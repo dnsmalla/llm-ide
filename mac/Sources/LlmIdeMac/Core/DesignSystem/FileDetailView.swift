@@ -461,6 +461,8 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     @State private var saveError: String?
     @State private var isPreview: Bool
     @State private var saving: Bool = false
+    /// The user was warned that the file changed on disk; the next Save overwrites.
+    @State private var overwriteConfirmed: Bool = false
     @State private var showSavedToast: Bool = false
     @State private var showRevertConfirm: Bool = false
 
@@ -605,6 +607,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     private func load() async {
         loadError = nil
         saveError = nil
+        overwriteConfirmed = false
         do {
             // Read off the main actor so a large file doesn't stall the editor.
             let fileURL = url
@@ -644,8 +647,33 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
         saving = true
         defer { saving = false }
         saveError = nil
+        // Write THROUGH a symlink: an atomic write to the link itself would
+        // replace the link with a regular file and leave its target unchanged.
+        let target = url.resolvingSymlinksInPath()
+        let base = savedContent
         do {
-            try content.write(to: url, atomically: true, encoding: .utf8)
+            // Refuse the first save when the file changed on disk after it was
+            // opened (a pull, the agent, Search's Replace All) — otherwise the
+            // stale buffer silently discards every external change. A second
+            // Save is the explicit "overwrite anyway".
+            if !overwriteConfirmed {
+                let onDisk = try? await Task.detached(priority: .userInitiated) {
+                    try String(contentsOf: target, encoding: .utf8)
+                }.value
+                if let onDisk, onDisk != base {
+                    overwriteConfirmed = true
+                    saveError = "This file changed on disk since you opened it. Save again to overwrite it, or use Revert to load the disk version."
+                    return
+                }
+            }
+            let attributes = try? FileManager.default.attributesOfItem(atPath: target.path)
+            try content.write(to: target, atomically: true, encoding: .utf8)
+            // An atomic write creates a new inode with default permissions;
+            // put back the original ones so a script keeps its exec bit.
+            if let permissions = attributes?[.posixPermissions] {
+                try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path)
+            }
+            overwriteConfirmed = false
             savedContent = content
             EditorDraftStore.shared.discard(url)
             await onSaved?()
@@ -656,9 +684,11 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
 
     @MainActor
     private func revert() async {
-        content = savedContent
-        saveError = nil
+        // Drop the draft FIRST: `load()` would otherwise restore it. Reloading
+        // (instead of resetting to the in-memory base) also picks up a change
+        // made on disk since the file was opened.
         EditorDraftStore.shared.discard(url)
+        await load()
     }
 
     /// Wrapper around save() that flashes a toast on success so the
