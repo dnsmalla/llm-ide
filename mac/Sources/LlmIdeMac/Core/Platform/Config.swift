@@ -334,7 +334,11 @@ final class AppConfig: ObservableObject {
                 KeychainStore.saveGitLabToken(gitLabToken, host: gitLabBaseURL)
                 let host = gitLabBaseURL
                 let token = gitLabToken
+                let previousHost = oldValue
                 Task.detached(priority: .utility) {
+                    // The PAT was copied into glab's plaintext config for the OLD
+                    // instance; switching instances left that copy behind.
+                    if previousHost != host { GlabAuthSync.sync(host: previousHost, token: "") }
                     GlabAuthSync.sync(host: host, token: token)
                 }
             }
