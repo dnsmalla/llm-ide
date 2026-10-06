@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  marketplaceUpdateArgs, listArgs, updateArgs, parseList, parseUpdateResult, runClaudePluginCli,
+  marketplaceUpdateArgs, listArgs, updateArgs, parseList, parseUpdateResult, runClaudePluginCli, defaultExec,
 } from '../providers/claude-plugin-cli.mjs';
 
 test('argv builders never pass -y', () => {
@@ -71,5 +71,26 @@ test('LLMIDE_CLAUDE_BIN_DISABLED env disables the real exec', async () => {
     } else {
       process.env.LLMIDE_CLAUDE_BIN_DISABLED = origEnv;
     }
+  }
+});
+
+test('a failure detail carries the stderr tail', () => {
+  const r = parseUpdateResult('', 1, 'Error: plugin demo@mp not found');
+  assert.equal(r.status, 'failed');
+  assert.match(r.detail, /plugin demo@mp not found/);
+  const long = parseUpdateResult('o'.repeat(3000), 1, 'TAIL');
+  assert.equal(long.detail.length, 2000);
+  assert.ok(long.detail.endsWith('TAIL'));
+});
+
+test('defaultExec closes the child stdin', async () => {
+  // Spawns node (never claude): the child exits 0 only once its stdin ends.
+  const origEnv = process.env.LLMIDE_CLAUDE_BIN_DISABLED;
+  delete process.env.LLMIDE_CLAUDE_BIN_DISABLED;
+  try {
+    const r = await defaultExec(process.execPath, ['-e', 'process.stdin.resume(); process.stdin.on("end", () => process.exit(0));'], { timeout: 5000 });
+    assert.equal(r.exitCode, 0);
+  } finally {
+    if (origEnv !== undefined) process.env.LLMIDE_CLAUDE_BIN_DISABLED = origEnv;
   }
 });

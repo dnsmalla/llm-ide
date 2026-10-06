@@ -41,7 +41,12 @@ function lastJsonLine(stdout) {
   return null;
 }
 
-export function parseUpdateResult(stdout, exitCode) {
+/**
+ * Classify `claude plugin update --json` output. A failure's `detail` is the
+ * tail of stdout + stderr: the CLI writes its error text to stderr, so stdout
+ * alone is often empty.
+ */
+export function parseUpdateResult(stdout, exitCode, stderr = '') {
   const r = lastJsonLine(stdout);
   const sha = r?.shownCommand?.sha256;
   if (typeof sha === 'string' && sha) {
@@ -50,10 +55,10 @@ export function parseUpdateResult(stdout, exitCode) {
   if (exitCode === 0 && r && r.ok !== false) {
     return { status: r.from !== undefined && r.from === r.to ? 'already-latest' : 'updated' };
   }
-  return { status: 'failed', detail: String(stdout).slice(-2000) };
+  return { status: 'failed', detail: [String(stdout ?? ''), String(stderr ?? '')].filter(Boolean).join('\n').slice(-2000) };
 }
 
-const defaultExec = (bin, args, opts) => new Promise((resolve, reject) => {
+export const defaultExec = (bin, args, opts) => new Promise((resolve, reject) => {
   // Test-only switch: when LLMIDE_CLAUDE_BIN_DISABLED is set, reject with ENOENT
   // without spawning. This routes tests away from the real claude CLI, which would
   // change ~/.claude. Route tests must use injected fakes.
@@ -63,10 +68,13 @@ const defaultExec = (bin, args, opts) => new Promise((resolve, reject) => {
     reject(err);
     return;
   }
-  execFile(bin, args, opts, (err, stdout, stderr) => {
+  const child = execFile(bin, args, opts, (err, stdout, stderr) => {
     if (err && err.code === 'ENOENT') { reject(err); return; }
     resolve({ stdout: String(stdout ?? ''), stderr: String(stderr ?? ''), exitCode: err ? (typeof err.code === 'number' ? err.code : 1) : 0 });
   });
+  // Everything goes via argv. An open stdin pipe lets a CLI that waits for
+  // input hang until the timeout (same as runClaude in providers.mjs).
+  child.stdin?.end();
 });
 
 export function runClaudePluginCli(args, { exec = defaultExec, timeoutMs = TIMEOUT_MS } = {}) {

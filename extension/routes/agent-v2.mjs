@@ -325,6 +325,18 @@ async function handleV2Stream(req, res, userId, deps) {
     sendTurnInProgress(req, res);
     return true;
   }
+  // Re-checked here because the classifier above can await an LLM call: an
+  // SDK or plugin update that started meanwhile saw no active turn (this one
+  // is not in inFlightChatSessions yet), so the turn must not start now.
+  // Nothing awaits between this check and the add below.
+  if (isSdkUpdating()) {
+    sendJSON(res, 503, { error: { code: 'SDK_UPDATING', message: 'The Claude Agent SDK is being updated — try again in a moment.' } });
+    return true;
+  }
+  if (isPluginUpdating()) {
+    sendJSON(res, 503, { error: { code: 'PLUGIN_UPDATING', message: 'A plugin is being updated — try again in a moment.' } });
+    return true;
+  }
   inFlightChatSessions.add(lockKey);
   try {
     return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);

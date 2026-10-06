@@ -137,23 +137,65 @@ test('legacy import without stamp is reimport', async () => {
   assert.equal(res.updates[0].importedVersion, null);
 });
 
-test('marketplace update runs only when forced or cache expired', async () => {
+test('marketplace update never runs on a non-forced check', async () => {
+  _resetForTests();
+  const env = setup();
+  const { run, calls } = fakeRun({ list: listOf([inst('1.0.0', env.installPath)]) });
+  const deps = { run, claudeRoot: env.claudeRoot, llmidePluginDir: env.mnDir };
+  await checkClaudeUpdates({ deps });
+  await checkClaudeUpdates({ deps });
+  assert.equal(calls.filter((a) => a[1] === 'marketplace').length, 0);
+  assert.equal(calls.filter((a) => a[1] === 'list').length, 2, 'tier 1 is always read fresh');
+});
+
+test('forced checks refresh at most once per 30 minutes', async () => {
   _resetForTests();
   const env = setup();
   const { run, calls } = fakeRun({ list: listOf([inst('1.0.0', env.installPath)]) });
   let clock = 1_000_000;
   const deps = { run, claudeRoot: env.claudeRoot, llmidePluginDir: env.mnDir, now: () => clock };
   const mpCalls = () => calls.filter((a) => a[1] === 'marketplace').length;
-  await checkClaudeUpdates({ deps });
-  clock += 10 * 60 * 1000;
-  await checkClaudeUpdates({ deps });
-  assert.equal(mpCalls(), 1, 'second check within 30 min reuses the refresh');
   await checkClaudeUpdates({ force: true, deps });
-  assert.equal(mpCalls(), 2, 'force bypasses the cache');
+  clock += 10 * 60 * 1000;
+  await checkClaudeUpdates({ force: true, deps });
+  assert.equal(mpCalls(), 1, 'a forced check within 30 min reuses the refresh');
   clock += 31 * 60 * 1000;
-  await checkClaudeUpdates({ deps });
-  assert.equal(mpCalls(), 3, 'an expired cache refreshes again');
-  assert.equal(calls.filter((a) => a[1] === 'list').length, 4, 'tier 1 is always read fresh');
+  await checkClaudeUpdates({ force: true, deps });
+  assert.equal(mpCalls(), 2, 'an expired cache refreshes again');
+});
+
+test('concurrent forced checks share one marketplace update', async () => {
+  _resetForTests();
+  const env = setup();
+  const { run: base, calls } = fakeRun({ list: listOf([inst('1.0.0', env.installPath)]) });
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const run = async (args) => { if (args[1] === 'marketplace') await gate; return base(args); };
+  const deps = { run, claudeRoot: env.claudeRoot, llmidePluginDir: env.mnDir };
+  const a = checkClaudeUpdates({ force: true, deps });
+  const b = checkClaudeUpdates({ force: true, deps });
+  release();
+  const [ra, rb] = await Promise.all([a, b]);
+  assert.equal(ra.cli && rb.cli, true);
+  assert.equal(calls.filter((x) => x[1] === 'marketplace').length, 1);
+});
+
+test('a forced check during an update answers from the list only', async () => {
+  _resetForTests();
+  const env = setup();
+  let release;
+  const gate = new Promise((r) => { release = r; });
+  const { run, calls } = fakeRun({
+    list: listOf([inst('1.0.0', env.installPath)]),
+    update: async () => { await gate; return okLine('1.0.0', '1.0.0'); },
+  });
+  const { deps } = baseDeps(env, run);
+  const updating = updateClaudePlugin({ name: 'claude-demo', deps });
+  const res = await checkClaudeUpdates({ force: true, deps: { run, claudeRoot: env.claudeRoot, llmidePluginDir: env.mnDir } });
+  assert.equal(res.cli, true);
+  assert.equal(calls.filter((a) => a[1] === 'marketplace').length, 0);
+  release();
+  await updating;
 });
 
 test('cli missing falls back to the scan', async () => {

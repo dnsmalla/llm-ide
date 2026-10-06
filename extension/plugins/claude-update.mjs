@@ -3,7 +3,8 @@
 //
 // Detection has two tiers: `reimport` (Claude Code's install differs from the
 // version llm-ide copied — exact and offline) and `upstream` (the marketplace
-// catalog proves a newer release, after a refresh cached for 30 minutes).
+// catalog proves a newer release; the catalog is refreshed only by a forced
+// check, at most once per 30 minutes).
 // An update re-decides the tier at click time: Tier 1 is an offline re-import
 // of Claude's install; otherwise it runs Claude Code's own `plugin update`
 // and re-imports the new installPath. Either way the copy is swapped in whole
@@ -29,11 +30,13 @@ const MARKETPLACE_TTL_MS = 30 * 60 * 1000;
 
 // Server-wide state: one marketplace refresh per TTL, one update at a time.
 let cache = null; // { at: number } — when the marketplace catalog was last refreshed
+let refreshing = null; // the in-flight `marketplace update`, shared by concurrent forced checks
 let busy = false;
 
 /** Test-only: forget the marketplace refresh and the update lock. */
 export function _resetForTests() {
   cache = null;
+  refreshing = null;
   busy = false;
 }
 
@@ -138,20 +141,33 @@ function fallbackCheck(d) {
   return { cli: false, checkedAt: new Date(d.now()).toISOString(), updates };
 }
 
-/** Refresh the marketplace catalogs when forced or stale. Failure is not fatal. */
+/**
+ * Refresh the marketplace catalogs for a forced check. `marketplace update`
+ * rewrites ~/.claude state, so it never runs on a background (non-forced)
+ * check, never twice at once (concurrent forced checks share one run), never
+ * during an update (that check answers from the local list), and at most
+ * once per TTL. Failure is not fatal.
+ */
 async function refreshMarketplaces(d, force) {
-  if (!force && cache && d.now() - cache.at <= MARKETPLACE_TTL_MS) return;
-  try {
-    await d.run(marketplaceUpdateArgs());
-  } catch (err) {
-    if (isEnoent(err)) throw err;
-    // A failed refresh still leaves Tier 1 exact; keep going.
+  if (!force || busy) return;
+  if (cache && d.now() - cache.at <= MARKETPLACE_TTL_MS) return;
+  if (!refreshing) {
+    refreshing = (async () => {
+      try {
+        await d.run(marketplaceUpdateArgs());
+      } catch (err) {
+        if (isEnoent(err)) throw err;
+        // A failed refresh still leaves Tier 1 exact; keep going.
+      }
+      cache = { at: d.now() };
+    })().finally(() => { refreshing = null; });
   }
-  cache = { at: d.now() };
+  await refreshing;
 }
 
 /**
- * Which Claude-imported plugins have an update.
+ * Which Claude-imported plugins have an update. A non-forced check reads the
+ * local `plugin list` only; `force` also refreshes the catalogs (see refreshMarketplaces).
  * @param {{force?: boolean, deps?: object}} [opts]
  * @returns {Promise<{cli: boolean, checkedAt: string, updates: Array<{name: string, pluginId: string|null,
  *   importedVersion: string|null, claudeVersion: string|null, latest: string|null, tier: 'reimport'|'upstream'}>}>}
@@ -190,7 +206,7 @@ async function runCliUpdate(d, pluginId, scope, acceptCommand) {
   } catch (err) {
     return { stop: cliFailed(isEnoent(err) ? 'claude CLI not found' : String(err?.message || err)) };
   }
-  const parsed = parseUpdateResult(out.stdout, out.exitCode);
+  const parsed = parseUpdateResult(out.stdout, out.exitCode, out.stderr);
   if (parsed.status === 'needs-confirmation') {
     return { stop: { status: 409, body: { code: 'NEEDS_CONFIRMATION', command: parsed.command, sha256: parsed.sha256 } } };
   }
@@ -281,6 +297,9 @@ export async function updateClaudePlugin({ name, acceptCommand, deps } = {}) {
   if (busy) return { status: 409, body: { code: 'UPDATE_IN_PROGRESS' } };
   busy = true;
   try {
+    // A forced check's catalog refresh may already be running; let it finish
+    // so two `claude plugin` processes never write ~/.claude at once.
+    if (refreshing) await refreshing.catch(() => {});
     const imp = { name, stamp, sourcePlugin: stamp.sourcePlugin || name.replace(/^claude-/, '') };
     return await runUpdate(d, imp, typeof acceptCommand === 'string' && acceptCommand ? acceptCommand : undefined);
   } finally {
