@@ -151,6 +151,11 @@ struct CodeAssistantPanel: View {
     /// tab while any prediction is showing.
     @State var ghostDismissed = false
     @State var showingSessionPicker = false
+    /// A delete the user asked for but has not confirmed yet. Deleting a chat
+    /// also drops its server-side memory and has no undo, so neither the
+    /// header's trash nor the picker row's hover trash may act on one click.
+    @State var sessionPendingDeletion: UUID?
+    @State var confirmingClearCurrentChat = false
     // NOTE: the per-turn `ToolStep` struct that used to live here moved to
     // `ChatMessage.ToolStep` in Task 9 — a tool step belongs to the message
     // that produced it, not to the view that draws it, so it is now stored

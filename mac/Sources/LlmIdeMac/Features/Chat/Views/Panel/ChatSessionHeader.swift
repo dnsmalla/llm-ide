@@ -25,6 +25,35 @@ extension CodeAssistantPanel {
         }
         .padding(.horizontal, isVeryCompact ? 6 : Spacing.md)
         .padding(.vertical, 8)
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: $confirmingClearCurrentChat,
+            titleVisibility: .visible
+        ) {
+            Button("Delete chat", role: .destructive) { deleteCurrentChat() }
+            Button("Cancel", role: .cancel) { }
+        } message: {
+            Text("The conversation and its memory are removed. This cannot be undone.")
+        }
+        .confirmationDialog(
+            "Delete this chat?",
+            isPresented: Binding(get: { sessionPendingDeletion != nil },
+                                 set: { if !$0 { sessionPendingDeletion = nil } }),
+            titleVisibility: .visible,
+            presenting: sessionPendingDeletion
+        ) { id in
+            Button("Delete chat", role: .destructive) {
+                // Kill any background turn on this chat FIRST: left running,
+                // its turn-end persist would write the session file straight
+                // back after the delete.
+                ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: id)
+                Task { await engine.deleteSession(id) }
+                sessionPendingDeletion = nil
+            }
+            Button("Cancel", role: .cancel) { sessionPendingDeletion = nil }
+        } message: { _ in
+            Text("The conversation and its memory are removed. This cannot be undone.")
+        }
     }
 
     /// Cursor-style chat-list dropdown: shows the current session's
@@ -135,12 +164,10 @@ extension CodeAssistantPanel {
                                     switchToSession(session.id)
                                 },
                                 onDelete: {
-                                    // Kill any background turn on this chat
-                                    // FIRST: left running, its turn-end
-                                    // persist would write the session file
-                                    // straight back after the delete.
-                                    ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: session.id)
-                                    Task { await engine.deleteSession(session.id) }
+                                    // Ask first: close the popover so the
+                                    // dialog (attached to the header) can show.
+                                    showingSessionPicker = false
+                                    sessionPendingDeletion = session.id
                                 },
                                 onRename: { newTitle in
                                     engine.renameSession(session.id, to: newTitle)
@@ -160,12 +187,12 @@ extension CodeAssistantPanel {
     /// it was the last remaining session for this scope).
     var clearChatButton: some View {
         Button {
-            // Same as the picker's delete: no off-screen engine may write
-            // this chat back after it is gone.
-            if let id = UUID(uuidString: engine.currentSessionIDString) {
-                ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: id)
+            // An empty chat has nothing to lose; anything else asks first.
+            if engine.messages.isEmpty {
+                deleteCurrentChat()
+            } else {
+                confirmingClearCurrentChat = true
             }
-            Task { await engine.clearCurrentChat() }
         } label: {
             Image(systemName: "trash")
                 .font(.system(size: 11, weight: .medium))
@@ -180,5 +207,12 @@ extension CodeAssistantPanel {
         .disabled(engine.messages.isEmpty && engine.sessions.count <= 1)
     }
 
-
+    /// Same as the picker's delete: no off-screen engine may write this chat
+    /// back after it is gone.
+    func deleteCurrentChat() {
+        if let id = UUID(uuidString: engine.currentSessionIDString) {
+            ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: id)
+        }
+        Task { await engine.clearCurrentChat() }
+    }
 }
