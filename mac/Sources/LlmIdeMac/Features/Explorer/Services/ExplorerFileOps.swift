@@ -160,11 +160,10 @@ enum ExplorerFileOps {
     /// leaves something a user can recognize and rename back, rather than a
     /// hidden nameless blob. `uniqueDestination` still guards the collision.
     ///
-    /// But recovery is FINDER-ONLY, never the Explorer: the staging name is
-    /// dot-prefixed, and `FileSystemTree.children` enumerates with
-    /// `.skipsHiddenFiles`, so the very tree the user was standing in when it
-    /// happened will never show the stranded file. Tell them `ls -a`, or
-    /// Finder with ⌘⇧. — not "look in the tree".
+    /// Recovery is still pointed at FINDER, not at the tree: the staging name is
+    /// dot-prefixed, and although `FileSystemTree.children` now shows ordinary
+    /// dotfiles, a stranded staging file is easiest to find with `ls -a`, or
+    /// Finder with ⌘⇧. — do not tell the user to "look in the tree".
     ///
     /// The suffix is dropped when it would push the name past `NAME_MAX`: the
     /// budget is checked in UTF-8 BYTES, because that is what the 255 limit

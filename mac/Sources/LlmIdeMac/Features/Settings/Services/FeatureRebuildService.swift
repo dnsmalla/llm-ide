@@ -361,6 +361,11 @@ final class FeatureRebuildService: ObservableObject {
               let sourceRoot
         else { return }
 
+        // Ask about unsaved editor text BEFORE the swap helper starts and the 15 s
+        // quit watchdog is armed: a prompt left open past the watchdog would abort
+        // the install, and the quit that follows would then install nothing.
+        guard AppDelegate.confirmDiscardUnsavedDrafts() else { return }
+
         phase = .swapping
 
         let scriptPath = sourceRoot.appendingPathComponent("Scripts/rebuild-swap.sh").path

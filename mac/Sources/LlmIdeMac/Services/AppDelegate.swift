@@ -62,13 +62,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return false
     }
 
-    /// Unsaved editor text lives only in memory (`EditorDraftStore`), so quitting
-    /// used to discard it with no word. Ask first when any file has unsaved edits.
-    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        let names = MainActor.assumeIsolated {
-            EditorDraftStore.shared.drafts.keys.map { ($0 as NSString).lastPathComponent }.sorted()
-        }
-        guard !names.isEmpty else { return .terminateNow }
+    /// Set once the user has agreed to discard the unsaved editor text, so the
+    /// quit that follows does not ask a second time.
+    @MainActor private static var discardConfirmed = false
+
+    /// Ask before anything that ends the process, when any editor has unsaved
+    /// text. Callers that start a helper which waits for this process to exit
+    /// (relaunch, install-and-restart) MUST call this BEFORE starting it: a
+    /// prompt shown only at quit time would leave the helper waiting after a
+    /// Cancel, and a long-open prompt would trip their watchdogs.
+    /// Returns true when it is fine to quit.
+    @MainActor static func confirmDiscardUnsavedDrafts() -> Bool {
+        let names = EditorDraftStore.shared.drafts.keys
+            .map { ($0 as NSString).lastPathComponent }.sorted()
+        guard !names.isEmpty, !discardConfirmed else { return true }
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = names.count == 1
@@ -79,6 +86,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             + "\n\nQuitting now discards them."
         alert.addButton(withTitle: "Cancel")
         alert.addButton(withTitle: "Quit and Discard")
-        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+        guard alert.runModal() == .alertSecondButtonReturn else { return false }
+        discardConfirmed = true
+        return true
+    }
+
+    /// Unsaved editor text lives only in memory (`EditorDraftStore`), so quitting
+    /// used to discard it with no word. Ask first when any file has unsaved edits.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        MainActor.assumeIsolated {
+            Self.confirmDiscardUnsavedDrafts() ? .terminateNow : .terminateCancel
+        }
     }
 }

@@ -128,6 +128,9 @@ struct BackendSettingsSection: View {
     /// Quit and reopen the bundle (a detached `open` waits for this process
     /// to exit first). Outside an `.app` bundle this just quits.
     static func relaunch() {
+        // BEFORE the waiter below starts: after a Cancel it would otherwise keep
+        // running and reopen the app on some later, unrelated quit.
+        guard MainActor.assumeIsolated({ AppDelegate.confirmDiscardUnsavedDrafts() }) else { return }
         let bundle = Bundle.main.bundleURL
         if bundle.pathExtension == "app" {
             let p = Process()
