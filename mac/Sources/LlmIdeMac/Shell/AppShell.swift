@@ -132,7 +132,16 @@ struct AppShell: View {
             OSLogIncidentSource.start()
         }
         .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new) }
-        .onDisappear { deepLink.pendingEvent = nil }
+        .onDisappear {
+            deepLink.pendingEvent = nil
+            // Sign-out unmounts the shell and drops `appEnv`, but the Auto Task
+            // service holds it through a static: the old environment and its
+            // kqueue watcher stayed alive and a second sign-in built another
+            // beside it (two watchers and two sqlite handles on one project).
+            appEnv?.indexer.stopWatching()
+            FeatureCatalog.setAutoCodeEnvironment(nil)
+            FeatureCatalog.setAutoCodeProjectNotes(nil)
+        }
         .onChange(of: registry.activeFeatures) { _, _ in
             reconcileSectionAfterFeatureChange()
         }
