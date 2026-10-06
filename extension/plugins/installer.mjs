@@ -152,9 +152,15 @@ async function hasSymlinks(dir) {
  * @param {object} opts
  * @param {boolean} [opts.replace] — overwrite an existing plugin with the same name
  * @param {string} [opts.pluginDir] — install root, defaults to platform standard
+ * @param {string} [opts.expectName] — the plugin an update means to replace;
+ *   a package whose manifest names another plugin is refused (409, `code:
+ *   'NAME_MISMATCH'`) before anything is installed, so an update can never
+ *   overwrite a different plugin
  * @returns {Promise<{ok: true, plugin: {...}} | {error: string, status?: number}>}
  */
-export async function installFromZip(zipBytes, { replace = false, pluginDir = defaultPluginDir(), trust, removeBackup = rm } = {}) {
+export async function installFromZip(zipBytes, {
+  replace = false, pluginDir = defaultPluginDir(), trust, removeBackup = rm, expectName,
+} = {}) {
   if (!Buffer.isBuffer(zipBytes)) {
     return { error: 'expected Buffer bytes', status: 400 };
   }
@@ -227,6 +233,14 @@ export async function installFromZip(zipBytes, { replace = false, pluginDir = de
         return { error: 'manifest did not produce a valid plugin', status: 400 };
       }
       const [plugin] = loaded.plugins.values();
+
+      if (expectName && plugin.name !== expectName) {
+        return {
+          error: `plugin source now provides '${plugin.name}', not '${expectName}'`,
+          status: 409,
+          code: 'NAME_MISMATCH',
+        };
+      }
 
       // Stage 6: move into the real plugin dir. If a plugin with the
       // same name exists, refuse unless `replace`.

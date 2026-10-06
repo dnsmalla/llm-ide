@@ -1063,6 +1063,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
     const u = new URL(url, 'http://127.0.0.1');
     const replace = u.searchParams.get('replace') === '1';
+    // The plugin an update means to replace; the installer refuses a package
+    // that names another one (NAME_MISMATCH) before touching anything.
+    const expectName = u.searchParams.get('expect');
+    if (expectName !== null && !/^[a-z][a-z0-9-]{1,40}$/.test(expectName)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'expect must be a plugin name' } });
+      return;
+    }
     let zipBytes;
     try {
       zipBytes = await readRawBody(req, 5 * 1024 * 1024);
@@ -1084,6 +1091,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const { clearPluginMcpConsents } = await import('../mcp/state.mjs');
     const result = await installFromZip(zipBytes, {
       replace,
+      expectName: expectName ?? undefined,
       trust: { clearTrust: clearHooksTrustForPlugin, clearMcpConsents: clearPluginMcpConsents },
     });
     if (result.error) {
@@ -1092,7 +1100,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         action: 'plugin.install', outcome: 'failure',
         detail: { error: result.error.slice(0, 200) },
       });
-      send(res, result.status || 400, { error: { code: 'INSTALL_FAILED', message: result.error } });
+      send(res, result.status || 400, { error: { code: result.code || 'INSTALL_FAILED', message: result.error } });
       return;
     }
     try {

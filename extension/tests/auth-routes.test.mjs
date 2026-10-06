@@ -615,6 +615,35 @@ test('install without header clears a stale record when it replaces nothing', { 
   await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/src-plugin-d', user: admin });
 });
 
+test('install ?expect= guards an update against another plugin', { skip: zipSkipReason || false }, async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const meta = (name, version) => ({ name, version, displayName: 'X', description: 'd', author: 't' });
+  await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: buildPluginZip(meta('expect-a', '1.0.0')), headers: srcHeader(GIT_SRC) });
+  await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: buildPluginZip(meta('expect-b', '1.0.0')) });
+
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?replace=1&expect=expect-a', user: admin, rawBody: buildPluginZip(meta('expect-a', '1.1.0')) });
+  assert.equal(ok.statusCode, 200, ok._body);
+
+  const { getSource } = await import('../plugins/source-store.mjs');
+  const before = getSource('expect-b');
+  const mismatch = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?replace=1&expect=expect-a', user: admin,
+    rawBody: buildPluginZip(meta('expect-b', '2.0.0')), headers: srcHeader(GIT_SRC) });
+  assert.equal(mismatch.statusCode, 409);
+  assert.equal(mismatch.json().error.code, 'NAME_MISMATCH');
+  const list = (await callAuth({ method: 'GET', url: '/auth/me/plugins', user: { id: user.id } })).json().plugins;
+  assert.equal(list.find((p) => p.name === 'expect-a').version, '1.1.0');
+  assert.equal(list.find((p) => p.name === 'expect-b').version, '1.0.0');
+  assert.deepEqual(getSource('expect-b'), before);
+
+  const bad = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?expect=Bad_Name', user: admin, rawBody: buildPluginZip(meta('expect-a', '1.2.0')) });
+  assert.equal(bad.statusCode, 400);
+  assert.equal(bad.json().error.code, 'VALIDATION_FAILED');
+
+  await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/expect-a', user: admin });
+  await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/expect-b', user: admin });
+});
+
 test('uninstall removes the record', { skip: zipSkipReason || false }, async () => {
   const { user } = await registerAndLogin();
   const admin = { id: user.id, role: 'admin' };

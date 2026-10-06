@@ -393,6 +393,31 @@ test('replaced is false on a first install with replace=true', { skip: skipReaso
   } finally { rmSync(pluginDir, { recursive: true, force: true }); }
 });
 
+test('expectName: a matching package installs', { skip: skipReason || false }, async () => {
+  const pluginDir = newTempRoot();
+  try {
+    const res = await installFromZip(buildZip(META), { replace: true, pluginDir, expectName: META.name });
+    assert.equal(res.ok, true, res.error);
+  } finally { rmSync(pluginDir, { recursive: true, force: true }); }
+});
+
+test('expectName: a package naming another plugin is refused, nothing changes', { skip: skipReason || false }, async () => {
+  const pluginDir = newTempRoot();
+  try {
+    const other = { ...META, name: 'other-demo', version: '1.0.0' };
+    await installFromZip(buildZip(META), { pluginDir });
+    await installFromZip(buildZip(other), { pluginDir });
+    const res = await installFromZip(buildZip({ ...other, version: '2.0.0' }),
+      { replace: true, pluginDir, expectName: META.name });
+    assert.equal(res.status, 409);
+    assert.equal(res.code, 'NAME_MISMATCH');
+    assert.match(res.error, /now provides 'other-demo', not 'replace-demo'/);
+    const read = (name) => JSON.parse(readFileSync(join(pluginDir, name, 'plugin.json'), 'utf8')).version;
+    assert.equal(read('replace-demo'), '1.0.0');
+    assert.equal(read('other-demo'), '1.0.0');
+  } finally { rmSync(pluginDir, { recursive: true, force: true }); }
+});
+
 test('replaced is true when a copy existed', { skip: skipReason || false }, async () => {
   const pluginDir = newTempRoot();
   try {
