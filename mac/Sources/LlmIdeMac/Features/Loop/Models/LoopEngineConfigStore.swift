@@ -412,7 +412,10 @@ enum LoopEngineConfigStore {
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-            try encoder().encode(store).write(to: url, options: .atomic)
+            let data = try encoder().encode(store)
+            try data.write(to: url, options: .atomic)
+            // Lets the repair guard tell this write from an agent's edit.
+            AppWrittenFiles.recordWrite(of: data, to: url)
             // A quarantine notice stays until the next clean load; the others
             // describe a state this write just proved is over.
             if case .quarantined? = LoopStoreNotices.shared.notice(forFile: url) {} else {

@@ -197,7 +197,12 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         "pytest.ini", "**/pytest.ini", "**/pyproject.toml", "**/setup.cfg",
         ".githooks/**", "**/jest.config.js", "**/vitest.config.ts",
         // 3. The harness's own state — editing this rigs the verdict directly.
-        "system/faults.csv", "system/faults/**", "system/loop-runs/**"
+        "system/faults.csv", "system/faults/**", "system/loop-runs/**",
+        // The loop's own contract: a repair that turned the guard off, disabled
+        // the failing stage or raised the budgets would be re-read by the NEXT
+        // scheduled run. `**/` so a project folder inside a larger git root
+        // matches too. App writes are exempt via `AppWrittenFiles`.
+        "**/system/loop.json"
     ]
 
     private let verifier: FaultVerifier
@@ -346,7 +351,12 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
             }
         }
         let changed = changedSet.sorted()
-        let violations = changed.filter { ProtectedGlobs.isProtected($0, by: protectedGlobs) }
+        // A protected file the APP wrote (and nothing has touched since) is not the
+        // repair's edit — see `AppWrittenFiles`.
+        let violations = changed.filter {
+            ProtectedGlobs.isProtected($0, by: protectedGlobs)
+                && !AppWrittenFiles.isUnchangedSinceAppWrite(gitRoot.appendingPathComponent($0))
+        }
         return violations.isEmpty
             ? .clean(changedPaths: changed)
             : .violated(paths: violations, allChangedPaths: changed)
