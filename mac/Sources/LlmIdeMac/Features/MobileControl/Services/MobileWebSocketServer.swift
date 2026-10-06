@@ -376,8 +376,15 @@ final class MobileWebSocketServer: @unchecked Sendable {
         // Evict the OLDEST waiting challenger rather than refusing the newest:
         // refusing the newest let two idle sockets lock the real phone out
         // (the old replace policy always admitted a new phone).
-        while challengers.count >= Self.maxChallengers, let stale = challengers.first {
-            onLog("Dropping the oldest unpaired peer to admit a new connection")
+        // Prefer evicting the oldest challenger from the SAME host as the newcomer:
+        // otherwise one LAN host opening sockets in a loop evicts the real
+        // phone's in-progress handshake every time and pairing never completes.
+        // Only when the newcomer's host has none waiting is the oldest overall dropped.
+        let newcomerHost = Self.hostKey(for: conn)
+        while challengers.count >= Self.maxChallengers {
+            guard let stale = challengers.first(where: { Self.hostKey(for: $0) == newcomerHost })
+                ?? challengers.first else { break }
+            onLog("Dropping an unpaired peer to admit a new connection")
             dropChallenger(stale)
         }
         challengers.append(conn)
