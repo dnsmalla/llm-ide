@@ -199,7 +199,12 @@ struct McpPluginDetailView: View {
             }
         }
         .task(id: p.id) {
-            if p.package != nil, center.update(for: p.id) == nil { await center.check(api: api, force: false) }
+            // Not while the list-load check is still in flight: a second check bumps the
+            // generation, which discards the list check's answer and leaves the OTHER
+            // servers' sidebar badges unset after the first open.
+            if p.package != nil, center.update(for: p.id) == nil, !center.checking {
+                await center.check(api: api, force: false)
+            }
             if isImport { await center.loadDrift(id: p.id, api: api) }
         }
     }
