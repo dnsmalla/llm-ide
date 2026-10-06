@@ -61,4 +61,24 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     ) -> Bool {
         return false
     }
+
+    /// Unsaved editor text lives only in memory (`EditorDraftStore`), so quitting
+    /// used to discard it with no word. Ask first when any file has unsaved edits.
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        let names = MainActor.assumeIsolated {
+            EditorDraftStore.shared.drafts.keys.map { ($0 as NSString).lastPathComponent }.sorted()
+        }
+        guard !names.isEmpty else { return .terminateNow }
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = names.count == 1
+            ? "\(names[0]) has unsaved changes."
+            : "\(names.count) files have unsaved changes."
+        let shown = names.prefix(5).joined(separator: ", ")
+        alert.informativeText = (names.count > 5 ? shown + ", …" : shown)
+            + "\n\nQuitting now discards them."
+        alert.addButton(withTitle: "Cancel")
+        alert.addButton(withTitle: "Quit and Discard")
+        return alert.runModal() == .alertSecondButtonReturn ? .terminateNow : .terminateCancel
+    }
 }
