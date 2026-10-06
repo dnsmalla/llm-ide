@@ -55,8 +55,12 @@ build-mac: ## Build the full mac app
 # --manifest-cache none is required: SwiftPM does not key its manifest cache
 # on env vars, so a stale cache would silently keep the previous selection's
 # target graph.
+# Each feature selection gets its OWN --scratch-path: sharing mac/.build made
+# every variant flip the compile flags of the one before it, so `make
+# regression` recompiled the whole app four times on every run (10+ min per
+# push even for a one-line change). Separate caches stay warm (~1-2 GB each).
 build-mac-lite: ## non-engineer build: no Explorer/Gantt/DocGen/Terminal/Graph
-	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync swift build --manifest-cache none
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_sync swift build --manifest-cache none --scratch-path .build-lite
 
 # Same rationale as build-mac-lite, two steps further: drops auto_tasks AND
 # mobile_sync too (excludes AutoTask/, LoopEngine/, and the Mobile Control
@@ -64,7 +68,7 @@ build-mac-lite: ## non-engineer build: no Explorer/Gantt/DocGen/Terminal/Graph
 # keeping only agent_chat. The true minimum. --manifest-cache none for the
 # same reason as build-mac-lite.
 build-mac-min: ## Chat only: excludes all 7 excludable features
-	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat swift build --manifest-cache none
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat swift build --manifest-cache none --scratch-path .build-min
 
 # The mirror quadrant of build-mac-min: mobile_sync compiled IN, auto_tasks
 # compiled OUT. Guards the bridge seam the other quadrant can't see — with
@@ -73,7 +77,7 @@ build-mac-min: ## Chat only: excludes all 7 excludable features
 # just a hidden toggle. --manifest-cache none for the same reason as
 # build-mac-lite.
 build-mac-mobile-only: ## Build with Chat + Mobile only (no AutoTask/Loop — guards the bridge seam)
-	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,mobile_sync swift build --manifest-cache none
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,mobile_sync swift build --manifest-cache none --scratch-path .build-mobile
 
 test-mac:
 	cd mac && swift build --product LlmIdeMac

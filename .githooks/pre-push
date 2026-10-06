@@ -66,8 +66,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
 done
 
 if [ "$mac_changed" -eq 1 ]; then
-    mac_build_dir="$(git rev-parse --show-toplevel)/mac/.build"
-    if mac_build_busy "$mac_build_dir"; then
+    # The feature-variant builds use their own scratch paths (Makefile
+    # build-mac-lite/min/mobile-only), so a build busy in ANY of them wedges the gate.
+    mac_root="$(git rev-parse --show-toplevel)/mac"
+    busy=0
+    for d in "$mac_root/.build" "$mac_root/.build-lite" "$mac_root/.build-min" "$mac_root/.build-mobile"; do
+        if mac_build_busy "$d"; then busy=1; fi
+    done
+    if [ "$busy" -eq 1 ]; then
         echo "pre-push: a SwiftPM build/test is already using mac/.build — not starting" >&2
         echo "          a second (it would block on the .build lock and wedge the push)." >&2
         echo "          Wait for it to finish (or kill a stuck build/test), then re-push." >&2

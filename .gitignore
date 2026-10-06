@@ -41,6 +41,7 @@ extension/bot-worker/bot-profile/
 
 # Mac build artefacts
 mac/.build/
+mac/.build-*/
 mac/LlmIdeMac.app/
 mac/LlmIdeMac_*.dmg
 

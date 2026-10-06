@@ -3,6 +3,7 @@
 
 # Build artifacts
 .build/
+.build-*/
 LlmIdeMac.app/
 LlmIdeMac.app.bak/
 *.dmg
