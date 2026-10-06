@@ -181,7 +181,7 @@ Each log contains: timestamps, findings, errors
 | Token invalid | Regenerate token on GitHub/GitLab, paste new one | Tokens expire; rotate every 90 days |
 | Clone path doesn't exist | Create dir and clone repo: `git clone <url> <path>` | Dir must exist and be readable |
 | No actions found | Increase lookback count/days | Might not have recent meetings with actions |
-| Working tree dirty | Enable "Auto-stash" or commit changes | Choose based on your workflow |
+| Working tree dirty | Nothing to do — tasks run in an isolated worktree and leave your changes alone | Keep Auto-stash OFF |
 | Stash restore conflict | Run `git stash pop` manually | Your changes are safe; resolve manually |
 | Tasks not running | Check "Enabled" toggle; try "Run Now" | Timer requires app to be open |
 | Regression timeout | Increase "Verify timeout" setting | Default 120s; may need more for large repos |

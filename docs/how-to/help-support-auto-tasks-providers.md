@@ -113,20 +113,21 @@ LLM-IDE enforces that **only one provider is active at a time** because:
 
 **Q: What happens if my repository working tree is dirty (has uncommitted changes)?**
 
-A: It depends on the kind of task.
+A: Nothing changes for your work. Every Auto Task that edits code runs in a
+temporary `git worktree` of the current commit, so it never sees your uncommitted
+changes and never touches them.
 
-- **Prompt-based tasks** (the built-in review tasks and your custom tasks) run in a
-  temporary `git worktree` of the current commit, so they never see your uncommitted
-  changes and never touch them. A review's output is discarded with the worktree; an
-  Implement task commits on its own `fix/custom-*` branch without switching your
-  checkout. These tasks run whether or not your tree is dirty.
-- **Issue tasks** (which work an issue in your checkout) still need a clean tree:
-  - **Auto-stash OFF (default):** they skip if there are uncommitted changes (safe)
-  - **Auto-stash ON:** they stash your changes, run, then restore (riskier but thorough).
-    The stash happens at the start of any run while Auto-stash is on, including
-    runs that contain only prompt-based tasks.
-
-If you work with uncommitted changes frequently, keep Auto-stash OFF.
+- **Prompt-based tasks** (the built-in review tasks and your custom tasks): a review's
+  output is discarded with the worktree; an Implement task commits on its own
+  `fix/custom-*` branch without switching your checkout.
+- **Issue tasks** (Implement Issues): each issue gets its own `fix/<number>-<slug>`
+  branch created in the worktree, off your current commit. Your checkout, your current
+  branch and your uncommitted changes are left alone, and the task no longer needs a
+  clean tree. If a branch with that name already exists, the new one gets a short
+  suffix instead of reusing it.
+- **Auto-stash** is no longer needed for these tasks. If it is ON, it still stashes
+  your changes at the start of a run and restores them afterwards, which is riskier
+  than leaving them in place, so keep it OFF.
 
 **Q: How often should Auto Tasks run?**
 
