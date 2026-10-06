@@ -18,6 +18,12 @@ struct AppShell: View {
     @State private var itemStore = LibraryItemStore()
     @State private var crashReportStore = CrashReportStore()
     @State private var appEnv: AppEnvironment?
+    /// Bumped after `GenerationRegistry.reset()` on a project switch. It is the
+    /// identity of the Doc Gen / Visual panes: those views resolve their model
+    /// ONCE (`@StateObject`), so without a new identity a mounted pane keeps
+    /// the dropped model and `Save` writes the old project's document into the
+    /// new project.
+    @State private var generationEpoch = 0
     @State private var envInitError: String?
     /// Standalone AppEnvironment for Settings on the Welcome screen (no project).
     @State private var welcomeEnv: AppEnvironment?
@@ -452,6 +458,7 @@ struct AppShell: View {
             // that by accident on every section switch; registry ownership has
             // to do it deliberately. Covers close too (path → nil).
             GenerationRegistry.shared.reset()
+            generationEpoch &+= 1
             reloadDocTemplatesForActiveProject()
         }
         // The kit arriving after the project did. Seeding above ran against
@@ -710,7 +717,7 @@ struct AppShell: View {
             }
         case .visual:
             if registry.isEnabled(.docGen) {
-                FeatureCatalog.visualPane(api: api)
+                FeatureCatalog.visualPane(api: api).id(generationEpoch)
             } else {
                 DisabledFeaturePlaceholderView(
                     featureName: "Visual",
@@ -718,7 +725,7 @@ struct AppShell: View {
             }
         case .docGen:
             if registry.isEnabled(.docGen) {
-                FeatureCatalog.docGenPane(api: api)
+                FeatureCatalog.docGenPane(api: api).id(generationEpoch)
             } else {
                 DisabledFeaturePlaceholderView(
                     featureName: "Document Generator",
