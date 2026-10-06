@@ -207,6 +207,10 @@ final class ActivityStore: SessionScoped {
             } else {
                 unreadCount = resp.unread
             }
+        } catch APIError.noSession {
+            // Not signed in (the loop starts at app launch, before login, and
+            // keeps running after sign-out until the next login): expected, so
+            // no error line every 25 s.
         } catch {
             log.error("activity refresh failed: \(error.localizedDescription, privacy: .public)")
         }
