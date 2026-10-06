@@ -35,10 +35,16 @@ enum AppDateFormatter {
         return f
     }()
 
+    /// A calendar date with no time zone ("due 2026-10-07"). Parsed and
+    /// formatted in the LOCAL zone because every producer (DatePicker) and
+    /// consumer (`startOfDay`, overdue checks, Gantt columns) works in local
+    /// time. In UTC, a due date picked at 08:00 JST was written as the
+    /// previous day, and west-of-UTC users saw dates shift the other way.
     private static let yyyyMMdd: DateFormatter = {
         let f = DateFormatter()
         f.dateFormat = "yyyy-MM-dd"
-        f.timeZone = TimeZone(identifier: "UTC")
+        f.timeZone = .current
+        f.locale = Locale(identifier: "en_US_POSIX")
         return f
     }()
 

@@ -231,7 +231,8 @@ final class GanttViewModel: ObservableObject {
 
     func category(of issue: RepoIssue) -> String {
         if issue.state == "closed" { return "closed" }
-        if let due = endDate(for: issue), due < Date() { return "overdue" }
+        // The due DAY is inclusive: an issue due today is not overdue until tomorrow.
+        if let due = endDate(for: issue), due < Calendar.current.startOfDay(for: Date()) { return "overdue" }
         return "open"
     }
 
