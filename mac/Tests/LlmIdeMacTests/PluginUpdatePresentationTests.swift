@@ -109,3 +109,30 @@ import Testing
     #expect(summary.contains("Hooks/MCP of claude-a changed"))
     #expect(summary.contains("Restart Claude Code"))
 }
+
+@Test func outcomeMapsToStep() {
+    #expect(PluginUpdateStep(name: "claude-a", outcome: .needsConfirmation(command: "c", sha256: "s"))
+            == .confirm(command: "c", sha256: "s"))
+    // Busy / in-progress stop an "Update all"; a single failure does not.
+    #expect(PluginUpdateStep(name: "claude-a", outcome: .busy).stopsBatch)
+    #expect(PluginUpdateStep(name: "claude-a", outcome: .inProgress).stopsBatch)
+    #expect(!PluginUpdateStep(name: "claude-a", outcome: .cliFailed("x")).stopsBatch)
+    #expect(!PluginUpdateStep(name: "claude-a", outcome: .notFound).stopsBatch)
+    #expect(!PluginUpdateStep.discarded.stopsBatch)
+    guard case let .done(_, ok, trustReset, _) = PluginUpdateStep(
+        name: "claude-a", outcome: .updated(from: "1", to: "2", trustReset: true)) else {
+        Issue.record("updated must map to .done")
+        return
+    }
+    #expect(ok)
+    #expect(trustReset)
+}
+
+@Test func libraryMessageIsNeverEmpty() {
+    // A dropped (discarded) result must not open an empty alert.
+    #expect(PluginUpdatePresentation.libraryMessage(prefix: nil, message: "") == nil)
+    #expect(PluginUpdatePresentation.libraryMessage(prefix: "", message: nil) == nil)
+    #expect(PluginUpdatePresentation.libraryMessage(prefix: nil, message: nil) == nil)
+    #expect(PluginUpdatePresentation.libraryMessage(prefix: "a", message: "") == "a")
+    #expect(PluginUpdatePresentation.libraryMessage(prefix: "a", message: "b") == "a\n\nb")
+}

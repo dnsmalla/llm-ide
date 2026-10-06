@@ -113,9 +113,47 @@ enum PluginUpdatePresentation {
         return lines.joined(separator: "\n")
     }
 
+    /// The Library alert text for a finished update: an earlier "Update all"
+    /// summary, then this update's own message. nil when both are empty —
+    /// never "", which would open an empty alert.
+    static func libraryMessage(prefix: String?, message: String?) -> String? {
+        let parts = [prefix, message].compactMap { $0 }.filter { !$0.isEmpty }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n\n")
+    }
+
     private static func detailSuffix(_ detail: String) -> String {
         let trimmed = detail.trimmingCharacters(in: .whitespacesAndNewlines)
         return trimmed.isEmpty ? "" : ": \(trimmed)"
+    }
+}
+
+/// How one plugin update ended, as the update center sequences it.
+enum PluginUpdateStep: Equatable {
+    /// Stopped for a marketplace-declared command the user must see first.
+    case confirm(command: String, sha256: String)
+    case done(message: String, succeeded: Bool, trustReset: Bool, stopsBatch: Bool)
+    /// Finished after a sign-out: nothing may be shown or written.
+    case discarded
+
+    /// The step a server outcome maps to. Busy / in-progress stop an
+    /// "Update all": every remaining plugin would be refused the same way.
+    init(name: String, outcome: PluginUpdateOutcome) {
+        let message = PluginUpdatePresentation.message(name: name, outcome: outcome) ?? ""
+        switch outcome {
+        case let .needsConfirmation(command, sha256):
+            self = .confirm(command: command, sha256: sha256)
+        case let .updated(_, _, trustReset):
+            self = .done(message: message, succeeded: true, trustReset: trustReset, stopsBatch: false)
+        case .busy, .inProgress:
+            self = .done(message: message, succeeded: false, trustReset: false, stopsBatch: true)
+        case .cliFailed, .reimportFailed, .notFound:
+            self = .done(message: message, succeeded: false, trustReset: false, stopsBatch: false)
+        }
+    }
+
+    var stopsBatch: Bool {
+        if case let .done(_, _, _, stops) = self { return stops }
+        return false
     }
 }
 

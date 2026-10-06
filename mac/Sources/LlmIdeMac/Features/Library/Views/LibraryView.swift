@@ -159,9 +159,11 @@ struct LibraryView: View {
             Task {
                 await loadMcpPlugins()
                 await loadConnectors()
-                // Plugins AND their update state: an update run from the detail
-                // pane must clear the row badge and the header's count too.
-                await refreshPlugins()
+                // Plugins AND their update state. No invalidation here: an
+                // update already re-checked in the center, and a toggle does
+                // not change what is updatable, so the 60 s TTL applies.
+                await loadPlugins()
+                await loadPluginUpdates()
                 await refreshLlmSources()
                 await loadLlmSourceUpdates(force: false)
             }
@@ -919,7 +921,7 @@ struct LibraryView: View {
                     Section("Updates available") {
                         ForEach(pluginUpdates) { update in
                             Button {
-                                Task { await applyPluginUpdate(update) }
+                                applyPluginUpdate(update)
                             } label: {
                                 Label(update.name + (update.targetVersion.map { " → \($0)" } ?? ""),
                                       systemImage: "arrow.triangle.2.circlepath")
@@ -927,7 +929,7 @@ struct LibraryView: View {
                             .disabled(updateCenter.isUpdating)
                         }
                         Button {
-                            Task { await applyAllPluginUpdates() }
+                            applyAllPluginUpdates()
                         } label: { Label("Update all (\(pluginUpdates.count))", systemImage: "square.and.arrow.down.on.square") }
                         .disabled(updateCenter.isUpdating)
                     }
@@ -986,8 +988,7 @@ struct LibraryView: View {
             set: { updateCenter.pendingConfirmation = $0 }
         ), onDismiss: { updateCenter.confirmationDismissed() }) { confirmation in
             PluginUpdateConfirmSheet(confirmation: confirmation) {
-                let oneClick = usesOneClickUpdate
-                Task { await updateCenter.accept(confirmation, api: api, oneClick: oneClick) }
+                updateCenter.accept(confirmation, api: api, oneClick: usesOneClickUpdate)
             } onCancel: {
                 updateCenter.pendingConfirmation = nil
             }
@@ -1032,8 +1033,11 @@ struct LibraryView: View {
         }
     }
 
+    /// After an install / import / remove / reload: the plugin set changed, so
+    /// the cached update check is stale too (a removed plugin's badge must go).
     private func refreshPlugins() async {
         await loadPlugins()
+        updateCenter.invalidateCheck()
         await loadPluginUpdates()
     }
 
@@ -1081,12 +1085,14 @@ struct LibraryView: View {
         }
     }
 
-    private func applyPluginUpdate(_ update: PluginUpdateEntry) async {
-        await updateCenter.update(name: update.name, api: api, oneClick: usesOneClickUpdate, origin: .library)
+    /// Synchronous on purpose: the center marks itself running before this
+    /// returns, so a second click is refused instead of starting a second run.
+    private func applyPluginUpdate(_ update: PluginUpdateEntry) {
+        updateCenter.startUpdate(name: update.name, api: api, oneClick: usesOneClickUpdate, origin: .library)
     }
 
-    private func applyAllPluginUpdates() async {
-        await updateCenter.updateAll(api: api, oneClick: usesOneClickUpdate)
+    private func applyAllPluginUpdates() {
+        updateCenter.startUpdateAll(api: api, oneClick: usesOneClickUpdate)
     }
 
     private func reloadPlugins() async {

@@ -82,8 +82,7 @@ struct PluginDetailView: View {
             set: { updateCenter.pendingConfirmation = $0 }
         ), onDismiss: { updateCenter.confirmationDismissed() }) { confirmation in
             PluginUpdateConfirmSheet(confirmation: confirmation) {
-                let isOneClick = oneClick
-                Task { await updateCenter.accept(confirmation, api: api, oneClick: isOneClick) }
+                updateCenter.accept(confirmation, api: api, oneClick: oneClick)
             } onCancel: {
                 updateCenter.pendingConfirmation = nil
             }
@@ -206,8 +205,7 @@ struct PluginDetailView: View {
     @ViewBuilder
     private var updateButton: some View {
         let button = Button(PluginUpdatePresentation.buttonTitle(tier: updateEntry?.tier)) {
-            let isOneClick = oneClick
-            Task { await updateCenter.update(name: pluginName, api: api, oneClick: isOneClick, origin: .detail) }
+            updateCenter.startUpdate(name: pluginName, api: api, oneClick: oneClick, origin: .detail)
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
