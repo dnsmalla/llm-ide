@@ -141,14 +141,11 @@ struct ExplorerView: View {
         WorkspaceRoot.gitWorkingTree(config: config, projectStore: projectStore)
     }
 
-    /// The root `SearchView` walks — a THIRD root, distinct from both `root`
-    /// (the tree's `code/` container) and `gitRoot` (the git working tree).
-    /// Unifying Search's root with the Explorer's is design §3 finding #10 and
-    /// belongs to P4; until then, Find in Folder computes against Search's
-    /// ACTUAL root so the handoff is honest rather than plausible.
-    private var searchRoot: URL? {
-        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
-    }
+    /// The root `SearchView` walks (`WorkspaceRoot.browsingRoot`), stamped by
+    /// the root `.task` because resolving it reads the filesystem. Only gates
+    /// the Find in Folder menu item; `findInFolder` re-resolves at click time,
+    /// so a `code/` created after the stamp (first clone) can't skew the glob.
+    @State private var searchRoot: URL?
 
     /// cwd for the embedded terminal dock — mirrors AppShell.projectDirectory
     /// (active repo / project folder, home as last resort).
@@ -207,6 +204,7 @@ struct ExplorerView: View {
             clipboard.clear()
             tabs.removeAll()
             activeTab = nil
+            searchRoot = WorkspaceRoot.browsingRoot(config: config, projectStore: projectStore)
             guard let root else {
                 treeRoot = nil
                 return
@@ -560,7 +558,7 @@ struct ExplorerView: View {
     /// the section change is what mounts `SearchView`, and its `.task` reads
     /// the value on mount. Writing it afterwards would arrive too late.
     private func findInFolder(_ folder: URL) {
-        guard let searchRoot,
+        guard let searchRoot = WorkspaceRoot.browsingRoot(config: config, projectStore: projectStore),
               let glob = ExplorerPaths.includeGlob(for: folder, root: searchRoot) else { return }
         shell.pendingSearchInclude = glob
         shell.section = .search

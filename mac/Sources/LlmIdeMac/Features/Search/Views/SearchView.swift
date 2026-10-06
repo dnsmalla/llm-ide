@@ -40,8 +40,21 @@ struct SearchView: View {
     @State private var debounce: Task<Void, Never>?
     @State private var searching = false
 
-    private var root: URL? {
-        WorkspaceRoot.resolve(config: config, projectStore: projectStore)
+    /// The folder Search walks — the same one the Explorer shows
+    /// (`WorkspaceRoot.browsingRoot`), so a project's notes and sources never
+    /// mix into code search. Held in `@State` and resolved by the
+    /// `.task(id: rootInputs)` below, never in `body`: `browsingRoot` reads
+    /// the filesystem.
+    @State private var root: URL?
+    /// False until the first resolution lands, so the "no project" empty state
+    /// doesn't flash for one frame on every mount.
+    @State private var rootResolved = false
+
+    /// Everything `browsingRoot` depends on, as one task identity.
+    private var rootInputs: [String] {
+        [projectStore.activeProjectCodeDir?.path ?? "",
+         projectStore.activeProject?.localPath ?? "",
+         config.activeRepoLocalURL?.path ?? ""]
     }
 
     var body: some View {
@@ -66,7 +79,17 @@ struct SearchView: View {
             // ends the AsyncStream, whose onTermination cancels the walk.
             debounce?.cancel()
         }
-        .onChange(of: root?.path) { _, _ in projectChanged() }
+        .task(id: rootInputs) {
+            let resolved = WorkspaceRoot.browsingRoot(config: config, projectStore: projectStore)
+            let isFirst = !rootResolved
+            rootResolved = true
+            guard isFirst || resolved != root else { return }
+            root = resolved
+            // Also on the first resolution: the Find in Folder `.task` above
+            // may already have scheduled its search while `root` was still
+            // nil, which ended in an empty result set.
+            projectChanged()
+        }
     }
 
     /// The workspace root moved (project switch, repo activation). Results and
@@ -101,7 +124,9 @@ struct SearchView: View {
 
     @ViewBuilder
     private var content: some View {
-        if root == nil {
+        if !rootResolved {
+            Color.clear
+        } else if root == nil {
             emptyState("Open a project or activate a repo to search")
         } else {
             // Fixed-width results column — HSplitView overrides a child's
