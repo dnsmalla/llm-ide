@@ -25,14 +25,6 @@ enum MobileExploreBridge {
         files.map { LlmIdeAPIClient.CodeAttachment(path: $0.name, content: $0.text) }
     }
 
-    /// Same workspace / project / git snapshot the Mac Explorer panel sends.
-    /// `sessionId` is the phone-side explorer chat's stable ChatSession UUID —
-    /// it fills BOTH `AgentContext.sessionId` (task-store correlation for the
-    /// phone's turns) and `chatSessionId` (the field the server prefers for
-    /// session-memory keying). The value is the same either way; sending the
-    /// stable id explicitly keeps memory keying on the preferred field
-    /// instead of the server's sessionId fallback, which only lined up
-    /// because this caller happened to pass the chat UUID.
     /// `mode` and `permissionMode` for a phone Explorer turn. Editing needs the
     /// explicit `exploreEdit` switch: without it the turn is read-only (like
     /// `llmide_chat`) no matter what the Mac's chip says, so a paired phone —
@@ -63,6 +55,14 @@ enum MobileExploreBridge {
         return (EditAcceptanceMode(rawValue: raw) ?? .review).agentPermissionMode
     }
 
+    /// Same workspace / project / git snapshot the Mac Explorer panel sends.
+    /// `sessionId` is the phone-side explorer chat's stable ChatSession UUID —
+    /// it fills BOTH `AgentContext.sessionId` (task-store correlation for the
+    /// phone's turns) and `chatSessionId` (the field the server prefers for
+    /// session-memory keying). The value is the same either way; sending the
+    /// stable id explicitly keeps memory keying on the preferred field
+    /// instead of the server's sessionId fallback, which only lined up
+    /// because this caller happened to pass the chat UUID.
     static func buildAgentContext(config: AppConfig, projectStore: ProjectStore,
                                   sessionId: String?) async -> AgentContext {
         let activeProject = deriveActiveProject(from: projectStore.activeProject)
