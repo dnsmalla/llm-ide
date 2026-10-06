@@ -98,7 +98,7 @@ private final class TurnFailureCapture {
 ///   deltas ARE the reply.
 /// - **Progress** — `tool_use_start`/`tool_result` map to `AgentProgress`
 ///   with `phase: "tool"` and the tool's wire name, labelled through the
-///   shared `progressLabel`/`toolVerb` conventions. A `tool_result` carries
+///   shared `progressLabel`/`ClaudeToolPresentation.verb` conventions. A `tool_result` carries
 ///   only its `toolUseId`, so its name is resolved from the preceding
 ///   `tool_use_start` (unknown id → nil → "Working…").
 /// - **Approvals** — `approval_request` surfaces verbatim through
@@ -445,7 +445,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     }
 
     /// One tool progress tick, labelled with the shared legacy conventions
-    /// (`progressLabel` → `toolVerb`).
+    /// (`progressLabel` → `ClaudeToolPresentation.verb`).
     ///
     /// Fired TWICE per call: once when it opens (name only) and once when it
     /// finishes (with `detail`, `args` and the result). `ChatEngine`'s
