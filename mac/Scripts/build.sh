@@ -43,6 +43,7 @@ if [ "$CLEAN_ALL" = "--clean-all" ]; then
   echo -e "${YELLOW}[build]${NC} --clean-all: removing all build caches..."
   echo -e "${BLUE}[build]${NC} removing .build directory (Swift Package Manager cache)..."
   rm -rf "$PROJ_DIR/.build"
+  rm -rf "$PROJ_DIR/.build-app-rebuild"
   echo -e "${BLUE}[build]${NC} removing .swiftpm directory..."
   rm -rf "$PROJ_DIR/.swiftpm"
   echo -e "${BLUE}[build]${NC} removing Xcode derived data for $APP_NAME..."

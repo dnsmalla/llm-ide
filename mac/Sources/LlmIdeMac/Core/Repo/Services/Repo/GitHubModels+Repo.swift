@@ -266,8 +266,6 @@ struct GitHubCommentWire: Decodable {
 // the per-endpoint methods in this file can reach it.
 
 extension GitHubClient {
-    /// Authed GET against `apiBase` returning a JSON-decoded body.
-    /// Adds query items, surfaces non-200 as `httpError`.
     /// Every page of a list endpoint (100 per page, at most `maxPages`) — these were
     /// one page, so a repo with more than 100 labels, milestones, assignees,
     /// comments or open PRs silently lost the rest.
@@ -285,6 +283,8 @@ extension GitHubClient {
         return all
     }
 
+    /// Authed GET against `apiBase` returning a JSON-decoded body.
+    /// Adds query items, surfaces non-200 as `httpError`.
     fileprivate func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
         var comps = URLComponents(url: Self.apiBase.appendingPathComponent(path),
                                   resolvingAgainstBaseURL: false)
