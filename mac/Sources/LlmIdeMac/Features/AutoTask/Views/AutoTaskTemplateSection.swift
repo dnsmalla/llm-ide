@@ -97,6 +97,10 @@ struct AutoTaskTemplateSection: View {
                 placeholderHint
             }
         }
+        // Re-read the folder when the card appears, so the editor, the banner and
+        // "Approve" all speak about the file as it is NOW (a `git pull` may have
+        // changed it while the app was open).
+        .onAppear { templates.reload() }
         .sheet(isPresented: $showingNewSheet) {
             AutoTaskTemplateNameSheet(
                 title: "New Template",

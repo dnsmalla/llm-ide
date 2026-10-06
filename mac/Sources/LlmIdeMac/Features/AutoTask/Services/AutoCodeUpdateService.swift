@@ -375,20 +375,30 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// `writesFiles` must match the `persistChanges:` the caller passes to
     /// `runCLI` — it is what stops a review task being told to write files
     /// that vanish with its throwaway worktree.
+    /// Re-read the templates and, when this task's selected one is not approved,
+    /// say so in the task log and on the task card. Called ONCE per run (never
+    /// from a view body). The re-read makes the run use — and the approval check
+    /// judge — what is on disk now, not what was cached when the project opened.
+    func noteUnapprovedTemplate(taskId: String) {
+        guard let templates = autoTaskTemplates else { return }
+        templates.reload()
+        guard let template = templates.template(id: taskConfigs.config(for: taskId).templateId),
+              !templates.isApproved(template) else { return }
+        let message = "Template \"\(template.name)\" changed outside the app and is not approved — using the task's own prompt. Review it under Auto Tasks → Template and choose Approve."
+        logStore.append(taskId, message, level: .error)
+        taskErrors[taskId] = message
+    }
+
     func composedPrompt(taskId: String, ownPrompt: String, projectRoot: String?,
                         writesFiles: Bool) -> String {
         let taskConfig = taskConfigs.config(for: taskId)
         // Only an APPROVED template (see `AutoTaskTemplateStore`): one that changed on
         // disk outside the app — a `git pull` — would otherwise start running
         // unattended, possibly under a CLI's auto-approve mode, with no one having
-        // read it. The task falls back to its own prompt and says why.
-        if let templates = autoTaskTemplates,
-           let template = templates.template(id: taskConfig.templateId),
-           !templates.isApproved(template) {
-            logStore.append(taskId,
-                            "Template \"\(template.name)\" changed outside the app and is not approved — using the task's own prompt. Review it under Auto Tasks → Template and choose Approve.",
-                            level: .error)
-        }
+        // read it. The task falls back to its own prompt. PURE on purpose: this is
+        // also called from a view body (the "effective prompt" preview), where a
+        // log write would re-render the view forever. The run path reports it via
+        // `noteUnapprovedTemplate`.
         let body = autoTaskTemplates?.approvedTemplate(id: taskConfig.templateId)?.body ?? ownPrompt
         let root = projectRoot.map { URL(fileURLWithPath: $0) }
         return AutoTaskPromptComposer.compose(body: body, config: taskConfig,
@@ -416,6 +426,7 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// unlike the built-in `sourceUpdate`).
     func runCustomTask(_ task: CustomAutoTask, trigger: AutoTaskRunTrigger = .manual) async {
         guard !isRunning else { return }
+        noteUnapprovedTemplate(taskId: task.id)
         isRunning = true
         currentCustomTaskId = task.id
         let startedAt = Date()
@@ -578,6 +589,7 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// Resolve backend/project once, then run a single task body.
     private func runOne(_ task: AutoTask, trigger: AutoTaskRunTrigger) async {
         guard !isRunning else { return }
+        noteUnapprovedTemplate(taskId: task.rawValue)
         isRunning = true
         let startedAt = Date()
         // Resolve-time project id — see `appendRunRecord`.

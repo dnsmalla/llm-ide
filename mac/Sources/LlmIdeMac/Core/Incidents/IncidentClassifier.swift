@@ -11,7 +11,7 @@ public enum IncidentClassifier {
         // A loop the USER configured wrongly is not an app bug: nothing in this
         // repository fixes "stage has no command".
         ("configuration", ["has no runnable command", "has no skill chosen", "has no checks configured",
-                           "needs a newer version of llm-ide", "is not registered", "isn't registered"]),
+                           "needs a newer version of llm-ide"]),
         ("cancelled", ["request was cancelled", "operation was cancelled", "cancellationerror",
                        "cancelled by user", "user cancelled"]),
     ]

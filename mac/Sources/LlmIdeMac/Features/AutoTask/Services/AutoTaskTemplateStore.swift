@@ -81,21 +81,32 @@ final class AutoTaskTemplateStore: ObservableObject {
         SHA256.hash(data: Data(contents.utf8)).map { String(format: "%02x", $0) }.joined()
     }
 
+    /// Canonical key: a root under a symlink, or `/var` vs `/private/var`, must
+    /// not make an approval recorded at write time miss at check time.
+    private func key(_ url: URL) -> String { url.standardizedFileURL.resolvingSymlinksInPath().path }
+
+    /// Digest of each template file's text AS LAST READ by `reload()` — the very
+    /// text that is parsed, shown in the editor and run. Approval is judged
+    /// against THIS, not a fresh read of the file: otherwise a `git pull` while
+    /// the app is open let "Approve" bless text that had never been displayed,
+    /// while the cached old body kept running.
+    private var loadedDigests: [String: String] = [:]
+
     private var approvals: [String: String] {
         get { (defaults.dictionary(forKey: Self.approvalsKey) as? [String: String]) ?? [:] }
         set { defaults.set(newValue, forKey: Self.approvalsKey) }
     }
 
-    private func recordApproval(path: String, contents: String) {
-        approvals[path] = digest(contents)
+    /// The app wrote `contents` to `url` on a person's behalf.
+    private func recordApproval(url: URL, contents: String) {
+        approvals[key(url)] = digest(contents)
         approvalRevision += 1
     }
 
-    /// Whether `template`'s file still holds exactly what was approved.
+    /// Whether `template` is exactly what was approved.
     func isApproved(_ template: AutoTaskTemplate) -> Bool {
-        guard let url = template.url,
-              let contents = try? String(contentsOf: url, encoding: .utf8) else { return false }
-        return approvals[url.path] == digest(contents)
+        guard let url = template.url, let loaded = loadedDigests[key(url)] else { return false }
+        return approvals[key(url)] == loaded
     }
 
     /// The template for `id`, only when it is approved. A changed-outside-the-app
@@ -105,11 +116,12 @@ final class AutoTaskTemplateStore: ObservableObject {
         return template
     }
 
-    /// The user reviewed the file as it is now and accepts it.
+    /// The user reviewed the text as the editor shows it and accepts it.
     func approve(id: String) {
         guard let template = template(id: id), let url = template.url,
-              let contents = try? String(contentsOf: url, encoding: .utf8) else { return }
-        recordApproval(path: url.path, contents: contents)
+              let loaded = loadedDigests[key(url)] else { return }
+        approvals[key(url)] = loaded
+        approvalRevision += 1
     }
 
     /// One-time, on first use after this feature shipped: approve what exists in the
@@ -154,16 +166,20 @@ final class AutoTaskTemplateStore: ObservableObject {
             setTemplates([])
             return
         }
-        setTemplates(entries
+        var digests: [String: String] = [:]
+        let parsed: [AutoTaskTemplate] = entries
             .filter { $0.pathExtension.lowercased() == AutoTaskTemplate.fileExtension }
             .compactMap { url in
                 guard let contents = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+                digests[key(url)] = digest(contents)
                 return AutoTaskTemplate.parse(
                     fileContents: contents,
                     slug: url.deletingPathExtension().lastPathComponent,
                     url: url)
             }
-            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending })
+            .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+        loadedDigests = digests
+        setTemplates(parsed)
     }
 
     /// Publish a new template list, announcing it only when it actually
@@ -373,7 +389,7 @@ final class AutoTaskTemplateStore: ObservableObject {
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try contents.write(to: url, atomically: true, encoding: .utf8)
             // Written by the app on a person's behalf: that is the approval.
-            recordApproval(path: url.path, contents: contents)
+            recordApproval(url: url, contents: contents)
             return true
         } catch {
             logger.error("failed to write \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
