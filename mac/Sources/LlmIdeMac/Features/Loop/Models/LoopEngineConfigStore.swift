@@ -96,7 +96,7 @@ enum LoopEngineConfigStore {
             }
             if let legacyConfig = try? JSONDecoder().decode(LoopEngineConfig.self, from: data) {
                 let wrapped = wrapAsMainLoop(legacyConfig)
-                write(wrapped, to: url)
+                write(wrapped, to: url, recordAsAppWrite: false)
                 return wrapped
             }
             // Present but unreadable/undecodable (a hand-edit typo, a bad
@@ -112,7 +112,7 @@ enum LoopEngineConfigStore {
         }
         if let legacy = LoopEngineConfig.load(for: projectId, defaults: defaults) {
             let wrapped = wrapAsMainLoop(legacy)
-            write(wrapped, to: url)
+            write(wrapped, to: url, recordAsAppWrite: false)
             return wrapped
         }
         return nil
@@ -135,8 +135,13 @@ enum LoopEngineConfigStore {
     /// degraded fallback; a non-Primary loop has nowhere to persist in that
     /// corner case (no project folder resolvable at all), which is an
     /// existing limitation of that fallback, not a new one.
+    ///
+    /// `recordAsAppWrite`: true for a save the user/UI initiated, which the
+    /// repair guard then treats as the app's own write. The automatic re-save
+    /// inside `loadEnsured` passes false — it would otherwise re-save an
+    /// AGENT's edited file and thereby bless it (see `AppWrittenFiles`).
     static func save(_ store: LoopEngineProjectStore, projectRoot: URL?, projectId: String,
-                     defaults: UserDefaults = .standard) {
+                     defaults: UserDefaults = .standard, recordAsAppWrite: Bool = true) {
         guard let projectRoot else {
             if let primary = store.loops.first(where: \.isPrimary) ?? store.loops.first {
                 primary.config.save(for: projectId, defaults: defaults)
@@ -144,7 +149,7 @@ enum LoopEngineConfigStore {
             return
         }
         LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
-        write(store, to: fileURL(projectRoot: projectRoot))
+        write(store, to: fileURL(projectRoot: projectRoot), recordAsAppWrite: recordAsAppWrite)
         LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
     }
 
@@ -249,8 +254,14 @@ enum LoopEngineConfigStore {
         guard ensured != saved || unscheduled else { return ensured }
         let worthKeeping = saved != nil
             || LoopEngineConfig.shouldPersist(ensured.loops.flatMap(\.config.stages))
-        if worthKeeping {
-            save(ensured, projectRoot: projectRoot, projectId: projectId, defaults: defaults)
+        // Not while a run is active in this repo: the repair guard would read this
+        // automatic rewrite of `system/loop.json` as the agent's edit and block
+        // the run. The in-memory result is already corrected, and the next load
+        // after the run persists it.
+        let runActive = gitRoot.map { LoopRunQueueMirror.isActive(gitRoot: $0) } ?? false
+        if worthKeeping && !runActive {
+            save(ensured, projectRoot: projectRoot, projectId: projectId, defaults: defaults,
+                 recordAsAppWrite: false)
         }
         return ensured
     }
@@ -407,15 +418,15 @@ enum LoopEngineConfigStore {
 
     /// Fail-quiet: losing a write is bad, but throwing from a SwiftUI action
     /// or the cron sweep would be worse than the user re-saving.
-    private static func write(_ store: LoopEngineProjectStore, to url: URL) {
+    private static func write(_ store: LoopEngineProjectStore, to url: URL, recordAsAppWrite: Bool) {
         guard mayOverwrite(url) else { return }
         do {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             let data = try encoder().encode(store)
             try data.write(to: url, options: .atomic)
-            // Lets the repair guard tell this write from an agent's edit.
-            AppWrittenFiles.recordWrite(of: data, to: url)
+            // Lets the repair guard tell a USER-initiated write from an agent's edit.
+            if recordAsAppWrite { AppWrittenFiles.recordWrite(of: data, to: url) }
             // A quarantine notice stays until the next clean load; the others
             // describe a state this write just proved is over.
             if case .quarantined? = LoopStoreNotices.shared.notice(forFile: url) {} else {

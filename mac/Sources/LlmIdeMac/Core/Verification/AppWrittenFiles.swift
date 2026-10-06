@@ -13,6 +13,11 @@ import Foundation
 /// agent cannot use this to hide an edit, because matching the digest means
 /// leaving the file exactly as the app wrote it.
 ///
+/// Only writes the USER/UI initiated may be recorded. A background re-save that
+/// merely normalises what it just READ (stage re-detection, legacy migration)
+/// would otherwise re-save an agent's edited file and record the edit as the
+/// app's own — those writers must not call `recordWrite`.
+///
 /// NOTE: process-wide state on purpose — the writer (a store) and the reader (the
 /// guard) share no object, and both are in the same process. Lock-guarded.
 enum AppWrittenFiles {

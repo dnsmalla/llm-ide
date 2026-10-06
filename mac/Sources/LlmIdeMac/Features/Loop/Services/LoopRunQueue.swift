@@ -15,7 +15,9 @@ enum LoopRunQueue {
     }
 
     /// Roots with a run currently holding the lock (started, not merely queued).
-    private static var heldRoots: Set<String> = []
+    private static var heldRoots: Set<String> = [] {
+        didSet { LoopRunQueueMirror.update(heldRoots) }
+    }
     /// Per-root FIFO of waiters blocked on `acquire`.
     private static var waiters: [String: [Waiter]] = [:]
 
@@ -98,4 +100,27 @@ enum LoopRunQueue {
         waiters.removeAll()
     }
 #endif
+}
+
+
+/// A lock-guarded copy of `LoopRunQueue`'s held roots that can be read from ANY
+/// thread. The queue itself is main-actor isolated, but its answer is needed by
+/// the (nonisolated, sometimes background) config store, which must not rewrite
+/// `system/loop.json` while a run is active — the repair guard would read that
+/// rewrite as the agent's edit.
+enum LoopRunQueueMirror {
+    private static let lock = NSLock()
+    nonisolated(unsafe) private static var held: Set<String> = []
+
+    fileprivate static func update(_ roots: Set<String>) {
+        lock.lock(); defer { lock.unlock() }
+        held = roots
+    }
+
+    /// Whether a run currently holds `gitRoot` (same keying as `LoopRunQueue`).
+    nonisolated static func isActive(gitRoot: URL) -> Bool {
+        let key = gitRoot.resolvingSymlinksInPath().path
+        lock.lock(); defer { lock.unlock() }
+        return held.contains(key)
+    }
 }
