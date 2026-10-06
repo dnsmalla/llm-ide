@@ -341,11 +341,14 @@ final class BackendManager {
                 // surface the tail of its output — a missing dependency,
                 // a syntax error, a port clash — so the reason shows on
                 // the login screen instead of looking like a silent no-op.
-                if exitCode != 0 {
+                // A deliberate Stop ends the child with SIGTERM (15): that is a
+                // stop, not a crash, and must not show "exited with code 15".
+                let stoppedByUser = self.userInitiatedStop && exitCode == Int32(SIGTERM)
+                if exitCode != 0 && !stoppedByUser {
                     self.lastError = self.recentErrorSummary()
                         ?? "Server exited with code \(exitCode). See Settings → Backend for the log."
                 }
-                self.status = exitCode == 0 ? .stopped : .crashed(exitCode: exitCode)
+                self.status = (exitCode == 0 || stoppedByUser) ? .stopped : .crashed(exitCode: exitCode)
                 if let next = self.startAfterExit {
                     // An intentional restart, not a crash: no auto-restart,
                     // no budget spent, no lingering "crashed" error.
@@ -517,7 +520,10 @@ final class BackendManager {
         // Signal the terminationHandler to skip auto-restart. Cleared
         // back to false once the next non-clean exit is handled, or
         // immediately when the user starts the backend again.
-        userInitiatedStop = true
+        // Only a CHILD we spawned has an exit handler to consume this flag. Set
+        // for an adopted listener, nothing ever cleared it, so the next real
+        // crash of a later-spawned child skipped its first auto-restart.
+        userInitiatedStop = process != nil
         // A Stop after Kill & Restart (node slow to exit) wins: the exit
         // must not relaunch against it.
         startAfterExit = nil
@@ -592,7 +598,9 @@ final class BackendManager {
             let cmdData = (try? cmdPipe.fileHandleForReading.readToEnd()) ?? Data()
             let cmdStr = String(data: cmdData, encoding: .utf8) ?? ""
             // Confirm the process references our Node backend.
-            guard cmdStr.contains("server.mjs") || cmdStr.contains("node") && cmdStr.contains("server") else {
+            // Match on `server.mjs` only: "node" + "server" also matched any
+            // unrelated `node dev-server.js` on the port, which we then killed.
+            guard cmdStr.contains("server.mjs") else {
                 // Log to stderr — not ideal in a nonisolated static, but avoids
                 // pulling in a logger dependency here.
                 fputs("[BackendManager] Skipping PID \(pid) on port \(port): '\(cmdStr.trimmingCharacters(in: .whitespacesAndNewlines))' does not look like our server\n", stderr)
