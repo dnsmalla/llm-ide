@@ -439,7 +439,16 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
                 }
             } else if created.contains(path) {
                 do {
-                    let url = gitRoot.appendingPathComponent(path)
+                    // `created` paths come from the server's report. A `..` or
+                    // absolute entry must never turn this into a delete outside
+                    // the repo, so contain the resolved path first.
+                    let url = gitRoot.appendingPathComponent(path).standardizedFileURL
+                    let rootPrefix = gitRoot.standardizedFileURL.path.hasSuffix("/")
+                        ? gitRoot.standardizedFileURL.path : gitRoot.standardizedFileURL.path + "/"
+                    guard !path.hasPrefix("/"), url.path.hasPrefix(rootPrefix) else {
+                        failures.append("refusing to delete \(path): it is outside the repository")
+                        continue
+                    }
                     if FileManager.default.fileExists(atPath: url.path) {
                         try FileManager.default.removeItem(at: url)
                     }
