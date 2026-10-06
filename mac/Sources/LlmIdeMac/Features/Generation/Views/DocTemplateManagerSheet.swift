@@ -127,13 +127,18 @@ struct DocTemplateManagerSheet: View {
                         .foregroundStyle(.secondary)
 
                     List {
-                        ForEach(binding.wrappedValue.sections, id: \.self) { section in
+                        // Keyed by POSITION: sections may legitimately repeat a name
+                        // (the template model preserves duplicate bodies), and
+                        // `id: \.self` + remove-by-value deleted every copy at once.
+                        ForEach(Array(binding.wrappedValue.sections.enumerated()), id: \.offset) { index, section in
                             HStack {
                                 Text(section)
                                     .font(.callout)
                                 Spacer()
                                 Button {
-                                    binding.wrappedValue.sections.removeAll { $0 == section }
+                                    if binding.wrappedValue.sections.indices.contains(index) {
+                                        binding.wrappedValue.sections.remove(at: index)
+                                    }
                                 } label: {
                                     Image(systemName: "minus.circle")
                                         .foregroundStyle(theme.current.danger.opacity(0.8))
