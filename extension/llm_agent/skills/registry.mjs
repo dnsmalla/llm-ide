@@ -380,6 +380,8 @@ export function listInstalledPlugins(userId) {
       // inert here, so the Library detail view can say so instead of the user
       // wondering why a Claude plugin's hooks do nothing.
       format: p.format || 'llmide',
+      // 'claude' | 'codex' when a vendor bridge imported it, else null.
+      origin: p.origin ?? null,
       unsupportedComponents: p.unsupportedComponents || [],
       pendingComponents: p.pendingComponents || [],
       // Hooks: how many runnable handlers the plugin declares, what llm-ide

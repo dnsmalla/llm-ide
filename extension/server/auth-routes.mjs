@@ -4,6 +4,7 @@
 // through the kb facade.
 
 import crypto from 'node:crypto';
+import { join } from 'node:path';
 import { config } from '../core/config.mjs';
 import { errAuth, errNotFound, errValidation } from '../core/errors.mjs';
 import { readBody, parseJSON } from '../core/utils.mjs';
@@ -1188,9 +1189,21 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     // stamp every route import reads as Tier 1 forever. Marketplace imports
     // have no Claude install to stamp from.
     const installed = body.source === 'installed' ? scanInstalled().find((p) => p.name === body.name) : null;
-    const result = importPlugin({
-      source: body.source, name: body.name,
-      ...(installed ? { installPath: installed.installPath, sourceVersion: installed.version, scope: installed.scope ?? null } : {}),
+    const { importWithTrustCheck } = await import('../plugins/import-trust.mjs');
+    const { defaultPluginDir } = await import('../plugins/loader.mjs');
+    const { clearHooksTrustForPlugin } = await import('../plugins/state.mjs');
+    const { clearPluginMcpConsents } = await import('../mcp/state.mjs');
+    // A re-import over an existing copy can swap in new hooks/MCP servers;
+    // trust granted to the old executables must not carry over.
+    const mnName = body.name.startsWith('claude-') ? body.name : `claude-${body.name}`;
+    const result = importWithTrustCheck({
+      dir: join(defaultPluginDir(), mnName),
+      doImport: () => importPlugin({
+        source: body.source, name: body.name,
+        ...(installed ? { installPath: installed.installPath, sourceVersion: installed.version, scope: installed.scope ?? null } : {}),
+      }),
+      clearTrust: clearHooksTrustForPlugin,
+      clearMcpConsents: clearPluginMcpConsents,
     });
     if (!result.ok) {
       send(res, 404, { error: { code: 'NOT_FOUND', message: result.error } });
@@ -1318,7 +1331,18 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       return;
     }
     const { importPlugin } = await import('../plugins/codex-adapter.mjs');
-    const result = importPlugin({ source: body.source, name: body.name });
+    const { importWithTrustCheck } = await import('../plugins/import-trust.mjs');
+    const { defaultPluginDir } = await import('../plugins/loader.mjs');
+    const { clearHooksTrustForPlugin } = await import('../plugins/state.mjs');
+    const { clearPluginMcpConsents } = await import('../mcp/state.mjs');
+    // Same rule as the Claude import: new executables lose the old grant.
+    const mnName = body.name.startsWith('codex-') ? body.name : `codex-${body.name}`;
+    const result = importWithTrustCheck({
+      dir: join(defaultPluginDir(), mnName),
+      doImport: () => importPlugin({ source: body.source, name: body.name }),
+      clearTrust: clearHooksTrustForPlugin,
+      clearMcpConsents: clearPluginMcpConsents,
+    });
     if (!result.ok) {
       send(res, 404, { error: { code: 'NOT_FOUND', message: result.error } });
       return;

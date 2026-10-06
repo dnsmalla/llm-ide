@@ -715,6 +715,38 @@ test('POST /auth/me/claude-plugins/import stamps the Claude install so the check
   assert.equal(res.updates.find((u) => u.name === 'claude-bridge-stamp-demo'), undefined);
 });
 
+test('POST /auth/me/claude-plugins/import resets hook trust when a re-import changes executables', async () => {
+  const installPath = writeClaudeInstalledFixture({ name: 'bridge-trust-demo', version: '1.0.0' });
+  // Manifest-bearing, so the whole tree (hooks/, bin/) is copied.
+  fs.mkdirSync(path.join(installPath, '.claude-plugin'), { recursive: true });
+  fs.writeFileSync(path.join(installPath, '.claude-plugin', 'plugin.json'), JSON.stringify({ name: 'bridge-trust-demo', version: '1.0.0' }), 'utf8');
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const post = () => callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: admin, body: { name: 'bridge-trust-demo', source: 'installed' } });
+  assert.equal((await post()).statusCode, 200);
+  const { setHooksTrusted, listHooksTrusted } = await import('../plugins/state.mjs');
+  setHooksTrusted(user.id, 'claude-bridge-trust-demo', true);
+  const same = await post();
+  assert.equal(same.json().trustReset, false);
+  assert.equal(listHooksTrusted(user.id).has('claude-bridge-trust-demo'), true, 'identical re-import keeps trust');
+  fs.mkdirSync(path.join(installPath, 'bin'), { recursive: true });
+  fs.writeFileSync(path.join(installPath, 'bin', 'run'), 'echo hi', 'utf8');
+  const changed = await post();
+  assert.equal(changed.json().trustReset, true);
+  assert.equal(listHooksTrusted(user.id).has('claude-bridge-trust-demo'), false, 'new executables drop the old grant');
+});
+
+test('GET /auth/me/plugins reports the import origin', async () => {
+  writeClaudeInstalledFixture({ name: 'bridge-origin-demo' });
+  const { user } = await registerAndLogin();
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: { id: user.id, role: 'admin' }, body: { name: 'bridge-origin-demo', source: 'installed' } });
+  assert.equal(ok.statusCode, 200, ok._body);
+  const list = await callAuth({ method: 'GET', url: '/auth/me/plugins', user: { id: user.id } });
+  const row = list.json().plugins.find((p) => p.name === 'claude-bridge-origin-demo');
+  assert.equal(row.origin, 'claude');
+  assert.ok(list.json().plugins.every((p) => p.origin === null || p.origin === 'claude' || p.origin === 'codex'));
+});
+
 test('POST /auth/me/claude-plugins/refresh returns live installed/marketplace counts', async () => {
   const { user } = await registerAndLogin();
   const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/refresh', user: { id: user.id } });
@@ -878,6 +910,8 @@ test('POST /auth/me/codex-plugins/import validates input and wires an imported p
 
   const nativeList = await callAuth({ method: 'GET', url: '/auth/me/plugins', user: { id: user.id } });
   assert.ok(nativeList.json().plugins.some((p) => p.name === 'codex-bridge-import-demo'), 'imported plugin shows up via the native plugin list');
+  assert.equal(nativeList.json().plugins.find((p) => p.name === 'codex-bridge-import-demo').origin, 'codex');
+  assert.equal(typeof ok.json().trustReset, 'boolean', 'the codex import runs the trust check too');
 
   const installedAgain = await callAuth({ method: 'GET', url: '/auth/me/codex-plugins/installed', user: { id: user.id } });
   const found = installedAgain.json().plugins.find((p) => p.name === 'bridge-import-demo');

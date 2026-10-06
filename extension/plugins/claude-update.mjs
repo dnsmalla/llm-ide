@@ -20,7 +20,7 @@ import { versionsDiffer, upstreamTier, pickInstalledEntry } from './plugin-versi
 import {
   importPlugin, readImportStamp, checkForUpdates, listImportedNames, claudePluginsRoot, scanInstalled,
 } from './claude-adapter.mjs';
-import { hashExecutables } from './executable-hash.mjs';
+import { importWithTrustCheck } from './import-trust.mjs';
 import { clearHooksTrustForPlugin } from './state.mjs';
 import { defaultPluginDir } from './loader.mjs';
 import { PLUGIN_NAME_RE } from './vendor-import-shared.mjs';
@@ -204,22 +204,20 @@ async function runCliUpdate(d, pluginId, scope, acceptCommand) {
  * whether Claude Code's own install moved in this request.
  */
 async function reimportEntry(d, imp, entry, claudeUpdated) {
-  const pluginDir = join(d.mnDir, imp.name);
-  const before = hashExecutables(pluginDir);
-  const res = importPlugin({
-    source: 'installed', name: imp.sourcePlugin, installPath: entry.installPath,
-    sourceVersion: entry.version, scope: entry.scope ?? null, claudeRoot: d.claudeRoot, llmidePluginDir: d.mnDir,
+  const res = importWithTrustCheck({
+    dir: join(d.mnDir, imp.name),
+    doImport: () => importPlugin({
+      source: 'installed', name: imp.sourcePlugin, installPath: entry.installPath,
+      sourceVersion: entry.version, scope: entry.scope ?? null, claudeRoot: d.claudeRoot, llmidePluginDir: d.mnDir,
+    }),
+    clearTrust: d.clearTrust,
+    clearMcpConsents: d.clearMcpConsents,
   });
   if (!res.ok) {
     return { status: 200, body: { ok: false, code: 'REIMPORT_FAILED', claudeUpdated, detail: res.error || 'import failed' } };
   }
-  const trustReset = before !== hashExecutables(pluginDir);
-  if (trustReset) {
-    d.clearTrust(imp.name);
-    d.clearMcpConsents(imp.name);
-  }
   await d.reload();
-  return { status: 200, body: { ok: true, from: imp.stamp.sourceVersion, to: entry.version ?? null, trustReset, claudeUpdated } };
+  return { status: 200, body: { ok: true, from: imp.stamp.sourceVersion, to: entry.version ?? null, trustReset: res.trustReset, claudeUpdated } };
 }
 
 /** Claude's installed_plugins.json entry for an import, read without the CLI. */

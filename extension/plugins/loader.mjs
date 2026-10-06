@@ -89,6 +89,10 @@ function binDeclares(dir) {
   catch { return existsSync(join(dir, 'bin')); }
 }
 
+// Which vendor bridge imported the plugin (its import stamp), so the Library
+// knows which update path applies. Anything else — a zip install — is null.
+const importOrigin = (v) => (v === 'claude' || v === 'codex' ? v : null);
+
 function validateClaudeManifest(raw) {
   if (!raw || typeof raw !== 'object') return { error: 'manifest is not an object' };
   const { name, version } = raw;
@@ -120,6 +124,7 @@ function validateClaudeManifest(raw) {
       displayName: typeof raw.displayName === 'string' ? raw.displayName.slice(0, 80) : name,
       description: typeof raw.description === 'string' ? raw.description.slice(0, 400) : '',
       author,
+      origin: importOrigin(raw.llmideOrigin),
     },
     components,
     // The manifest can carry these inline or point at another file; the SDK
@@ -237,6 +242,7 @@ function validateManifest(raw) {
       displayName: typeof displayName === 'string' ? displayName.slice(0, 80) : name,
       description: typeof description === 'string' ? description.slice(0, 400) : '',
       author: typeof author === 'string' ? author.slice(0, 120) : '',
+      origin: importOrigin(raw.origin),
       // Skill / command lists are derived from disk, not the manifest,
       // so a plugin author can drop files in without editing the
       // manifest. The manifest is identity + metadata only.
