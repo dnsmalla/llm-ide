@@ -57,6 +57,9 @@ struct PluginMarketplaceSheet: View {
                 Button(installed.isEmpty ? "Cancel" : "Done", role: installed.isEmpty ? .cancel : nil) {
                     finish()
                 }
+                // Closing mid-install deleted the staged clone under the running
+                // package/install step ("zip failed" or a half-deleted tree).
+                .disabled(installing != nil)
                 if staged == nil {
                     Button("Browse") { Task { await load() } }
                         .buttonStyle(.borderedProminent)
@@ -68,6 +71,7 @@ struct PluginMarketplaceSheet: View {
         .padding(20)
         .frame(width: 520, height: staged == nil ? 260 : 480)
         .onAppear { urlFocused = true }
+        .interactiveDismissDisabled(installing != nil)
         .onDisappear { staged?.cleanup() }
     }
 
