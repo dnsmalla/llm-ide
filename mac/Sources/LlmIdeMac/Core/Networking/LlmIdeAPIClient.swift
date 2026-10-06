@@ -464,7 +464,9 @@ final class LlmIdeAPIClient: @unchecked Sendable {
             if !(200..<300).contains(http.statusCode) {
                 let env = try? decoder.decode(ErrorEnvelope.self, from: data)
                 let flat = try? decoder.decode(FlatErrorEnvelope.self, from: data)
-                let raw = String(data: data, encoding: .utf8)?
+                // Bounded: an HTML 502 page or a multi-MB trace would otherwise
+                // become the error message shown in the UI.
+                let raw = String(data: data.prefix(2_000), encoding: .utf8)?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let code = env?.error?.code ?? "UPSTREAM_ERROR"
                 let rawMsg = env?.error?.message

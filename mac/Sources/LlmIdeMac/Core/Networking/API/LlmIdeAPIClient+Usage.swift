@@ -125,17 +125,25 @@ extension LlmIdeAPIClient {
         var outputTokens: RateLimitBucket?
     }
 
+    /// A query VALUE, encoded strictly: `.urlQueryAllowed` leaves `&`, `#` and
+    /// `+` alone, which would let a provider id alter the request.
+    private static func queryValue(_ raw: String) -> String {
+        var allowed = CharacterSet.alphanumerics
+        allowed.insert(charactersIn: "-._~")
+        return raw.addingPercentEncoding(withAllowedCharacters: allowed) ?? ""
+    }
+
     // MARK: - Reads
 
     /// Current caps (built-in chains merged with the user's overrides).
     func usageLimits(provider: String? = nil) async throws -> UsageLimits {
-        let q = provider.map { "?provider=\($0)" } ?? ""
+        let q = provider.map { "?provider=\(Self.queryValue($0))" } ?? ""
         return try await get("/kb/usage/limits\(q)", authenticated: true)
     }
 
     /// Live per-model usage + the resolved active model per provider.
     func usageSummary(provider: String? = nil) async throws -> UsageSummary {
-        let q = provider.map { "?provider=\($0)" } ?? ""
+        let q = provider.map { "?provider=\(Self.queryValue($0))" } ?? ""
         return try await get("/kb/usage/summary\(q)", authenticated: true)
     }
 
@@ -143,10 +151,9 @@ extension LlmIdeAPIClient {
     /// `prefer` is the caller's desired model — kept when healthy, stepped down
     /// only when constrained.
     func resolveUsageModel(provider: String, prefer: String? = nil) async throws -> UsageResolution {
-        var q = "?provider=\(provider)"
-        if let p = prefer, !p.isEmpty,
-           let enc = p.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) {
-            q += "&prefer=\(enc)"
+        var q = "?provider=\(Self.queryValue(provider))"
+        if let p = prefer, !p.isEmpty {
+            q += "&prefer=\(Self.queryValue(p))"
         }
         return try await get("/kb/usage/resolve\(q)", authenticated: true)
     }
@@ -154,7 +161,7 @@ extension LlmIdeAPIClient {
     /// Latest API rate-limit headers for a provider (nil in subscription/CLI mode).
     func usageRateLimits(provider: String) async throws -> RateLimits? {
         struct Resp: Decodable { let ratelimits: RateLimits? }
-        let r: Resp = try await get("/kb/usage/ratelimits?provider=\(provider)", authenticated: true)
+        let r: Resp = try await get("/kb/usage/ratelimits?provider=\(Self.queryValue(provider))", authenticated: true)
         return r.ratelimits
     }
 

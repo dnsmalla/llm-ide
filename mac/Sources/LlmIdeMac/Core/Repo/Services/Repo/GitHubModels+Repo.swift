@@ -213,7 +213,8 @@ extension GitHubClient {
         guard successCodes.contains(http.statusCode) else {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
                 ?? "HTTP \(http.statusCode)"
-            throw GitHubError.httpError(http.statusCode, msg)
+            // Redacted like `GitHubClient.extractMessage`: a 401 body can echo the token.
+            throw GitHubError.httpError(http.statusCode, SecretRedactor.redact(msg))
         }
         do {
             return try AppJSON.decoder.decode(T.self, from: data)
@@ -282,7 +283,8 @@ extension GitHubClient {
         guard http.statusCode == 200 else {
             let msg = (try? JSONSerialization.jsonObject(with: data) as? [String: Any])?["message"] as? String
                 ?? "HTTP \(http.statusCode)"
-            throw GitHubError.httpError(http.statusCode, msg)
+            // Redacted like `GitHubClient.extractMessage`: a 401 body can echo the token.
+            throw GitHubError.httpError(http.statusCode, SecretRedactor.redact(msg))
         }
         do {
             return try AppJSON.decoder.decode(T.self, from: data)
