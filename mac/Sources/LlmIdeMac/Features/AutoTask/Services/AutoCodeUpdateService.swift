@@ -534,8 +534,17 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
             for task in dueOther { realignNextFire(for: task, now: now) }       // realign BEFORE running
             for task in dueCustom { realignCustomNextFire(for: task, now: now) }
             runTask = Task { [weak self] in
-                for task in dueOther { await self?.runOne(task, trigger: .cron) }
-                for task in dueCustom { await self?.runCustomTask(task, trigger: .cron) }
+                // Stop ends the whole batch: without these checks every remaining
+                // task still entered `runOne`, bailed late, and recorded a
+                // "cancelled" run plus an error log line for one Stop click.
+                for task in dueOther {
+                    if Task.isCancelled { break }
+                    await self?.runOne(task, trigger: .cron)
+                }
+                for task in dueCustom {
+                    if Task.isCancelled { break }
+                    await self?.runCustomTask(task, trigger: .cron)
+                }
                 self?.runTask = nil
             }
         }
