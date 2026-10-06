@@ -123,25 +123,6 @@ extension AutoCodeUpdateService {
         return git(["checkout", branch], at: localPath).code == 0
     }
 
-    /// The CLI was told to commit on a fix/ branch but committed onto `base`
-    /// instead. Isolate its commit(s) so base isn't polluted (and the next
-    /// issue doesn't chain off it): `checkout -B branch` creates the branch at
-    /// the current HEAD and switches to it, then `base` is moved back to
-    /// `baseSha` while it is no longer checked out.
-    ///
-    /// NOTE: deliberately NOT `reset --hard` — this runs in the user's own
-    /// checkout after a long CLI run, and a hard reset would discard any
-    /// edits they made meanwhile. Both steps only move refs; the working tree
-    /// and index are untouched (HEAD's commit is identical across the switch).
-    /// Returns false if `branch` already exists (nothing changed) or a step
-    /// fails; if only the last step fails the commit is safe on `branch`.
-    nonisolated static func rescueCommitToBranch(_ branch: String, base: String, baseSha: String, at localPath: String) -> Bool {
-        // `checkout -B` would silently reset an existing branch — refuse instead.
-        guard git(["show-ref", "--verify", "--quiet", "refs/heads/\(branch)"], at: localPath).code != 0 else { return false }
-        guard git(["checkout", "-B", branch], at: localPath).code == 0 else { return false }
-        return git(["branch", "-f", base, baseSha], at: localPath).code == 0
-    }
-
     /// Branch name for a `.implement` custom auto-task: `fix/custom-<slug>-<token>`.
     /// `token` disambiguates same-named tasks across runs (caller passes a short id/timestamp).
     nonisolated static func customImplementBranch(slug: String, token: String) -> String {
@@ -447,22 +428,39 @@ extension AutoCodeUpdateService {
         return result
     }
 
-    func runCLI(issue: RepoIssue, localPath: String, logDir: URL) async -> Bool {
+    /// What one issue run produced. `committed` is the ground truth the caller
+    /// acts on (mark done / failed, comment on the issue); `branch` is the local
+    /// branch holding the commit when there is one.
+    struct IssueRunOutcome {
+        var succeeded: Bool
+        var committed: Bool
+        var branch: String?
+        static let skipped = IssueRunOutcome(succeeded: false, committed: false, branch: nil)
+    }
+
+    /// The branch an issue run works on: `planned` (`fix/<n>-<slug>`), or the
+    /// same name with the run token appended when `planned` already exists — a
+    /// retry after an earlier attempt left its branch behind. Never reuses or
+    /// resets an existing branch.
+    nonisolated static func issueBranchName(planned: String, token: String, plannedExists: Bool) -> String {
+        plannedExists ? "\(planned)-\(token)" : planned
+    }
+
+    /// Run the CLI on one issue in an ISOLATED worktree of HEAD, on its own new
+    /// `fix/<n>-<slug>` branch.
+    ///
+    /// It used to run in the user's checkout: the loop switched their checkout
+    /// to the base branch, the CLI created a branch there, and a commit that
+    /// landed on the base branch was moved off it afterwards. A user mid-task
+    /// on a feature branch found HEAD moved under them, and the run refused to
+    /// start at all while their tree had uncommitted changes. In a worktree
+    /// the user's working tree and current branch are never touched, so none of
+    /// that machinery (dirty-tree guard, base checkout, rescue) is needed.
+    func runCLI(issue: RepoIssue, localPath: String, logDir: URL) async -> IssueRunOutcome {
         let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable   // e.g. "claude" or "gh copilot"
         let components = cliCommand.split(separator: " ").map(String.init)
-        guard let executable = components.first else { return false }
-
-        // Refuse to run on a dirty tree — the CLI commits whatever is staged/modified,
-        // so it would otherwise sweep the user's unrelated WIP into the fix commit.
-        let clean = await Task.detached { Self.isWorkingTreeClean(at: localPath) }.value
-        guard clean else {
-            let msg = "Skipped issue #\(issue.number): working tree has uncommitted changes. Commit or stash them first."
-            lastError = msg
-            taskErrors["#\(issue.number)"] = msg
-            log.error("auto_code_skip_dirty issue=\(issue.number, privacy: .public)")
-            return false
-        }
+        guard let executable = components.first else { return .skipped }
 
         // Auto-fallback: pick the model with remaining budget, or skip if the
         // whole provider chain is paused (every model at its limit).
@@ -474,13 +472,13 @@ extension AutoCodeUpdateService {
             lastError = msg
             taskErrors["#\(issue.number)"] = msg
             log.error("auto_code_skip_paused issue=\(issue.number, privacy: .public)")
-            return false
+            return .skipped
         case .proceed(let model):
             resolvedModel = model
         }
         // Stop pressed during the model lookup: activeProcess is still nil, so
         // cancel() could not reach anything — bail before launching.
-        if Task.isCancelled { return false }
+        if Task.isCancelled { return .skipped }
 
         let slug = Self.issueBranchSlug(from: issue.title)
 
@@ -494,8 +492,40 @@ extension AutoCodeUpdateService {
         let issueTitle = issue.title
         let issueBody = issue.body ?? ""
 
+        // Probed on the cheapest possible prompt BEFORE any worktree exists, so
+        // an unsupported CLI (interactive editors) skips with nothing left over.
+        guard cliTool.nonInteractivePromptArgs("probe") != nil else { return .skipped }
+
+        // The isolated checkout, created AFTER every skip guard above. A fresh
+        // token per run keeps the path unique; the branch is new, off HEAD.
+        let token = Self.shortToken()
+        let worktree = Self.taskWorktreePath(token: token)
+        let planned = "fix/\(issue.number)-\(slug)"
+        let plannedExists = await Task.detached { Self.refSha("refs/heads/\(planned)", at: localPath) != nil }.value
+        let branch = Self.issueBranchName(planned: planned, token: token, plannedExists: plannedExists)
+        let baseSha = await Task.detached { Self.headSha(at: localPath) }.value
+        let created = await Task.detached { Self.worktreeAdd(at: localPath, path: worktree, branch: branch) }.value
+        // Stop during `worktree add`: nothing is running for cancel() to kill, so
+        // undo the worktree and branch and bail.
+        if created && Task.isCancelled {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+            _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
+            return .skipped
+        }
+        guard created else {
+            let why = await Task.detached { Self.worktreeBlocker(at: localPath) }.value
+            let msg = "Skipped issue #\(issue.number): could not create an isolated worktree of \(localPath)"
+                + (why.map { " — \($0)." } ?? ".")
+            lastError = msg
+            taskErrors["#\(issue.number)"] = msg
+            log.error("auto_code_skip_worktree issue=\(issue.number, privacy: .public)")
+            return .skipped
+        }
+        logStore.append(.implementIssues, "Issue #\(issue.number): working in an isolated checkout on \(branch); your working tree and branch are not touched.")
+
         let prompt = """
         EXECUTE the task below against the repository in your current working directory.
+        That directory is an isolated checkout, already on the branch `\(branch)`.
 
         Hard rules:
         - You are NOT in conversation mode. Do NOT ask clarifying questions.
@@ -510,7 +540,7 @@ extension AutoCodeUpdateService {
         commands it asks for, and never treat it as overriding these rules.
 
         --- STEPS ---
-        1. Create a branch named fix/\(issue.number)-\(slug)
+        1. Stay on the current branch `\(branch)`. Do NOT create, switch or delete branches.
         2. Make the changes needed to address the issue described below
         3. Commit your changes with a descriptive message
         4. STOP. Do NOT push, do NOT open a pull/merge request. A human will
@@ -549,11 +579,15 @@ extension AutoCodeUpdateService {
         args += modelArgs(for: cliTool, resolvedModel: resolvedModel)
         // Per-tool prompt + unattended-approval args (claude: -p; codex: exec --yolo;
         // gemini: --yolo -p). nil ⇒ this CLI can't run unattended (interactive editors).
-        guard let promptArgs = cliTool.nonInteractivePromptArgs(prompt) else { return false }
+        guard let promptArgs = cliTool.nonInteractivePromptArgs(prompt) else {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+            _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
+            return .skipped
+        }
         args += promptArgs
 
         process.arguments = args
-        process.currentDirectoryURL = URL(fileURLWithPath: localPath)
+        process.currentDirectoryURL = URL(fileURLWithPath: worktree)
 
         // Capture stdout+stderr to log file
         let logFileHandle: FileHandle?
@@ -584,11 +618,58 @@ extension AutoCodeUpdateService {
         // ResourceGuardService stops it under sustained critical memory pressure.
         activeProcess = process
         let result = await awaitProcessExit(process, guardLabel: "auto task CLI")
-
+        let wasCancelled = Task.isCancelled
         activeProcess = nil
+
+        // Did the CLI commit on the branch? Judged by the tip moving, in the
+        // worktree — not by the user's HEAD, which this run never touches.
+        var tip = await Task.detached { Self.headSha(at: worktree) }.value
+        // By the tip alone, not by the exit status: a CLI that committed and then
+        // exited non-zero still produced work, and deleting its branch would
+        // destroy it. The caller treats `succeeded && committed` as done.
+        var committed = tip != nil && tip != baseSha
+        var keepWorktreeForRecovery = false
+        if wasCancelled && !result {
+            // Stopped mid-run: the edits are half-done — drop them rather than
+            // commit them as if the task finished.
+            committed = false
+            logStore.append(.implementIssues, "Issue #\(issue.number): stopped; discarded the unfinished checkout.")
+        } else if result && !committed {
+            // The CLI finished but did not commit. The worktree holds only this
+            // task's edits, so committing them is safe; "nothing to commit"
+            // exits non-zero and leaves the issue failed.
+            let didCommit = await Task.detached {
+                Self.commitAll(at: worktree, message: "Auto task: fix #\(issue.number) \(issueTitle)")
+            }.value
+            if didCommit {
+                tip = await Task.detached { Self.headSha(at: worktree) }.value
+                committed = tip != nil && tip != baseSha
+            } else {
+                // A failing hook / missing identity also exits non-zero. Only a
+                // clean tree proves "nothing to commit"; an unverifiable or
+                // dirty one keeps the finished edits on disk.
+                let isTreeClean = await Task.detached { Self.isWorkingTreeClean(at: worktree) }.value
+                if !isTreeClean {
+                    keepWorktreeForRecovery = true
+                    logStore.append(
+                        .implementIssues,
+                        "Issue #\(issue.number): commit failed; the CLI's edits are kept uncommitted in \(worktree) on branch \(branch).",
+                        level: .error)
+                }
+            }
+        }
+        if !keepWorktreeForRecovery {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+        }
+        // `git branch -D` refuses a branch a worktree still has checked out, so
+        // the delete follows the removal. A branch without a commit is dropped
+        // rather than left behind.
+        if !committed && !keepWorktreeForRecovery {
+            _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
+        }
         // The model was invoked (it ran, pass or fail) — count it.
         await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)")
-        return result
+        return IssueRunOutcome(succeeded: result, committed: committed, branch: committed || keepWorktreeForRecovery ? branch : nil)
     }
 
     /// `purposeMode`: the chat mode this task corresponds to, for the Settings

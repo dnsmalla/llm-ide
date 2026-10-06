@@ -422,7 +422,6 @@ extension AutoCodeUpdateService {
             return
         }
 
-        let baseBranch = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
         let failedBefore = failedCount   // per-run delta (failedCount is cumulative, reset only by a full run())
         for entry in pending {
             if Task.isCancelled { break }
@@ -446,24 +445,9 @@ extension AutoCodeUpdateService {
             registry.markImplementing(id: entry.actionId, repoKey: entry.repoKey)
             logStore.append(.implementIssues, "Implementing issue #\(number)…")
 
-            if let base = baseBranch {
-                let switched = await Task.detached { Self.checkout(base, at: capturedGitRoot) }.value
-                if !switched {
-                    let msg = "Issue #\(number): couldn't switch to base branch \(base)."
-                    taskErrors["#\(number)"] = msg
-                    logStore.append(.implementIssues, msg, level: .error)
-                    registry.markFailed(id: entry.actionId, repoKey: entry.repoKey)
-                    failedCount += 1
-                    continue
-                }
-            }
-
-            // Branch `runCLI(issue:)` is about to instruct the CLI to create
-            // (see its prompt's STEPS). Announced now — AFTER the base-branch
-            // checkout above succeeded, so a failed checkout never leaves a
-            // "starting work" comment with no follow-up — so a human sees
-            // intent + a short plan before any commit lands. Posted only on
-            // the FIRST attempt (`entry.retryCount == 0`): `pendingEntries()`
+            // Branch `runCLI(issue:)` is about to create in its isolated
+            // worktree. Announced now so a human sees intent + a short plan
+            // before any commit lands. Posted only on the FIRST attempt (`entry.retryCount == 0`): `pendingEntries()`
             // retries a `.failed` entry up to 3 times, and re-announcing the
             // same plan on every retry (with no "it failed" comment in
             // between) reads as the task being stuck in a loop.
@@ -485,57 +469,27 @@ extension AutoCodeUpdateService {
                     log.error("Failed to add start-of-work note to issue \(number): \(error)")
                 }
             }
-            let baseSha = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
-
-            let succeeded = await runCLI(issue: issue, localPath: capturedGitRoot, logDir: logDir)
+            // Runs in an isolated worktree on its own branch: the user's
+            // checkout, HEAD and uncommitted work are never touched.
+            let outcome = await runCLI(issue: issue, localPath: capturedGitRoot, logDir: logDir)
             // Stop is not a failure: markFailed would bump retryCount, and
             // three Stops would exclude the entry for good. Leave it pending.
-            if !succeeded && Task.isCancelled {
+            if !outcome.succeeded && Task.isCancelled {
                 registry.markPending(id: entry.actionId, repoKey: entry.repoKey)
                 logStore.append(.implementIssues, "Issue #\(number): stopped; left pending.")
                 break
             }
-            let headAfter = await Task.detached { Self.headSha(at: capturedGitRoot) }.value
-            let committed = succeeded && headAfter != nil && headAfter != baseSha
+            let succeeded = outcome.succeeded
+            let committed = succeeded && outcome.committed
 
             if committed {
-                var branchAfter = await Task.detached { Self.currentBranch(at: capturedGitRoot) }.value
-                if let base = baseBranch, let baseSha, branchAfter == base {
-                    let rescue = "fix/\(number)-auto"
-                    _ = await Task.detached {
-                        Self.rescueCommitToBranch(rescue, base: base, baseSha: baseSha, at: capturedGitRoot)
-                    }.value
-                    // `rescueCommitToBranch` can fail on its LAST step (the
-                    // checkout) after already succeeding at `git branch` +
-                    // `git reset --hard` — the commit is safely captured on
-                    // `rescue` in that case too, just not the checked-out
-                    // branch. Check the ref directly rather than trusting the
-                    // combined Bool, so a failed final checkout doesn't make
-                    // this report "committed on \(base)" — a shared branch —
-                    // when the commit actually landed on `rescue`. (Written
-                    // as an explicit `if`, not `rescued || await …` — `||`'s
-                    // autoclosure doesn't support `await`.)
-                    // Verified by SHA, not by name or by the Bool: a stale
-                    // `rescue` branch from an earlier run exists but does not
-                    // hold this commit (the rescue refused to touch it), and a
-                    // failed last step leaves the commit on `rescue` while
-                    // `base` still carries it.
-                    let rescueSha = await Task.detached { Self.refSha("refs/heads/\(rescue)", at: capturedGitRoot) }.value
-                    if let rescueSha, rescueSha == headAfter {
-                        branchAfter = rescue
-                        let baseNow = await Task.detached { Self.refSha("refs/heads/\(base)", at: capturedGitRoot) }.value
-                        if baseNow != baseSha {
-                            logStore.append(.implementIssues, "Issue #\(number): commit is on \(rescue), but \(base) could not be moved back — check \(base) manually.", level: .error)
-                        }
-                    }
-                }
+                let branchAfter = outcome.branch
                 registry.markDone(id: entry.actionId, repoKey: entry.repoKey)
                 implementedCount += 1
-                // `branchAfter` is nil only when `git rev-parse` itself failed
-                // (detached HEAD, git error) — genuinely unknown, so the
-                // human-facing comment hedges rather than naming the
-                // uncommitted-to `plannedBranch` as if it were fact. The log
-                // line is internal and can still take the best-effort guess.
+                // `branchAfter` is the branch the commit is on (it can carry a
+                // run token when `plannedBranch` already existed); nil only if
+                // the outcome lost it, in which case the human-facing comment
+                // hedges and the log line takes the planned name as a guess.
                 logStore.append(.implementIssues, "Issue #\(number): fix committed locally on \(branchAfter ?? plannedBranch).")
                 if config.isAllowed(.commentIssue, provider: client.kind) {
                     do {
