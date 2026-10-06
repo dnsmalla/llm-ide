@@ -529,6 +529,15 @@ final class RepoManager {
             pairs.append(authConfigPair(token: token, backend: backend, scope: scope))
         }
         var env = ProcessInfo.processInfo.environment
+        // Repo-selecting variables inherited from a hook, a terminal started
+        // inside a repo or a rebuild script would aim EVERY git call (status,
+        // add -A, commit, push, `clean -fd`, `checkout -- .`) at another
+        // repository regardless of the `-C` directory. `mergedEnvironment`
+        // already strips them when a caller supplies its own; do it for all.
+        for key in ["GIT_INDEX_FILE", "GIT_DIR", "GIT_WORK_TREE", "GIT_COMMON_DIR", "GIT_OBJECT_DIRECTORY",
+                    "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_NAMESPACE", "GIT_PREFIX"] {
+            env[key] = nil
+        }
         // Never let git launch an interactive credential prompt; fail fast. Set
         // unconditionally — it used to arrive only with a token, so an
         // unauthenticated op against a private remote could sit waiting forever.
