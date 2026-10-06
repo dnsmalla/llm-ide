@@ -411,6 +411,10 @@ struct AppShell: View {
             // first project open. Retire it: a stale event was re-applied on
             // every AppShell re-mount (sign-out/sign-in) and made every later
             // project open skip the Home seed.
+            // Apply it HERE before retiring it: this block and the outer
+            // `.onAppear` have no guaranteed order, and if this one ran first
+            // the outer would find nothing to apply.
+            applyDeepLink(deepLink.pendingEvent)
             deepLink.pendingEvent = nil
         }
         .onChange(of: config.localCodeFolders)        { _, _ in seedLocalCodeFolders() }
