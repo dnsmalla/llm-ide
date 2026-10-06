@@ -48,7 +48,13 @@ function registryUrl(runner, name) {
     : `https://pypi.org/pypi/${name}/json`;
 }
 
-export async function latestVersion({ runner, name } = {}, { fetchFn = fetch, now = Date.now, force = false } = {}) {
+let testFetch = null;
+/** Tests inject a fake fetch here so nothing reaches the network. Pass null to restore. */
+export function _setRegistryFetchForTests(fn) {
+  testFetch = typeof fn === 'function' ? fn : null;
+}
+
+export async function latestVersion({ runner, name } = {}, { fetchFn = testFetch ?? fetch, now = Date.now, force = false } = {}) {
   if ((runner !== 'npx' && runner !== 'uvx') || !isValidName(runner, name)) {
     return { error: 'invalid package name' };
   }

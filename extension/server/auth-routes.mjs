@@ -1623,10 +1623,19 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // POST   /auth/me/mcp-plugins/add              → { command,args,env,name,source } | { claudeName } | { codexName }
   // POST   /auth/me/mcp-plugins/consent          → { id, consented }
   // POST   /auth/me/mcp-plugins/toggle           → { id, enabled }
+  // GET    /auth/me/mcp-plugins/updates[?force=1] → registry version check
+  // POST   /auth/me/mcp-plugins/<id>/update      → { to?, expectArgs? } re-pin
+  // GET|POST /auth/me/mcp-plugins/<id>/resync    → drift / apply from Claude Code or Codex
   // DELETE /auth/me/mcp-plugins/<id>
   if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins') {
-    const { listMcpPluginsWithState } = await import('../mcp/state.mjs');
+    const { listMcpPluginsWithState, managedPackageOf } = await import('../mcp/state.mjs');
     const { plugins } = listMcpPluginsWithState(req.user.id);
+    const packageInfoOf = (p) => {
+      const parsed = managedPackageOf(p);
+      if (!parsed) return null;
+      const { argIndex: _argIndex, ...info } = parsed;
+      return info;
+    };
     // Redact env VALUES before this reaches a non-admin caller — every
     // plugin's env is userId-independent (stored once on the shared
     // registry record, not per-user), so an unredacted spread here would
@@ -1660,6 +1669,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     send(res, 200, {
       plugins: plugins.map((p) => ({
         ...p,
+        package: packageInfoOf(p),
         env: redactEnvValues(p.env),
         headers: redactHeaderValues(p.headers),
         ...(p.url ? { url: redactUrlSecrets(p.url) } : {}),
@@ -1710,7 +1720,15 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     // never restates a command or URL (and cannot drift from the catalog).
     if (body?.catalogId) {
       const { addMcpPluginFromCatalog } = await import('../mcp/state.mjs');
-      const result = addMcpPluginFromCatalog(body.catalogId, { arg: body.arg, name: body.name });
+      // Resolve the latest version BEFORE the (sync) state call; a registry
+      // outage must never block the add — it just lands unpinned.
+      const { catalogEntry } = await import('../mcp/catalog.mjs');
+      const { parseRunnerSpec } = await import('../mcp/package-spec.mjs');
+      const { latestVersion } = await import('../mcp/registry-versions.mjs');
+      const catalogParsed = parseRunnerSpec(catalogEntry(body.catalogId) || {});
+      let pin = null;
+      if (catalogParsed) pin = await latestVersion(catalogParsed);
+      const result = addMcpPluginFromCatalog(body.catalogId, { arg: body.arg, name: body.name, version: pin?.version });
       if (result.error) {
         safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
           action: 'mcp-plugin.add', outcome: 'failure', detail: { error: String(result.error).slice(0, 200) } });
@@ -1718,7 +1736,11 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         return;
       }
       safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua, action: 'mcp-plugin.add', resource: result.plugin.id, outcome: 'success' });
-      send(res, 200, { ...result, plugin: redactServerSecrets(result.plugin) });
+      send(res, 200, {
+        ...result,
+        plugin: redactServerSecrets(result.plugin),
+        ...(catalogParsed ? (pin?.version ? { pinned: true } : { pinned: false, reason: pin?.error || 'unknown' }) : {}),
+      });
       return;
     }
     // Imports forward the scanned shape verbatim — including the hosted
@@ -1728,12 +1750,12 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       const { scanClaudeMcpServers } = await import('../mcp/claude-source.mjs');
       const found = scanClaudeMcpServers().find((s) => s.name === body.claudeName);
       if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Claude MCP server named '${body.claudeName}'` } }); return; }
-      body = { ...found, name: body.name || found.name, source: 'claude' };
+      body = { ...found, name: body.name || found.name, source: 'claude', sourceName: found.name };
     } else if (body?.codexName) {
       const { scanCodexMcpServers } = await import('../mcp/codex-source.mjs');
       const found = scanCodexMcpServers().find((s) => s.name === body.codexName);
       if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Codex MCP server named '${body.codexName}'` } }); return; }
-      body = { ...found, name: body.name || found.name, source: 'codex' };
+      body = { ...found, name: body.name || found.name, source: 'codex', sourceName: found.name };
     }
     const { addMcpPlugin } = await import('../mcp/state.mjs');
     const result = addMcpPlugin(body || {});
@@ -1786,6 +1808,92 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
       action: toggled.enabled ? 'mcp-plugin.enable' : 'mcp-plugin.disable', resource: body.id, outcome: 'success' });
     send(res, 200, { ok: true, enabled: toggled.enabled });
+    return;
+  }
+
+  // Version routes. Matched BEFORE the DELETE `<id>` prefix handler below so
+  // `/updates` is never read as an id; every static path above is exact-match.
+  if (method === 'GET' && url.split('?')[0] === '/auth/me/mcp-plugins/updates') {
+    let force = new URL(url, 'http://x').searchParams.get('force') === '1';
+    // Forced checks are admin-only; for anyone else it quietly degrades to the cached check.
+    if (force) { try { requireAdmin(req); } catch { force = false; } }
+    const { readMcpRegistry, managedPackageOf } = await import('../mcp/state.mjs');
+    const { latestVersion } = await import('../mcp/registry-versions.mjs');
+    const servers = await Promise.all(readMcpRegistry().map(async (p) => {
+      const parsed = managedPackageOf(p);
+      if (!parsed) return null;
+      const current = parsed.version ?? parsed.tag ?? null;
+      const row = { id: p.id, runner: parsed.runner, name: parsed.name, current, latest: null };
+      const found = await latestVersion(parsed, { force });
+      if (found.error) return { ...row, status: 'unknown', reason: found.error };
+      row.latest = found.version;
+      if (!parsed.version) return { ...row, status: 'unpinned' };
+      return { ...row, status: parsed.version === found.version ? 'up-to-date' : 'update-available' };
+    }));
+    send(res, 200, { checkedAt: new Date().toISOString(), servers: servers.filter(Boolean) });
+    return;
+  }
+
+  const mcpVersionMatch = /^\/auth\/me\/mcp-plugins\/([a-z][a-z0-9-]{1,40})\/(update|resync)$/.exec(url.split('?')[0]);
+  if (mcpVersionMatch && ((mcpVersionMatch[2] === 'update' && method === 'POST')
+      || (mcpVersionMatch[2] === 'resync' && (method === 'GET' || method === 'POST')))) {
+    try { requireAdmin(req); } catch (err) { send(res, err.status || 403, { error: { code: err.code || 'FORBIDDEN', message: err.message } }); return; }
+    const [, id, action] = mcpVersionMatch;
+    const fail = (status, code, message) => send(res, status, { error: { code, message } });
+    const state = await import('../mcp/state.mjs');
+    const plugin = state.getMcpPlugin(id);
+    if (!plugin) { fail(404, 'NOT_FOUND', 'not found'); return; }
+
+    if (action === 'update') {
+      let body;
+      try { body = await readJson(req, bodyLimit); }
+      catch { fail(400, 'VALIDATION_FAILED', 'Invalid JSON body'); return; }
+      const parsed = state.managedPackageOf(plugin);
+      if (!parsed) { fail(400, 'NOT_MANAGED', 'this server is not version-managed'); return; }
+      const { isValidVersion } = await import('../mcp/package-spec.mjs');
+      if (body?.expectArgs !== undefined && !(Array.isArray(body.expectArgs) && body.expectArgs.every((a) => typeof a === 'string'))) {
+        fail(400, 'VALIDATION_FAILED', 'expectArgs must be an array of strings'); return;
+      }
+      let version = body?.to;
+      if (version === undefined || version === null) {
+        const { latestVersion } = await import('../mcp/registry-versions.mjs');
+        const found = await latestVersion(parsed, { force: true });
+        if (found.error) { fail(502, 'REGISTRY_UNAVAILABLE', found.error); return; }
+        version = found.version;
+      } else if (!isValidVersion(parsed.runner, version)) {
+        fail(400, 'VALIDATION_FAILED', 'invalid version'); return;
+      }
+      const result = state.setMcpPackageVersion(id, { expectArgs: body?.expectArgs, version });
+      if (result.error) {
+        safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+          action: 'mcp-plugin.update', resource: id, outcome: 'failure', detail: { error: String(result.error).slice(0, 200) } });
+        fail(result.status || 400, result.code || 'UPDATE_FAILED', result.error); return;
+      }
+      safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+        action: 'mcp-plugin.update', resource: id, outcome: 'success', detail: { from: result.from, to: result.to } });
+      send(res, 200, { ok: true, from: result.from, to: result.to });
+      return;
+    }
+
+    // resync
+    if (!(plugin.source === 'claude' || plugin.source === 'codex') || !plugin.sourceName) {
+      fail(400, 'NOT_MANAGED', 'this server has no Claude Code / Codex source to re-sync from'); return;
+    }
+    const scanned = plugin.source === 'claude'
+      ? (await import('../mcp/claude-source.mjs')).scanClaudeMcpServers()
+      : (await import('../mcp/codex-source.mjs')).scanCodexMcpServers();
+    const sourceDef = scanned.find((s) => s.name === plugin.sourceName);
+    if (!sourceDef) { fail(404, 'SOURCE_NOT_FOUND', `'${plugin.sourceName}' is no longer in the ${plugin.source} config`); return; }
+    if (method === 'GET') {
+      const changes = state.diffMcpSource(plugin, sourceDef);
+      send(res, 200, { drift: changes.length > 0, changes });
+      return;
+    }
+    const result = state.applyMcpResync(id, sourceDef);
+    if (result.error) { fail(result.status || 400, result.code || 'RESYNC_FAILED', result.error); return; }
+    safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
+      action: 'mcp-plugin.resync', resource: id, outcome: 'success', detail: { changes: result.changes } });
+    send(res, 200, { ok: true, changes: result.changes });
     return;
   }
 

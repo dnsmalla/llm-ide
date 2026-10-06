@@ -258,3 +258,95 @@ test('a catalog server still gets its curated credential', async () => {
   assert.ok(!r.error, r.error);
   assert.equal(r.plugin.credential.vaultKey, 'mcp.github.token');
 });
+
+// ---- version pinning, revoke-for-all, resync (task 2) ----
+const {
+  setMcpPackageVersion, revokeConsentForAll, applyMcpResync, diffMcpSource, addMcpPluginFromCatalog,
+} = await import('../mcp/state.mjs');
+
+function consentTwoUsers(id) {
+  for (const user of ['u1', 'u2']) { setConsented(user, id, true); setEnabledMcp(user, id, true); }
+}
+const flags = (user, id) => {
+  const row = listMcpPluginsWithState(user).plugins.find((p) => p.id === id);
+  return [row.consented, row.enabled];
+};
+
+test('setMcpPackageVersion rewrites only the spec arg and revokes EVERY user', () => {
+  writeMcpRegistry([]);
+  const { plugin } = addMcpPlugin({ name: 'pin-me', command: 'npx', args: ['-y', '@x/pkg@1.0.0', '--flag', 'v'], env: { K: 'v' } });
+  consentTwoUsers(plugin.id);
+  const res = setMcpPackageVersion(plugin.id, { expectArgs: plugin.args, version: '1.2.0' });
+  assert.deepEqual([res.from, res.to], ['1.0.0', '1.2.0']);
+  assert.deepEqual(getMcpPlugin(plugin.id).args, ['-y', '@x/pkg@1.2.0', '--flag', 'v']);
+  assert.deepEqual(getMcpPlugin(plugin.id).env, { K: 'v' });
+  assert.deepEqual(flags('u1', plugin.id), [false, false]);
+  assert.deepEqual(flags('u2', plugin.id), [false, false]);
+});
+
+test('setMcpPackageVersion: 404, NOT_MANAGED, STALE, invalid version', () => {
+  writeMcpRegistry([]);
+  assert.equal(setMcpPackageVersion('nope-x', { version: '1.0.0' }).status, 404);
+  const node = addMcpPlugin({ name: 'node-srv', command: '/usr/bin/node', args: ['s.js'] }).plugin;
+  assert.equal(setMcpPackageVersion(node.id, { version: '1.0.0' }).code, 'NOT_MANAGED');
+  const hosted = addMcpPlugin({ name: 'hosted-srv', url: 'https://e.example/mcp' }).plugin;
+  assert.equal(setMcpPackageVersion(hosted.id, { version: '1.0.0' }).code, 'NOT_MANAGED');
+  const list = readMcpRegistry();
+  list.push({ id: 'plug-srv', name: 'p', source: 'plugin', transport: 'stdio', command: 'npx', args: ['-y', 'pkg@1.0.0'] });
+  writeMcpRegistry(list);
+  assert.equal(setMcpPackageVersion('plug-srv', { version: '1.1.0' }).code, 'NOT_MANAGED');
+  const ok = addMcpPlugin({ name: 'ok-srv', command: 'npx', args: ['-y', 'pkg@1.0.0'] }).plugin;
+  assert.equal(setMcpPackageVersion(ok.id, { expectArgs: ['-y', 'pkg@0.9.0'], version: '1.1.0' }).status, 409);
+  assert.equal(setMcpPackageVersion(ok.id, { version: 'latest; rm' }).status, 400);
+  assert.deepEqual(getMcpPlugin(ok.id).args, ['-y', 'pkg@1.0.0']);
+});
+
+test('catalog add stores catalogId and pins (replacing @latest); failure leaves it unpinned', () => {
+  writeMcpRegistry([]);
+  const pinned = addMcpPluginFromCatalog('playwright', { version: '0.0.9' }).plugin;
+  assert.equal(pinned.catalogId, 'playwright');
+  assert.deepEqual(pinned.args, ['-y', '@playwright/mcp@0.0.9']);
+  const unpinned = addMcpPluginFromCatalog('playwright', { name: 'pw2' }).plugin;
+  assert.deepEqual(unpinned.args, ['-y', '@playwright/mcp@latest']);
+  // catalogId cannot be forged through a plain add
+  const forged = addMcpPlugin({ name: 'forge', command: 'npx', args: ['x'], catalogId: 'github' }).plugin;
+  assert.equal(forged.catalogId, undefined);
+});
+
+test('sourceName is stored only for claude/codex sources', () => {
+  writeMcpRegistry([]);
+  assert.equal(addMcpPlugin({ name: 'a-srv', command: 'x', source: 'claude', sourceName: 'orig' }).plugin.sourceName, 'orig');
+  assert.equal(addMcpPlugin({ name: 'b-srv', command: 'x', source: 'manual', sourceName: 'orig' }).plugin.sourceName, undefined);
+});
+
+test('revokeConsentForAll leaves other ids alone', () => {
+  writeMcpRegistry([]);
+  const a = addMcpPlugin({ name: 'rev-a', command: 'x' }).plugin;
+  const b = addMcpPlugin({ name: 'rev-b', command: 'x' }).plugin;
+  consentTwoUsers(a.id); consentTwoUsers(b.id);
+  revokeConsentForAll(a.id);
+  assert.deepEqual(flags('u1', a.id), [false, false]);
+  assert.deepEqual(flags('u2', b.id), [true, true]);
+});
+
+test('diffMcpSource / applyMcpResync: replace definition, keep credential, revoke all', () => {
+  writeMcpRegistry([]);
+  const entry = addMcpPlugin({ name: 'sync-me', command: 'npx', args: ['-y', 'a@1.0.0'], env: { A: '1', OLD: 'x' }, source: 'codex', sourceName: 'sync-me' }).plugin;
+  const list = readMcpRegistry();
+  list[0].credential = { vaultKey: 'mcp.sync-me.token' };
+  writeMcpRegistry(list);
+  consentTwoUsers(entry.id);
+  const same = { name: 'sync-me', transport: 'stdio', command: 'npx', args: ['-y', 'a@1.0.0'], env: { A: '1', OLD: 'x' } };
+  assert.deepEqual(diffMcpSource(entry, same), []);
+  assert.deepEqual(applyMcpResync(entry.id, same).changes, []);
+  assert.deepEqual(flags('u1', entry.id), [true, true], 'no drift must not revoke');
+  const moved = { ...same, args: ['-y', 'a@2.0.0'], env: { A: '2' } };
+  assert.deepEqual(diffMcpSource(entry, moved), ['args', 'env']);
+  const res = applyMcpResync(entry.id, moved);
+  assert.deepEqual(res.changes, ['args', 'env']);
+  const now = getMcpPlugin(entry.id);
+  assert.deepEqual(now.args, ['-y', 'a@2.0.0']);
+  assert.deepEqual(now.env, { A: '2' });
+  assert.deepEqual(now.credential, { vaultKey: 'mcp.sync-me.token' });
+  assert.deepEqual(flags('u2', entry.id), [false, false]);
+});

@@ -69,6 +69,14 @@ fs.writeFileSync(path.join(skillsRepoFixture, 'registry.yaml'), 'registryVersion
 fs.writeFileSync(path.join(codexHomeFixture, 'config.toml'), '', 'utf8');
 process.env.CODEX_CONFIG_PATH = path.join(codexHomeFixture, 'config.toml');
 
+// Catalog adds look up the latest package version; never let a test reach the network.
+const { _setRegistryFetchForTests, _resetRegistryCacheForTests } = await import('../mcp/registry-versions.mjs');
+let registryLatest = { '@playwright/mcp': '1.2.3', 'pkg-one': '2.0.0' };
+_setRegistryFetchForTests(async (url) => {
+  const name = decodeURIComponent(String(url).split('/-/package/')[1]?.split('/dist-tags')[0] ?? '');
+  if (registryLatest === null || !registryLatest[name]) return { ok: false, status: 503, json: async () => ({}) };
+  return { ok: true, status: 200, json: async () => ({ latest: registryLatest[name] }) };
+});
 const kb = await import('../kb/db.mjs');
 const { handleAuth, isAuthRoute } = await import('../server/auth-routes.mjs');
 const { authenticate, isPublicPath } = await import('../server/auth.mjs');
@@ -1433,4 +1441,139 @@ test('plugin install: invalid expect is a 400 only after the body is read', asyn
   const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?expect=BAD%20NAME', user: { id: user.id, role: 'admin' }, rawBody: Buffer.from('x') });
   assert.equal(res.statusCode, 400);
   assert.equal(res.json().error.code, 'VALIDATION_FAILED');
+});
+
+
+// ---- MCP server versions (API v62) --------------------------------------
+
+async function mcpAdmin() {
+  const { user } = await registerAndLogin();
+  return { id: user.id, role: 'admin' };
+}
+async function addNpx(admin, name, spec) {
+  const r = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: ['-y', spec], name } });
+  assert.equal(r.statusCode, 200, r._body);
+  return r.json().plugin.id;
+}
+
+test('mcp versions: GET list gains package; /updates is not read as an id; DELETE still works', async () => {
+  _resetRegistryCacheForTests();
+  const admin = await mcpAdmin();
+  const id = await addNpx(admin, 'ver-list', 'pkg-one@1.0.0');
+  const list = (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin })).json().plugins;
+  assert.deepEqual(list.find((p) => p.id === id).package,
+    { runner: 'npx', name: 'pkg-one', version: '1.0.0', tag: null });
+  const upd = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/updates', user: admin });
+  assert.equal(upd.statusCode, 200, upd._body);
+  const row = upd.json().servers.find((s) => s.id === id);
+  assert.deepEqual([row.current, row.latest, row.status], ['1.0.0', '2.0.0', 'update-available']);
+  assert.ok(upd.json().checkedAt);
+  // static routes are not shadowed
+  assert.equal((await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/catalog', user: admin })).statusCode, 200);
+  assert.equal((await callAuth({ method: 'DELETE', url: `/auth/me/mcp-plugins/${id}`, user: admin })).statusCode, 200);
+});
+
+test('mcp versions: unknown when the registry is down; unpinned; up-to-date; non-admin force is not an error', async () => {
+  _resetRegistryCacheForTests();
+  const admin = await mcpAdmin();
+  const a = await addNpx(admin, 'ver-down', 'pkg-one');
+  const b = await addNpx(admin, 'ver-same', 'pkg-one@2.0.0');
+  const status = async (url, user = admin) => Object.fromEntries(
+    (await callAuth({ method: 'GET', url, user })).json().servers.map((s) => [s.id, s]));
+  let rows = await status('/auth/me/mcp-plugins/updates');
+  assert.equal(rows[a].status, 'unpinned');
+  assert.equal(rows[b].status, 'up-to-date');
+  const saved = registryLatest; registryLatest = null; _resetRegistryCacheForTests();
+  try {
+    rows = await status('/auth/me/mcp-plugins/updates?force=1');
+    assert.equal(rows[a].status, 'unknown');
+    assert.ok(rows[a].reason);
+    const plain = await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins/updates?force=1', user: { id: admin.id } });
+    assert.equal(plain.statusCode, 200);
+  } finally { registryLatest = saved; _resetRegistryCacheForTests(); }
+});
+
+test('mcp versions: update to latest / explicit, revokes consent, STALE, NOT_MANAGED, bad version, registry down', async () => {
+  _resetRegistryCacheForTests();
+  const admin = await mcpAdmin();
+  const id = await addNpx(admin, 'ver-update', 'pkg-one@1.0.0');
+  await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: admin, body: { id, consented: true } });
+  await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/toggle', user: admin, body: { id, enabled: true } });
+  const post = (target, body, user = admin) => callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${target}/update`, user, body });
+
+  assert.equal((await post(id, { expectArgs: ['-y', 'pkg-one@0.1.0'] })).statusCode, 409);
+  assert.equal((await post(id, { to: 'bad version' })).statusCode, 400);
+  const ok = await post(id, { expectArgs: ['-y', 'pkg-one@1.0.0'] });
+  assert.equal(ok.statusCode, 200, ok._body);
+  assert.deepEqual([ok.json().from, ok.json().to], ['1.0.0', '2.0.0']);
+  const row = (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin })).json().plugins.find((p) => p.id === id);
+  assert.deepEqual(row.args, ['-y', 'pkg-one@2.0.0']);
+  assert.equal(row.consented, false);
+  assert.equal(row.enabled, false);
+
+  const explicit = await post(id, { to: '1.5.0' });
+  assert.equal(explicit.json().to, '1.5.0');
+
+  const saved = registryLatest; registryLatest = null; _resetRegistryCacheForTests();
+  try { assert.equal((await post(id, {})).statusCode, 502); } finally { registryLatest = saved; }
+
+  const manual = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: '/bin/node', args: ['x.js'], name: 'ver-node' } });
+  const nm = await post(manual.json().plugin.id, {});
+  assert.equal(nm.statusCode, 400);
+  assert.equal(nm.json().error.code, 'NOT_MANAGED');
+  assert.equal((await post('does-not-exist', {})).statusCode, 404);
+});
+
+test('mcp versions: catalog add pins the latest; registry down adds unpinned with a reason', async () => {
+  _resetRegistryCacheForTests();
+  const admin = await mcpAdmin();
+  const pinned = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { catalogId: 'playwright', name: 'pw-pinned' } });
+  assert.equal(pinned.statusCode, 200, pinned._body);
+  assert.equal(pinned.json().pinned, true);
+  assert.deepEqual(pinned.json().plugin.args, ['-y', '@playwright/mcp@1.2.3']);
+  assert.equal(pinned.json().plugin.catalogId, 'playwright');
+
+  const saved = registryLatest; registryLatest = null; _resetRegistryCacheForTests();
+  try {
+    const down = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+      body: { catalogId: 'playwright', name: 'pw-unpinned' } });
+    assert.equal(down.statusCode, 200);
+    assert.equal(down.json().pinned, false);
+    assert.ok(down.json().reason);
+    assert.deepEqual(down.json().plugin.args, ['-y', '@playwright/mcp@latest']);
+  } finally { registryLatest = saved; }
+});
+
+test('mcp versions: resync reports drift, applies, revokes; manual entries are NOT_MANAGED', async () => {
+  const admin = await mcpAdmin();
+  appendCodexConfigToml(`
+[mcp_servers.resyncme]
+command = "npx"
+args = ["-y", "resync-pkg@1.0.0"]
+`);
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin, body: { codexName: 'resyncme' } });
+  assert.equal(added.statusCode, 200, added._body);
+  const id = added.json().plugin.id;
+  assert.equal(added.json().plugin.sourceName, 'resyncme');
+  const get = () => callAuth({ method: 'GET', url: `/auth/me/mcp-plugins/${id}/resync`, user: admin });
+  assert.deepEqual((await get()).json(), { drift: false, changes: [] });
+
+  await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: admin, body: { id, consented: true } });
+  const cfg = path.join(codexHomeFixture, 'config.toml');
+  fs.writeFileSync(cfg, fs.readFileSync(cfg, 'utf8').replace('resync-pkg@1.0.0', 'resync-pkg@3.0.0'), 'utf8');
+  assert.deepEqual((await get()).json(), { drift: true, changes: ['args'] });
+  const applied = await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${id}/resync`, user: admin });
+  assert.equal(applied.statusCode, 200, applied._body);
+  const row = (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin })).json().plugins.find((p) => p.id === id);
+  assert.deepEqual(row.args, ['-y', 'resync-pkg@3.0.0']);
+  assert.equal(row.consented, false);
+
+  const manual = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: ['-y', 'm-pkg'], name: 'resync-manual' } });
+  const nm = await callAuth({ method: 'GET', url: `/auth/me/mcp-plugins/${manual.json().plugin.id}/resync`, user: admin });
+  assert.equal(nm.statusCode, 400);
+  assert.equal(nm.json().error.code, 'NOT_MANAGED');
 });

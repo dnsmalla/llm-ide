@@ -5,6 +5,7 @@ import { existsSync, readFileSync, writeFileSync, renameSync, mkdirSync } from '
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { catalogEntry } from './catalog.mjs';
+import { parseRunnerSpec, withVersion, isValidVersion } from './package-spec.mjs';
 
 export const SLUG_RE = /^[a-z][a-z0-9-]{1,40}$/;
 
@@ -109,7 +110,7 @@ const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
  * catalog's `mcp.github.token`. Whoever consents to that server would send
  * those secrets to an arbitrary URL.
  */
-export function addMcpPlugin({ name, command, args, env, url, headers, transport, credential, source }, { allowCatalogKey = false } = {}) {
+export function addMcpPlugin({ name, command, args, env, url, headers, transport, credential, source, sourceName }, { allowCatalogKey = false, catalogId } = {}) {
   const wantsHttp = transport === 'http' || transport === 'sse' || (!command && url);
   const resolved = { source: (source === 'claude' || source === 'codex' || source === 'catalog') ? source : 'manual' };
 
@@ -142,6 +143,11 @@ export function addMcpPlugin({ name, command, args, env, url, headers, transport
     name: name || id,
     ...resolved,
     ...(credential && typeof credential === 'object' ? { credential } : {}),
+    // catalogId is trusted only from addMcpPluginFromCatalog (never a request
+    // body); sourceName is the original name in ~/.claude.json / config.toml,
+    // kept so a later Re-sync can find the entry again.
+    ...(allowCatalogKey && typeof catalogId === 'string' ? { catalogId } : {}),
+    ...((resolved.source === 'claude' || resolved.source === 'codex') && typeof sourceName === 'string' && sourceName && sourceName.length <= 200 ? { sourceName } : {}),
     builtin: false,
   };
   list.push(plugin);
@@ -156,13 +162,16 @@ export function addMcpPlugin({ name, command, args, env, url, headers, transport
  * filesystem server with no allowed root produces a server that silently
  * exposes nothing.
  */
-export function addMcpPluginFromCatalog(catalogId, { arg, name } = {}) {
+export function addMcpPluginFromCatalog(catalogId, { arg, name, version } = {}) {
   const entry = catalogEntry(catalogId);
   if (!entry) return { error: `no catalog entry '${catalogId}'`, status: 400 };
   if (entry.requiresArg && (typeof arg !== 'string' || !arg.trim())) {
     return { error: `${entry.name} needs ${entry.requiresArg.label.toLowerCase()}`, status: 400 };
   }
-  const args = entry.requiresArg ? [...(entry.args || []), arg.trim()] : entry.args;
+  let args = entry.requiresArg ? [...(entry.args || []), arg.trim()] : entry.args;
+  // A catalog `@latest` tag is replaced too: pinning is the point of this.
+  const parsed = version ? parseRunnerSpec({ command: entry.command, args }) : null;
+  if (parsed && isValidVersion(parsed.runner, version)) args = withVersion(parsed, { args }, version);
   return addMcpPlugin({
     name: name || entry.name,
     transport: entry.transport,
@@ -171,7 +180,7 @@ export function addMcpPluginFromCatalog(catalogId, { arg, name } = {}) {
     url: entry.url,
     credential: entry.credential,
     source: 'catalog',
-  }, { allowCatalogKey: true });
+  }, { allowCatalogKey: true, catalogId });
 }
 
 /**
@@ -389,6 +398,103 @@ export function clearPluginMcpConsents(pluginName) {
     }
   }
   if (touched) writeState(st);
+}
+
+/**
+ * Revoke every user's consent AND enable for one server id. A different
+ * version or a re-synced definition is different code, so approval given to
+ * the old one must not carry over.
+ */
+export function revokeConsentForAll(id) {
+  const st = readState();
+  let touched = false;
+  for (const entry of Object.values(st)) {
+    if (!entry || typeof entry !== 'object' || !entry[id]) continue;
+    entry[id] = { ...entry[id], consented: false, enabled: false };
+    touched = true;
+  }
+  if (touched) writeState(st);
+}
+
+/** The npx/uvx package spec of a version-managed entry, or null (plugin/hosted/other). */
+export function managedPackageOf(plugin) {
+  if (!plugin || plugin.source === 'plugin' || plugin.transport !== 'stdio') return null;
+  return parseRunnerSpec({ command: plugin.command, args: plugin.args });
+}
+
+const sameJson = (a, b) => JSON.stringify(a) === JSON.stringify(b);
+
+/**
+ * Re-pin a managed entry to `version`. Only `args[argIndex]` changes; consent
+ * is revoked for every user after the atomic registry write.
+ */
+export function setMcpPackageVersion(id, { expectArgs, version } = {}) {
+  const list = readMcpRegistry();
+  const index = list.findIndex((s) => s.id === id);
+  if (index < 0) return { error: 'not found', status: 404, code: 'NOT_FOUND' };
+  const plugin = list[index];
+  const parsed = managedPackageOf(plugin);
+  if (!parsed) return { error: 'this server is not version-managed', status: 400, code: 'NOT_MANAGED' };
+  if (expectArgs !== undefined && !sameJson(expectArgs, plugin.args)) {
+    return { error: 'the server changed since it was checked', status: 409, code: 'STALE' };
+  }
+  if (!isValidVersion(parsed.runner, version)) {
+    return { error: 'invalid version', status: 400, code: 'VALIDATION_FAILED' };
+  }
+  const from = parsed.version ?? parsed.tag ?? null;
+  const next = { ...plugin, args: withVersion(parsed, plugin, version) };
+  list[index] = next;
+  writeMcpRegistry(list);
+  revokeConsentForAll(id);
+  return { plugin: next, from, to: version };
+}
+
+/** Names of the fields where `sourceDef` (a scanner result) differs from the stored entry. */
+export function diffMcpSource(entry, sourceDef) {
+  const changes = [];
+  if ((entry.transport || 'stdio') !== (sourceDef.transport || 'stdio')) changes.push('transport');
+  if ((entry.command ?? null) !== (sourceDef.command ?? null)) changes.push('command');
+  if (!sameJson(entry.args ?? [], sourceDef.args ?? [])) changes.push('args');
+  if ((entry.url ?? null) !== (sourceDef.url ?? null)) changes.push('url');
+  const have = entry.env || {};
+  const want = sourceDef.env || {};
+  const wantKeys = Object.keys(want).sort();
+  if (!sameJson(Object.keys(have).sort(), wantKeys) || wantKeys.some((k) => have[k] !== want[k])) changes.push('env');
+  if (!sameJson(entry.headers ?? {}, sourceDef.headers ?? {})) changes.push('headers');
+  return changes;
+}
+
+/**
+ * Replace command/args/url/env/headers with the source's current definition.
+ * The vault `credential` mapping is kept. No drift => nothing written and
+ * nobody's consent touched.
+ */
+export function applyMcpResync(id, sourceDef) {
+  const list = readMcpRegistry();
+  const index = list.findIndex((s) => s.id === id);
+  if (index < 0) return { error: 'not found', status: 404, code: 'NOT_FOUND' };
+  const entry = list[index];
+  const changes = diffMcpSource(entry, sourceDef);
+  if (!changes.length) return { plugin: entry, changes };
+  const next = { ...entry };
+  for (const key of ['command', 'args', 'url', 'env', 'headers']) delete next[key];
+  const hosted = sourceDef.transport === 'http' || sourceDef.transport === 'sse';
+  if (hosted) {
+    const url = normalizeUrl(sourceDef.url);
+    if (!url) return { error: 'the source url is not a valid http(s) url', status: 400, code: 'VALIDATION_FAILED' };
+    next.transport = sourceDef.transport;
+    next.url = url;
+    if (sourceDef.headers) next.headers = sourceDef.headers;
+  } else {
+    next.transport = 'stdio';
+    next.command = sourceDef.command;
+    next.args = Array.isArray(sourceDef.args) ? sourceDef.args : [];
+    if (sourceDef.env) next.env = { ...sourceDef.env };
+  }
+  list[index] = next;
+  writeMcpRegistry(list);
+  revokeConsentForAll(id);
+  return { plugin: next, changes };
 }
 
 export function listMcpPluginsWithState(userId) {
