@@ -1123,6 +1123,8 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, result.status || 400, { error: { code: 'UNINSTALL_FAILED', message: result.error } });
       return;
     }
+    // Forget where it came from so a reinstall by the same name starts clean.
+    (await import('../plugins/source-store.mjs')).removeSource(pluginName);
     // Reload to drop the registry entry + prune orphan state.
     const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
     reloadPlugins();
