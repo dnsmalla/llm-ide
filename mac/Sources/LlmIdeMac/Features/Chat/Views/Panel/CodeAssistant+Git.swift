@@ -32,7 +32,7 @@ extension CodeAssistantPanel {
             // already succeeded, and reported success even if the follow-up failed.
             // Append the acknowledgement now; run the follow-up detached.
             await engine.acknowledge(payload, followUp: .none)
-            Task { await engine.sendFollowup() }
+            scheduleFollowup()
             return .success(args.branch)
         } catch {
             return .failure(error.localizedDescription)
@@ -115,6 +115,19 @@ extension CodeAssistantPanel {
                 summary: "(git \(args.op.rawValue) failed) \(SecretRedactor.redact(error.localizedDescription))",
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
             await engine.acknowledge(payload, followUp: .forceUnblock)
+        }
+    }
+
+    /// The model follow-up after a sheet confirmed an action, run AFTER the
+    /// sheet has closed. Dropped when the user moved to another chat in the
+    /// meantime: an unstructured Task does not inherit cancellation, and the
+    /// follow-up would otherwise be sent into the NEW chat's history.
+    func scheduleFollowup(refreshRecentIssues: Bool = false) {
+        let sessionID = engine.currentSessionIDString
+        Task {
+            if refreshRecentIssues { await refreshRecentIssuesOnce() }
+            guard engine.currentSessionIDString == sessionID else { return }
+            await engine.sendFollowup()
         }
     }
 }

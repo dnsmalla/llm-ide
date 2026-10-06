@@ -174,10 +174,7 @@ extension CodeAssistantPanel {
             // detached so the sheet closes as soon as the issue exists.
             // sendFollowup no-ops if an autonomous turn is still streaming,
             // same as every other sheet confirmer's .ifIdle.
-            Task {
-                await refreshRecentIssuesOnce()
-                await engine.sendFollowup()
-            }
+            scheduleFollowup(refreshRecentIssues: true)
             return .success(issue.number)
         } catch {
             return .failure(error.localizedDescription)

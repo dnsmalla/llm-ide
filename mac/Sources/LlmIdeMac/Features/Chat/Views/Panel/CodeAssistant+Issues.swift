@@ -30,7 +30,7 @@ extension CodeAssistantPanel {
             // already succeeded, and reported success even if the follow-up failed.
             // Append the acknowledgement now; run the follow-up detached.
             await engine.acknowledge(ackPayload, followUp: .none)
-            Task { await engine.sendFollowup() }
+            scheduleFollowup()
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)
@@ -68,10 +68,7 @@ extension CodeAssistantPanel {
             await engine.acknowledge(ackPayload, followUp: .none)
             // Refresh + follow-up run detached so the sheet closes now (see the
             // other confirmers): the follow-up still waits for the refresh.
-            Task {
-                await refreshRecentIssuesOnce()
-                await engine.sendFollowup()
-            }
+            scheduleFollowup(refreshRecentIssues: true)
             return .success(args.iid)
         } catch {
             return .failure(error.localizedDescription)

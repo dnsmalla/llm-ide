@@ -30,7 +30,7 @@ extension CodeAssistantPanel {
             // already succeeded, and reported success even if the follow-up failed.
             // Append the acknowledgement now; run the follow-up detached.
             await engine.acknowledge(ackPayload, followUp: .none)
-            Task { await engine.sendFollowup() }
+            scheduleFollowup()
             return .success(iid: result.number, webUrl: result.webUrl)
         } catch {
             return .failure(error.localizedDescription)
