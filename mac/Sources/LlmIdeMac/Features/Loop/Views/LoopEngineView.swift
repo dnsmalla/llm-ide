@@ -104,9 +104,26 @@ struct LoopEngineView: View {
     /// The plan awaiting the user's consent for "Set up environment…".
     /// Frozen with the repo root at tap time, like `approveAllSnapshot`.
     @State private var environmentSetupPlan: (plan: ProjectEnvironmentSetupPlan, gitRoot: URL)?
-    @State private var isSettingUpEnvironment = false
+    /// Whether an environment setup is running for the active repo. Held in
+    /// `LoopEnvironmentSetupTracker`, NOT view `@State`: AppShell destroys this
+    /// view on a section switch while the pip install keeps running, and the
+    /// rebuilt page used to show "not setting up", re-enable Run, and let a run
+    /// race the half-installed venv.
+    private var isSettingUpEnvironment: Bool {
+        guard let key = environmentSetupKey else { return false }
+        return LoopEnvironmentSetupTracker.shared.running.contains(key)
+    }
+    private var environmentSetupKey: String? {
+        activeGitRootURL?.resolvingSymlinksInPath().path
+    }
     /// The last setup run's outcome, shown under the toolbar until the next run.
-    @State private var environmentSetupMessage: String?
+    private var environmentSetupMessage: String? {
+        get { environmentSetupKey.flatMap { LoopEnvironmentSetupTracker.shared.messages[$0] } }
+        nonmutating set {
+            guard let key = environmentSetupKey else { return }
+            LoopEnvironmentSetupTracker.shared.messages[key] = newValue
+        }
+    }
     @State private var skillCatalog: [LlmIdeAPIClient.SkillLibraryEntry] = []
     @State private var skillsLoaded = false
     @State private var pastRuns: [LoopRunIndexEntry] = []
@@ -775,12 +792,16 @@ struct LoopEngineView: View {
         guard let snapshot = environmentSetupPlan else { return }
         let (plan, gitRoot) = (snapshot.plan, snapshot.gitRoot)
         environmentSetupPlan = nil
-        isSettingUpEnvironment = true
-        environmentSetupMessage = nil
-        Task { @MainActor in
+        let key = gitRoot.resolvingSymlinksInPath().path
+        let tracker = LoopEnvironmentSetupTracker.shared
+        tracker.running.insert(key)
+        tracker.messages[key] = nil
+        // Does not capture `self` for state: the view may be gone by the time
+        // this finishes, and the tracker is what a rebuilt page reads.
+        Task { @MainActor [weak tracker] in
             let result = await ProjectEnvironmentSetupService().run(plan, in: gitRoot)
-            isSettingUpEnvironment = false
-            environmentSetupMessage = result.succeeded
+            tracker?.running.remove(key)
+            tracker?.messages[key] = result.succeeded
                 ? "Environment is ready — run the loop again."
                 : "Setup failed — \(String(result.output.suffix(300)))"
             // The click on "Set up" was the approval to run the project's Python.
