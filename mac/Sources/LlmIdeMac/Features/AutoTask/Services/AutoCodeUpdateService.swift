@@ -358,6 +358,20 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
         statusMessage = "\(AutoTask.loopEngineering.label) — done"
     }
 
+    /// Re-read the templates and, when this task's selected one is not approved,
+    /// say so in the task log and on the task card. Called ONCE per run (never
+    /// from a view body). The re-read makes the run use — and the approval check
+    /// judge — what is on disk now, not what was cached when the project opened.
+    func noteUnapprovedTemplate(taskId: String) {
+        guard let templates = autoTaskTemplates else { return }
+        templates.reload()
+        guard let template = templates.template(id: taskConfigs.config(for: taskId).templateId),
+              !templates.isApproved(template) else { return }
+        let message = "Template \"\(template.name)\" changed outside the app and is not approved — using the task's own prompt. Review it under Auto Tasks → Template and choose Approve."
+        logStore.append(taskId, message, level: .error)
+        taskErrors[taskId] = message
+    }
+
     /// The prompt a task actually runs: its selected `AutoTaskTemplate` when it
     /// has one, otherwise its own prompt (the built-in `AppConfig` template, or
     /// a custom task's inline text), with the task's input/output paths and
@@ -375,20 +389,6 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// `writesFiles` must match the `persistChanges:` the caller passes to
     /// `runCLI` — it is what stops a review task being told to write files
     /// that vanish with its throwaway worktree.
-    /// Re-read the templates and, when this task's selected one is not approved,
-    /// say so in the task log and on the task card. Called ONCE per run (never
-    /// from a view body). The re-read makes the run use — and the approval check
-    /// judge — what is on disk now, not what was cached when the project opened.
-    func noteUnapprovedTemplate(taskId: String) {
-        guard let templates = autoTaskTemplates else { return }
-        templates.reload()
-        guard let template = templates.template(id: taskConfigs.config(for: taskId).templateId),
-              !templates.isApproved(template) else { return }
-        let message = "Template \"\(template.name)\" changed outside the app and is not approved — using the task's own prompt. Review it under Auto Tasks → Template and choose Approve."
-        logStore.append(taskId, message, level: .error)
-        taskErrors[taskId] = message
-    }
-
     func composedPrompt(taskId: String, ownPrompt: String, projectRoot: String?,
                         writesFiles: Bool) -> String {
         let taskConfig = taskConfigs.config(for: taskId)
@@ -589,7 +589,6 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// Resolve backend/project once, then run a single task body.
     private func runOne(_ task: AutoTask, trigger: AutoTaskRunTrigger) async {
         guard !isRunning else { return }
-        noteUnapprovedTemplate(taskId: task.rawValue)
         isRunning = true
         let startedAt = Date()
         // Resolve-time project id — see `appendRunRecord`.
@@ -642,6 +641,9 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     ///   than the one `resolved` was computed against.
     private func runTaskBody(_ task: AutoTask, resolved: ResolvedRepo?, projectId: String?, logDir: URL,
                              startedAt: Date, trigger: AutoTaskRunTrigger) async {
+        // Every built-in run goes through here — a manual/cron `runOne` and a full
+        // pipeline — so report an unapproved template once per task, in one place.
+        noteUnapprovedTemplate(taskId: task.rawValue)
         // Only the Loop sweep can report "nothing started"; every other task
         // body runs to a terminal status by construction.
         var didStart = true
