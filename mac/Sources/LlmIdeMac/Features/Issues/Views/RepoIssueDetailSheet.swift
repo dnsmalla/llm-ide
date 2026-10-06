@@ -892,6 +892,8 @@ private struct MRCreationSheet: View {
             // 3. Create the MR / PR.
             let mrPayload = RepoMergeRequestPayload(
                 title: "\(issue.title) (#\(issue.number))",
+                // Links the issue (and closes it on merge) — the PR used to have no body.
+                description: "Closes #\(issue.number)",
                 sourceBranch: branch,
                 targetBranch: targetBranch,
                 draft: draft
@@ -899,7 +901,15 @@ private struct MRCreationSheet: View {
             let mr = try await client.createMergeRequest(projectId: projectId, payload: mrPayload)
             onCreated(mr)
         } catch {
-            self.error = error.localizedDescription
+            let message = error.localizedDescription
+            // A fresh branch is identical to its target, and GitHub refuses a pull
+            // request with no commits ("No commits between …"). Say what to do
+            // instead of surfacing the raw 422.
+            if message.localizedCaseInsensitiveContains("no commits between") {
+                self.error = "The branch \(branch) was created, but GitHub needs at least one commit on it before a pull request can be opened. Push a commit to \(branch), then press Create again."
+            } else {
+                self.error = message
+            }
         }
     }
 }
