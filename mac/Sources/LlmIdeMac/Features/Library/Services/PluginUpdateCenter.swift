@@ -458,6 +458,14 @@ final class PluginUpdateCenter: SessionScoped {
                 // row must not survive until the next 30-minute source check.
                 sourceEntries.removeAll { $0.name == name }
                 sourceFailures[name] = nil
+                // The reinstall recorded a NEW commit/tree for this plugin.
+                // `afterChange` re-checks sources against `knownPlugins`, so
+                // reload it first: otherwise the check compares the remote
+                // against the PRE-update commit, finds a "newer" one, and the
+                // Update badge comes straight back for another 30 minutes.
+                if let fresh = try? await api.listPlugins().plugins, started == epoch {
+                    knownPlugins = Dictionary(fresh.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+                }
                 await afterChange(api: api, oneClick: oneClick)
             }
             guard started == epoch else { return .discarded }

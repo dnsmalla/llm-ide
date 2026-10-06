@@ -362,7 +362,13 @@ struct EmailSourceSheet: View {
         testStatus = nil
         defer { testing = false }
         do {
-            try await api.setSecret(key: "email.imapPassword", value: password)
+            // An empty value means DELETE on the secrets endpoint. Only write
+            // when something was typed: testing with an empty field (Google
+            // OAuth mode, or a password already stored) must not wipe the
+            // saved password. `save()` has the same guard.
+            if !password.isEmpty {
+                try await api.setSecret(key: "email.imapPassword", value: password)
+            }
             let r = try await api.testEmail(draft)
             testWasError = !r.ok
             testStatus = r.ok

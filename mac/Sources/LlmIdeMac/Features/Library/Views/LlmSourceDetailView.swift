@@ -425,6 +425,10 @@ struct LlmSourceDetailView: View {
         defer { busy = false }
         do {
             try await api.removeLlmSource(id: sourceId)
+            // Leave the pane: it would keep showing the removed source with
+            // live controls whose next toggle 404s. The sibling detail views
+            // (MCP, connectors) clear the selection the same way.
+            shell.librarySelection = nil
             announceChange()
         } catch {
             loadError = error.localizedDescription

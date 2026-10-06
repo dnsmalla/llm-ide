@@ -297,6 +297,10 @@ struct MeetingDetailView: View {
         let newVM = MeetingDetailViewModel(fileURL: url, api: api)
         do {
             try await newVM.load()
+            // A slower load for an EARLIER selection must not land after a
+            // newer one: it would show meeting A under B's selected row, and
+            // Re-summarize / Export would act on the wrong file.
+            guard shell.selectedMeetingId == id else { return }
             vm = newVM
             // Just-mounted case for the Library list "Re-summarize" action:
             // the view model is now loaded for this id, so honor the flag.
@@ -305,6 +309,7 @@ struct MeetingDetailView: View {
                 await newVM.resummarize()
             }
         } catch {
+            guard shell.selectedMeetingId == id else { return }
             loadError = error.localizedDescription
             vm = nil
         }
