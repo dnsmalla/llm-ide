@@ -154,7 +154,7 @@ async function hasSymlinks(dir) {
  * @param {string} [opts.pluginDir] — install root, defaults to platform standard
  * @returns {Promise<{ok: true, plugin: {...}} | {error: string, status?: number}>}
  */
-export async function installFromZip(zipBytes, { replace = false, pluginDir = defaultPluginDir(), trust } = {}) {
+export async function installFromZip(zipBytes, { replace = false, pluginDir = defaultPluginDir(), trust, removeBackup = rm } = {}) {
   if (!Buffer.isBuffer(zipBytes)) {
     return { error: 'expected Buffer bytes', status: 400 };
   }
@@ -241,6 +241,7 @@ export async function installFromZip(zipBytes, { replace = false, pluginDir = de
       }
       // Snapshot right before the swap: validation passed and the name is known.
       const token = trust ? beginTrustCheck(finalDir, { hash: trust.hash }) : null;
+      let backupToRemove = null;
       if (existed) {
         // Rename existing to a backup first so we can roll back on
         // the subsequent rename failure.
@@ -253,13 +254,18 @@ export async function installFromZip(zipBytes, { replace = false, pluginDir = de
           await rename(backup, finalDir).catch(() => {});
           return { error: `move failed: ${err.message}`, status: 500 };
         }
-        await rm(backup, { recursive: true, force: true });
+        backupToRemove = backup;
       } else {
         await rename(intoValidate, finalDir);
       }
+      // Reset trust the moment the new copy is live, BEFORE any cleanup that
+      // could throw: a failed cleanup must never leave old grants in force.
       const trustReset = token
         ? finishTrustCheck(token, { ok: true, clearTrust: trust.clearTrust, clearMcpConsents: trust.clearMcpConsents })
         : false;
+      if (backupToRemove) {
+        await removeBackup(backupToRemove, { recursive: true, force: true }).catch(() => {});
+      }
 
       // Returns the validated subset the routes layer will surface.
       return {

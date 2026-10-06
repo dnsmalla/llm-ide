@@ -1095,8 +1095,13 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, result.status || 400, { error: { code: 'INSTALL_FAILED', message: result.error } });
       return;
     }
-    if (decoded.source) setSource(result.plugin.name, decoded.source);
-    else if (!result.plugin.replaced) removeSource(result.plugin.name);
+    try {
+      if (decoded.source) setSource(result.plugin.name, decoded.source);
+      else if (!result.plugin.replaced) removeSource(result.plugin.name);
+    } catch (err) {
+      // The install already succeeded; a record write failure must not turn it into a 500.
+      logger.warn('plugin source record write failed', { plugin: result.plugin.name, error: err.message });
+    }
     // Re-scan so the runtime picks up the new plugin immediately.
     const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
     reloadPlugins();
@@ -1108,7 +1113,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         trustReset: !!result.plugin.trustReset, sourceKind: decoded.source?.kind ?? null,
       },
     });
-    send(res, 200, { ...result, installSource: getSource(result.plugin.name) ?? null });
+    let installSource = null;
+    try { installSource = getSource(result.plugin.name) ?? null; } catch { /* record unreadable */ }
+    send(res, 200, { ...result, installSource });
     return;
   }
 

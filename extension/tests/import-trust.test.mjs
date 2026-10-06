@@ -85,12 +85,23 @@ test('begin/finish match importWithTrustCheck', () => {
   assert.equal(changed.reset, true);
   assert.deepEqual(changed.calls, { trust: ['claude-demo'], mcp: ['claude-demo'] });
   assert.equal(run({ dir: pluginDir(), after: '{"hooks":{}}' }).reset, false);
-  const fresh = join(root, 'fresh', 'claude-demo');
-  mkdirSync(join(fresh, 'hooks'), { recursive: true });
   assert.equal(finishTrustCheck(beginTrustCheck(join(root, 'nope', 'claude-demo')), { ok: true, ...spies() }), true);
   const boom = () => { throw new Error('x'); };
   assert.equal(run({ dir: pluginDir(), after: '{"hooks":{}}', opts: { hash: boom } }).reset, true);
   const failed = run({ dir: pluginDir(), after: 'zzz' }, false);
   assert.equal(failed.reset, false);
   assert.deepEqual(failed.calls, { trust: [], mcp: [] });
+});
+
+test('finishTrustCheck clears both even when the first clear throws', () => {
+  const dir = pluginDir();
+  const token = beginTrustCheck(dir);
+  writeHooks(dir, '{"x":1}')();
+  const mcp = [];
+  assert.throws(() => finishTrustCheck(token, {
+    ok: true,
+    clearTrust: () => { throw new Error('boom'); },
+    clearMcpConsents: (n) => mcp.push(n),
+  }), /boom/);
+  assert.deepEqual(mcp, ['claude-demo']);
 });

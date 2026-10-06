@@ -418,3 +418,19 @@ test('trust reset on changed hooks', { skip: skipReason || false }, async () => 
     assert.deepEqual(calls, { trust: [], mcp: [] });
   } finally { rmSync(pluginDir, { recursive: true, force: true }); }
 });
+
+test('a failing backup removal still resets trust', { skip: skipReason || false }, async () => {
+  const pluginDir = newTempRoot();
+  try {
+    const calls = { trust: [], mcp: [] };
+    const trust = { clearTrust: (n) => calls.trust.push(n), clearMcpConsents: (n) => calls.mcp.push(n) };
+    await installFromZip(buildZip(META, '{}'), { replace: true, pluginDir, trust });
+    calls.trust.length = 0; calls.mcp.length = 0;
+    const res = await installFromZip(buildZip(META, '{"x":1}'), {
+      replace: true, pluginDir, trust, removeBackup: async () => { throw new Error('EACCES'); },
+    });
+    assert.equal(res.ok, true);
+    assert.equal(res.plugin.trustReset, true);
+    assert.deepEqual(calls, { trust: ['replace-demo'], mcp: ['replace-demo'] });
+  } finally { rmSync(pluginDir, { recursive: true, force: true }); }
+});

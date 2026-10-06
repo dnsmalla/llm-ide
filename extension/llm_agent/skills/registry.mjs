@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSkills } from './loader.mjs';
 import { loadPlugins } from '../../plugins/loader.mjs';
-import { getSource as getPluginSource } from '../../plugins/source-store.mjs';
+import { readSources as readPluginSources } from '../../plugins/source-store.mjs';
 import {
   listEnabled as listEnabledPlugins,
   listHooksTrusted as listHooksTrustedPlugins,
@@ -355,6 +355,7 @@ export function listInstalledPlugins(userId) {
   // "Codex layout" by `nativeDelivery` alone (false in all three), so say the two
   // facts that decide whether the agent engine can ever load a plugin.
   const nativePluginsOn = nativePluginsEnabled(userId);
+  const pluginSources = readPluginSources(pluginRegistry.pluginDir);
   const items = [];
   for (const p of pluginRegistry.plugins.values()) {
     items.push({
@@ -386,7 +387,7 @@ export function listInstalledPlugins(userId) {
       // The vendor version the import copied (the stamp), else null.
       sourceVersion: p.sourceVersion ?? null,
       // Where git/marketplace/zip installs came from (null when unrecorded).
-      installSource: getPluginSource(p.name, pluginRegistry.pluginDir) ?? null,
+      installSource: (Object.hasOwn(pluginSources, p.name) ? pluginSources[p.name] : null) ?? null,
       unsupportedComponents: p.unsupportedComponents || [],
       pendingComponents: p.pendingComponents || [],
       // Hooks: how many runnable handlers the plugin declares, what llm-ide

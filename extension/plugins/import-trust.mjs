@@ -50,8 +50,16 @@ export function finishTrustCheck(token, { ok, clearTrust, clearMcpConsents }) {
   }
   const trustReset = hashFailed || token.before === null || token.before !== after;
   if (trustReset) {
-    clearTrust(token.name);
-    clearMcpConsents(token.name);
+    // Run both even if the first throws, so clearing is never partial.
+    let firstError = null;
+    for (const clear of [clearTrust, clearMcpConsents]) {
+      try {
+        clear(token.name);
+      } catch (err) {
+        firstError ??= err;
+      }
+    }
+    if (firstError) throw firstError;
   }
   return trustReset;
 }
