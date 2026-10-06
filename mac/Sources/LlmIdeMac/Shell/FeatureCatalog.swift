@@ -406,8 +406,9 @@ enum FeatureCatalog {
             projectStore: projectStore,
             api: api,
             logStore: taskLog)
+        SessionScopedRegistry.shared.register(service)
 
-        // The registry's `bootstrap()` (the disk-read path) is invoked
+        // The registry's `bootstrap()' (the disk-read path) is invoked
         // from the AppShell's first `.task` tick — see `autoCode.start()`
         // which performs it lazily before any registry query.  Errors are
         // surfaced after bootstrap inside AutoCodeUpdateService.

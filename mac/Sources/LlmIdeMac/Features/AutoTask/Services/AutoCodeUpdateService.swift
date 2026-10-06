@@ -5,7 +5,7 @@ import Combine
 import os.log
 
 @MainActor
-final class AutoCodeUpdateService: ObservableObject {
+final class AutoCodeUpdateService: ObservableObject, SessionScoped {
 
     // MARK: - Published state (for Settings UI)
 
@@ -197,6 +197,9 @@ final class AutoCodeUpdateService: ObservableObject {
         // Lazy registry bootstrap — disk read deferred from app launch
         // until first .task tick (when start() is called).
         registry.bootstrap()
+        // `resetForSignOut` empties the published copy; re-read it so a second
+        // sign-in does not show an empty list until the next run.
+        allEntries = registry.allEntries()
         loadRunHistoryForDisplay()
         if let loadErr = registry.loadError {
             setError("Action history failed to load: \(loadErr.localizedDescription)")
@@ -806,6 +809,24 @@ final class AutoCodeUpdateService: ObservableObject {
 
     func setError(_ message: String) {
         lastError = message
+    }
+
+    /// Sign-out / account switch: stop the scheduler and any run in flight and
+    /// drop what is shown. Without it, the next account saw the previous one's
+    /// action items, errors and run history, and a CLI run kept going.
+    /// `start()` re-reads everything on the next sign-in.
+    func resetForSignOut() {
+        stop()
+        allEntries = []
+        runHistoryEntries = []
+        lastError = nil
+        lastResolveDiagnosis = nil
+        taskErrors = [:]
+        statusMessage = "Never run"
+        lastRunDate = nil
+        createdCount = 0
+        implementedCount = 0
+        failedCount = 0
     }
 
     func dismissLastError() {
