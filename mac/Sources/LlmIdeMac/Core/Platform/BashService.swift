@@ -106,7 +106,8 @@ final class BashService: Sendable {
     nonisolated static func sanitizedEnvironment(_ env: [String: String]) -> [String: String] {
         let containsMarkers = ["API_KEY", "APIKEY", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "PRIVATE_KEY"]
         let suffixes = ["_TOKEN", "_PAT", "_ACCESS_KEY", "_AUTH"]
-        let prefixes = ["ANTHROPIC_", "OPENAI_", "GEMINI_", "GOOGLE_API", "JWT_", "AWS_SESSION"]
+        // Not whole vendor prefixes: `ANTHROPIC_BASE_URL` and friends are not secrets.
+        let prefixes = ["JWT_", "AWS_SESSION"]
         return env.filter { key, _ in
             let upper = key.uppercased()
             if containsMarkers.contains(where: { upper.contains($0) }) { return false }

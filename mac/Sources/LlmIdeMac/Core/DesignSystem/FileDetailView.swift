@@ -461,8 +461,9 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     @State private var saveError: String?
     @State private var isPreview: Bool
     @State private var saving: Bool = false
-    /// The user was warned that the file changed on disk; the next Save overwrites.
-    @State private var overwriteConfirmed: Bool = false
+    /// The on-disk text the user was warned about. The next Save overwrites only
+    /// while the disk still holds exactly this; a further external change warns again.
+    @State private var acknowledgedDiskContent: String?
     @State private var showSavedToast: Bool = false
     @State private var showRevertConfirm: Bool = false
 
@@ -607,7 +608,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     private func load() async {
         loadError = nil
         saveError = nil
-        overwriteConfirmed = false
+        acknowledgedDiskContent = nil
         do {
             // Read off the main actor so a large file doesn't stall the editor.
             let fileURL = url
@@ -656,15 +657,13 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             // opened (a pull, the agent, Search's Replace All) — otherwise the
             // stale buffer silently discards every external change. A second
             // Save is the explicit "overwrite anyway".
-            if !overwriteConfirmed {
-                let onDisk = try? await Task.detached(priority: .userInitiated) {
-                    try String(contentsOf: target, encoding: .utf8)
-                }.value
-                if let onDisk, onDisk != base {
-                    overwriteConfirmed = true
-                    saveError = "This file changed on disk since you opened it. Save again to overwrite it, or use Revert to load the disk version."
-                    return
-                }
+            let onDisk = try? await Task.detached(priority: .userInitiated) {
+                try String(contentsOf: target, encoding: .utf8)
+            }.value
+            if let onDisk, onDisk != base, onDisk != acknowledgedDiskContent {
+                acknowledgedDiskContent = onDisk
+                saveError = "This file changed on disk since you opened it. Save again to overwrite it, or use Revert to load the disk version."
+                return
             }
             let attributes = try? FileManager.default.attributesOfItem(atPath: target.path)
             try content.write(to: target, atomically: true, encoding: .utf8)
@@ -673,7 +672,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             if let permissions = attributes?[.posixPermissions] {
                 try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path)
             }
-            overwriteConfirmed = false
+            acknowledgedDiskContent = nil
             savedContent = content
             EditorDraftStore.shared.discard(url)
             await onSaved?()

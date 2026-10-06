@@ -10,6 +10,6 @@ struct BashServiceEnvironmentTests {
             "DB_PASSWORD": "p", "JWT_SECRET": "j", "OPENAI_BASE_URL": "u", "GITLAB_PAT": "g",
         ]
         let clean = BashService.sanitizedEnvironment(env)
-        #expect(Set(clean.keys) == ["PATH", "HOME", "LANG", "SSH_AUTH_SOCK"])
+        #expect(Set(clean.keys) == ["PATH", "HOME", "LANG", "SSH_AUTH_SOCK", "OPENAI_BASE_URL"])
     }
 }

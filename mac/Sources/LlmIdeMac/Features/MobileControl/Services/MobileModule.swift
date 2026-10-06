@@ -20,7 +20,8 @@ extension MobileControlManager: FeatureService {}
 ///
 /// It DOES track sign-in: the paired phone belongs to the signed-in account,
 /// so signing out stops the listener (dropping the connection) and signing
-/// back in restarts it, like the other auth-scoped modules (Chat, Graph).
+/// back in restarts it (when auto-start is on, the same rule as app launch),
+/// like the other auth-scoped modules (Chat, Graph).
 @MainActor
 final class MobileModule: AppModule {
     let feature: AppFeature = .mobileSync

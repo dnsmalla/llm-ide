@@ -466,7 +466,9 @@ final class LlmIdeAPIClient: @unchecked Sendable {
                 let flat = try? decoder.decode(FlatErrorEnvelope.self, from: data)
                 // Bounded: an HTML 502 page or a multi-MB trace would otherwise
                 // become the error message shown in the UI.
-                let raw = String(data: data.prefix(2_000), encoding: .utf8)?
+                // Lossy decode: a cut in the middle of a multibyte character must not
+                // make the whole text nil.
+                let raw: String? = String(decoding: data.prefix(2_000), as: UTF8.self)
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 let code = env?.error?.code ?? "UPSTREAM_ERROR"
                 let rawMsg = env?.error?.message
