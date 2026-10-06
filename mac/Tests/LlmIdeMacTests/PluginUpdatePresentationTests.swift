@@ -285,3 +285,25 @@ private func decodedPlugin(_ name: String, extra: String = "") throws -> PluginI
     #expect(PluginUpdateSources.isDue(tracked: ["a"], checked: ["a"], lastCheck: now.addingTimeInterval(-1801),
                                       now: now, ttl: 1800, force: false))
 }
+
+@Test func parsesInstalledNameFromConflictMessage() {
+    #expect(PluginUpdatePresentation.alreadyInstalledName(
+        from: "plugin 'demo-x' is already installed; set replace=true to overwrite") == "demo-x")
+    #expect(PluginUpdatePresentation.alreadyInstalledName(from: "something else 'x' happened") == nil)
+    #expect(PluginUpdatePresentation.alreadyInstalledName(from: "no quotes") == nil)
+}
+
+@Test func sourceUpdatesNeedExpectSupport() {
+    #expect(!PluginUpdatePresentation.supportsExpect(serverApiVersion: nil))
+    #expect(!PluginUpdatePresentation.supportsExpect(serverApiVersion: 60))
+    #expect(PluginUpdatePresentation.supportsExpect(serverApiVersion: 61))
+    let git = PluginInstallSource.git(url: "https://github.com/o/r.git", ref: nil,
+                                       commit: String(repeating: "a", count: 40))
+    #expect(PluginUpdatePresentation.action(name: "p", origin: nil, installSource: git, entry: nil,
+                                            oneClick: true, expectSupported: false) == .none)
+    #expect(PluginUpdatePresentation.action(name: "p", origin: nil, installSource: git, entry: nil,
+                                            oneClick: true, expectSupported: true) == .gitReinstall)
+    let zip = PluginInstallSource.zip(fileName: "p.zip")
+    #expect(PluginUpdatePresentation.action(name: "p", origin: nil, installSource: zip, entry: nil,
+                                            oneClick: true, expectSupported: false) == .none)
+}

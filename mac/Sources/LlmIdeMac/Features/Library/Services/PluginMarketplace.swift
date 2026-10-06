@@ -95,8 +95,9 @@ enum PluginMarketplace {
     /// Clone a marketplace repo and read what it offers. The clone is kept
     /// (unlike `PluginGitInstaller.cloneAndZip`) because installing a plugin
     /// from it means zipping one of its subdirectories afterwards.
-    static func fetch(url rawURL: String, ref: String? = nil) async throws -> Staged {
-        let staged = try await PluginGitInstaller.cloneKeepingRepo(url: rawURL, ref: ref)
+    static func fetch(url rawURL: String, ref: String? = nil,
+                      timeoutSec: TimeInterval = 0) async throws -> Staged {
+        let staged = try await PluginGitInstaller.cloneKeepingRepo(url: rawURL, ref: ref, timeoutSec: timeoutSec)
         let manifestURL = staged.repoRoot
             .appendingPathComponent(".claude-plugin", isDirectory: true)
             .appendingPathComponent("marketplace.json")

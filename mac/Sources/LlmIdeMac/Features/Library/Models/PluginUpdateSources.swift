@@ -51,15 +51,18 @@ enum PluginUpdateSources {
     /// otherwise it would be a badge, and an "Update all" entry, that can
     /// only ever fail.
     static func merge(vendor: [PluginUpdateEntry], source: [PluginUpdateEntry],
-                      plugins: [String: PluginInfo], oneClick: Bool) -> [PluginUpdateEntry] {
+                      plugins: [String: PluginInfo], oneClick: Bool,
+                      expectSupported: Bool = true) -> [PluginUpdateEntry] {
         let trackedNames = Set(tracked(plugins).map(\.name))
         let vendorRows = vendor.filter { entry in
             guard let info = plugins[entry.name] else { return true }
-            switch PluginUpdatePresentation.action(for: info, entry: entry, oneClick: oneClick) {
+            switch PluginUpdatePresentation.action(for: info, entry: entry, oneClick: oneClick,
+                                                expectSupported: expectSupported) {
             case .claudeOneClick, .reimportClaude, .reimportCodex: return true
             default: return false
             }
         }
-        return vendorRows + source.filter { trackedNames.contains($0.name) }
+        // Without `?expect=` support an update could replace the wrong plugin.
+        return vendorRows + (expectSupported ? source.filter { trackedNames.contains($0.name) } : [])
     }
 }

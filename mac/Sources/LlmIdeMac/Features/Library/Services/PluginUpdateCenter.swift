@@ -73,6 +73,12 @@ final class PluginUpdateCenter: SessionScoped {
     private var sourceCheckedNames: Set<String> = []
     /// The gate the last refresh ran under; routing (and so the merge) needs it.
     private var lastOneClick = false
+    /// Whether the server honours `?expect=` (API v61+); set by the views from
+    /// `backend.serverApiVersion`. Below it the git / marketplace / file paths
+    /// are off. Defaults to false: nil (not probed yet) counts as old.
+    var supportsExpect = false {
+        didSet { if oldValue != supportsExpect { rebuildEntries() } }
+    }
     /// What the vendor bridges (Claude Code / Codex) reported last.
     private var vendorEntries: [PluginUpdateEntry] = []
     /// What the git / marketplace check reported last (tier "upstream").
@@ -265,7 +271,8 @@ final class PluginUpdateCenter: SessionScoped {
 
     private func rebuildEntries() {
         entries = PluginUpdateSources.merge(vendor: vendorEntries, source: sourceEntries,
-                                            plugins: knownPlugins, oneClick: lastOneClick)
+                                            plugins: knownPlugins, oneClick: lastOneClick,
+                                            expectSupported: supportsExpect)
     }
 
     // MARK: - Update (entry points)
@@ -414,8 +421,9 @@ final class PluginUpdateCenter: SessionScoped {
         let info = knownPlugins[name]
         let action = fileURL == nil
             ? PluginUpdatePresentation.action(name: name, origin: info?.origin, installSource: info?.installSource,
-                                              entry: entry(for: name), oneClick: oneClick)
-            : .replaceFromFile
+                                              entry: entry(for: name), oneClick: oneClick,
+                                              expectSupported: supportsExpect)
+            : (supportsExpect ? .replaceFromFile : .none)
         let step: PluginUpdateStep
         switch action {
         case .claudeOneClick:

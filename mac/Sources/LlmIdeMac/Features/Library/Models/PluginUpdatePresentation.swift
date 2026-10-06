@@ -8,6 +8,16 @@ enum PluginUpdatePresentation {
     /// re-import path (an older server has neither).
     static let oneClickUpdateApiVersion = 60
 
+    /// The server API version whose install route honours `?expect=` (the
+    /// NAME_MISMATCH guard). An older server ignores it silently, so an update
+    /// sent there could overwrite a different plugin — the git / marketplace /
+    /// file update paths are off below it.
+    static let expectApiVersion = 61
+
+    static func supportsExpect(serverApiVersion: Int?) -> Bool {
+        (serverApiVersion ?? 0) >= expectApiVersion
+    }
+
     /// nil (not probed yet) counts as old: the re-import path is safe on any
     /// server, the new endpoint is not.
     static func supportsOneClickUpdate(serverApiVersion: Int?) -> Bool {
@@ -36,9 +46,10 @@ enum PluginUpdatePresentation {
         case none
     }
 
-    static func action(for info: PluginInfo, entry: PluginUpdateEntry?, oneClick: Bool) -> UpdateAction {
+    static func action(for info: PluginInfo, entry: PluginUpdateEntry?, oneClick: Bool,
+                       expectSupported: Bool = true) -> UpdateAction {
         action(name: info.name, origin: info.origin, installSource: info.installSource,
-               entry: entry, oneClick: oneClick)
+               entry: entry, oneClick: oneClick, expectSupported: expectSupported)
     }
 
     /// The recorded install source wins over the vendor origin and over the
@@ -50,11 +61,12 @@ enum PluginUpdatePresentation {
     /// all (API < 60, i.e. `oneClick` false). A server that does report it has
     /// said "not an import", so the plugin came from a file.
     static func action(name: String, origin: String?, installSource: PluginInstallSource?,
-                       entry: PluginUpdateEntry?, oneClick: Bool) -> UpdateAction {
+                       entry: PluginUpdateEntry?, oneClick: Bool,
+                       expectSupported: Bool = true) -> UpdateAction {
         switch installSource?.kind {
-        case "git": return .gitReinstall
-        case "marketplace": return .marketplaceReinstall
-        case "zip": return .replaceFromFile
+        case "git": return expectSupported ? .gitReinstall : .none
+        case "marketplace": return expectSupported ? .marketplaceReinstall : .none
+        case "zip": return expectSupported ? .replaceFromFile : .none
         default: break
         }
         var vendor = origin
@@ -127,6 +139,15 @@ enum PluginUpdatePresentation {
         let parts = serverMessage.split(separator: "'", omittingEmptySubsequences: false)
         let provided = parts.count >= 3 && !parts[1].isEmpty ? String(parts[1]) : "another plugin"
         return "The source now provides \(provided), not \(name); nothing was replaced."
+    }
+
+    /// The plugin name in the server's 409 `plugin 'X' is already installed; …`
+    /// message, or nil when the message does not carry one.
+    static func alreadyInstalledName(from serverMessage: String) -> String? {
+        let parts = serverMessage.split(separator: "'", omittingEmptySubsequences: false)
+        guard parts.count >= 3, !parts[1].isEmpty,
+              parts[2].hasPrefix(" is already installed") else { return nil }
+        return String(parts[1])
     }
 
     /// The result line for a failed git / marketplace / file update.

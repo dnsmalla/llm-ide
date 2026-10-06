@@ -29,7 +29,8 @@ enum PluginSourceReinstaller {
                             api: LlmIdeAPIClient) async -> PluginUpdateStep {
         guard let source, let url = source.url else { return incompleteRecord(name) }
         do {
-            let staged = try await PluginMarketplace.fetch(url: url, ref: source.ref)
+            let staged = try await PluginMarketplace.fetch(
+                url: url, ref: source.ref, timeoutSec: PluginSourceUpdateChecker.networkTimeout)
             defer { staged.cleanup() }
             let entryName = source.entry ?? name
             guard let entry = staged.entries.first(where: { $0.name == entryName }) else {
@@ -53,7 +54,7 @@ enum PluginSourceReinstaller {
         do {
             let response = try await api.installPlugin(
                 zipURL: zipURL, replace: true, source: .zip(fileName: zipURL.lastPathComponent),
-                expectName: name)
+                fallbackFileName: "\(name).zip", expectName: name)
             let trustReset = response.plugin.trustReset == true
             return .done(message: PluginUpdatePresentation.replacedMessage(
                             name: name, version: response.plugin.version, trustReset: trustReset),

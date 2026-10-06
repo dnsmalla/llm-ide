@@ -22,6 +22,11 @@ struct PluginMarketplaceSheet: View {
     /// Entries already present on the server (from the plugin list, or learned
     /// from a 409): their button says "Update" and installs with replace.
     @State private var alreadyInstalled: Set<String> = []
+    /// The installed plugin an entry's "Update" replaces, sent as `expectName`
+    /// so a package that now names another plugin is refused, not installed
+    /// over it. From the installed list it is the entry name; from a 409 it is
+    /// the name the server reported.
+    @State private var replaceTargets: [String: String] = [:]
     @State private var message: String?
     @State private var search = ""
     @FocusState private var urlFocused: Bool
@@ -178,6 +183,7 @@ struct PluginMarketplaceSheet: View {
         // entry comes back 409 and flips it to "Update" then.
         if let list = try? await api.listPlugins() {
             alreadyInstalled = Set(list.plugins.map(\.name))
+            replaceTargets = Dictionary(uniqueKeysWithValues: list.plugins.map { ($0.name, $0.name) })
         }
     }
 
@@ -188,6 +194,7 @@ struct PluginMarketplaceSheet: View {
                          replace: Bool) async {
         installing = entry.name
         defer { installing = nil }
+        let expectName = replaceTargets[entry.name] ?? entry.name
         var zipURL: URL?
         defer { if let zipURL { try? FileManager.default.removeItem(at: zipURL) } }
         do {
@@ -197,7 +204,8 @@ struct PluginMarketplaceSheet: View {
             // install failure — install without a record.
             let source = try? staged.source(for: entry)
             let response = try await api.installPlugin(zipURL: packaged, replace: replace, source: source,
-                                                       fallbackFileName: "\(entry.name).zip")
+                                                       fallbackFileName: "\(entry.name).zip",
+                                                       expectName: replace ? expectName : nil)
             installed.insert(entry.name)
             var text = response.plugin.replaced
                 ? "Updated \(response.plugin.name) to v\(response.plugin.version)."
@@ -206,10 +214,16 @@ struct PluginMarketplaceSheet: View {
                 text += " Its trust was reset — review and trust it again in the Plugins list."
             }
             message = text
+        } catch let APIError.http(_, "NAME_MISMATCH", serverMessage, _) {
+            message = PluginUpdatePresentation.nameMismatchMessage(name: expectName, serverMessage: serverMessage)
         } catch let APIError.http(status, _, serverMessage, _)
                     where !replace && (status == 409 || serverMessage.contains("already installed")) {
+            // The 409 names the plugin the package really is; Update must
+            // replace that one, not whatever the entry is called here.
+            let installedName = PluginUpdatePresentation.alreadyInstalledName(from: serverMessage) ?? entry.name
             alreadyInstalled.insert(entry.name)
-            message = "\(entry.name) is already installed. Choose Update to replace it with this version."
+            replaceTargets[entry.name] = installedName
+            message = "\(installedName) is already installed. Choose Update to replace it with this version."
         } catch {
             message = "Could not install \(entry.name): \(error.localizedDescription)"
         }

@@ -1064,6 +1064,8 @@ struct LibraryView: View {
     /// short TTL for non-forced checks). `force` also refreshes the
     /// marketplace catalogs server-side (v60+ only).
     private func loadPluginUpdates(force: Bool = false) async {
+        updateCenter.supportsExpect = PluginUpdatePresentation.supportsExpect(
+            serverApiVersion: backend.serverApiVersion)
         // The full list lets the center route each update by its install
         // source; nil (nothing loaded yet) keeps what it already knows. After a
         // failed reload `plugins` is still the last good list.

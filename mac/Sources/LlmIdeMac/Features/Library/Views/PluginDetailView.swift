@@ -32,11 +32,12 @@ struct PluginDetailView: View {
     /// still be here after the user leaves the Library and comes back.
     private var updateCenter: PluginUpdateCenter { .shared }
     private var updateEntry: PluginUpdateEntry? { updateCenter.entry(for: pluginName) }
-    private var checkingUpdates: Bool { updateCenter.checking }
-    private var updatePending: Bool { updateCenter.inFlight.contains(pluginName) }
-    private var updateResult: PluginUpdateCenter.Result? { updateCenter.results[pluginName] }
     private var oneClick: Bool {
         PluginUpdatePresentation.supportsOneClickUpdate(serverApiVersion: backend.serverApiVersion)
+    }
+    /// Git / marketplace / file updates need `?expect=` (API v61+).
+    private var expectSupported: Bool {
+        PluginUpdatePresentation.supportsExpect(serverApiVersion: backend.serverApiVersion)
     }
 
     var body: some View {
@@ -52,7 +53,10 @@ struct PluginDetailView: View {
                 } else if let err = loadError {
                     Text(err).foregroundStyle(theme.current.danger).font(.callout)
                 } else if let plugin {
-                    updateBlock(plugin)
+                    PluginUpdateSection(
+                        plugin: plugin, pluginName: pluginName, api: api,
+                        oneClick: oneClick, expectSupported: expectSupported,
+                        onCheck: { await loadUpdate(force: true) })
                     descriptionBlock(plugin)
                     commandsBlock(plugin)
                     subagentsBlock(plugin)
@@ -162,127 +166,12 @@ struct PluginDetailView: View {
 
     /// How this plugin updates (see `PluginUpdatePresentation.action`).
     private func updateAction(_ plugin: PluginInfo) -> PluginUpdatePresentation.UpdateAction {
-        PluginUpdatePresentation.action(for: plugin, entry: updateEntry, oneClick: oneClick)
+        PluginUpdateSection.action(for: plugin, entry: updateEntry, oneClick: oneClick,
+                                   expectSupported: expectSupported)
     }
 
-    /// A git / marketplace / file install always gets the block; an imported
-    /// vendor plugin only on a v60+ server (the one-click route), as before.
     private func showsUpdateBlock(_ plugin: PluginInfo) -> Bool {
-        switch updateAction(plugin) {
-        case .gitReinstall, .marketplaceReinstall, .replaceFromFile: return true
-        case .claudeOneClick, .reimportClaude, .reimportCodex: return oneClick
-        case .none: return false
-        }
-    }
-
-    private func isSourceInstall(_ plugin: PluginInfo) -> Bool {
-        let action = updateAction(plugin)
-        return action == .gitReinstall || action == .marketplaceReinstall
-    }
-
-    /// The version the user knows the copy as: the import stamp, else the
-    /// check's view of Claude's install, else the normalized manifest version
-    /// (which reads "0.0.0" for a sha-versioned plugin).
-    private func shownVersion(_ plugin: PluginInfo) -> String {
-        [plugin.sourceVersion, updateEntry?.importedVersion, updateEntry?.claudeVersion]
-            .compactMap { $0 }.first { !$0.isEmpty } ?? plugin.version
-    }
-
-    @ViewBuilder
-    private func updateBlock(_ plugin: PluginInfo) -> some View {
-        if showsUpdateBlock(plugin) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text("Updates").font(.headline)
-                if updateAction(plugin) == .replaceFromFile {
-                    Text("Installed from a file — choose a newer .zip to replace it.")
-                        .font(.callout).foregroundStyle(.secondary)
-                } else if checkingUpdates {
-                    HStack(spacing: 6) {
-                        ProgressView().controlSize(.small)
-                        Text("Checking for updates…").font(.callout).foregroundStyle(.secondary)
-                    }
-                } else if let updateEntry {
-                    Label(availabilityText(plugin, updateEntry), systemImage: "arrow.triangle.2.circlepath")
-                        .font(.callout)
-                        .foregroundStyle(theme.current.warning)
-                } else {
-                    Text("No update reported for v\(shownVersion(plugin)).")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                HStack(spacing: 8) {
-                    updateButtons(plugin)
-                }
-                if let updateResult, !updateResult.message.isEmpty {
-                    Text(updateResult.message)
-                        .font(.caption)
-                        .foregroundStyle(updateResult.failed ? theme.current.danger : .secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .textSelection(.enabled)
-                }
-            }
-        }
-    }
-
-    private func availabilityText(_ plugin: PluginInfo, _ entry: PluginUpdateEntry) -> String {
-        if isSourceInstall(plugin), let kind = plugin.installSource?.kind {
-            return PluginUpdatePresentation.sourceAvailabilityText(kind: kind, latest: entry.latest)
-        }
-        return PluginUpdatePresentation.availabilityText(entry)
-    }
-
-    @ViewBuilder
-    private func updateButtons(_ plugin: PluginInfo) -> some View {
-        if updatePending {
-            ProgressView().controlSize(.small)
-            Text("Updating…").font(.callout).foregroundStyle(.secondary)
-        } else if updateAction(plugin) == .replaceFromFile {
-            Button("Replace from file…") { replaceFromFile() }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .disabled(updateCenter.isUpdating)
-        } else {
-            // A Claude import can always be re-fetched (its one-click route);
-            // a source or Codex install only updates when a check reports one.
-            if (plugin.origin == "claude" && !isSourceInstall(plugin)) || updateEntry != nil {
-                updateButton
-            }
-        }
-        if updateAction(plugin) != .replaceFromFile {
-            Button("Check for updates") { Task { await loadUpdate(force: true) } }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                // A forced check runs `claude plugin marketplace update`; not during any update.
-                .disabled(checkingUpdates || updateCenter.isUpdating)
-        }
-    }
-
-    @ViewBuilder
-    private var updateButton: some View {
-        let button = Button(PluginUpdatePresentation.buttonTitle(tier: updateEntry?.tier)) {
-            updateCenter.startUpdate(name: pluginName, api: api, oneClick: oneClick, origin: .detail)
-        }
-        .buttonStyle(.bordered)
-        .controlSize(.small)
-        .disabled(checkingUpdates || updateCenter.isUpdating)
-        // Same emphasis as the import sheet's "Update": tinted only when an
-        // update is actually reported, plain for a speculative re-fetch.
-        if updateEntry != nil {
-            button.tint(theme.current.warning)
-        } else {
-            button
-        }
-    }
-
-    /// Pick the newer .zip here; the center runs the replace, so its result
-    /// survives a section switch.
-    private func replaceFromFile() {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.zip]
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose the new .zip for \(plugin?.title ?? pluginName)"
-        panel.prompt = "Replace"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        updateCenter.startReplaceFromFile(name: pluginName, zipURL: url, api: api, oneClick: oneClick)
+        PluginUpdateSection.shows(action: updateAction(plugin), oneClick: oneClick)
     }
 
     // MARK: - Body sections
@@ -468,6 +357,7 @@ struct PluginDetailView: View {
     /// also refreshes the marketplace catalogs and records the outcome;
     /// otherwise the center's short TTL applies.
     private func loadUpdate(force: Bool) async {
+        updateCenter.supportsExpect = expectSupported
         guard let plugin, showsUpdateBlock(plugin), updateAction(plugin) != .replaceFromFile else { return }
         if force {
             await updateCenter.check(name: pluginName, info: plugin, api: api, oneClick: oneClick)
