@@ -393,8 +393,21 @@ final class SourceControlService {
             .filter { !$0.isEmpty }
     }
 
+    /// A user-typed branch/tag name that git will take as a NAME, not an option
+    /// (`-D`, `--orphan`, …). On failure the reason lands in the sticky
+    /// `opError` and the caller must not run git.
+    private func validRef(_ raw: String) -> String? {
+        do {
+            return try RepoManager.safeRef(raw)
+        } catch {
+            state.opError = "Invalid branch or tag name: \(raw)"
+            return nil
+        }
+    }
+
     /// Check out an existing local branch, then refresh.
     func checkout(root: URL, branch: String) async {
+        guard let branch = validRef(branch) else { return }
         await run(["checkout", branch], root)
     }
 
@@ -402,11 +415,13 @@ final class SourceControlService {
     func createBranch(root: URL, name: String) async {
         state.opError = nil
         if blocked(.createBranch, at: root) { return }
+        guard let name = validRef(name) else { return }
         await run(["checkout", "-b", name], root)
     }
 
     /// Delete a local branch (safe `-d` by default; `-D` when forced), then refresh.
     func deleteBranch(root: URL, name: String, force: Bool = false) async {
+        guard let name = validRef(name) else { return }
         await run(["branch", force ? "-D" : "-d", name], root)
     }
 
@@ -589,6 +604,7 @@ final class SourceControlService {
     /// (e.g. conflicts) the error is captured into the sticky `opError`; the
     /// status refresh will surface conflicted (`U`) files.
     func merge(root: URL, branch: String) async {
+        guard let branch = validRef(branch) else { return }
         await run(["merge", branch], root)
     }
 
@@ -603,6 +619,7 @@ final class SourceControlService {
 
     /// Create a lightweight tag at HEAD, then refresh.
     func createTag(root: URL, name: String) async {
+        guard let name = validRef(name) else { return }
         await run(["tag", name], root)
     }
 
