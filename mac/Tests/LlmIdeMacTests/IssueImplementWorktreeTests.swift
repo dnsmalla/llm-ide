@@ -36,6 +36,12 @@ struct IssueImplementWorktreeTests {
             #expect(process.terminationStatus == 0, "git \(args.joined(separator: " "))")
         }
         try git(["init", "-q", "-b", "feature"], in: repo)
+        // `commitAll` runs a plain `git commit` inside the worktree, which shares
+        // THIS repo's config: set an identity and no signing here, or the commit
+        // fails on a machine (or CI runner) with no global git identity.
+        try git(["config", "user.name", "t"], in: repo)
+        try git(["config", "user.email", "t@t"], in: repo)
+        try git(["config", "commit.gpgsign", "false"], in: repo)
         try "one\n".write(to: repo.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
         try git(["add", "-A"], in: repo)
         try git(["commit", "-q", "-m", "init"], in: repo)

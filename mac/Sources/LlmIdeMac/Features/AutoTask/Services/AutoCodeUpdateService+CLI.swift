@@ -54,7 +54,7 @@ extension AutoCodeUpdateService {
     }
 
     /// Whether a branch name is one this pipeline creates: `fix/<n>-…` (issue
-    /// and rescue branches) or `fix/custom-…` (custom implement tasks). A
+    /// branches) or `fix/custom-…` (custom implement tasks). A
     /// user's own `fix/typo` WIP branch matches neither and must never be
     /// pushed on their behalf.
     nonisolated static func isPipelineBranch(_ branch: String) -> Bool {
@@ -116,11 +116,6 @@ extension AutoCodeUpdateService {
         let r = git(["rev-parse", "--verify", "--quiet", ref], at: localPath)
         let s = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
         return (r.code == 0 && !s.isEmpty) ? s : nil
-    }
-
-    /// Check out an existing branch. Returns true on success.
-    nonisolated static func checkout(_ branch: String, at localPath: String) -> Bool {
-        return git(["checkout", branch], at: localPath).code == 0
     }
 
     /// Branch name for a `.implement` custom auto-task: `fix/custom-<slug>-<token>`.
@@ -503,7 +498,6 @@ extension AutoCodeUpdateService {
         let planned = "fix/\(issue.number)-\(slug)"
         let plannedExists = await Task.detached { Self.refSha("refs/heads/\(planned)", at: localPath) != nil }.value
         let branch = Self.issueBranchName(planned: planned, token: token, plannedExists: plannedExists)
-        let baseSha = await Task.detached { Self.headSha(at: localPath) }.value
         let created = await Task.detached { Self.worktreeAdd(at: localPath, path: worktree, branch: branch) }.value
         // Stop during `worktree add`: nothing is running for cancel() to kill, so
         // undo the worktree and branch and bail.
@@ -521,6 +515,9 @@ extension AutoCodeUpdateService {
             log.error("auto_code_skip_worktree issue=\(issue.number, privacy: .public)")
             return .skipped
         }
+        // The commit the branch STARTS at, read from the worktree itself: the
+        // user's HEAD may have moved between our read and `worktree add`.
+        let baseSha = await Task.detached { Self.headSha(at: worktree) }.value
         logStore.append(.implementIssues, "Issue #\(issue.number): working in an isolated checkout on \(branch); your working tree and branch are not touched.")
 
         let prompt = """
@@ -629,11 +626,18 @@ extension AutoCodeUpdateService {
         // destroy it. The caller treats `succeeded && committed` as done.
         var committed = tip != nil && tip != baseSha
         var keepWorktreeForRecovery = false
+        var keepBranch = false
         if wasCancelled && !result {
             // Stopped mid-run: the edits are half-done — drop them rather than
-            // commit them as if the task finished.
-            committed = false
-            logStore.append(.implementIssues, "Issue #\(issue.number): stopped; discarded the unfinished checkout.")
+            // commit them as if the task finished. But never destroy commits the
+            // CLI already made: those stay on their branch.
+            if committed {
+                keepBranch = true
+                committed = false
+                logStore.append(.implementIssues, "Issue #\(issue.number): stopped; the commits already made are kept on \(branch), unfinished edits discarded.")
+            } else {
+                logStore.append(.implementIssues, "Issue #\(issue.number): stopped; discarded the unfinished checkout.")
+            }
         } else if result && !committed {
             // The CLI finished but did not commit. The worktree holds only this
             // task's edits, so committing them is safe; "nothing to commit"
@@ -657,6 +661,21 @@ extension AutoCodeUpdateService {
                         level: .error)
                 }
             }
+        } else if !result {
+            // The CLI failed (non-zero exit) without being stopped. Its edits used
+            // to stay in the user's checkout; do not throw them away silently.
+            if committed {
+                logStore.append(.implementIssues, "Issue #\(issue.number): the CLI exited with an error after committing; the commit is kept on \(branch).", level: .error)
+            } else {
+                let isTreeClean = await Task.detached { Self.isWorkingTreeClean(at: worktree) }.value
+                if !isTreeClean {
+                    keepWorktreeForRecovery = true
+                    logStore.append(
+                        .implementIssues,
+                        "Issue #\(issue.number): the CLI exited with an error; its uncommitted edits are kept in \(worktree) on branch \(branch).",
+                        level: .error)
+                }
+            }
         }
         if !keepWorktreeForRecovery {
             await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
@@ -664,7 +683,7 @@ extension AutoCodeUpdateService {
         // `git branch -D` refuses a branch a worktree still has checked out, so
         // the delete follows the removal. A branch without a commit is dropped
         // rather than left behind.
-        if !committed && !keepWorktreeForRecovery {
+        if !committed && !keepWorktreeForRecovery && !keepBranch {
             _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
         }
         // The model was invoked (it ran, pass or fail) — count it.

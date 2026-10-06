@@ -76,7 +76,7 @@ extension AutoCodeUpdateService {
 
         Auto Tasks is starting work on issue #\(issueNumber) now. Here's the short plan:
 
-        1. Create a local branch `\(branch)` off the current base branch.
+        1. Create a local branch `\(branch)` off the commit your checkout is on (in an isolated worktree, so your checkout is not touched).
         2. Implement the change described above.
         3. Commit the fix locally and leave it ready for review — nothing is pushed automatically.
 
