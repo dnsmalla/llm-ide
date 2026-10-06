@@ -297,11 +297,14 @@ final class LlmIdeAPIClient: @unchecked Sendable {
     /// Upload raw bytes (Content-Type controlled by caller). Used for
     /// plugin install where the body is a zip archive. Bypasses the
     /// JSON encoder. Mirrors `send()`'s 401 → refresh-and-retry path.
-    func postRawBytes<T: Decodable>(_ path: String, bytes: Data, contentType: String, authenticated: Bool, isRetry: Bool = false) async throws -> T {
+    /// `headers` are extra request headers (e.g. plugin provenance).
+    func postRawBytes<T: Decodable>(_ path: String, bytes: Data, contentType: String, authenticated: Bool,
+                                    headers: [String: String] = [:], isRetry: Bool = false) async throws -> T {
         guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
         req.httpMethod = "POST"
         req.setValue(contentType, forHTTPHeaderField: "Content-Type")
+        for (name, value) in headers { req.setValue(value, forHTTPHeaderField: name) }
         if authenticated {
             let token: String? = await MainActor.run { sessionStore?.accessToken }
             guard let token else { throw APIError.noSession }
@@ -319,7 +322,8 @@ final class LlmIdeAPIClient: @unchecked Sendable {
             if hasRefresh {
                 let ok = await store.attemptRefresh(via: self)
                 if ok {
-                    return try await postRawBytes(path, bytes: bytes, contentType: contentType, authenticated: authenticated, isRetry: true)
+                    return try await postRawBytes(path, bytes: bytes, contentType: contentType, authenticated: authenticated,
+                                                  headers: headers, isRetry: true)
                 }
             }
         }

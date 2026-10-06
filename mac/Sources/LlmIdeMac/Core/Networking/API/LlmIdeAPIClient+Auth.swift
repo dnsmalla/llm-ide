@@ -1,6 +1,8 @@
 import Foundation
+import os.log
 
 extension LlmIdeAPIClient {
+    private static let pluginInstallLog = Logger(subsystem: "com.llmide.macapp", category: "PluginInstall")
 
     // Per-user UI preferences, synced server-side via /auth/me/prefs.
     // Both the Chrome extension and Mac app read this on login and PUT
@@ -116,11 +118,33 @@ extension LlmIdeAPIClient {
     /// Install a plugin from a zip on disk. Optionally overwrite an
     /// existing same-named plugin. Returns the installer's report so
     /// the UI can surface "Installed @foo (1 skill, 2 commands)".
-    func installPlugin(zipURL: URL, replace: Bool = false) async throws -> PluginInstallResponse {
+    ///
+    /// `source` is where the package came from; the server records it so
+    /// updates can be checked later. A value the server would refuse is not
+    /// sent (the install still happens, unrecorded), and if the server refuses
+    /// it anyway (`INVALID_SOURCE`) the install is retried once without it —
+    /// provenance must never be the reason an install fails.
+    func installPlugin(zipURL: URL, replace: Bool = false,
+                       source: PluginInstallSource? = nil) async throws -> PluginInstallResponse {
         let data = try Data(contentsOf: zipURL)
         let path = "/auth/me/plugins/install" + (replace ? "?replace=1" : "")
-        let response: PluginInstallResponse = try await postRawBytes(
-            path, bytes: data, contentType: "application/zip", authenticated: true)
+        var headers: [String: String] = [:]
+        if let source {
+            if source.isServerAcceptable, let value = try? source.headerValue() {
+                headers["X-Llmide-Plugin-Source"] = value
+            } else {
+                Self.pluginInstallLog.notice("install source (\(source.kind, privacy: .public)) not recordable; installing without it")
+            }
+        }
+        let response: PluginInstallResponse
+        do {
+            response = try await postRawBytes(
+                path, bytes: data, contentType: "application/zip", authenticated: true, headers: headers)
+        } catch APIError.http(400, "INVALID_SOURCE", let message, _) where !headers.isEmpty {
+            Self.pluginInstallLog.warning("server refused install source: \(message, privacy: .public); retrying without it")
+            response = try await postRawBytes(
+                path, bytes: data, contentType: "application/zip", authenticated: true)
+        }
         // A newly installed plugin may declare a graph engine, and the resolved
         // engine is cached for the process. Without this the app kept reporting
         // "No graph engine installed" — pointing the user at the very screen
@@ -383,6 +407,9 @@ struct PluginRefreshResponse: Decodable {
 struct PluginInstallResponse: Decodable {
     let ok: Bool
     let plugin: InstalledPluginSummary
+    /// The provenance the server now holds for this plugin (nil when none, or
+    /// from an older server).
+    let installSource: PluginInstallSource?
     struct InstalledPluginSummary: Decodable {
         let name: String
         let version: String
@@ -392,7 +419,11 @@ struct PluginInstallResponse: Decodable {
         let skillCount: Int
         let commandCount: Int
         let subagentCount: Int
+        /// True only when an installed copy existed and was overwritten.
         let replaced: Bool
+        /// True when the replace cleared hook trust / MCP consents. Nil from an
+        /// older server.
+        let trustReset: Bool?
         /// Same display-name fallback as `PluginInfo.title`.
         var title: String {
             let trimmed = displayName.trimmingCharacters(in: .whitespaces)
@@ -489,6 +520,9 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// The vendor version the import copied (its stamp) — what the user knows
     /// it as; `version` is normalized ("0.0.0" for a sha). Nil when unknown.
     let sourceVersion: String?
+    /// Where it was installed from (git / marketplace / zip). Nil for a plugin
+    /// installed before provenance was recorded, or from an older server.
+    let installSource: PluginInstallSource?
     /// True when this plugin would be handed to the agent engine to load itself
     /// — so its hooks run at full fidelity, and the "not run here" notes below
     /// do not apply. Follows both hook trust and the `nativePlugins` pref.
@@ -541,6 +575,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
             && lhs.unsupportedComponents == rhs.unsupportedComponents
             && lhs.mcpServerCount == rhs.mcpServerCount && lhs.version == rhs.version
             && lhs.origin == rhs.origin && lhs.sourceVersion == rhs.sourceVersion
+            && lhs.installSource == rhs.installSource
             && lhs.sdkReadable == rhs.sdkReadable && lhs.nativePluginsOn == rhs.nativePluginsOn
             && lhs.trustOutdated == rhs.trustOutdated && lhs.trustOutdatedKinds == rhs.trustOutdatedKinds
             // The rest of what PluginDetailView renders: a reinstall that only adds
@@ -563,7 +598,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
         case hookCount, declaresHooks, executableKinds, sdkReadable, nativePluginsOn, trustOutdated, trustOutdatedKinds, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
-        case origin, sourceVersion
+        case origin, sourceVersion, installSource
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -592,6 +627,8 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.nativeDelivery = try c.decodeIfPresent(Bool.self, forKey: .nativeDelivery) ?? false
         self.origin         = try c.decodeIfPresent(String.self, forKey: .origin)
         self.sourceVersion  = try c.decodeIfPresent(String.self, forKey: .sourceVersion)
+        // A malformed record must not drop the whole plugin row.
+        self.installSource  = (try? c.decodeIfPresent(PluginInstallSource.self, forKey: .installSource)) ?? nil
     }
 }
 

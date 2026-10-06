@@ -19,6 +19,9 @@ struct PluginMarketplaceSheet: View {
     @State private var loading = false
     @State private var installing: String?
     @State private var installed: Set<String> = []
+    /// Entries already present on the server (from the plugin list, or learned
+    /// from a 409): their button says "Update" and installs with replace.
+    @State private var alreadyInstalled: Set<String> = []
     @State private var message: String?
     @State private var search = ""
     @FocusState private var urlFocused: Bool
@@ -119,8 +122,12 @@ struct PluginMarketplaceSheet: View {
                                 .foregroundStyle(.green)
                         } else if installing == entry.name {
                             ProgressView().controlSize(.small)
+                        } else if alreadyInstalled.contains(entry.name) {
+                            Button("Update") { Task { await install(entry, from: staged, replace: true) } }
+                                .disabled(installing != nil)
+                                .help("Replace the installed copy with this marketplace's version")
                         } else {
-                            Button("Install") { Task { await install(entry, from: staged) } }
+                            Button("Install") { Task { await install(entry, from: staged, replace: false) } }
                                 .disabled(installing != nil)
                         }
                     }
@@ -165,18 +172,43 @@ struct PluginMarketplaceSheet: View {
             staged = try await PluginMarketplace.fetch(url: url, ref: ref.isEmpty ? nil : ref)
         } catch {
             message = error.localizedDescription
+            return
+        }
+        // Best effort: a failed list only means the first click on an installed
+        // entry comes back 409 and flips it to "Update" then.
+        if let list = try? await api.listPlugins() {
+            alreadyInstalled = Set(list.plugins.map(\.name))
         }
     }
 
-    private func install(_ entry: PluginMarketplace.Entry, from staged: PluginMarketplace.Staged) async {
+    /// Install (or, with `replace`, update) one entry from the staged clone —
+    /// no re-clone. A 409 does not fail: it marks the entry installed so its
+    /// button turns into "Update", which is the user's confirmation to replace.
+    private func install(_ entry: PluginMarketplace.Entry, from staged: PluginMarketplace.Staged,
+                         replace: Bool) async {
         installing = entry.name
         defer { installing = nil }
+        var zipURL: URL?
+        defer { if let zipURL { try? FileManager.default.removeItem(at: zipURL) } }
         do {
-            let zipURL = try await PluginMarketplace.package(entry, from: staged)
-            let response = try await api.installPlugin(zipURL: zipURL)
-            try? FileManager.default.removeItem(at: zipURL)
+            let packaged = try await PluginMarketplace.package(entry, from: staged)
+            zipURL = packaged
+            // Unrecordable provenance (e.g. a plugin at the repo root) is not an
+            // install failure — install without a record.
+            let source = try? staged.source(for: entry)
+            let response = try await api.installPlugin(zipURL: packaged, replace: replace, source: source)
             installed.insert(entry.name)
-            message = "Installed \(response.plugin.name). Enable it in the Plugins list to use it."
+            var text = response.plugin.replaced
+                ? "Updated \(response.plugin.name) to v\(response.plugin.version)."
+                : "Installed \(response.plugin.name). Enable it in the Plugins list to use it."
+            if response.plugin.trustReset == true {
+                text += " Its trust was reset — review and trust it again in the Plugins list."
+            }
+            message = text
+        } catch let APIError.http(status, _, serverMessage, _)
+                    where !replace && (status == 409 || serverMessage.contains("already installed")) {
+            alreadyInstalled.insert(entry.name)
+            message = "\(entry.name) is already installed. Choose Update to replace it with this version."
         } catch {
             message = "Could not install \(entry.name): \(error.localizedDescription)"
         }

@@ -37,6 +37,10 @@ enum PluginGitInstaller {
     /// to clean up; it lives under `/tmp` already).
     struct StagedPackage {
         let zipURL: URL
+        /// The cloned commit (40-hex), read before `.git` was removed.
+        let commit: String
+        /// The URL actually cloned (trimmed/validated), as the source record holds it.
+        let normalizedURL: String
         let cleanup: () -> Void
     }
 
@@ -98,6 +102,14 @@ enum PluginGitInstaller {
             throw InstallError.cloneFailed(stderr.isEmpty ? "git exited \(cloneRes.code)" : stderr)
         }
 
+        // Read the commit while `.git` still exists — it is the install's provenance.
+        let commit: String
+        do { commit = try await headCommit(in: clonedDir) }
+        catch {
+            try? FileManager.default.removeItem(at: stage)
+            throw error
+        }
+
         // Drop .git so the zip stays small and reproducible. Failure
         // here is non-fatal — the resulting zip would just be larger.
         try? FileManager.default.removeItem(at: clonedDir.appendingPathComponent(".git"))
@@ -126,14 +138,22 @@ enum PluginGitInstaller {
         let cleanup: () -> Void = {
             try? FileManager.default.removeItem(at: stage)
         }
-        return StagedPackage(zipURL: zipURL, cleanup: cleanup)
+        return StagedPackage(zipURL: zipURL, commit: commit, normalizedURL: normalizedURL, cleanup: cleanup)
     }
 
     /// A clone that is KEPT for further work (reading a marketplace manifest,
     /// then zipping one plugin out of it). `cloneAndZip` above throws its clone
     /// away as soon as the zip exists; this hands the tree back instead.
+    ///
+    /// `.git` is KEPT so the caller can read tree hashes for the plugins it
+    /// offers (`treeHash(at:in:)`); the caller must `dropGitDir(of:)` before
+    /// zipping anything out of the tree.
     struct StagedRepo {
         let repoRoot: URL
+        /// The cloned commit (40-hex).
+        let commit: String
+        /// The URL actually cloned (trimmed/validated).
+        let normalizedURL: String
         let cleanup: () -> Void
     }
 
@@ -153,8 +173,46 @@ enum PluginGitInstaller {
             log.error("git clone failed: \(stderr, privacy: .public)")
             throw InstallError.cloneFailed(stderr.isEmpty ? "git exited \(cloneRes.code)" : stderr)
         }
-        try? FileManager.default.removeItem(at: clonedDir.appendingPathComponent(".git"))
-        return StagedRepo(repoRoot: clonedDir, cleanup: { try? FileManager.default.removeItem(at: stage) })
+        let cleanup: () -> Void = { try? FileManager.default.removeItem(at: stage) }
+        let commit: String
+        do { commit = try await headCommit(in: clonedDir) }
+        catch {
+            cleanup()
+            throw error
+        }
+        return StagedRepo(repoRoot: clonedDir, commit: commit, normalizedURL: normalizedURL, cleanup: cleanup)
+    }
+
+    /// Remove a staged clone's `.git` so nothing zipped out of it carries history.
+    static func dropGitDir(of repoRoot: URL) {
+        try? FileManager.default.removeItem(at: repoRoot.appendingPathComponent(".git"))
+    }
+
+    /// The commit checked out in `repo`, as 40 lowercase hex. Runs through the
+    /// same hardened runner as the clone (detached stdin, no terminal prompt).
+    static func headCommit(in repo: URL) async throws -> String {
+        let res = try await runProcess("/usr/bin/git", args: ["rev-parse", "--verify", "HEAD^{commit}"], cwd: repo)
+        let sha = res.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard res.code == 0, PluginInstallSource.isSHA(sha) else {
+            log.error("could not read the cloned commit: \(res.stderr, privacy: .public)")
+            throw InstallError.cloneFailed("could not read the cloned commit")
+        }
+        return sha
+    }
+
+    /// The tree hash of `relativePath` at HEAD in `repo`, or nil when it is not
+    /// a directory in the commit (or `.git` is gone). The `HEAD:` prefix keeps a
+    /// manifest-supplied path from ever being parsed as a git option.
+    static func treeHash(at relativePath: String, in repo: URL) async -> String? {
+        guard let res = try? await runProcess(
+            "/usr/bin/git", args: ["rev-parse", "--verify", "--quiet", "HEAD:\(relativePath)"], cwd: repo),
+              res.code == 0 else { return nil }
+        let sha = res.stdout.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard PluginInstallSource.isSHA(sha) else { return nil }
+        guard let type = try? await runProcess("/usr/bin/git", args: ["cat-file", "-t", sha], cwd: repo),
+              type.code == 0,
+              type.stdout.trimmingCharacters(in: .whitespacesAndNewlines) == "tree" else { return nil }
+        return sha
     }
 
     /// `-y` stores a symlink AS a link instead of zipping the file it points at.
@@ -301,6 +359,11 @@ extension LlmIdeAPIClient {
     func installPluginFromGit(url: String, ref: String? = nil, replace: Bool = false) async throws -> PluginInstallResponse {
         let staged = try await PluginGitInstaller.cloneAndZip(url: url, ref: ref)
         defer { staged.cleanup() }
-        return try await installPlugin(zipURL: staged.zipURL, replace: replace)
+        let trimmedRef = ref?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let source = PluginInstallSource.git(
+            url: staged.normalizedURL,
+            ref: (trimmedRef?.isEmpty ?? true) ? nil : trimmedRef,
+            commit: staged.commit)
+        return try await installPlugin(zipURL: staged.zipURL, replace: replace, source: source)
     }
 }

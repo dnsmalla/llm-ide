@@ -32,6 +32,37 @@ enum PluginMarketplace {
         let skipped: [String]
         let repoRoot: URL
         let cleanup: () -> Void
+        /// The URL that was cloned, the ref asked for (nil = default branch) and
+        /// the commit checked out — the marketplace half of each install's
+        /// provenance. Defaulted so a hand-built `Staged` (tests) stays short.
+        var url: String = ""
+        var ref: String?
+        var commit: String = ""
+        /// Tree hash of each entry's directory at `commit`, keyed by the entry's
+        /// recordable path. Read at fetch time because `.git` is dropped before
+        /// anything is zipped out of the clone.
+        var trees: [String: String] = [:]
+
+        /// The provenance to send when installing `entry` from this marketplace.
+        /// Throws when it cannot be expressed under the server's rules (e.g. a
+        /// plugin at the repository root, path `.`, or a name the server's entry
+        /// pattern refuses): the caller then installs without a record.
+        func source(for entry: Entry) throws -> PluginInstallSource {
+            guard let path = PluginMarketplace.recordablePath(entry.relativePath) else {
+                throw MarketplaceError.unrecordable("\(entry.name): its path cannot be recorded")
+            }
+            guard let tree = trees[path] else {
+                throw MarketplaceError.unrecordable("\(entry.name): no tree hash for \(path)")
+            }
+            let trimmedRef = ref?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let source = PluginInstallSource.marketplace(
+                url: url, ref: (trimmedRef?.isEmpty ?? true) ? nil : trimmedRef, commit: commit,
+                entry: entry.name, path: path, tree: tree, version: entry.version)
+            guard source.isServerAcceptable else {
+                throw MarketplaceError.unrecordable("\(entry.name): source would be refused by the server")
+            }
+            return source
+        }
     }
 
     enum MarketplaceError: LocalizedError {
@@ -39,6 +70,7 @@ enum PluginMarketplace {
         case badManifest(String)
         case noPlugins
         case unknownPlugin(String)
+        case unrecordable(String)
 
         var errorDescription: String? {
             switch self {
@@ -50,6 +82,8 @@ enum PluginMarketplace {
                 return "That marketplace lists no installable plugins."
             case .unknownPlugin(let name):
                 return "Plugin '\(name)' is not in this marketplace."
+            case .unrecordable(let why):
+                return "Install source not recorded — \(why)."
             }
         }
     }
@@ -82,8 +116,29 @@ enum PluginMarketplace {
             staged.cleanup()
             throw MarketplaceError.noPlugins
         }
+        // Tree hashes need `.git`; read them all now, then drop it so no zip made
+        // from this clone (a root-level plugin included) carries history.
+        var trees: [String: String] = [:]
+        for entry in parsed.entries {
+            guard let path = recordablePath(entry.relativePath), trees[path] == nil else { continue }
+            if let tree = await PluginGitInstaller.treeHash(at: path, in: staged.repoRoot) {
+                trees[path] = tree
+            }
+        }
+        PluginGitInstaller.dropGitDir(of: staged.repoRoot)
         return Staged(marketplaceName: parsed.name, entries: parsed.entries, skipped: parsed.skipped,
-                      repoRoot: staged.repoRoot, cleanup: staged.cleanup)
+                      repoRoot: staged.repoRoot, cleanup: staged.cleanup,
+                      url: staged.normalizedURL, ref: ref, commit: staged.commit, trees: trees)
+    }
+
+    /// An entry path in the form the server records: leading `./` stripped,
+    /// trailing `/` trimmed, and nil when what is left breaks the server's path
+    /// rule (empty or `.` = the repository root, `..`, a backslash, …).
+    static func recordablePath(_ relativePath: String) -> String? {
+        var path = relativePath
+        while path.hasPrefix("./") { path.removeFirst(2) }
+        while path.hasSuffix("/") { path.removeLast() }
+        return PluginInstallSource.validPath(path) ? path : nil
     }
 
     /// Zip one plugin out of a cloned marketplace, ready for the install

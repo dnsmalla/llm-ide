@@ -1118,7 +1118,12 @@ struct LibraryView: View {
         panel.message = "Choose a plugin .zip"
         panel.prompt = "Install"
         guard panel.runModal() == .OK, let url = panel.url else { return }
-        await performInstall { replace in try await api.installPlugin(zipURL: url, replace: replace) }
+        // Only the file name is recorded: a local path is neither portable nor
+        // something an update check could use.
+        let source = PluginInstallSource.zip(fileName: url.lastPathComponent)
+        await performInstall { replace in
+            try await api.installPlugin(zipURL: url, replace: replace, source: source)
+        }
     }
 
     private func installFromGit(url: String, ref: String?) async {
