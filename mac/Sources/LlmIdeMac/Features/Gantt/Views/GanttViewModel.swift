@@ -53,6 +53,9 @@ final class GanttViewModel: ObservableObject {
         return c
     }()
 
+    /// Provider + project the current rows belong to; see `load`.
+    private var loadedKey: String?
+
     // MARK: - Date parsing
 
     func parseDate(_ s: String?) -> Date? {
@@ -66,6 +69,19 @@ final class GanttViewModel: ObservableObject {
     /// backend protocol. `api` is only used for the scheduling overlay and may
     /// be nil — the chart then falls back to whatever native dates exist.
     func load(client: RepoBackend, project: RepoProject, api: LlmIdeAPIClient?) async {
+        // A different project (or provider) must not keep showing — or acting
+        // on — the previous one's issues while the new list pages in: a tap
+        // during that window would pair project A's issue with project B's id
+        // and update the wrong repo. A refresh of the SAME project keeps its
+        // rows so the chart does not flash empty.
+        let loadKey = "\(client.kind.rawValue):\(project.id)"
+        if loadedKey != loadKey {
+            issues = []
+            schedules = [:]
+            milestones = []
+            members = []
+            loadedKey = loadKey
+        }
         isLoading = true
         errorMessage = nil
         defer { isLoading = false }

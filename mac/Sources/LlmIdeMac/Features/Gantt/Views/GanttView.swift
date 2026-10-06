@@ -90,6 +90,11 @@ struct GanttView: View {
             .task(id: "\(client.kind.rawValue):\(project.id)") {
                 await vm.load(client: client, project: project, api: api)
             }
+            .onChange(of: project.id) {
+                // A sheet opened for the previous project must not outlive it.
+                detailIssue = nil
+                schedulingIssue = nil
+            }
             .sheet(item: $detailIssue) { issue in
                 RepoIssueDetailSheet(
                     issue: issue,
