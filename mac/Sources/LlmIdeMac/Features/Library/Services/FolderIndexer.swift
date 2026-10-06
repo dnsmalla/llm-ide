@@ -27,6 +27,22 @@ final class FolderIndexer: @unchecked Sendable {
     /// the index until the next watcher fire.
     private let scanLock = NSLock()
 
+    /// `url`'s path relative to `root`. A plain prefix strip silently did nothing
+    /// when the configured folder's spelling differed from the on-disk one (case, or
+    /// a `/var` vs `/private/var` symlink), storing an ABSOLUTE path that every
+    /// later lookup (`appendingPathComponent` onto the folder) could not resolve.
+    static func relativePath(of url: URL, under root: URL) -> String {
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        if url.path.hasPrefix(rootPrefix) { return String(url.path.dropFirst(rootPrefix.count)) }
+        let resolvedRoot = root.resolvingSymlinksInPath().path
+        let resolvedPrefix = resolvedRoot.hasSuffix("/") ? resolvedRoot : resolvedRoot + "/"
+        let resolvedURL = url.resolvingSymlinksInPath().path
+        if let range = resolvedURL.range(of: resolvedPrefix, options: [.caseInsensitive, .anchored]) {
+            return String(resolvedURL[range.upperBound...])
+        }
+        return url.path
+    }
+
     init(root: URL, index: MeetingIndex) {
         self.root = root
         self.index = index
@@ -64,7 +80,7 @@ final class FolderIndexer: @unchecked Sendable {
                 for case let url as URL in enumerator {
                     let name = url.lastPathComponent
                     guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
-                    let relative = url.path.replacingOccurrences(of: root.path + "/", with: "")
+                    let relative = Self.relativePath(of: url, under: root)
                     // Unchanged (same mtime AND size) → skip the read/parse/upsert.
                     if let row = byPath[relative],
                        let rv = try? url.resourceValues(forKeys: [.contentModificationDateKey, .fileSizeKey]),
@@ -97,7 +113,7 @@ final class FolderIndexer: @unchecked Sendable {
         let size = (attrs[.size] as? Int64) ?? 0
         let body = String(contents[split.bodyStart...])
 
-        let relative = url.path.replacingOccurrences(of: root.path + "/", with: "")
+        let relative = Self.relativePath(of: url, under: root)
         let tldrJSON: String?
         if !fm.tldr.isEmpty,
            let data = try? AppJSON.encoder.encode(fm.tldr),
