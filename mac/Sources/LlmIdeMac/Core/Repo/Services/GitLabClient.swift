@@ -238,9 +238,8 @@ final class GitLabClient {
     // MARK: - Notes (comments)
 
     func listNotes(projectId: Int, iid: Int) async throws -> [GitLabNote] {
-        return try await get("/projects/\(projectId)/issues/\(iid)/notes",
-                             query: [.init(name: "per_page", value: "100"),
-                                     .init(name: "sort",     value: "asc")])
+        return try await getAllPages("/projects/\(projectId)/issues/\(iid)/notes",
+                                     query: [.init(name: "sort", value: "asc")])
     }
 
     func createNote(projectId: Int, iid: Int, body: String) async throws -> GitLabNote {
@@ -262,16 +261,14 @@ final class GitLabClient {
     }
 
     func listMergeRequests(projectId: Int, state: String = "opened") async throws -> [GitLabMergeRequest] {
-        return try await get("/projects/\(projectId)/merge_requests",
-                             query: [.init(name: "state",    value: state),
-                                     .init(name: "per_page", value: "50")])
+        return try await getAllPages("/projects/\(projectId)/merge_requests",
+                                     query: [.init(name: "state", value: state)])
     }
 
     // MARK: - Labels
 
     func listLabels(projectId: Int) async throws -> [GitLabLabel] {
-        return try await get("/projects/\(projectId)/labels",
-                             query: [.init(name: "per_page", value: "100")])
+        return try await getAllPages("/projects/\(projectId)/labels")
     }
 
     // MARK: - Milestones
@@ -280,14 +277,12 @@ final class GitLabClient {
         // All states, like GitHub's `listMilestonesGitHub`: an issue can reference a
         // CLOSED milestone, and with `active` only that milestone was missing from
         // the filter menu, the detail editor and the Gantt diamonds.
-        return try await get("/projects/\(projectId)/milestones",
-                             query: [.init(name: "per_page", value: "100")])
+        return try await getAllPages("/projects/\(projectId)/milestones")
     }
 
     /// Title of a milestone in ANY state, by id. The issues list filters by
     /// title, and the issue payload only carries the id; `listMilestones` is
-    /// active-only and one page, which would lose closed milestones and any
-    /// beyond the first 100.
+    /// paged, but a direct lookup by id avoids walking every page.
     func milestoneTitle(projectId: Int, id: Int) async throws -> String? {
         let milestone: GitLabMilestone = try await get("/projects/\(projectId)/milestones/\(id)")
         return milestone.title
@@ -296,8 +291,7 @@ final class GitLabClient {
     // MARK: - Members
 
     func listMembers(projectId: Int) async throws -> [GitLabUser] {
-        return try await get("/projects/\(projectId)/members/all",
-                             query: [.init(name: "per_page", value: "100")])
+        return try await getAllPages("/projects/\(projectId)/members/all")
     }
 
     // MARK: - Low-level HTTP
@@ -357,6 +351,24 @@ final class GitLabClient {
     private func execute<T: Decodable>(_ req: URLRequest) async throws -> T {
         let (value, _): (T, HTTPURLResponse) = try await executeWithHeaders(req)
         return value
+    }
+
+    /// Every page of a list endpoint (100 per page, at most `maxPages`). These lists
+    /// were a single page, so a project with more than 100 labels, milestones,
+    /// members, notes or open MRs silently lost the rest (and the MR de-dup check
+    /// then missed an existing MR).
+    private func getAllPages<T: Decodable>(_ path: String, query: [URLQueryItem] = [],
+                                           perPage: Int = 100, maxPages: Int = 10) async throws -> [T] {
+        var all: [T] = []
+        for page in 1...maxPages {
+            let batch: [T] = try await get(path, query: query + [
+                .init(name: "per_page", value: "\(perPage)"),
+                .init(name: "page", value: "\(page)"),
+            ])
+            all.append(contentsOf: batch)
+            if batch.count < perPage { break }
+        }
+        return all
     }
 
     private func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {

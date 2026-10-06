@@ -126,16 +126,16 @@ extension GitHubClient {
     }
 
     func listLabelsGitHub(owner: String, name: String) async throws -> [GitHubLabelWire] {
-        try await get("/repos/\(owner)/\(name)/labels", query: [.init(name: "per_page", value: "100")])
+        try await getAllPages("/repos/\(owner)/\(name)/labels")
     }
 
     func listMilestonesGitHub(owner: String, name: String) async throws -> [GitHubMilestoneWire] {
-        try await get("/repos/\(owner)/\(name)/milestones",
-                      query: [.init(name: "state", value: "all"), .init(name: "per_page", value: "100")])
+        try await getAllPages("/repos/\(owner)/\(name)/milestones",
+                              query: [.init(name: "state", value: "all")])
     }
 
     func listAssigneesGitHub(owner: String, name: String) async throws -> [GitHubUserWire] {
-        try await get("/repos/\(owner)/\(name)/assignees", query: [.init(name: "per_page", value: "100")])
+        try await getAllPages("/repos/\(owner)/\(name)/assignees")
     }
 
     // MARK: - Issue writes
@@ -149,8 +149,7 @@ extension GitHubClient {
     }
 
     func listIssueCommentsGitHub(owner: String, name: String, number: Int) async throws -> [GitHubCommentWire] {
-        try await get("/repos/\(owner)/\(name)/issues/\(number)/comments",
-                      query: [.init(name: "per_page", value: "100")])
+        try await getAllPages("/repos/\(owner)/\(name)/issues/\(number)/comments")
     }
 
     func createIssueCommentGitHub(owner: String, name: String, number: Int, body: String) async throws -> GitHubCommentWire {
@@ -164,8 +163,8 @@ extension GitHubClient {
     }
 
     func listOpenPullRequestsGitHub(owner: String, name: String) async throws -> [GitHubPullRequestWire] {
-        try await get("/repos/\(owner)/\(name)/pulls",
-                      query: [.init(name: "state", value: "open"), .init(name: "per_page", value: "100")])
+        try await getAllPages("/repos/\(owner)/\(name)/pulls",
+                              query: [.init(name: "state", value: "open")])
     }
 
     // MARK: - Branches
@@ -269,6 +268,23 @@ struct GitHubCommentWire: Decodable {
 extension GitHubClient {
     /// Authed GET against `apiBase` returning a JSON-decoded body.
     /// Adds query items, surfaces non-200 as `httpError`.
+    /// Every page of a list endpoint (100 per page, at most `maxPages`) — these were
+    /// one page, so a repo with more than 100 labels, milestones, assignees,
+    /// comments or open PRs silently lost the rest.
+    fileprivate func getAllPages<T: Decodable>(_ path: String, query: [URLQueryItem] = [],
+                                               perPage: Int = 100, maxPages: Int = 10) async throws -> [T] {
+        var all: [T] = []
+        for page in 1...maxPages {
+            let batch: [T] = try await get(path, query: query + [
+                .init(name: "per_page", value: "\(perPage)"),
+                .init(name: "page", value: "\(page)"),
+            ])
+            all.append(contentsOf: batch)
+            if batch.count < perPage { break }
+        }
+        return all
+    }
+
     fileprivate func get<T: Decodable>(_ path: String, query: [URLQueryItem] = []) async throws -> T {
         var comps = URLComponents(url: Self.apiBase.appendingPathComponent(path),
                                   resolvingAgainstBaseURL: false)
