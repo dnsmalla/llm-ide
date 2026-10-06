@@ -197,7 +197,8 @@ public struct LlmIdeMacApp: App {
             activity: activity,
             capture: self.autoCapture,
             registry: featureRegistry,
-            appSupportDir: appSupportBase)
+            appSupportDir: appSupportBase,
+            isAuthenticated: { store.isAuthenticated })
         // Must run AFTER both boot calls — it installs push observers on the
         // Auto Task / Loop mobile bridges they just constructed (previously
         // this ran right after the inline bridge construction).

@@ -17,14 +17,22 @@ final class AutoTaskModule: AppModule {
     private let scheduler: any FeatureService
     private let capture: any FeatureService
     private let schedulerEnabled: () -> Bool
+    private let isAuthenticated: () -> Bool
 
     init(scheduler: any FeatureService,
          capture: any FeatureService,
-         schedulerEnabled: @escaping () -> Bool) {
+         schedulerEnabled: @escaping () -> Bool,
+         isAuthenticated: @escaping () -> Bool = { true }) {
         self.scheduler = scheduler
         self.capture = capture
         self.schedulerEnabled = schedulerEnabled
+        self.isAuthenticated = isAuthenticated
     }
+
+    /// Auth-scoped like Chat/Graph/Mobile: `AutoCodeUpdateService.resetForSignOut`
+    /// stops the scheduler, and only the registry can start it again on the
+    /// next sign-in (it calls `start()` when this flips back to true).
+    var runtimeReady: Bool { isAuthenticated() }
 
     func start() {
         capture.start()
