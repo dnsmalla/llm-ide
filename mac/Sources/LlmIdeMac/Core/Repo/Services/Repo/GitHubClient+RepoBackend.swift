@@ -259,8 +259,12 @@ private extension SavedGitHubRepo {
 
 private extension GitHubUserWire {
     var asRepoUser: RepoUser {
+        // Keyed by LOGIN, like `listMembers`: GitHub assigns and filters issues
+        // by username, and the editors match "already assigned" by id. A
+        // numeric id here made an issue's current assignees disagree with the
+        // member list, so toggling one sent `["1234567", "login"]` (422).
         RepoUser(
-            id: String(id),
+            id: login,
             username: login,
             displayName: name?.isEmpty == false ? name! : login,
             avatarUrl: avatarUrl
