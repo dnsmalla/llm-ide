@@ -741,6 +741,12 @@ extension ChatEngine {
     /// silent under test — same as `finishStreamingTurn`.
     func announceAndPersist(oldValue: [ChatMessage],
                             newValue: [ChatMessage]) {
+        // The quick chat's two surfaces (menu-bar popover and sheet) both observe
+        // the same engine and both call this for every change: the second call for
+        // an identical transcript did a second file write and a second VoiceOver
+        // announcement. A repeat of the last handled value is a no-op.
+        guard newValue != lastHandledMessages else { return }
+        lastHandledMessages = newValue
         // Streamed text mutates `messages` in place many times per turn, and
         // each of those used to cost a synchronous session-file read + atomic
         // write on the MainActor. Debounce ONLY that case: every structural

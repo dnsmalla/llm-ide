@@ -220,6 +220,8 @@ final class ChatEngine {
     /// end is a no-op — the whole background turn would finish in memory and
     /// never reach disk. With this set, the turn-end funnel writes directly.
     var persistsUnobserved = false
+    /// The transcript `announceAndPersist` last handled — see there.
+    var lastHandledMessages: [ChatMessage] = []
 
     /// The composer settings this engine's turns send, captured while it was
     /// on screen. The panel's `resolveTransportInput` reads LIVE panel state,
