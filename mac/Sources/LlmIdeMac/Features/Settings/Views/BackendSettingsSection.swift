@@ -106,6 +106,10 @@ struct BackendSettingsSection: View {
         // tokens under the old host — lost on the relaunch that finally used
         // the new one. Sign out of both hosts and ask for a relaunch.
         session.clear()
+        // A different server is a different account (possibly another org):
+        // its chats must not be shown to, or rewritten for, the next sign-in.
+        ChatEngineRegistry.shared.forgetAllForSignOut()
+        ChatSessionStore.clear()
         KeychainStore.deleteToken(host: trimmed)
         needsRelaunch = true
     }

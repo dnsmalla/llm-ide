@@ -90,6 +90,11 @@ struct ReconnectView: View {
 
                 Button("Sign out", role: .destructive) {
                     session.clear()
+                    // Same as the header menu's Sign out: without this the
+                    // previous account's chats stay on disk and a live engine
+                    // writes them straight back for the next user.
+                    ChatEngineRegistry.shared.forgetAllForSignOut()
+                    ChatSessionStore.clear()
                 }
                 .font(Typography.caption)
                 .buttonStyle(.plain)
