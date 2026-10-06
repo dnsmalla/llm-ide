@@ -272,7 +272,7 @@ final class MobileLoopBridge: MobileFeatureBridge {
         // page observes.
         let tail = (autoCode?.logStore.buffers[AutoTask.loopEngineering.rawValue] ?? [])
             .suffix(40)
-            .map { "\($0.text)" }
+            .map { PhoneRedaction.logLine($0.text) }
         let startedHere = running && loopStartedHere
         let projectRoot = context.projectRoot
         let gitRoot = context.gitRoot

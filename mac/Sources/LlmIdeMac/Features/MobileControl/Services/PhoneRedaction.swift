@@ -46,6 +46,13 @@ enum PhoneRedaction {
         return (out.joined(separator: "\n"), truncated)
     }
 
+    /// One log line (CLI stdout/stderr) scrubbed of known token shapes. Uses the cheap
+    /// `SecretRedactor` path — logs are pushed on every change, so this runs far more often
+    /// than file/diff redaction — and leaves `key = value` text alone.
+    nonisolated static func logLine(_ raw: String) -> String {
+        code(raw, maxChars: maxLine * 2).text
+    }
+
     /// PEM private keys have no `key=value` shape, so neither redactor catches them. Everything from
     /// a `-----BEGIN … PRIVATE KEY-----` line through its `-----END` line is replaced by one marker.
     /// Returns true when the line was consumed (swallowed or replaced).

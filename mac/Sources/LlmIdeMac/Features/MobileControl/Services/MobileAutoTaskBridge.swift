@@ -515,7 +515,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                 AutoTaskLogLine(id: line.id.uuidString,
                                 timestamp: line.timestamp.timeIntervalSince1970,
                                 level: line.level.rawValue,
-                                text: line.text)
+                                text: PhoneRedaction.logLine(line.text))
             }
             return AutoTaskTaskLogs(id: task.rawValue, label: task.label, lines: lines)
         }
@@ -524,7 +524,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                 AutoTaskLogLine(id: line.id.uuidString,
                                 timestamp: line.timestamp.timeIntervalSince1970,
                                 level: line.level.rawValue,
-                                text: line.text)
+                                text: PhoneRedaction.logLine(line.text))
             }
             return AutoTaskTaskLogs(id: task.id, label: task.name, lines: lines)
         }
