@@ -46,6 +46,15 @@ enum PluginUpdatePresentation {
         }
     }
 
+    /// After a plugin was replaced from a zip, git or a marketplace: the new
+    /// version, and — when the server cleared hook trust / MCP consents — that
+    /// they must be approved again.
+    static func replacedMessage(name: String, version: String, trustReset: Bool) -> String {
+        var text = "Replaced \(name) — now v\(version)."
+        if trustReset { text += "\nHooks/MCP of \(name) were reset and need re-approval." }
+        return text
+    }
+
     /// The message for one finished update (nil for `.needsConfirmation`,
     /// which opens the confirmation sheet instead of saying anything).
     static func message(name: String, outcome: PluginUpdateOutcome) -> String? {

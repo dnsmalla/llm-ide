@@ -146,3 +146,10 @@ import Testing
     #expect(PluginUpdatePresentation.libraryMessage(prefix: "a", message: "") == "a")
     #expect(PluginUpdatePresentation.libraryMessage(prefix: "a", message: "b") == "a\n\nb")
 }
+
+@Test func replacedMessageNamesTrustReset() {
+    #expect(PluginUpdatePresentation.replacedMessage(name: "x", version: "2.0.0", trustReset: false)
+        == "Replaced x — now v2.0.0.")
+    #expect(PluginUpdatePresentation.replacedMessage(name: "x", version: "2.0.0", trustReset: true)
+        .contains("were reset and need re-approval"))
+}

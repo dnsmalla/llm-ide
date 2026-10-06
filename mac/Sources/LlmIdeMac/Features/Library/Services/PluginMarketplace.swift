@@ -55,9 +55,13 @@ enum PluginMarketplace {
                 throw MarketplaceError.unrecordable("\(entry.name): no tree hash for \(path)")
             }
             let trimmedRef = ref?.trimmingCharacters(in: .whitespacesAndNewlines)
+            // `version` is only a display label from the (untrusted) manifest:
+            // when it alone breaks the server's rules, drop it rather than lose
+            // the tree/commit the update check depends on.
+            let version = entry.version.flatMap { PluginInstallSource.validVersion($0) ? $0 : nil }
             let source = PluginInstallSource.marketplace(
                 url: url, ref: (trimmedRef?.isEmpty ?? true) ? nil : trimmedRef, commit: commit,
-                entry: entry.name, path: path, tree: tree, version: entry.version)
+                entry: entry.name, path: path, tree: tree, version: version)
             guard source.isServerAcceptable else {
                 throw MarketplaceError.unrecordable("\(entry.name): source would be refused by the server")
             }

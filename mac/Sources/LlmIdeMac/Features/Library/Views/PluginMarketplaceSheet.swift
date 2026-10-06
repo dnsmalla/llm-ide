@@ -196,7 +196,8 @@ struct PluginMarketplaceSheet: View {
             // Unrecordable provenance (e.g. a plugin at the repo root) is not an
             // install failure — install without a record.
             let source = try? staged.source(for: entry)
-            let response = try await api.installPlugin(zipURL: packaged, replace: replace, source: source)
+            let response = try await api.installPlugin(zipURL: packaged, replace: replace, source: source,
+                                                       fallbackFileName: "\(entry.name).zip")
             installed.insert(entry.name)
             var text = response.plugin.replaced
                 ? "Updated \(response.plugin.name) to v\(response.plugin.version)."

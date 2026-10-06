@@ -368,7 +368,12 @@ extension LlmIdeAPIClient {
     /// Convenience: clone a public Git URL → zip → upload through the
     /// existing install endpoint. Caller surfaces the install result
     /// the same way as the .zip-upload path.
-    func installPluginFromGit(url: String, ref: String? = nil, replace: Bool = false) async throws -> PluginInstallResponse {
+    ///
+    /// `fallbackFileName` names the zip record a replace falls back to when
+    /// the git record cannot be sent (see `installPlugin`); by default the
+    /// repository's name.
+    func installPluginFromGit(url: String, ref: String? = nil, replace: Bool = false,
+                              fallbackFileName: String? = nil) async throws -> PluginInstallResponse {
         let staged = try await PluginGitInstaller.cloneAndZip(url: url, ref: ref)
         defer { staged.cleanup() }
         let trimmedRef = ref?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -376,6 +381,9 @@ extension LlmIdeAPIClient {
             url: staged.normalizedURL,
             ref: (trimmedRef?.isEmpty ?? true) ? nil : trimmedRef,
             commit: staged.commit)
-        return try await installPlugin(zipURL: staged.zipURL, replace: replace, source: source)
+        let repoName = staged.normalizedURL.split(whereSeparator: { $0 == "/" || $0 == ":" }).last
+            .map { $0.hasSuffix(".git") ? String($0.dropLast(4)) : String($0) }
+        return try await installPlugin(zipURL: staged.zipURL, replace: replace, source: source,
+                                       fallbackFileName: fallbackFileName ?? repoName.map { "\($0).zip" })
     }
 }

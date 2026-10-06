@@ -88,3 +88,14 @@ func refusedURLsAreNotSent(url: String) {
     let rootEntry = PluginMarketplace.Entry(name: "root", description: "", version: nil, relativePath: ".")
     #expect(throws: (any Error).self) { try staged.source(for: rootEntry) }
 }
+
+@Test func invalidVersionIsDroppedButRecordKept() throws {
+    let entry = PluginMarketplace.Entry(name: "my-plugin", description: "", version: "1.0\n",
+                                        relativePath: "plugins/my-plugin")
+    let staged = PluginMarketplace.Staged(marketplaceName: "m", entries: [entry], skipped: [],
+                                          repoRoot: URL(fileURLWithPath: "/nonexistent"), cleanup: {},
+                                          url: "https://github.com/o/m", ref: nil, commit: sha,
+                                          trees: ["plugins/my-plugin": sha])
+    let source = try staged.source(for: entry)
+    #expect(source.version == nil && source.tree == sha && source.commit == sha)
+}

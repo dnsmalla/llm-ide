@@ -121,20 +121,26 @@ extension LlmIdeAPIClient {
     ///
     /// `source` is where the package came from; the server records it so
     /// updates can be checked later. A value the server would refuse is not
-    /// sent (the install still happens, unrecorded), and if the server refuses
-    /// it anyway (`INVALID_SOURCE`) the install is retried once without it —
-    /// provenance must never be the reason an install fails.
+    /// sent (the install still happens), and if the server refuses it anyway
+    /// (`INVALID_SOURCE`) the install is retried once without it — provenance
+    /// must never be the reason an install fails.
+    ///
+    /// On a REPLACE the server keeps the existing record when no header comes,
+    /// so in those two cases a zip record (`fallbackFileName`, default the zip's
+    /// own name) is sent instead: a git/marketplace record must never go on
+    /// describing content that was just replaced.
     func installPlugin(zipURL: URL, replace: Bool = false,
-                       source: PluginInstallSource? = nil) async throws -> PluginInstallResponse {
+                       source: PluginInstallSource? = nil,
+                       fallbackFileName: String? = nil) async throws -> PluginInstallResponse {
         let data = try Data(contentsOf: zipURL)
         let path = "/auth/me/plugins/install" + (replace ? "?replace=1" : "")
-        var headers: [String: String] = [:]
-        if let source {
-            if source.isServerAcceptable, let value = try? source.headerValue() {
-                headers["X-Llmide-Plugin-Source"] = value
-            } else {
-                Self.pluginInstallLog.notice("install source (\(source.kind, privacy: .public)) not recordable; installing without it")
-            }
+        let fallback = replace
+            ? Self.zipFallbackHeaders(fallbackFileName ?? zipURL.lastPathComponent) : [:]
+        var headers: [String: String] = fallback
+        if let source, source.isServerAcceptable, let value = try? source.headerValue() {
+            headers = ["X-Llmide-Plugin-Source": value]
+        } else if let source {
+            Self.pluginInstallLog.notice("install source (\(source.kind, privacy: .public)) not recordable; installing without it")
         }
         let response: PluginInstallResponse
         do {
@@ -142,8 +148,10 @@ extension LlmIdeAPIClient {
                 path, bytes: data, contentType: "application/zip", authenticated: true, headers: headers)
         } catch APIError.http(400, "INVALID_SOURCE", let message, _) where !headers.isEmpty {
             Self.pluginInstallLog.warning("server refused install source: \(message, privacy: .public); retrying without it")
+            // The fallback itself may be what was refused: then send nothing.
+            let retry = headers == fallback ? [:] : fallback
             response = try await postRawBytes(
-                path, bytes: data, contentType: "application/zip", authenticated: true)
+                path, bytes: data, contentType: "application/zip", authenticated: true, headers: retry)
         }
         // A newly installed plugin may declare a graph engine, and the resolved
         // engine is cached for the process. Without this the app kept reporting
@@ -151,6 +159,14 @@ extension LlmIdeAPIClient {
         // they had just used — until a relaunch.
         await MainActor.run { FeatureCatalog.invalidateGraphEngineCache() }
         return response
+    }
+
+    /// The zip record a replace falls back to; empty when even that would be
+    /// refused (then the replace goes out with no header at all).
+    private static func zipFallbackHeaders(_ fileName: String) -> [String: String] {
+        let source = PluginInstallSource.zip(fileName: fileName)
+        guard source.isServerAcceptable, let value = try? source.headerValue() else { return [:] }
+        return ["X-Llmide-Plugin-Source": value]
     }
 
     /// Remove an installed plugin by slug. Idempotent — removing

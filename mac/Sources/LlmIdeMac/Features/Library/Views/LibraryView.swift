@@ -1007,7 +1007,13 @@ struct LibraryView: View {
             get: { pendingReplaceInstall != nil },
             set: { if !$0 { pendingReplaceInstall = nil } }
         )) {
-            Button("Replace", role: .destructive) { Task { await replaceInstall() } }
+            Button("Replace", role: .destructive) {
+                // Captured now: the alert's dismissal clears the binding before
+                // the Task body runs, which used to make Replace a silent no-op.
+                let op = pendingReplaceInstall
+                pendingReplaceInstall = nil
+                Task { await replaceInstall(op) }
+            }
             Button("Cancel", role: .cancel) { pendingReplaceInstall = nil }
         } message: {
             Text("A plugin with this name is already installed. Replace it with this version?")
@@ -1142,7 +1148,9 @@ struct LibraryView: View {
             let resp = try await op(false)
             pluginInstallMessage = "Installed \(resp.plugin.title) v\(resp.plugin.version)."
             await refreshPlugins()
-        } catch let APIError.http(_, code, message, _) where code == "HTTP_ERROR" && message.contains("already installed") {
+        } catch let APIError.http(status, _, message, _) where status == 409 || message.contains("already installed") {
+            // The server answers 409 with code INSTALL_FAILED; the status is the
+            // signal, the message a fallback for a proxy that rewrites it.
             pendingReplaceInstall = op
         } catch {
             pluginInstallMessage = error.localizedDescription
@@ -1150,12 +1158,13 @@ struct LibraryView: View {
     }
 
     /// Re-run the held install with replace=true after the user confirms.
-    private func replaceInstall() async {
-        guard let op = pendingReplaceInstall else { return }
-        pendingReplaceInstall = nil
+    private func replaceInstall(_ op: ((Bool) async throws -> PluginInstallResponse)?) async {
+        guard let op else { return }
         do {
             let resp = try await op(true)
-            pluginInstallMessage = "Replaced \(resp.plugin.title) — now v\(resp.plugin.version)."
+            pluginInstallMessage = PluginUpdatePresentation.replacedMessage(
+                name: resp.plugin.title, version: resp.plugin.version,
+                trustReset: resp.plugin.trustReset == true)
             await refreshPlugins()
         } catch {
             pluginInstallMessage = error.localizedDescription

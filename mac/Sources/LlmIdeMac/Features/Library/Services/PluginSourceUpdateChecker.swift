@@ -20,6 +20,9 @@ actor PluginSourceUpdateChecker {
         for plugin in plugins where plugin.source.kind == "git" {
             results[plugin.name] = await checkGit(plugin.source)
         }
+        for name in PluginSourceComparison.incompleteMarketplaces(plugins) {
+            results[name] = SourceCheckResult(status: .unavailable("the install record is incomplete"), latest: nil)
+        }
         let groups = PluginSourceComparison.groupMarketplaces(plugins)
         let byName = Dictionary(plugins.map { ($0.name, $0.source) }, uniquingKeysWith: { first, _ in first })
         for (key, names) in groups {
