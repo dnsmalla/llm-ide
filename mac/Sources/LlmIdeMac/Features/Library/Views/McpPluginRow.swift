@@ -7,6 +7,8 @@ import SwiftUI
 /// action belongs in the list, not buried in the detail pane).
 struct McpPluginRow: View {
     let plugin: LlmIdeAPIClient.McpPluginInfo
+    /// Registry check result for this server (API v62+); nil when none.
+    var versionUpdate: LlmIdeAPIClient.McpServerUpdate?
     let onToggleConsent: (Bool) -> Void
     let onToggleEnabled: (Bool) -> Void
 
@@ -19,6 +21,18 @@ struct McpPluginRow: View {
                 HStack(spacing: 6) {
                     Text(plugin.name).font(.callout).lineLimit(1)
                     sourceBadge
+                    if let version = McpUpdatePresentation.versionText(package: plugin.package) {
+                        Text(version).font(.caption2).foregroundStyle(.secondary)
+                    }
+                    if versionUpdate?.status == "update-available" {
+                        Text("Update")
+                            .font(.system(size: 9, weight: .bold))
+                            .foregroundStyle(Color.orange)
+                            .padding(.horizontal, 5).padding(.vertical, 1)
+                            .background(Color.orange.opacity(0.15))
+                            .clipShape(Capsule())
+                            .help("A newer version is available: \(versionUpdate?.latest ?? "")")
+                    }
                 }
                 Text(subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
             }
@@ -53,11 +67,12 @@ struct McpPluginRow: View {
     }
 
     private var sourceBadge: some View {
-        Text(plugin.source == "claude" ? "claude" : "manual")
+        let isImport = plugin.source == "claude" || plugin.source == "codex"
+        return Text(isImport ? plugin.source : (plugin.source == "catalog" ? "catalog" : "manual"))
             .font(.system(size: 9, weight: .bold))
-            .foregroundStyle(plugin.source == "claude" ? Color.blue : Color.secondary)
+            .foregroundStyle(isImport ? Color.blue : Color.secondary)
             .padding(.horizontal, 5).padding(.vertical, 1)
-            .background((plugin.source == "claude" ? Color.blue : Color.secondary).opacity(0.15))
+            .background((isImport ? Color.blue : Color.secondary).opacity(0.15))
             .clipShape(Capsule())
     }
 

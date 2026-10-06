@@ -16,6 +16,48 @@ extension LlmIdeAPIClient {
         let label: String?
     }
 
+    /// The npx/uvx package a server runs, as parsed server-side (API v62+).
+    /// `version` is the pinned release; `tag` is a dist-tag such as `latest`.
+    struct McpPackageSpec: Decodable, Equatable {
+        let runner: String
+        let name: String
+        let version: String?
+        let tag: String?
+    }
+
+    /// One server's row of `GET /auth/me/mcp-plugins/updates`.
+    struct McpServerUpdate: Decodable, Equatable, Identifiable {
+        let id: String
+        let runner: String
+        let name: String
+        let current: String?
+        let latest: String?
+        /// "up-to-date" | "update-available" | "unpinned" | "unknown"
+        let status: String
+        let reason: String?
+    }
+
+    struct McpUpdateCheck: Decodable, Equatable {
+        let checkedAt: String?
+        let servers: [McpServerUpdate]
+    }
+
+    struct McpUpdateAck: Decodable, Equatable {
+        let ok: Bool
+        let from: String?
+        let to: String?
+    }
+
+    struct McpResyncStatus: Decodable, Equatable {
+        let drift: Bool
+        let changes: [String]
+    }
+
+    struct McpResyncAck: Decodable, Equatable {
+        let ok: Bool
+        let changes: [String]
+    }
+
     struct McpPluginInfo: Decodable, Identifiable, Equatable {
         let id: String
         let name: String
@@ -44,6 +86,13 @@ extension LlmIdeAPIClient {
         /// consented AND (for a plugin-declared server) its plugin enabled for
         /// this user. Nil from an older server, which `isEffective` falls back on.
         let effective: Bool?
+        /// Parsed npx/uvx package; nil for hosted or unmanaged servers and
+        /// from a pre-v62 server.
+        let package: McpPackageSpec?
+        /// Catalog entry this server was added from (v62+).
+        let catalogId: String?
+        /// Name in the Claude Code / Codex config it was imported from (v62+).
+        let sourceName: String?
         /// What the user should count as "costing tokens now".
         var isEffective: Bool { effective ?? (enabled && consented) }
 
@@ -70,6 +119,7 @@ extension LlmIdeAPIClient {
         enum CodingKeys: String, CodingKey {
             case id, name, transport, command, args, env, url, headers
             case credential, credentialMissing, source, builtin, enabled, consented, effective
+            case package, catalogId, sourceName
         }
         init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -88,6 +138,9 @@ extension LlmIdeAPIClient {
             self.enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? false
             self.consented = try c.decodeIfPresent(Bool.self, forKey: .consented) ?? false
             self.effective = try c.decodeIfPresent(Bool.self, forKey: .effective)
+            self.package = try c.decodeIfPresent(McpPackageSpec.self, forKey: .package)
+            self.catalogId = try c.decodeIfPresent(String.self, forKey: .catalogId)
+            self.sourceName = try c.decodeIfPresent(String.self, forKey: .sourceName)
         }
     }
     private struct McpPluginListResponse: Decodable { let plugins: [McpPluginInfo] }
@@ -270,5 +323,34 @@ extension LlmIdeAPIClient {
     /// Remove a registered server. Admin-gated server-side.
     func removeMcpPlugin(id: String) async throws {
         let _: RemoveAck = try await delete("/auth/me/mcp-plugins/\(percentEncoded(id))", authenticated: true)
+    }
+
+    // MARK: - Versions (API v62)
+
+    /// Registry version check for every version-managed server. `force`
+    /// bypasses the server's cache (admin-only; others get the cached answer).
+    func mcpUpdates(force: Bool = false) async throws -> McpUpdateCheck {
+        try await get("/auth/me/mcp-plugins/updates" + (force ? "?force=1" : ""), authenticated: true)
+    }
+
+    /// Re-pin a server. `to` nil means the registry's latest; `expectArgs` is
+    /// the args the caller saw, so a concurrent edit fails with 409 STALE.
+    /// Revokes every user's consent server-side.
+    func updateMcpPlugin(id: String, to: String? = nil, expectArgs: [String]? = nil) async throws -> McpUpdateAck {
+        struct Req: Encodable { let to: String?; let expectArgs: [String]? }
+        return try await post("/auth/me/mcp-plugins/\(percentEncoded(id))/update",
+                              body: Req(to: to, expectArgs: expectArgs), authenticated: true)
+    }
+
+    /// Whether an imported (claude/codex) server drifted from its source config.
+    func mcpResyncStatus(id: String) async throws -> McpResyncStatus {
+        try await get("/auth/me/mcp-plugins/\(percentEncoded(id))/resync", authenticated: true)
+    }
+
+    /// Re-apply the source config. Revokes every user's consent server-side.
+    func resyncMcpPlugin(id: String) async throws -> McpResyncAck {
+        struct Empty: Encodable {}
+        return try await post("/auth/me/mcp-plugins/\(percentEncoded(id))/resync",
+                              body: Empty(), authenticated: true)
     }
 }

@@ -91,6 +91,8 @@ struct LibraryView: View {
     /// which hides an actionable problem from the user.
     @State private var mcpPlugins: [LlmIdeAPIClient.McpPluginInfo] = []
     @State private var mcpPluginsError: String?
+    /// Registry-owned (not view state) so a check outlives a section switch.
+    private let mcpUpdateCenter = McpUpdateCenter.shared
     @State private var mcpPluginMessage: String?
     @State private var mcpClaudeSources: [LlmIdeAPIClient.ClaudeMcpSource] = []
     @State private var mcpCodexSources: [LlmIdeAPIClient.CodexMcpSource] = []
@@ -1385,6 +1387,7 @@ struct LibraryView: View {
                     ForEach(mcpPlugins) { p in
                         McpPluginRow(
                             plugin: p,
+                            versionUpdate: mcpUpdateCenter.update(for: p.id),
                             onToggleConsent: { consented in Task { await consentPlugin(p.id, consented: consented) } },
                             onToggleEnabled: { enabled in Task { await togglePlugin(p.id, enabled: enabled) } }
                         )
@@ -1503,6 +1506,11 @@ struct LibraryView: View {
         // rather than reporting an error over the plugin list, which is the
         // more important thing on this screen.
         mcpCatalog = (try? await api.fetchMcpCatalog()) ?? mcpCatalog
+        // Version badges (API v62+): cached server-side, so cheap to repeat.
+        if McpUpdatePresentation.isSupported(serverApiVersion: backend.serverApiVersion),
+           mcpPlugins.contains(where: { $0.package != nil }) {
+            await mcpUpdateCenter.check(api: api, force: false)
+        }
     }
 
     /// One add call for every entry point — the server resolves catalogId,

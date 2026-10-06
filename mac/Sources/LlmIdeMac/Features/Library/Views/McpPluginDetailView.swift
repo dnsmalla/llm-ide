@@ -16,6 +16,9 @@ struct McpPluginDetailView: View {
     @Environment(ShellState.self) private var shell
     let api: LlmIdeAPIClient
     let pluginId: String
+    /// Read for `serverApiVersion` only — version controls need API v62+.
+    @Environment(BackendManager.self) private var backend
+    private let center = McpUpdateCenter.shared
 
     @State private var plugin: LlmIdeAPIClient.McpPluginInfo?
     @State private var loaded = false
@@ -43,6 +46,7 @@ struct McpPluginDetailView: View {
                     Text(err).foregroundStyle(theme.current.danger).font(.callout)
                 } else if let plugin {
                     infoBlock(plugin)
+                    if supportsVersions { versionBlock(plugin) }
                     actionsRow
                 } else {
                     Text("Plugin not found — it may have been removed.")
@@ -79,7 +83,7 @@ struct McpPluginDetailView: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(plugin?.name ?? pluginId).font(.title2.bold())
                 if let plugin {
-                    Text(plugin.source == "claude" ? "Imported from Claude Code" : "Manually registered")
+                    Text(McpUpdatePresentation.sourceLabel(source: plugin.source))
                         .font(.caption).foregroundStyle(.secondary)
                 }
             }
@@ -149,6 +153,65 @@ struct McpPluginDetailView: View {
             .font(.caption).foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    private var supportsVersions: Bool {
+        McpUpdatePresentation.isSupported(serverApiVersion: backend.serverApiVersion)
+    }
+
+    @ViewBuilder
+    private func versionBlock(_ p: LlmIdeAPIClient.McpPluginInfo) -> some View {
+        let working = center.inFlight.contains(p.id)
+        let info = center.update(for: p.id)
+        let isImport = p.source == "claude" || p.source == "codex"
+        VStack(alignment: .leading, spacing: 6) {
+            if let version = McpUpdatePresentation.versionText(package: p.package) {
+                Text("Version").font(.headline)
+                LabeledContent(p.package?.name ?? "Package", value: version)
+                if let info, info.status == "unknown", let reason = info.reason {
+                    Text("Could not look up the latest version: \(reason)")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                HStack(spacing: 8) {
+                    if let title = McpUpdatePresentation.actionTitle(status: info?.status ?? "", latest: info?.latest) {
+                        Button(title) { Task { await applyUpdate(p, latest: info?.latest) } }
+                            .disabled(busy || working)
+                    }
+                    Button("Check for updates") {
+                        Task { await center.check(api: api, force: true, reportTo: p.id) }
+                    }
+                    .disabled(busy || working || center.checking)
+                    if working || center.checking { ProgressView().controlSize(.small) }
+                }
+            }
+            if isImport, let changes = center.drift[p.id], !changes.isEmpty {
+                Text(McpUpdatePresentation.driftText(changes: changes))
+                    .font(.caption).foregroundStyle(.secondary)
+                Button("Re-sync from \(p.source == "codex" ? "Codex" : "Claude Code")") {
+                    Task { await applyResync(p) }
+                }
+                .disabled(busy || working)
+            }
+            if let result = center.results[p.id] {
+                Text(result.message).font(.caption)
+                    .foregroundStyle(result.failed ? theme.current.danger : Color.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .task(id: p.id) {
+            if p.package != nil, center.update(for: p.id) == nil { await center.check(api: api, force: false) }
+            if isImport { await center.loadDrift(id: p.id, api: api) }
+        }
+    }
+
+    private func applyUpdate(_ p: LlmIdeAPIClient.McpPluginInfo, latest: String?) async {
+        if await center.update(id: p.id, to: latest, expectArgs: p.args, api: api) {
+            shell.markLibraryDirty()
+        }
+    }
+
+    private func applyResync(_ p: LlmIdeAPIClient.McpPluginInfo) async {
+        if await center.resync(id: p.id, api: api) { shell.markLibraryDirty() }
     }
 
     @ViewBuilder
