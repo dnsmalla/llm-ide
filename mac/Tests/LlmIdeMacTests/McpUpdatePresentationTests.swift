@@ -14,6 +14,24 @@ struct McpUpdatePresentationTests {
         #expect(McpUpdatePresentation.sourceLabel(source: "other") == "Manually registered")
     }
 
+    @Test("source badge names plugin-declared servers instead of calling them manual")
+    func sourceBadges() {
+        for source in ["catalog", "claude", "codex", "plugin"] {
+            #expect(McpUpdatePresentation.sourceBadge(source: source) == source)
+        }
+        #expect(McpUpdatePresentation.sourceBadge(source: "manual") == "manual")
+        #expect(McpUpdatePresentation.sourceBadge(source: "other") == "manual")
+    }
+
+    @Test("checked text states the server time, or says cached when there is none")
+    func checkedText() {
+        #expect(McpUpdatePresentation.checkedText(checkedAt: nil, upToDate: true) == "Checked (cached) — up to date.")
+        #expect(McpUpdatePresentation.checkedText(checkedAt: "garbage", upToDate: false) == "Checked (cached).")
+        let text = McpUpdatePresentation.checkedText(checkedAt: "2026-10-06T05:07:09.123Z", upToDate: true)
+        #expect(text.hasPrefix("Checked at "))
+        #expect(text.hasSuffix(" — up to date."))
+    }
+
     @Test("version text: pinned, unpinned, unmanaged")
     func versionText() throws {
         let pinned = try decodePackage(#"{"runner":"npx","name":"x","version":"1.2.3","tag":null}"#)

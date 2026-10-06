@@ -68,7 +68,7 @@ struct McpPluginRow: View {
 
     private var sourceBadge: some View {
         let isImport = plugin.source == "claude" || plugin.source == "codex"
-        return Text(isImport ? plugin.source : (plugin.source == "catalog" ? "catalog" : "manual"))
+        return Text(McpUpdatePresentation.sourceBadge(source: plugin.source))
             .font(.system(size: 9, weight: .bold))
             .foregroundStyle(isImport ? Color.blue : Color.secondary)
             .padding(.horizontal, 5).padding(.vertical, 1)

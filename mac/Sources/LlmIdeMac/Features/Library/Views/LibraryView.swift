@@ -1509,7 +1509,8 @@ struct LibraryView: View {
         // Version badges (API v62+): cached server-side, so cheap to repeat.
         if McpUpdatePresentation.isSupported(serverApiVersion: backend.serverApiVersion),
            mcpPlugins.contains(where: { $0.package != nil }) {
-            await mcpUpdateCenter.check(api: api, force: false)
+            // Not awaited: a slow registry must not hold up the list loads.
+            mcpUpdateCenter.startListCheck(api: api)
         }
     }
 

@@ -27,6 +27,7 @@ final class McpUpdateCenter: SessionScoped {
     private(set) var drift: [String: [String]] = [:]
     private var epoch = 0
     private var checkGeneration = 0
+    private var listCheckTask: Task<Void, Never>?
 
     private init() {
         SessionScopedRegistry.shared.register(self)
@@ -35,6 +36,8 @@ final class McpUpdateCenter: SessionScoped {
     func resetForSignOut() {
         epoch += 1
         checkGeneration += 1
+        listCheckTask?.cancel()
+        listCheckTask = nil
         updates = [:]
         checking = false
         inFlight = []
@@ -43,6 +46,18 @@ final class McpUpdateCenter: SessionScoped {
     }
 
     func update(for id: String) -> LlmIdeAPIClient.McpServerUpdate? { updates[id] }
+
+    /// Start the list-load check without making the caller wait. The registry
+    /// lookup can take seconds when npm/PyPI are slow, and the list's own
+    /// loads (connectors, plugins) must not queue behind it. Owned here, not
+    /// by the view, so leaving the section does not orphan it; the epoch and
+    /// generation guards in `check` still drop a stale answer.
+    func startListCheck(api: LlmIdeAPIClient) {
+        guard !checking else { return }
+        listCheckTask = Task { [weak self] in
+            await self?.check(api: api, force: false)
+        }
+    }
 
     /// Ask the server which managed servers have a newer release. A failure
     /// keeps the previous answer; `id` (the open pane) gets the message.
@@ -57,7 +72,11 @@ final class McpUpdateCenter: SessionScoped {
             updates = Dictionary(answer.servers.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
             if let id, results[id]?.failed == true { results[id] = nil }
             if let id, force, updates[id]?.status == "up-to-date" {
-                results[id] = Result(message: "Checked — up to date.", failed: false)
+                // The server may serve a forced check from its cache; state its
+                // own timestamp rather than implying a fresh lookup.
+                results[id] = Result(
+                    message: McpUpdatePresentation.checkedText(checkedAt: answer.checkedAt, upToDate: true),
+                    failed: false)
             }
         } catch {
             guard started == epoch, generation == checkGeneration else { return }

@@ -21,6 +21,31 @@ enum McpUpdatePresentation {
         }
     }
 
+    /// The short capsule on a list row. A plugin-declared server must not read
+    /// as "manual": it is not hand-registered and cannot be removed by hand.
+    static func sourceBadge(source: String) -> String {
+        switch source {
+        case "catalog", "claude", "codex", "plugin": return source
+        default: return "manual"
+        }
+    }
+
+    /// Result line for a user-requested check. The server answers a forced
+    /// check from its cache when it declines to force, so the line states the
+    /// server's own `checkedAt` instead of claiming a fresh lookup.
+    static func checkedText(checkedAt: String?, upToDate: Bool) -> String {
+        let head = checkedAt.flatMap(Self.timeText).map { "Checked at \($0)" } ?? "Checked (cached)"
+        return upToDate ? "\(head) — up to date." : "\(head)."
+    }
+
+    private static func timeText(_ iso: String) -> String? {
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let plain = ISO8601DateFormatter()
+        guard let date = parser.date(from: iso) ?? plain.date(from: iso) else { return nil }
+        return date.formatted(date: .omitted, time: .shortened)
+    }
+
     /// `v1.2.3`, "unpinned" (runs whatever the registry serves), or nil for a
     /// server that is not version-managed.
     static func versionText(package: LlmIdeAPIClient.McpPackageSpec?) -> String? {
