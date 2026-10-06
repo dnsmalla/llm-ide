@@ -8,6 +8,10 @@ public enum IncidentClassifier {
         ("auth", ["http 401", "http 403", "status 401", "status 403", "unauthorized", "forbidden", "not signed in"]),
         ("permission", ["operation not permitted", "permission denied", "eperm", "eacces"]),
         ("disk", ["no space left on device", "enospc"]),
+        // A loop the USER configured wrongly is not an app bug: nothing in this
+        // repository fixes "stage has no command".
+        ("configuration", ["has no runnable command", "has no skill chosen", "has no checks configured",
+                           "needs a newer version of llm-ide", "is not registered", "isn't registered"]),
         ("cancelled", ["request was cancelled", "operation was cancelled", "cancellationerror",
                        "cancelled by user", "user cancelled"]),
     ]

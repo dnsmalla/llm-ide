@@ -111,23 +111,29 @@ public enum LoopWorktreeManager {
     /// cleanup must fail safe because deleting a Loop's repairs is worse than
     /// leaving an extra checkout on disk.
     /// - Parameter runGit: resolved in the body — see `createIfPossible`.
+    /// - Returns: a message naming the worktree and branch when it was RETAINED
+    ///   (dirty, advanced, or unreadable), so the caller can tell the user where
+    ///   the work is; nil when it was removed or already gone.
+    @discardableResult
     static func finish(_ lease: Lease,
-                       runGit: (([String], URL) async throws -> String)? = nil) async {
+                       runGit: (([String], URL) async throws -> String)? = nil) async -> String? {
         let runGit = runGit ?? { try await defaultRunGit($0, at: $1) }
         decrementActive(mainRepo: lease.mainRepo)
         liveLeasePaths.remove(key(lease.worktreePath))
-        guard FileManager.default.fileExists(atPath: lease.worktreePath.path) else { return }
+        guard FileManager.default.fileExists(atPath: lease.worktreePath.path) else { return nil }
 
         guard let status = try? await runGit(["status", "--porcelain"], lease.worktreePath),
               let head = try? await runGit(["rev-parse", "HEAD"], lease.worktreePath),
               status.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
               head.trimmingCharacters(in: .whitespacesAndNewlines) == lease.baseCommit else {
-            return
+            return "the run changed code in an isolated checkout, kept for review: "
+                + "\(lease.worktreePath.path) (branch \(lease.branch))"
         }
 
         _ = try? await runGit(["worktree", "remove", "--force", lease.worktreePath.path],
                                lease.mainRepo)
         _ = try? await runGit(["branch", "-D", lease.branch], lease.mainRepo)
+        return nil
     }
 
     /// Run-start hygiene: `git worktree prune`, then remove loop worktree

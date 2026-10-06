@@ -618,7 +618,14 @@ final class LoopEngineRunner: ObservableObject {
             currentRunContext = nil
             LoopRunQueue.release(rootKey: lockRootKey)
             if let lease = worktreeLease {
-                Task { await LoopWorktreeManager.finish(lease) }
+                Task {
+                    // Say where the work went. This used to be silent: a concurrent
+                    // run that repaired code ended "success" with the fix in a
+                    // hidden sibling directory nobody was pointed at.
+                    if let kept = await LoopWorktreeManager.finish(lease) {
+                        self.appendLog(.info, "Worktree kept · \(kept)")
+                    }
+                }
             }
             currentWorktreeLease = nil
         }
@@ -2350,7 +2357,12 @@ final class LoopEngineRunner: ObservableObject {
                         faultsRoot: URL, gitRoot: URL, projectId: String?,
                         startedAt: Date, loopId: String, loopName: String) async -> LoopEngineStatus {
         if case .error(let message) = terminal {
-            IncidentRecorder.record(source: .ui, category: "loop", message: message)
+            // Only genuine failures feed Self-Heal. A misconfigured stage, an
+            // unregistered repo or an offline network is the user's situation, and
+            // recording it sent the fix agent after an "app bug" that does not exist.
+            if IncidentClassifier.environmentalReason(message: message) == nil {
+                IncidentRecorder.record(source: .ui, category: "loop", message: message)
+            }
         }
         if let token = selfHealSuppression {
             IncidentRecorder.endSuppression(token)
