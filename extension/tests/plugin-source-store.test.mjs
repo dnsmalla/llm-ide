@@ -19,6 +19,10 @@ test('absent ref is omitted, null ref is kept', () => {
   assert.equal(validateSource({ kind: 'git', url: 'https://github.com/o/r.git', ref: null, commit: C }).source.ref, null);
 });
 
+test('scp form with a normal host stays valid', () => {
+  assert.equal(validateSource({ kind: 'git', url: 'git@github.com:o/r.git', commit: C }).ok, true);
+});
+
 test('rejects unsafe values', () => {
   for (const bad of [
     { kind: 'git', url: 'http://localhost/r.git', commit: C },
@@ -52,6 +56,9 @@ test('rejects unsafe values', () => {
     { kind: 'git', url: 'git@localhost:o/r.git', commit: C },
     { kind: 'git', url: 'git@127.0.0.1:o/r.git', commit: C },
     { kind: 'git', url: 'git@box.local:o/r.git', commit: C },
+    { kind: 'git', url: 'git@127.1:x', commit: C },
+    { kind: 'git', url: 'git@2130706433:x', commit: C },
+    { kind: 'git', url: 'git@0x7f000001:x', commit: C },
     { kind: 'git', url: 'git@-host.com:o/r.git', commit: C },
     { kind: 'git', url: 'git@github.com:-o/r.git', commit: C },
     { kind: 'git', url: 'git@github.com:o/../r.git', commit: C },

@@ -46,7 +46,14 @@ function validScpUrl(url) {
   const match = SCP_PARTS_RE.exec(url);
   if (!match) return false;
   const [, host, repoPath] = match;
-  if (!SCP_HOST_RE.test(host) || !publicHostName(host)) return false;
+  if (!SCP_HOST_RE.test(host)) return false;
+  // Normalize like the https path so numeric forms (127.1, 2130706433, 0x7f000001)
+  // resolve to what they really are before the host checks run.
+  let normalized;
+  try { normalized = new URL(`https://${host}`).hostname; } catch { return false; }
+  const lastLabel = host.replace(/\.$/, '').split('.').pop();
+  if (/^\d+$/.test(lastLabel) || /^0x[0-9a-f]+$/i.test(lastLabel)) return false;
+  if (!publicHostName(host) || !publicHostName(normalized)) return false;
   return !repoPath.startsWith('-') && !repoPath.split('/').includes('..');
 }
 
