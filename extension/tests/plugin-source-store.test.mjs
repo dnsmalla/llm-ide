@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs'; import os from 'node:os'; import path from 'node:path';
-import { validateSource, decodeSourceHeader, getSource, setSource, removeSource, readSources } from '../plugins/source-store.mjs';
+import { validateSource, decodeSourceHeader, getSource, setSource, removeSource, readSources, pruneSources } from '../plugins/source-store.mjs';
 
 const C = 'a'.repeat(40); const T = 'b'.repeat(40);
 const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64url');
@@ -92,4 +92,12 @@ test('remove drops the record; corrupt file reads as empty', () => {
   assert.equal(getSource('demo', d), null);
   fs.writeFileSync(path.join(path.dirname(d), 'plugin-sources.json'), '{nope');
   assert.deepEqual(readSources(d), {});
+});
+
+test('pruneSources drops records for plugins that are not installed', () => {
+  const d = pdir();
+  setSource('keep', { kind: 'zip', fileName: 'k.zip' }, d);
+  setSource('gone', { kind: 'zip', fileName: 'g.zip' }, d);
+  pruneSources(new Set(['keep']), d);
+  assert.deepEqual(Object.keys(readSources(d)), ['keep']);
 });

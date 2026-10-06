@@ -9,7 +9,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
+import { readdirSync, mkdtempSync, mkdirSync, writeFileSync, existsSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { readFileSync } from 'node:fs';
@@ -457,5 +457,20 @@ test('a failing backup removal still resets trust', { skip: skipReason || false 
     assert.equal(res.ok, true);
     assert.equal(res.plugin.trustReset, true);
     assert.deepEqual(calls, { trust: ['replace-demo'], mcp: ['replace-demo'] });
+  } finally { rmSync(pluginDir, { recursive: true, force: true }); }
+});
+
+test('a leftover dot-prefixed backup is not loaded as a plugin', { skip: skipReason || false }, async () => {
+  const pluginDir = newTempRoot();
+  try {
+    await installFromZip(buildZip(META, '{}'), { replace: true, pluginDir });
+    await installFromZip(buildZip(META, '{"x":1}'), {
+      replace: true, pluginDir, removeBackup: async () => { throw new Error('EACCES'); },
+    });
+    const leftovers = readdirSync(pluginDir).filter((n) => n.includes('.bak-'));
+    assert.equal(leftovers.length, 1);
+    assert.ok(leftovers[0].startsWith('.'));
+    const names = [...loadPlugins({ pluginDir }).plugins.keys()];
+    assert.deepEqual(names, ['replace-demo']);
   } finally { rmSync(pluginDir, { recursive: true, force: true }); }
 });

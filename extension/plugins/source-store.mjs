@@ -186,3 +186,17 @@ export function removeSource(name, pluginDir) {
   delete all[name];
   writeSources(all, pluginDir);
 }
+
+/**
+ * Drop records whose plugin is no longer installed. A plugin folder can vanish
+ * or be overwritten outside the install route; a stale record would later
+ * offer an "update" that replaces the wrong thing.
+ */
+export function pruneSources(installedNames, pluginDir) {
+  const all = readSources(pluginDir);
+  let changed = false;
+  for (const name of Object.keys(all)) {
+    if (!installedNames.has(name)) { delete all[name]; changed = true; }
+  }
+  if (changed) writeSources(all, pluginDir);
+}

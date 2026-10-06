@@ -1416,3 +1416,21 @@ test('POST /auth/me/mcp-plugins/add with an unmatched claudeName fails with a cl
   assert.equal(miss.statusCode, 400);
   assert.match(miss.json().error.message, /no Claude MCP server named/);
 });
+
+test('claude import drops a same-named git/marketplace source record', async () => {
+  writeClaudeInstalledFixture({ name: 'bridge-srcrec-demo', packageVersion: '1.0.0' });
+  const { user } = await registerAndLogin();
+  const { getSource, setSource } = await import('../plugins/source-store.mjs');
+  setSource('claude-bridge-srcrec-demo', GIT_SRC);
+  assert.ok(getSource('claude-bridge-srcrec-demo'));
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: { id: user.id, role: 'admin' }, body: { name: 'bridge-srcrec-demo', source: 'installed' } });
+  assert.equal(ok.statusCode, 200, ok._body);
+  assert.equal(getSource('claude-bridge-srcrec-demo'), null);
+});
+
+test('plugin install: invalid expect is a 400 only after the body is read', async () => {
+  const { user } = await registerAndLogin();
+  const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?expect=BAD%20NAME', user: { id: user.id, role: 'admin' }, rawBody: Buffer.from('x') });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error.code, 'VALIDATION_FAILED');
+});

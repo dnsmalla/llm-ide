@@ -1066,10 +1066,6 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     // The plugin an update means to replace; the installer refuses a package
     // that names another one (NAME_MISMATCH) before touching anything.
     const expectName = u.searchParams.get('expect');
-    if (expectName !== null && !/^[a-z][a-z0-9-]{1,40}$/.test(expectName)) {
-      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'expect must be a plugin name' } });
-      return;
-    }
     let zipBytes;
     try {
       zipBytes = await readRawBody(req, 5 * 1024 * 1024);
@@ -1077,8 +1073,12 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, err.status || 413, { error: { code: err.code || 'PAYLOAD_TOO_LARGE', message: err.message } });
       return;
     }
-    // Decode the provenance header only after the body is drained, so a 400
+    // Header/query errors are reported only after the body is drained, so a 400
     // never leaves the client mid-upload.
+    if (expectName !== null && !/^[a-z][a-z0-9-]{1,40}$/.test(expectName)) {
+      send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'expect must be a plugin name' } });
+      return;
+    }
     const { decodeSourceHeader, setSource, removeSource, getSource } = await import('../plugins/source-store.mjs');
     const sourceHeader = req.headers['x-llmide-plugin-source'];
     const decoded = decodeSourceHeader(Array.isArray(sourceHeader) ? sourceHeader[0] : sourceHeader);
@@ -1250,6 +1250,12 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, 404, { error: { code: 'NOT_FOUND', message: result.error } });
       return;
     }
+    // An import that overwrote a same-named dir must not keep a git/marketplace record.
+    try {
+      (await import('../plugins/source-store.mjs')).removeSource(result.plugin.name);
+    } catch (err) {
+      logger.warn('plugin source record removal failed', { plugin: result.plugin.name, error: err.message });
+    }
     const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
     reloadPlugins();
     safeAudit(db, {
@@ -1387,6 +1393,12 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     if (!result.ok) {
       send(res, 404, { error: { code: 'NOT_FOUND', message: result.error } });
       return;
+    }
+    // An import that overwrote a same-named dir must not keep a git/marketplace record.
+    try {
+      (await import('../plugins/source-store.mjs')).removeSource(result.plugin.name);
+    } catch (err) {
+      logger.warn('plugin source record removal failed', { plugin: result.plugin.name, error: err.message });
     }
     const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
     reloadPlugins();

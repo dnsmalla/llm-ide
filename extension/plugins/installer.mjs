@@ -259,7 +259,8 @@ export async function installFromZip(zipBytes, {
       if (existed) {
         // Rename existing to a backup first so we can roll back on
         // the subsequent rename failure.
-        const backup = `${finalDir}.bak-${Date.now()}`;
+        // Dot-prefixed so the loader skips it if the removal below fails.
+        const backup = join(pluginDir, `.${plugin.name}.bak-${Date.now()}`);
         await rename(finalDir, backup);
         try {
           await rename(intoValidate, finalDir);

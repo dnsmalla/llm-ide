@@ -11,7 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSkills } from './loader.mjs';
 import { loadPlugins } from '../../plugins/loader.mjs';
-import { readSources as readPluginSources } from '../../plugins/source-store.mjs';
+import { readSources as readPluginSources, pruneSources as prunePluginSources } from '../../plugins/source-store.mjs';
 import {
   listEnabled as listEnabledPlugins,
   listHooksTrusted as listHooksTrustedPlugins,
@@ -122,6 +122,13 @@ export function reloadPlugins() {
     prunePluginOrphans(new Set(pluginRegistry.plugins.keys()));
   } catch (err) {
     console.warn('[plugins] orphan prune failed:', err?.message || err);
+  }
+  // Same for install-source records: a folder removed or overwritten outside
+  // the install route must not keep offering updates.
+  try {
+    prunePluginSources(new Set(pluginRegistry.plugins.keys()));
+  } catch (err) {
+    console.warn('[plugins] source record prune failed:', err?.message || err);
   }
   // Reconcile the MCP registry with what the installed plugins declare. This
   // layer does the wiring because plugins/ and mcp/ are peers that may not
