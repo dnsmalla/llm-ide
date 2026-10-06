@@ -7,6 +7,7 @@ struct StatusBar: View {
     @EnvironmentObject var config: AppConfig
     @ObservedObject private var registry = FeatureRegistry.shared
     @Environment(TerminalPanelState.self) private var terminalState
+    @Environment(BackendManager.self) private var backend
 
     /// Working directory for the terminal — mirrors AppShell.projectDirectory:
     /// prefer the active SCM repo, then the project folder, then home.
@@ -31,6 +32,16 @@ struct StatusBar: View {
         HStack(spacing: 12) {
             ProjectSwitcher()
             Spacer()
+            // A signed-in user never sees Login/Reconnect, so this is the only
+            // place a too-old (orphaned or stale) backend is visible to them;
+            // newer features otherwise fail with confusing 404s.
+            if backend.serverVersionTooOld {
+                Label("Server out of date", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundStyle(t.warning)
+                    .help(backend.lastError
+                          ?? "The local server is older than this app needs. Restart it from Settings → Backend.")
+            }
             if registry.isEnabled(.terminal) {
                 terminalToggleButton
             }
