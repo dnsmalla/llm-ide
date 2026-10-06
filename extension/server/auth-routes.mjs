@@ -1124,7 +1124,12 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       return;
     }
     // Forget where it came from so a reinstall by the same name starts clean.
-    (await import('../plugins/source-store.mjs')).removeSource(pluginName);
+    try {
+      (await import('../plugins/source-store.mjs')).removeSource(pluginName);
+    } catch (err) {
+      // The uninstall already succeeded; a stale record must not turn it into a 500.
+      logger.warn('plugin source record removal failed', { plugin: pluginName, error: err.message });
+    }
     // Reload to drop the registry entry + prune orphan state.
     const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
     reloadPlugins();

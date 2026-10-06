@@ -29,14 +29,37 @@ const PRINTABLE_ASCII_RE = /^[\x20-\x7e]+$/;
 
 function isString(value) { return typeof value === 'string'; }
 
+const SCP_PARTS_RE = /^git@([^:]+):(.+)$/;
+const SCP_HOST_RE = /^[A-Za-z0-9][A-Za-z0-9.-]*$/;
+const IPV4_RE = /^\d{1,3}(\.\d{1,3}){3}$/;
+
+// Hosts that point at this machine or a private network are refused: the Mac
+// hands these URLs to git, so they must not become an SSRF/local-access door.
+function publicHostName(rawHost) {
+  const host = rawHost.toLowerCase().replace(/\.$/, '');
+  if (!host || host.startsWith('[') || IPV4_RE.test(host)) return false;
+  if (host === 'localhost' || host.endsWith('.localhost') || host.endsWith('.local')) return false;
+  return true;
+}
+
+function validScpUrl(url) {
+  const match = SCP_PARTS_RE.exec(url);
+  if (!match) return false;
+  const [, host, repoPath] = match;
+  if (!SCP_HOST_RE.test(host) || !publicHostName(host)) return false;
+  return !repoPath.startsWith('-') && !repoPath.split('/').includes('..');
+}
+
 function validUrl(url) {
   if (!isString(url) || !url || url.length > MAX_URL || UNSAFE_CHARS_RE.test(url)) return false;
-  if (SCP_URL_RE.test(url)) return true;
+  if (SCP_URL_RE.test(url)) return validScpUrl(url);
+  if (url.includes('?') || url.includes('#')) return false;
   let parsed;
   try { parsed = new URL(url); } catch { return false; }
   if (parsed.protocol !== 'https:' || !parsed.hostname) return false;
-  const host = parsed.hostname.toLowerCase();
-  return host !== 'localhost' && host !== '127.0.0.1' && !host.endsWith('.local');
+  // Credentials must never be persisted or listed.
+  if (parsed.username || parsed.password) return false;
+  return publicHostName(parsed.hostname);
 }
 
 function validRef(ref) {
@@ -45,8 +68,9 @@ function validRef(ref) {
 
 function validPath(path) {
   if (!isString(path) || !path || path.length > MAX_PATH || path.startsWith('/')) return false;
-  if (UNSAFE_CHARS_RE.test(path)) return false;
-  return !path.split('/').includes('..');
+  if (UNSAFE_CHARS_RE.test(path) || path.includes('\\')) return false;
+  // Empty segments cover a trailing '/' and '//'; '.' and '..' cover traversal.
+  return !path.split('/').some((seg) => seg === '' || seg === '.' || seg === '..');
 }
 
 function validVersion(version) {
