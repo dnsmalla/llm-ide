@@ -53,6 +53,29 @@ extension AutoCodeUpdateService {
             .sorted()
     }
 
+    /// Whether a branch name is one this pipeline creates: `fix/<n>-…` (issue
+    /// and rescue branches) or `fix/custom-…` (custom implement tasks). A
+    /// user's own `fix/typo` WIP branch matches neither and must never be
+    /// pushed on their behalf.
+    nonisolated static func isPipelineBranch(_ branch: String) -> Bool {
+        issueNumber(fromFixBranch: branch) != nil || branch.hasPrefix("fix/custom-")
+    }
+
+    /// Local pipeline branches that still need review-merge: named by the
+    /// pipeline, carrying commits the default branch lacks, and not already on
+    /// the remote. The last check stops a branch whose MR was merged or closed
+    /// from being re-pushed and re-opened on every scheduled run.
+    nonisolated static func reviewMergeCandidates(defaultBranch: String, at localPath: String) -> [String] {
+        let base = refSha("refs/remotes/origin/\(defaultBranch)", at: localPath) != nil
+            ? "origin/\(defaultBranch)" : defaultBranch
+        return localBranches(prefix: "fix/", at: localPath).filter { branch in
+            guard isPipelineBranch(branch) else { return false }
+            if refSha("refs/remotes/origin/\(branch)", at: localPath) != nil { return false }
+            let ahead = git(["rev-list", "--count", "\(base)..\(branch)"], at: localPath)
+            return ahead.code == 0 && (Int(ahead.out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) > 0
+        }
+    }
+
     /// Best-effort default branch for MR target (origin/HEAD → main).
     nonisolated static func defaultBranch(at localPath: String) -> String {
         let r = git(["symbolic-ref", "refs/remotes/origin/HEAD"], at: localPath)

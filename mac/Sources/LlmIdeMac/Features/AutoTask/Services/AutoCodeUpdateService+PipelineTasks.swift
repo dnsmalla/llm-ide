@@ -596,14 +596,16 @@ extension AutoCodeUpdateService {
             return
         }
 
-        let branches = await Task.detached { Self.localBranches(prefix: "fix/", at: gitRoot) }.value
+        let defaultBranch = await Task.detached { Self.defaultBranch(at: gitRoot) }.value
+        let branches = await Task.detached {
+            Self.reviewMergeCandidates(defaultBranch: defaultBranch, at: gitRoot)
+        }.value
         if branches.isEmpty {
-            logStore.append(.reviewMerge, "No local fix/* branches to push.")
+            logStore.append(.reviewMerge, "No unpushed auto-task fix/* branches with new commits.")
             taskErrors.removeValue(forKey: key)
             return
         }
 
-        let defaultBranch = await Task.detached { Self.defaultBranch(at: gitRoot) }.value
         let openMRs: [RepoMergeRequest]
         do {
             openMRs = try await client.listOpenMergeRequests(projectId: resolved.projectId)
