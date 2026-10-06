@@ -72,6 +72,10 @@ struct TerminalPanelView: View {
                 ForEach(Array(dock.sessions.enumerated()), id: \.element.id) { idx, session in
                     TerminalSessionView(session: session)
                         .opacity(idx == dock.activeIndex ? 1 : 0)
+                        // Opacity does not stop hit testing: AppKit ignores
+                        // alpha, so the LAST session in the stack used to take
+                        // every click and keystroke focus while invisible.
+                        .allowsHitTesting(idx == dock.activeIndex)
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
