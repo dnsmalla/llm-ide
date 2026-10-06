@@ -259,7 +259,7 @@ test('trust reset only when executables changed', async () => {
   const runChanged = async (args) => { if (args[1] === 'update') current = inst('1.1.0', changed); return run(args); };
   const res1 = await updateClaudePlugin({ name: 'claude-demo', deps: { ...a.deps, run: runChanged } });
   assert.equal(res1.status, 200);
-  assert.deepEqual(res1.body, { ok: true, from: '1.0.0', to: '1.1.0', trustReset: true });
+  assert.deepEqual(res1.body, { ok: true, from: '1.0.0', to: '1.1.0', trustReset: true, claudeUpdated: true });
   assert.deepEqual(a.calls.clearTrust, ['claude-demo']);
   assert.deepEqual(a.calls.clearMcp, ['claude-demo'], 'MCP consents reset with hook trust');
   assert.equal(a.calls.reload, 1);
@@ -332,7 +332,7 @@ test('already latest', async () => {
   const { deps, calls } = baseDeps(env, run);
   const res = await updateClaudePlugin({ name: 'claude-demo', deps });
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { ok: true, from: '1.0.0', to: '1.0.0', trustReset: false });
+  assert.deepEqual(res.body, { ok: true, from: '1.0.0', to: '1.0.0', trustReset: false, claudeUpdated: false });
   assert.match(readFileSync(skill, 'utf8'), /v1\.0\.0/, 're-import still ran');
   assert.equal(calls.reload, 1);
 });
@@ -359,4 +359,67 @@ test('required deps are enforced', async () => {
     updateClaudePlugin({ name: 'claude-demo', deps: { run, reload: () => {}, isTurnActive: () => false, claudeRoot: env.claudeRoot, llmidePluginDir: env.mnDir } }),
     /clearMcpConsents/,
   );
+});
+
+test('reimport tier at click time is offline and never runs the CLI update', async () => {
+  _resetForTests();
+  const env = setup();
+  const p = writeClaudeVersion(env.claudeRoot, '1.1.0');
+  const { run, calls } = fakeRun({ list: listOf([inst('1.1.0', p)]), update: () => { throw new Error('must not run'); } });
+  const { deps, calls: depCalls } = baseDeps(env, run);
+  const res = await updateClaudePlugin({ name: 'claude-demo', deps });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ok: true, from: '1.0.0', to: '1.1.0', trustReset: false, claudeUpdated: false });
+  assert.equal(calls.filter((a) => a[1] === 'update').length, 0, 'updateArgs never used');
+  assert.equal(readImportStamp('claude-demo', env.mnDir).sourceVersion, '1.1.0');
+  assert.equal(depCalls.reload, 1);
+});
+
+test('upstream tier at click time runs the CLI update', async () => {
+  _resetForTests();
+  const env = setup();
+  const p = writeClaudeVersion(env.claudeRoot, '1.2.0');
+  let updated = false;
+  const { run, calls } = fakeRun({
+    list: () => listOf([updated ? inst('1.2.0', p) : inst('1.0.0', env.installPath)], [{ pluginId: 'demo@mp', version: '1.2.0', source: './demo' }]),
+    update: () => { updated = true; return okLine('1.0.0', '1.2.0'); },
+  });
+  const { deps } = baseDeps(env, run);
+  const res = await updateClaudePlugin({ name: 'claude-demo', deps });
+  assert.equal(res.status, 200);
+  assert.equal(res.body.claudeUpdated, true);
+  assert.equal(res.body.to, '1.2.0');
+  assert.equal(calls.filter((a) => a[1] === 'update').length, 1);
+});
+
+test('CLI missing during update re-imports offline when Claude is ahead', async () => {
+  _resetForTests();
+  const env = setup();
+  const p = writeClaudeVersion(env.claudeRoot, '1.3.0');
+  writeFileSync(join(env.claudeRoot, 'installed_plugins.json'), JSON.stringify({
+    version: 2, plugins: { 'demo@mp': [{ scope: 'user', installPath: p, version: '1.3.0' }] },
+  }), 'utf8');
+  const { run } = fakeRun({ enoent: true });
+  const { deps, calls } = baseDeps(env, run);
+  const res = await updateClaudePlugin({ name: 'claude-demo', deps });
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { ok: true, from: '1.0.0', to: '1.3.0', trustReset: false, claudeUpdated: false });
+  const stamp = readImportStamp('claude-demo', env.mnDir);
+  assert.equal(stamp.sourceVersion, '1.3.0');
+  assert.equal(stamp.sourceScope, 'user');
+  assert.equal(calls.reload, 1);
+});
+
+test('CLI missing during update with Claude at the stamped version is CLI_FAILED', async () => {
+  _resetForTests();
+  const env = setup();
+  writeFileSync(join(env.claudeRoot, 'installed_plugins.json'), JSON.stringify({
+    version: 2, plugins: { 'demo@mp': [{ scope: 'user', installPath: env.installPath, version: '1.0.0' }] },
+  }), 'utf8');
+  const { run } = fakeRun({ enoent: true });
+  const { deps, calls } = baseDeps(env, run);
+  const res = await updateClaudePlugin({ name: 'claude-demo', deps });
+  assert.equal(res.status, 502);
+  assert.deepEqual(res.body, { code: 'CLI_FAILED', detail: 'claude CLI not found' });
+  assert.equal(calls.reload, 0);
 });

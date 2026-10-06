@@ -1182,8 +1182,16 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid plugin name' } });
       return;
     }
-    const { importPlugin } = await import('../plugins/claude-adapter.mjs');
-    const result = importPlugin({ source: body.source, name: body.name });
+    const { importPlugin, scanInstalled } = await import('../plugins/claude-adapter.mjs');
+    // An installed import is stamped with the Claude install it copied, so the
+    // update check can tell "Claude is ahead" from "same version". Without the
+    // stamp every route import reads as Tier 1 forever. Marketplace imports
+    // have no Claude install to stamp from.
+    const installed = body.source === 'installed' ? scanInstalled().find((p) => p.name === body.name) : null;
+    const result = importPlugin({
+      source: body.source, name: body.name,
+      ...(installed ? { installPath: installed.installPath, sourceVersion: installed.version, scope: installed.scope ?? null } : {}),
+    });
     if (!result.ok) {
       send(res, 404, { error: { code: 'NOT_FOUND', message: result.error } });
       return;
@@ -1247,7 +1255,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         deps: { reload: reloadPlugins, isTurnActive: () => activeTurnCount() > 0, clearMcpConsents: clearPluginMcpConsents },
       });
       if (status === 200 && out.ok) {
-        safeAudit(db, { ...auditBase, outcome: 'success', detail: { from: out.from, to: out.to, trustReset: out.trustReset } });
+        safeAudit(db, { ...auditBase, outcome: 'success', detail: { from: out.from, to: out.to, trustReset: out.trustReset, claudeUpdated: out.claudeUpdated } });
       } else {
         safeAudit(db, { ...auditBase, outcome: 'failure', detail: { code: out.code || String(status) } });
       }

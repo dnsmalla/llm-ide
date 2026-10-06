@@ -691,6 +691,30 @@ test('POST /auth/me/claude-plugins/import validates input and wires an imported 
   assert.equal(found.importedVersion, '1.0.0');
 });
 
+test('POST /auth/me/claude-plugins/import stamps the Claude install so the check reports no tier', async () => {
+  writeClaudeInstalledFixture({ name: 'bridge-stamp-demo', version: '1.4.0' });
+  const { user } = await registerAndLogin();
+  const ok = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/import', user: { id: user.id, role: 'admin' }, body: { name: 'bridge-stamp-demo', source: 'installed' } });
+  assert.equal(ok.statusCode, 200, ok._body);
+  const { readImportStamp } = await import('../plugins/claude-adapter.mjs');
+  const stamp = readImportStamp('claude-bridge-stamp-demo');
+  assert.equal(stamp.sourceVersion, '1.4.0');
+  assert.equal(stamp.sourceScope, 'user');
+  // Claude reports the same version it was imported from: no Tier 1, no Tier 2.
+  const { checkClaudeUpdates, _resetForTests } = await import('../plugins/claude-update.mjs');
+  _resetForTests();
+  const installPath = path.join(claudePluginsFixture, 'cache', 'fixture-mp', 'bridge-stamp-demo', '1.4.0');
+  const run = async (args) => {
+    if (args[1] === 'list') {
+      return { stdout: JSON.stringify({ installed: [{ id: 'bridge-stamp-demo@fixture-mp', version: '1.4.0', scope: 'user', installPath }], available: [] }), stderr: '', exitCode: 0 };
+    }
+    return { stdout: '', stderr: '', exitCode: 0 };
+  };
+  const res = await checkClaudeUpdates({ deps: { run } });
+  assert.equal(res.cli, true);
+  assert.equal(res.updates.find((u) => u.name === 'claude-bridge-stamp-demo'), undefined);
+});
+
 test('POST /auth/me/claude-plugins/refresh returns live installed/marketplace counts', async () => {
   const { user } = await registerAndLogin();
   const res = await callAuth({ method: 'POST', url: '/auth/me/claude-plugins/refresh', user: { id: user.id } });

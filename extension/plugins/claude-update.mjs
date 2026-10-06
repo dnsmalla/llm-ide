@@ -4,9 +4,10 @@
 // Detection has two tiers: `reimport` (Claude Code's install differs from the
 // version llm-ide copied — exact and offline) and `upstream` (the marketplace
 // catalog proves a newer release, after a refresh cached for 30 minutes).
-// An update runs Claude Code's own `plugin update`, re-imports the new
-// installPath copy-then-swap, and resets hook/MCP trust when the executable
-// components changed.
+// An update re-decides the tier at click time: Tier 1 is an offline re-import
+// of Claude's install; otherwise it runs Claude Code's own `plugin update`
+// and re-imports the new installPath. Either way the copy is swapped in whole
+// and hook/MCP trust is reset when the executable components changed.
 //
 // All `claude plugin …` knowledge stays in the linker (providers/). The route
 // supplies `reload`, `isTurnActive` and `clearMcpConsents`, because plugins/
@@ -17,7 +18,7 @@ import {
 } from '../providers/claude-plugin-cli.mjs';
 import { versionsDiffer, upstreamTier, pickInstalledEntry } from './plugin-version.mjs';
 import {
-  importPlugin, readImportStamp, checkForUpdates, listImportedNames, claudePluginsRoot,
+  importPlugin, readImportStamp, checkForUpdates, listImportedNames, claudePluginsRoot, scanInstalled,
 } from './claude-adapter.mjs';
 import { hashExecutables } from './executable-hash.mjs';
 import { clearHooksTrustForPlugin } from './state.mjs';
@@ -101,6 +102,9 @@ const catalogLatest = (available) => {
   return typeof sha === 'string' && sha ? sha : null;
 };
 
+/** Tier 1: Claude's install differs from the copy (or the copy predates stamps). */
+const claudeIsAhead = (entry, stamp) => !stamp.sourceVersion || versionsDiffer(entry.version, stamp.sourceVersion);
+
 /** One update row, or null when neither tier applies. */
 function updateRow(list, imp) {
   const found = findEntry(list, imp);
@@ -108,7 +112,7 @@ function updateRow(list, imp) {
   const { pluginId, entry } = found;
   const available = list.available.find((a) => a.pluginId === pluginId);
   const upstream = upstreamTier({ installedVersion: entry.version, available });
-  const reimport = !imp.stamp.sourceVersion || versionsDiffer(entry.version, imp.stamp.sourceVersion);
+  const reimport = claudeIsAhead(entry, imp.stamp);
   const tier = reimport ? 'reimport' : upstream;
   if (!tier) return null;
   return {
@@ -178,65 +182,89 @@ async function listOrFail(d) {
   }
 }
 
-/** Run Claude Code's own update. Returns a final result, or null when it succeeded. */
+/** Run Claude Code's own update. Returns { stop } (a final result) or { claudeUpdated }. */
 async function runCliUpdate(d, pluginId, scope, acceptCommand) {
   let out;
   try {
     out = await d.run(updateArgs(pluginId, { scope, acceptCommand }));
   } catch (err) {
-    return cliFailed(isEnoent(err) ? 'claude CLI not found' : String(err?.message || err));
+    return { stop: cliFailed(isEnoent(err) ? 'claude CLI not found' : String(err?.message || err)) };
   }
   const parsed = parseUpdateResult(out.stdout, out.exitCode);
   if (parsed.status === 'needs-confirmation') {
-    return { status: 409, body: { code: 'NEEDS_CONFIRMATION', command: parsed.command, sha256: parsed.sha256 } };
+    return { stop: { status: 409, body: { code: 'NEEDS_CONFIRMATION', command: parsed.command, sha256: parsed.sha256 } } };
   }
-  if (parsed.status === 'failed') return cliFailed(parsed.detail || `exit ${out.exitCode}`);
-  return null;
+  if (parsed.status === 'failed') return { stop: cliFailed(parsed.detail || `exit ${out.exitCode}`) };
+  return { claudeUpdated: parsed.status === 'updated' };
 }
 
-/** Re-read Claude's install and copy it into llm-ide. */
-async function reimport(d, imp) {
-  const reimportFailed = (detail) => ({ status: 200, body: { ok: false, code: 'REIMPORT_FAILED', claudeUpdated: true, detail } });
-  const { list, failure } = await listOrFail(d);
-  if (failure) return { result: reimportFailed(failure.body.detail) };
-  const found = findEntry(list, imp);
-  if (!found) return { result: reimportFailed('plugin no longer installed in Claude Code') };
-  const { entry } = found;
-  const res = importPlugin({
-    source: 'installed', name: imp.sourcePlugin, installPath: entry.installPath,
-    sourceVersion: entry.version, scope: entry.scope, claudeRoot: d.claudeRoot, llmidePluginDir: d.mnDir,
-  });
-  if (!res.ok) return { result: reimportFailed(res.error || 'import failed') };
-  return { entry };
-}
-
-async function runUpdate(d, imp, acceptCommand) {
+/**
+ * Copy Claude's install at `entry` into llm-ide (copy-then-swap), reset trust
+ * when the executable parts changed, and reload. `claudeUpdated` only reports
+ * whether Claude Code's own install moved in this request.
+ */
+async function reimportEntry(d, imp, entry, claudeUpdated) {
   const pluginDir = join(d.mnDir, imp.name);
   const before = hashExecutables(pluginDir);
-  const { list, failure } = await listOrFail(d);
-  if (failure) return failure;
-  const found = findEntry(list, imp);
-  if (!found) return { status: 404, body: { code: 'NOT_FOUND', detail: 'not installed in Claude Code' } };
-
-  const stop = await runCliUpdate(d, found.pluginId, found.entry.scope, acceptCommand);
-  if (stop) return stop;
-  cache = null; // Claude's install changed; the next check must re-read the catalog too.
-
-  const { entry, result } = await reimport(d, imp);
-  if (result) return result;
+  const res = importPlugin({
+    source: 'installed', name: imp.sourcePlugin, installPath: entry.installPath,
+    sourceVersion: entry.version, scope: entry.scope ?? null, claudeRoot: d.claudeRoot, llmidePluginDir: d.mnDir,
+  });
+  if (!res.ok) {
+    return { status: 200, body: { ok: false, code: 'REIMPORT_FAILED', claudeUpdated, detail: res.error || 'import failed' } };
+  }
   const trustReset = before !== hashExecutables(pluginDir);
   if (trustReset) {
     d.clearTrust(imp.name);
     d.clearMcpConsents(imp.name);
   }
   await d.reload();
-  return { status: 200, body: { ok: true, from: imp.stamp.sourceVersion, to: entry.version ?? null, trustReset } };
+  return { status: 200, body: { ok: true, from: imp.stamp.sourceVersion, to: entry.version ?? null, trustReset, claudeUpdated } };
+}
+
+/** Claude's installed_plugins.json entry for an import, read without the CLI. */
+function scannedEntry(d, imp) {
+  const p = scanInstalled(d.claudeRoot).find((e) => e.name === imp.sourcePlugin);
+  return p ? { version: p.version, installPath: p.installPath, scope: p.scope ?? null } : null;
+}
+
+async function runUpdate(d, imp, acceptCommand) {
+  let list;
+  try {
+    list = parseList((await d.run(listArgs())).stdout);
+  } catch (err) {
+    if (!isEnoent(err)) return cliFailed(String(err?.message || err));
+    // No CLI: Claude's own index still proves a Tier 1 gap, and closing it
+    // needs no CLI — only a copy of what Claude already installed.
+    const entry = scannedEntry(d, imp);
+    if (entry && claudeIsAhead(entry, imp.stamp)) return reimportEntry(d, imp, entry, false);
+    return cliFailed('claude CLI not found');
+  }
+  const found = findEntry(list, imp);
+  if (!found) return { status: 404, body: { code: 'NOT_FOUND', detail: 'not installed in Claude Code' } };
+  // Tier 1 is decided now, not from the badge the client saw: Claude Code is
+  // already ahead, so its install is copied offline without touching Claude.
+  if (claudeIsAhead(found.entry, imp.stamp)) return reimportEntry(d, imp, found.entry, false);
+
+  const cli = await runCliUpdate(d, found.pluginId, found.entry.scope, acceptCommand);
+  if (cli.stop) return cli.stop;
+  cache = null; // Claude's install changed; the next check must re-read the catalog too.
+
+  const after = await listOrFail(d);
+  const reimportFailed = (detail) => ({ status: 200, body: { ok: false, code: 'REIMPORT_FAILED', claudeUpdated: cli.claudeUpdated, detail } });
+  if (after.failure) return reimportFailed(after.failure.body.detail);
+  const now = findEntry(after.list, imp);
+  if (!now) return reimportFailed('plugin no longer installed in Claude Code');
+  return reimportEntry(d, imp, now.entry, cli.claudeUpdated);
 }
 
 /**
- * Update one Claude-imported plugin: Claude Code's install first, then
- * llm-ide's copy. Nothing in llm-ide changes unless the CLI update succeeded,
- * and a failed re-import keeps the old copy.
+ * Update one Claude-imported plugin. When Claude Code's install is already
+ * ahead of llm-ide's copy (Tier 1) the copy is refreshed offline; otherwise
+ * Claude Code's install is updated first, then llm-ide's copy. Nothing in
+ * llm-ide changes unless the CLI update succeeded, and a failed re-import
+ * keeps the old copy. A 200 body carries `claudeUpdated` (did Claude Code's
+ * own install change in this request).
  *
  * Pre: `deps.reload`, `deps.isTurnActive` and `deps.clearMcpConsents` are
  * functions (throws otherwise). `acceptCommand` is the sha256 the user saw.

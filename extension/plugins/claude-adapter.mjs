@@ -24,7 +24,7 @@ export function claudePluginsRoot() {
 /**
  * Parse installed_plugins.json and scan cache dirs for skill/command counts.
  * @param {string} [rootOverride] - Override root for tests
- * @returns {Array<{name: string, version: string, marketplace: string, installPath: string, skillCount: number, commandCount: number, installedAt: string|null}>}
+ * @returns {Array<{name: string, version: string, marketplace: string, installPath: string, skillCount: number, commandCount: number, installedAt: string|null, scope: string|null}>}
  */
 export function scanInstalled(rootOverride) {
   const root = rootOverride || claudePluginsRoot();
@@ -60,6 +60,8 @@ export function scanInstalled(rootOverride) {
       skillCount,
       commandCount,
       installedAt: entry.installedAt || null,
+      // Recorded so an import can stamp the scope Claude installed it under.
+      scope: typeof entry.scope === 'string' ? entry.scope : null,
     });
   }
   return results;
