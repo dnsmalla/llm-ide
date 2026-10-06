@@ -135,7 +135,7 @@ struct PluginDetailView: View {
                         .textSelection(.enabled)
                         .help(text)
                 }
-                if plugin?.name.hasPrefix("claude-") == true && plugin?.installSource == nil {
+                if let plugin, [.claudeOneClick, .reimportClaude].contains(updateAction(plugin)) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.down.circle.fill")
                             .font(.caption2)

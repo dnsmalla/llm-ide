@@ -3,6 +3,10 @@ import Foundation
 /// The update paths that replace a plugin from where it was installed — a git
 /// URL, a marketplace entry, or a file the user picked. Stateless: the update
 /// center owns sequencing, guards and results, and calls in here.
+///
+/// Every path sends `expectName: name`, so the server refuses (409
+/// NAME_MISMATCH, nothing installed) a package that now names another plugin —
+/// an update can never overwrite a different plugin.
 enum PluginSourceReinstaller {
     /// Clone the recorded git URL / ref again and replace the plugin with it.
     /// The new git record (or, if it cannot be sent, a zip one) replaces the
@@ -12,7 +16,7 @@ enum PluginSourceReinstaller {
         guard let url = source?.url else { return incompleteRecord(name) }
         do {
             let response = try await api.installPluginFromGit(
-                url: url, ref: source?.ref, replace: true, fallbackFileName: "\(name).zip")
+                url: url, ref: source?.ref, replace: true, fallbackFileName: "\(name).zip", expectName: name)
             return reinstalled(name: name, response)
         } catch {
             return failed(name, error)
@@ -36,38 +40,24 @@ enum PluginSourceReinstaller {
             defer { try? FileManager.default.removeItem(at: zipURL) }
             let response = try await api.installPlugin(
                 zipURL: zipURL, replace: true, source: try? staged.source(for: entry),
-                fallbackFileName: "\(name).zip")
+                fallbackFileName: "\(name).zip", expectName: name)
             return reinstalled(name: name, response)
         } catch {
             return failed(name, error)
         }
     }
 
-    /// Replace `name` with a zip the user picked. Installs WITHOUT replace
-    /// first: the file may hold a different plugin, and a blind replace would
-    /// overwrite that other plugin instead. Only a 409 naming `name` itself
-    /// confirms the file is the same plugin.
+    /// Replace `name` with a zip the user picked, in one upload. A file that
+    /// holds another plugin is refused by the server; nothing is installed.
     static func replaceFromFile(name: String, zipURL: URL, api: LlmIdeAPIClient) async -> PluginUpdateStep {
-        let source = PluginInstallSource.zip(fileName: zipURL.lastPathComponent)
         do {
-            let fresh = try await api.installPlugin(zipURL: zipURL, replace: false, source: source)
-            return .done(message: "That file holds \(fresh.plugin.name), not \(name). It was installed as a "
-                            + "new plugin; \(name) is unchanged.",
-                         succeeded: true, trustReset: false, stopsBatch: false)
-        } catch let APIError.http(409, _, message, _) where message.contains("'\(name)'") {
-            do {
-                let response = try await api.installPlugin(zipURL: zipURL, replace: true, source: source)
-                let trustReset = response.plugin.trustReset == true
-                return .done(message: PluginUpdatePresentation.replacedMessage(
-                                name: name, version: response.plugin.version, trustReset: trustReset),
-                             succeeded: true, trustReset: trustReset, stopsBatch: false)
-            } catch {
-                return failed(name, error)
-            }
-        } catch APIError.http(409, _, _, _) {
-            return .done(message: "That file holds a different plugin that is already installed. "
-                            + "Nothing was replaced.",
-                         succeeded: false, trustReset: false, stopsBatch: false)
+            let response = try await api.installPlugin(
+                zipURL: zipURL, replace: true, source: .zip(fileName: zipURL.lastPathComponent),
+                expectName: name)
+            let trustReset = response.plugin.trustReset == true
+            return .done(message: PluginUpdatePresentation.replacedMessage(
+                            name: name, version: response.plugin.version, trustReset: trustReset),
+                         succeeded: true, trustReset: trustReset, stopsBatch: false)
         } catch {
             return failed(name, error)
         }
@@ -76,8 +66,7 @@ enum PluginSourceReinstaller {
     private static func reinstalled(name: String, _ response: PluginInstallResponse) -> PluginUpdateStep {
         let trustReset = response.plugin.trustReset == true
         return .done(message: PluginUpdatePresentation.reinstalledMessage(
-                        name: name, installedName: response.plugin.name,
-                        version: response.plugin.version, trustReset: trustReset),
+                        name: name, version: response.plugin.version, trustReset: trustReset),
                      succeeded: true, trustReset: trustReset, stopsBatch: false)
     }
 
@@ -87,7 +76,7 @@ enum PluginSourceReinstaller {
     }
 
     private static func failed(_ name: String, _ error: Error) -> PluginUpdateStep {
-        .done(message: "Could not update \(name): \(error.localizedDescription)",
+        .done(message: PluginUpdatePresentation.updateFailureMessage(name: name, error: error),
               succeeded: false, trustReset: false, stopsBatch: false)
     }
 }

@@ -193,9 +193,13 @@ private func route(_ name: String, origin: String? = nil, source: PluginInstallS
 }
 
 @Test func actionWithoutSourceOrOrigin() {
-    // A server predating both fields: the prefix is the only import sign left.
-    #expect(route("claude-x") == .claudeOneClick)
-    #expect(route("codex-x") == .reimportCodex)
+    // A server predating `origin` (< v60): the prefix is the only import sign left.
+    #expect(route("claude-x", oneClick: false) == .reimportClaude)
+    #expect(route("codex-x", oneClick: false) == .reimportCodex)
+    #expect(route("plain", oneClick: false) == .replaceFromFile)
+    // A server that reports origin and gave none: not an import, whatever the name.
+    #expect(route("claude-x") == .replaceFromFile)
+    #expect(route("codex-x") == .replaceFromFile)
     #expect(route("plain") == .replaceFromFile)
     // An origin this client does not know, with no source: nothing to do.
     #expect(route("x", origin: "other") == PluginUpdatePresentation.UpdateAction.none)
@@ -213,7 +217,71 @@ private func route(_ name: String, origin: String? = nil, source: PluginInstallS
     #expect(PluginUpdatePresentation.sourceDescription(.zip(fileName: "a.zip")) == "Installed from file a.zip")
     #expect(PluginUpdatePresentation.sourceAvailabilityText(kind: "marketplace", latest: "2.0")
         == "The marketplace has a newer version v2.0.")
-    let renamed = PluginUpdatePresentation.reinstalledMessage(name: "a", installedName: "b", version: "1",
-                                                              trustReset: true)
-    #expect(renamed.contains("a is unchanged") && renamed.contains("need re-approval"))
+    let updated = PluginUpdatePresentation.reinstalledMessage(name: "a", version: "1", trustReset: true)
+    #expect(updated.hasPrefix("Updated a to v1.") && updated.contains("need re-approval"))
+}
+
+@Test func nameMismatchIsRefusedWithTheProvidedName() {
+    let server = "plugin source now provides 'other', not 'mine'"
+    #expect(PluginUpdatePresentation.nameMismatchMessage(name: "mine", serverMessage: server)
+        == "The source now provides other, not mine; nothing was replaced.")
+    #expect(PluginUpdatePresentation.nameMismatchMessage(name: "mine", serverMessage: "odd")
+        == "The source now provides another plugin, not mine; nothing was replaced.")
+    let error = APIError.http(status: 409, code: "NAME_MISMATCH", message: server, details: nil)
+    #expect(PluginUpdatePresentation.updateFailureMessage(name: "mine", error: error).contains("nothing was replaced"))
+    let other = APIError.http(status: 409, code: "INSTALL_FAILED", message: "x", details: nil)
+    #expect(PluginUpdatePresentation.updateFailureMessage(name: "mine", error: other).hasPrefix("Could not update mine"))
+}
+
+@Test func installPlanFallsBackToZipOnlyOnReplace() {
+    let git = PluginInstallSource.git(url: "https://github.com/o/r", ref: nil, commit: routeSha)
+    let badGit = PluginInstallSource.git(url: "file:///etc", ref: nil, commit: routeSha)
+    let zip = PluginInstallSource.zip(fileName: "p.zip")
+    // A sendable source goes first; on replace its retry is the zip stand-in.
+    var plan = PluginInstallSource.installPlan(source: git, replace: true, fallbackFileName: "p.zip")
+    #expect(plan.first == git && plan.retry == zip)
+    plan = PluginInstallSource.installPlan(source: git, replace: false, fallbackFileName: "p.zip")
+    #expect(plan.first == git && plan.retry == nil)
+    // Unsendable or missing source: the zip on replace, nothing otherwise; no retry.
+    plan = PluginInstallSource.installPlan(source: badGit, replace: true, fallbackFileName: "p.zip")
+    #expect(plan.first == zip && plan.retry == nil)
+    plan = PluginInstallSource.installPlan(source: nil, replace: true, fallbackFileName: "p.zip")
+    #expect(plan.first == zip && plan.retry == nil)
+    plan = PluginInstallSource.installPlan(source: badGit, replace: false, fallbackFileName: "p.zip")
+    #expect(plan.first == nil && plan.retry == nil)
+    // A fallback name the server would refuse is never planned.
+    plan = PluginInstallSource.installPlan(source: nil, replace: true, fallbackFileName: "a/b.zip")
+    #expect(plan.first == nil)
+}
+
+private func decodedPlugin(_ name: String, extra: String = "") throws -> PluginInfo {
+    let json = #"{"name":"\#(name)","version":"1.0.0","displayName":"X","description":"","author":"","enabled":true,"skillCount":0,"commands":[]\#(extra)}"#
+    return try JSONDecoder().decode(PluginInfo.self, from: Data(json.utf8))
+}
+
+@Test func mergeDropsRowsThatCanOnlyFail() throws {
+    let zipped = try decodedPlugin("claude-z", extra: #","installSource":{"kind":"zip","fileName":"z.zip"}"#)
+    let imported = try decodedPlugin("claude-i", extra: #","origin":"claude""#)
+    let git = try decodedPlugin("g", extra: #","installSource":{"kind":"git","url":"https://h/r","commit":"\#(routeSha)"}"#)
+    let plugins = Dictionary(uniqueKeysWithValues: [zipped, imported, git].map { ($0.name, $0) })
+    func row(_ name: String) -> PluginUpdateEntry {
+        PluginUpdateEntry(name: name, pluginId: "p", importedVersion: nil, claudeVersion: "2",
+                          latest: nil, tier: "reimport", source: nil)
+    }
+    let merged = PluginUpdateSources.merge(
+        vendor: [row("claude-z"), row("claude-i"), row("g"), row("unlisted")],
+        source: [row("g"), row("gone")], plugins: plugins, oneClick: true)
+    #expect(merged.map(\.name) == ["claude-i", "unlisted", "g"])
+}
+
+@Test func sourceCheckDueForUncoveredPlugins() {
+    let now = Date()
+    let recent = now.addingTimeInterval(-60)
+    #expect(!PluginUpdateSources.isDue(tracked: [], checked: [], lastCheck: nil, now: now, ttl: 1800, force: true))
+    #expect(PluginUpdateSources.isDue(tracked: ["a"], checked: [], lastCheck: nil, now: now, ttl: 1800, force: false))
+    #expect(!PluginUpdateSources.isDue(tracked: ["a"], checked: ["a"], lastCheck: recent, now: now, ttl: 1800, force: false))
+    #expect(PluginUpdateSources.isDue(tracked: ["a", "b"], checked: ["a"], lastCheck: recent, now: now, ttl: 1800, force: false))
+    #expect(PluginUpdateSources.isDue(tracked: ["a"], checked: ["a"], lastCheck: recent, now: now, ttl: 1800, force: true))
+    #expect(PluginUpdateSources.isDue(tracked: ["a"], checked: ["a"], lastCheck: now.addingTimeInterval(-1801),
+                                      now: now, ttl: 1800, force: false))
 }

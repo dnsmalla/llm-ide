@@ -372,8 +372,10 @@ extension LlmIdeAPIClient {
     /// `fallbackFileName` names the zip record a replace falls back to when
     /// the git record cannot be sent (see `installPlugin`); by default the
     /// repository's name.
+    /// `expectName`: see `installPlugin` — an update sends the plugin it replaces.
     func installPluginFromGit(url: String, ref: String? = nil, replace: Bool = false,
-                              fallbackFileName: String? = nil) async throws -> PluginInstallResponse {
+                              fallbackFileName: String? = nil,
+                              expectName: String? = nil) async throws -> PluginInstallResponse {
         let staged = try await PluginGitInstaller.cloneAndZip(url: url, ref: ref)
         defer { staged.cleanup() }
         let trimmedRef = ref?.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -384,6 +386,7 @@ extension LlmIdeAPIClient {
         let repoName = staged.normalizedURL.split(whereSeparator: { $0 == "/" || $0 == ":" }).last
             .map { $0.hasSuffix(".git") ? String($0.dropLast(4)) : String($0) }
         return try await installPlugin(zipURL: staged.zipURL, replace: replace, source: source,
-                                       fallbackFileName: fallbackFileName ?? repoName.map { "\($0).zip" })
+                                       fallbackFileName: fallbackFileName ?? repoName.map { "\($0).zip" },
+                                       expectName: expectName)
     }
 }

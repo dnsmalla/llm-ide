@@ -69,6 +69,10 @@ final class PluginUpdateCenter: SessionScoped {
     static let sourceCheckTTL: TimeInterval = 30 * 60
     private var lastCheck: (at: Date, oneClick: Bool)?
     private var lastSourceCheck: Date?
+    /// The plugins the last source check covered (see `PluginUpdateSources.isDue`).
+    private var sourceCheckedNames: Set<String> = []
+    /// The gate the last refresh ran under; routing (and so the merge) needs it.
+    private var lastOneClick = false
     /// What the vendor bridges (Claude Code / Codex) reported last.
     private var vendorEntries: [PluginUpdateEntry] = []
     /// What the git / marketplace check reported last (tier "upstream").
@@ -106,6 +110,7 @@ final class PluginUpdateCenter: SessionScoped {
         sourceFailures = [:]
         knownPlugins = [:]
         lastSourceCheck = nil
+        sourceCheckedNames = []
         sourceGeneration += 1
         sourceCheckRunning = false
         vendorChecking = false
@@ -154,60 +159,70 @@ final class PluginUpdateCenter: SessionScoped {
         // plugin` process); never alongside a running update. The UI disables
         // it too; this covers a check already queued when the update began.
         let force = force && !isUpdating
+        lastOneClick = oneClick
         let vendorFresh = !force && lastCheck.map {
             $0.oneClick == oneClick && Date().timeIntervalSince($0.at) < Self.checkTTL
         } == true
-        let tracked = trackedSources()
-        let sourcesDue = !tracked.isEmpty && (force || lastSourceCheck.map {
-            Date().timeIntervalSince($0) >= Self.sourceCheckTTL
-        } ?? true)
+        let tracked = PluginUpdateSources.tracked(knownPlugins)
+        let sourcesDue = PluginUpdateSources.isDue(
+            tracked: Set(tracked.map(\.name)), checked: sourceCheckedNames, lastCheck: lastSourceCheck,
+            now: Date(), ttl: Self.sourceCheckTTL, force: force)
         let startSources = sourcesDue && (force || !sourceCheckRunning)
         if vendorFresh && !startSources {
             rebuildEntries()
             return true
         }
-        refreshGeneration += 1
-        let generation = refreshGeneration
+        let startedEpoch = epoch
+        // Only a refresh that fetches the vendor part takes a generation: a
+        // source-only refresh must not void a vendor answer still in flight.
+        var generation: Int?
+        if !vendorFresh {
+            refreshGeneration += 1
+            generation = refreshGeneration
+            vendorChecking = true
+        }
+        defer { if let generation, generation == refreshGeneration { vendorChecking = false } }
         var sourceRun: Int?
         if startSources {
             sourceGeneration += 1
             sourceRun = sourceGeneration
             sourceCheckRunning = true
         }
-        if !vendorFresh { vendorChecking = true }
-        defer { if generation == refreshGeneration { vendorChecking = false } }
         let checker = sourceChecker
         async let sourceAnswer: [String: SourceCheckResult]? = startSources ? checker.check(tracked) : nil
-        var found: [PluginUpdateEntry] = []
-        var claudeOK = true
-        if !vendorFresh {
-            if oneClick {
-                do { found += try await api.claudePluginUpdates(force: force).updates } catch { claudeOK = false }
-                found += (try? await api.codexPluginUpdateCheck())?.updates ?? []
-            } else {
-                let legacy: [PluginUpdate] = ((try? await api.claudePluginUpdates()) ?? [])
-                    + ((try? await api.codexPluginUpdates()) ?? [])
-                found = legacy.map(PluginUpdateEntry.init(legacy:))
-            }
-        }
+        let vendor: (found: [PluginUpdateEntry], claudeOK: Bool)? = vendorFresh ? nil
+            : await fetchVendor(api: api, oneClick: oneClick, force: force)
         let answered = await sourceAnswer
-        // resetForSignOut bumps both generations, so neither part of a
-        // previous account's check is written.
+        // resetForSignOut bumps both generations and the epoch, so no part of
+        // a previous account's check is written.
         if let sourceRun, sourceRun == sourceGeneration {
             sourceCheckRunning = false
-            if let answered {
-                applySourceResults(answered, tracked: tracked, force: force)
-                lastSourceCheck = Date()
-            }
+            if let answered { applySourceResults(answered, tracked: tracked, force: force) }
             rebuildEntries()
         }
+        guard startedEpoch == epoch else { return nil }
+        guard let generation, let vendor else { return true }
         guard generation == refreshGeneration else { return nil }
-        if !vendorFresh {
-            vendorEntries = found
-            lastCheck = (Date(), oneClick)
-        }
+        vendorEntries = vendor.found
+        lastCheck = (Date(), oneClick)
         rebuildEntries()
-        return claudeOK
+        return vendor.claudeOK
+    }
+
+    /// Ask both bridges. Best-effort per vendor; `claudeOK` is whether the
+    /// Claude check answered.
+    private func fetchVendor(api: LlmIdeAPIClient, oneClick: Bool,
+                             force: Bool) async -> (found: [PluginUpdateEntry], claudeOK: Bool) {
+        guard oneClick else {
+            let legacy: [PluginUpdate] = ((try? await api.claudePluginUpdates()) ?? [])
+                + ((try? await api.codexPluginUpdates()) ?? [])
+            return (legacy.map(PluginUpdateEntry.init(legacy:)), true)
+        }
+        var found: [PluginUpdateEntry] = []
+        var claudeOK = true
+        do { found += try await api.claudePluginUpdates(force: force).updates } catch { claudeOK = false }
+        found += (try? await api.codexPluginUpdateCheck())?.updates ?? []
+        return (found, claudeOK)
     }
 
     /// The detail pane's "Check for updates": a forced check, with the
@@ -231,31 +246,9 @@ final class PluginUpdateCenter: SessionScoped {
         }
     }
 
-    /// Installed plugins whose record names a git or marketplace origin.
-    private func trackedSources() -> [(name: String, source: PluginInstallSource)] {
-        knownPlugins.values
-            .compactMap { info in info.installSource.map { (name: info.name, source: $0) } }
-            .filter { $0.source.kind == "git" || $0.source.kind == "marketplace" }
-            .sorted { $0.name < $1.name }
-    }
-
     private func applySourceResults(_ answered: [String: SourceCheckResult],
-                                    tracked: [(name: String, source: PluginInstallSource)], force: Bool) {
-        var found: [PluginUpdateEntry] = []
-        var failures: [String: String] = [:]
-        for (name, source) in tracked {
-            guard let answer = answered[name] else { continue }
-            switch answer.status {
-            case .updateAvailable:
-                found.append(PluginUpdateEntry(
-                    name: name, pluginId: nil, importedVersion: source.version, claudeVersion: nil,
-                    latest: answer.latest, tier: "upstream", source: source.kind))
-            case .unavailable(let reason):
-                failures[name] = PluginUpdatePresentation.sourceCheckFailedMessage(name: name, reason: reason)
-            case .upToDate:
-                break
-            }
-        }
+                                    tracked: PluginUpdateSources.Tracked, force: Bool) {
+        let (found, failures) = PluginUpdateSources.outcome(answered, tracked: tracked)
         // Clear only what an earlier source check wrote; an update's own
         // result stays until that plugin is updated or checked again.
         for (name, old) in sourceFailures where failures[name] == nil && results[name]?.message == old {
@@ -266,14 +259,13 @@ final class PluginUpdateCenter: SessionScoped {
         }
         sourceFailures = failures
         sourceEntries = found
+        sourceCheckedNames = Set(tracked.map(\.name))
+        lastSourceCheck = Date()
     }
 
-    /// A git / marketplace plugin is answered by its source only; a vendor row
-    /// for the same name (a zip once imported under that name) is ignored.
     private func rebuildEntries() {
-        let tracked = Set(trackedSources().map(\.name))
-        entries = vendorEntries.filter { !tracked.contains($0.name) }
-            + sourceEntries.filter { tracked.contains($0.name) }
+        entries = PluginUpdateSources.merge(vendor: vendorEntries, source: sourceEntries,
+                                            plugins: knownPlugins, oneClick: lastOneClick)
     }
 
     // MARK: - Update (entry points)

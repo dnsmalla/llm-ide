@@ -125,33 +125,38 @@ extension LlmIdeAPIClient {
     /// (`INVALID_SOURCE`) the install is retried once without it — provenance
     /// must never be the reason an install fails.
     ///
-    /// On a REPLACE the server keeps the existing record when no header comes,
-    /// so in those two cases a zip record (`fallbackFileName`, default the zip's
-    /// own name) is sent instead: a git/marketplace record must never go on
-    /// describing content that was just replaced.
+    /// On a replace a zip record stands in when `source` cannot be sent (see
+    /// `PluginInstallSource.installPlan`).
+    ///
+    /// `expectName` is the plugin an update means to replace: the server
+    /// refuses (409 NAME_MISMATCH, nothing installed) a package that names
+    /// another one. Every update path sends it.
     func installPlugin(zipURL: URL, replace: Bool = false,
                        source: PluginInstallSource? = nil,
-                       fallbackFileName: String? = nil) async throws -> PluginInstallResponse {
+                       fallbackFileName: String? = nil,
+                       expectName: String? = nil) async throws -> PluginInstallResponse {
         let data = try Data(contentsOf: zipURL)
-        let path = "/auth/me/plugins/install" + (replace ? "?replace=1" : "")
-        let fallback = replace
-            ? Self.zipFallbackHeaders(fallbackFileName ?? zipURL.lastPathComponent) : [:]
-        var headers: [String: String] = fallback
-        if let source, source.isServerAcceptable, let value = try? source.headerValue() {
-            headers = ["X-Llmide-Plugin-Source": value]
-        } else if let source {
+        var query: [String] = replace ? ["replace=1"] : []
+        if let expectName {
+            let encoded = expectName.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? expectName
+            query.append("expect=\(encoded)")
+        }
+        let path = "/auth/me/plugins/install" + (query.isEmpty ? "" : "?" + query.joined(separator: "&"))
+        let plan = PluginInstallSource.installPlan(
+            source: source, replace: replace, fallbackFileName: fallbackFileName ?? zipURL.lastPathComponent)
+        if let source, plan.first != source {
             Self.pluginInstallLog.notice("install source (\(source.kind, privacy: .public)) not recordable; installing without it")
         }
+        let headers = Self.sourceHeaders(plan.first)
         let response: PluginInstallResponse
         do {
             response = try await postRawBytes(
                 path, bytes: data, contentType: "application/zip", authenticated: true, headers: headers)
         } catch APIError.http(400, "INVALID_SOURCE", let message, _) where !headers.isEmpty {
-            Self.pluginInstallLog.warning("server refused install source: \(message, privacy: .public); retrying without it")
-            // The fallback itself may be what was refused: then send nothing.
-            let retry = headers == fallback ? [:] : fallback
+            Self.pluginInstallLog.warning("server refused install source: \(message, privacy: .public); retrying")
             response = try await postRawBytes(
-                path, bytes: data, contentType: "application/zip", authenticated: true, headers: retry)
+                path, bytes: data, contentType: "application/zip", authenticated: true,
+                headers: Self.sourceHeaders(plan.retry))
         }
         // A newly installed plugin may declare a graph engine, and the resolved
         // engine is cached for the process. Without this the app kept reporting
@@ -161,11 +166,8 @@ extension LlmIdeAPIClient {
         return response
     }
 
-    /// The zip record a replace falls back to; empty when even that would be
-    /// refused (then the replace goes out with no header at all).
-    private static func zipFallbackHeaders(_ fileName: String) -> [String: String] {
-        let source = PluginInstallSource.zip(fileName: fileName)
-        guard source.isServerAcceptable, let value = try? source.headerValue() else { return [:] }
+    private static func sourceHeaders(_ source: PluginInstallSource?) -> [String: String] {
+        guard let source, let value = try? source.headerValue() else { return [:] }
         return ["X-Llmide-Plugin-Source": value]
     }
 

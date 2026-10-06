@@ -45,9 +45,10 @@ enum PluginUpdatePresentation {
     /// name: a zip that happens to be named `claude-x` was not imported, and
     /// re-importing it would pull a different package from Claude Code.
     ///
-    /// With neither a source nor an origin (a server predating both), the
-    /// `claude-` / `codex-` prefix is the only sign of an import left; anything
-    /// else came from a file.
+    /// With neither a source nor an origin, the `claude-` / `codex-` prefix
+    /// counts as an import only on a server that does not report `origin` at
+    /// all (API < 60, i.e. `oneClick` false). A server that does report it has
+    /// said "not an import", so the plugin came from a file.
     static func action(name: String, origin: String?, installSource: PluginInstallSource?,
                        entry: PluginUpdateEntry?, oneClick: Bool) -> UpdateAction {
         switch installSource?.kind {
@@ -58,7 +59,9 @@ enum PluginUpdatePresentation {
         }
         var vendor = origin
         if vendor == nil && installSource == nil {
-            if name.hasPrefix("claude-") {
+            if oneClick {
+                return .replaceFromFile
+            } else if name.hasPrefix("claude-") {
                 vendor = "claude"
             } else if name.hasPrefix("codex-") {
                 vendor = "codex"
@@ -111,19 +114,27 @@ enum PluginUpdatePresentation {
         "Could not check \(name) for updates: \(reason)."
     }
 
-    /// After a git / marketplace re-install. The source may now hold a plugin
-    /// under another name: then that one was installed and `name` is unchanged.
-    static func reinstalledMessage(name: String, installedName: String, version: String,
-                                   trustReset: Bool) -> String {
-        var lines: [String] = []
-        if installedName == name {
-            lines.append("Updated \(name) to v\(version).")
-        } else {
-            lines.append("The source of \(name) now provides \(installedName) v\(version); "
-                + "it was installed under that name and \(name) is unchanged.")
-        }
-        if trustReset { lines.append("Hooks/MCP of \(installedName) were reset and need re-approval.") }
+    /// After a git / marketplace re-install of `name`.
+    static func reinstalledMessage(name: String, version: String, trustReset: Bool) -> String {
+        var lines = ["Updated \(name) to v\(version)."]
+        if trustReset { lines.append("Hooks/MCP of \(name) were reset and need re-approval.") }
         return lines.joined(separator: "\n")
+    }
+
+    /// The server refused an update because the package names another plugin
+    /// (409 NAME_MISMATCH, message `plugin source now provides 'X', not 'Y'`).
+    static func nameMismatchMessage(name: String, serverMessage: String) -> String {
+        let parts = serverMessage.split(separator: "'", omittingEmptySubsequences: false)
+        let provided = parts.count >= 3 && !parts[1].isEmpty ? String(parts[1]) : "another plugin"
+        return "The source now provides \(provided), not \(name); nothing was replaced."
+    }
+
+    /// The result line for a failed git / marketplace / file update.
+    static func updateFailureMessage(name: String, error: Error) -> String {
+        if case let APIError.http(409, "NAME_MISMATCH", message, _) = error {
+            return nameMismatchMessage(name: name, serverMessage: message)
+        }
+        return "Could not update \(name): \(error.localizedDescription)"
     }
 
     /// Sidebar badge text, or nil for no badge.

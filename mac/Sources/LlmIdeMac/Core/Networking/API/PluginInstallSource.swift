@@ -54,6 +54,22 @@ struct PluginInstallSource: Codable, Equatable, Sendable {
             .replacingOccurrences(of: "=", with: "")
     }
 
+    /// Which record an install sends first, and which one its single retry
+    /// after `INVALID_SOURCE` sends (nil = no header).
+    ///
+    /// On a replace the server keeps the existing record when no header comes,
+    /// so a zip record (`fallbackFileName`) stands in whenever `source` cannot
+    /// be sent or is refused: a git / marketplace record must never go on
+    /// describing content that was just replaced. Values the server would
+    /// refuse are never planned.
+    static func installPlan(source: PluginInstallSource?, replace: Bool,
+                            fallbackFileName: String) -> (first: PluginInstallSource?, retry: PluginInstallSource?) {
+        let fallback: PluginInstallSource? = replace
+            ? Optional(.zip(fileName: fallbackFileName)).flatMap { $0.isServerAcceptable ? $0 : nil } : nil
+        guard let source, source.isServerAcceptable else { return (fallback, nil) }
+        return (source, fallback)
+    }
+
     // MARK: - Mirror of the server's validation
 
     /// True when the server's `validateSource` would accept this record.
