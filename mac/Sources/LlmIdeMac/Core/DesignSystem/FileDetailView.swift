@@ -64,7 +64,19 @@ struct FileDetailView: View {
 
     private enum FileKind { case markdown, html, pdf, image, code, quicklook }
 
+    /// Text files with no extension (or only a dot-name), which `pathExtension`
+    /// cannot classify: `Makefile`'s extension is "" and `.gitignore`'s too, so
+    /// the extension cases below could never match them and they opened in
+    /// QuickLook with no way to edit.
+    private static let codeFileNames: Set<String> = [
+        "makefile", "dockerfile", "license", "licence", "readme", "codeowners", "gemfile",
+        "rakefile", "procfile", "podfile", "brewfile", "justfile", "vagrantfile", "cartfile",
+        ".gitignore", ".gitattributes", ".gitmodules", ".editorconfig", ".env", ".npmrc",
+        ".prettierrc", ".eslintrc", ".dockerignore", ".zshrc", ".bashrc", ".profile",
+    ]
+
     private var fileKind: FileKind {
+        if Self.codeFileNames.contains(url.lastPathComponent.lowercased()) { return .code }
         switch url.pathExtension.lowercased() {
         case "md", "markdown":
             return .markdown
