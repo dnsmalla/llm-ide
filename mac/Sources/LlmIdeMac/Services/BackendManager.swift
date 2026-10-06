@@ -514,7 +514,14 @@ final class BackendManager {
         startAfterExit = (nodePath, workingDirectory)
         Task { @MainActor [weak self] in
             await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
-            try? await Task.sleep(nanoseconds: 500_000_000)
+            // Wait for the port to actually FREE, not a fixed 500 ms: a node that is
+            // still draining keeps answering /health, and `start()` would adopt the
+            // dying server as `.running` — then it exits and the status goes stale.
+            // Bounded (about 4 s); after that `start()` copes with whatever is there.
+            for _ in 0..<20 {
+                if !(await Self.isPortInUse(port: Self.defaultBackendPort)) { break }
+                try? await Task.sleep(nanoseconds: 200_000_000)
+            }
             guard let self, self.startAfterExit != nil, self.process == nil else { return }
             self.startAfterExit = nil
             self.userInitiatedStop = false
