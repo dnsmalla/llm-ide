@@ -27,7 +27,12 @@ extension CodeAssistantPanel {
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: false)
             // Sheet-driven, not the auto-chain path — .ifIdle matches the old
             // plain sendFollowup() (no-op if an autonomous turn is streaming).
-            await engine.acknowledge(payload, followUp: .ifIdle)
+            // The follow-up is a model round trip (tens of seconds). Awaiting it
+            // here kept the sheet on its "Creating…" spinner after the action had
+            // already succeeded, and reported success even if the follow-up failed.
+            // Append the acknowledgement now; run the follow-up detached.
+            await engine.acknowledge(payload, followUp: .none)
+            Task { await engine.sendFollowup() }
             return .success(args.branch)
         } catch {
             return .failure(error.localizedDescription)
@@ -104,7 +109,10 @@ extension CodeAssistantPanel {
             await engine.acknowledge(payload, followUp: .forceUnblock)
         } catch {
             let payload = ChatMessage.ToolResultPayload(
-                kind: .git, summary: "(git \(args.op.rawValue) failed) \(error.localizedDescription)",
+                kind: .git, // Redacted: a failed push/fetch can echo the remote URL with its
+                // embedded credential, and this text is persisted AND replayed
+                // to the model.
+                summary: "(git \(args.op.rawValue) failed) \(SecretRedactor.redact(error.localizedDescription))",
                 exitCode: nil, command: nil, output: nil, url: nil, isFailure: true)
             await engine.acknowledge(payload, followUp: .forceUnblock)
         }

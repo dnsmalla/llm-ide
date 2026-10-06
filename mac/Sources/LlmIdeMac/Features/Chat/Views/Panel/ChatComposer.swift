@@ -753,6 +753,9 @@ extension CodeAssistantPanel {
             // and "no such model" surface in the same place a turn error does.
             if let feedback = modelState.resolveModelCommand(modelQuery, config: config) {
                 engine.error = feedback
+                // Keep what the user typed so a typo is one edit away, not a
+                // full retype (the draft was cleared above).
+                draft = msg
             }
             return
         }
