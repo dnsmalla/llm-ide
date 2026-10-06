@@ -47,7 +47,3 @@ export function usageDelta(current, baseline) {
     return out;
   }).filter((m) => FIELDS.some((f) => m[f] > 0));
 }
-
-export function __resetUsageBaselinesForTest() {
-  baselines.clear();
-}
