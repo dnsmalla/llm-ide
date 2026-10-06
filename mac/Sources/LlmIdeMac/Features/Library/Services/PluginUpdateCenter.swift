@@ -32,7 +32,16 @@ final class PluginUpdateCenter: SessionScoped {
 
     /// Updates the last check reported (pre-v60 rows converted).
     private(set) var entries: [PluginUpdateEntry] = []
-    private(set) var checking = false
+    /// A vendor check or a git / marketplace check is running.
+    var checking: Bool { vendorChecking || sourceCheckRunning }
+    private var vendorChecking = false
+    /// A source check is out. A non-forced refresh does not start a second
+    /// one meanwhile; it can take a minute per unreachable origin.
+    private var sourceCheckRunning = false
+    /// Bumped by every source check that starts (and on sign-out); only the
+    /// newest one may write its results — independent of `refreshGeneration`,
+    /// so a quick vendor refresh does not throw away a slow source answer.
+    private var sourceGeneration = 0
     /// Plugins whose update is running.
     private(set) var inFlight: Set<String> = []
     /// True from the click until the update / batch ends — set synchronously
@@ -54,7 +63,23 @@ final class PluginUpdateCenter: SessionScoped {
 
     /// Non-forced checks within this window reuse the last answer.
     static let checkTTL: TimeInterval = 60
+    /// Git / marketplace checks clone or ls-remote every source, so a plain
+    /// Library refresh reuses their answer for this long; only a forced check
+    /// ("Check for updates") goes out sooner.
+    static let sourceCheckTTL: TimeInterval = 30 * 60
     private var lastCheck: (at: Date, oneClick: Bool)?
+    private var lastSourceCheck: Date?
+    /// What the vendor bridges (Claude Code / Codex) reported last.
+    private var vendorEntries: [PluginUpdateEntry] = []
+    /// What the git / marketplace check reported last (tier "upstream").
+    private var sourceEntries: [PluginUpdateEntry] = []
+    /// Per-plugin reasons the last source check could not answer, as written
+    /// into `results` (kept so a later success can clear exactly those).
+    private var sourceFailures: [String: String] = [:]
+    /// The installed plugins as the Library last listed them: routing needs
+    /// each one's origin and install source, which update entries lack.
+    private var knownPlugins: [String: PluginInfo] = [:]
+    private let sourceChecker = PluginSourceUpdateChecker()
     /// Bumped on sign-out; work started under an older epoch reports nothing.
     private var epoch = 0
     /// Bumped by every refresh that actually fetches; only the newest one may
@@ -76,7 +101,14 @@ final class PluginUpdateCenter: SessionScoped {
         epoch += 1
         refreshGeneration += 1
         entries = []
-        checking = false
+        vendorEntries = []
+        sourceEntries = []
+        sourceFailures = [:]
+        knownPlugins = [:]
+        lastSourceCheck = nil
+        sourceGeneration += 1
+        sourceCheckRunning = false
+        vendorChecking = false
         inFlight = []
         isRunning = false
         pendingConfirmation = nil
@@ -84,6 +116,13 @@ final class PluginUpdateCenter: SessionScoped {
         deferredSummary = nil
         libraryMessage = nil
         lastCheck = nil
+    }
+
+    /// The detail pane's own fresh copy of one plugin: routing needs its
+    /// install source even when the Library has not listed it yet (or its
+    /// list predates a replace).
+    func remember(_ info: PluginInfo) {
+        knownPlugins[info.name] = info
     }
 
     /// Forget the last check, so the next non-forced refresh fetches. Called
@@ -94,57 +133,147 @@ final class PluginUpdateCenter: SessionScoped {
 
     // MARK: - Check
 
-    /// Ask both bridges what the vendor sources offer. Best-effort per vendor:
-    /// a machine without Claude Code or Codex simply has no updates.
+    /// Ask both bridges what the vendor sources offer, and the git /
+    /// marketplace origins whether they moved. Best-effort per vendor: a
+    /// machine without Claude Code or Codex simply has no updates.
     ///
-    /// Pre: `oneClick` is the v60 gate for the current server.
+    /// Pre: `oneClick` is the v60 gate for the current server. `plugins`, when
+    /// given, is the full installed list (it replaces what the center knows).
     /// Post: `entries` is fresh unless a non-forced check ran under `checkTTL`
-    /// ago against the same gate. `force` also refreshes the marketplace
+    /// ago against the same gate; the source part runs only when forced or
+    /// older than `sourceCheckTTL`. `force` also refreshes the marketplace
     /// catalogs server-side. Returns whether the Claude check answered, or nil
     /// when this refresh was superseded (a newer refresh, or a sign-out).
     @discardableResult
-    func refresh(api: LlmIdeAPIClient, oneClick: Bool, force: Bool) async -> Bool? {
+    func refresh(api: LlmIdeAPIClient, oneClick: Bool, force: Bool,
+                 plugins: [PluginInfo]? = nil) async -> Bool? {
+        if let plugins {
+            knownPlugins = Dictionary(plugins.map { ($0.name, $0) }, uniquingKeysWith: { first, _ in first })
+        }
         // A forced check refreshes the marketplace catalogs (a second `claude
         // plugin` process); never alongside a running update. The UI disables
         // it too; this covers a check already queued when the update began.
         let force = force && !isUpdating
-        if !force, let lastCheck, lastCheck.oneClick == oneClick,
-           Date().timeIntervalSince(lastCheck.at) < Self.checkTTL {
+        let vendorFresh = !force && lastCheck.map {
+            $0.oneClick == oneClick && Date().timeIntervalSince($0.at) < Self.checkTTL
+        } == true
+        let tracked = trackedSources()
+        let sourcesDue = !tracked.isEmpty && (force || lastSourceCheck.map {
+            Date().timeIntervalSince($0) >= Self.sourceCheckTTL
+        } ?? true)
+        let startSources = sourcesDue && (force || !sourceCheckRunning)
+        if vendorFresh && !startSources {
+            rebuildEntries()
             return true
         }
         refreshGeneration += 1
         let generation = refreshGeneration
-        checking = true
-        defer { if generation == refreshGeneration { checking = false } }
+        var sourceRun: Int?
+        if startSources {
+            sourceGeneration += 1
+            sourceRun = sourceGeneration
+            sourceCheckRunning = true
+        }
+        if !vendorFresh { vendorChecking = true }
+        defer { if generation == refreshGeneration { vendorChecking = false } }
+        let checker = sourceChecker
+        async let sourceAnswer: [String: SourceCheckResult]? = startSources ? checker.check(tracked) : nil
         var found: [PluginUpdateEntry] = []
         var claudeOK = true
-        if oneClick {
-            do { found += try await api.claudePluginUpdates(force: force).updates } catch { claudeOK = false }
-            found += (try? await api.codexPluginUpdateCheck())?.updates ?? []
-        } else {
-            let legacy: [PluginUpdate] = ((try? await api.claudePluginUpdates()) ?? [])
-                + ((try? await api.codexPluginUpdates()) ?? [])
-            found = legacy.map(PluginUpdateEntry.init(legacy:))
+        if !vendorFresh {
+            if oneClick {
+                do { found += try await api.claudePluginUpdates(force: force).updates } catch { claudeOK = false }
+                found += (try? await api.codexPluginUpdateCheck())?.updates ?? []
+            } else {
+                let legacy: [PluginUpdate] = ((try? await api.claudePluginUpdates()) ?? [])
+                    + ((try? await api.codexPluginUpdates()) ?? [])
+                found = legacy.map(PluginUpdateEntry.init(legacy:))
+            }
         }
-        // resetForSignOut bumps the generation too, so this also drops a
-        // result that belongs to the previous account.
+        let answered = await sourceAnswer
+        // resetForSignOut bumps both generations, so neither part of a
+        // previous account's check is written.
+        if let sourceRun, sourceRun == sourceGeneration {
+            sourceCheckRunning = false
+            if let answered {
+                applySourceResults(answered, tracked: tracked, force: force)
+                lastSourceCheck = Date()
+            }
+            rebuildEntries()
+        }
         guard generation == refreshGeneration else { return nil }
-        entries = found
-        lastCheck = (Date(), oneClick)
+        if !vendorFresh {
+            vendorEntries = found
+            lastCheck = (Date(), oneClick)
+        }
+        rebuildEntries()
         return claudeOK
     }
 
     /// The detail pane's "Check for updates": a forced check, with the
-    /// outcome recorded for `name`.
-    func check(name: String, api: LlmIdeAPIClient, oneClick: Bool) async {
+    /// outcome recorded for `name`. `info` is the pane's own copy of the
+    /// plugin, so a check works before the Library has listed it.
+    func check(name: String, info: PluginInfo?, api: LlmIdeAPIClient, oneClick: Bool) async {
+        if let info { knownPlugins[name] = info }
         guard let ok = await refresh(api: api, oneClick: oneClick, force: true) else { return }
-        if !ok {
+        let kind = knownPlugins[name]?.installSource?.kind
+        if kind == "git" || kind == "marketplace" {
+            // A failure was already written by the source check.
+            if sourceFailures[name] != nil { return }
+            results[name] = entry(for: name) == nil
+                ? Result(message: "Checked — no update found.", failed: false) : nil
+        } else if !ok {
             results[name] = Result(message: "Could not check for updates.", failed: true)
         } else if entry(for: name) == nil {
             results[name] = Result(message: "Checked — no update found.", failed: false)
         } else {
             results[name] = nil
         }
+    }
+
+    /// Installed plugins whose record names a git or marketplace origin.
+    private func trackedSources() -> [(name: String, source: PluginInstallSource)] {
+        knownPlugins.values
+            .compactMap { info in info.installSource.map { (name: info.name, source: $0) } }
+            .filter { $0.source.kind == "git" || $0.source.kind == "marketplace" }
+            .sorted { $0.name < $1.name }
+    }
+
+    private func applySourceResults(_ answered: [String: SourceCheckResult],
+                                    tracked: [(name: String, source: PluginInstallSource)], force: Bool) {
+        var found: [PluginUpdateEntry] = []
+        var failures: [String: String] = [:]
+        for (name, source) in tracked {
+            guard let answer = answered[name] else { continue }
+            switch answer.status {
+            case .updateAvailable:
+                found.append(PluginUpdateEntry(
+                    name: name, pluginId: nil, importedVersion: source.version, claudeVersion: nil,
+                    latest: answer.latest, tier: "upstream", source: source.kind))
+            case .unavailable(let reason):
+                failures[name] = PluginUpdatePresentation.sourceCheckFailedMessage(name: name, reason: reason)
+            case .upToDate:
+                break
+            }
+        }
+        // Clear only what an earlier source check wrote; an update's own
+        // result stays until that plugin is updated or checked again.
+        for (name, old) in sourceFailures where failures[name] == nil && results[name]?.message == old {
+            results[name] = nil
+        }
+        for (name, message) in failures where force || results[name] == nil || sourceFailures[name] != nil {
+            results[name] = Result(message: message, failed: true)
+        }
+        sourceFailures = failures
+        sourceEntries = found
+    }
+
+    /// A git / marketplace plugin is answered by its source only; a vendor row
+    /// for the same name (a zip once imported under that name) is ignored.
+    private func rebuildEntries() {
+        let tracked = Set(trackedSources().map(\.name))
+        entries = vendorEntries.filter { !tracked.contains($0.name) }
+            + sourceEntries.filter { tracked.contains($0.name) }
     }
 
     // MARK: - Update (entry points)
@@ -161,6 +290,21 @@ final class PluginUpdateCenter: SessionScoped {
             guard started == epoch else { return }
             isRunning = false
             finish(step, name: name, origin: origin, prefix: nil)
+        }
+    }
+
+    /// Replace a file-installed plugin with the zip the user picked. Same
+    /// guards and result plumbing as `startUpdate`.
+    func startReplaceFromFile(name: String, zipURL: URL, api: LlmIdeAPIClient, oneClick: Bool) {
+        guard !isUpdating else { return }
+        isRunning = true
+        let started = epoch
+        Task {
+            let step = await run(name: name, api: api, oneClick: oneClick, acceptCommand: nil,
+                                 origin: .detail, fileURL: zipURL)
+            guard started == epoch else { return }
+            isRunning = false
+            finish(step, name: name, origin: .detail, prefix: nil)
         }
     }
 
@@ -264,24 +408,42 @@ final class PluginUpdateCenter: SessionScoped {
         libraryMessage = message
     }
 
-    /// One plugin. A Claude import on a v60+ server goes through Claude Code's
-    /// own update (then a re-import); everything else re-imports at the version
-    /// its source offers — the same call the import sheets make. A step that
-    /// finishes after a sign-out comes back `.discarded` with nothing written.
+    /// One plugin, routed by `PluginUpdatePresentation.action`: a git or
+    /// marketplace install is fetched again from its recorded origin, a Claude
+    /// import on a v60+ server goes through Claude Code's own update, other
+    /// imports re-import from their vendor, and a file install is replaced
+    /// only with the file the user picked (`fileURL`). A step that finishes
+    /// after a sign-out comes back `.discarded` with nothing written.
     private func run(name: String, api: LlmIdeAPIClient, oneClick: Bool,
-                     acceptCommand: String?, origin: Origin) async -> PluginUpdateStep {
+                     acceptCommand: String?, origin: Origin, fileURL: URL? = nil) async -> PluginUpdateStep {
         let started = epoch
         inFlight.insert(name)
         defer { if started == epoch { inFlight.remove(name) } }
+        let info = knownPlugins[name]
+        let action = fileURL == nil
+            ? PluginUpdatePresentation.action(name: name, origin: info?.origin, installSource: info?.installSource,
+                                              entry: entry(for: name), oneClick: oneClick)
+            : .replaceFromFile
         let step: PluginUpdateStep
-        // A row the check answered from the local scan (no CLI) has no
-        // pluginId: the one-click route needs Claude's plugin id, the plain
-        // re-import does not.
-        let fallbackRow = entry(for: name).map { $0.pluginId == nil } ?? false
-        if oneClick && name.hasPrefix("claude-") && !fallbackRow {
+        switch action {
+        case .claudeOneClick:
             step = await runOneClick(name: name, api: api, acceptCommand: acceptCommand)
-        } else {
-            step = await runReimport(name: name, api: api)
+        case .reimportClaude, .reimportCodex:
+            step = await runReimport(name: name, api: api, codex: action == .reimportCodex)
+        case .gitReinstall:
+            step = await PluginSourceReinstaller.git(name: name, source: info?.installSource, api: api)
+        case .marketplaceReinstall:
+            step = await PluginSourceReinstaller.marketplace(name: name, source: info?.installSource, api: api)
+        case .replaceFromFile:
+            if let fileURL {
+                step = await PluginSourceReinstaller.replaceFromFile(name: name, zipURL: fileURL, api: api)
+            } else {
+                step = .done(message: "\(name) was installed from a file — use Replace from file… in its detail pane.",
+                             succeeded: false, trustReset: false, stopsBatch: false)
+            }
+        case .none:
+            step = .done(message: "\(name) has no recorded source to update from.",
+                         succeeded: false, trustReset: false, stopsBatch: false)
         }
         guard started == epoch else { return .discarded }
         switch step {
@@ -291,7 +453,13 @@ final class PluginUpdateCenter: SessionScoped {
             pendingOrigin = origin
             pendingConfirmation = PluginUpdateConfirmation(pluginName: name, command: command, sha256: sha256)
         case let .done(_, ok, _, _, _):
-            if ok { await afterChange(api: api, oneClick: oneClick) }
+            if ok {
+                // The content now matches the source: its old "newer version"
+                // row must not survive until the next 30-minute source check.
+                sourceEntries.removeAll { $0.name == name }
+                sourceFailures[name] = nil
+                await afterChange(api: api, oneClick: oneClick)
+            }
             guard started == epoch else { return .discarded }
         case .discarded:
             break
@@ -309,12 +477,12 @@ final class PluginUpdateCenter: SessionScoped {
         }
     }
 
-    private func runReimport(name: String, api: LlmIdeAPIClient) async -> PluginUpdateStep {
+    private func runReimport(name: String, api: LlmIdeAPIClient, codex: Bool) async -> PluginUpdateStep {
         let entry = entry(for: name)
         let sourceName = entry?.sourcePluginName ?? name
         let source = entry?.source ?? "installed"
         do {
-            if name.hasPrefix("codex-") {
+            if codex {
                 _ = try await api.importCodexPlugin(name: sourceName, source: source)
             } else {
                 _ = try await api.importClaudePlugin(name: sourceName, source: source)

@@ -153,3 +153,67 @@ import Testing
     #expect(PluginUpdatePresentation.replacedMessage(name: "x", version: "2.0.0", trustReset: true)
         .contains("were reset and need re-approval"))
 }
+
+// MARK: - Update routing by install source
+
+private let routeSha = String(repeating: "a", count: 40)
+
+private func route(_ name: String, origin: String? = nil, source: PluginInstallSource? = nil,
+                   entry: PluginUpdateEntry? = nil, oneClick: Bool = true) -> PluginUpdatePresentation.UpdateAction {
+    PluginUpdatePresentation.action(name: name, origin: origin, installSource: source, entry: entry, oneClick: oneClick)
+}
+
+@Test func actionRoutesByInstallSourceFirst() {
+    let git = PluginInstallSource.git(url: "https://github.com/o/r", ref: "main", commit: routeSha)
+    let market = PluginInstallSource.marketplace(url: "https://github.com/o/m", ref: nil, commit: routeSha,
+                                                 entry: "x", path: "plugins/x", tree: routeSha, version: "1.0.0")
+    let zip = PluginInstallSource.zip(fileName: "x.zip")
+    #expect(route("x", source: git) == .gitReinstall)
+    #expect(route("x", source: market) == .marketplaceReinstall)
+    #expect(route("x", source: zip) == .replaceFromFile)
+    // The record outranks the vendor origin too.
+    #expect(route("claude-x", origin: "claude", source: git) == .gitReinstall)
+}
+
+@Test func zipNamedLikeAnImportIsNeverReimported() {
+    let zip = PluginInstallSource.zip(fileName: "claude-x.zip")
+    #expect(route("claude-x", source: zip) == .replaceFromFile)
+    #expect(route("claude-x", source: zip, oneClick: false) == .replaceFromFile)
+    #expect(route("codex-x", source: zip) == .replaceFromFile)
+}
+
+@Test func actionRoutesVendorImports() {
+    #expect(route("claude-x", origin: "claude") == .claudeOneClick)
+    #expect(route("claude-x", origin: "claude", oneClick: false) == .reimportClaude)
+    // A locally-answered row (no pluginId) cannot take the one-click route.
+    let local = PluginUpdateEntry(name: "claude-x", pluginId: nil, importedVersion: "1", claudeVersion: "2",
+                                  latest: nil, tier: "reimport", source: nil)
+    #expect(route("claude-x", origin: "claude", entry: local) == .reimportClaude)
+    #expect(route("codex-x", origin: "codex") == .reimportCodex)
+}
+
+@Test func actionWithoutSourceOrOrigin() {
+    // A server predating both fields: the prefix is the only import sign left.
+    #expect(route("claude-x") == .claudeOneClick)
+    #expect(route("codex-x") == .reimportCodex)
+    #expect(route("plain") == .replaceFromFile)
+    // An origin this client does not know, with no source: nothing to do.
+    #expect(route("x", origin: "other") == PluginUpdatePresentation.UpdateAction.none)
+}
+
+@Test func actionForDecodedPluginInfo() throws {
+    let json = #"{"name":"claude-x","version":"1.0.0","displayName":"X","description":"","author":"","enabled":true,"skillCount":0,"commands":[],"installSource":{"kind":"zip","fileName":"claude-x.zip"}}"#
+    let info = try JSONDecoder().decode(PluginInfo.self, from: Data(json.utf8))
+    #expect(PluginUpdatePresentation.action(for: info, entry: nil, oneClick: true) == .replaceFromFile)
+}
+
+@Test func sourceMessages() {
+    let git = PluginInstallSource.git(url: "https://github.com/o/r", ref: "main", commit: routeSha)
+    #expect(PluginUpdatePresentation.sourceDescription(git) == "From git: https://github.com/o/r @ main (aaaaaaa)")
+    #expect(PluginUpdatePresentation.sourceDescription(.zip(fileName: "a.zip")) == "Installed from file a.zip")
+    #expect(PluginUpdatePresentation.sourceAvailabilityText(kind: "marketplace", latest: "2.0")
+        == "The marketplace has a newer version v2.0.")
+    let renamed = PluginUpdatePresentation.reinstalledMessage(name: "a", installedName: "b", version: "1",
+                                                              trustReset: true)
+    #expect(renamed.contains("a is unchanged") && renamed.contains("need re-approval"))
+}

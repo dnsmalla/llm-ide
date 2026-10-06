@@ -21,6 +21,111 @@ enum PluginUpdatePresentation {
         claudeName.hasPrefix("claude-") ? claudeName : "claude-" + claudeName
     }
 
+    /// How the Library updates one plugin.
+    enum UpdateAction: Equatable {
+        /// Claude Code's own update, then a re-import (v60+ server).
+        case claudeOneClick
+        case reimportClaude
+        case reimportCodex
+        /// Clone the recorded git URL / ref again and replace.
+        case gitReinstall
+        /// Fetch the recorded marketplace again and replace its entry.
+        case marketplaceReinstall
+        /// Installed from a file: only the user can pick the newer one.
+        case replaceFromFile
+        case none
+    }
+
+    static func action(for info: PluginInfo, entry: PluginUpdateEntry?, oneClick: Bool) -> UpdateAction {
+        action(name: info.name, origin: info.origin, installSource: info.installSource,
+               entry: entry, oneClick: oneClick)
+    }
+
+    /// The recorded install source wins over the vendor origin and over the
+    /// name: a zip that happens to be named `claude-x` was not imported, and
+    /// re-importing it would pull a different package from Claude Code.
+    ///
+    /// With neither a source nor an origin (a server predating both), the
+    /// `claude-` / `codex-` prefix is the only sign of an import left; anything
+    /// else came from a file.
+    static func action(name: String, origin: String?, installSource: PluginInstallSource?,
+                       entry: PluginUpdateEntry?, oneClick: Bool) -> UpdateAction {
+        switch installSource?.kind {
+        case "git": return .gitReinstall
+        case "marketplace": return .marketplaceReinstall
+        case "zip": return .replaceFromFile
+        default: break
+        }
+        var vendor = origin
+        if vendor == nil && installSource == nil {
+            if name.hasPrefix("claude-") {
+                vendor = "claude"
+            } else if name.hasPrefix("codex-") {
+                vendor = "codex"
+            } else {
+                return .replaceFromFile
+            }
+        }
+        switch vendor {
+        case "claude":
+            // A row the check answered from the local scan (no CLI) has no
+            // pluginId: the one-click route needs Claude's plugin id.
+            let localRow = entry.map { $0.pluginId == nil } ?? false
+            return oneClick && !localRow ? .claudeOneClick : .reimportClaude
+        case "codex":
+            return .reimportCodex
+        default:
+            return .none
+        }
+    }
+
+    /// The detail header's "where it came from" line, or nil when unrecorded.
+    static func sourceDescription(_ source: PluginInstallSource) -> String? {
+        switch source.kind {
+        case "git":
+            guard let url = source.url else { return nil }
+            let ref = source.ref.map { " @ \($0)" } ?? ""
+            let commit = source.commit.map { " (\($0.prefix(7)))" } ?? ""
+            return "From git: \(url)\(ref)\(commit)"
+        case "marketplace":
+            guard let url = source.url else { return nil }
+            let entry = source.entry.map { "\($0) from " } ?? ""
+            let version = source.version.map { " · v\($0)" } ?? ""
+            return "Marketplace: \(entry)\(url)\(version)"
+        case "zip":
+            return source.fileName.map { "Installed from file \($0)" }
+        default:
+            return nil
+        }
+    }
+
+    /// Detail-pane status line for an update found at a git / marketplace source.
+    static func sourceAvailabilityText(kind: String, latest: String?) -> String {
+        if kind == "git" { return "The git source has a newer commit." }
+        let target = latest.map { " v\($0)" } ?? ""
+        return "The marketplace has a newer version\(target)."
+    }
+
+    /// A source check that could not answer for one plugin.
+    static func sourceCheckFailedMessage(name: String, reason: String) -> String {
+        "Could not check \(name) for updates: \(reason)."
+    }
+
+    /// After a git / marketplace re-install. The source may now hold a plugin
+    /// under another name: then that one was installed and `name` is unchanged.
+    static func reinstalledMessage(name: String, installedName: String, version: String,
+                                   trustReset: Bool) -> String {
+        var lines: [String] = []
+        if installedName == name {
+            lines.append("Updated \(name) to v\(version).")
+        } else {
+            lines.append("The source of \(name) now provides \(installedName) v\(version); "
+                + "it was installed under that name and \(name) is unchanged.")
+        }
+        if trustReset { lines.append("Hooks/MCP of \(installedName) were reset and need re-approval.") }
+        return lines.joined(separator: "\n")
+    }
+
     /// Sidebar badge text, or nil for no badge.
     static func badge(for tier: String?) -> String? {
         isKnownTier(tier) ? "Update" : nil

@@ -53,6 +53,9 @@ struct LibraryView: View {
     /// Why the plugin list could not be read (server down, …). Without it a failed
     /// fetch read as "No plugins installed yet" and emptied the list.
     @State private var pluginsError: String?
+    /// True once a plugin list has loaded, so an empty `plugins` before that
+    /// is never handed to the update center as "nothing installed".
+    @State private var pluginsLoaded = false
     /// The destructive action waiting for the user's yes.
     @State private var pendingRemoval: LibraryRemoval?
     @State private var showingGitInstallSheet = false
@@ -133,7 +136,6 @@ struct LibraryView: View {
         // oversized content got centered, clipping headers on the left.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
-        .task { await loadPlugins() }
         .task {
             await loadLlmSources()
             await loadLlmSourceUpdates(force: false)
@@ -141,6 +143,9 @@ struct LibraryView: View {
         .task { await loadMcpPlugins() }
         .task { await loadConnectors() }
         .task {
+            // Plugins first: the update check routes (and checks git /
+            // marketplace origins) by each plugin's install source.
+            await loadPlugins()
             await loadPluginUpdates()
             consumeUpdateMessage()
         }
@@ -1026,6 +1031,7 @@ struct LibraryView: View {
         do {
             self.plugins = try await api.listPlugins().plugins
             self.pluginsError = nil
+            self.pluginsLoaded = true
         } catch {
             self.pluginsError = error.localizedDescription
         }
@@ -1058,7 +1064,11 @@ struct LibraryView: View {
     /// short TTL for non-forced checks). `force` also refreshes the
     /// marketplace catalogs server-side (v60+ only).
     private func loadPluginUpdates(force: Bool = false) async {
-        await updateCenter.refresh(api: api, oneClick: usesOneClickUpdate, force: force)
+        // The full list lets the center route each update by its install
+        // source; nil (nothing loaded yet) keeps what it already knows. After a
+        // failed reload `plugins` is still the last good list.
+        await updateCenter.refresh(api: api, oneClick: usesOneClickUpdate, force: force,
+                                   plugins: pluginsLoaded ? plugins : nil)
     }
 
     /// Move a result the center holds for the Library into this view's alert.
