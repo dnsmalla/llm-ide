@@ -173,7 +173,15 @@ struct CustomProvidersSection: View {
         // nothing listed and nothing could clear.
         let vaultKey = provider.apiKey
         if !vaultKey.isEmpty {
-            Task { try? await api.setSecret(key: vaultKey, value: "") }
+            Task {
+                do {
+                    try await api.setSecret(key: vaultKey, value: "")
+                } catch {
+                    // `try?` swallowed this: a failed clear left an orphaned secret
+                    // that nothing lists and the user never heard about.
+                    syncError = "The provider was deleted, but its API key could not be removed from the vault (\(error.localizedDescription)). Remove it manually."
+                }
+            }
         }
     }
 
