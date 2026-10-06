@@ -197,7 +197,12 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         "pytest.ini", "**/pytest.ini", "**/pyproject.toml", "**/setup.cfg",
         ".githooks/**", "**/jest.config.js", "**/vitest.config.ts",
         // 3. The harness's own state — editing this rigs the verdict directly.
-        "system/faults.csv", "system/faults/**", "system/loop-runs/**"
+        //    `system/loop.json` is the loop's own contract: a repair that sets
+        //    `protectedPathPolicy` to off, disables the failing stage or widens
+        //    the budgets would not affect the current run (config is in memory)
+        //    but is re-read by the next scheduled run. NOTE: an in-app autosave
+        //    of the config DURING a run is also reverted by this rule.
+        "system/faults.csv", "system/faults/**", "system/loop-runs/**", "system/loop.json"
     ]
 
     private let verifier: FaultVerifier
