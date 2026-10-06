@@ -277,9 +277,11 @@ final class GitLabClient {
     // MARK: - Milestones
 
     func listMilestones(projectId: Int) async throws -> [GitLabMilestone] {
+        // All states, like GitHub's `listMilestonesGitHub`: an issue can reference a
+        // CLOSED milestone, and with `active` only that milestone was missing from
+        // the filter menu, the detail editor and the Gantt diamonds.
         return try await get("/projects/\(projectId)/milestones",
-                             query: [.init(name: "per_page", value: "100"),
-                                     .init(name: "state",    value: "active")])
+                             query: [.init(name: "per_page", value: "100")])
     }
 
     /// Title of a milestone in ANY state, by id. The issues list filters by
