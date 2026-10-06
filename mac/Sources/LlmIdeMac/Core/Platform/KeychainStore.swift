@@ -236,7 +236,11 @@ enum KeychainStore {
 
     // MARK: - JWT refresh token
 
-    static func saveToken(_ token: String, host: String) {
+    /// Returns false when the write was refused (keychain locked / unreadable)
+    /// or failed. Callers that rotate a refresh token MUST check it: the
+    /// server has already retired the previous token.
+    @discardableResult
+    static func saveToken(_ token: String, host: String) -> Bool {
         set("\(host)::refresh_token", token)
     }
 

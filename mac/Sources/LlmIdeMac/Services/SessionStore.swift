@@ -41,6 +41,11 @@ final class SessionStore: ObservableObject {
     /// the server's revoked-at race and are treated as token theft — which
     /// logs the user out on EVERY device.
     private var launchRefreshTask: Task<Void, Never>?
+    /// Retry loop for a rotated refresh token the Keychain refused to store.
+    private var tokenPersistRetryTask: Task<Void, Never>?
+    /// Seams for tests: the Keychain write and the backoff between retries.
+    var persistRefreshToken: (String, String) -> Bool = { KeychainStore.saveToken($0, host: $1) }
+    var tokenPersistRetryDelays: [Duration] = [.seconds(5), .seconds(30), .seconds(120)]
     private let host: String
     /// Snapshot taken once at init so launch gating doesn't re-query Keychain.
     private let storedSessionAtLaunch: Bool
@@ -173,7 +178,36 @@ final class SessionStore: ObservableObject {
         }
         accessToken = session.accessToken
         refreshToken = session.refreshToken
-        KeychainStore.saveToken(session.refreshToken, host: host)
+        persistRotatedRefreshToken(session.refreshToken)
+    }
+
+    /// Store the rotated refresh token, retrying if the Keychain refuses.
+    ///
+    /// The server retires the previous token on every refresh, so a write that
+    /// fails silently leaves the Keychain holding a revoked token: the next
+    /// launch presents it, the server reads that as reuse (theft), and the
+    /// user is signed out everywhere. The in-memory session stays valid, so
+    /// retry in the background until the Keychain unlocks.
+    @MainActor
+    private func persistRotatedRefreshToken(_ token: String) {
+        tokenPersistRetryTask?.cancel()
+        tokenPersistRetryTask = nil
+        if persistRefreshToken(token, host) { return }
+        log.error("Could not store the rotated refresh token; will retry")
+        let delays = tokenPersistRetryDelays
+        tokenPersistRetryTask = Task { @MainActor [weak self] in
+            for delay in delays {
+                try? await Task.sleep(for: delay)
+                guard let self, !Task.isCancelled else { return }
+                // Signed out, or rotated again: the pending token is stale.
+                guard self.refreshToken == token else { return }
+                if self.persistRefreshToken(token, self.host) {
+                    self.log.info("Stored the rotated refresh token on retry")
+                    return
+                }
+            }
+            self?.log.error("Giving up storing the rotated refresh token; next launch may require sign-in")
+        }
     }
 
     /// Sign out / drop the session. Per-account connector setup is NOT wiped
@@ -186,6 +220,8 @@ final class SessionStore: ObservableObject {
         accessToken = nil
         refreshToken = nil
         lastError = nil
+        tokenPersistRetryTask?.cancel()
+        tokenPersistRetryTask = nil
         // ContentView tests `unreachable` before `isAuthenticated`, so without
         // this the Reconnect screen's "Sign out" deletes the token yet stays
         // on screen.
