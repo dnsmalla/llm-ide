@@ -897,6 +897,19 @@ struct ExplorerView: View {
     /// Continuing is safe because each operation is independently guarded and
     /// never overwrites: a refused item simply stays where it was.
     private func performDrop(_ sources: [URL], into destinationDir: URL, copy: Bool) {
+        // The drag payload is plain text, which ANY app can put on the
+        // pasteboard — a path typed in Notes or Terminal would otherwise be
+        // MOVED into the project from anywhere on disk. Only items already
+        // inside this workspace are accepted.
+        var sources = sources
+        if let root {
+            let outside = sources.filter { !ExplorerPaths.isDescendant($0, of: root) }
+            if !outside.isEmpty {
+                sources.removeAll { source in outside.contains { $0 == source } }
+                reportFailures(outside.map { "\($0.lastPathComponent): outside this workspace — not moved" })
+            }
+        }
+        guard !sources.isEmpty else { return }
         var touched: Set<String> = [ExplorerPaths.key(destinationDir)]
         var reopened: [URL] = []
         var failures: [String] = []
