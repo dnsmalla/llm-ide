@@ -5,7 +5,11 @@
 import { isValidName, isValidVersion } from './package-spec.mjs';
 
 const CACHE_MS = 60 * 60 * 1000;
-const TIMEOUT_MS = 15_000;
+// Failures are cached too, so a registry outage does not make every list load
+// wait out the timeout again; short enough that recovery is noticed quickly.
+const ERROR_CACHE_MS = 5 * 60 * 1000;
+// Short because lookups run in parallel on a user-facing request.
+const TIMEOUT_MS = 5_000;
 const FINAL_PYPI_RE = /^\d+(\.\d+)*(\.post\d+)?$/;
 
 const cache = new Map();
@@ -60,21 +64,28 @@ export async function latestVersion({ runner, name } = {}, { fetchFn = testFetch
   }
   const key = `${runner}:${name}`;
   const hit = cache.get(key);
-  if (!force && hit && now() - hit.at < CACHE_MS) return { version: hit.version };
+  if (!force && hit) {
+    if (hit.error !== undefined && now() - hit.at < ERROR_CACHE_MS) return { error: hit.error };
+    if (hit.error === undefined && now() - hit.at < CACHE_MS) return { version: hit.version };
+  }
+  const fail = (error) => {
+    cache.set(key, { at: now(), error });
+    return { error };
+  };
   try {
     const res = await fetchFn(registryUrl(runner, name), {
       redirect: 'error',
       signal: AbortSignal.timeout(TIMEOUT_MS),
     });
-    if (!res.ok) return { error: `registry answered ${res.status}` };
+    if (!res.ok) return fail(`registry answered ${res.status}`);
     const data = await res.json();
     const version = runner === 'npx' ? data?.latest : newestPypi(data);
     if (typeof version !== 'string' || !isValidVersion(runner, version)) {
-      return { error: 'registry gave no usable latest version' };
+      return fail('registry gave no usable latest version');
     }
     cache.set(key, { at: now(), version });
     return { version };
   } catch (err) {
-    return { error: String(err?.message || err).slice(0, 200) };
+    return fail(String(err?.message || err).slice(0, 200));
   }
 }

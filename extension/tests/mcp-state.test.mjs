@@ -350,3 +350,49 @@ test('diffMcpSource / applyMcpResync: replace definition, keep credential, revok
   assert.deepEqual(now.credential, { vaultKey: 'mcp.sync-me.token' });
   assert.deepEqual(flags('u2', entry.id), [false, false]);
 });
+
+// ---- final review fixes ----
+test('a legacy record without `transport` is version-managed (stdio by absence)', async () => {
+  const { managedPackageOf } = await import('../mcp/state.mjs');
+  assert.equal(managedPackageOf({ command: 'npx', args: ['-y', 'pkg@1.0.0'] })?.version, '1.0.0');
+  assert.equal(managedPackageOf({ transport: 'http', url: 'https://e.example/mcp' }), null);
+});
+
+test('a throwing registry write still leaves consent revoked (fail closed)', () => {
+  writeMcpRegistry([]);
+  const plugin = addMcpPlugin({ name: 'fail-closed', command: 'npx', args: ['-y', 'pkg@1.0.0'], source: 'codex', sourceName: 'fc' }).plugin;
+  consentTwoUsers(plugin.id);
+  // A directory squatting on the temp path makes the atomic write throw.
+  const tmp = path.join(path.dirname(process.env.LLMIDE_PLUGIN_DIR), 'mcp-plugins.json.tmp');
+  fs.mkdirSync(tmp, { recursive: true });
+  try {
+    assert.throws(() => setMcpPackageVersion(plugin.id, { version: '1.1.0' }));
+    assert.deepEqual(flags('u1', plugin.id), [false, false]);
+    consentTwoUsers(plugin.id);
+    assert.throws(() => applyMcpResync(plugin.id, { transport: 'stdio', command: 'npx', args: ['-y', 'pkg@2.0.0'] }));
+    assert.deepEqual(flags('u2', plugin.id), [false, false]);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+test('diffMcpSource: a trailing-slash-normalized hosted url is not drift', () => {
+  const entry = addMcpPlugin({ name: 'hosted-diff', url: 'https://mcp.example.com' }).plugin;
+  assert.equal(entry.url, 'https://mcp.example.com/');
+  assert.deepEqual(diffMcpSource(entry, { transport: 'http', url: 'https://mcp.example.com' }), []);
+  assert.deepEqual(diffMcpSource(entry, { transport: 'http', url: 'https://other.example.com' }), ['url']);
+});
+
+test('applyMcpResync validates the source definition like addMcpPlugin', () => {
+  writeMcpRegistry([]);
+  const entry = addMcpPlugin({ name: 'val-sync', command: 'npx', args: ['a'], source: 'codex', sourceName: 'v' }).plugin;
+  for (const bad of [
+    { transport: 'stdio', command: '' },
+    { transport: 'stdio', command: 5 },
+    { transport: 'stdio', command: 'npx', args: ['ok', 3] },
+    { transport: 'stdio', command: 'npx', args: ['b'], env: { K: 1 } },
+  ]) {
+    const res = applyMcpResync(entry.id, bad);
+    assert.equal(res.status, 400, JSON.stringify(bad));
+    assert.equal(res.code, 'VALIDATION_FAILED');
+  }
+  assert.deepEqual(getMcpPlugin(entry.id).args, ['a']);
+});

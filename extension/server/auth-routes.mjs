@@ -1757,6 +1757,12 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       if (!found) { send(res, 400, { error: { code: 'ADD_FAILED', message: `no Codex MCP server named '${body.codexName}'` } }); return; }
       body = { ...found, name: body.name || found.name, source: 'codex', sourceName: found.name };
     }
+    else if (body && typeof body === 'object') {
+      // Only the import paths above may set sourceName (it is what Re-sync
+      // trusts to find the entry again); a plain body must not forge one.
+      const { sourceName: _ignored, ...rest } = body;
+      body = rest;
+    }
     const { addMcpPlugin } = await import('../mcp/state.mjs');
     const result = addMcpPlugin(body || {});
     if (result.error) {
@@ -1851,6 +1857,10 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       const parsed = state.managedPackageOf(plugin);
       if (!parsed) { fail(400, 'NOT_MANAGED', 'this server is not version-managed'); return; }
       const { isValidVersion } = await import('../mcp/package-spec.mjs');
+      // Default the staleness guard to the args read at the start of this
+      // route, so a concurrent edit during the registry lookup is a 409, not
+      // a silent overwrite.
+      const argsAtStart = Array.isArray(plugin.args) ? [...plugin.args] : [];
       if (body?.expectArgs !== undefined && !(Array.isArray(body.expectArgs) && body.expectArgs.every((a) => typeof a === 'string'))) {
         fail(400, 'VALIDATION_FAILED', 'expectArgs must be an array of strings'); return;
       }
@@ -1863,7 +1873,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       } else if (!isValidVersion(parsed.runner, version)) {
         fail(400, 'VALIDATION_FAILED', 'invalid version'); return;
       }
-      const result = state.setMcpPackageVersion(id, { expectArgs: body?.expectArgs, version });
+      const result = state.setMcpPackageVersion(id, { expectArgs: body?.expectArgs ?? argsAtStart, version });
       if (result.error) {
         safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
           action: 'mcp-plugin.update', resource: id, outcome: 'failure', detail: { error: String(result.error).slice(0, 200) } });

@@ -418,7 +418,10 @@ export function revokeConsentForAll(id) {
 
 /** The npx/uvx package spec of a version-managed entry, or null (plugin/hosted/other). */
 export function managedPackageOf(plugin) {
-  if (!plugin || plugin.source === 'plugin' || plugin.transport !== 'stdio') return null;
+  // transportOf, not a raw field read: records from older builds carry no
+  // `transport` and are stdio, so `!== 'stdio'` on the field would wrongly
+  // exclude them from version management.
+  if (!plugin || plugin.source === 'plugin' || transportOf(plugin) !== 'stdio') return null;
   return parseRunnerSpec({ command: plugin.command, args: plugin.args });
 }
 
@@ -444,8 +447,11 @@ export function setMcpPackageVersion(id, { expectArgs, version } = {}) {
   const from = parsed.version ?? parsed.tag ?? null;
   const next = { ...plugin, args: withVersion(parsed, plugin, version) };
   list[index] = next;
-  writeMcpRegistry(list);
+  // Revoke BEFORE the registry write (fail closed): if the write throws, the
+  // old pin stays but nobody's consent survives, whereas the reverse order
+  // could leave new code running under approval given to the old one.
   revokeConsentForAll(id);
+  writeMcpRegistry(list);
   return { plugin: next, from, to: version };
 }
 
@@ -455,7 +461,11 @@ export function diffMcpSource(entry, sourceDef) {
   if ((entry.transport || 'stdio') !== (sourceDef.transport || 'stdio')) changes.push('transport');
   if ((entry.command ?? null) !== (sourceDef.command ?? null)) changes.push('command');
   if (!sameJson(entry.args ?? [], sourceDef.args ?? [])) changes.push('args');
-  if ((entry.url ?? null) !== (sourceDef.url ?? null)) changes.push('url');
+  // Stored hosted urls went through normalizeUrl (e.g. trailing slash added),
+  // so compare against the normalized source url or every hosted entry drifts.
+  const hostedSource = sourceDef.transport === 'http' || sourceDef.transport === 'sse';
+  const wantUrl = hostedSource ? (normalizeUrl(sourceDef.url) ?? sourceDef.url ?? null) : (sourceDef.url ?? null);
+  if ((entry.url ?? null) !== wantUrl) changes.push('url');
   const have = entry.env || {};
   const want = sourceDef.env || {};
   const wantKeys = Object.keys(want).sort();
@@ -486,14 +496,26 @@ export function applyMcpResync(id, sourceDef) {
     next.url = url;
     if (sourceDef.headers) next.headers = sourceDef.headers;
   } else {
+    // Same checks as addMcpPlugin: a re-sync must not be a way around them.
+    if (typeof sourceDef.command !== 'string' || !sourceDef.command.trim()) {
+      return { error: 'the source command is not a valid command', status: 400, code: 'VALIDATION_FAILED' };
+    }
+    if (sourceDef.args !== undefined && !(Array.isArray(sourceDef.args) && sourceDef.args.every((a) => typeof a === 'string'))) {
+      return { error: 'the source args must be strings', status: 400, code: 'VALIDATION_FAILED' };
+    }
+    if (sourceDef.env !== undefined && !(sourceDef.env && typeof sourceDef.env === 'object'
+        && Object.values(sourceDef.env).every((v) => typeof v === 'string'))) {
+      return { error: 'the source env values must be strings', status: 400, code: 'VALIDATION_FAILED' };
+    }
     next.transport = 'stdio';
     next.command = sourceDef.command;
     next.args = Array.isArray(sourceDef.args) ? sourceDef.args : [];
     if (sourceDef.env) next.env = { ...sourceDef.env };
   }
   list[index] = next;
-  writeMcpRegistry(list);
+  // Fail closed: revoke before the write (see setMcpPackageVersion).
   revokeConsentForAll(id);
+  writeMcpRegistry(list);
   return { plugin: next, changes };
 }
 

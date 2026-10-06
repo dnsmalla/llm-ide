@@ -1577,3 +1577,107 @@ args = ["-y", "resync-pkg@1.0.0"]
   assert.equal(nm.statusCode, 400);
   assert.equal(nm.json().error.code, 'NOT_MANAGED');
 });
+
+test('mcp versions: update and resync refuse an unauthenticated caller (401 from auth; requireAdmin is a no-op for any signed-in user)', async () => {
+  const admin = await mcpAdmin();
+  const id = await addNpx(admin, 'ver-403', 'pkg-one@1.0.0');
+  const upd = await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${id}/update`, body: {} });
+  assert.equal(upd.statusCode, 401);
+  const sync = await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${id}/resync` });
+  assert.equal(sync.statusCode, 401);
+  const syncGet = await callAuth({ method: 'GET', url: `/auth/me/mcp-plugins/${id}/resync` });
+  assert.equal(syncGet.statusCode, 401);
+});
+
+test('mcp versions: a second user\'s consent is revoked by update and by resync; SOURCE_NOT_FOUND', async () => {
+  _resetRegistryCacheForTests();
+  const admin = await mcpAdmin();
+  const other = await mcpAdmin();
+  const id = await addNpx(admin, 'ver-two-users', 'pkg-one@1.0.0');
+  const consentBoth = async () => {
+    for (const user of [admin, other]) {
+      await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user, body: { id, consented: true } });
+    }
+  };
+  const otherConsented = async () => (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: other }))
+    .json().plugins.find((p) => p.id === id).consented;
+  await consentBoth();
+  assert.equal(await otherConsented(), true);
+  assert.equal((await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${id}/update`, user: admin, body: { to: '1.1.0' } })).statusCode, 200);
+  assert.equal(await otherConsented(), false, 'update revokes every user');
+
+  appendCodexConfigToml(`
+[mcp_servers.twousers]
+command = "npx"
+args = ["-y", "two-pkg@1.0.0"]
+`);
+  const added = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin, body: { codexName: 'twousers' } });
+  const rid = added.json().plugin.id;
+  for (const user of [admin, other]) {
+    await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user, body: { id: rid, consented: true } });
+  }
+  const cfg = path.join(codexHomeFixture, 'config.toml');
+  const original = fs.readFileSync(cfg, 'utf8');
+  fs.writeFileSync(cfg, original.replace('two-pkg@1.0.0', 'two-pkg@2.0.0'), 'utf8');
+  assert.equal((await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${rid}/resync`, user: admin })).statusCode, 200);
+  const row = (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: other })).json().plugins.find((p) => p.id === rid);
+  assert.equal(row.consented, false, 'resync revokes every user');
+
+  fs.writeFileSync(cfg, original.replace(/\[mcp_servers\.twousers\][\s\S]*?\n(?=\[|$)/, ''), 'utf8');
+  const gone = await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${rid}/resync`, user: admin });
+  assert.equal(gone.statusCode, 404);
+  assert.equal(gone.json().error.code, 'SOURCE_NOT_FOUND');
+});
+
+test('mcp versions: a failing registry write surfaces as a thrown error (server 500) and consent stays revoked', async () => {
+  _resetRegistryCacheForTests();
+  const admin = await mcpAdmin();
+  const id = await addNpx(admin, 'ver-500', 'pkg-one@1.0.0');
+  await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/consent', user: admin, body: { id, consented: true } });
+  const tmp = path.join(path.dirname(llmidePluginFixture), 'mcp-plugins.json.tmp');
+  fs.mkdirSync(tmp, { recursive: true });
+  try {
+    // handleAuth lets the throw propagate; server.mjs's catch -> sendError turns it into the 500.
+    await assert.rejects(
+      callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${id}/update`, user: admin, body: { to: '1.1.0' } }),
+      /EISDIR/);
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+  const row = (await callAuth({ method: 'GET', url: '/auth/me/mcp-plugins', user: admin })).json().plugins.find((p) => p.id === id);
+  assert.equal(row.consented, false);
+  assert.deepEqual(row.args, ['-y', 'pkg-one@1.0.0']);
+});
+
+test('mcp versions: a plain add cannot forge sourceName', async () => {
+  const admin = await mcpAdmin();
+  const r = await callAuth({ method: 'POST', url: '/auth/me/mcp-plugins/add', user: admin,
+    body: { command: 'npx', args: ['-y', 'forge-pkg'], name: 'forge-src', source: 'claude', sourceName: 'victim' } });
+  assert.equal(r.statusCode, 200, r._body);
+  assert.equal(r.json().plugin.sourceName, undefined);
+});
+
+test('mcp versions: update defaults expectArgs to the args read at the start (concurrent edit => 409)', async () => {
+  _resetRegistryCacheForTests();
+  const admin = await mcpAdmin();
+  const id = await addNpx(admin, 'ver-race', 'pkg-one@1.0.0');
+  const state = await import('../mcp/state.mjs');
+  // Mutate the registry while the (injected) registry lookup is in flight.
+  const saved = registryLatest;
+  _setRegistryFetchForTests(async () => {
+    const list = state.readMcpRegistry();
+    list.find((p) => p.id === id).args = ['-y', 'pkg-one@1.5.0'];
+    state.writeMcpRegistry(list);
+    return { ok: true, status: 200, json: async () => ({ latest: '2.0.0' }) };
+  });
+  try {
+    const res = await callAuth({ method: 'POST', url: `/auth/me/mcp-plugins/${id}/update`, user: admin, body: {} });
+    assert.equal(res.statusCode, 409, res._body);
+  } finally {
+    registryLatest = saved;
+    _setRegistryFetchForTests(async (url) => {
+      const name = decodeURIComponent(String(url).split('/-/package/')[1]?.split('/dist-tags')[0] ?? '');
+      if (registryLatest === null || !registryLatest[name]) return { ok: false, status: 503, json: async () => ({}) };
+      return { ok: true, status: 200, json: async () => ({ latest: registryLatest[name] }) };
+    });
+    _resetRegistryCacheForTests();
+  }
+});

@@ -70,15 +70,42 @@ test('cache hit, expiry and force', async () => {
   assert.equal(fetchFn.calls.length, 3);
 });
 
-test('error results are not cached', async () => {
+test('error results are cached briefly, so a retry inside the window does not refetch', async () => {
   const bad = fake({}, 500);
   assert.ok((await latestVersion({ runner: 'npx', name: 'e' }, { fetchFn: bad })).error);
   const good = fake({ latest: '2.0.0' });
-  assert.deepEqual(await latestVersion({ runner: 'npx', name: 'e' }, { fetchFn: good }), { version: '2.0.0' });
-  assert.equal(good.calls.length, 1);
+  assert.ok((await latestVersion({ runner: 'npx', name: 'e' }, { fetchFn: good })).error);
+  assert.equal(good.calls.length, 0);
+  assert.deepEqual(await latestVersion({ runner: 'npx', name: 'e' }, { fetchFn: good, force: true }), { version: '2.0.0' });
 });
 
 test('PyPI with no usable final version is an error', async () => {
   const out = await latestVersion({ runner: 'uvx', name: 'y' }, { fetchFn: fake({ info: { version: '1.0.0rc1' }, releases: { '1.0.0rc1': [{}] } }) });
   assert.ok(out.error);
+});
+
+test('errors are cached for 5 minutes (successes 1 h); force bypasses both', async () => {
+  let clock = 0;
+  const now = () => clock;
+  let status = 503;
+  const fetchFn = async () => ({ ok: status === 200, status, json: async () => ({ latest: '1.0.0' }) });
+  const counting = (fn) => { const wrapped = async (...a) => { wrapped.n += 1; return fn(...a); }; wrapped.n = 0; return wrapped; };
+  const f = counting(fetchFn);
+  const spec = { runner: 'npx', name: 'neg-cache' };
+  assert.ok((await latestVersion(spec, { fetchFn: f, now })).error);
+  clock = 4 * 60 * 1000;
+  assert.ok((await latestVersion(spec, { fetchFn: f, now })).error);
+  assert.equal(f.n, 1, 'error served from cache inside 5 min');
+  status = 200;
+  assert.deepEqual(await latestVersion(spec, { fetchFn: f, now, force: true }), { version: '1.0.0' });
+  assert.equal(f.n, 2, 'force bypasses the error cache');
+  clock = 4 * 60 * 1000 + 30 * 60 * 1000;
+  assert.deepEqual(await latestVersion(spec, { fetchFn: f, now }), { version: '1.0.0' });
+  assert.equal(f.n, 2, 'success still cached after 30 min');
+  const g = counting(async () => ({ ok: false, status: 500, json: async () => ({}) }));
+  clock = 10_000_000;
+  await latestVersion({ runner: 'npx', name: 'neg-two' }, { fetchFn: g, now });
+  clock += 6 * 60 * 1000;
+  await latestVersion({ runner: 'npx', name: 'neg-two' }, { fetchFn: g, now });
+  assert.equal(g.n, 2, 'error expires after 5 min');
 });
