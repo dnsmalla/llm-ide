@@ -903,7 +903,13 @@ struct ExplorerView: View {
         // inside this workspace are accepted.
         var sources = sources
         if let root {
-            let outside = sources.filter { !ExplorerPaths.isDescendant($0, of: root) }
+            // The tree (and so the drag payload) uses the symlink-RESOLVED root,
+            // while `root` is the raw configured path: accept either spelling,
+            // or every drag inside a symlinked workspace would be refused.
+            let roots = [root, treeBase(root), ExplorerPaths.canonical(root)]
+            let outside = sources.filter { source in
+                !roots.contains { ExplorerPaths.isDescendant(source, of: $0) }
+            }
             if !outside.isEmpty {
                 sources.removeAll { source in outside.contains { $0 == source } }
                 reportFailures(outside.map { "\($0.lastPathComponent): outside this workspace — not moved" })
