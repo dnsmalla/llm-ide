@@ -23,6 +23,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
     case autoTaskControl    // toggle / run auto tasks, edit their config and templates
     case loopControl        // start a Loop run or a single stage
     case generationRun      // run Doc Gen from the phone (writes files under llm-doc/)
+    case exploreEdit        // let Explorer chat from the phone edit files / run commands
 
     var id: String { rawValue }
 
@@ -38,6 +39,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .autoTaskControl:   return "Control Auto Tasks (run, enable, edit settings and templates)"
         case .loopControl:       return "Start Loop runs"
         case .generationRun:     return "Run document generation"
+        case .exploreEdit:       return "Let phone Explorer chat edit files and run commands"
         }
     }
 
@@ -53,6 +55,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .autoTaskControl:   return "Auto Tasks can edit files in the project. Viewing state, history and logs, and Stop, need no switch."
         case .loopControl:       return "A Loop run edits files and runs commands in the project. Viewing and Stop need no switch."
         case .generationRun:     return "Writes generated documents into the project's llm-doc/generated folder and uses your LLM quota."
+        case .exploreEdit:       return "Off: phone Explorer chat is read-only. On: it runs with the Mac's Code Assistant permission chip, which can be Auto (no prompts)."
         }
     }
 
@@ -61,7 +64,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         switch self {
         case .projectSwitch, .fileBrowse, .sourceControlRead, .issuesRead: return true
         case .issueComment, .selfHealApply, .toolApprovals,
-             .autoTaskControl, .loopControl, .generationRun:               return false
+             .autoTaskControl, .loopControl, .generationRun, .exploreEdit:  return false
         }
     }
 

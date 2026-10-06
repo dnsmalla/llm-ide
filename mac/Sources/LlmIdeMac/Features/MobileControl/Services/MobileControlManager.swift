@@ -1094,6 +1094,7 @@ final class MobileControlManager {
         var attachments = MobileExploreBridge.attachments(from: chat.files)
         // @file/@folder refs read project files, so they honour the Files switch (re-checked per request).
         let refsAllowed = phoneAccess.isAllowed(.fileBrowse)
+        let turnPolicy = MobileExploreBridge.turnPolicy(editAllowed: phoneAccess.isAllowed(.exploreEdit))
         let refs = refsAllowed ? chat.refs : []
         if !refsAllowed, !chat.refs.isEmpty {
             append(.info, "explore_chat: @file refs ignored — \"\(PhoneAccess.fileBrowse.title)\" is off")
@@ -1145,10 +1146,11 @@ final class MobileControlManager {
                 // This arm sent nothing, so every turn ran as the server's
                 // default (execute): "make me a plan" never reached plan mode,
                 // because only `auto` is ever classified.
-                mode: "auto",
-                // And the Mac's permission chip, so a classified execute turn
-                // can actually finish. See MobileExploreBridge.permissionMode.
-                permissionMode: MobileExploreBridge.permissionMode(),
+                mode: turnPolicy.mode,
+                // The Mac's permission chip, so a classified execute turn can
+                // finish — but ONLY when the user enabled the exploreEdit
+                // switch; otherwise the turn is read-only. See turnPolicy.
+                permissionMode: turnPolicy.permissionMode,
                 expectedSessionID: sid,
                 onProgress: { [weak self] label in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
