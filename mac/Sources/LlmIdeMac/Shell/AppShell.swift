@@ -132,6 +132,7 @@ struct AppShell: View {
             OSLogIncidentSource.start()
         }
         .onChange(of: deepLink.pendingEvent) { _, new in applyDeepLink(new) }
+        .onDisappear { deepLink.pendingEvent = nil }
         .onChange(of: registry.activeFeatures) { _, _ in
             reconcileSectionAfterFeatureChange()
         }
@@ -167,8 +168,8 @@ struct AppShell: View {
             // Guard against re-registration if onAppear fires more than once
             // (e.g., during SwiftUI re-renders) without a matching onDisappear.
             guard keyMonitor == nil else { return }
-            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [terminalPanelState, projectDirectory] event in
-                handleGlobalKeyDown(event, terminalPanelState: terminalPanelState, projectDirectory: projectDirectory)
+            keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [terminalPanelState] event in
+                handleGlobalKeyDown(event, terminalPanelState: terminalPanelState)
             }
         }
         .onDisappear {
@@ -187,11 +188,14 @@ struct AppShell: View {
     /// Compares by character rather than keyCode so shortcuts work on all
     /// keyboard layouts (keyCode 50 for backtick is layout-specific to US).
     private func handleGlobalKeyDown(
-        _ event: NSEvent, terminalPanelState: TerminalPanelState, projectDirectory: URL
+        _ event: NSEvent, terminalPanelState: TerminalPanelState
     ) -> NSEvent? {
         if event.charactersIgnoringModifiers == "`" && event.modifierFlags.contains(.control) {
             if registry.isEnabled(.terminal) {
                 Task { @MainActor in
+                    // Resolved at KEY TIME. It used to be captured when the
+                    // monitor was installed (right after login, usually with no
+                    // project), so Ctrl-` always opened the terminal in ~.
                     terminalPanelState.toggle(projectDirectory: projectDirectory)
                 }
             }
@@ -403,6 +407,11 @@ struct AppShell: View {
             if pendingDeepLinkSection == nil {
                 shell.section = effectiveHome()
             }
+            // The link has now steered (or been outranked at) this launch's
+            // first project open. Retire it: a stale event was re-applied on
+            // every AppShell re-mount (sign-out/sign-in) and made every later
+            // project open skip the Home seed.
+            deepLink.pendingEvent = nil
         }
         .onChange(of: config.localCodeFolders)        { _, _ in seedLocalCodeFolders() }
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
