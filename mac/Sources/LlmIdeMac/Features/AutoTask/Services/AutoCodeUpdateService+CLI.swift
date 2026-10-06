@@ -206,6 +206,12 @@ extension AutoCodeUpdateService {
         }
     }
 
+    /// Rename a local branch. Used to move work that must be kept but not published
+    /// (a stopped or failed run's commits) out of the `fix/` namespace.
+    nonisolated static func branchRename(_ old: String, to new: String, at localPath: String) -> Bool {
+        git(["branch", "-m", old, new], at: localPath).code == 0
+    }
+
     /// Delete a local branch (an implement run that produced no commit leaves
     /// an empty one behind otherwise).
     nonisolated static func branchDelete(_ branch: String, at localPath: String) -> Bool {
@@ -518,6 +524,16 @@ extension AutoCodeUpdateService {
         // The commit the branch STARTS at, read from the worktree itself: the
         // user's HEAD may have moved between our read and `worktree add`.
         let baseSha = await Task.detached { Self.headSha(at: worktree) }.value
+        // Without a start commit "did the tip move?" cannot be answered, and a nil
+        // tip compared to a nil base would read as a commit that never happened.
+        guard let baseSha else {
+            await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+            _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
+            let msg = "Skipped issue #\(issue.number): could not read the starting commit of the isolated checkout."
+            lastError = msg
+            taskErrors["#\(issue.number)"] = msg
+            return .skipped
+        }
         logStore.append(.implementIssues, "Issue #\(issue.number): working in an isolated checkout on \(branch); your working tree and branch are not touched.")
 
         let prompt = """
@@ -680,6 +696,19 @@ extension AutoCodeUpdateService {
         if !keepWorktreeForRecovery {
             await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
         }
+        // Commits that are kept but belong to a stopped or failed run are PARKED
+        // under `autotask-wip/`: `fix/*` pipeline branches are pushed and opened
+        // as merge requests by review-merge, and half-done work must not be
+        // published. Moving the name also frees `fix/<n>-<slug>` for the retry,
+        // so one issue never ends up with two pushable branches.
+        var keptBranchName = branch
+        if (keepBranch || (committed && !result)) && !keepWorktreeForRecovery {
+            let parked = "autotask-wip/\(branch)"
+            if await Task.detached(operation: { Self.branchRename(branch, to: parked, at: localPath) }).value {
+                keptBranchName = parked
+                logStore.append(.implementIssues, "Issue #\(issue.number): kept as \(parked) (not published).")
+            }
+        }
         // `git branch -D` refuses a branch a worktree still has checked out, so
         // the delete follows the removal. A branch without a commit is dropped
         // rather than left behind.
@@ -688,7 +717,7 @@ extension AutoCodeUpdateService {
         }
         // The model was invoked (it ran, pass or fail) — count it.
         await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)")
-        return IssueRunOutcome(succeeded: result, committed: committed, branch: committed || keepWorktreeForRecovery ? branch : nil)
+        return IssueRunOutcome(succeeded: result, committed: committed, branch: committed || keepWorktreeForRecovery ? keptBranchName : nil)
     }
 
     /// `purposeMode`: the chat mode this task corresponds to, for the Settings
