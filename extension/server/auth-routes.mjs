@@ -1070,8 +1070,22 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, err.status || 413, { error: { code: err.code || 'PAYLOAD_TOO_LARGE', message: err.message } });
       return;
     }
+    // Decode the provenance header only after the body is drained, so a 400
+    // never leaves the client mid-upload.
+    const { decodeSourceHeader, setSource, removeSource, getSource } = await import('../plugins/source-store.mjs');
+    const sourceHeader = req.headers['x-llmide-plugin-source'];
+    const decoded = decodeSourceHeader(Array.isArray(sourceHeader) ? sourceHeader[0] : sourceHeader);
+    if (!decoded.ok) {
+      send(res, 400, { error: { code: 'INVALID_SOURCE', message: decoded.error } });
+      return;
+    }
     const { installFromZip } = await import('../plugins/installer.mjs');
-    const result = await installFromZip(zipBytes, { replace });
+    const { clearHooksTrustForPlugin } = await import('../plugins/state.mjs');
+    const { clearPluginMcpConsents } = await import('../mcp/state.mjs');
+    const result = await installFromZip(zipBytes, {
+      replace,
+      trust: { clearTrust: clearHooksTrustForPlugin, clearMcpConsents: clearPluginMcpConsents },
+    });
     if (result.error) {
       safeAudit(db, {
         userId: req.user.id, requestId, ip, userAgent: ua,
@@ -1081,15 +1095,20 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       send(res, result.status || 400, { error: { code: 'INSTALL_FAILED', message: result.error } });
       return;
     }
+    if (decoded.source) setSource(result.plugin.name, decoded.source);
+    else if (!result.plugin.replaced) removeSource(result.plugin.name);
     // Re-scan so the runtime picks up the new plugin immediately.
     const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
     reloadPlugins();
     safeAudit(db, {
       userId: req.user.id, requestId, ip, userAgent: ua,
       action: 'plugin.install', resource: result.plugin.name, outcome: 'success',
-      detail: { version: result.plugin.version, replaced: !!result.plugin.replaced },
+      detail: {
+        version: result.plugin.version, replaced: !!result.plugin.replaced,
+        trustReset: !!result.plugin.trustReset, sourceKind: decoded.source?.kind ?? null,
+      },
     });
-    send(res, 200, result);
+    send(res, 200, { ...result, installSource: getSource(result.plugin.name) ?? null });
     return;
   }
 

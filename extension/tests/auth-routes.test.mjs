@@ -561,6 +561,70 @@ test('plugin lifecycle: install (admin) -> list -> toggle -> uninstall (admin)',
   assert.equal(afterUninstall.json().plugins.length, countBefore);
 });
 
+function srcHeader(obj) {
+  return { 'x-llmide-plugin-source': Buffer.from(JSON.stringify(obj)).toString('base64url') };
+}
+const GIT_SRC = { kind: 'git', url: 'https://github.com/example/demo.git', commit: 'a'.repeat(40) };
+
+test('install with a git source header records it and lists it', { skip: zipSkipReason || false }, async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const zip = buildPluginZip({ name: 'src-plugin-a', version: '1.0.0', displayName: 'A', description: 'd', author: 't' });
+  const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader(GIT_SRC) });
+  assert.equal(res.statusCode, 200, res._body);
+  assert.equal(res.json().installSource.kind, 'git');
+  assert.equal(res.json().plugin.replaced, false);
+  const list = await callAuth({ method: 'GET', url: '/auth/me/plugins', user: { id: user.id } });
+  assert.equal(list.json().plugins.find((p) => p.name === 'src-plugin-a').installSource.kind, 'git');
+  await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/src-plugin-a', user: admin });
+});
+
+test('invalid source header is 400 and installs nothing', { skip: zipSkipReason || false }, async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const zip = buildPluginZip({ name: 'src-plugin-b', version: '1.0.0', displayName: 'B', description: 'd', author: 't' });
+  const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader({ kind: 'git', url: 'file:///etc' }) });
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error.code, 'INVALID_SOURCE');
+  assert.equal(fs.existsSync(path.join(llmidePluginFixture, 'src-plugin-b')), false);
+});
+
+test('failed install keeps the old record', { skip: zipSkipReason || false }, async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const zip = buildPluginZip({ name: 'src-plugin-c', version: '1.0.0', displayName: 'C', description: 'd', author: 't' });
+  await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader(GIT_SRC) });
+  const bad = await callAuth({ method: 'POST', url: '/auth/me/plugins/install?replace=1', user: admin, rawBody: Buffer.from('not a zip'),
+    headers: srcHeader({ kind: 'git', url: 'https://github.com/example/other.git', commit: 'b'.repeat(40) }) });
+  assert.notEqual(bad.statusCode, 200);
+  const { getSource } = await import('../plugins/source-store.mjs');
+  assert.equal(getSource('src-plugin-c').url, GIT_SRC.url);
+  await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/src-plugin-c', user: admin });
+});
+
+test('install without header clears a stale record when it replaces nothing', { skip: zipSkipReason || false }, async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const { getSource, setSource } = await import('../plugins/source-store.mjs');
+  setSource('src-plugin-d', GIT_SRC);
+  const zip = buildPluginZip({ name: 'src-plugin-d', version: '1.0.0', displayName: 'D', description: 'd', author: 't' });
+  const res = await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip });
+  assert.equal(res.statusCode, 200, res._body);
+  assert.equal(getSource('src-plugin-d'), null);
+  assert.equal(res.json().installSource, null);
+  await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/src-plugin-d', user: admin });
+});
+
+test('uninstall removes the record', { skip: zipSkipReason || false }, async () => {
+  const { user } = await registerAndLogin();
+  const admin = { id: user.id, role: 'admin' };
+  const zip = buildPluginZip({ name: 'src-plugin-e', version: '1.0.0', displayName: 'E', description: 'd', author: 't' });
+  await callAuth({ method: 'POST', url: '/auth/me/plugins/install', user: admin, rawBody: zip, headers: srcHeader(GIT_SRC) });
+  await callAuth({ method: 'DELETE', url: '/auth/me/plugins/uninstall/src-plugin-e', user: admin });
+  const { getSource } = await import('../plugins/source-store.mjs');
+  assert.equal(getSource('src-plugin-e'), null);
+});
+
 test('POST /auth/me/plugins/toggle validates the plugin slug and installed-state', async () => {
   const { user } = await registerAndLogin();
   const u = { id: user.id };

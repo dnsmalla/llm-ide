@@ -41,6 +41,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { defaultPluginDir, loadPlugins } from './loader.mjs';
+import { beginTrustCheck, finishTrustCheck } from './import-trust.mjs';
 
 const MAX_ZIP_BYTES = 5 * 1024 * 1024; // 5 MB
 const UNZIP_TIMEOUT_MS = 30_000;
@@ -153,7 +154,7 @@ async function hasSymlinks(dir) {
  * @param {string} [opts.pluginDir] — install root, defaults to platform standard
  * @returns {Promise<{ok: true, plugin: {...}} | {error: string, status?: number}>}
  */
-export async function installFromZip(zipBytes, { replace = false, pluginDir = defaultPluginDir() } = {}) {
+export async function installFromZip(zipBytes, { replace = false, pluginDir = defaultPluginDir(), trust } = {}) {
   if (!Buffer.isBuffer(zipBytes)) {
     return { error: 'expected Buffer bytes', status: 400 };
   }
@@ -231,13 +232,16 @@ export async function installFromZip(zipBytes, { replace = false, pluginDir = de
       // same name exists, refuse unless `replace`.
       await mkdir(pluginDir, { recursive: true });
       const finalDir = join(pluginDir, plugin.name);
-      if (existsSync(finalDir)) {
-        if (!replace) {
-          return {
-            error: `plugin '${plugin.name}' is already installed; set replace=true to overwrite`,
-            status: 409,
-          };
-        }
+      const existed = existsSync(finalDir);
+      if (existed && !replace) {
+        return {
+          error: `plugin '${plugin.name}' is already installed; set replace=true to overwrite`,
+          status: 409,
+        };
+      }
+      // Snapshot right before the swap: validation passed and the name is known.
+      const token = trust ? beginTrustCheck(finalDir, { hash: trust.hash }) : null;
+      if (existed) {
         // Rename existing to a backup first so we can roll back on
         // the subsequent rename failure.
         const backup = `${finalDir}.bak-${Date.now()}`;
@@ -253,6 +257,9 @@ export async function installFromZip(zipBytes, { replace = false, pluginDir = de
       } else {
         await rename(intoValidate, finalDir);
       }
+      const trustReset = token
+        ? finishTrustCheck(token, { ok: true, clearTrust: trust.clearTrust, clearMcpConsents: trust.clearMcpConsents })
+        : false;
 
       // Returns the validated subset the routes layer will surface.
       return {
@@ -266,7 +273,8 @@ export async function installFromZip(zipBytes, { replace = false, pluginDir = de
           skillCount: plugin.skillFiles.length,
           commandCount: Object.keys(plugin.commands).length,
           subagentCount: Object.keys(plugin.subagents || {}).length,
-          replaced: existsSync(finalDir) && replace,
+          replaced: existed,
+          trustReset,
         },
       };
     } finally {

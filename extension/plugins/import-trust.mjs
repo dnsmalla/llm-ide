@@ -9,6 +9,54 @@ import { basename } from 'node:path';
 import { hashExecutables } from './executable-hash.mjs';
 
 /**
+ * Snapshot the executables hash of the copy about to be replaced.
+ *
+ * Pre: `dir` is the plugin directory (basename = plugin name).
+ * Post: `before` is the hash, or null when no copy exists; hash errors set
+ * `hashFailed` (fail closed in finishTrustCheck).
+ * @param {string} dir - plugin directory
+ * @param {{hash?: (dir: string) => string}} [opts] - `hash` is a test seam
+ * @returns {{name: string, dir: string, before: string|null, hashFailed: boolean, hash: Function}} token
+ */
+export function beginTrustCheck(dir, { hash = hashExecutables } = {}) {
+  let hashFailed = false;
+  let before = null;
+  try {
+    before = existsSync(dir) ? hash(dir) : null;
+  } catch {
+    hashFailed = true;
+  }
+  return { name: basename(dir), dir, before, hashFailed, hash };
+}
+
+/**
+ * Compare the new copy against the snapshot and reset trust when needed.
+ *
+ * Pre: `token` from beginTrustCheck; the swap has finished (or failed).
+ * Post: when `ok`, trust is reset if the hash differs, no prior copy existed,
+ * or hashing failed. When not `ok`, nothing is cleared (the old copy stays).
+ * @param {object} token - from beginTrustCheck
+ * @param {{ok: boolean, clearTrust: (name: string) => void, clearMcpConsents: (name: string) => void}} opts
+ * @returns {boolean} trustReset
+ */
+export function finishTrustCheck(token, { ok, clearTrust, clearMcpConsents }) {
+  if (!ok) return false;
+  let hashFailed = token.hashFailed;
+  let after = null;
+  try {
+    after = token.hash(token.dir);
+  } catch {
+    hashFailed = true;
+  }
+  const trustReset = hashFailed || token.before === null || token.before !== after;
+  if (trustReset) {
+    clearTrust(token.name);
+    clearMcpConsents(token.name);
+  }
+  return trustReset;
+}
+
+/**
  * Run `doImport` and reset trust when the plugin's executables changed.
  *
  * Pre: `dir` is the plugin directory the import writes (its basename is the
@@ -23,26 +71,8 @@ import { hashExecutables } from './executable-hash.mjs';
  * @returns {object} the import result plus `trustReset: boolean`
  */
 export function importWithTrustCheck({ dir, doImport, clearTrust, clearMcpConsents, hash = hashExecutables }) {
-  const name = basename(dir);
-  let hashFailed = false;
-  let before = null;
-  try {
-    before = existsSync(dir) ? hash(dir) : null;
-  } catch {
-    hashFailed = true;
-  }
+  const token = beginTrustCheck(dir, { hash });
   const result = doImport();
-  if (!result?.ok) return { ...result, trustReset: false };
-  let after = null;
-  try {
-    after = hash(dir);
-  } catch {
-    hashFailed = true;
-  }
-  const trustReset = hashFailed || before === null || before !== after;
-  if (trustReset) {
-    clearTrust(name);
-    clearMcpConsents(name);
-  }
+  const trustReset = finishTrustCheck(token, { ok: !!result?.ok, clearTrust, clearMcpConsents });
   return { ...result, trustReset };
 }

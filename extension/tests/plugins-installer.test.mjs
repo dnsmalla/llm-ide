@@ -365,3 +365,56 @@ test('a vendor zip carrying unsupported components still installs', { skip: skip
     rmSync(installDir, { recursive: true, force: true });
   }
 });
+
+function buildZip(manifest, hooks) {
+  const stage = newTempRoot();
+  const src = join(stage, manifest.name);
+  writeManifest(src, manifest);
+  if (hooks !== undefined) {
+    mkdirSync(join(src, 'hooks'), { recursive: true });
+    writeFileSync(join(src, 'hooks', 'hooks.json'), hooks, 'utf8');
+  }
+  const zipPath = join(stage, 'p.zip');
+  zipDirectory(src, zipPath);
+  const bytes = readFileSync(zipPath);
+  rmSync(stage, { recursive: true, force: true });
+  return bytes;
+}
+
+const META = { name: 'replace-demo', version: '1.0.0', displayName: 'R', description: 'd', author: 'a' };
+
+test('replaced is false on a first install with replace=true', { skip: skipReason || false }, async () => {
+  const pluginDir = newTempRoot();
+  try {
+    const res = await installFromZip(buildZip(META), { replace: true, pluginDir });
+    assert.equal(res.ok, true, res.error);
+    assert.equal(res.plugin.replaced, false);
+    assert.equal(res.plugin.trustReset, false, 'false when trust omitted');
+  } finally { rmSync(pluginDir, { recursive: true, force: true }); }
+});
+
+test('replaced is true when a copy existed', { skip: skipReason || false }, async () => {
+  const pluginDir = newTempRoot();
+  try {
+    await installFromZip(buildZip(META), { replace: true, pluginDir });
+    const res = await installFromZip(buildZip(META), { replace: true, pluginDir });
+    assert.equal(res.plugin.replaced, true);
+  } finally { rmSync(pluginDir, { recursive: true, force: true }); }
+});
+
+test('trust reset on changed hooks', { skip: skipReason || false }, async () => {
+  const pluginDir = newTempRoot();
+  try {
+    const calls = { trust: [], mcp: [] };
+    const trust = { clearTrust: (n) => calls.trust.push(n), clearMcpConsents: (n) => calls.mcp.push(n) };
+    await installFromZip(buildZip(META, '{}'), { replace: true, pluginDir, trust });
+    calls.trust.length = 0; calls.mcp.length = 0;
+    const changed = await installFromZip(buildZip(META, '{"x":1}'), { replace: true, pluginDir, trust });
+    assert.equal(changed.plugin.trustReset, true);
+    assert.deepEqual(calls, { trust: ['replace-demo'], mcp: ['replace-demo'] });
+    calls.trust.length = 0; calls.mcp.length = 0;
+    const same = await installFromZip(buildZip(META, '{"x":1}'), { replace: true, pluginDir, trust });
+    assert.equal(same.plugin.trustReset, false);
+    assert.deepEqual(calls, { trust: [], mcp: [] });
+  } finally { rmSync(pluginDir, { recursive: true, force: true }); }
+});

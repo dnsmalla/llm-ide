@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { importWithTrustCheck } from '../plugins/import-trust.mjs';
+import { importWithTrustCheck, beginTrustCheck, finishTrustCheck } from '../plugins/import-trust.mjs';
 
 const root = mkdtempSync(join(tmpdir(), 'import-trust-'));
 let n = 0;
@@ -70,4 +70,27 @@ test('hash failure fails closed (trust reset)', () => {
     assert.equal(res.trustReset, true, `throw on hash #${throwOn}`);
     assert.deepEqual(s.calls, { trust: ['claude-demo'], mcp: ['claude-demo'] });
   }
+});
+
+test('begin/finish match importWithTrustCheck', () => {
+  const run = (setup, ok = true) => {
+    const dir = setup.dir;
+    const s = spies();
+    const token = beginTrustCheck(dir, setup.opts);
+    if (ok) writeHooks(dir, setup.after)();
+    const reset = finishTrustCheck(token, { ok, ...s });
+    return { reset, calls: s.calls };
+  };
+  const changed = run({ dir: pluginDir(), after: '{"x":1}' });
+  assert.equal(changed.reset, true);
+  assert.deepEqual(changed.calls, { trust: ['claude-demo'], mcp: ['claude-demo'] });
+  assert.equal(run({ dir: pluginDir(), after: '{"hooks":{}}' }).reset, false);
+  const fresh = join(root, 'fresh', 'claude-demo');
+  mkdirSync(join(fresh, 'hooks'), { recursive: true });
+  assert.equal(finishTrustCheck(beginTrustCheck(join(root, 'nope', 'claude-demo')), { ok: true, ...spies() }), true);
+  const boom = () => { throw new Error('x'); };
+  assert.equal(run({ dir: pluginDir(), after: '{"hooks":{}}', opts: { hash: boom } }).reset, true);
+  const failed = run({ dir: pluginDir(), after: 'zzz' }, false);
+  assert.equal(failed.reset, false);
+  assert.deepEqual(failed.calls, { trust: [], mcp: [] });
 });

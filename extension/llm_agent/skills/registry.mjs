@@ -11,6 +11,7 @@ import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadSkills } from './loader.mjs';
 import { loadPlugins } from '../../plugins/loader.mjs';
+import { getSource as getPluginSource } from '../../plugins/source-store.mjs';
 import {
   listEnabled as listEnabledPlugins,
   listHooksTrusted as listHooksTrustedPlugins,
@@ -384,6 +385,8 @@ export function listInstalledPlugins(userId) {
       origin: p.origin ?? null,
       // The vendor version the import copied (the stamp), else null.
       sourceVersion: p.sourceVersion ?? null,
+      // Where git/marketplace/zip installs came from (null when unrecorded).
+      installSource: getPluginSource(p.name, pluginRegistry.pluginDir) ?? null,
       unsupportedComponents: p.unsupportedComponents || [],
       pendingComponents: p.pendingComponents || [],
       // Hooks: how many runnable handlers the plugin declares, what llm-ide

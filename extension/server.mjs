@@ -252,7 +252,8 @@ const HOST = config.host;
 //     Additive (no bump): a step that repeats itself or fails 5 tool calls in
 //     a row ends 200 with `resultSubtype: 'no_progress'` + `noProgressReason`.
 //   v60 — GET /auth/me/claude-plugins/updates[?force=1] (non-forced = local `claude plugin list` only; force=1 also refreshes marketplaces, single-flight, ≤ once/30 min, skipped during an update) → { cli, checkedAt, updates:[{ name, pluginId, importedVersion, claudeVersion, latest, tier, sourceVersion, source }] } (rows keep importedVersion (never null, '' if unknown)/sourceVersion/source for older clients); POST /auth/me/claude-plugins/update { name, acceptCommand? } → 400 VALIDATION_FAILED | 404 NOT_FOUND | 200 { ok, from, to, trustReset, claudeUpdated } (Tier 1 = offline re-import, claudeUpdated:false) | 409 NEEDS_CONFIRMATION { command, sha256 } | 409 UPDATE_IN_PROGRESS | 409 BUSY | 502 CLI_FAILED | 200 { ok:false, code: REIMPORT_FAILED }; codex …/updates same shape. GET /auth/me/plugins rows gain origin ('claude'|'codex'|null) and sourceVersion (import stamp, else null); claude/codex import responses gain trustReset. /agent/v2/stream refuses 503 PLUGIN_UPDATING during an update.
-const SERVER_API_VERSION = 60;
+//   v61 — POST /auth/me/plugins/install accepts X-Llmide-Plugin-Source (base64url JSON {kind:git|marketplace|zip,...}) → records provenance; response plugin.trustReset, plugin.replaced (true only when a copy existed), installSource; 400 INVALID_SOURCE. GET /auth/me/plugins rows gain installSource.
+const SERVER_API_VERSION = 61;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
