@@ -448,14 +448,19 @@ public struct LlmIdeMacApp: App {
                 }
             }
             CommandGroup(after: .windowList) {
+                // These commands live on the Window scene, which also hosts the login
+                // screen: signed out, ⌘P opened projects and ⌘N began caption capture
+                // that could never be ingested (no session).
                 Button("Quick Switch Project…") { quickSwitcherShown = true }
                     .keyboardShortcut("p", modifiers: .command)
+                    .disabled(!session.isAuthenticated)
                 // Global llm-chat — opens the LlmChatSheet owned by
                 // AppShell, regardless of which section is active.
                 Button("LLM Chat…") {
                     NotificationCenter.default.post(name: .openLlmChatSheet, object: nil)
                 }
                 .keyboardShortcut("l", modifiers: [.command, .shift])
+                .disabled(!session.isAuthenticated)
                 // Moved from the deleted Settings → Recording section (it
                 // had no config, just this button) so ⌘N works globally
                 // instead of only while Settings happened to be the active
@@ -471,7 +476,7 @@ public struct LlmIdeMacApp: App {
                         capture.start()
                     }
                     .keyboardShortcut("n", modifiers: .command)
-                    .disabled(!AXCaptionReader.canRead)
+                    .disabled(!AXCaptionReader.canRead || !session.isAuthenticated)
                 }
             }
         }
