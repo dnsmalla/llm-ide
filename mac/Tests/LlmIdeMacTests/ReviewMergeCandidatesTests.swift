@@ -38,6 +38,8 @@ struct ReviewMergeCandidatesTests {
         #expect(AutoCodeUpdateService.isPipelineBranch("fix/12-null-crash"))
         #expect(AutoCodeUpdateService.isPipelineBranch("fix/custom-lint-ab12"))
         #expect(!AutoCodeUpdateService.isPipelineBranch("fix/typo"))
+        #expect(!AutoCodeUpdateService.isPipelineBranch("fix/12"))
+        #expect(!AutoCodeUpdateService.isPipelineBranch("fix/12typo"))
         #expect(!AutoCodeUpdateService.isPipelineBranch("feature/12-x"))
     }
 

@@ -4,7 +4,8 @@ import Foundation
 
 /// A rotated refresh token the Keychain refuses to store must be retried, not
 /// dropped: the server has already retired the old one, so a lost write ends
-/// in reuse detection and a logout on every device.
+/// in reuse detection and a logout on every device. Each store uses a unique
+/// fake host so `clear()` can never delete a real developer login.
 @MainActor
 @Suite("SessionStore refresh-token persistence", .serialized)
 struct SessionStoreTokenPersistTests {
@@ -14,7 +15,7 @@ struct SessionStoreTokenPersistTests {
     }
 
     private func store(attempts: @escaping (String) -> Bool) -> SessionStore {
-        let store = SessionStore(server: "http://127.0.0.1:3456")
+        let store = SessionStore(server: "http://test-\(UUID().uuidString.lowercased()).invalid")
         store.tokenPersistRetryDelays = [.milliseconds(10), .milliseconds(10), .milliseconds(10)]
         store.persistRefreshToken = { token, _ in attempts(token) }
         return store

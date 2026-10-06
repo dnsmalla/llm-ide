@@ -33,6 +33,15 @@ enum MobileExploreBridge {
     /// stable id explicitly keeps memory keying on the preferred field
     /// instead of the server's sessionId fallback, which only lined up
     /// because this caller happened to pass the chat UUID.
+    /// `mode` and `permissionMode` for a phone Explorer turn. Editing needs the
+    /// explicit `exploreEdit` switch: without it the turn is read-only (like
+    /// `llmide_chat`) no matter what the Mac's chip says, so a paired phone —
+    /// or anyone replaying its token — cannot run write/exec tools on a Mac
+    /// left in Auto.
+    static func turnPolicy(editAllowed: Bool) -> (mode: String, permissionMode: String?) {
+        editAllowed ? ("auto", permissionMode()) : ("auto_read_only", nil)
+    }
+
     /// The permission setting a phone-driven turn runs under: whatever the
     /// Mac's Code Assistant chip is set to, read through
     /// `EditAcceptanceMode.defaultsKey` — the same constant the panel's own
@@ -49,15 +58,6 @@ enum MobileExploreBridge {
     /// Note what it does NOT lift: the server's hard rails stand either way —
     /// a blocklisted command and a write outside the workspace are refused on
     /// bypass exactly as on manual.
-    /// `mode` and `permissionMode` for a phone Explorer turn. Editing needs the
-    /// explicit `exploreEdit` switch: without it the turn is read-only (like
-    /// `llmide_chat`) no matter what the Mac's chip says, so a paired phone —
-    /// or anyone replaying its token — cannot run write/exec tools on a Mac
-    /// left in Auto.
-    static func turnPolicy(editAllowed: Bool) -> (mode: String, permissionMode: String?) {
-        editAllowed ? ("auto", permissionMode()) : ("auto_read_only", nil)
-    }
-
     static func permissionMode() -> String {
         let raw = UserDefaults.standard.string(forKey: EditAcceptanceMode.defaultsKey) ?? ""
         return (EditAcceptanceMode(rawValue: raw) ?? .review).agentPermissionMode

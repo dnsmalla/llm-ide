@@ -58,19 +58,22 @@ extension AutoCodeUpdateService {
     /// user's own `fix/typo` WIP branch matches neither and must never be
     /// pushed on their behalf.
     nonisolated static func isPipelineBranch(_ branch: String) -> Bool {
-        issueNumber(fromFixBranch: branch) != nil || branch.hasPrefix("fix/custom-")
+        if branch.hasPrefix("fix/custom-") { return true }
+        guard issueNumber(fromFixBranch: branch) != nil else { return false }
+        let afterDigits = branch.dropFirst(4).drop(while: { $0.isNumber })
+        return afterDigits.first == "-"
     }
 
     /// Local pipeline branches that still need review-merge: named by the
-    /// pipeline, carrying commits the default branch lacks, and not already on
-    /// the remote. The last check stops a branch whose MR was merged or closed
-    /// from being re-pushed and re-opened on every scheduled run.
+    /// pipeline and carrying commits the default branch lacks (so a merged
+    /// branch is not pushed again). Deliberately NOT filtered by "already on
+    /// the remote": the push sets the upstream BEFORE the MR is created, so a
+    /// failed MR creation would otherwise strand the branch with no MR.
     nonisolated static func reviewMergeCandidates(defaultBranch: String, at localPath: String) -> [String] {
         let base = refSha("refs/remotes/origin/\(defaultBranch)", at: localPath) != nil
             ? "origin/\(defaultBranch)" : defaultBranch
         return localBranches(prefix: "fix/", at: localPath).filter { branch in
             guard isPipelineBranch(branch) else { return false }
-            if refSha("refs/remotes/origin/\(branch)", at: localPath) != nil { return false }
             let ahead = git(["rev-list", "--count", "\(base)..\(branch)"], at: localPath)
             return ahead.code == 0 && (Int(ahead.out.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0) > 0
         }

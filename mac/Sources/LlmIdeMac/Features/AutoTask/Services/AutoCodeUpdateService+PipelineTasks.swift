@@ -601,7 +601,7 @@ extension AutoCodeUpdateService {
             Self.reviewMergeCandidates(defaultBranch: defaultBranch, at: gitRoot)
         }.value
         if branches.isEmpty {
-            logStore.append(.reviewMerge, "No unpushed auto-task fix/* branches with new commits.")
+            logStore.append(.reviewMerge, "No auto-task fix/* branches with unmerged commits.")
             taskErrors.removeValue(forKey: key)
             return
         }
