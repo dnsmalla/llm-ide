@@ -99,6 +99,23 @@ final class BashService: Sendable {
         }
     }
 
+    /// `env` without variables that look like credentials. Commands run here are
+    /// proposed by a model; if the app was started from a shell, launcher or
+    /// rebuild script that exported `ANTHROPIC_API_KEY`, `GITHUB_TOKEN`, `AWS_*`
+    /// and the like, a plain `env` would otherwise hand them to it.
+    nonisolated static func sanitizedEnvironment(_ env: [String: String]) -> [String: String] {
+        let containsMarkers = ["API_KEY", "APIKEY", "SECRET", "PASSWORD", "PASSWD", "CREDENTIAL", "PRIVATE_KEY"]
+        let suffixes = ["_TOKEN", "_PAT", "_ACCESS_KEY", "_AUTH"]
+        let prefixes = ["ANTHROPIC_", "OPENAI_", "GEMINI_", "GOOGLE_API", "JWT_", "AWS_SESSION"]
+        return env.filter { key, _ in
+            let upper = key.uppercased()
+            if containsMarkers.contains(where: { upper.contains($0) }) { return false }
+            if suffixes.contains(where: { upper.hasSuffix($0) }) { return false }
+            if prefixes.contains(where: { upper.hasPrefix($0) }) { return false }
+            return true
+        }
+    }
+
     /// Execute a shell command and return the result. Never throws; a launch
     /// failure surfaces as `exitCode == -1` with the reason on stderr.
     func execute(_ command: String,
@@ -121,6 +138,7 @@ final class BashService: Sendable {
                     let process = Process()
                     process.executableURL = URL(fileURLWithPath: "/bin/zsh")
                     process.arguments = ["-c", command]
+                    process.environment = Self.sanitizedEnvironment(ProcessInfo.processInfo.environment)
                     if let dir = workingDirectory, !dir.isEmpty {
                         process.currentDirectoryURL =
                             URL(fileURLWithPath: (dir as NSString).expandingTildeInPath)
