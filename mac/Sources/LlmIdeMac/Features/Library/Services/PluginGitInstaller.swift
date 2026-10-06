@@ -71,6 +71,10 @@ enum PluginGitInstaller {
         guard let host = url.host?.lowercased(), !host.isEmpty else {
             throw InstallError.invalidURL
         }
+        // No credentials in the URL: git echoes the URL in its errors, which are
+        // logged and shown in the install alert, and the server refuses such a URL
+        // as provenance anyway (so the install could never be update-checked).
+        guard url.user == nil, url.password == nil else { throw InstallError.invalidURL }
         // Block obviously local hosts to keep things sane.
         if host == "localhost" || host == "127.0.0.1" || host.hasSuffix(".local") {
             throw InstallError.unsupportedScheme("local hosts not supported")
@@ -97,7 +101,7 @@ enum PluginGitInstaller {
         let cloneRes = try await runProcess("/usr/bin/git", args: args)
         guard cloneRes.code == 0 else {
             // Strip the temp path from stderr so we don't leak it.
-            let stderr = cloneRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
+            let stderr = SecretRedactor.redact(cloneRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
             log.error("git clone failed: \(stderr, privacy: .public)")
             throw InstallError.cloneFailed(stderr.isEmpty ? "git exited \(cloneRes.code)" : stderr)
         }
