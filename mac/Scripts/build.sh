@@ -15,6 +15,15 @@ NC='\033[0m'
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 PROJ_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+# Where SwiftPM builds. Default `.build` (unchanged). `rebuild-features.sh` sets
+# LLMIDE_SCRATCH_PATH so the in-app rebuild uses its OWN directory: sharing
+# `.build` made it wait silently on a developer's running `swift build` (SwiftPM
+# prints nothing while waiting on the lock) and left `.build/release`
+# feature-stripped for the next full dev build.
+SCRATCH_REL="${LLMIDE_SCRATCH_PATH:-.build}"
+SCRATCH_FLAG=""
+[ -n "${LLMIDE_SCRATCH_PATH:-}" ] && SCRATCH_FLAG="--scratch-path $SCRATCH_REL"
+SCRATCH_DIR="$PROJ_DIR/$SCRATCH_REL"
 APP_NAME="LlmIdeMac"
 # LLMIDE_APP_DIR lets a staging rebuild assemble the bundle somewhere other
 # than the project root, without touching the installed app. Unset = today's
@@ -249,13 +258,13 @@ cd "$PROJ_DIR"
 SPM_OFFLINE="--disable-automatic-resolution"
 if [ "${LLMIDE_FORCE_RESOLVE:-}" = "1" ]; then
   echo -e "${BLUE}[build]${NC} LLMIDE_FORCE_RESOLVE=1 — resolving dependencies from remotes..."
-  swift package resolve
+  swift package $SCRATCH_FLAG resolve
   SPM_OFFLINE=""
-elif swift package resolve --disable-automatic-resolution >/dev/null 2>&1; then
+elif swift package $SCRATCH_FLAG resolve --disable-automatic-resolution >/dev/null 2>&1; then
   echo -e "${BLUE}[build]${NC} dependencies satisfied from Package.resolved (offline — no remote fetch)"
 else
   echo -e "${BLUE}[build]${NC} Package.resolved not fully cached — resolving from remotes (needs network; all deps are public)..."
-  swift package resolve
+  swift package $SCRATCH_FLAG resolve
   SPM_OFFLINE=""
 fi
 
@@ -271,7 +280,7 @@ fi
 # tee keeps the compiler output streaming live while we keep a copy to
 # diagnose from. pipefail (set above) makes `if !` see swift build's status.
 build_log="$(mktemp -t llmide-build)"
-if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FLAGS 2>&1 | tee "$build_log"; then
+if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FLAGS $SCRATCH_FLAG 2>&1 | tee "$build_log"; then
   echo -e "${RED}[build] swift build failed.${NC}" >&2
   # Hint from what actually went wrong, not every hint every time: the
   # credentials footer printed under a "modified during the build" failure
@@ -294,7 +303,7 @@ if ! swift build -c release --product "$APP_NAME" $SPM_OFFLINE $FEATURE_BUILD_FL
 fi
 rm -f "$build_log"
 
-BUILT_BIN="$PROJ_DIR/.build/release/$APP_NAME"
+BUILT_BIN="$SCRATCH_DIR/release/$APP_NAME"
 if [ ! -f "$BUILT_BIN" ]; then
   echo -e "${RED}[build] swift build did not produce $BUILT_BIN${NC}"
   exit 1
@@ -306,7 +315,7 @@ cp "$BUILT_BIN" "$APP_DIR/Contents/MacOS/$APP_NAME"
 # at compile time — i.e. only on the machine that built it. Contents/Resources,
 # not the .app root: codesign rejects unsealed files at the bundle root. The
 # code looks them up with Bundle(url:) (never `Bundle.module`, which traps).
-for res_bundle in "$PROJ_DIR"/.build/release/*.bundle; do
+for res_bundle in "$SCRATCH_DIR"/release/*.bundle; do
   [ -d "$res_bundle" ] || continue
   # The app's own bundle is already mirrored loose into Contents/Resources by
   # the rsync above (and read from Bundle.main first) — copying it would ship
@@ -321,7 +330,7 @@ done
 # into Contents/Frameworks/ ourselves and fix the executable's
 # @rpath so dyld finds it at runtime. Without this the app crashes
 # on launch with "Library not loaded: @rpath/Sparkle.framework".
-SPARKLE_SRC=$(find "$PROJ_DIR/.build" -path '*/Sparkle.framework' -type d -print -quit)
+SPARKLE_SRC=$(find "$SCRATCH_DIR" -path '*/Sparkle.framework' -type d -print -quit)
 if [ -n "$SPARKLE_SRC" ] && [ -d "$SPARKLE_SRC" ]; then
   echo -e "${BLUE}[build]${NC} vendoring Sparkle.framework from $SPARKLE_SRC..."
   mkdir -p "$APP_DIR/Contents/Frameworks"

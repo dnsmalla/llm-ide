@@ -21,7 +21,8 @@ done
 mkdir -p "$STAGE_DIR"
 APP_DIR="$STAGE_DIR/LlmIdeMac.app"
 echo "[rebuild] staging build (features: $FEATURES) into $APP_DIR"
-LLMIDE_FEATURES="$FEATURES" LLMIDE_APP_DIR="$APP_DIR" LLMIDE_SKIP_KILL=1 "$SCRIPT_DIR/build.sh"
+# Own SwiftPM scratch dir: never contend with (or strip) a developer's `.build`.
+LLMIDE_SCRATCH_PATH=".build-app-rebuild" LLMIDE_FEATURES="$FEATURES" LLMIDE_APP_DIR="$APP_DIR" LLMIDE_SKIP_KILL=1 "$SCRIPT_DIR/build.sh"
 echo "[rebuild] signing staged bundle"
 LLMIDE_APP_DIR="$APP_DIR" "$SCRIPT_DIR/sign.sh"
 echo "[rebuild] staged OK: $APP_DIR"
