@@ -71,10 +71,19 @@ enum KeychainStore {
     /// parked in `SecurityServer::ClientSession::decrypt` and the suite never
     /// finishing. Any test that constructs `SessionStore`, `Config`, or
     /// `MobilePin` reaches this path, so an opt-in per test is not enough.
-    internal static var backend: RawKeychainAccess =
-        ProcessInfo.processInfo.environment["LLMIDE_KEYCHAIN_BACKEND"] == "memory"
-            ? InMemoryKeychainAccess()
-            : SecItemKeychainAccess()
+    ///
+    /// DEBUG builds only. In a release build the variable is ignored: an
+    /// environment variable set by a launcher or wrapper must not be able to
+    /// silently downgrade the app's secrets to RAM (login lost on every
+    /// relaunch while `wipeAllSecrets` reports success on the real items).
+    internal static var backend: RawKeychainAccess = {
+        #if DEBUG
+        if ProcessInfo.processInfo.environment["LLMIDE_KEYCHAIN_BACKEND"] == "memory" {
+            return InMemoryKeychainAccess()
+        }
+        #endif
+        return SecItemKeychainAccess()
+    }()
 
     /// True when secrets are readable (or legitimately absent). False after a
     /// failed load, when writes are blocked to protect the stored data.
