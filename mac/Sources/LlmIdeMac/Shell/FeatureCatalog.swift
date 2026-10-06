@@ -598,7 +598,8 @@ enum FeatureCatalog {
                            projectStore: ProjectStore,
                            backend: BackendManager,
                            activity: ActivityStore,
-                           registry: FeatureRegistry) {
+                           registry: FeatureRegistry,
+                           isAuthenticated: @escaping () -> Bool = { true }) {
         #if FEATURE_MOBILE
         let manager = MobileControlManager()
         // Hand the API client to the mobile control manager so inbound
@@ -614,7 +615,8 @@ enum FeatureCatalog {
         registry.register(module: MobileModule(
             manager: manager,
             controlEnabled: { config.mobileControlEnabled },
-            autoStart: { config.mobileControlAutoStart }))
+            autoStart: { config.mobileControlAutoStart },
+            isAuthenticated: isAuthenticated))
 
         wireMobileFeatureBridges()
         wireGenerationBridge()

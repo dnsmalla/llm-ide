@@ -184,7 +184,8 @@ public struct LlmIdeMacApp: App {
             projectStore: projectStoreInstance,
             backend: backend,
             activity: activity,
-            registry: featureRegistry)
+            registry: featureRegistry,
+            isAuthenticated: { store.isAuthenticated })
         // Builds the entire Auto Task / Loop stack (scheduler, settings,
         // templates, skills, log store, on-disk histories) and registers
         // AutoTaskModule — see FeatureCatalog for construction order and
