@@ -160,6 +160,14 @@ struct PluginDetailView: View {
 
     private var isClaudeImport: Bool { pluginName.hasPrefix("claude-") }
 
+    /// The version the user knows the copy as: the import stamp, else the
+    /// check's view of Claude's install, else the normalized manifest version
+    /// (which reads "0.0.0" for a sha-versioned plugin).
+    private func shownVersion(_ plugin: PluginInfo) -> String {
+        [plugin.sourceVersion, updateEntry?.importedVersion, updateEntry?.claudeVersion]
+            .compactMap { $0 }.first { !$0.isEmpty } ?? plugin.version
+    }
+
     @ViewBuilder
     private func updateBlock(_ plugin: PluginInfo) -> some View {
         if showsUpdateBlock {
@@ -176,20 +184,23 @@ struct PluginDetailView: View {
                         .font(.callout)
                         .foregroundStyle(theme.current.warning)
                 } else {
-                    Text("No update reported for v\(plugin.version).")
+                    Text("No update reported for v\(shownVersion(plugin)).")
                         .font(.callout).foregroundStyle(.secondary)
                 }
                 HStack(spacing: 8) {
                     if updatePending {
                         ProgressView().controlSize(.small)
                         Text("Updating…").font(.callout).foregroundStyle(.secondary)
-                    } else if isClaudeImport || updateEntry != nil {
+                    } else if plugin.origin == "claude" || updateEntry != nil {
+                        // The re-fetch is Claude's one-click route; a Codex import
+                        // (or a zip named claude-…) only updates when a check reports one.
                         updateButton
                     }
                     Button("Check for updates") { Task { await loadUpdate(force: true) } }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
-                        .disabled(checkingUpdates || updatePending)
+                        // A forced check runs `claude plugin marketplace update`; not during any update.
+                        .disabled(checkingUpdates || updateCenter.isUpdating)
                 }
                 if let updateResult, !updateResult.message.isEmpty {
                     Text(updateResult.message)

@@ -27,6 +27,19 @@ final class PluginInfoDecodingTests: XCTestCase {
         XCTAssertEqual(info.format, "llmide")
         XCTAssertEqual(info.unsupportedComponents, [])
         XCTAssertEqual(info.pendingComponents, [])
+        XCTAssertNil(info.origin)
+        XCTAssertNil(info.sourceVersion)
+    }
+
+    func testImportOriginAndStampDecode() throws {
+        let json = """
+        {"name":"claude-x","version":"0.0.0","displayName":"X","description":"d",
+         "author":"a","enabled":true,"skillCount":0,"commands":[],"subagents":[],
+         "origin":"claude","sourceVersion":"a1b2c3d"}
+        """.data(using: .utf8)!
+        let info = try JSONDecoder().decode(PluginInfo.self, from: json)
+        XCTAssertEqual(info.origin, "claude")
+        XCTAssertEqual(info.sourceVersion, "a1b2c3d")
     }
 }
 

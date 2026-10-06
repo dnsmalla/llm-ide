@@ -941,6 +941,8 @@ struct LibraryView: View {
                 Button {
                     Task { await rescanVendorSources() }
                 } label: { Label("Check for plugin updates", systemImage: "arrow.clockwise.circle") }
+                // A forced check runs `claude plugin marketplace update`; not while an update runs.
+                .disabled(updateCenter.isUpdating)
                 Button {
                     Task { await reloadPlugins() }
                 } label: { Label("Reload from disk", systemImage: "arrow.clockwise") }

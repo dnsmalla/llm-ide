@@ -298,8 +298,10 @@ struct PluginUpdateEntry: Decodable, Hashable, Identifiable {
 /// What `POST /auth/me/claude-plugins/update` reported. Every case except
 /// `.updated` means llm-ide's copy is unchanged.
 enum PluginUpdateOutcome: Equatable {
-    /// `from == to` means it was already the latest version.
-    case updated(from: String?, to: String?, trustReset: Bool)
+    /// `from == to` means it was already the latest version. `claudeUpdated`
+    /// is whether Claude Code's own install changed (false for an offline
+    /// re-import, an already-latest answer, or a server that predates it).
+    case updated(from: String?, to: String?, trustReset: Bool, claudeUpdated: Bool)
     /// The marketplace declares a command; nothing ran yet. Re-send with
     /// `acceptCommand: sha256` once the user has seen `command`.
     case needsConfirmation(command: String, sha256: String)
@@ -320,6 +322,7 @@ enum PluginUpdateOutcome: Equatable {
             let from: String?
             let to: String?
             let trustReset: Bool?
+            let claudeUpdated: Bool?
             let code: String?
             let detail: String?
             let command: String?
@@ -330,7 +333,8 @@ enum PluginUpdateOutcome: Equatable {
         let detail = SecretRedactor.redact(body.detail ?? "")
         switch (status, body.code) {
         case (200, _) where body.ok == true:
-            return .updated(from: body.from, to: body.to, trustReset: body.trustReset ?? false)
+            return .updated(from: body.from, to: body.to, trustReset: body.trustReset ?? false,
+                            claudeUpdated: body.claudeUpdated ?? false)
         case (200, "REIMPORT_FAILED"): return .reimportFailed(detail)
         case (409, "NEEDS_CONFIRMATION"):
             guard let command = body.command, let sha = body.sha256 else { return nil }
@@ -479,6 +483,12 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     /// MCP servers the plugin declares; each needs its own consent in the MCP
     /// Plugins section before it connects.
     let mcpServerCount: Int
+    /// "claude" / "codex" when a vendor bridge imported the plugin, nil for a
+    /// zip install or an older server.
+    let origin: String?
+    /// The vendor version the import copied (its stamp) — what the user knows
+    /// it as; `version` is normalized ("0.0.0" for a sha). Nil when unknown.
+    let sourceVersion: String?
     /// True when this plugin would be handed to the agent engine to load itself
     /// — so its hooks run at full fidelity, and the "not run here" notes below
     /// do not apply. Follows both hook trust and the `nativePlugins` pref.
@@ -530,6 +540,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
             && lhs.hookCount == rhs.hookCount && lhs.hookNotes == rhs.hookNotes
             && lhs.unsupportedComponents == rhs.unsupportedComponents
             && lhs.mcpServerCount == rhs.mcpServerCount && lhs.version == rhs.version
+            && lhs.origin == rhs.origin && lhs.sourceVersion == rhs.sourceVersion
             && lhs.sdkReadable == rhs.sdkReadable && lhs.nativePluginsOn == rhs.nativePluginsOn
             && lhs.trustOutdated == rhs.trustOutdated && lhs.trustOutdatedKinds == rhs.trustOutdatedKinds
             // The rest of what PluginDetailView renders: a reinstall that only adds
@@ -552,6 +563,7 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         case enabled, skillCount, commands, subagents
         case format, unsupportedComponents, pendingComponents
         case hookCount, declaresHooks, executableKinds, sdkReadable, nativePluginsOn, trustOutdated, trustOutdatedKinds, hookNotes, hooksTrusted, mcpServerCount, nativeDelivery
+        case origin, sourceVersion
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -578,6 +590,8 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
         self.hooksTrusted   = try c.decodeIfPresent(Bool.self, forKey: .hooksTrusted) ?? false
         self.mcpServerCount = try c.decodeIfPresent(Int.self, forKey: .mcpServerCount) ?? 0
         self.nativeDelivery = try c.decodeIfPresent(Bool.self, forKey: .nativeDelivery) ?? false
+        self.origin         = try c.decodeIfPresent(String.self, forKey: .origin)
+        self.sourceVersion  = try c.decodeIfPresent(String.self, forKey: .sourceVersion)
     }
 }
 

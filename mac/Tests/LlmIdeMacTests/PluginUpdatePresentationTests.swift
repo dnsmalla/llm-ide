@@ -44,8 +44,11 @@ import Testing
     func outcome(_ status: Int, _ json: String) -> PluginUpdateOutcome? {
         PluginUpdateOutcome.decode(status: status, data: Data(json.utf8))
     }
-    #expect(outcome(200, #"{"ok":true,"from":"1.0.0","to":"1.1.0","trustReset":true}"#)
-            == .updated(from: "1.0.0", to: "1.1.0", trustReset: true))
+    #expect(outcome(200, #"{"ok":true,"from":"1.0.0","to":"1.1.0","trustReset":true,"claudeUpdated":true}"#)
+            == .updated(from: "1.0.0", to: "1.1.0", trustReset: true, claudeUpdated: true))
+    // An older v60 body without the field: Claude's install is not assumed moved.
+    #expect(outcome(200, #"{"ok":true,"from":"1.0.0","to":"1.1.0","trustReset":false}"#)
+            == .updated(from: "1.0.0", to: "1.1.0", trustReset: false, claudeUpdated: false))
     #expect(outcome(200, #"{"ok":false,"code":"REIMPORT_FAILED","claudeUpdated":true,"detail":"x"}"#)
             == .reimportFailed("x"))
     #expect(outcome(409, #"{"code":"NEEDS_CONFIRMATION","command":"npm i","sha256":"abc123"}"#)
@@ -61,21 +64,27 @@ import Testing
 
 @Test func successMessageMentionsTrustAndRestart() throws {
     let updated = try #require(PluginUpdatePresentation.message(
-        name: "claude-a", outcome: .updated(from: "1.0.0", to: "1.1.0", trustReset: true)))
+        name: "claude-a", outcome: .updated(from: "1.0.0", to: "1.1.0", trustReset: true, claudeUpdated: true)))
     #expect(updated.contains("Hooks/MCP of claude-a changed — review and re-approve them."))
     #expect(updated.contains("Restart Claude Code to use the new version there."))
+
+    // Tier 1 offline re-import: llm-ide's copy moved, Claude Code's did not.
+    let offline = try #require(PluginUpdatePresentation.message(
+        name: "claude-a", outcome: .updated(from: "1.0.0", to: "1.1.0", trustReset: false, claudeUpdated: false)))
+    #expect(offline.contains("Updated claude-a from v1.0.0 to v1.1.0."))
+    #expect(!offline.contains("Restart Claude Code"))
 
     // Re-fetch of the same version, nothing executable changed: no restart,
     // no trust notice.
     let latest = try #require(PluginUpdatePresentation.message(
-        name: "claude-a", outcome: .updated(from: "1.1.0", to: "1.1.0", trustReset: false)))
+        name: "claude-a", outcome: .updated(from: "1.1.0", to: "1.1.0", trustReset: false, claudeUpdated: false)))
     #expect(latest.contains("already the latest"))
     #expect(!latest.contains("Restart Claude Code"))
     #expect(!latest.contains("Hooks/MCP"))
 
     // Same version, but its executables changed: the trust notice must stay.
     let latestReset = try #require(PluginUpdatePresentation.message(
-        name: "claude-a", outcome: .updated(from: "1.1.0", to: "1.1.0", trustReset: true)))
+        name: "claude-a", outcome: .updated(from: "1.1.0", to: "1.1.0", trustReset: true, claudeUpdated: false)))
     #expect(latestReset.contains("already the latest"))
     #expect(latestReset.contains("Hooks/MCP of claude-a changed — review and re-approve them."))
     #expect(!latestReset.contains("Restart Claude Code"))
@@ -119,13 +128,14 @@ import Testing
     #expect(!PluginUpdateStep(name: "claude-a", outcome: .cliFailed("x")).stopsBatch)
     #expect(!PluginUpdateStep(name: "claude-a", outcome: .notFound).stopsBatch)
     #expect(!PluginUpdateStep.discarded.stopsBatch)
-    guard case let .done(_, ok, trustReset, _) = PluginUpdateStep(
-        name: "claude-a", outcome: .updated(from: "1", to: "2", trustReset: true)) else {
+    guard case let .done(_, ok, trustReset, _, claudeUpdated) = PluginUpdateStep(
+        name: "claude-a", outcome: .updated(from: "1", to: "2", trustReset: true, claudeUpdated: true)) else {
         Issue.record("updated must map to .done")
         return
     }
     #expect(ok)
     #expect(trustReset)
+    #expect(claudeUpdated)
 }
 
 @Test func libraryMessageIsNeverEmpty() {

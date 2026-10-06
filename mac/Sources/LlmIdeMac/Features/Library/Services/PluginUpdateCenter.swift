@@ -104,6 +104,10 @@ final class PluginUpdateCenter: SessionScoped {
     /// when this refresh was superseded (a newer refresh, or a sign-out).
     @discardableResult
     func refresh(api: LlmIdeAPIClient, oneClick: Bool, force: Bool) async -> Bool? {
+        // A forced check refreshes the marketplace catalogs (a second `claude
+        // plugin` process); never alongside a running update. The UI disables
+        // it too; this covers a check already queued when the update began.
+        let force = force && !isUpdating
         if !force, let lastCheck, lastCheck.oneClick == oneClick,
            Date().timeIntervalSince(lastCheck.at) < Self.checkTTL {
             return true
@@ -216,6 +220,7 @@ final class PluginUpdateCenter: SessionScoped {
         var succeeded = 0
         var failures: [(name: String, message: String)] = []
         var trustResets: [String] = []
+        var claudeUpdated = false
         var stoppedForConfirmation = false
         for update in pending {
             let step = await run(name: update.name, api: api, oneClick: oneClick, acceptCommand: nil, origin: .library)
@@ -225,10 +230,11 @@ final class PluginUpdateCenter: SessionScoped {
                 return
             case .confirm:
                 stoppedForConfirmation = true
-            case let .done(message, ok, trustReset, _):
+            case let .done(message, ok, trustReset, _, movedClaude):
                 results[update.name] = Result(message: message, failed: !ok)
                 if ok { succeeded += 1 } else { failures.append((update.name, message)) }
                 if trustReset { trustResets.append(update.name) }
+                if movedClaude { claudeUpdated = true }
             }
             if stoppedForConfirmation || step.stopsBatch { break }
         }
@@ -237,7 +243,7 @@ final class PluginUpdateCenter: SessionScoped {
         // its Accept is never refused as "already updating".
         let summary = PluginUpdatePresentation.updateAllSummary(
             succeeded: succeeded, failures: failures, trustResets: trustResets,
-            claudeUpdated: oneClick && succeeded > 0 && pending.contains { $0.name.hasPrefix("claude-") })
+            claudeUpdated: claudeUpdated)
         if stoppedForConfirmation {
             deferredSummary = succeeded + failures.count > 0 ? summary : nil
         } else {
@@ -246,7 +252,7 @@ final class PluginUpdateCenter: SessionScoped {
     }
 
     private func finish(_ step: PluginUpdateStep, name: String, origin: Origin, prefix: String?) {
-        guard case let .done(message, ok, _, _) = step else { return }
+        guard case let .done(message, ok, _, _, _) = step else { return }
         results[name] = Result(message: message, failed: !ok)
         post(PluginUpdatePresentation.libraryMessage(prefix: prefix, message: origin == .library ? message : nil))
     }
@@ -268,7 +274,11 @@ final class PluginUpdateCenter: SessionScoped {
         inFlight.insert(name)
         defer { if started == epoch { inFlight.remove(name) } }
         let step: PluginUpdateStep
-        if oneClick && name.hasPrefix("claude-") {
+        // A row the check answered from the local scan (no CLI) has no
+        // pluginId: the one-click route needs Claude's plugin id, the plain
+        // re-import does not.
+        let fallbackRow = entry(for: name).map { $0.pluginId == nil } ?? false
+        if oneClick && name.hasPrefix("claude-") && !fallbackRow {
             step = await runOneClick(name: name, api: api, acceptCommand: acceptCommand)
         } else {
             step = await runReimport(name: name, api: api)
@@ -280,7 +290,7 @@ final class PluginUpdateCenter: SessionScoped {
             // account must never open (Accept would run it under the new one).
             pendingOrigin = origin
             pendingConfirmation = PluginUpdateConfirmation(pluginName: name, command: command, sha256: sha256)
-        case let .done(_, ok, _, _):
+        case let .done(_, ok, _, _, _):
             if ok { await afterChange(api: api, oneClick: oneClick) }
             guard started == epoch else { return .discarded }
         case .discarded:

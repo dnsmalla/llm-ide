@@ -50,8 +50,8 @@ enum PluginUpdatePresentation {
     /// which opens the confirmation sheet instead of saying anything).
     static func message(name: String, outcome: PluginUpdateOutcome) -> String? {
         switch outcome {
-        case let .updated(from, to, trustReset):
-            return updatedMessage(name: name, from: from, to: to, trustReset: trustReset)
+        case let .updated(from, to, trustReset, claudeUpdated):
+            return updatedMessage(name: name, from: from, to: to, trustReset: trustReset, claudeUpdated: claudeUpdated)
         case .needsConfirmation:
             return nil
         case .inProgress:
@@ -68,7 +68,8 @@ enum PluginUpdatePresentation {
         }
     }
 
-    private static func updatedMessage(name: String, from: String?, to: String?, trustReset: Bool) -> String {
+    private static func updatedMessage(name: String, from: String?, to: String?, trustReset: Bool,
+                                       claudeUpdated: Bool) -> String {
         var lines: [String] = []
         let unchanged: Bool = from != nil && from == to
         if unchanged, let to {
@@ -85,8 +86,9 @@ enum PluginUpdatePresentation {
         if trustReset {
             lines.append("Hooks/MCP of \(name) changed — review and re-approve them.")
         }
-        // Claude Code's install did not move when the version is unchanged.
-        if !unchanged {
+        // Only when Claude Code's own install moved: an offline re-import of
+        // what Claude already had needs no restart there.
+        if claudeUpdated {
             lines.append("Restart Claude Code to use the new version there.")
         }
         return lines.joined(separator: "\n")
@@ -131,7 +133,8 @@ enum PluginUpdatePresentation {
 enum PluginUpdateStep: Equatable {
     /// Stopped for a marketplace-declared command the user must see first.
     case confirm(command: String, sha256: String)
-    case done(message: String, succeeded: Bool, trustReset: Bool, stopsBatch: Bool)
+    /// `claudeUpdated`: Claude Code's own install changed (drives the restart note).
+    case done(message: String, succeeded: Bool, trustReset: Bool, stopsBatch: Bool, claudeUpdated: Bool = false)
     /// Finished after a sign-out: nothing may be shown or written.
     case discarded
 
@@ -142,8 +145,9 @@ enum PluginUpdateStep: Equatable {
         switch outcome {
         case let .needsConfirmation(command, sha256):
             self = .confirm(command: command, sha256: sha256)
-        case let .updated(_, _, trustReset):
-            self = .done(message: message, succeeded: true, trustReset: trustReset, stopsBatch: false)
+        case let .updated(_, _, trustReset, claudeUpdated):
+            self = .done(message: message, succeeded: true, trustReset: trustReset, stopsBatch: false,
+                         claudeUpdated: claudeUpdated)
         case .busy, .inProgress:
             self = .done(message: message, succeeded: false, trustReset: false, stopsBatch: true)
         case .cliFailed, .reimportFailed, .notFound:
@@ -152,7 +156,7 @@ enum PluginUpdateStep: Equatable {
     }
 
     var stopsBatch: Bool {
-        if case let .done(_, _, _, stops) = self { return stops }
+        if case let .done(_, _, _, stops, _) = self { return stops }
         return false
     }
 }
