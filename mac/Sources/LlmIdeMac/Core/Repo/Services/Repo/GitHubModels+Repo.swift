@@ -87,9 +87,19 @@ extension GitHubClient {
     /// list matches users' "Issues" mental model (matching GitLab's
     /// behaviour where MRs live under a separate endpoint).
     func listIssuesGitHub(owner: String, name: String, filter: RepoIssueFilter, page: Int) async throws -> [GitHubIssueWire] {
+        try await listIssuesGitHubRaw(owner: owner, name: name, filter: filter, page: page)
+            .filter { $0.pullRequest == nil }
+    }
+
+    /// Size of one raw page; also the "might have more" threshold.
+    static let issuesPerPage = 100
+
+    /// The raw page, pull requests included, so a pager can tell "all PRs"
+    /// from "end of list".
+    func listIssuesGitHubRaw(owner: String, name: String, filter: RepoIssueFilter, page: Int) async throws -> [GitHubIssueWire] {
         var items: [URLQueryItem] = [
             .init(name: "state", value: filter.state == .all ? "all" : (filter.state == .closed ? "closed" : "open")),
-            .init(name: "per_page", value: "100"),   // match GitLab; fewer round-trips, and the caller paginates until an empty page
+            .init(name: "per_page", value: "\(Self.issuesPerPage)"),   // match GitLab; fewer round-trips, and the caller paginates until an empty page
             .init(name: "sort", value: "updated"),
             .init(name: "direction", value: "desc"),
             .init(name: "page", value: "\(page)"),
@@ -100,7 +110,7 @@ extension GitHubClient {
         if let mid = filter.milestoneId { items.append(.init(name: "milestone", value: mid)) }
         if let aid = filter.assigneeId  { items.append(.init(name: "assignee",  value: aid)) }
         let issues: [GitHubIssueWire] = try await get("/repos/\(owner)/\(name)/issues", query: items)
-        // Drop pull requests — GitHub's /issues endpoint mixes them in.
+        // Pull requests are dropped by `listIssuesGitHub` — GitHub's /issues endpoint mixes them in.
         // NOTE: `filter.search` is deliberately NOT applied here. This endpoint
         // has no text-search parameter (that lives on /search/issues, with its
         // own much lower rate limit), and filtering a page in place would break
@@ -108,7 +118,7 @@ extension GitHubClient {
         // one page with no matches would silently truncate the results. Callers
         // page first, then narrow via `RepoIssueFilter.matchesLocally`, which
         // `filtersSearchServerSide == false` tells them to do.
-        return issues.filter { $0.pullRequest == nil }
+        return issues
     }
 
     func getIssueGitHub(owner: String, name: String, number: Int) async throws -> GitHubIssueWire {

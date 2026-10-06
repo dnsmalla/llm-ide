@@ -50,6 +50,18 @@ extension GitHubClient: RepoBackend {
         return wires.map { $0.asRepoIssue(projectFullName: "\(owner)/\(name)") }
     }
 
+    func listIssuePage(projectId: String, filter: RepoIssueFilter, page: Int) async throws -> RepoIssuePage {
+        guard let (owner, name) = Self.ownerAndName(from: projectId) else {
+            throw GitHubError.badURL(projectId)
+        }
+        let raw = try await listIssuesGitHubRaw(owner: owner, name: name, filter: filter, page: page)
+        let issues = raw.filter { $0.pullRequest == nil }
+            .map { $0.asRepoIssue(projectFullName: "\(owner)/\(name)") }
+        // A FULL raw page may be followed by more, even if every item on it
+        // was a pull request and `issues` is empty.
+        return RepoIssuePage(issues: issues, hasMore: raw.count >= Self.issuesPerPage)
+    }
+
     func getIssue(projectId: String, number: Int) async throws -> RepoIssue {
         guard let (owner, name) = Self.ownerAndName(from: projectId) else {
             throw GitHubError.badURL(projectId)

@@ -345,6 +345,22 @@ struct RepoIssueFilter: Equatable, Sendable {
 // @MainActor — they read main-mutated AppConfig live — and every consumer is
 // a SwiftUI view. Isolating the protocol to match avoids the Swift 6
 // conformance-isolation warning without faking Sendability.
+/// A page of issues and whether another page may follow. See
+/// `RepoBackend.listIssuePage`.
+struct RepoIssuePage {
+    var issues: [RepoIssue]
+    var hasMore: Bool
+}
+
+extension RepoBackend {
+    /// Default: a backend whose pages are not post-filtered is exhausted by
+    /// the first empty page.
+    func listIssuePage(projectId: String, filter: RepoIssueFilter, page: Int) async throws -> RepoIssuePage {
+        let issues = try await listIssues(projectId: projectId, filter: filter, page: page)
+        return RepoIssuePage(issues: issues, hasMore: !issues.isEmpty)
+    }
+}
+
 @MainActor
 protocol RepoBackend: Sendable {
     var kind: RepoBackendKind { get }
@@ -357,6 +373,12 @@ protocol RepoBackend: Sendable {
 
     /// Issues for a project, paginated. `page` is 1-based.
     func listIssues(projectId: String, filter: RepoIssueFilter, page: Int) async throws -> [RepoIssue]
+
+    /// One page of issues plus whether upstream may have more. Pagers must use
+    /// THIS, not "the page was empty": GitHub's issues endpoint mixes in pull
+    /// requests that are dropped client-side, so a full page of PRs yields an
+    /// empty `issues` while older issues still exist beyond it.
+    func listIssuePage(projectId: String, filter: RepoIssueFilter, page: Int) async throws -> RepoIssuePage
 
     /// Single issue by its per-project number.
     func getIssue(projectId: String, number: Int) async throws -> RepoIssue

@@ -645,10 +645,14 @@ struct RepoIssuesView: View {
             let maxPages = 20
             for page in 1...maxPages {
                 try Task.checkCancellation()
-                let batch = try await currentClient.listIssues(projectId: project.id, filter: filter, page: page)
-                let fresh = batch.filter { seen.insert($0.id).inserted }
-                if fresh.isEmpty { break }   // empty page or repeated content → done
+                let result = try await currentClient.listIssuePage(projectId: project.id, filter: filter, page: page)
+                let fresh = result.issues.filter { seen.insert($0.id).inserted }
+                // Repeated content (a backend clamping an out-of-range page) ends
+                // the walk; an EMPTY page only does when upstream has no more —
+                // a full page of GitHub pull requests is empty but not the end.
+                if !result.issues.isEmpty && fresh.isEmpty { break }
                 all.append(contentsOf: fresh)
+                if !result.hasMore { break }
             }
             guard isCurrent() else { return }
             // Narrow AFTER paging for backends whose issues endpoint has no

@@ -138,12 +138,11 @@ extension AutoCodeUpdateService {
         let maxPages = 20
         var out: [RepoIssue] = []
         for page in 1...maxPages {
-            let batch = try await client.listIssues(projectId: projectId, filter: filter, page: page)
-            out.append(contentsOf: batch)
-            // Empty page = nothing more upstream. A small-but-nonzero
-            // page on GitHub can occur when many PRs were filtered out
-            // client-side; keep walking until we see truly empty.
-            if batch.isEmpty { break }
+            let result = try await client.listIssuePage(projectId: projectId, filter: filter, page: page)
+            out.append(contentsOf: result.issues)
+            // Stop when upstream has no more. An EMPTY page is not the end on
+            // GitHub: a full page of pull requests filters down to nothing.
+            if !result.hasMore { break }
         }
         return out
     }

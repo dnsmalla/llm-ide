@@ -90,7 +90,7 @@ final class GanttViewModel: ObservableObject {
             // Members feed the assignee filter only — a token without the
             // members/collaborators scope must not blank the whole chart.
             async let membersTask: [RepoUser] = (try? await client.listMembers(projectId: project.id)) ?? []
-            async let firstPageTask = client.listIssues(
+            async let firstPageTask = client.listIssuePage(
                 projectId: project.id, filter: RepoIssueFilter(state: .all), page: 1)
 
             let (ms, mem, firstPage) = try await (milestonesTask, membersTask, firstPageTask)
@@ -121,17 +121,22 @@ final class GanttViewModel: ObservableObject {
     /// Continue paging issues from page 2 onward, reusing the already-fetched
     /// first page. Dedups by id so a backend that repeats content terminates.
     private func drainIssues(client: RepoBackend, projectId: String,
-                             firstPage: [RepoIssue]) async throws -> [RepoIssue] {
+                             firstPage: RepoIssuePage) async throws -> [RepoIssue] {
         var all: [RepoIssue] = []
         var seen = Set<String>()
-        all.append(contentsOf: firstPage.filter { seen.insert($0.id).inserted })
-        if firstPage.isEmpty { return all }
-        for page in 2...maxIssuePages {
-            let batch = try await client.listIssues(
+        all.append(contentsOf: firstPage.issues.filter { seen.insert($0.id).inserted })
+        var hasMore = firstPage.hasMore
+        var page = 2
+        while hasMore && page <= maxIssuePages {
+            let result = try await client.listIssuePage(
                 projectId: projectId, filter: RepoIssueFilter(state: .all), page: page)
-            let fresh = batch.filter { seen.insert($0.id).inserted }
-            if fresh.isEmpty { break }
+            let fresh = result.issues.filter { seen.insert($0.id).inserted }
+            // Repeated content ends the walk; an empty page only when upstream
+            // has no more (a page of GitHub pull requests is empty but not last).
+            if !result.issues.isEmpty && fresh.isEmpty { break }
             all.append(contentsOf: fresh)
+            hasMore = result.hasMore
+            page += 1
         }
         return all
     }
