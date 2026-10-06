@@ -11,6 +11,9 @@ test('parseRunnerSpec formats', () => {
     ['npx', ['pkg@1.2.3-beta.1', 'x'], { runner: 'npx', name: 'pkg', version: '1.2.3-beta.1', tag: null, argIndex: 0 }],
     ['npx', ['-y', '@playwright/mcp@latest'], { runner: 'npx', name: '@playwright/mcp', version: null, tag: 'latest', argIndex: 1 }],
     ['/usr/local/bin/npx', ['--yes', '-q', 'pkg'], { runner: 'npx', name: 'pkg', version: null, tag: null, argIndex: 2 }],
+    ['npx', ['-y', '--', 'pkg@1.0.0'], { runner: 'npx', name: 'pkg', version: '1.0.0', tag: null, argIndex: 2 }],
+    ['npx', ['-y', 'pkg@1.2.3', '--flag'], { runner: 'npx', name: 'pkg', version: '1.2.3', tag: null, argIndex: 1 }],
+    ['uvx', ['--quiet', '--offline', 'mcp-x'], { runner: 'uvx', name: 'mcp-x', version: null, tag: null, argIndex: 2 }],
     ['uvx', ['mcp-server-git'], { runner: 'uvx', name: 'mcp-server-git', version: null, tag: null, argIndex: 0 }],
     ['uvx', ['mcp-server-git@1.2.3'], { runner: 'uvx', name: 'mcp-server-git', version: '1.2.3', tag: null, argIndex: 0 }],
     ['uvx', ['mcp-server-git==1.2.3', '--repo', '.'], { runner: 'uvx', name: 'mcp-server-git', version: '1.2.3', tag: null, argIndex: 0 }],
@@ -24,6 +27,9 @@ test('parseRunnerSpec rejects', () => {
     ['npx', ['--package=x', 'y']],
     ['npx', ['-p', 'x', 'y']],
     ['uvx', ['--from', 'x', 'y']],
+    ['uvx', ['--python', '3.12', 'mcp-x']],
+    ['uvx', ['--with', 'requests', 'mcp-x']],
+    ['npx', ['--registry', 'https://x', 'pkg']],
     ['npx', []],
     ['npx', ['-y']],
     ['npx', ['../evil']],
@@ -49,4 +55,11 @@ test('withVersion rewrites only the spec arg', () => {
   assert.deepEqual(next, ['-y', '@scope/pkg@2.0.0', '--flag', 'pkg@9.9.9']);
   assert.equal(cfg.args[1], '@scope/pkg@latest');
   assert.throws(() => withVersion(parsed, cfg, '1.0.0; rm'));
+});
+
+test('withVersion leaves trailing flags and normalizes uvx ==', () => {
+  const cfg = { command: 'npx', args: ['-y', 'pkg@1.2.3', '--flag'] };
+  assert.deepEqual(withVersion(parseRunnerSpec(cfg), cfg, '1.3.0'), ['-y', 'pkg@1.3.0', '--flag']);
+  const uv = { command: 'uvx', args: ['mcp-x==1.0.0'] };
+  assert.deepEqual(withVersion(parseRunnerSpec(uv), uv, '1.1.0'), ['mcp-x@1.1.0']);
 });

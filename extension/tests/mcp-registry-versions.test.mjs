@@ -69,3 +69,16 @@ test('cache hit, expiry and force', async () => {
   await latestVersion({ runner: 'npx', name: 'c' }, opts);
   assert.equal(fetchFn.calls.length, 3);
 });
+
+test('error results are not cached', async () => {
+  const bad = fake({}, 500);
+  assert.ok((await latestVersion({ runner: 'npx', name: 'e' }, { fetchFn: bad })).error);
+  const good = fake({ latest: '2.0.0' });
+  assert.deepEqual(await latestVersion({ runner: 'npx', name: 'e' }, { fetchFn: good }), { version: '2.0.0' });
+  assert.equal(good.calls.length, 1);
+});
+
+test('PyPI with no usable final version is an error', async () => {
+  const out = await latestVersion({ runner: 'uvx', name: 'y' }, { fetchFn: fake({ info: { version: '1.0.0rc1' }, releases: { '1.0.0rc1': [{}] } }) });
+  assert.ok(out.error);
+});

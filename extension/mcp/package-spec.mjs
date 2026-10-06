@@ -24,10 +24,13 @@ export function isValidVersion(runner, version) {
   return (runner === 'npx' ? NPM_VERSION_RE : PYPI_VERSION_RE).test(version);
 }
 
-function isPackageFlag(runner, arg) {
-  if (arg === '--package' || arg === '-p' || arg.startsWith('--package=')) return true;
-  return runner === 'uvx' && (arg === '--from' || arg.startsWith('--from='));
-}
+// Only flags known to take NO value may precede the spec. Any other leading
+// flag (`--python 3.12`, `--with x`, `--registry url`, `--package`, `--from`)
+// may swallow the next argument, so the launch is not managed (null).
+const VALUELESS_FLAGS = {
+  npx: new Set(['-y', '--yes', '-q', '--quiet']),
+  uvx: new Set(['-q', '--quiet', '--no-cache', '--offline', '-v', '--verbose']),
+};
 
 function splitSpec(runner, spec) {
   // npx: the last '@' not at index 0 separates the version (index 0 is a scope).
@@ -52,8 +55,10 @@ export function parseRunnerSpec({ command, args } = {}) {
   const runner = base;
   let argIndex = 0;
   while (argIndex < args.length && typeof args[argIndex] === 'string' && args[argIndex].startsWith('-')) {
-    if (isPackageFlag(runner, args[argIndex])) return null;
+    const flag = args[argIndex];
     argIndex++;
+    if (flag === '--') break;
+    if (!VALUELESS_FLAGS[runner].has(flag)) return null;
   }
   const spec = args[argIndex];
   if (typeof spec !== 'string' || spec === '') return null;
@@ -65,7 +70,10 @@ export function parseRunnerSpec({ command, args } = {}) {
   return null;
 }
 
-/** Copy of `args` with only the spec argument replaced by `name@version`. */
+/**
+ * Copy of `args` with only the spec argument replaced by `name@version`.
+ * NOTE: a uvx `name==1.2.3` spec is normalized to `name@1.2.3` on rewrite.
+ */
 export function withVersion(parsed, { args }, version) {
   if (!isValidVersion(parsed.runner, version)) throw new Error('invalid version');
   const next = [...args];
