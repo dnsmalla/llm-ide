@@ -14,6 +14,7 @@ struct SelfHealProposalSheet: View {
     @State private var reviewedPatch: Data?
     @State private var failure: String?
     @State private var working = false
+    @State private var confirmingDiscard = false
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "Incidents")
 
     var body: some View {
@@ -29,10 +30,17 @@ struct SelfHealProposalSheet: View {
             .frame(minHeight: 300)
             if let failure { Text(failure).font(.caption).foregroundStyle(.red) }
             HStack {
-                Button("Discard", role: .destructive) {
-                    run(gitWork: { try SelfHealProposalService.discard(proposal) },
-                        onSuccess: { SelfHealProposalService.markDiscarded(proposal, store: .shared) })
-                }
+                Button("Discard", role: .destructive) { confirmingDiscard = true }
+                    .confirmationDialog("Discard this proposal?", isPresented: $confirmingDiscard,
+                                        titleVisibility: .visible) {
+                        Button("Discard", role: .destructive) {
+                            run(gitWork: { try SelfHealProposalService.discard(proposal) },
+                                onSuccess: { SelfHealProposalService.markDiscarded(proposal, store: .shared) })
+                        }
+                        Button("Cancel", role: .cancel) { }
+                    } message: {
+                        Text("Its worktree and the changes in it are deleted. This cannot be undone.")
+                    }
                 Spacer()
                 Button("Close") { dismiss() }
                 Button("Apply to this checkout") { runApply() }

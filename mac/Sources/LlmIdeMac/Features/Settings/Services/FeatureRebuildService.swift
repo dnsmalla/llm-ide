@@ -94,7 +94,15 @@ final class FeatureRebuildService: ObservableObject {
     @Published private(set) var stagedCSV: String?
     /// True when a ready build was staged for a different feature set than the
     /// one currently selected.
-    var stagedIsStale: Bool { phase == .readyToSwap && stagedCSV != desiredCSV }
+    ///
+    /// Compared on the build-time-excludable features only, like `hasDrift`:
+    /// toggling a runtime-only feature after staging does not change what is
+    /// compiled in, and treating it as stale forced a multi-minute rebuild of
+    /// a byte-identical binary.
+    var stagedIsStale: Bool {
+        phase == .readyToSwap
+            && stagedCSV.map(Self.buildRelevantCSV) != Self.buildRelevantCSV(desiredCSV)
+    }
     /// The staging `bash`, so quitting the app mid-build doesn't orphan a
     /// multi-minute `swift build`. Written from the detached build task,
     /// read from the willTerminate observer — hence the lock-guarded box.
@@ -154,6 +162,14 @@ final class FeatureRebuildService: ObservableObject {
     }
 
     // MARK: - Pure helpers (unit-tested directly, no Process/Bundle touched)
+
+    /// `csv` reduced to the features that are actually compiled in or out.
+    static func buildRelevantCSV(_ csv: String) -> String {
+        csv.split(separator: ",")
+            .compactMap { AppFeature(rawValue: String($0)) }
+            .filter { AppFeature.buildTimeExcludable.contains($0) }
+            .map(\.rawValue).sorted().joined(separator: ",")
+    }
 
     static func featureCSV(for features: Set<AppFeature>) -> String {
         features.map(\.rawValue).sorted().joined(separator: ",")
