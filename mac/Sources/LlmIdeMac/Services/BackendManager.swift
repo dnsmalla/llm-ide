@@ -85,17 +85,24 @@ final class BackendManager {
         }
     }
 
-    /// Synchronously SIGTERM (then SIGKILL after 1s) the node child we
+    /// Synchronously SIGTERM (then SIGKILL after up to 1s) the node child we
     /// spawned. Adopted external backends are left alone — they have
     /// their own lifecycle and `stop()` is the path that touches them.
     func terminateSpawnedBackend() {
         guard let p = process, p.isRunning else { return }
         let childPID = p.processIdentifier
         kill(childPID, SIGTERM)
-        // Escalate on a utility queue so we don't block willTerminate.
-        DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 1.0) {
-            // Send SIGKILL unconditionally — if the process is already
-            // gone, kill() returns ESRCH and that's fine.
+        // Wait for it to go, then SIGKILL a straggler — here, synchronously. The
+        // escalation used to be scheduled with `asyncAfter` on a global queue, but
+        // this runs from `willTerminate`: the process exits right after, so that
+        // block never fired and a node that ignored SIGTERM was orphaned (and then
+        // adopted, stale, by the next launch). `kill(pid, 0)` probes existence
+        // without signalling; a zombie reads as alive and the SIGKILL is harmless.
+        let deadline = Date().addingTimeInterval(1.0)
+        while Date() < deadline, kill(childPID, 0) == 0 {
+            usleep(50_000)
+        }
+        if kill(childPID, 0) == 0 {
             kill(childPID, SIGKILL)
         }
     }
