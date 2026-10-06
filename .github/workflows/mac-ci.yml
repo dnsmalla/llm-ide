@@ -304,7 +304,13 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        target: [build-mac-lite, build-mac-min, build-mac-mobile-only]
+        include:
+          - target: build-mac-lite
+            scratch: mac/.build-lite
+          - target: build-mac-min
+            scratch: mac/.build-min
+          - target: build-mac-mobile-only
+            scratch: mac/.build-mobile
     steps:
       - uses: actions/checkout@v7
 
@@ -314,7 +320,8 @@ jobs:
       - name: Cache SwiftPM
         uses: actions/cache@v6
         with:
-          path: mac/.build
+          # Must match the target's --scratch-path in the Makefile.
+          path: ${{ matrix.scratch }}
           key: spm-${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}-${{ github.sha }}
           restore-keys: |
             spm-${{ matrix.target }}-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}-
