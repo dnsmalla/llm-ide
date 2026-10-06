@@ -38,12 +38,20 @@ final class RepoManager {
 
     /// Host of the configured GitLab instance — the only host a GitLab token
     /// may be sent to. Read from settings by default; injectable for tests.
-    private let gitLabHost: String
+    private let injectedGitLabHost: String?
+
+    /// The host to trust for a GitLab token. Read at USE time unless one was
+    /// injected: a copy taken at init kept the old instance after Settings →
+    /// Instance URL changed, and every push/pull then failed with
+    /// `credentialHostMismatch` until the view that owns this was recreated.
+    private var gitLabHost: String {
+        let configured = injectedGitLabHost
+            ?? URL(string: AppConfig.shared.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines))?.host
+        return (configured ?? "").lowercased()
+    }
 
     init(gitLabHost: String? = nil) {
-        let configured = gitLabHost
-            ?? URL(string: AppConfig.shared.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines))?.host
-        self.gitLabHost = (configured ?? "").lowercased()
+        self.injectedGitLabHost = gitLabHost
     }
 
     /// Which provider we're authenticating against — drives the auth
@@ -209,7 +217,7 @@ final class RepoManager {
 
     func commit(at repoURL: URL, message: String) async throws {
         _ = try await git(["commit", "-m", message], cwd: repoURL)
-        log.info("committed message=\(message, privacy: .public)")
+        log.info("committed message=\(message, privacy: .private)")
     }
 
     func push(at repoURL: URL, branch: String, token: String, backend: Backend = .gitlab, remote: String = "origin") async throws {
