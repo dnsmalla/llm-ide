@@ -54,11 +54,20 @@ extension GitLabClient: RepoBackend {
         guard let intId = Int(projectId) else {
             throw GitLabError.badURL("project id \(projectId) isn't numeric")
         }
+        var milestoneTitle: String?
+        if let milestoneId = filter.milestoneId.flatMap(Int.init) {
+            // A milestone that cannot be resolved must not silently turn into
+            // "no milestone filter" (that would show every issue as a match).
+            guard let title = try await self.milestoneTitle(projectId: intId, id: milestoneId) else {
+                return []
+            }
+            milestoneTitle = title
+        }
         let gitLabFilter = IssueFilter(
             state: filter.state.asGitLab,
             search: filter.search,
             labelName: filter.labelName,
-            milestoneId: filter.milestoneId.flatMap(Int.init),
+            milestoneTitle: milestoneTitle,
             assigneeId: filter.assigneeId.flatMap(Int.init)
         )
         let raw = try await self.listIssues(projectId: intId, filter: gitLabFilter, page: page)

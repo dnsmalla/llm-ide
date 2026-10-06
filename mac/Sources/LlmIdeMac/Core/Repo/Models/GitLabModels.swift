@@ -128,7 +128,10 @@ struct IssueFilter: Equatable {
     var state: IssueState = .opened
     var search: String = ""
     var labelName: String = ""
-    var milestoneId: Int? = nil
+    /// Milestone TITLE. GitLab's issues list takes `milestone=<title>`;
+    /// `milestone_id` there accepts only None/Any/Upcoming/Started, so a
+    /// numeric id is rejected with a 400.
+    var milestoneTitle: String? = nil
     var assigneeId: Int? = nil
 
     enum IssueState: String, CaseIterable, Identifiable {
@@ -148,9 +151,10 @@ struct IssueFilter: Equatable {
         if state != .all { items.append(.init(name: "state", value: state.rawValue)) }
         if !search.isEmpty { items.append(.init(name: "search", value: search)) }
         if !labelName.isEmpty { items.append(.init(name: "labels", value: labelName)) }
-        if let mid = milestoneId { items.append(.init(name: "milestone_id", value: "\(mid)")) }
+        if let title = milestoneTitle { items.append(.init(name: "milestone", value: title)) }
         if let aid = assigneeId { items.append(.init(name: "assignee_id", value: "\(aid)")) }
-        items.append(.init(name: "per_page", value: "50"))
+        // `per_page` is appended by `GitLabClient.listIssues` (once; a second
+        // copy here made which value wins server-defined).
         items.append(.init(name: "order_by", value: "updated_at"))
         return items
     }

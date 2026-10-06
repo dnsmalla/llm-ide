@@ -282,6 +282,16 @@ final class GitLabClient {
                                      .init(name: "state",    value: "active")])
     }
 
+    /// Title of a milestone in ANY state. The issues list filters by title,
+    /// and the issue payload only carries the id; `listMilestones` is
+    /// active-only, which would lose closed milestones.
+    func milestoneTitle(projectId: Int, id: Int) async throws -> String? {
+        let all: [GitLabMilestone] = try await get(
+            "/projects/\(projectId)/milestones",
+            query: [.init(name: "per_page", value: "100")])
+        return all.first { $0.id == id }?.title
+    }
+
     // MARK: - Members
 
     func listMembers(projectId: Int) async throws -> [GitLabUser] {
