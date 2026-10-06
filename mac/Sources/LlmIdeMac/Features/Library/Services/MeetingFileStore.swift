@@ -154,11 +154,14 @@ final class MeetingFileStore {
 
     @discardableResult
     func finalize(handle: Handle, title: String, endedAt: Date,
-                  participants: [String]) throws -> URL {
+                  participants: [String], platform: String? = nil) throws -> URL {
         try handle.flush()
         try handle.close()
 
         var fm = handle.frontmatter
+        // The partial is created before any scraper is picked, so it carries a
+        // placeholder platform; the caller passes the one actually observed.
+        if let platform { fm.platform = platform }
         fm.title = title
         fm.endedAt = endedAt
         fm.durationSeconds = Int(endedAt.timeIntervalSince(fm.startedAt))

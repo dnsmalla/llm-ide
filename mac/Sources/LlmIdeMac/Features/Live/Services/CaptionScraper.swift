@@ -50,6 +50,10 @@ final class CaptionOrchestrator: ObservableObject {
     @Published private(set) var captions: [Caption] = []
     @Published private(set) var isRunning: Bool = false
     @Published private(set) var activeSource: CaptureSource = .unknown
+    /// The last platform a scraper actually read from during this recording.
+    /// `activeSource` falls back to `.unknown` whenever the app is momentarily
+    /// not detected, so it cannot tell us at stop time which meeting this was.
+    private var observedSource: CaptureSource?
     @Published private(set) var sessionId: String?
     @Published private(set) var startedAt: Date?
     @Published var lastIngestStatus: IngestStatus = .idle
@@ -135,6 +139,15 @@ final class CaptionOrchestrator: ObservableObject {
     /// monologue survives a crash.  Later growth sets `fileNeedsRewrite`.
     private let rowMaxPendingAge: TimeInterval = 15.0
 
+    /// The frontmatter `platform` value for a scraper source.
+    private static func platformTag(_ source: CaptureSource) -> String? {
+        switch source {
+        case .zoomDesktop: return "zoom"
+        case .teamsDesktop: return "teams"
+        case .unknown: return nil
+        }
+    }
+
     init(scrapers: [CaptionScraper] = PlatformDetector.allScrapers,
          pollInterval: TimeInterval = 0.25) {
         self.scrapers = scrapers
@@ -157,6 +170,7 @@ final class CaptionOrchestrator: ObservableObject {
         startedAt = now
         captions.removeAll()
         deltaState = CaptionDeltaState()
+        observedSource = nil
         pendingRows.removeAll()
         rowCaptionIDs.removeAll()
         writtenRows.removeAll()
@@ -274,7 +288,8 @@ final class CaptionOrchestrator: ObservableObject {
                     handle: handle,
                     title: request.title,
                     endedAt: Date(),
-                    participants: participants)
+                    participants: participants,
+                    platform: observedSource.flatMap(Self.platformTag))
                 try? PartialRecovery(notesFolder: root).cleanup(id: handle.id)
                 // Fire-and-forget summarize.  Failure leaves the file as-is
                 // and the user can hit ⌘R Re-summarize from the detail view.
@@ -352,6 +367,7 @@ final class CaptionOrchestrator: ObservableObject {
             }
             return
         }
+        observedSource = scraper.source
         if activeSource != scraper.source {
             activeSource = scraper.source
             noSourceDetected = false
