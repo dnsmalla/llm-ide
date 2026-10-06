@@ -127,7 +127,7 @@ struct RepoKanbanPanel: View {
                 VStack(spacing: 8) {
                     ForEach(col.issues) { issue in
                         card(issue, t: t)
-                            .draggable(String(issue.number))
+                            .draggable(Self.dragPrefix + String(issue.number))
                             .onTapGesture { onSelect(issue) }
                     }
                     if col.issues.isEmpty {
@@ -146,7 +146,11 @@ struct RepoKanbanPanel: View {
         .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(RoundedRectangle(cornerRadius: 10).strokeBorder(t.border.opacity(0.5), lineWidth: 0.5))
         .dropDestination(for: String.self) { items, _ in
-            guard let idStr = items.first else { return false }
+            // Only a drag this board started: plain text from another app ("42")
+            // would otherwise rewrite issue #42's labels and state.
+            guard let payload = items.first(where: { $0.hasPrefix(Self.dragPrefix) }) else { return false }
+            let idStr = String(payload.dropFirst(Self.dragPrefix.count))
+            guard Int(idStr) != nil else { return false }
             Task { await move(idStr: idStr, to: col) }
             return true
         }
@@ -224,6 +228,9 @@ struct RepoKanbanPanel: View {
     }
 
     // MARK: - Drag-drop move
+
+    /// Marks a drag as this board's own (see the drop handler).
+    private static let dragPrefix = "llmide-kanban-issue:"
 
     private func move(idStr: String, to col: RepoColumn) async {
         guard let number = Int(idStr),
