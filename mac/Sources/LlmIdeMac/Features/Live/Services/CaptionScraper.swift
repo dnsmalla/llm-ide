@@ -54,6 +54,10 @@ final class CaptionOrchestrator: ObservableObject {
     /// `activeSource` falls back to `.unknown` whenever the app is momentarily
     /// not detected, so it cannot tell us at stop time which meeting this was.
     private var observedSource: CaptureSource?
+    /// See `tick()`: which scraper was available at the last re-check.
+    private var cachedScraperIndex: Int?
+    private var lastAvailabilityCheck: TimeInterval = -.infinity
+    private static let availabilityRecheckInterval: TimeInterval = 1.0
     @Published private(set) var sessionId: String?
     @Published private(set) var startedAt: Date?
     @Published var lastIngestStatus: IngestStatus = .idle
@@ -171,6 +175,8 @@ final class CaptionOrchestrator: ObservableObject {
         captions.removeAll()
         deltaState = CaptionDeltaState()
         observedSource = nil
+        cachedScraperIndex = nil
+        lastAvailabilityCheck = -.infinity
         pendingRows.removeAll()
         rowCaptionIDs.removeAll()
         writtenRows.removeAll()
@@ -355,7 +361,16 @@ final class CaptionOrchestrator: ObservableObject {
             return
         }
         flushIdlePendingRows(now: ProcessInfo.processInfo.systemUptime)
-        let scraper = scrapers.first(where: { $0.isAvailable() })
+        // `isAvailable()` scans NSWorkspace.runningApplications (and for some
+        // platforms probes AX); doing that at 4 Hz for a whole meeting is waste.
+        // Re-evaluate about once a second and reuse the answer in between.
+        let nowUptime = ProcessInfo.processInfo.systemUptime
+        let scraper: CaptionScraper?
+        if nowUptime - lastAvailabilityCheck >= Self.availabilityRecheckInterval {
+            lastAvailabilityCheck = nowUptime
+            cachedScraperIndex = scrapers.firstIndex(where: { $0.isAvailable() })
+        }
+        scraper = cachedScraperIndex.map { scrapers[$0] }
         guard let scraper else {
             activeSource = .unknown
             // After a short grace period, flag that no caption source is
