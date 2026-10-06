@@ -170,7 +170,10 @@ final class VoiceInputService: NSObject {
                     let ns = error as NSError
                     // Ignore expected cancellation after stopListening.
                     if ns.domain == "kAFAssistantErrorDomain", ns.code == 216 { return }
-                    if ns.code == 1 { return }
+                    // Scoped to the Speech framework's domain: a code of 1 from any
+                    // OTHER domain is a real failure, and swallowing it left the UI on
+                    // "Listening…" forever with no teardown.
+                    if ns.domain == "kAFAssistantErrorDomain", ns.code == 1 { return }
                     self.log.error("voice_recognition_error err=\(error.localizedDescription, privacy: .public)")
                     // Keep what was dictated before the failure — teardown
                     // clears it, and it used to be discarded with it.
