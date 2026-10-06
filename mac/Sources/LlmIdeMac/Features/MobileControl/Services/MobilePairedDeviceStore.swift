@@ -28,6 +28,11 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
     /// Anyone who holds the PIN can add a record, so the registry is bounded:
     /// past this many devices the least recently seen one is dropped.
     static let maxDevices = 20
+    /// A token not used for this long stops working and the device must pair again.
+    /// The connection is cleartext `ws://`, so a token sniffed on the LAN would
+    /// otherwise stay valid forever; an idle one is the likeliest to be stale or
+    /// stolen, and a phone that is actually used keeps refreshing `lastSeenAt`.
+    static let maxIdleInterval: TimeInterval = 30 * 24 * 60 * 60
 
     private let fileURL: URL
     private let lock = NSLock()
@@ -80,6 +85,12 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
         lock.lock(); defer { lock.unlock() }
         guard let index = devices.firstIndex(where: { $0.id == deviceId }),
               Self.constantTimeEqual(devices[index].tokenHash, candidate) else {
+            return false
+        }
+        // Expired by disuse: forget the device so it has to pair with the PIN again.
+        if now.timeIntervalSince(devices[index].lastSeenAt) > Self.maxIdleInterval {
+            devices.remove(at: index)
+            persistLocked()
             return false
         }
         devices[index].lastSeenAt = now
