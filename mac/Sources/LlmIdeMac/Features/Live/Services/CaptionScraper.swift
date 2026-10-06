@@ -172,7 +172,11 @@ final class CaptionOrchestrator: ObservableObject {
         do {
             let h = try store.createPartial(
                 id: id, startedAt: now,
-                platform: "mic", language: "en")
+                // The language drives the summary (`summarizeFM.language`). A
+                // hardcoded "en" summarised every Japanese meeting in English;
+                // use the user's preferred language, the best signal available
+                // before any caption has been read.
+                platform: "mic", language: AppConfig.shared.preferredLanguage)
             self.fileHandle = h
             try? PartialRecovery(notesFolder: root)
                 .record(id: id, path: h.url, startedAt: now)

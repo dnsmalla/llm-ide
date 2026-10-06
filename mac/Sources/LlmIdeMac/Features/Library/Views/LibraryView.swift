@@ -517,10 +517,10 @@ struct LibraryView: View {
                         .tag(ShellState.LibrarySelection.file(item.url))
                         .padding(.leading, Self.treeRowInset)
                 }
-                .onDelete { offsets in
-                    let toDelete = offsets.map { looseFiles[$0] }
-                    toDelete.forEach { itemStore.remove(id: $0.id) }
-                }
+                // No `.onDelete`: `itemStore.remove` deletes the file from disk, and
+                // the Delete key / Edit ▸ Delete used to do that with no prompt,
+                // while the row's context menu asks first. That menu is the one
+                // deliberate path.
 
                 // Folder groups (imported via "Add Folder"). A folder row plus
                 // its children as SIBLING rows rather than a DisclosureGroup:
@@ -538,10 +538,6 @@ struct LibraryView: View {
                             LibraryFileRow(item: item, depth: 1)
                                 .tag(ShellState.LibrarySelection.file(item.url))
                                 .padding(.leading, Self.treeRowInset)
-                        }
-                        .onDelete { offsets in
-                            let toDelete = offsets.map { folderItems[$0] }
-                            toDelete.forEach { itemStore.remove(id: $0.id) }
                         }
                     }
                 }
