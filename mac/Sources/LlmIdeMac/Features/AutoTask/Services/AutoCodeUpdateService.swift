@@ -378,7 +378,18 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     func composedPrompt(taskId: String, ownPrompt: String, projectRoot: String?,
                         writesFiles: Bool) -> String {
         let taskConfig = taskConfigs.config(for: taskId)
-        let body = autoTaskTemplates?.template(id: taskConfig.templateId)?.body ?? ownPrompt
+        // Only an APPROVED template (see `AutoTaskTemplateStore`): one that changed on
+        // disk outside the app — a `git pull` — would otherwise start running
+        // unattended, possibly under a CLI's auto-approve mode, with no one having
+        // read it. The task falls back to its own prompt and says why.
+        if let templates = autoTaskTemplates,
+           let template = templates.template(id: taskConfig.templateId),
+           !templates.isApproved(template) {
+            logStore.append(taskId,
+                            "Template \"\(template.name)\" changed outside the app and is not approved — using the task's own prompt. Review it under Auto Tasks → Template and choose Approve.",
+                            level: .error)
+        }
+        let body = autoTaskTemplates?.approvedTemplate(id: taskConfig.templateId)?.body ?? ownPrompt
         let root = projectRoot.map { URL(fileURLWithPath: $0) }
         return AutoTaskPromptComposer.compose(body: body, config: taskConfig,
                                               projectRoot: root, writesFiles: writesFiles)

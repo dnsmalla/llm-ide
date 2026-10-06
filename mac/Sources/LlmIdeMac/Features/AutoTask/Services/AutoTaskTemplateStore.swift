@@ -1,4 +1,5 @@
 import Combine
+import CryptoKit
 import Foundation
 import os.log
 
@@ -50,7 +51,74 @@ final class AutoTaskTemplateStore: ObservableObject {
 
     var hasProject: Bool { projectRoot != nil }
 
-    init() {}
+    private let defaults: UserDefaults
+
+    init(defaults: UserDefaults = .standard) {
+        self.defaults = defaults
+    }
+
+    // MARK: - Approval (trust on change)
+
+    // A template is prompt text that runs UNATTENDED — with the CLI's auto-approve
+    // mode, so `codex --yolo` / `gemini --yolo` execute whatever it says — and it
+    // lives in the repository (`templates/auto_task/*.md`). A `git pull` that
+    // rewrites one would otherwise change what tonight's scheduled run does. So a
+    // template runs only while its file still equals the content a person last
+    // wrote or approved ON THIS MACHINE. The record is local (UserDefaults), never
+    // in the repo — same stance as shell-command approvals (`VerifyApprovalStore`).
+    //
+    // Approved implicitly: anything the app itself writes (create, edit, rename,
+    // starter seeds), and — once, so upgrading does not silence every task — the
+    // templates of the project that is open the first time this runs.
+
+    private static let approvalsKey = "autoTaskTemplateApprovals"
+    private static let migratedKey = "autoTaskTemplateApprovalsMigrated"
+
+    /// Bumped when an approval is recorded, so views showing approval state refresh.
+    @Published private(set) var approvalRevision = 0
+
+    private func digest(_ contents: String) -> String {
+        SHA256.hash(data: Data(contents.utf8)).map { String(format: "%02x", $0) }.joined()
+    }
+
+    private var approvals: [String: String] {
+        get { (defaults.dictionary(forKey: Self.approvalsKey) as? [String: String]) ?? [:] }
+        set { defaults.set(newValue, forKey: Self.approvalsKey) }
+    }
+
+    private func recordApproval(path: String, contents: String) {
+        approvals[path] = digest(contents)
+        approvalRevision += 1
+    }
+
+    /// Whether `template`'s file still holds exactly what was approved.
+    func isApproved(_ template: AutoTaskTemplate) -> Bool {
+        guard let url = template.url,
+              let contents = try? String(contentsOf: url, encoding: .utf8) else { return false }
+        return approvals[url.path] == digest(contents)
+    }
+
+    /// The template for `id`, only when it is approved. A changed-outside-the-app
+    /// template is not returned: the caller falls back to the task's own prompt.
+    func approvedTemplate(id: String?) -> AutoTaskTemplate? {
+        guard let template = template(id: id), isApproved(template) else { return nil }
+        return template
+    }
+
+    /// The user reviewed the file as it is now and accepts it.
+    func approve(id: String) {
+        guard let template = template(id: id), let url = template.url,
+              let contents = try? String(contentsOf: url, encoding: .utf8) else { return }
+        recordApproval(path: url.path, contents: contents)
+    }
+
+    /// One-time, on first use after this feature shipped: approve what exists in the
+    /// project that is open, so existing templates keep running.
+    private func approveExistingOnceForMigration() {
+        guard !defaults.bool(forKey: Self.migratedKey) else { return }
+        defaults.set(true, forKey: Self.migratedKey)
+        for template in templates { approve(id: template.id) }
+    }
 
     // MARK: - Project binding
 
@@ -70,6 +138,7 @@ final class AutoTaskTemplateStore: ObservableObject {
         }
         seedDefaultsIfMissing()
         reload()
+        approveExistingOnceForMigration()
     }
 
     /// Rescan the folder. Cheap enough to call after every mutation.
@@ -303,6 +372,8 @@ final class AutoTaskTemplateStore: ObservableObject {
             try FileManager.default.createDirectory(
                 at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
             try contents.write(to: url, atomically: true, encoding: .utf8)
+            // Written by the app on a person's behalf: that is the approval.
+            recordApproval(path: url.path, contents: contents)
             return true
         } catch {
             logger.error("failed to write \(url.path, privacy: .public): \(error.localizedDescription, privacy: .public)")

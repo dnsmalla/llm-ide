@@ -62,6 +62,24 @@ struct AutoTaskTemplateSection: View {
                 }
 
                 if let template = selected {
+                    // Reading the revision makes this refresh right after Approve.
+                    let _ = templates.approvalRevision
+                    if !templates.isApproved(template) {
+                        HStack(alignment: .top, spacing: Spacing.xs) {
+                            Image(systemName: "exclamationmark.shield.fill")
+                                .foregroundStyle(theme.current.warning)
+                            Text("This template changed outside the app (for example by a git pull) and is not approved, so tasks ignore it and use their own prompt. Read it, then approve it to let tasks run it unattended.")
+                                .font(Typography.caption)
+                                .foregroundStyle(theme.current.warning)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer(minLength: Spacing.xs)
+                            Button("Approve") { templates.approve(id: template.id) }
+                                .controlSize(.small)
+                        }
+                        .padding(Spacing.sm)
+                        .background(theme.current.warning.opacity(0.10))
+                        .clipShape(RoundedRectangle(cornerRadius: Radius.sm))
+                    }
                     savedTemplateEditor(template)
                 } else if let ownPrompt {
                     editor(text: ownPrompt)
