@@ -22,6 +22,11 @@ extension LlmIdeAPIClient {
         let extraRoots: [String]?
         let language: String?
         let model: String?
+        /// Server wire provider id (`anthropic` or an Anthropic-compatible
+        /// `custom:<uuid>`; server API v66). Omitted → first-party Anthropic.
+        /// The server refuses one the Agent engine cannot run (400
+        /// `PROVIDER_UNAVAILABLE` / `PROVIDER_NOT_AGENT_CAPABLE`).
+        let provider: String?
         /// Omitted → the server's default budget (30 min).
         let timeoutMs: Int?
     }
@@ -64,13 +69,13 @@ extension LlmIdeAPIClient {
     /// a network call.
     static func loopAgentRunRequest(message: String, skills: [String], repoRoot: URL,
                                     extraRoots: [URL] = [],
-                                    language: String?, model: String?,
+                                    language: String?, model: String?, provider: String? = nil,
                                     timeout: TimeInterval?) -> LoopAgentRunRequest {
         LoopAgentRunRequest(
             message: message, skills: skills,
             repoRoot: repoRoot.standardizedFileURL.path,
             extraRoots: extraRoots.isEmpty ? nil : extraRoots.map(\.standardizedFileURL.path),
-            language: language, model: model,
+            language: language, model: model, provider: provider,
             timeoutMs: timeout.map { Int(($0 * 1000).rounded()) })
     }
 
@@ -82,11 +87,12 @@ extension LlmIdeAPIClient {
 
     func loopAgentRun(message: String, skills: [String], repoRoot: URL,
                       extraRoots: [URL] = [],
-                      language: String?, model: String? = nil,
+                      language: String?, model: String? = nil, provider: String? = nil,
                       timeout: TimeInterval?) async throws -> LoopAgentResult {
         let body = Self.loopAgentRunRequest(message: message, skills: skills, repoRoot: repoRoot,
                                             extraRoots: extraRoots,
-                                            language: language, model: model, timeout: timeout)
+                                            language: language, model: model, provider: provider,
+                                            timeout: timeout)
         let response: LoopAgentRunResponse = try await post(
             "/kb/loop/agent-run", body: body, authenticated: true,
             timeout: Self.loopAgentRequestTimeout(for: timeout))
@@ -96,14 +102,33 @@ extension LlmIdeAPIClient {
 
 /// Production `LoopAgentRunning` — one `POST /kb/loop/agent-run` per call.
 /// Repair is a multi-file code edit, so no model override: the server uses the
-/// user's full chat model, not the sub-model tier.
+/// user's full chat model, not the sub-model tier — unless a tier route
+/// (`routeResolver`) or an explicit per-loop model says otherwise.
 final class APILoopAgentRunner: LoopAgentRunning {
     private let api: LlmIdeAPIClient
     private let language: String
+    /// The tier route for this runner's role, read at each call so a Settings
+    /// change reaches a long-lived runner. Injected (not resolved here)
+    /// because Core does not know which role it serves: the Loop passes its
+    /// `.loop` route, the Auto Tasks regression sweep passes none.
+    private let routeResolver: @Sendable () -> TierRoute?
 
-    init(api: LlmIdeAPIClient, language: String = "en") {
+    init(api: LlmIdeAPIClient, language: String = "en",
+         routeResolver: @escaping @Sendable () -> TierRoute? = { nil }) {
         self.api = api
         self.language = language
+        self.routeResolver = routeResolver
+    }
+
+    /// The model + provider one run sends. An explicit model (a loop's own
+    /// `repairModel`) wins and keeps today's provider-less request: pairing
+    /// it with a routed gateway would send a Claude model id to a GLM door.
+    /// Otherwise the tier route, when set, supplies both; nil keeps exactly
+    /// today's request (server default model on first-party Anthropic).
+    static func target(explicitModel: String?, route: TierRoute?) -> (model: String?, provider: String?) {
+        if let explicitModel { return (explicitModel, nil) }
+        guard let route else { return (nil, nil) }
+        return (route.model, route.provider)
     }
 
     func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
@@ -114,8 +139,10 @@ final class APILoopAgentRunner: LoopAgentRunning {
 
     func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
              timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
-        try await api.loopAgentRun(message: message, skills: skills, repoRoot: repoRoot,
-                                   extraRoots: extraRoots, language: language, model: model,
-                                   timeout: timeout)
+        let target = Self.target(explicitModel: model, route: model == nil ? routeResolver() : nil)
+        return try await api.loopAgentRun(message: message, skills: skills, repoRoot: repoRoot,
+                                          extraRoots: extraRoots, language: language,
+                                          model: target.model, provider: target.provider,
+                                          timeout: timeout)
     }
 }

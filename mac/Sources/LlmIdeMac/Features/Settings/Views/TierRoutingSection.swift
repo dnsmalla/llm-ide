@@ -119,8 +119,21 @@ struct TierRoutingSection: View {
             }
             if let reason = featureUnusableReason(feature) {
                 note("uses default — \(reason)")
+            } else if feature == .loop, let reason = loopAgentStepReason() {
+                // The replay takes the route; the agent steps (the bulk of a
+                // Loop's cost) run on the Agent SDK and keep their default.
+                note("agent steps use default — \(reason). Only Claude or a custom provider "
+                     + "with an Anthropic-compatible URL can run them.")
             }
         }
+    }
+
+    /// Why the Loop's agent steps (POST /kb/loop/agent-run, Agent SDK) cannot
+    /// take the Loop's route even though the regression replay can — the same
+    /// check `LoopAgentTierRoute` applies per call.
+    private func loopAgentStepReason() -> String? {
+        guard let tier = routing.tier(for: .loop), let route = routing.tier(tier) else { return nil }
+        return TierRouting.unusableReason(route, customProviders: customProviders, requiresAgentEngine: true)
     }
 
     private func note(_ text: String) -> some View {

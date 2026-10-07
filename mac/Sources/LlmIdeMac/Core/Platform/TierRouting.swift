@@ -30,7 +30,7 @@ enum RoutedFeature: String, CaseIterable, Identifiable {
     var displayName: String {
         switch self {
         case .subagents: return "Plugin subagents"
-        case .loop:      return "Loop (regression replay)"
+        case .loop:      return "Loop (agent steps, regression replay)"
         case .autoTasks: return "Auto Tasks"
         case .quickChat: return "Quick chat & phone"
         case .pipeline:  return "Server pipeline (plan, codegen)"

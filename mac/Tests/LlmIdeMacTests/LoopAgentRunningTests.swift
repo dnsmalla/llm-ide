@@ -59,6 +59,31 @@ final class LoopAgentRunningTests: XCTestCase {
         XCTAssertEqual(Set(json.keys), ["message", "skills", "repoRoot"])
     }
 
+    func testRequestCarriesProviderOnlyWhenRouted() throws {
+        let routed = LlmIdeAPIClient.loopAgentRunRequest(
+            message: "m", skills: [], repoRoot: URL(fileURLWithPath: "/tmp/repo"),
+            language: nil, model: "glm-4.6", provider: "custom:abc", timeout: nil)
+        let json = try jsonObject(routed)
+        XCTAssertEqual(json["provider"] as? String, "custom:abc")
+        XCTAssertEqual(json["model"] as? String, "glm-4.6")
+    }
+
+    func testTierRouteAppliesOnlyWhenNoExplicitModel() {
+        let route = TierRoute(provider: "custom:abc", model: "glm-4.6")
+        // No route → exactly today's request.
+        let bare = APILoopAgentRunner.target(explicitModel: nil, route: nil)
+        XCTAssertNil(bare.model)
+        XCTAssertNil(bare.provider)
+        // A route supplies both provider and model.
+        let routed = APILoopAgentRunner.target(explicitModel: nil, route: route)
+        XCTAssertEqual(routed.model, "glm-4.6")
+        XCTAssertEqual(routed.provider, "custom:abc")
+        // A loop's own repairModel wins and is never paired with a routed gateway.
+        let explicit = APILoopAgentRunner.target(explicitModel: "claude-x", route: route)
+        XCTAssertEqual(explicit.model, "claude-x")
+        XCTAssertNil(explicit.provider)
+    }
+
     func testRequestTimeoutSitsAboveTheServerBudget() {
         XCTAssertGreaterThan(LlmIdeAPIClient.loopAgentRequestTimeout(for: 90), 90)
         // nil → the server's 30-minute default, which is longer than the

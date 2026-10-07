@@ -28,7 +28,7 @@ final class LoopRunnerProvider: LoopRunnerProviding {
         let prompter = CodeAssistPrompter(api: api, model: route?.model, provider: route?.provider,
                                           agent: config.activeCLI)
         let judge = CodeAssistJudge(api: api)
-        let repairer = AgentFaultRepairer(api: api)
+        let repairer = AgentFaultRepairer(api: api, routeResolver: LoopAgentTierRoute.resolve)
         let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,
                                                 verifier: ShellFaultVerifier(), repairer: repairer,
                                                 verifyTimeout: regressionVerifyTimeout, config: config)
@@ -36,9 +36,9 @@ final class LoopRunnerProvider: LoopRunnerProviding {
         // stage's per-fault activity reporting is silently dropped.
         regressionRunner.activity = activity
         let runner = LoopEngineRunner(
-            stageRepairer: AgentLoopStageRepairer(api: api),
+            stageRepairer: AgentLoopStageRepairer(api: api, routeResolver: LoopAgentTierRoute.resolve),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
-            skillExecutor: AgentLoopSkillExecutor(api: api),
+            skillExecutor: AgentLoopSkillExecutor(api: api, routeResolver: LoopAgentTierRoute.resolve),
             trigger: trigger,
             repoRegistrar: APILoopRepoRegistrar(api: api),
             defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
@@ -48,5 +48,17 @@ final class LoopRunnerProvider: LoopRunnerProviding {
         )
         laneRegistry?.attachLaneRunner(runner, trigger: trigger)
         return runner
+    }
+}
+
+/// The Loop's tier route for its AGENT steps (skill stages, stage repairs,
+/// fault repairs → POST /kb/loop/agent-run) — the bulk of a Loop's cost. Those
+/// run on the Agent SDK, so only Claude or a custom provider with an
+/// Anthropic-compatible URL qualifies (`requiresAgentEngine`); anything else
+/// resolves to nil and the step keeps its default. Read at each call, so a
+/// Settings change reaches runners that outlive it (LoopRunService caches them).
+enum LoopAgentTierRoute {
+    static let resolve: @Sendable () -> TierRoute? = {
+        TierRouting.resolve(feature: .loop, requiresAgentEngine: true)
     }
 }

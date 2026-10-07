@@ -30,8 +30,11 @@ final class AgentLoopSkillExecutor: LoopSkillExecuting {
         self.agent = agent
     }
 
-    convenience init(api: LlmIdeAPIClient, language: String = "en") {
-        self.init(agent: APILoopAgentRunner(api: api, language: language))
+    /// - Parameter routeResolver: The caller's tier route (`APILoopAgentRunner`);
+    ///   the default sends no route — today's request.
+    convenience init(api: LlmIdeAPIClient, language: String = "en",
+                     routeResolver: @escaping @Sendable () -> TierRoute? = { nil }) {
+        self.init(agent: APILoopAgentRunner(api: api, language: language, routeResolver: routeResolver))
     }
 
     func execute(skillId: String, targetPath: String?, message: String,

@@ -101,11 +101,12 @@ final class LoopRunService: ObservableObject, SessionScoped {
                                           agent: "claude_code")
         let regressionRunner = RegressionRunner(
             prompter: prompter, judge: CodeAssistJudge(api: api),
-            verifier: ShellFaultVerifier(), repairer: AgentFaultRepairer(api: api))
+            verifier: ShellFaultVerifier(),
+            repairer: AgentFaultRepairer(api: api, routeResolver: LoopAgentTierRoute.resolve))
         let runner = LoopEngineRunner(
-            stageRepairer: AgentLoopStageRepairer(api: api),
+            stageRepairer: AgentLoopStageRepairer(api: api, routeResolver: LoopAgentTierRoute.resolve),
             regressionSweep: RegressionRunnerSweepAdapter(runner: regressionRunner),
-            skillExecutor: AgentLoopSkillExecutor(api: api),
+            skillExecutor: AgentLoopSkillExecutor(api: api, routeResolver: LoopAgentTierRoute.resolve),
             approvals: approvals,
             repoRegistrar: APILoopRepoRegistrar(api: api),
             defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
