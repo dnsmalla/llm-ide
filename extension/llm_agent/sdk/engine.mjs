@@ -1638,6 +1638,9 @@ export async function runAgentV2Turn(
     ...(abortController ? { abortController } : {}),
   });
 
+  // The context-usage read happens at most once per turn, even if the SDK
+  // emits a second `result` (the session is released after the first).
+  let contextUsageRead = false;
   const usageTotals = {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
     costUsd: 0, numTurns: 0, durationMs: 0,
@@ -1746,7 +1749,8 @@ export async function runAgentV2Turn(
         if (ev.type === 'result') {
           // Read while the session is still open; a gateway's numbers would
           // describe a model this window math does not know.
-          if (!gatewayBaseUrl) {
+          if (!gatewayBaseUrl && !contextUsageRead) {
+            contextUsageRead = true;
             const contextUsage = await readContextUsage(q);
             if (contextUsage) onEvent?.(contextUsage);
           }

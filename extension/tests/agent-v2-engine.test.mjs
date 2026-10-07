@@ -887,6 +887,18 @@ test('turn end: context_usage follows result, then the input is released', { tim
     assert.equal(calls.order.indexOf('release'), 1);
   }));
 
+test('turn end: a second result in the same query reads context usage only once', { timeout: 5000 },
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const { factory, calls } = contextQuery({ messages: [...RESULT_TURN, RESULT_TURN[1]], usage: SDK_USAGE });
+    const events = [];
+    await runAgentV2Turn({
+      message: 'hi', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+      onEvent: (e) => events.push(e), queryFactory: factory,
+    }, turnInjectable);
+    assert.equal(calls.asked, 1);
+    assert.equal(events.filter((e) => e.type === 'context_usage').length, 1);
+  }));
+
 test('turn end: an SDK failure with no result still releases the input and sends no context_usage', { timeout: 5000 },
   withAnthropicKey('sk-ant-v2-test', async () => {
     const { factory, calls } = contextQuery({ messages: [RESULT_TURN[0]], usage: SDK_USAGE, throwAfter: true });
