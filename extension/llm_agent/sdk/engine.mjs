@@ -72,6 +72,7 @@ import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { resolveCustomProviderDispatch } from '../../providers/providers.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage } from './events.mjs';
+import { cachedEffortLevels } from './models.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
@@ -454,6 +455,26 @@ export function effortForTurn(mode, message, { env = process.env.LLMIDE_CHAT_EFF
   if (isBareGreeting(message)) return 'medium';
   return HIGH_EFFORT_MODES.has(mode) ? 'high' : 'medium';
 }
+
+/**
+ * This turn's effort: the operator pin (LLMIDE_CHAT_EFFORT), else the user's
+ * explicit pick when the chosen model supports it, else effortForTurn.
+ *
+ * `modelLevels` is what the SDK's own model listing reported for the model
+ * the turn runs on (models.mjs cachedEffortLevels) — so a level a newer SDK
+ * adds is accepted with no change here. `null` = no listing cached yet
+ * (fresh server); only then does the static EFFORT_LEVELS set decide.
+ */
+export function resolveTurnEffort({ requested, mode, message, modelLevels, env = process.env.LLMIDE_CHAT_EFFORT } = {}) {
+  const pinned = typeof env === 'string' ? env.trim().toLowerCase() : '';
+  if (pinned === 'default' || EFFORT_LEVELS.has(pinned)) return effortForTurn(mode, message, { env });
+  if (typeof requested === 'string' && requested && requested !== 'auto') {
+    const offered = Array.isArray(modelLevels) ? modelLevels.includes(requested) : EFFORT_LEVELS.has(requested);
+    if (offered) return requested;
+    console.warn(`effort "${String(requested).slice(0, 20)}" not offered for this model — using auto`);
+  }
+  return effortForTurn(mode, message, { env });
+}
 const MAX_PROMPT_CHARS = 120_000;
 
 /**
@@ -485,7 +506,7 @@ const MAX_PROMPT_CHARS = 120_000;
  *                                     the client's memory footnote)
  */
 export function buildEngineOptions(
-  { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite, delivered, history } = {},
+  { userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite, delivered, history, effort } = {},
   {
     readSkill = readSkillInstructions,
     roots = buildReadableRoots,
@@ -496,6 +517,9 @@ export function buildEngineOptions(
     // testable without a plugin directory on disk. Only used to decide
     // inline vs subagent-driven execution (plan-pipeline.mjs).
     getSubagents = (uid) => buildPerUserSkillSet(uid).subagents,
+    // The SDK listing's levels for the model this turn runs on. Injected
+    // like readSkill so composition stays testable without the SDK.
+    effortLevels = cachedEffortLevels,
   } = {},
 ) {
   const resolvedMode = typeof mode === 'string' && mode ? mode : 'execute';
@@ -742,7 +766,10 @@ export function buildEngineOptions(
   // Bounded: a very long chat must not carry an ever-growing hash list.
   for (const key of ['attachments', 'images']) next[key] = next[key].slice(-400);
   const compactWindow = autoCompactWindow();
-  const effort = effortForTurn(resolvedMode, message);
+  const turnEffort = resolveTurnEffort({
+    requested: effort, mode: resolvedMode, message,
+    modelLevels: effortLevels(userId, typeof model === 'string' && model ? model : null),
+  });
   const queryOptions = {
     // Live token + tool-args deltas — the stream a chat UI needs.
     includePartialMessages: true,
@@ -788,7 +815,7 @@ export function buildEngineOptions(
     ...(compactWindow ? { settings: { autoCompactWindow: compactWindow } } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
     // See effortForTurn. The runner drops it on a gateway turn.
-    ...(effort ? { effort } : {}),
+    ...(turnEffort ? { effort: turnEffort } : {}),
   };
 
   return {
@@ -1033,7 +1060,7 @@ const TURN_PROGRESS_EVENTS = new Set(['delta', 'tool_use_start', 'tool_args_delt
 
 export async function runAgentV2Turn(
   {
-    message, userId, mode, model, language, skills, agentContext, attachments,
+    message, userId, mode, model, language, skills, agentContext, attachments, effort,
     // The app's record of the chat, only on a fresh turn (routes/agent-v2.mjs
     // freshTurnHistory) — see buildEngineOptions.
     history,
@@ -1390,7 +1417,7 @@ export async function runAgentV2Turn(
 
   const { queryOptions, prompt, images, meta } = buildEngineOptions(
     {
-      userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite,
+      userId, mode, model, language, message, skills, agentContext, attachments, planExecute, planWrite, effort,
       // Only meaningful without a resume — buildEngineOptions ignores it when
       // the session already holds turns (`delivered` non-null).
       history: resume ? [] : history,

@@ -1808,6 +1808,49 @@ test('effort: high for plan/assist_plan/execute, medium for ask/review/document 
   assert.equal(queryOptions.model, undefined, 'the model is never chosen here');
 });
 
+test('resolveTurnEffort: pin > explicit level the model supports > auto', async () => {
+  const { resolveTurnEffort, effortForTurn } = await import('../llm_agent/sdk/engine.mjs');
+  const base = { mode: 'execute', message: 'fix the build', env: '' };
+  // Auto: absent or "auto" is exactly today's per-turn choice.
+  assert.equal(resolveTurnEffort({ ...base, modelLevels: ['low', 'high'] }), effortForTurn('execute', 'fix the build', { env: '' }));
+  assert.equal(resolveTurnEffort({ ...base, requested: 'auto', modelLevels: ['low'] }), 'high');
+  // A level the model lists is taken — including one this code has never heard of.
+  assert.equal(resolveTurnEffort({ ...base, requested: 'low', modelLevels: ['low', 'high'] }), 'low');
+  assert.equal(resolveTurnEffort({ ...base, requested: 'ultra', modelLevels: ['ultra'] }), 'ultra');
+  // Not one the model lists → auto.
+  assert.equal(resolveTurnEffort({ ...base, requested: 'max', modelLevels: ['low', 'high'] }), 'high');
+  assert.equal(resolveTurnEffort({ ...base, requested: 'low', modelLevels: [] }), 'high', 'a model without effort support');
+  // No listing cached yet (null): the static known set decides.
+  assert.equal(resolveTurnEffort({ ...base, requested: 'xhigh', modelLevels: null }), 'xhigh');
+  assert.equal(resolveTurnEffort({ ...base, requested: 'ultra', modelLevels: null }), 'high');
+  // Garbage → auto.
+  assert.equal(resolveTurnEffort({ ...base, requested: 42, modelLevels: ['low'] }), 'high');
+  // The operator pin still wins over the user's pick.
+  assert.equal(resolveTurnEffort({ ...base, env: 'medium', requested: 'low', modelLevels: ['low'] }), 'medium');
+  assert.equal(resolveTurnEffort({ ...base, env: 'default', requested: 'low', modelLevels: ['low'] }), null);
+});
+
+test('buildEngineOptions: the requested effort is checked against the chosen model\'s cached levels', () => {
+  const seen = [];
+  const effortLevels = (uid, model) => { seen.push([uid, model]); return model === 'claude-sonnet-5' ? ['low', 'high'] : null; };
+  const opts = (effort, model) => buildEngineOptions(
+    { userId: 'u', mode: 'execute', model, effort, message: 'fix the build', agentContext: {} },
+    { readSkill: () => null, roots: () => [], effortLevels },
+  ).queryOptions.effort;
+  const prev = process.env.LLMIDE_CHAT_EFFORT;
+  delete process.env.LLMIDE_CHAT_EFFORT;
+  try {
+    assert.equal(opts('low', 'claude-sonnet-5'), 'low');
+    assert.equal(opts('max', 'claude-sonnet-5'), 'high', 'not offered for this model → auto');
+    assert.equal(opts(undefined, 'claude-sonnet-5'), 'high');
+    assert.deepEqual(seen[0], ['u', 'claude-sonnet-5']);
+    assert.equal(opts('low', undefined), 'low', 'no cache (null) → the static set');
+    assert.deepEqual(seen.at(-1), ['u', null], 'no model = the SDK default');
+  } finally {
+    if (prev === undefined) delete process.env.LLMIDE_CHAT_EFFORT; else process.env.LLMIDE_CHAT_EFFORT = prev;
+  }
+});
+
 // The SDK subprocess runs the agent's Bash, and `env` is what Bash inherits.
 // Spreading process.env handed every approved command the server's own
 // secrets (LLMIDE_JWT_SECRET signs every user's session; LLMIDE_VAULT_KEY
