@@ -216,7 +216,7 @@ Each skill is a Markdown file with a YAML frontmatter block. The loader validate
 | `confirmation` | no (required for write) | write skills must have `confirmation: editable-sheet` or `confirmation: gitop-sheet` | loader.mjs:139–142 |
 | `model` | no | model string (used by subagent frontmatter, not core skills) | — |
 
-**Per-file size cap:** `MAX_SKILL_BYTES = 32_768` bytes (32 KB) per skill file including `_base.md` (loader.mjs:18). Files exceeding this limit are dropped with a warning. `_base.md` is rejected entirely (not truncated) because truncating the fence-protocol contract mid-sentence produces subtly malformed tool calls (loader.mjs:100–111).
+**Per-file size cap:** `MAX_SKILL_BYTES = 65_536` bytes (64 KB) per skill file including `_base.md` (loader.mjs:23). Files exceeding this limit are dropped with a warning. `_base.md` is rejected entirely (not truncated) because truncating the fence-protocol contract mid-sentence produces subtly malformed tool calls (loader.mjs:100–111).
 
 **Name must match filename** (loader.mjs:130–134): `fm.name` is compared against the filename with `.md` stripped. A mismatch is a loader error, not a warning, so skill files cannot be silently mis-keyed.
 

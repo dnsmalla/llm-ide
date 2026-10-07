@@ -17,7 +17,10 @@ const VALID_CONFIRMATIONS = new Set(['editable-sheet', 'gitop-sheet', 'question-
 // Per-file content cap — prevents a single oversized skill from
 // exhausting the Claude context window.  Core skills are small and
 // will never approach this; the limit mainly guards plugin skills.
-const MAX_SKILL_BYTES = 32_768;   // 32 KB
+// 64 KB, not 32: imported Codex plugin skills (browser, spreadsheets,
+// presentations) run 36–50 KB and were silently skipped. Must match
+// MAX_SKILL_BYTES in plugins/loader.mjs, or discovery and load disagree.
+const MAX_SKILL_BYTES = 65_536;   // 64 KB
 
 // Strip prompt-injection fence markers before parsing so a plugin
 // can't break the <<<BEGIN>>>…<<<END>>> contract used by AI routes.

@@ -185,7 +185,7 @@ test('skill missing kind reports missing required field', () => {
 
 test('oversized _base.md is rejected, not truncated', () => {
   const dir = makeSkillDir({
-    '_base.md': 'A'.repeat(40_000),
+    '_base.md': 'A'.repeat(70_000), // over MAX_SKILL_BYTES (64 KB)
     'ok.md': '---\nname: ok\nkind: read\n---\nfine\n',
   });
   const { base, skills, warnings } = loadSkills(dir);

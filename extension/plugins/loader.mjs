@@ -143,7 +143,7 @@ function validateClaudeManifest(raw) {
 
 // Hard caps on plugin content so a malicious or oversized plugin
 // can't exhaust the Claude context window or the server's heap.
-const MAX_SKILL_BYTES    = 32_768;   // 32 KB per skill file
+const MAX_SKILL_BYTES    = 65_536;   // 64 KB per skill file — keep equal to llm_agent/skills/loader.mjs
 const MAX_COMMAND_BYTES  = 16_384;   // 16 KB per command template
 const MAX_SUBAGENT_BYTES = 32_768;   // 32 KB per subagent system prompt
 const MAX_FILES_PER_DIR  = 50;       // max skills/commands/subagents per plugin

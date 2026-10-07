@@ -139,7 +139,7 @@ export function copySkills(src, dst) {
           if (stat.size <= MAX_BYTES) {
             sources.push({ srcPath: skillFile, dstName: `${entry.name}.md` });
           } else {
-            skipped.push(`${entry.name} (${Math.round(stat.size / 1024)}KB > 32KB limit)`);
+            skipped.push(`${entry.name} (${Math.round(stat.size / 1024)}KB > ${MAX_BYTES / 1024}KB limit)`);
           }
         }
       } else if (entry.name.endsWith('.md')) {
@@ -147,7 +147,7 @@ export function copySkills(src, dst) {
         if (stat.size <= MAX_BYTES) {
           sources.push({ srcPath: join(src, entry.name), dstName: entry.name });
         } else {
-          skipped.push(`${entry.name} (${Math.round(stat.size / 1024)}KB > 32KB limit)`);
+          skipped.push(`${entry.name} (${Math.round(stat.size / 1024)}KB > ${MAX_BYTES / 1024}KB limit)`);
         }
       }
     }

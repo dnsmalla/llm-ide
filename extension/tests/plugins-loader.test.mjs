@@ -408,9 +408,13 @@ test('vendor: nested skill exceeding the byte cap is skipped with a warning', ()
   mkdirSync(join(dir, 'skills', 'big'), { recursive: true });
   writeFileSync(join(dir, '.claude-plugin', 'plugin.json'),
     JSON.stringify({ name: 'example', version: '1.0.0' }), 'utf8');
-  writeFileSync(join(dir, 'skills', 'big', 'SKILL.md'), 'x'.repeat(33_000), 'utf8');
+  mkdirSync(join(dir, 'skills', 'mid'), { recursive: true });
+  writeFileSync(join(dir, 'skills', 'big', 'SKILL.md'), 'x'.repeat(66_000), 'utf8');
+  // 50 KB — the size of the imported Codex browser skill — must still load.
+  writeFileSync(join(dir, 'skills', 'mid', 'SKILL.md'), 'x'.repeat(50_000), 'utf8');
   const { plugins, warnings } = loadPlugins({ pluginDir: root });
-  assert.equal(plugins.get('example')?.skillFiles.length, 0);
+  assert.equal(plugins.get('example')?.skillFiles.length, 1);
+  assert.ok(plugins.get('example')?.skillFiles[0].endsWith(join('mid', 'SKILL.md')));
   assert.ok(warnings.some((w) => w.includes('big/SKILL.md') && w.includes('byte limit')),
     warnings.join(', '));
   rmSync(root, { recursive: true, force: true });

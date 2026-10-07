@@ -140,9 +140,9 @@ const MIN_FINAL_REPLY_CHARS = 24;
 const ABNORMAL_REPLY_MAX_CHARS = 4000;
 
 // Aggregate cap on skill bodies in one system prompt. Each skill file
-// is individually capped at 32 KB by the loader, but a user with many
+// is individually capped at 64 KB by the loader, but a user with many
 // enabled plugins could still stack enough of them to crowd out the
-// context window. 128 KB ≈ 4 max-size skills; core sets use ~8 KB.
+// context window. 128 KB ≈ 2 max-size skills; core sets use ~8 KB.
 const MAX_TOTAL_SKILL_BYTES = 131_072;
 
 // Echo-stall guard thresholds (see the fence loop). The minimum keeps trivial
