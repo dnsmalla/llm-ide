@@ -302,12 +302,18 @@ function parseSubagentFile(path) {
     ? fm.model
     : undefined;
 
+  // Optional routing tier (`tier: cheap`): the user's Settings decide which
+  // provider + model that tier means. Unknown values are dropped (the
+  // subagent then follows features.subagents / the default), not fatal.
+  const tier = ['strong', 'standard', 'cheap'].includes(fm.tier) ? fm.tier : undefined;
+
   return {
     subagent: {
       description: typeof fm.description === 'string' ? fm.description.slice(0, 300) : '',
       allowedTools,
       maxIterations: maxIters,
       model,
+      tier,
       systemPrompt: body,
     },
     suspicious,

@@ -4,6 +4,7 @@
 // projects rather than being pulled from thin air.
 
 import { runClaude, tryParseJSON, languageDirective, formatContext } from '../providers/runtime.mjs';
+import { routeOpts } from '../providers/tier-routing.mjs';
 import { getMeeting, getMeetingTranscript } from '../kb/db.mjs';
 import { findGraphContext } from '../graphkit/index.mjs';
 import { sanitizeLine as sanitizeStr } from '../core/utils.mjs';
@@ -146,7 +147,8 @@ export async function generatePlan(userId, { meetingId, goal, language }) {
     { kinds: ['meetings', 'tasks', 'tickets', 'blockers'] });
 
   // Cap output tokens — plan JSON schema is bounded by task count (max ~30).
-  const claudeOpts = { userId, maxTokens: 3000 };
+  // Tier routing (`features.pipeline`); unrouted → runClaude's default.
+  const claudeOpts = { userId, maxTokens: 3000, ...routeOpts(userId, 'pipeline') };
   let parsed = tryParseJSON(await runClaude(
     buildPrompt({ meeting, goal, lang, context, strict: false }), claudeOpts));
   let plan = validatePlan(parsed, meeting, goal);

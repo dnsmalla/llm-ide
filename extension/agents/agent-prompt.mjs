@@ -17,6 +17,7 @@
 
 import { runClaude, tryParseJSON, languageDirective } from '../providers/runtime.mjs';
 import { sanitizePersonaSuffix, personaConfigBlock } from '../providers/prompt-utils.mjs';
+import { routeOpts } from '../providers/tier-routing.mjs';
 
 const MAX_TRANSCRIPT_CHARS = 6000;          // ~1500 tokens of context
 const MAX_RECENT_QUESTIONS = 5;
@@ -121,10 +122,12 @@ Rules:
   // ample for the output and avoids burning the full 8192 default budget
   // on every 90-second tick.
   const QUESTION_MAX_TOKENS = 512;
+  // Tier routing (`features.internal`); unrouted → runClaude's default model.
+  const claudeOpts = { userId, maxTokens: QUESTION_MAX_TOKENS, ...routeOpts(userId, 'internal') };
 
   let raw;
   try {
-    raw = await _runClaude(prompt, { userId, maxTokens: QUESTION_MAX_TOKENS });
+    raw = await _runClaude(prompt, claudeOpts);
   } catch (err) {
     return {
       shouldAsk: false, score: 0,
@@ -139,7 +142,7 @@ Rules:
     // the stricter prompt reduces that.
     try {
       const strictPrompt = prompt + '\n\nIMPORTANT: Output ONLY the JSON object on the last line of your reply. No markdown fences, no prose after the JSON.';
-      const raw2 = await _runClaude(strictPrompt, { userId, maxTokens: QUESTION_MAX_TOKENS });
+      const raw2 = await _runClaude(strictPrompt, claudeOpts);
       json = tryParseJSON(extractLastJSONLine(raw2));
     } catch { /* ignore retry failure — fall through to bad-llm-output */ }
   }

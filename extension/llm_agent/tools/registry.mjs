@@ -38,6 +38,7 @@ import { runBashGate, autoGate } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { isAllowedByRule, suggestRule, addRule } from '../../kb/tool-permissions.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
+import { resolveTier, resolveFeatureRoute } from '../../providers/tier-routing.mjs';
 
 // The turn's abort signal, wherever the driving engine puts it. v2
 // (sdk/tools.mjs) sets `signal` on its flat toolCtx; the legacy loop nests its
@@ -91,6 +92,9 @@ const ENTRIES = [
       userId: ctx.userId,
       subagents: ctx.userSubagents,
       defaultModel: ctx.subagentModel,
+      // Bound to this user; resolved lazily, only when a subagent actually runs.
+      resolveTier: (tier) => resolveTier(ctx.userId, tier),
+      resolveFeatureRoute: (feature) => resolveFeatureRoute(ctx.userId, feature),
       depth: ctx.loopCtx?.depth ?? 1,
       internalSkillsBase: ctx.internalSkills?.base,
       signal: signalFor(ctx),

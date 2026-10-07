@@ -797,9 +797,12 @@ function safeLookupApiKey(userId) {
  * `resolvedModel` — validated model id (falls back to DEFAULT_MODEL).
  */
 function resolveClaudeCall({ userId, model, provider: explicitProvider }) {
-  const provider = (typeof explicitProvider === 'string' && PROVIDER_IDS.includes(explicitProvider))
-    ? explicitProvider
-    : resolveProvider(model);
+  // A user-registered `custom:<uuid>` is honoured as given (case preserved —
+  // the registry is keyed by the Mac's exact id); its model ids are not
+  // prefix-routable, so dropping it sent tier-routed calls to Anthropic.
+  const explicitOk = typeof explicitProvider === 'string'
+    && (PROVIDER_IDS.includes(explicitProvider) || /^custom:./.test(explicitProvider));
+  const provider = explicitOk ? explicitProvider : resolveProvider(model);
   const userScopedKey = userId ? safeLookupApiKey(userId) : null;
   const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
   const resolvedModel = provider === 'anthropic' ? resolveModel(model) : model;

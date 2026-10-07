@@ -3076,6 +3076,50 @@ paths:
         '405': { description: Method not allowed }
         '413': { description: Request body too large }
 
+  /kb/routing-tiers:
+    post:
+      summary: Sync the Mac app's per-role tier routing config to the server
+      description: >
+        Replaces the CALLER's tier routing config (other users are untouched),
+        persisted per user. Each tier names a provider + model; each feature
+        names a tier. Every entry is optional and invalid entries are dropped
+        (unknown tier/feature names, a provider outside
+        anthropic|openai|google|deepseek|custom:<id>, a model id outside
+        `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`). An unset or unusable tier
+        (custom provider missing/disabled/keyless, DeepSeek without a key)
+        keeps the role on its default provider and model.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                tiers:
+                  type: object
+                  description: Keys strong | standard | cheap
+                  additionalProperties:
+                    type: object
+                    properties:
+                      provider: { type: string, example: 'custom:3F2A-…' }
+                      model:    { type: string, example: 'glm-4.6' }
+                features:
+                  type: object
+                  description: Keys subagents | loop | autoTasks | quickChat | pipeline | internal; values a tier name
+                  additionalProperties: { type: string, enum: [strong, standard, cheap] }
+      responses:
+        '200':
+          description: Synced
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean }
+        '400': { description: Body is not a JSON object }
+        '405': { description: Method not allowed }
+        '413': { description: Request body too large }
+
   /kb/ingest-scip:
     post:
       summary: Ingest a SCIP index into the code-graph tables

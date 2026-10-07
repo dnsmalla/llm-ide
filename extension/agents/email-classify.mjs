@@ -4,6 +4,7 @@
 // Modeled on agents/summarize.mjs.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtime.mjs';
+import { routeOpts } from '../providers/tier-routing.mjs';
 import { readFileSync } from 'node:fs';
 
 // The one source for Claude model ids — see schema/models/anthropic-models.json.
@@ -68,7 +69,9 @@ function normalizeTodo(t) {
 
 export async function classifyEmail(opts) {
   const { _runClaude = defaultRunClaude, userId } = opts;
-  const claudeOpts = { userId, model: MODEL, maxTokens: 1024 };
+  // Tier routing (`features.internal`) replaces the default model when it
+  // resolves; otherwise the call is exactly as before.
+  const claudeOpts = { userId, maxTokens: 1024, ...routeOpts(userId, 'internal', { model: MODEL }) };
   const first = await _runClaude(buildPrompt(opts), claudeOpts);
   let parsed = tryParseJSON(first);
   if (!parsed) {
@@ -91,6 +94,6 @@ export async function classifyEmail(opts) {
     noteWorthy,
     summary: noteWorthy ? String(parsed.summary ?? '').slice(0, 200) : '',
     todos,
-    model: MODEL,
+    model: claudeOpts.model,
   };
 }

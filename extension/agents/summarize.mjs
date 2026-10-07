@@ -2,6 +2,7 @@
 // Retries once with a stricter prompt if the first attempt isn't parseable.
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../providers/runtime.mjs';
+import { routeOpts } from '../providers/tier-routing.mjs';
 import { readFileSync } from 'node:fs';
 
 // The one source for Claude model ids — see schema/models/anthropic-models.json.
@@ -49,7 +50,9 @@ export async function summarizeTranscript(opts) {
   // Cap output tokens — the summary schema is compact; 2048 is generous.
   // Include userId so the runtime can apply per-user rate-limiting /
   // audit logging the same way all other agent calls do.
-  const claudeOpts = { userId, model: MODEL, maxTokens: 2048 };
+  // Tier routing (`features.internal`) replaces the default model when it
+  // resolves; otherwise the call is exactly as before.
+  const claudeOpts = { userId, maxTokens: 2048, ...routeOpts(userId, 'internal', { model: MODEL }) };
   const first = await _runClaude(buildPrompt(opts), claudeOpts);
   let parsed = tryParseJSON(first);
   if (!parsed) {
@@ -68,7 +71,7 @@ export async function summarizeTranscript(opts) {
     actions:   Array.isArray(parsed.actions)   ? parsed.actions   : [],
     decisions: Array.isArray(parsed.decisions) ? parsed.decisions : [],
     blockers:  Array.isArray(parsed.blockers)  ? parsed.blockers  : [],
-    model: MODEL,
+    model: claudeOpts.model,
     generated_at: Date.now(),
   };
 }

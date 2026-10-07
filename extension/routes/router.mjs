@@ -32,6 +32,7 @@ import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../providers/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
+import { handleTierRoutingSync } from '../server/tier-routing.mjs';
 import { listSdkModels } from '../llm_agent/sdk/models.mjs';
 import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
 import { activeTurnCount } from './agent-v2.mjs';
@@ -190,6 +191,12 @@ export async function handleKB(req, res) {
     // Sync custom providers from Mac app
     if (req.method === 'POST' && url === '/kb/custom-providers') {
       await handleCustomProvidersSync(req, res, userId);
+      return true;
+    }
+
+    // Sync the per-role tier routing config from Mac app (spec: tier routing)
+    if (req.method === 'POST' && url === '/kb/routing-tiers') {
+      await handleTierRoutingSync(req, res, userId);
       return true;
     }
 

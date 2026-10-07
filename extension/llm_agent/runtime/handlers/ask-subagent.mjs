@@ -86,6 +86,17 @@ export async function askSubagent(args, ctx) {
   if (hasTools && ctx.internalSkillsBase) baseParts.unshift(ctx.internalSkillsBase);
   const base = baseParts.join('\n\n');
 
+  // Tier routing. Precedence: the subagent's own frontmatter `model:` (an
+  // author's explicit pick, provider inferred from the id as before) → its
+  // `tier:` → the user's `features.subagents` tier → today's default. The
+  // resolvers come from the caller bound to this user and return null for an
+  // unset or unusable tier, so each step falls through instead of failing.
+  let route = null;
+  if (!subagent.model) {
+    if (subagent.tier && typeof ctx.resolveTier === 'function') route = ctx.resolveTier(subagent.tier);
+    if (!route && typeof ctx.resolveFeatureRoute === 'function') route = ctx.resolveFeatureRoute('subagents');
+  }
+
   const result = await runAgentLoop({
     skills: new Map(),         // no skill bodies — body IS the prompt
     userMessage: sanitisedQuestion,
@@ -102,10 +113,11 @@ export async function askSubagent(args, ctx) {
     handlers,
     maxIterations: subagent.maxIterations,
     // Sub-model routing: a subagent's own frontmatter `model:` wins,
-    // then the deployment-wide LLMIDE_SUBAGENT_MODEL, then the
-    // runClaude default.  Leaf calls are the natural place to run a
-    // cheaper/faster tier.
-    model: subagent.model || ctx.defaultModel,
+    // then the tier route above, then the deployment-wide
+    // LLMIDE_SUBAGENT_MODEL, then the runClaude default.  Leaf calls are
+    // the natural place to run a cheaper/faster tier.
+    model: subagent.model || route?.model || ctx.defaultModel,
+    ...(route ? { provider: route.provider } : {}),
     depth: ctx.depth ?? 1,
     // The outer turn's cancellation — the sub-loop consults it every iteration
     // and composes it into each model call, so Stop ends a subagent mid-flight

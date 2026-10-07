@@ -9,6 +9,7 @@
 import fs from 'fs';
 import path from 'path';
 import { runClaude, tryParseJSON, languageDirective } from '../providers/runtime.mjs';
+import { routeOpts } from '../providers/tier-routing.mjs';
 import { getTaskById, getPlan, mergeTaskMeta, userRepoAllowlist } from '../kb/db.mjs';
 
 const MAX_FILES = 8;
@@ -225,12 +226,14 @@ export async function generateCodeForTask(userId, { taskId, language, includeFil
   const lang = languageDirective(language || plan.language);
   const prompt = buildPrompt({ task, plan, lang, filesCtx });
 
-  let parsed = tryParseJSON(await runClaude(prompt, { userId, maxTokens: MAX_OUTPUT_TOKENS }));
+  // Tier routing (`features.pipeline`); unrouted → runClaude's default.
+  const claudeOpts = { userId, maxTokens: MAX_OUTPUT_TOKENS, ...routeOpts(userId, 'pipeline') };
+  let parsed = tryParseJSON(await runClaude(prompt, claudeOpts));
   let validated = validate(parsed, { modifiable });
   if (!validated) {
     // Stricter retry — most failures are the model wrapping JSON in prose.
     const stricter = `${prompt}\n\nYour previous response was not valid JSON. Output ONLY the JSON object — start with { and end with }.`;
-    parsed = tryParseJSON(await runClaude(stricter, { userId, maxTokens: MAX_OUTPUT_TOKENS }));
+    parsed = tryParseJSON(await runClaude(stricter, claudeOpts));
     validated = validate(parsed, { modifiable });
   }
   if (!validated) {

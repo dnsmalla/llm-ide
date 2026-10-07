@@ -256,7 +256,8 @@ const HOST = config.host;
 //   v62 — MCP server versions: GET /auth/me/mcp-plugins rows gain package/catalogId/sourceName; GET /auth/me/mcp-plugins/updates[?force=1] (non-forced is available to any authenticated user; force is admin-only and silently degrades to the cached check otherwise); POST /auth/me/mcp-plugins/<id>/update {to?,expectArgs?} (re-pin npx/uvx, revokes consent for all users; 400 NOT_MANAGED, 409 STALE, 502 REGISTRY_UNAVAILABLE); GET|POST /auth/me/mcp-plugins/<id>/resync; catalog add resolves+pins the latest version (response pinned/reason).
 //   v63 — POST /kb/providers/models entries[] gain effortLevels (the SDK's supportedEffortLevels, verbatim; [] when unsupported); POST /agent/v2/stream accepts optional `effort` (a level the chosen model lists, or "auto"; anything else falls back to auto; LLMIDE_CHAT_EFFORT still wins).
 //   v64 — /agent/v2/stream emits `context_usage` { totalTokens, maxTokens (SDK rawMaxTokens), percentage, categories:[{ name, kind, tokens }] } once after `result` (SDK getContextUsage detail 'summary', ≤ 2 s; omitted on gateway turns and when the read fails).
-const SERVER_API_VERSION = 64;
+//   v65 — POST /kb/routing-tiers { tiers: { strong|standard|cheap: { provider: anthropic|openai|google|deepseek|custom:<id>, model } }, features: { subagents|loop|autoTasks|quickChat|pipeline|internal: <tier> } } → 200 { success: true } (replaces the caller's config; invalid entries dropped; 400 VALIDATION_FAILED on a non-object body). Server-side roles (plugin subagents, planner/codegen, internal helpers) then run on the routed provider+model; an unset/unusable tier keeps the default. Plugin subagent frontmatter gains optional `tier:`.
+const SERVER_API_VERSION = 65;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -316,6 +317,7 @@ const ENDPOINTS = [
   '/kb/agent-sdk',
   '/kb/agent-sdk/update',
   '/kb/custom-providers',
+  '/kb/routing-tiers',
   '/kb/code-sync',
   '/kb/plans',
   '/kb/plan/:id',

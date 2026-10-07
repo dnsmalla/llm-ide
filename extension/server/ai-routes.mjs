@@ -534,10 +534,12 @@ export async function handleAIRoutes(req, res) {
                 const callOpts = {
                   userId: req.user?.id,
                   // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
-                  // the user's tier model for agent calls; drop provider so it
-                  // is derived from the model (e.g. claude-* -> anthropic).
+                  // the user's tier model for agent calls; drop the composer's
+                  // provider so it is derived from the model (e.g. claude-* ->
+                  // anthropic) — unless the call names its own (a tier-routed
+                  // subagent on custom:<uuid>/deepseek, see ask-subagent).
                   model: opts.model ?? tierModel,
-                  provider: opts.model ? undefined : body.provider,
+                  provider: opts.model ? opts.provider : body.provider,
                   maxTokens: opts.maxTokens,
                   tools: opts.tools,
                   signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
@@ -617,10 +619,12 @@ export async function handleAIRoutes(req, res) {
           runClaude: (p, opts = {}) => runClaude(p, {
             userId: req.user?.id,
             // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
-            // the user's tier model for agent calls; drop provider so it
-            // is derived from the model (e.g. claude-* -> anthropic).
+            // the user's tier model for agent calls; drop the composer's
+            // provider so it is derived from the model (e.g. claude-* ->
+            // anthropic) — unless the call names its own (a tier-routed
+            // subagent on custom:<uuid>/deepseek, see ask-subagent).
             model: opts.model ?? tierModel,
-            provider: opts.model ? undefined : body.provider,
+            provider: opts.model ? opts.provider : body.provider,
             maxTokens: opts.maxTokens,
             tools: opts.tools,
             signal: opts.signal ? AbortSignal.any([opts.signal, bufferedAc.signal]) : bufferedAc.signal,

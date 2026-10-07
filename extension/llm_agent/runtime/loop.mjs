@@ -453,6 +453,10 @@ export async function runAgentLoop({
   skills, userMessage, history, agentContext, runClaude, kb, userId, handlers,
   maxIterations, deadlineMs, model, maxTokens, depth = 0, onProgress, onChunk,
   mcpConfig, replyMode = 'accumulated',
+  // Optional explicit provider for every hop (tier routing: a subagent routed
+  // to `custom:<uuid>` / deepseek, whose model ids runClaude can't infer a
+  // provider from). Omitted → runClaude infers it from `model`, as before.
+  provider,
   // The TURN's abort signal (the route's client-disconnect controller), not a
   // per-call deadline. Three consumers, all required for a Stop to actually
   // stop work: (1) each tool's ctx, so a tool that owns an OS process —
@@ -617,6 +621,7 @@ export async function runAgentLoop({
       out = await runClaude(prompt, {
         userId,
         model,
+        ...(provider ? { provider } : {}),
         // 2048 cut long answers and whole-file update-file fences off mid-way
         // (a parse-error retry); runClaude's own default is the ceiling now.
         maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : DEFAULT_HOP_MAX_TOKENS,
