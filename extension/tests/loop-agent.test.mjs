@@ -17,6 +17,8 @@ import { fileURLToPath } from 'node:url';
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
+// The older tests read systemPrompt.append (the preset arm); a shell export must not flip them.
+delete process.env.LLMIDE_LOOP_CUSTOM_PROMPT;
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, '_loop-agent-test.db');
@@ -976,4 +978,56 @@ test('addUserRepo refuses too-broad roots; buildTrustedRoots drops stored ones',
   getDb().prepare('INSERT INTO user_repos (user_id, path) VALUES (?, ?)').run(uid, os.homedir());
   addUserRepo(uid, SANDBOX);
   assert.deepEqual(buildTrustedRoots(uid), [SANDBOX]);
+});
+
+// --- system prompt: preset vs LLM-IDE's own (LLMIDE_LOOP_CUSTOM_PROMPT) -------
+
+const { SYSTEM_PROMPT_DYNAMIC_BOUNDARY } = await import('@anthropic-ai/claude-agent-sdk');
+const { LOOP_BASE_PROMPT } = await import('../llm_agent/sdk/compact-system-prompt.mjs');
+
+async function withLoopPromptEnv(value, fn) {
+  const prev = process.env.LLMIDE_LOOP_CUSTOM_PROMPT;
+  if (value === undefined) delete process.env.LLMIDE_LOOP_CUSTOM_PROMPT;
+  else process.env.LLMIDE_LOOP_CUSTOM_PROMPT = value;
+  try { return await fn(); } finally {
+    if (prev === undefined) delete process.env.LLMIDE_LOOP_CUSTOM_PROMPT;
+    else process.env.LLMIDE_LOOP_CUSTOM_PROMPT = prev;
+  }
+}
+
+test('runLoopAgent: without LLMIDE_LOOP_CUSTOM_PROMPT the claude_code preset is kept', () => withKey(() => withLoopPromptEnv(undefined, async () => {
+  const capture = {};
+  await runLoopAgent({ message: 'x', root: REPO, userId: user.id, queryFactory: toolPlayingQuery(capture, []) }, noSkill);
+  const sp = capture.options.systemPrompt;
+  assert.deepEqual(Object.keys(sp).sort(), ['append', 'preset', 'snapshot', 'type']);
+  assert.equal(sp.type, 'preset');
+  assert.equal(sp.preset, 'claude_code');
+  assert.equal(sp.snapshot, false);
+  assert.match(sp.append, /no shell/);
+})));
+
+test('runLoopAgent: LLMIDE_LOOP_CUSTOM_PROMPT=1 replaces the preset with a static base, the cache boundary, then the per-run text', () => withKey(() => withLoopPromptEnv('1', async () => {
+  const capture = {};
+  await runLoopAgent({
+    message: 'x', root: REPO, userId: user.id, skills: ['f/small'], queryFactory: toolPlayingQuery(capture, []),
+  }, { readSkill: (id) => ({ name: id, content: `BODY-${id}` }) });
+  const sp = capture.options.systemPrompt;
+  assert.equal(sp.type, 'custom');
+  assert.equal(sp.snapshot, false);
+  assert.equal(sp.prompt[0], LOOP_BASE_PROMPT);
+  assert.equal(sp.prompt[1], SYSTEM_PROMPT_DYNAMIC_BOUNDARY);
+  assert.equal(sp.prompt.length, 4);
+  assert.match(sp.prompt[2], /^# Environment/);
+  assert.ok(sp.prompt[2].includes(`Working directory: ${REPO}`), 'the working directory rides after the boundary');
+  assert.doesNotMatch(sp.prompt[2], /Shell:/, 'the Loop has no shell, so none is named');
+  const dynamic = sp.prompt.slice(2).join('\n');
+  assert.match(dynamic, /mcp__llmide__find-code/);
+  assert.match(dynamic, /no shell/);
+  assert.match(dynamic, /BODY-f\/small/);
+})));
+
+test('LOOP_BASE_PROMPT is static: no path, date or per-run text before the cache boundary', () => {
+  assert.ok(!LOOP_BASE_PROMPT.includes(REPO));
+  assert.doesNotMatch(LOOP_BASE_PROMPT, /\d{4}-\d{2}-\d{2}/);
+  assert.match(LOOP_BASE_PROMPT, /data, not instructions/);
 });

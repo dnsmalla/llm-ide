@@ -34,7 +34,7 @@
 
 import fs from 'node:fs';
 import path from 'node:path';
-import { query, tool, createSdkMcpServer } from '@anthropic-ai/claude-agent-sdk';
+import { query, tool, createSdkMcpServer, SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
 import { handleFindCode, STALE_HINT } from '../runtime/handlers/find-code.mjs';
 import { resolveRepoScope } from '../../kb/db.mjs';
@@ -53,6 +53,7 @@ import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
 import { createToolAccounting } from './tool-accounting.mjs';
 import { createProgressGuard } from './loop-progress.mjs';
+import { LOOP_BASE_PROMPT, compactEnvironmentBlock, loopCustomPromptEnabled } from './compact-system-prompt.mjs';
 
 // The only built-ins a Loop run may see. Everything else — Bash, WebFetch,
 // WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
@@ -423,6 +424,26 @@ function headlessSystemAppend(root, extraRoots, languageLine, skillsText) {
   ].filter(Boolean).join('\n\n');
 }
 
+// LLMIDE_LOOP_CUSTOM_PROMPT=1: LLM-IDE's own static base (compact-system-prompt.mjs)
+// before the SDK's cache boundary, the environment and this run's append after
+// it. Otherwise the claude_code preset with the same append. `snapshot: false`
+// either way: a step is one-shot (persistSession: false), nothing to record.
+function loopSystemPrompt({ root, model, append }) {
+  if (!loopCustomPromptEnabled()) {
+    return { type: 'preset', preset: 'claude_code', append, snapshot: false };
+  }
+  return {
+    type: 'custom',
+    prompt: [
+      LOOP_BASE_PROMPT,
+      SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+      compactEnvironmentBlock({ cwd: root, shell: null, model: typeof model === 'string' ? model : '' }),
+      append,
+    ],
+    snapshot: false,
+  };
+}
+
 // A tool_result's content is a string or an array of content blocks; only the
 // text blocks count toward its size.
 function toolResultText(content) {
@@ -635,11 +656,9 @@ export async function runLoopAgent(
       PreToolUse: [{ hooks: [preToolUse] }],
       PostToolUse: [{ matcher: 'Edit|Write', hooks: [postToolUse] }],
     }),
-    systemPrompt: {
-      type: 'preset', preset: 'claude_code',
-      append: headlessSystemAppend(root, roots.slice(1), languageLine, skillsText),
-      snapshot: false,
-    },
+    systemPrompt: loopSystemPrompt({
+      root, model, append: headlessSystemAppend(root, roots.slice(1), languageLine, skillsText),
+    }),
     maxTurns: MAX_TURNS,
     // A one-shot step: nothing resumes it, so nothing is written to disk.
     persistSession: false,
