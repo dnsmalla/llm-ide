@@ -382,6 +382,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 self.onModeResolved?(mode)
             case .memory(let info):
                 memoryInfo = info
+            case .contextUsage:
+                break  // TODO: captured in the next task (composer context usage)
             case .result(let result):
                 sawTerminal = true
                 // The SDK ends a turn it could not finish with a `result`

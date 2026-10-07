@@ -132,6 +132,13 @@ extension AgentV2Event {
         case .memory:
             return ["sessionFacts", "chars", "approxTokens"]
 
+        case .contextUsage(let payload):
+            var names = ["totalTokens", "maxTokens", "percentage", "categories"]
+            if !payload.categories.isEmpty {
+                names += ["categories.name", "categories.kind", "categories.tokens"]
+            }
+            return names
+
         case .tasks:
             return ["tasks", "tasks.id", "tasks.title", "tasks.status", "continueNeeded"]
 

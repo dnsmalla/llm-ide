@@ -50,15 +50,6 @@ const ALLOWED_UNDECODED = Object.freeze({
   'approval_request_question.json': {
     'questions.options.preview': 'REAL DRIFT: the SDK sends option previews, AgentV2ApprovalOption has no field for them, so they cannot render.',
   },
-  'context_usage.json': {
-    totalTokens: 'Swift decoding lands in the next task of the same plan (composer context usage, Task 3); remove this entry there.',
-    maxTokens: 'Same.',
-    percentage: 'Same.',
-    categories: 'Same.',
-    'categories.name': 'Same.',
-    'categories.kind': 'Same.',
-    'categories.tokens': 'Same.',
-  },
 });
 
 const fail = [];

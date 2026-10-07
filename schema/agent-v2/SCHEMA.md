@@ -58,7 +58,6 @@ authority, this is the explanation.
 | `sdk.subtype`, `sdk.raw` | The Mac keeps only `sdkType`; the payload is an observation channel for unknown SDK message types (`AgentV2Event.swift` `SdkWire`). |
 | `error.retryable` | **Not a deliberate choice — real drift.** The Mac infers retryability from `code == "SESSION_UNRESUMABLE"` alone, so a future retryable code is invisible to it. Listed so the gate stays green while the fix is scheduled; remove this row when `ErrorWire` gains the field. |
 | `approval_request.questions[].options[].preview` | Same: emitted (it is the SDK's own field) and undecodable, so option previews silently do not render. |
-| `context_usage.*` | Temporary: the Swift decoder lands in the same plan's next task; remove this row with the ALLOWED_UNDECODED entry. |
 
 ## The one place the wire IS the SDK's shape
 

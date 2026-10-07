@@ -108,6 +108,22 @@ struct AgentV2Memory: Sendable, Equatable, Codable {
     enum CodingKeys: String, CodingKey { case sessionFacts, chars, approxTokens }
 }
 
+/// `{"type":"context_usage", …}` — the SDK's context-window usage after a
+/// turn (server API v64). Every value is the SDK's own; `kind` stays a String
+/// ("used" / "free" / "buffer" / "deferred" today) so a kind a newer SDK adds
+/// decodes instead of failing the whole event.
+public struct AgentV2ContextUsage: Decodable, Equatable, Sendable {
+    public struct Category: Decodable, Equatable, Sendable {
+        public let name: String
+        public let kind: String
+        public let tokens: Int
+    }
+    public let totalTokens: Int
+    public let maxTokens: Int
+    public let percentage: Int
+    public let categories: [Category]
+}
+
 /// One selectable answer of a parked `AskUserQuestion`.
 struct AgentV2ApprovalOption: Sendable, Equatable, Codable {
     let label: String
@@ -268,6 +284,8 @@ enum AgentV2Event: Sendable, Equatable {
     /// `{"type":"memory", …}` — the session-memory share of the prompt,
     /// emitted once before the query starts (server API v49).
     case memory(AgentV2Memory)
+    /// `{"type":"context_usage", …}` — sent once after `result`.
+    case contextUsage(AgentV2ContextUsage)
     /// `{"type":"approval_request", …}` — engine parked on AskUserQuestion.
     case approvalRequest(AgentV2Approval)
     /// `{"type":"approval_resolved","requestId":…,"outcome":…}` — the parked
@@ -317,6 +335,8 @@ enum AgentV2Event: Sendable, Equatable {
             return Self.payload(AgentV2Usage.self, data).map { .usage($0) }
         case "memory":
             return Self.payload(AgentV2Memory.self, data).map { .memory($0) }
+        case "context_usage":
+            return Self.payload(AgentV2ContextUsage.self, data).map { .contextUsage($0) }
         case "approval_request":
             return Self.payload(AgentV2Approval.self, data).map { .approvalRequest($0) }
         case "approval_resolved":

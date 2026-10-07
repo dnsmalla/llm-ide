@@ -1419,6 +1419,20 @@ do {
            "an unlisted model has no picker")
 }
 
+print("AgentV2ContextUsage")
+do {
+    let json = #"{"type":"context_usage","totalTokens":10460,"maxTokens":1000000,"percentage":1,"categories":[{"name":"System tools","kind":"used","tokens":1809},{"name":"Brand new","kind":"mystery","tokens":5}]}"#
+    let usage = try? JSONDecoder().decode(AgentV2ContextUsage.self, from: Data(json.utf8))
+    expect(usage?.totalTokens == 10460 && usage?.maxTokens == 1000000 && usage?.percentage == 1,
+           "totals decode verbatim")
+    expect(usage?.categories.map(\.name) == ["System tools", "Brand new"]
+           && usage?.categories.last?.kind == "mystery",
+           "an unknown kind still decodes — kinds are strings, never an enum")
+    let empty = try? JSONDecoder().decode(AgentV2ContextUsage.self,
+        from: Data(#"{"totalTokens":1,"maxTokens":2,"percentage":50,"categories":[]}"#.utf8))
+    expect(empty?.categories.isEmpty == true, "no categories is valid")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {
