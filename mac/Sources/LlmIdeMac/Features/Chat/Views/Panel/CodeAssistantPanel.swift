@@ -154,6 +154,9 @@ struct CodeAssistantPanel: View {
     /// The composer context meter's breakdown popover (ChatComposer is an
     /// extension of this view and cannot hold stored state).
     @State var showContextUsage = false
+    /// Settings' "Code Assistant provider" override (a custom provider id, or
+    /// "" for the default provider) — see CodeAssistantModelState.composerProviderKey.
+    @AppStorage(CodeAssistantModelState.composerProviderKey) var composerProviderId = ""
     /// A delete the user asked for but has not confirmed yet. Deleting a chat
     /// also drops its server-side memory and has no undo, so neither the
     /// header's trash nor the picker row's hover trash may act on one click.
@@ -371,6 +374,7 @@ struct CodeAssistantPanel: View {
                 config.modelPickIsExplicit = false
                 modelState.followDefaultProvider(activeCLI: config.activeCLI,
                                                  defaultModelId: config.defaultModelId)
+                applyComposerProvider()
             }
             // Settings → Custom Providers edits while this panel is open: the
             // transport reads the live provider list every turn, but the menu
@@ -380,6 +384,7 @@ struct CodeAssistantPanel: View {
                 modelState.customProviders = CustomProvider.loadAll()
                 modelState.reconcileCustomSelection(activeCLI: config.activeCLI,
                                                     defaultModelId: config.defaultModelId)
+                applyComposerProvider()
             }
             // AppShell's pending-approval toolbar button already primed the
             // registry with this session as `scope`'s displayed engine; if
@@ -579,8 +584,8 @@ struct CodeAssistantPanel: View {
         // `codeAssistRoundTrip` built `ctx` inline) — wired for completeness.
         engine.buildContext = { await buildAgentContext() }
         // The composer's live provider is what a new chat's first turn will
-        // send, so it — not the Settings default, which `switchProvider`
-        // doesn't update for custom providers — decides the engine stamp.
+        // send, so it — not the Settings default (`activeCLI`), which never
+        // names a custom provider — decides the engine stamp.
         engine.resolveNewChatProvider = {
             ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider)
         }
@@ -872,6 +877,14 @@ struct CodeAssistantPanel: View {
         engine.refreshSessions()
     }
 
+    /// The composer has no provider chip: its provider is Settings' choice
+    /// (the "Code Assistant provider" override, else the default provider).
+    func applyComposerProvider() {
+        modelState.applyComposerProvider(overrideId: composerProviderId,
+                                         activeCLI: config.activeCLI,
+                                         defaultModelId: config.defaultModelId)
+    }
+
     func handleOnAppear() {
         wireEngine()
         modelState.customProviders = CustomProvider.loadAll()
@@ -885,6 +898,7 @@ struct CodeAssistantPanel: View {
         if modelState.selectedProvider.isEmpty {
             modelState.selectedProvider = config.activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : config.activeCLI
         }
+        applyComposerProvider()
         // Task 12: the engine is now shared (`ChatEngineRegistry`), so it may
         // already have a session loaded — from a PRIOR appearance of this
         // same panel, or from a mobile `explore_chat` that switched it onto a

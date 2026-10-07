@@ -172,6 +172,35 @@ extension CodeAssistantModelState {
         }
     }
 
+    /// UserDefaults key of Settings' "Code Assistant provider" override: a
+    /// custom provider's id, or "" to follow the default provider
+    /// (`config.activeCLI`). Kept apart from `activeCLI` on purpose — Loop,
+    /// Auto Tasks, the phone bridge and quick chat all read `activeCLI` as an
+    /// `AICliTool` raw value, and a `custom:<id>` there would leak into them.
+    static let composerProviderKey = "codeAssistProvider"
+
+    /// Point the composer at the provider Settings chose for it: the custom
+    /// provider named by `overrideId` while it exists and is enabled, else the
+    /// default provider. A no-op when already there, so an explicit model pick
+    /// on the current provider survives a re-apply (appear, Settings edits).
+    func applyComposerProvider(overrideId: String, activeCLI: String, defaultModelId: String) {
+        if !overrideId.isEmpty,
+           let provider = customProviders.first(where: { $0.id == overrideId && $0.isEnabled }) {
+            let target = "custom:\(provider.id)"
+            if selectedProvider != target {
+                selectedProvider = target
+                selectedModel = provider.models.first?.id ?? ""
+            } else if !provider.models.contains(where: { $0.id == selectedModel }) {
+                selectedModel = provider.models.first?.id ?? ""
+            }
+            return
+        }
+        let fallback = activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : activeCLI
+        if selectedProvider != fallback {
+            followDefaultProvider(activeCLI: activeCLI, defaultModelId: defaultModelId)
+        }
+    }
+
     enum ProviderSwitch {
         case builtIn(AICliTool)
         case custom(CustomProvider)

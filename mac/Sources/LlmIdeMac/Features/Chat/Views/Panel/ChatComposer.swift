@@ -329,6 +329,10 @@ extension CodeAssistantPanel {
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .padding(.horizontal, Spacing.md)
         .padding(.vertical, 10)
+        // Settings → "Code Assistant provider" changed while the panel is open.
+        // Here rather than on the panel body, whose modifier chain is already
+        // at the type checker's limit.
+        .onChange(of: composerProviderId) { _, _ in applyComposerProvider() }
     }
 
     // MARK: - Toolbar layouts (used by ViewThatFits)
@@ -562,13 +566,10 @@ extension CodeAssistantPanel {
             Button("Add") {
                 let id = modelState.newModelId.trimmingCharacters(in: .whitespacesAndNewlines)
                 guard !id.isEmpty else { return }
-                // `currentTool` — the provider this composer is SHOWING — not
-                // config.activeCLI. The two normally agree (switchProvider
-                // writes both), but Settings' provider radio writes only
-                // activeCLI, so picking a provider there while a chat is open
-                // left them diverged: the id was then filed under the Settings
-                // provider while the composer displayed a different one, so
-                // `modelsFor` never listed the model the user had just added.
+                // `currentTool` — the provider this composer is USING — not
+                // config.activeCLI: filing the id under a provider the composer
+                // is not on would leave `modelsFor` never listing the model
+                // the user had just added.
                 modelState.addCustomModel(id, provider: currentTool.provider, config: config)
             }
             Button("Cancel", role: .cancel) {}

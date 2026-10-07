@@ -16,11 +16,29 @@ struct CustomProvidersSection: View {
     /// top of it would overwrite (lose) the user's real providers.
     @State private var isListUnreadable = CustomProvider.isListUnreadable
     @State private var showDiscardConfirm = false
+    /// The Code Assistant's provider override — a custom provider's id, or ""
+    /// to use the default provider (Model Providers ◉ above). The composer has
+    /// no provider chip, so this is the only place a custom provider is chosen.
+    @AppStorage(CodeAssistantModelState.composerProviderKey) private var composerProviderId = ""
+
+    /// Enabled providers only: a disabled one cannot run a turn, and the
+    /// composer falls back to the default provider for it anyway.
+    private var composerProviderPicker: some View {
+        Picker("Code Assistant provider", selection: $composerProviderId) {
+            Text("Default provider (Model Providers ◉)").tag("")
+            ForEach(providers.filter(\.isEnabled)) { provider in
+                Text(provider.canRunAgentEngine ? provider.name : "\(provider.name) — classic engine only")
+                    .tag(provider.id)
+            }
+        }
+        .pickerStyle(.menu)
+        .font(Typography.body)
+    }
 
     var body: some View {
         SettingsSectionCard(icon: "atom", title: "Custom Providers") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text("Add named LLM providers (GLM, Ollama, OpenRouter, etc.) for the Code Assistant composer.")
+                Text("Add named LLM providers (GLM, Ollama, OpenRouter, etc.). Pick one under “Code Assistant provider” to use it in the Code Assistant.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
                 SettingsHint("For Anthropic, OpenAI, Gemini, DeepSeek, and a single shared custom endpoint, use Model Providers above. This section is for multiple named providers with their own model lists — e.g. Z.AI GLM: base URL https://api.z.ai/api/paas/v4 with models glm-5.2 / glm-5-turbo / glm-4.7. To run a provider on the Claude Agent engine, also give it its Anthropic-compatible URL (Z.AI: https://api.z.ai/api/anthropic).")
@@ -68,6 +86,8 @@ struct CustomProvidersSection: View {
                     Button("Add Provider") { showAddSheet = true }
                         .buttonStyle(.bordered)
                         .controlSize(.small)
+
+                    composerProviderPicker
                 }
 
                 if let syncError {
