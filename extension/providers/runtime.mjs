@@ -7,6 +7,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
+import { markRouteFailed, routeFailure } from './route-health.mjs';
 import { resolveProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
@@ -160,7 +161,65 @@ const MAX_PROMPT_CHARS = 500_000;
 // so multi-user deployments charge each user's own Anthropic account
 // rather than the operator's CLI login.  When userId is omitted (or
 // the user has no stored key) we fall back to the operator's CLI auth.
-export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig, cwd } = {}) {
+// One warn per (user, provider) per window when a routed call falls back.
+const ROUTE_FALLBACK_WARN_MS = 10 * 60_000;
+const routeFallbackWarned = new Map();
+
+// Whether a ROUTED call's failure should be retried on the caller's default.
+// Not for: a cancelled request, a usage-limit pause (the user's own cap), a
+// content-related 4xx (the prompt itself was refused — the default would be
+// refused too, and it is a real failure of a working route), or runClaude's
+// own argument errors. Everything else — CLI missing/broken/logged out, auth
+// or network failure, exhausted retries — means the route cannot run now.
+function routeFallbackApplies(err, signal) {
+  if (signal?.aborted || err?.name === 'AbortError') return false;
+  if (err?.usagePaused) return false;
+  if (err?.code !== 'PROVIDER_UNAVAILABLE' && [400, 413, 422].includes(err?.status)) return false;
+  if (/^runClaude:/.test(String(err?.message || ''))) return false;
+  return true;
+}
+
+function routeVia(userId, provider) {
+  if (String(provider).startsWith('custom:')) return 'key';
+  return providerApiKey(userId, provider) ? 'key' : 'cli';
+}
+
+/**
+ * Run a prompt on the resolved provider (see runClaudeDirect below).
+ *
+ * `routeFallback` marks a TIER-ROUTED call (providers/tier-routing.mjs
+ * routeOpts): it holds the caller's own default options (e.g. `{ model }`).
+ * When the routed provider fails for a non-content reason the provider is
+ * marked broken for (user, provider) — route-health.mjs, ~10 min, also shown
+ * in the Settings status — and the call is retried ONCE on that default
+ * (no provider, the fallback model). A routed provider already marked broken
+ * goes straight to the default, so a JSON-retry right after a failure does
+ * not hit it again. Without `routeFallback` nothing changes.
+ */
+export async function runClaude(prompt, opts = {}) {
+  const { routeFallback, ...rest } = opts;
+  if (!routeFallback || !rest.provider) return runClaudeDirect(prompt, rest);
+  const fallbackOpts = { ...rest, provider: undefined, model: routeFallback.model };
+  if (routeFailure(rest.userId, rest.provider)) return runClaudeDirect(prompt, fallbackOpts);
+  try {
+    return await runClaudeDirect(prompt, rest);
+  } catch (err) {
+    if (!routeFallbackApplies(err, rest.signal)) throw err;
+    markRouteFailed(rest.userId, rest.provider, routeVia(rest.userId, rest.provider));
+    const key = `${rest.userId || ''}|${rest.provider}`;
+    const now = Date.now();
+    if (now - (routeFallbackWarned.get(key) || 0) >= ROUTE_FALLBACK_WARN_MS) {
+      routeFallbackWarned.set(key, now);
+      log.warn('routing_route_failed_fallback', {
+        userId: rest.userId, provider: rest.provider, endpoint: rest.endpoint,
+        error: String(err?.message || err).slice(0, 200),
+      });
+    }
+    return runClaudeDirect(prompt, fallbackOpts);
+  }
+}
+
+async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig, cwd } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -258,11 +317,25 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     // `model` rides the CLI argv as `-m` (validated by cliModelId — an id it
     // refuses is omitted and the CLI runs its own default). A call with no
     // cwd runs in an isolated empty temp dir, never the server's tree.
-    const cliText = await runViaCli(provider, prompt, { cwd, model });
+    // `signal` reaches the spawn, so an aborted request kills the CLI and
+    // frees its concurrency slot and temp dir. A CLI that cannot run at all
+    // (PROVIDER_UNAVAILABLE + cliCantRun) marks the provider broken for this
+    // user, so the Settings status stops offering the route — the Mac's
+    // routed callers then retry without it on the 400 this becomes.
+    let cliText;
+    try {
+      cliText = await runViaCli(provider, prompt, { cwd, model, signal });
+    } catch (err) {
+      if (err?.cliCantRun) markRouteFailed(userId, provider, 'cli');
+      throw err;
+    }
     // Meter the model the CLI was actually told to run — the request's own id
     // (NOT resolvedModel, which normalizes non-Claude ids to the Anthropic
     // default) when the flag was passed, else 'cli-default': naming a model
     // the CLI never received would make the ledger (and quota chains) lie.
+    // NOTE: 'cli-default' rows therefore never count against a same-provider
+    // quota chain (chains are keyed by real model ids) — by design: the
+    // model that ran is unknown.
     meterUsage({ userId, provider, model: cliModelId(provider, model) || 'cli-default', source: 'cli', endpoint });
     return cliText;
   }

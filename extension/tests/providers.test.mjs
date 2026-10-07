@@ -84,16 +84,16 @@ test('cliInvocation: codex is rooted with -C and pinned read-only; --yolo is nev
   // loop, so no write it made could pass through the approval cards. The
   // ceiling is therefore the sandbox flag, not a prompt.
   const withCwd = cliInvocation('openai', 'do X', { cwd: '/tmp/proj' });
-  assert.deepEqual(withCwd.args, ['exec', '-C', '/tmp/proj', '-s', 'read-only', 'do X']);
+  assert.deepEqual(withCwd.args, ['exec', '-C', '/tmp/proj', '-s', 'read-only', '--', 'do X']);
   // No workspace known → no -C, but still read-only.
-  assert.deepEqual(cliInvocation('openai', 'do X').args, ['exec', '-s', 'read-only', 'do X']);
+  assert.deepEqual(cliInvocation('openai', 'do X').args, ['exec', '-s', 'read-only', '--', 'do X']);
   for (const inv of [withCwd, cliInvocation('openai', 'do X'), cliInvocation('google', 'do X')]) {
     assert.ok(!inv.args.includes('--yolo'), 'chat must never auto-approve writes');
     assert.ok(!inv.args.includes('--dangerously-bypass-approvals-and-sandbox'));
   }
   // gemini takes no documented read-only flag — it is rooted via the child
   // process cwd instead, so its argv stays the bare prompt form.
-  assert.deepEqual(cliInvocation('google', 'do X', { cwd: '/tmp/proj' }).args, ['-p', 'do X']);
+  assert.deepEqual(cliInvocation('google', 'do X', { cwd: '/tmp/proj' }).args, ['--prompt=do X']);
 });
 
 test('providerHasCli: only providers with a real CLI binary can run keyless', () => {
@@ -380,8 +380,8 @@ test('cliInvocation: standard non-interactive form per provider', () => {
   assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', 'hi'] });
   // codex is pinned read-only for chat delegation (see the dedicated test
   // below); no workspace passed here, so no -C.
-  assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', '-s', 'read-only', 'hi'] });
-  assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['-p', 'hi'] });
+  assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', '-s', 'read-only', '--', 'hi'] });
+  assert.deepEqual(cliInvocation('google', 'hi'),    { bin: 'gemini', args: ['--prompt=hi'] });
   assert.equal(cliInvocation('skynet', 'hi'), null);
 });
 
@@ -402,7 +402,7 @@ test('anthropicWebCliArgs: enables AND pre-approves a single web tool', () => {
 test('cliInvocation: binary overridable via LLMIDE_<PROVIDER>_CLI', () => {
   process.env.LLMIDE_OPENAI_CLI = 'my-codex';
   try {
-    assert.deepEqual(cliInvocation('openai', 'x'), { bin: 'my-codex', args: ['exec', '-s', 'read-only', 'x'] });
+    assert.deepEqual(cliInvocation('openai', 'x'), { bin: 'my-codex', args: ['exec', '-s', 'read-only', '--', 'x'] });
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
   }
@@ -420,7 +420,7 @@ test('spawnCli: invokes cliInvocation argv, closes stdin, resolves {stdout,stder
   try {
     const out = await spawnCli('openai', 'hi');
     assert.equal(out.bin, 'echo');
-    assert.equal(out.stdout.trim(), 'exec -s read-only hi');
+    assert.equal(out.stdout.trim(), 'exec -s read-only -- hi');
     assert.equal(out.stderr, '');
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
@@ -436,7 +436,7 @@ test('runViaCli: trims CLI stdout and reports it', async () => {
   try {
     // No caller workspace → the isolated temp-dir form (see the isolation
     // tests below); `echo` round-trips the argv.
-    assert.match(await runViaCli('openai', 'hi'), /^exec --skip-git-repo-check -C \S+llmide-cli-\S+ -s read-only hi$/);
+    assert.match(await runViaCli('openai', 'hi'), /^exec --skip-git-repo-check -C \S+llmide-cli-\S+ -s read-only -- hi$/);
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
   }
@@ -556,30 +556,30 @@ test('resolveCustomProviderDispatch: a non-allowlisted vault key degrades to {er
 
 // ── Subscription (logged-in CLI) tiers: model flag + isolation ───────────
 
-const { cliModelId, isCliAvailable, _resetCliAvailabilityCacheForTests } = await import('../providers/providers.mjs');
+const { cliModelId, sweepStaleCliTempDirs } = await import('../providers/providers.mjs');
 
 test('cliInvocation: the requested model rides the codex/gemini argv as -m', () => {
   // Without it a routed cheap model silently ran the CLI default and the
   // usage ledger recorded a model that never ran.
   assert.deepEqual(
     cliInvocation('openai', 'do X', { cwd: '/tmp/proj', model: 'gpt-5-mini' }).args,
-    ['exec', '-C', '/tmp/proj', '-m', 'gpt-5-mini', '-s', 'read-only', 'do X'],
+    ['exec', '-C', '/tmp/proj', '-m', 'gpt-5-mini', '-s', 'read-only', '--', 'do X'],
   );
   assert.deepEqual(
     cliInvocation('google', 'do X', { model: 'gemini-2.5-flash' }).args,
-    ['-m', 'gemini-2.5-flash', '-p', 'do X'],
+    ['-m', 'gemini-2.5-flash', '--prompt=do X'],
   );
   // The Google API's `models/` resource prefix is not a CLI model id.
   assert.deepEqual(
     cliInvocation('google', 'do X', { model: 'models/gemini-2.5-pro' }).args,
-    ['-m', 'gemini-2.5-pro', '-p', 'do X'],
+    ['-m', 'gemini-2.5-pro', '--prompt=do X'],
   );
 });
 
 test('cliInvocation: a model id that could be read as a flag is omitted, never forwarded', () => {
   for (const bad of ['--yolo', '-s', 'gpt 5', 'gpt-5;rm', '', 'a'.repeat(200), 42, null]) {
-    assert.deepEqual(cliInvocation('openai', 'p', { model: bad }).args, ['exec', '-s', 'read-only', 'p'], String(bad));
-    assert.deepEqual(cliInvocation('google', 'p', { model: bad }).args, ['-p', 'p'], String(bad));
+    assert.deepEqual(cliInvocation('openai', 'p', { model: bad }).args, ['exec', '-s', 'read-only', '--', 'p'], String(bad));
+    assert.deepEqual(cliInvocation('google', 'p', { model: bad }).args, ['--prompt=p'], String(bad));
   }
   assert.equal(cliModelId('openai', '--yolo'), null);
   assert.equal(cliModelId('openai', 'gpt-5'), 'gpt-5');
@@ -590,10 +590,10 @@ test('cliInvocation: a model id that could be read as a flag is omitted, never f
 test('cliInvocation: an isolated codex run skips the git-repo check (temp dir is not a repo)', () => {
   assert.deepEqual(
     cliInvocation('openai', 'p', { cwd: '/tmp/iso', isolated: true, model: 'gpt-5' }).args,
-    ['exec', '--skip-git-repo-check', '-C', '/tmp/iso', '-m', 'gpt-5', '-s', 'read-only', 'p'],
+    ['exec', '--skip-git-repo-check', '-C', '/tmp/iso', '-m', 'gpt-5', '-s', 'read-only', '--', 'p'],
   );
   // A caller-supplied workspace keeps today's argv exactly.
-  assert.deepEqual(cliInvocation('openai', 'p', { cwd: '/tmp/proj' }).args, ['exec', '-C', '/tmp/proj', '-s', 'read-only', 'p']);
+  assert.deepEqual(cliInvocation('openai', 'p', { cwd: '/tmp/proj' }).args, ['exec', '-C', '/tmp/proj', '-s', 'read-only', '--', 'p']);
 });
 
 // A fake CLI that reports where it ran and what it was given.
@@ -615,7 +615,7 @@ test('runViaCli: no cwd → runs in a fresh, empty, private temp dir that is rem
     assert.ok(!ran.startsWith(fs.realpathSync(process.cwd())), 'never the server cwd');
     assert.equal(field(out, 'entries'), '0');
     assert.equal(field(out, 'mode'), '700');
-    assert.equal(field(out, 'argv'), '-m gemini-2.5-flash -p hi');
+    assert.equal(field(out, 'argv'), '-m gemini-2.5-flash --prompt=hi');
     assert.equal(fs.existsSync(ran), false, 'temp dir removed');
   } finally {
     delete process.env.LLMIDE_GOOGLE_CLI;
@@ -630,7 +630,7 @@ test('runViaCli: codex without cwd gets --skip-git-repo-check -C <tmp> read-only
     const out = await runViaCli('openai', 'hi', { model: 'gpt-5' });
     const ran = field(out, 'cwd');
     const argv = field(out, 'argv');
-    assert.match(argv, /^exec --skip-git-repo-check -C (\S+) -m gpt-5 -s read-only hi$/);
+    assert.match(argv, /^exec --skip-git-repo-check -C (\S+) -m gpt-5 -s read-only -- hi$/);
     // -C names the directory the child actually ran in (pwd is realpath'd).
     const cDir = argv.split(' ')[3];
     assert.ok(ran.endsWith(`/${cDir.split('/').pop()}`), `${ran} vs ${cDir}`);
@@ -658,7 +658,7 @@ test('runViaCli: a caller-supplied cwd is used as is (no temp dir, no skip flag)
   try {
     const out = await runViaCli('openai', 'hi', { cwd: proj });
     assert.equal(field(out, 'cwd'), fs.realpathSync(proj));
-    assert.equal(field(out, 'argv'), `exec -C ${proj} -s read-only hi`);
+    assert.equal(field(out, 'argv'), `exec -C ${proj} -s read-only -- hi`);
     assert.ok(fs.existsSync(proj), 'the caller\'s dir is never removed');
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
@@ -667,27 +667,121 @@ test('runViaCli: a caller-supplied cwd is used as is (no temp dir, no skip flag)
   }
 });
 
-test('isCliAvailable: resolves the same bin spawnCli runs; key-only providers never', () => {
-  _resetCliAvailabilityCacheForTests();
-  assert.equal(isCliAvailable('deepseek'), false);
-  assert.equal(isCliAvailable('custom'), false);
-  assert.equal(isCliAvailable('nope'), false);
-  const { bin, cleanup } = fakeCli();
+test('cliInvocation: a prompt that looks like a flag stays the prompt (codex `--`, gemini `--prompt=`)', () => {
+  // codex (clap): everything after `--` is positional, so a prompt such as
+  // "--yolo" or "resume" can never become a flag or a subcommand.
+  const codex = cliInvocation('openai', '--yolo', { model: 'gpt-5' }).args;
+  assert.deepEqual(codex.slice(-2), ['--', '--yolo']);
+  assert.equal(codex.filter((a) => a === '--yolo').length, 1, 'only the prompt slot holds it');
+  // gemini (yargs): `--prompt=<value>` is ONE token whose value is taken
+  // verbatim — a separate `-p <value>` would let yargs read a dash-led value
+  // as the next flag. The argv must carry no standalone flag-shaped prompt.
+  const gemini = cliInvocation('google', '--yolo -s', { model: 'gemini-2.5-flash' }).args;
+  assert.deepEqual(gemini, ['-m', 'gemini-2.5-flash', '--prompt=--yolo -s']);
+  assert.ok(!gemini.includes('--yolo') && !gemini.includes('-p'));
+});
+
+test('formatCliSpawnError: names the right CLI login per provider', () => {
+  const notLoggedIn = { code: 1, stdout: 'Not logged in · Please run /login\n', stderr: '' };
+  assert.match(formatCliSpawnError(notLoggedIn, { bin: 'codex', provider: 'openai' }), /`codex login`/);
+  assert.doesNotMatch(formatCliSpawnError(notLoggedIn, { bin: 'codex', provider: 'openai' }), /claude login/);
+  assert.match(formatCliSpawnError(notLoggedIn, { bin: 'gemini', provider: 'google' }), /`gemini`.*sign in/);
+  assert.match(formatCliSpawnError(notLoggedIn, { bin: 'claude' }), /`claude login`/);
+  const empty = { code: 1, stdout: '', stderr: '' };
+  assert.match(formatCliSpawnError(empty, { bin: 'codex', provider: 'openai' }), /`codex login`/);
+  assert.match(formatCliSpawnError({ code: 'ENOENT' }, { bin: 'gemini', provider: 'google' }), /gemini CLI not found/);
+});
+
+test('formatCliSpawnError: never echoes stack frames or absolute paths (kept in the log only)', () => {
+  // The broken-codex shape on this machine: the shim exits 1 with a Node
+  // stack naming its vendored native binary.
+  const err = {
+    code: 1, stdout: '',
+    stderr: 'Error: spawn /opt/homebrew/lib/node_modules/@openai/codex/vendor/aarch64-apple-darwin/codex/codex ENOENT\n'
+      + '    at ChildProcess._handle.onexit (node:internal/child_process:285:19)\n'
+      + '    at onErrorNT (node:internal/child_process:483:16)\n',
+  };
+  const msg = formatCliSpawnError(err, { bin: 'codex', provider: 'openai' });
+  assert.doesNotMatch(msg, /\/opt\/homebrew|node_modules|ChildProcess|onErrorNT/);
+  assert.match(msg, /codex/);
+  assert.match(msg, /reinstall|install/i);
+});
+
+// A fake CLI that exits non-zero with or without stdout.
+function scriptCli(body) {
+  const dir = fs.mkdtempSync(`${os.tmpdir()}/fakecli-`);
+  const bin = `${dir}/fake-cli`;
+  fs.writeFileSync(bin, `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  return { bin, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
+}
+
+test('runViaCli: a CLI that cannot run is tagged PROVIDER_UNAVAILABLE (the code the Mac retries on)', async () => {
+  const cases = [
+    ['missing binary', 'definitely-not-a-real-binary-xyz', null],
+    ['non-zero exit, no stdout', null, 'echo "boom" >&2; exit 1'],
+    ['not logged in', null, 'echo "Not logged in"; exit 1'],
+  ];
+  for (const [label, binName, body] of cases) {
+    const fake = body ? scriptCli(body) : null;
+    process.env.LLMIDE_OPENAI_CLI = fake ? fake.bin : binName;
+    try {
+      await assert.rejects(() => runViaCli('openai', 'hi'),
+        (err) => err.code === 'PROVIDER_UNAVAILABLE' && err.cliCantRun === true, label);
+    } finally {
+      delete process.env.LLMIDE_OPENAI_CLI;
+      fake?.cleanup();
+    }
+  }
+  // A CLI that ran and answered with an error on stdout is a real failure of a
+  // working route — not tagged.
+  const real = scriptCli('echo "model overloaded, try later"; exit 1');
+  process.env.LLMIDE_OPENAI_CLI = real.bin;
   try {
-    process.env.LLMIDE_OPENAI_CLI = 'definitely-not-a-real-binary-xyz';
-    assert.equal(isCliAvailable('openai'), false);
-    process.env.LLMIDE_OPENAI_CLI = bin;          // absolute + executable
-    assert.equal(isCliAvailable('openai'), true);
-    process.env.LLMIDE_OPENAI_CLI = 'sh';         // bare name on PATH
-    assert.equal(isCliAvailable('openai'), true);
-    fs.chmodSync(bin, 0o644);
-    process.env.LLMIDE_OPENAI_CLI = bin;          // cached for the TTL…
-    assert.equal(isCliAvailable('openai'), true);
-    _resetCliAvailabilityCacheForTests();         // …re-probed after it
-    assert.equal(isCliAvailable('openai'), false, 'not executable');
+    await assert.rejects(() => runViaCli('openai', 'hi'),
+      (err) => err.code !== 'PROVIDER_UNAVAILABLE' && !err.cliCantRun);
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
-    _resetCliAvailabilityCacheForTests();
-    cleanup();
+    real.cleanup();
+  }
+});
+
+test('runViaCli: an aborted request kills the CLI and removes its temp dir', async () => {
+  const slow = scriptCli('pwd > "$0.cwd"; sleep 5; echo late');
+  process.env.LLMIDE_GOOGLE_CLI = slow.bin;
+  const ctl = new AbortController();
+  const started = Date.now();
+  try {
+    // Abort once the CLI has demonstrably started (wrote its cwd) — a fixed
+    // delay raced the spawn under a loaded test run.
+    const poll = setInterval(() => { if (fs.existsSync(`${slow.bin}.cwd`)) { clearInterval(poll); ctl.abort(); } }, 20);
+    await assert.rejects(() => runViaCli('google', 'hi', { signal: ctl.signal }), (err) => err.name === 'AbortError');
+    clearInterval(poll);
+    assert.ok(Date.now() - started < 4500, 'did not wait for the CLI to finish');
+    const ran = fs.readFileSync(`${slow.bin}.cwd`, 'utf8').trim();
+    assert.equal(fs.existsSync(ran), false, 'temp dir removed on abort');
+  } finally {
+    delete process.env.LLMIDE_GOOGLE_CLI;
+    slow.cleanup();
+  }
+});
+
+test('sweepStaleCliTempDirs: removes llmide-cli-* dirs older than the cutoff, nothing else', async () => {
+  const root = fs.mkdtempSync(`${os.tmpdir()}/sweep-`);
+  try {
+    const old = `${root}/llmide-cli-old`;
+    const fresh = `${root}/llmide-cli-fresh`;
+    const other = `${root}/something-else`;
+    for (const d of [old, fresh, other]) fs.mkdirSync(d);
+    fs.writeFileSync(`${old}/f`, 'x');
+    const twoHoursAgo = new Date(Date.now() - 2 * 3600_000);
+    fs.utimesSync(old, twoHoursAgo, twoHoursAgo);
+    fs.utimesSync(other, twoHoursAgo, twoHoursAgo);
+    const removed = await sweepStaleCliTempDirs({ root, maxAgeMs: 3600_000 });
+    assert.equal(removed, 1);
+    assert.equal(fs.existsSync(old), false);
+    assert.ok(fs.existsSync(fresh));
+    assert.ok(fs.existsSync(other));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
   }
 });

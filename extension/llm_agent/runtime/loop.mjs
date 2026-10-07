@@ -457,6 +457,10 @@ export async function runAgentLoop({
   // to `custom:<uuid>` / deepseek, whose model ids runClaude can't infer a
   // provider from). Omitted → runClaude infers it from `model`, as before.
   provider,
+  // Tier routing: the caller's default options when `provider`/`model` came
+  // from a tier route (see runClaude) — a hop whose routed provider cannot
+  // run is retried once on this default instead of failing the loop.
+  routeFallback,
   // The TURN's abort signal (the route's client-disconnect controller), not a
   // per-call deadline. Three consumers, all required for a Stop to actually
   // stop work: (1) each tool's ctx, so a tool that owns an OS process —
@@ -622,6 +626,7 @@ export async function runAgentLoop({
         userId,
         model,
         ...(provider ? { provider } : {}),
+        ...(routeFallback ? { routeFallback } : {}),
         // 2048 cut long answers and whole-file update-file fences off mid-way
         // (a parse-error retry); runClaude's own default is the ceiling now.
         maxTokens: (Number.isFinite(maxTokens) && maxTokens > 0) ? maxTokens : DEFAULT_HOP_MAX_TOKENS,

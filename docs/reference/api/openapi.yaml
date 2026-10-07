@@ -3136,7 +3136,9 @@ paths:
         The stored config and, for each tier, whether the server can run it
         right now — the same check the server's resolver applies (custom
         provider registered/enabled/keyed; DeepSeek keyed; OpenAI/Google keyed
-        or, API v68+, their CLI installed for the logged-in subscription path) —
+        or, API v68+, their CLI installed for the logged-in subscription path;
+        v69+: the CLI must pass a `--version` health probe, which this request
+        may wait a few seconds for) —
         and whether it can run on the Agent SDK engine (first-party Anthropic,
         or a custom provider with an Anthropic-compatible endpoint and a key).
         The Mac app uses it to skip a route the server would refuse.
@@ -3157,7 +3159,7 @@ paths:
                       type: object
                       properties:
                         usable: { type: boolean }
-                        reason: { type: string, description: 'unset | not_found | disabled | no_key | no_key_or_cli (OpenAI/Google, v68+) | error (only when usable is false)' }
+                        reason: { type: string, description: 'unset | not_found | disabled | no_key | no_key_or_cli (OpenAI/Google, v68+) | cli_unverified (CLI health probe not run yet, v69+) | cli_failed / route_failed (the route failed at runtime in the last ~10 min, v69+) | error (only when usable is false)' }
                         agentCapable: { type: boolean }
                         agentReason: { type: string, description: 'not_agent_capable (only when usable but not agentCapable)' }
                         via:
@@ -3168,6 +3170,20 @@ paths:
                             (user vault or operator env; custom providers always),
                             `cli` = runs on the provider's logged-in CLI subscription
                             (claude / codex / gemini). A key wins when both exist.
+                  featureStatus:
+                    type: object
+                    description: >
+                      API v69+. One entry per CONFIGURED feature. `usable: false`
+                      with the tier's own reason when the tier is unusable, or
+                      `cli_untrusted_input` when the tier runs on a keyless
+                      codex/gemini CLI and the feature is `internal` or
+                      `pipeline` (untrusted email/connector/transcript input;
+                      pipeline output is dispatched to issue trackers).
+                    additionalProperties:
+                      type: object
+                      properties:
+                        usable: { type: boolean }
+                        reason: { type: string }
 
   /kb/ingest-scip:
     post:

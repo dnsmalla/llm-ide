@@ -40,6 +40,7 @@ const {
 const cliInstalled = new Set();
 _setCliProbeForTests((provider) => cliInstalled.has(provider));
 const { runClaude } = await import('../providers/runtime.mjs');
+const { markRouteFailed, _resetRouteHealthForTests } = await import('../providers/route-health.mjs');
 const { loadPlugins } = await import('../plugins/loader.mjs');
 const { askSubagent } = await import('../llm_agent/runtime/handlers/ask-subagent.mjs');
 
@@ -243,10 +244,75 @@ test('resolveFeatureRoute + routeOpts: feature → tier → route, fallback othe
   }, userId);
   setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
   assert.deepEqual(resolveFeatureRoute(userId, 'pipeline'), { provider: 'openai', model: 'gpt-5' });
-  assert.deepEqual(routeOpts(userId, 'pipeline'), { provider: 'openai', model: 'gpt-5' });
+  // Routed opts carry the caller's own default for runClaude's one fallback.
+  assert.deepEqual(routeOpts(userId, 'pipeline'), { provider: 'openai', model: 'gpt-5', routeFallback: {} });
+  assert.deepEqual(routeOpts(userId, 'pipeline', { model: 'm-default' }),
+    { provider: 'openai', model: 'gpt-5', routeFallback: { model: 'm-default' } });
   assert.equal(resolveFeatureRoute(userId, 'internal'), null, 'feature → unset tier → null');
   assert.deepEqual(routeOpts(userId, 'internal', { model: 'm-default' }), { model: 'm-default' });
   assert.deepEqual(routeOpts(undefined, 'pipeline', { model: 'x' }), { model: 'x' });
+});
+
+test('resolveTier: a keyless openai/google CLI not yet verified is unusable (cli_unverified)', () => {
+  const userId = freshUser();
+  syncTierRouting({ tiers: { cheap: { provider: 'openai', model: 'gpt-5' } } }, userId);
+  _setCliProbeForTests(() => 'unverified');
+  try {
+    assert.equal(resolveTier(userId, 'cheap'), null);
+    assert.deepEqual(tierRoutingStatus(userId).status.cheap, { usable: false, reason: 'cli_unverified', agentCapable: false });
+  } finally { _setCliProbeForTests((provider) => cliInstalled.has(provider)); }
+});
+
+test('resolveTier: a route that just failed at runtime is skipped (cli_failed / route_failed)', () => {
+  const userId = freshUser();
+  syncTierRouting({ tiers: { cheap: { provider: 'openai', model: 'gpt-5' } } }, userId);
+  cliInstalled.add('openai');
+  try {
+    assert.deepEqual(resolveTier(userId, 'cheap'), { provider: 'openai', model: 'gpt-5' });
+    markRouteFailed(userId, 'openai', 'cli');
+    assert.equal(resolveTier(userId, 'cheap'), null);
+    assert.deepEqual(tierRoutingStatus(userId).status.cheap, { usable: false, reason: 'cli_failed', agentCapable: false });
+  } finally { cliInstalled.clear(); _resetRouteHealthForTests(); }
+});
+
+test('keyless CLI routes never serve untrusted-input features (internal, pipeline); key routes and other roles do', () => {
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: { cheap: { provider: 'openai', model: 'gpt-5' }, standard: { provider: 'google', model: 'gemini-2.5-flash' } },
+    features: { internal: 'cheap', pipeline: 'standard', subagents: 'cheap', quickChat: 'standard' },
+  }, userId);
+  cliInstalled.add('openai');
+  cliInstalled.add('google');
+  try {
+    assert.equal(resolveFeatureRoute(userId, 'internal'), null);
+    assert.equal(resolveFeatureRoute(userId, 'pipeline'), null);
+    assert.deepEqual(routeOpts(userId, 'internal', { model: 'm-default' }), { model: 'm-default' });
+    assert.deepEqual(resolveFeatureRoute(userId, 'subagents'), { provider: 'openai', model: 'gpt-5' });
+    const st = tierRoutingStatus(userId);
+    assert.deepEqual(st.featureStatus, {
+      internal: { usable: false, reason: 'cli_untrusted_input' },
+      pipeline: { usable: false, reason: 'cli_untrusted_input' },
+      subagents: { usable: true },
+      quickChat: { usable: true },
+    });
+    // With an API key the same tier is a plain HTTP completion → allowed.
+    setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
+    assert.deepEqual(resolveFeatureRoute(userId, 'internal'), { provider: 'openai', model: 'gpt-5' });
+    assert.deepEqual(tierRoutingStatus(userId).featureStatus.internal, { usable: true });
+  } finally { cliInstalled.clear(); }
+  // Claude's tool-less `claude -p` (keyless anthropic) is not an agent CLI.
+  const u2 = freshUser();
+  syncTierRouting({ tiers: { cheap: { provider: 'anthropic', model: 'claude-haiku-4-5' } }, features: { internal: 'cheap' } }, u2);
+  assert.deepEqual(resolveFeatureRoute(u2, 'internal'), { provider: 'anthropic', model: 'claude-haiku-4-5' });
+});
+
+test('tierRoutingStatus: featureStatus carries the tier\'s own reason for an unusable tier', () => {
+  const userId = freshUser();
+  syncTierRouting({ tiers: { cheap: { provider: 'deepseek', model: 'deepseek-chat' } }, features: { loop: 'cheap', subagents: 'strong' } }, userId);
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus, {
+    loop: { usable: false, reason: 'no_key' },
+    subagents: { usable: false, reason: 'unset' },
+  });
 });
 
 // ── HTTP handler ─────────────────────────────────────────────────────────
@@ -447,12 +513,12 @@ test('runClaude: keyless openai/google run their CLI WITH the routed model and m
   process.env.LLMIDE_GOOGLE_CLI = 'echo';
   try {
     const oa = await runClaude('hi', { userId, model: 'gpt-5-mini', provider: 'openai' });
-    assert.match(oa, /^exec --skip-git-repo-check -C \S+ -m gpt-5-mini -s read-only hi$/);
+    assert.match(oa, /^exec --skip-git-repo-check -C \S+ -m gpt-5-mini -s read-only -- hi$/);
     const gg = await runClaude('hi', { userId, model: 'gemini-2.5-flash', provider: 'google' });
-    assert.equal(gg, '-m gemini-2.5-flash -p hi');
+    assert.equal(gg, '-m gemini-2.5-flash --prompt=hi');
     // An id the CLI guard refuses is omitted from argv AND from the ledger.
     const bad = await runClaude('hi', { userId, model: 'gemini 2.5', provider: 'google' });
-    assert.equal(bad, '-p hi');
+    assert.equal(bad, '--prompt=hi');
   } finally {
     delete process.env.LLMIDE_OPENAI_CLI;
     delete process.env.LLMIDE_GOOGLE_CLI;
@@ -462,6 +528,108 @@ test('runClaude: keyless openai/google run their CLI WITH the routed model and m
     { provider: 'google', model: 'gemini-2.5-flash', source: 'cli' },
     { provider: 'google', model: 'cli-default', source: 'cli' },
   ]);
+});
+
+// A fake CLI that counts its invocations and exits 1 with nothing printed
+// (the broken / logged-out shape).
+function brokenCli() {
+  const dir = mkdtempSync(path.join(os.tmpdir(), 'brokencli-'));
+  const bin = path.join(dir, 'cli');
+  writeFileSync(bin, `#!/bin/sh\necho x >> "${dir}/calls"\necho "Error: spawn /opt/x/codex ENOENT" >&2\nexit 1\n`, { mode: 0o755 });
+  const calls = () => { try { return fs.readFileSync(path.join(dir, 'calls'), 'utf8').trim().split('\n').length; } catch { return 0; } };
+  return { bin, calls, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
+}
+
+function mockAnthropic(text = 'default-reply') {
+  const original = globalThis.fetch;
+  const seen = [];
+  globalThis.fetch = async (url, init) => {
+    seen.push({ url: String(url), body: JSON.parse(init?.body || '{}') });
+    return {
+      ok: true, status: 200, headers: new Map(),
+      json: async () => ({ content: [{ type: 'text', text }], usage: { input_tokens: 1, output_tokens: 1 } }),
+      text: async () => '{}',
+    };
+  };
+  return { seen, restore: () => { globalThis.fetch = original; } };
+}
+
+test('runClaude: a routed provider that fails falls back ONCE to the caller default; the next call skips it', async () => {
+  _resetRouteHealthForTests();
+  const userId = freshUser();
+  setSecret(db.getDb(), userId, 'claude.apiKey', 'sk-ant-test');   // the default path = Anthropic HTTP (mocked)
+  const cli = brokenCli();
+  const api = mockAnthropic();
+  process.env.LLMIDE_OPENAI_CLI = cli.bin;
+  try {
+    const opts = { userId, model: 'gpt-5', provider: 'openai', routeFallback: { model: 'claude-haiku-4-5' } };
+    assert.equal(await runClaude('hi', opts), 'default-reply');
+    assert.equal(cli.calls(), 1, 'the routed CLI was tried once');
+    assert.equal(api.seen.length, 1);
+    assert.equal(api.seen[0].body.model, 'claude-haiku-4-5', 'fallback ran the caller\'s default model');
+    // A JSON-retry (same opts) goes straight to the default — no second CLI spawn.
+    assert.equal(await runClaude('hi again', opts), 'default-reply');
+    assert.equal(cli.calls(), 1);
+    assert.equal(api.seen.length, 2);
+    assert.equal(tierRoutingStatusFor(userId, 'openai'), 'cli_failed');
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+    api.restore();
+    cli.cleanup();
+    _resetRouteHealthForTests();
+  }
+});
+
+function tierRoutingStatusFor(userId, provider) {
+  syncTierRouting({ tiers: { cheap: { provider, model: 'gpt-5' } } }, userId);
+  cliInstalled.add(provider);
+  try { return tierRoutingStatus(userId).status.cheap.reason; } finally { cliInstalled.clear(); }
+}
+
+test('runClaude: no route fallback without routeFallback or on abort', async () => {
+  _resetRouteHealthForTests();
+  const userId = freshUser();
+  setSecret(db.getDb(), userId, 'claude.apiKey', 'sk-ant-test');
+  const cli = brokenCli();
+  const api = mockAnthropic();
+  process.env.LLMIDE_OPENAI_CLI = cli.bin;
+  try {
+    // An explicit (non-routed) provider pick fails as before — tagged so
+    // /code-assist answers the 400 the Mac retries without its route.
+    await assert.rejects(runClaude('hi', { userId, model: 'gpt-5', provider: 'openai' }),
+      (err) => err.code === 'PROVIDER_UNAVAILABLE');
+    assert.equal(api.seen.length, 0);
+    // …and that can't-run failure marked the provider broken for this user.
+    assert.equal(tierRoutingStatusFor(userId, 'openai'), 'cli_failed');
+    _resetRouteHealthForTests();
+    // Aborted request: never retried on the default.
+    const ctl = new AbortController();
+    ctl.abort();
+    await assert.rejects(runClaude('hi', { userId, model: 'gpt-5', provider: 'openai', signal: ctl.signal,
+      routeFallback: { model: 'claude-haiku-4-5' } }));
+    assert.equal(api.seen.length, 0);
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+    api.restore();
+    cli.cleanup();
+    _resetRouteHealthForTests();
+  }
+});
+
+test('runClaude: a content-related 4xx from a routed key provider is NOT retried on the default', async () => {
+  _resetRouteHealthForTests();
+  const userId = freshUser();
+  setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => {
+    calls += 1;
+    return { ok: false, status: 400, headers: new Map(), json: async () => ({}), text: async () => '{"error":{"message":"context_length_exceeded"}}' };
+  };
+  try {
+    await assert.rejects(runClaude('hi', { userId, model: 'gpt-5', provider: 'openai', routeFallback: {} }), /HTTP 400/);
+    assert.equal(calls, 1, 'no fallback call');
+  } finally { globalThis.fetch = original; _resetRouteHealthForTests(); }
 });
 
 // ── loader: `tier:` frontmatter ──────────────────────────────────────────
@@ -485,8 +653,13 @@ test('loader parses subagent `tier:` and drops an invalid one', () => {
 
 function captureClaude() {
   const calls = [];
-  const fn = async (_prompt, opts) => { calls.push({ model: opts?.model, provider: opts?.provider }); return 'ok'; };
+  const fn = async (_prompt, opts) => {
+    calls.push({ model: opts?.model, provider: opts?.provider });
+    fn.fallbacks.push(opts?.routeFallback);
+    return 'ok';
+  };
   fn.calls = calls;
+  fn.fallbacks = [];
   return fn;
 }
 
@@ -519,6 +692,8 @@ test('ask-subagent: subagent tier wins over features.subagents', async () => {
   const { runClaude, ctx } = subCtx({ tier: 'strong' }, { tiers: TIERS, features: { subagents: 'cheap' } });
   await askSubagent({ name: 's', question: 'q' }, ctx);
   assert.deepEqual(runClaude.calls[0], { model: 'claude-opus-5-5', provider: 'anthropic' });
+  // A routed hop carries today's default for runClaude's one fallback.
+  assert.deepEqual(runClaude.fallbacks[0], { model: 'default-model' });
 });
 
 test('ask-subagent: unusable subagent tier falls through to features.subagents', async () => {
@@ -531,6 +706,7 @@ test('ask-subagent: nothing routed → today\'s default model, no provider', asy
   const { runClaude, ctx } = subCtx({}, { tiers: TIERS });
   await askSubagent({ name: 's', question: 'q' }, ctx);
   assert.deepEqual(runClaude.calls[0], { model: 'default-model', provider: undefined });
+  assert.equal(runClaude.fallbacks[0], undefined, 'unrouted → no fallback marker');
 });
 
 test('ask-subagent: no resolvers on ctx (older callers) → default model', async () => {

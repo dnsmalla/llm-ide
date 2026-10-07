@@ -557,13 +557,19 @@ const CLI_ARG_BUILDERS = {
     // `model` is already validated by cliInvocation (cliModelId).
     ...(model ? ['-m', model] : []),
     '-s', 'read-only',
+    // `--` ends option parsing (clap), so a prompt that starts with `-` — or
+    // equals a subcommand name such as `resume` — is still the prompt.
+    '--',
     p,
   ],
   // The Gemini CLI has no documented read-only flag to pin, so it keeps its
   // own default (interactive approval, which headless can never grant — the
   // same effect) and is rooted via the child process cwd instead. `--yolo`,
   // which WOULD auto-approve, is likewise never passed here.
-  google:    (p, { model } = {}) => [...(model ? ['-m', model] : []), '-p', p],  // gemini [-m <model>] -p "<prompt>"
+  // `--prompt=<p>` (one token) rather than `-p <p>`: yargs takes an `=`
+  // value verbatim, while a separate value starting with `-` could be read
+  // as the next flag. The prompt still travels in argv (stdin is closed).
+  google:    (p, { model } = {}) => [...(model ? ['-m', model] : []), `--prompt=${p}`],
 };
 
 /**
@@ -666,54 +672,12 @@ export function cliInvocation(provider, prompt, { cwd, model, isolated = false }
   return { bin, args: build(prompt, { cwd, model: cliModel || undefined, isolated }) };
 }
 
-// The binary spawnCli runs for `provider` — the LLMIDE_<PROVIDER>_CLI
-// override first, else the provider's own CLI name. Shared by cliInvocation
-// and isCliAvailable so "available" means "the thing we would spawn".
-function cliBinFor(provider) {
+/** The binary spawnCli runs for `provider` — the LLMIDE_<PROVIDER>_CLI
+ *  override first, else the provider's own CLI name (null without one).
+ *  Shared with the CLI health probe (route-health.mjs) so "available" means
+ *  "the thing we would spawn". */
+export function cliBinFor(provider) {
   return process.env[`LLMIDE_${provider.toUpperCase()}_CLI`] || PROVIDERS[provider]?.cli || null;
-}
-
-// How long a CLI-availability answer is trusted. The check runs on every
-// routed call (tier resolver), so it must not stat PATH each time; a minute
-// is short enough that installing/removing a CLI is picked up without a
-// server restart.
-const CLI_AVAILABILITY_TTL_MS = 60_000;
-const cliAvailabilityCache = new Map();
-
-function isExecutableFile(file) {
-  try {
-    fs.accessSync(file, fs.constants.X_OK);
-    return fs.statSync(file).isFile();
-  } catch {
-    return false;
-  }
-}
-
-/**
- * True when `provider` has a CLI and its binary resolves to an executable —
- * the bin spawnCli would run, searched on the same PATH minimalCliEnv hands
- * the child. A path-like bin (an override) is checked directly. Answers are
- * cached per bin for CLI_AVAILABILITY_TTL_MS. Presence only: a logged-out or
- * broken install (e.g. a codex shim whose native binary is missing) still
- * reads as available and fails at spawn with the usual install/login hint.
- */
-export function isCliAvailable(provider, { now = Date.now() } = {}) {
-  if (!providerHasCli(provider)) return false;
-  const bin = cliBinFor(provider);
-  if (!bin) return false;
-  const hit = cliAvailabilityCache.get(bin);
-  if (hit && now - hit.at < CLI_AVAILABILITY_TTL_MS) return hit.ok;
-  const ok = bin.includes(path.sep)
-    ? isExecutableFile(bin)
-    : String(process.env.PATH || '').split(path.delimiter).filter(Boolean)
-      .some((dir) => isExecutableFile(path.join(dir, bin)));
-  cliAvailabilityCache.set(bin, { ok, at: now });
-  return ok;
-}
-
-/** Test seam: forget cached CLI-availability answers. */
-export function _resetCliAvailabilityCacheForTests() {
-  cliAvailabilityCache.clear();
 }
 
 // Last-resort HANG BREAKER for a CLI completion — not a work deadline.
@@ -1009,39 +973,86 @@ export function spawnCliStream(provider, prompt, {
   });
 }
 
+// How each provider's CLI is logged in, for the user-facing hint.
+const CLI_LOGIN_HINT = {
+  anthropic: 'Run `claude login` in Terminal',
+  openai: 'Run `codex login` in Terminal',
+  google: 'Run `gemini` in Terminal and sign in',
+};
+const CLI_KEY_LABEL = { anthropic: 'Anthropic', openai: 'OpenAI', google: 'Google' };
+
+// A CLI's "you are not logged in" across claude / codex / gemini wording.
+const NOT_LOGGED_IN_RE = /not logged in|please run \/login|run `?codex login|please (?:log ?in|sign in)|no credentials found/i;
+
+/**
+ * Strip what must not reach the chat bubble from raw CLI output: stack-frame
+ * lines (`    at fn (file:1:2)`) and absolute paths (a vendored binary's
+ * location, the user's home layout). The full text goes to the log instead.
+ */
+function scrubCliOutput(text) {
+  return text
+    .split('\n')
+    .filter((line) => !/^\s*at\s/.test(line))
+    .join(' ')
+    .replace(/(?:[A-Za-z]:)?(?:\/[^\s/'"`:]+){2,}\/?/g, '<path>')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 /**
  * Turn a raw execFile rejection from spawnCli into a short, user-safe message.
  * Node's default err.message embeds the ENTIRE argv (including the prompt),
  * which must never reach the UI — it looks like a shell injection failure and
- * hides the real cause (usually "not logged in" on stdout).
+ * hides the real cause (usually "not logged in" on stdout). The hint names
+ * the provider's own CLI login (`claude login` / `codex login` / `gemini`);
+ * stack frames and absolute paths are never echoed (they go to the log).
  */
 export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'anthropic' } = {}) {
   const stdout = String(err?.stdout || '').trim();
   const stderr = String(err?.stderr || '').trim();
   const combined = `${stdout}\n${stderr}`.trim();
-  const providerLabel = provider === 'anthropic' ? 'Anthropic' : String(provider || 'model');
+  const keyLabel = CLI_KEY_LABEL[provider] || String(provider || 'model');
+  const login = CLI_LOGIN_HINT[provider] || `Log in to \`${bin}\``;
+  const keyHint = `add an ${keyLabel} API key in LLM IDE → Settings → Model Providers`;
 
-  if (/not logged in|please run \/login/i.test(combined)) {
-    return `${bin} is not logged in. Run \`claude login\` in Terminal, or add a ${providerLabel} API key in LLM IDE → Settings → Model Providers.`;
+  if (combined) {
+    log.warn('provider_cli_failed_output', { provider, bin, output: redactWithKey(combined, apiKey).slice(0, 2000) });
+  }
+  if (NOT_LOGGED_IN_RE.test(combined)) {
+    return `${bin} is not logged in. ${login}, or ${keyHint}.`;
   }
   if (err?.code === 'ENOENT') {
-    return `${bin} CLI not found. Install it and run \`claude login\`, or add a ${providerLabel} API key in Settings → Model Providers.`;
+    return `${bin} CLI not found. Install it and log in (${login.toLowerCase()}), or ${keyHint}.`;
   }
   if (err?.killed || /ETIMEDOUT|timed out/i.test(combined)) {
-    return `${bin} timed out. Try again or add a ${providerLabel} API key in Settings → Model Providers.`;
+    return `${bin} timed out. Try again or ${keyHint}.`;
   }
-  if (combined) {
-    // Collapse the dump to one labeled line: this string lands verbatim in
-    // the chat's error bubble, where a bare multi-line stdout/stderr blob
-    // reads as if the assistant itself produced garbage. Redact BEFORE
-    // truncating (same order as redact() above) — slicing first would leave
-    // the head of a credential that straddles the cap visible.
-    const oneLine = combined.replace(/\s+/g, ' ').trim();
-    return `${bin} failed: ${redactWithKey(oneLine, apiKey).slice(0, 300)}`;
+  // The CLI's launcher could not start its own native binary (a broken
+  // install — e.g. codex's npm shim with its vendored binary missing).
+  if (/spawn\s+\S+\s+ENOENT/.test(combined)) {
+    return `${bin} is installed but broken (it could not start its own binary). Reinstall it, or ${keyHint}.`;
   }
+  // Collapse the dump to one labeled line: this string lands verbatim in the
+  // chat's error bubble, where a bare multi-line stdout/stderr blob reads as
+  // if the assistant itself produced garbage. Redact BEFORE truncating (same
+  // order as redact() above) — slicing first would leave the head of a
+  // credential that straddles the cap visible.
+  const shown = scrubCliOutput(redactWithKey(combined, apiKey));
+  if (shown) return `${bin} failed: ${shown.slice(0, 300)}`;
   // Never surface err.message — it contains the full command + prompt.
   const exit = typeof err?.code === 'number' ? err.code : '?';
-  return `${bin} failed (exit ${exit}). Run \`claude login\` or add a ${providerLabel} API key in Settings → Model Providers.`;
+  return `${bin} failed (exit ${exit}). ${login}, or ${keyHint}.`;
+}
+
+// Prefix of runViaCli's private temp dirs; the startup sweep keys on it.
+const CLI_TMP_PREFIX = 'llmide-cli-';
+
+// A provider-CLI failure that means "this CLI cannot run here" (missing or
+// broken binary, logged out, nothing printed) — as opposed to a CLI that ran
+// and reported an error. Tagged PROVIDER_UNAVAILABLE so /code-assist answers
+// the 400 the Mac's tier-routed callers retry without the route.
+function cliCantRun(message) {
+  return Object.assign(new Error(message), { code: 'PROVIDER_UNAVAILABLE', cliCantRun: true });
 }
 
 /**
@@ -1054,9 +1065,14 @@ export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'a
  * inherit the server's directory — codex/gemini are agents, the prompt may
  * carry untrusted text (email, connector content), and the server's tree
  * holds kb/ (DB, dev secrets). It instead runs in a fresh, empty, private
- * (0700) temp dir that is removed afterwards, best-effort, success or not.
+ * (mkdtemp: 0700) temp dir that is removed afterwards, best-effort, success,
+ * failure or abort. `signal` aborts the spawn (the child is killed, its
+ * concurrency slot and temp dir released).
+ *
+ * Failures that mean the CLI cannot run at all reject with code
+ * PROVIDER_UNAVAILABLE and `cliCantRun: true`; an AbortError is rethrown as is.
  */
-export async function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, cwd, model } = {}) {
+export async function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, cwd, model, signal } = {}) {
   const cfg = PROVIDERS[provider];
   if (!cfg) throw new Error(`runViaCli: unknown provider '${provider}'`);
   // Use a minimal env allowlist — never inherit LLMIDE_JWT_SECRET,
@@ -1065,26 +1081,37 @@ export async function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, 
   // HOME (+ XDG_*) stay in it: that is where codex/gemini keep their login.
   const extraKeys = cfg.env && process.env[cfg.env] ? { [cfg.env]: process.env[cfg.env] } : {};
   const env = minimalCliEnv(extraKeys);
-  let isolatedDir = null;
-  if (!cwd) {
-    isolatedDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'llmide-cli-'));
-    await fs.promises.chmod(isolatedDir, 0o700);
-  }
+  // mkdtemp creates the directory 0700 itself — no chmod window to close.
+  const isolatedDir = cwd ? null : await fs.promises.mkdtemp(path.join(os.tmpdir(), CLI_TMP_PREFIX));
   try {
-    const { stdout, bin } = await spawnCli(provider, prompt, {
-      env, timeoutMs, model,
-      cwd: cwd || isolatedDir,
-      isolated: Boolean(isolatedDir),
-    }).catch((err) => {
+    let out;
+    try {
+      // NOTE: on timeout/abort execFile kills only the CLI's own pid, not
+      // children it spawned. Killing the whole process group needs
+      // `detached: true` + process.kill(-pid), which would change spawnCli
+      // for every provider (claude included) and its stdin/stdio handling;
+      // left as is — codex runs `-s read-only` and the hang breaker is 30 min.
+      out = await spawnCli(provider, prompt, {
+        env, timeoutMs, model, signal,
+        cwd: cwd || isolatedDir,
+        isolated: Boolean(isolatedDir),
+      });
+    } catch (err) {
+      if (err?.name === 'AbortError' || signal?.aborted) throw err;
       const errBin = err.bin || cfg.cli;
       if (err.code === 'ENOENT') {
-        throw new Error(`${errBin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`);
+        throw cliCantRun(`${errBin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`);
       }
-      throw new Error(formatCliSpawnError(err, { bin: errBin, provider }));
-    });
-    const text = String(stdout || '').trim();
-    if (!text) throw new Error(`${bin} returned empty output`);
-    log.info('provider_cli_complete', { provider, bin, isolated: Boolean(isolatedDir) });
+      const message = formatCliSpawnError(err, { bin: errBin, provider });
+      const printed = String(err.stdout || '').trim();
+      if (!err.killed && (!printed || NOT_LOGGED_IN_RE.test(`${printed}\n${err.stderr || ''}`))) {
+        throw cliCantRun(message);
+      }
+      throw new Error(message);
+    }
+    const text = String(out.stdout || '').trim();
+    if (!text) throw cliCantRun(`${out.bin} returned empty output`);
+    log.info('provider_cli_complete', { provider, bin: out.bin, isolated: Boolean(isolatedDir) });
     return text;
   } finally {
     if (isolatedDir) {
@@ -1093,6 +1120,29 @@ export async function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, 
       });
     }
   }
+}
+
+/**
+ * Remove runViaCli temp dirs (`<root>/llmide-cli-*`) older than `maxAgeMs` —
+ * the ones a crash or kill -9 left behind before the `finally` ran. Called
+ * once at server startup. Best-effort; returns how many were removed.
+ */
+export async function sweepStaleCliTempDirs({ root = os.tmpdir(), maxAgeMs = 3_600_000, now = Date.now() } = {}) {
+  let removed = 0;
+  let names = [];
+  try { names = await fs.promises.readdir(root); } catch { return 0; }
+  for (const name of names) {
+    if (!name.startsWith(CLI_TMP_PREFIX)) continue;
+    const dir = path.join(root, name);
+    try {
+      const st = await fs.promises.lstat(dir);
+      if (!st.isDirectory() || now - st.mtimeMs < maxAgeMs) continue;
+      await fs.promises.rm(dir, { recursive: true, force: true });
+      removed += 1;
+    } catch { /* raced or not ours to remove — skip */ }
+  }
+  if (removed) log.info('provider_cli_tmp_swept', { removed });
+  return removed;
 }
 
 // ── Model discovery ───────────────────────────────────────────────────

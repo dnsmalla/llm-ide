@@ -117,7 +117,8 @@ export async function askSubagent(args, ctx) {
     // LLMIDE_SUBAGENT_MODEL, then the runClaude default.  Leaf calls are
     // the natural place to run a cheaper/faster tier.
     model: subagent.model || route?.model || ctx.defaultModel,
-    ...(route ? { provider: route.provider } : {}),
+    // A routed hop that cannot run retries once on today's default model.
+    ...(route ? { provider: route.provider, routeFallback: { model: ctx.defaultModel } } : {}),
     depth: ctx.depth ?? 1,
     // The outer turn's cancellation — the sub-loop consults it every iteration
     // and composes it into each model call, so Stop ends a subagent mid-flight

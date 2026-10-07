@@ -25,6 +25,7 @@ import { sendJSON } from './core/utils.mjs';
 import { routeTimeoutMs, withRouteTimeout } from './server/route-timeout.mjs';
 import { buildHealthPayload, buildNotFoundDetails } from './server/control-plane.mjs';
 import { startBackgroundOutcomePoller, stopBackgroundOutcomePoller } from './agents/outcome-watcher.mjs';
+import { sweepStaleCliTempDirs } from './providers/providers.mjs';
 
 const PORT = config.port;
 const HOST = config.host;
@@ -260,7 +261,8 @@ const HOST = config.host;
 //   v66 — POST /kb/loop/agent-run accepts optional `provider` ("anthropic" | Anthropic-compatible "custom:<id>"; the Mac's Loop tier route) → the step runs on that provider through the chat engine's gateway env (ANTHROPIC_BASE_URL + its key), confinement unchanged; 400 PROVIDER_UNAVAILABLE / PROVIDER_NOT_AGENT_CAPABLE on a refused provider (VALIDATION_FAILED on a non-string); metered under the provider that ran. Absent = first-party Anthropic as before.
 //   v67 — GET /kb/routing-tiers → { tiers, features, status: { strong|standard|cheap: { usable, reason?, agentCapable, agentReason? } } } (the resolver's own usability check, so the Mac skips a route the server would refuse); POST /kb/routing-tiers answers { success, dropped: [{ entry, reason }] }; model ids may end in the SDK's `[1m]`; a tier on openai/google without an API key is now unusable (was: CLI fallback); a body read error answers 400 (413 only for an oversized body); /code-assist answers 400 PROVIDER_UNAVAILABLE (message = the Settings hint) when the named provider is missing/disabled/keyless instead of the generic 502.
 //   v68 — GET /kb/routing-tiers status entries gain `via: 'key' | 'cli'` on a usable tier; a tier on openai/google with no API key is usable again when its CLI (codex/gemini) is installed (reason 'no_key_or_cli' when neither) — the CLI path now passes the routed model (`-m`) and, with no caller workspace, runs in an empty private temp dir (codex `--skip-git-repo-check -C <tmp> -s read-only`).
-const SERVER_API_VERSION = 68;
+//   v69 — GET /kb/routing-tiers: keyless openai/google tiers are usable only after a passing CLI health probe (`<cli> --version`; reasons 'cli_unverified' until probed, 'no_key_or_cli' on failure) and a route that failed at runtime reports 'cli_failed' / 'route_failed' for ~10 min; new `featureStatus: { <feature>: { usable, reason? } }` per configured feature ('cli_untrusted_input' = a keyless codex/gemini route never serves `internal`/`pipeline`). A provider CLI that cannot run (missing/broken/logged out) now fails /code-assist with 400 PROVIDER_UNAVAILABLE. CLI argv: codex ends `-- <prompt>`, gemini takes `--prompt=<prompt>`.
+const SERVER_API_VERSION = 69;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
@@ -1105,6 +1107,10 @@ server.listen(PORT, HOST, () => {
         'accepting external traffic. All tokens and vault data travel unencrypted otherwise.',
     });
   }
+
+  // Temp dirs a provider-CLI run left behind (crash / kill -9 before its
+  // own cleanup) — see runViaCli. Best-effort, off the request path.
+  sweepStaleCliTempDirs().catch(() => {});
 
   // Open the DB at boot so migrations apply BEFORE we accept traffic;
   // a slow first request would otherwise pay the migration cost.

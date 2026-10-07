@@ -36,6 +36,14 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   (`-m`) and, when no project workspace is involved, in an empty private temp directory (codex
   read-only) instead of the server's own directory. `GET /kb/routing-tiers` adds `via: key | cli` per
   usable tier, shown next to each tier in Settings → Tier Routing.
+- Tier routing (API v69): a subscription tier must pass a CLI health check (`codex --version` /
+  `gemini --version`) before it is used, and a routed call whose provider fails (CLI broken or logged
+  out, auth/network failure) is retried once on the role's default and that route is skipped for ~10
+  minutes; the Mac's quick chat, phone chat and Loop replay likewise retry once without the route.
+  Keyless codex/gemini routes are never used for Internal or Pipeline roles (untrusted email/connector
+  text; plan/code output goes to issue trackers). CLI error messages name the right login command
+  (`codex login`, `gemini`) and no longer show stack traces or file paths. Usage rows recorded as
+  `cli-default` (the CLI ran its own default model) do not count against same-provider quota chains.
 - Loop reliability (Mac app). Loop agent runs are headless and confined to the
   run's git root; a stage whose agent call errored ends the run `error` unless
   that stage later ran cleanly (a passing verify stage no longer launders it);
