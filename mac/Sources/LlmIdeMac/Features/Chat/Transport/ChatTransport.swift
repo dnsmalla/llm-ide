@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 /// Abstraction over "send one chat turn to the backend and stream back
 /// progress/chunks". `CodeAssistTransport` is the real implementation
@@ -26,7 +27,33 @@ protocol ChatTransport: Sendable {
     ) async throws -> ChatTransportResult
 }
 
+private let chatTransportRouteLogger = Logger(subsystem: "com.llmide.macapp", category: "TierRouting")
+
 extension ChatTransport {
+    /// `roundTrip`, retried ONCE without the tier route when the server
+    /// refuses the routed provider (`TierRouting.isProviderConfigError` — a
+    /// missing/disabled/keyless provider or a CLI that cannot run). Routing
+    /// must never fail a turn the default would answer; any other failure is
+    /// a real failure of a working route and is not retried. A turn with no
+    /// `routeFallback` behaves exactly like `roundTrip`.
+    func roundTripWithRouteFallback(
+        _ input: ChatTransportInput,
+        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
+        onChunk: @escaping @MainActor (String) -> Void,
+        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
+    ) async throws -> ChatTransportResult {
+        do {
+            return try await roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
+        } catch where input.routeFallback != nil && TierRouting.isProviderConfigError(error) {
+            var retry = input
+            retry.model = input.routeFallback?.model
+            retry.provider = input.routeFallback?.provider
+            retry.routeFallback = nil
+            chatTransportRouteLogger.notice("Chat route \(input.provider ?? "", privacy: .public) refused (\(error.localizedDescription, privacy: .public)); retrying on the default")
+            return try await roundTrip(retry, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
+        }
+    }
+
     /// Default 4-callback round trip: forward to the 3-callback variant and
     /// drop `onApproval` — the legacy engines this default serves cannot
     /// park on a question.
@@ -53,9 +80,11 @@ struct ChatTransportInput: Sendable {
     /// trip — see `ChatEngine.stampOwnIdentity`.
     var agentContext: AgentContext?
     let language: String?
-    let model: String?
+    /// `var` (like `provider`) so a refused tier route can be retried on the
+    /// fallback — see `roundTripWithRouteFallback`.
+    var model: String?
     /// Explicit backend provider string, resolved via `makeProvider(selectedProvider:)`.
-    let provider: String?
+    var provider: String?
     let mode: String?
     /// True only for the turn the saved-plan card's "Execute plan" action
     /// fires. The server uses it to inject the plan-execution skill
@@ -96,6 +125,12 @@ struct ChatTransportInput: Sendable {
     /// headless caller (Loop, fault repair, regression) or a quick surface
     /// cannot be handed a question it has no way to show.
     var questionCard: Bool = false
+
+    /// Set when `model`/`provider` came from a tier route: what to send
+    /// instead if the server refuses that route. Nil = not routed (or already
+    /// the retry), so `roundTripWithRouteFallback` never retries. `var` with a
+    /// default so existing call sites are unchanged.
+    var routeFallback: TierRouteFallback? = nil
 
     /// Determine the provider string to send: `custom:<uuid>` verbatim for a
     /// custom provider, or the built-in tool's `provider` for everything else.

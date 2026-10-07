@@ -240,6 +240,7 @@ struct TierRoutingSection: View {
         // The version note at the top already covers an old server.
         guard serverSupported else { return nil }
         return TierRouting.serverUnusableReason(tier, server: serverState, localCLIOnly: localCLIOnly)
+            ?? TierRouting.serverFeatureUnusableReason(feature, server: serverState)
     }
 
     private func isListedProvider(_ provider: String) -> Bool {

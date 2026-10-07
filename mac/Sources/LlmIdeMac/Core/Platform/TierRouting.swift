@@ -39,6 +39,15 @@ enum RoutedFeature: String, CaseIterable, Identifiable {
     }
 }
 
+/// What a tier-routed chat turn sends instead when the server refuses its
+/// route (400 PROVIDER_UNAVAILABLE / PROVIDER_NOT_AGENT_CAPABLE): the model +
+/// provider the surface would have sent without routing. Retried once — see
+/// `ChatTransport.roundTripWithRouteFallback`.
+struct TierRouteFallback: Sendable, Equatable {
+    let model: String?
+    let provider: String?
+}
+
 /// One tier's target: the server wire provider id
 /// (`anthropic | openai | google | deepseek | custom:<uuid>`) and a model id.
 struct TierRoute: Codable, Equatable {
@@ -229,6 +238,18 @@ enum TierRouting {
         return nil
     }
 
+    /// Why the server will not run `feature`'s route although its tier is
+    /// usable (API v69+ `featureStatus`), or nil. Today that is only
+    /// `cli_untrusted_input` — a keyless codex/gemini tier is never used for
+    /// Internal helpers or the Server pipeline. A tier-level refusal is left
+    /// to `serverUnusableReason`, so the two never repeat each other.
+    static func serverFeatureUnusableReason(_ feature: RoutedFeature, server: TierRoutingServerState) -> String? {
+        guard serverSupportsRouting(server.apiVersion),
+              let status = server.featureStatus?[feature.rawValue], !status.usable,
+              status.reason == "cli_untrusted_input" else { return nil }
+        return describeServerReason(status.reason)
+    }
+
     /// Human wording for the server's reason codes (providers/tier-routing.mjs).
     static func describeServerReason(_ code: String?) -> String {
         switch code {
@@ -239,6 +260,12 @@ enum TierRouting {
         case "disabled":          return "the provider is disabled"
         case "not_agent_capable": return "only Claude or a custom provider with an Anthropic-compatible URL can"
         case "unset":             return "the tier is not set on the server — it has not synced yet"
+        case "cli_unverified":    return "the server hasn't checked its CLI yet — reopen Settings in a moment"
+        case "cli_failed":        return "its CLI failed on the server recently (broken install or logged out) "
+                                      + "— it is retried automatically in about 10 minutes"
+        case "route_failed":      return "the provider failed on the server recently — it is retried automatically "
+                                      + "in about 10 minutes"
+        case "cli_untrusted_input": return "subscription CLIs aren't used for untrusted input; add an API key to route this role"
         case let other?:          return other
         case nil:                 return "unknown reason"
         }
@@ -355,8 +382,9 @@ enum TierRouting {
             tierRoutingLogger.error("Tier routing table unreadable; not pushing it (the server keeps its copy)")
         }
         if let table { dropped = try await api.syncTierRouting(table) }
-        let status = try await api.fetchTierRoutingStatus()
-        return TierRoutingServerState(apiVersion: serverApiVersion, status: status, dropped: dropped)
+        let fetched = try await api.fetchTierRoutingStatus()
+        return TierRoutingServerState(apiVersion: serverApiVersion, status: fetched.status, dropped: dropped,
+                                      featureStatus: fetched.featureStatus)
     }
 
     /// Sign-out: the status belongs to the previous user. Also invalidates any

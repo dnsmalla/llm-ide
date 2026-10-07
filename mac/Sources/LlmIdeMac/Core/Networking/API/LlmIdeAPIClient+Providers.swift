@@ -101,12 +101,18 @@ extension LlmIdeAPIClient {
     }
 
     /// The server's per-tier status (GET /kb/routing-tiers, API v67+): whether
-    /// its resolver can run each tier (vault keys, synced custom providers) and
-    /// whether the Agent engine can. Keyed by `RoutingTier.rawValue`.
-    func fetchTierRoutingStatus() async throws -> [String: TierServerStatus] {
-        struct Response: Decodable { let status: [String: TierServerStatus]? }
+    /// its resolver can run each tier (vault keys, installed CLIs, synced
+    /// custom providers) and whether the Agent engine can, keyed by
+    /// `RoutingTier.rawValue`; plus per-role status (`featureStatus`, v69+,
+    /// nil from an older server), keyed by `RoutedFeature.rawValue`.
+    func fetchTierRoutingStatus() async throws
+        -> (status: [String: TierServerStatus], featureStatus: [String: TierFeatureServerStatus]?) {
+        struct Response: Decodable {
+            let status: [String: TierServerStatus]?
+            let featureStatus: [String: TierFeatureServerStatus]?
+        }
         let response: Response = try await get("/kb/routing-tiers", authenticated: true,
                                                timeout: TierRouting.refreshRequestTimeout)
-        return response.status ?? [:]
+        return (response.status ?? [:], response.featureStatus)
     }
 }

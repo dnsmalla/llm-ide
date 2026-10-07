@@ -757,7 +757,7 @@ final class ChatEngine {
             // surfaces v2 approvals; legacy transports take the protocol's
             // default, which forwards to the 3-callback method above and
             // never fires onApproval — byte-identical to the old call.
-            let resp = try await transport.roundTrip(
+            let resp = try await transport.roundTripWithRouteFallback(
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
@@ -969,7 +969,7 @@ final class ChatEngine {
             // question, a confirmed card): without the flag the server drops
             // the execution skill for it — same rule as the auto-continue.
             if agent.planExecution?.phase == .running { input.planExecute = true }
-            let resp = try await transport.roundTrip(
+            let resp = try await transport.roundTripWithRouteFallback(
                 input,
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },

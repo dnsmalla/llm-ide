@@ -20,6 +20,15 @@ struct TierServerStatus: Codable, Equatable, Sendable {
     var via: String? = nil
 }
 
+/// One configured ROLE as the server sees it (`featureStatus`, API v69+):
+/// unusable when its tier is (same reason) or when the tier's route may not
+/// serve this role — `cli_untrusted_input`: a keyless codex/gemini route is
+/// never used for Internal helpers or the Server pipeline.
+struct TierFeatureServerStatus: Codable, Equatable, Sendable {
+    var usable: Bool
+    var reason: String?
+}
+
 /// An entry the server dropped from the synced table (`POST` answer, v67+).
 struct TierRoutingDropped: Codable, Equatable, Sendable {
     let entry: String
@@ -38,6 +47,9 @@ struct TierRoutingServerState: Equatable, Sendable {
     /// Per-tier status keyed by `RoutingTier.rawValue`; nil = not fetched.
     var status: [String: TierServerStatus]?
     var dropped: [TierRoutingDropped] = []
+    /// Per-role status keyed by `RoutedFeature.rawValue` (API v69+; nil from
+    /// an older server or before the first fetch).
+    var featureStatus: [String: TierFeatureServerStatus]? = nil
 
     static let unknown = TierRoutingServerState(apiVersion: nil, status: nil)
 }

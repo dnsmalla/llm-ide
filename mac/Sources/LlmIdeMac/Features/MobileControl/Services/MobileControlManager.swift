@@ -982,7 +982,7 @@ final class MobileControlManager {
         // Forward the Mac user's selected provider/model (same source as
         // explore_chat) so a non-Anthropic provider is used instead of the
         // server defaulting to Anthropic → the claude CLI → "not logged in".
-        let (model, provider) = MobileExploreBridge.modelAndProvider(
+        let (model, provider, routeFallback) = MobileExploreBridge.modelAndProvider(
             config: config, mode: "auto_read_only", requiresAgentEngine: engine.usesAgentV2Engine)
         do {
             let commandId = chat.commandId
@@ -1021,6 +1021,7 @@ final class MobileControlManager {
                 // the plan is simply the reply. So they need no confirmation
                 // channel, and `execute` still lands on `ask`.
                 mode: "auto_read_only",
+                routeFallback: routeFallback,
                 expectedSessionID: sid,
                 onProgress: { [weak self] label in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }
@@ -1129,7 +1130,7 @@ final class MobileControlManager {
         }
         // Resolved AFTER the engine: a tier route must fit the engine (a v2
         // chat needs an Agent-engine-capable provider).
-        let (model, provider) = MobileExploreBridge.modelAndProvider(
+        let (model, provider, routeFallback) = MobileExploreBridge.modelAndProvider(
             config: config, mode: "auto", requiresAgentEngine: engine.usesAgentV2Engine)
         do {
             let commandId = chat.commandId
@@ -1155,6 +1156,7 @@ final class MobileControlManager {
                 // finish — but ONLY when the user enabled the exploreEdit
                 // switch; otherwise the turn is read-only. See turnPolicy.
                 permissionMode: turnPolicy.permissionMode,
+                routeFallback: routeFallback,
                 expectedSessionID: sid,
                 onProgress: { [weak self] label in
                     guard let self, !self.isMobileCommandCancelled(commandId) else { return }

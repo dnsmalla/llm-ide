@@ -238,7 +238,8 @@ struct QuickChatContext {
                                          defaultModelId: quickChatFallbackModel(config: config, tool: tool),
                                          models: tool.models)
             let route = engine.flatMap(tierRoute(for:))
-            return ChatTransportInput(
+            let configuredProvider = ChatTransportInput.makeProvider(selectedProvider: tool.rawValue)
+            var input = ChatTransportInput(
                 message: message,
                 history: history,
                 attachments: attachments,
@@ -248,12 +249,18 @@ struct QuickChatContext {
                 agentContext: resolve(config: config, projectStore: projectStore)?.agentContext,
                 language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
                 model: route?.model ?? model,
-                provider: route?.provider ?? ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
+                provider: route?.provider ?? configuredProvider,
                 // Read-only: either surface can be closed while the phone
                 // drives the same engine, so a turn that could park on an
                 // approval would hang with nothing able to render the card.
                 mode: "ask"
             )
+            // A route the server refuses (provider missing / CLI unable to
+            // run) is retried once on the configured model + provider.
+            if route != nil {
+                input.routeFallback = TierRouteFallback(model: model, provider: configuredProvider)
+            }
+            return input
         }
         // Without these three, the engine's defaults (`{ _, _, _ in false }`)
         // answer every Submit/Allow/Deny with a failure — the card the quick

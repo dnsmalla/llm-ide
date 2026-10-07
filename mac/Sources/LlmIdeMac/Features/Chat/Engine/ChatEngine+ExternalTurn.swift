@@ -103,6 +103,7 @@ extension ChatEngine {
         provider: String?,
         mode: String? = nil,
         permissionMode: String? = nil,
+        routeFallback: TierRouteFallback? = nil,
         expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
@@ -139,7 +140,7 @@ extension ChatEngine {
                 try await performExternalTurn(
                     message: message, skillIds: skillIds, attachments: attachments,
                     agentContext: agentContext, model: model, provider: provider, mode: mode,
-                    permissionMode: permissionMode,
+                    permissionMode: permissionMode, routeFallback: routeFallback,
                     expectedSessionID: expectedSessionID, onProgress: onProgress)
             }
         }
@@ -177,6 +178,7 @@ extension ChatEngine {
         provider: String?,
         mode: String? = nil,
         permissionMode: String? = nil,
+        routeFallback: TierRouteFallback? = nil,
         expectedSessionID: UUID,
         onProgress: @escaping (String) -> Void
     ) async throws -> String {
@@ -238,12 +240,15 @@ extension ChatEngine {
                 mode: mode,
                 permissionMode: permissionMode
             )
+            // A tier-routed phone turn the server refuses is retried once on
+            // the Mac's own settings (roundTripWithRouteFallback).
+            input.routeFallback = routeFallback
             // Same identity stamp as runTurn/sendFollowup — here the bridge
             // already targets this engine's session (the resolver guarantees
             // it), so this is a structural no-op that keeps the rule uniform:
             // every turn carries the identity of the engine that runs it.
             stampOwnIdentity(&input)
-            let resp = try await transport.roundTrip(
+            let resp = try await transport.roundTripWithRouteFallback(
                 input,
                 onProgress: { [self] progress in
                     recordProgress(progress)
