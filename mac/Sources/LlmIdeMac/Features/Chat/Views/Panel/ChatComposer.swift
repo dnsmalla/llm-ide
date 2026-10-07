@@ -333,6 +333,9 @@ extension CodeAssistantPanel {
         // Here rather than on the panel body, whose modifier chain is already
         // at the type checker's limit.
         .onChange(of: composerProviderId) { _, _ in applyComposerProvider() }
+        // The displayed chat switched between the Agent v2 and the legacy
+        // engine: re-decide whether a classic-only override may apply.
+        .onChange(of: engine.usesAgentV2Engine) { _, _ in applyComposerProvider() }
     }
 
     // MARK: - Toolbar layouts (used by ViewThatFits)
