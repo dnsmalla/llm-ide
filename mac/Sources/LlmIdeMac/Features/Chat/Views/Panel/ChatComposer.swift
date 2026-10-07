@@ -652,11 +652,13 @@ extension CodeAssistantPanel {
     /// Reasoning-effort selector. Its options are the chosen model's own
     /// levels from the Agent SDK (never a list kept here), so it needs a
     /// dynamic Menu rather than `chipMenu`'s fixed enum. Hidden when the
-    /// model reports none (other providers, an older server).
+    /// model reports none (other providers, an older server). Also hidden when
+    /// the turn will not run on the Agent v2 engine: the legacy transport drops
+    /// `effort`, so a visible chip would promise a setting that has no effect.
     @ViewBuilder
     var effortChip: some View {
         let levels = modelState.effortLevelsForNextTurn(config: config)
-        if !levels.isEmpty {
+        if engine.usesAgentV2Engine, !levels.isEmpty {
             let current = EffortChoice.effective(stored: effortRaw, levels: levels)
             Menu {
                 Button { effortRaw = EffortChoice.auto } label: {
