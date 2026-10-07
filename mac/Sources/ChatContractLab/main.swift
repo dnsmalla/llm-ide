@@ -1402,6 +1402,23 @@ do {
            "an older server's entry (no effortLevels) decodes as []")
 }
 
+print("EffortChoice.levels")
+do {
+    let rows: [(id: String, levels: [String])] = [
+        (id: "claude-opus-5[1m]", levels: ["high", "max"]),
+        (id: "claude-sonnet-5", levels: ["low", "high"]),
+    ]
+    let base = { (id: String) in id.replacingOccurrences(of: "[1m]", with: "") }
+    expect(EffortChoice.levels(forModelId: "claude-sonnet-5", in: rows, baseId: base) == ["low", "high"],
+           "exact id match")
+    expect(EffortChoice.levels(forModelId: "claude-opus-5", in: rows, baseId: base) == ["high", "max"],
+           "a saved pick without the [1m] suffix still finds its model")
+    expect(EffortChoice.levels(forModelId: "", in: rows, baseId: base) == ["high", "max"],
+           "no model chosen = the SDK default, listed first")
+    expect(EffortChoice.levels(forModelId: "claude-gone", in: rows, baseId: base) == [],
+           "an unlisted model has no picker")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

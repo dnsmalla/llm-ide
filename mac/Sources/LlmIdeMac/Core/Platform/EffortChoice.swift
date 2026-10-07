@@ -24,4 +24,17 @@ public enum EffortChoice {
         guard let first = level.first else { return level }
         return first.uppercased() + level.dropFirst()
     }
+
+    /// The levels of the model a turn will run on. `modelId` "" = none
+    /// chosen, so the server's default runs — the listing's first row. A
+    /// saved id can differ from the listed one by a suffix ("[1m]", a date
+    /// snapshot); `baseId` (AIModel.baseId) bridges that.
+    public static func levels(forModelId modelId: String,
+                              in rows: [(id: String, levels: [String])],
+                              baseId: (String) -> String) -> [String] {
+        if modelId.isEmpty { return rows.first?.levels ?? [] }
+        if let exact = rows.first(where: { $0.id == modelId }) { return exact.levels }
+        let base = baseId(modelId)
+        return rows.first(where: { baseId($0.id) == base })?.levels ?? []
+    }
 }

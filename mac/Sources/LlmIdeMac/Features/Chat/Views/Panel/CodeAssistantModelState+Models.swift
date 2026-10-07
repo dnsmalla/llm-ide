@@ -68,6 +68,16 @@ extension CodeAssistantModelState {
         return id.isEmpty ? nil : id
     }
 
+    /// The effort levels of the model the next turn sends. Custom providers
+    /// and non-Claude tools never get an effort picker.
+    func effortLevelsForNextTurn(config: AppConfig) -> [String] {
+        guard !selectedProvider.starts(with: "custom:"),
+              (AICliTool(rawValue: selectedProvider) ?? .claudeCode) == .claudeCode else { return [] }
+        let rows = models(for: .claudeCode).map { (id: $0.id, levels: $0.effortLevels) }
+        return EffortChoice.levels(forModelId: effectiveModelId(config: config),
+                                   in: rows, baseId: AIModel.baseId)
+    }
+
     /// Models for the currently selected provider, built-in or custom.
     func modelsForCurrentProvider() -> [AIModel] {
         if selectedProvider.starts(with: "custom:") {
