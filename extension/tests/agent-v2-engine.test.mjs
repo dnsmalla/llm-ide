@@ -842,16 +842,22 @@ function registerGatewayProvider(userId, {
   return `custom:${id}`;
 }
 
-// A fake SDK query with the two extras the real factory provides.
+// A fake SDK query with the two extras the real factory provides. Like the
+// real iterator it does NOT end on its own: after its messages it waits for
+// `releaseInput`, so a runner that forgets to release hangs (and the test's
+// timeout fails it) instead of passing by accident.
 function contextQuery({ messages, usage, throwAfter = false }) {
-  const calls = { asked: 0, released: 0 };
+  const calls = { asked: 0, released: 0, order: [] };
   const factory = () => {
+    let release;
+    const inputEnded = new Promise((resolve) => { release = resolve; });
     const gen = (async function* () {
       for (const m of messages) yield m;
       if (throwAfter) throw new Error('sdk blew up');
+      await inputEnded;
     })();
-    gen.getContextUsage = async () => { calls.asked += 1; return usage; };
-    gen.releaseInput = () => { calls.released += 1; };
+    gen.getContextUsage = async () => { calls.asked += 1; calls.order.push('ask'); return usage; };
+    gen.releaseInput = () => { calls.released += 1; calls.order.push('release'); release(); };
     return gen;
   };
   return { factory, calls };
@@ -863,7 +869,7 @@ const RESULT_TURN = [
 ];
 const SDK_USAGE = { totalTokens: 10460, rawMaxTokens: 1000000, percentage: 1, categories: [{ name: 'Messages', kind: 'used', tokens: 2078 }] };
 
-test('turn end: context_usage follows result, then the input is released',
+test('turn end: context_usage follows result, then the input is released', { timeout: 5000 },
   withAnthropicKey('sk-ant-v2-test', async () => {
     const { factory, calls } = contextQuery({ messages: RESULT_TURN, usage: SDK_USAGE });
     const events = [];
@@ -877,9 +883,11 @@ test('turn end: context_usage follows result, then the input is released',
     assert.equal(events.find((e) => e.type === 'context_usage').maxTokens, 1000000);
     assert.equal(calls.asked, 1);
     assert.ok(calls.released >= 1, 'released after the read');
+    assert.equal(calls.order[0], 'ask', 'usage is read before the first release');
+    assert.equal(calls.order.indexOf('release'), 1);
   }));
 
-test('turn end: an SDK failure with no result still releases the input and sends no context_usage',
+test('turn end: an SDK failure with no result still releases the input and sends no context_usage', { timeout: 5000 },
   withAnthropicKey('sk-ant-v2-test', async () => {
     const { factory, calls } = contextQuery({ messages: [RESULT_TURN[0]], usage: SDK_USAGE, throwAfter: true });
     const events = [];
@@ -892,7 +900,7 @@ test('turn end: an SDK failure with no result still releases the input and sends
     assert.ok(!events.some((e) => e.type === 'context_usage'));
   }));
 
-test('turn end: a gateway turn never reads context usage but still releases',
+test('turn end: a gateway turn never reads context usage but still releases', { timeout: 5000 },
   async () => {
     const user = registerUser(getDb(), { email: 'v2-ctx-gw@example.com', password: 'CorrectHorseBattery', displayName: 't' });
     const gateway = registerGatewayProvider(user.id);
