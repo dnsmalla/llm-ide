@@ -689,7 +689,9 @@ extension CodeAssistantPanel {
     /// Context-window meter: a ring + percentage of the SDK's own numbers for
     /// this chat's last v2 turn; the popover lists the SDK's categories as
     /// they come. Nothing until a turn has reported (fresh chat, app restart,
-    /// older server, gateway turn).
+    /// older server). The previous value deliberately stays visible after a
+    /// gateway, legacy, stopped or failed turn (keep-previous rule); it only
+    /// clears when the chat is switched or cleared.
     @ViewBuilder
     var contextUsageChip: some View {
         if let usage = engine.lastContextUsage {

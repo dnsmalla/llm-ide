@@ -352,6 +352,11 @@ struct CodeAssistantPanel: View {
             // A turn starting while dictating (Enter mid-recording): stop, so
             // the transcript lands in the composer now as the NEXT draft,
             // instead of arriving a minute later into whatever is there.
+            // A popover left open must not re-open itself when the next
+            // turn reports usage after a session switch / clear emptied it.
+            .onChange(of: engine.lastContextUsage == nil) { _, isEmpty in
+                if isEmpty { showContextUsage = false }
+            }
             .onChange(of: engine.busy) { _, busy in
                 guard busy, voiceState.isRecording else { return }
                 voiceState.setRecording(false)
