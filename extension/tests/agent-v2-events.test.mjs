@@ -8,7 +8,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { mapSdkMessage } from '../llm_agent/sdk/events.mjs';
+import { mapSdkMessage, mapContextUsage } from '../llm_agent/sdk/events.mjs';
 
 // --- init --------------------------------------------------------------------
 
@@ -125,4 +125,37 @@ test('assistant message without usage is dropped, not passed through', () => {
     mapSdkMessage({ type: 'assistant', message: { content: [{ type: 'text', text: 'hi' }] } }),
     [],
   );
+});
+
+test('mapContextUsage: SDK values pass through verbatim; maxTokens is rawMaxTokens', () => {
+  const ev = mapContextUsage({
+    model: 'claude-sonnet-5', totalTokens: 10460, maxTokens: 967000, rawMaxTokens: 1000000, percentage: 1,
+    categories: [
+      { name: 'System tools', tokens: 1809, color: 'x', kind: 'used' },
+      { name: 'Autocompact buffer', tokens: 33000, color: 'y', kind: 'buffer' },
+      { name: 'Brand new thing', tokens: 5, color: 'z', kind: 'mystery' },
+    ],
+    gridRows: [], memoryFiles: [], mcpTools: [], agents: [],
+  });
+  assert.deepEqual(ev, {
+    type: 'context_usage', totalTokens: 10460, maxTokens: 1000000, percentage: 1,
+    categories: [
+      { name: 'System tools', kind: 'used', tokens: 1809 },
+      { name: 'Autocompact buffer', kind: 'buffer', tokens: 33000 },
+      { name: 'Brand new thing', kind: 'mystery', tokens: 5 },
+    ],
+  }, 'no model field: the route treats any event model as the metered model');
+});
+
+test('mapContextUsage: missing numbers → null; bad rows dropped; missing kind → used', () => {
+  assert.equal(mapContextUsage(null), null);
+  assert.equal(mapContextUsage({ totalTokens: 5 }), null, 'no rawMaxTokens');
+  assert.equal(mapContextUsage({ totalTokens: 'x', rawMaxTokens: 10 }), null);
+  const ev = mapContextUsage({
+    totalTokens: 5, rawMaxTokens: 10,
+    categories: [null, { name: 'A', tokens: 2 }, { name: 7, tokens: 1 }, { name: 'B', tokens: 'n' }],
+  });
+  assert.equal(ev.percentage, 0, 'a missing percentage is 0, not NaN');
+  assert.deepEqual(ev.categories, [{ name: 'A', kind: 'used', tokens: 2 }]);
+  assert.deepEqual(mapContextUsage({ totalTokens: 5, rawMaxTokens: 10 }).categories, []);
 });

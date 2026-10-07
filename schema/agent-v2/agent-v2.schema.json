@@ -91,6 +91,31 @@
       }
     },
     {
+      "title": "context_usage",
+      "description": "The SDK's context-window usage after the turn (getContextUsage detail 'summary'), read while the session is still open. Emitted once after `result`, never on a gateway turn, and not at all when the read fails or exceeds 2 s (server API v64).",
+      "additionalProperties": false,
+      "required": ["type", "totalTokens", "maxTokens", "percentage", "categories"],
+      "properties": {
+        "type": { "const": "context_usage" },
+        "totalTokens": { "type": "integer" },
+        "maxTokens": { "type": "integer" },
+        "percentage": { "type": "integer" },
+        "categories": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "kind", "tokens"],
+            "properties": {
+              "name": { "type": "string" },
+              "kind": { "type": "string" },
+              "tokens": { "type": "integer" }
+            }
+          }
+        }
+      }
+    },
+    {
       "title": "result",
       "additionalProperties": false,
       "required": ["type", "subtype", "costUsd", "numTurns", "durationMs", "sessionId", "stopReason"],

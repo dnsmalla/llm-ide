@@ -136,3 +136,26 @@ export function mapSdkMessage(msg) {
   // the observation channel unchanged.
   return [{ type: 'sdk', sdkType: msg.type, subtype: msg.subtype ?? null, raw: msg }];
 }
+
+/**
+ * SDK `getContextUsage()` response → the `context_usage` wire event.
+ *
+ * Every value is the SDK's own: the window is `rawMaxTokens` (the one
+ * auto-compaction measures against), and category names and kinds pass
+ * through untouched so a category a newer SDK adds shows up with no change
+ * here or in the Mac app. No `model` field on purpose — the route takes any
+ * event's `model` as the turn's metered model.
+ */
+export function mapContextUsage(r) {
+  if (!r || !Number.isFinite(r.totalTokens) || !Number.isFinite(r.rawMaxTokens)) return null;
+  const categories = (Array.isArray(r.categories) ? r.categories : [])
+    .filter((c) => c && typeof c.name === 'string' && Number.isFinite(c.tokens))
+    .map((c) => ({ name: c.name, kind: typeof c.kind === 'string' && c.kind ? c.kind : 'used', tokens: c.tokens }));
+  return {
+    type: 'context_usage',
+    totalTokens: r.totalTokens,
+    maxTokens: r.rawMaxTokens,
+    percentage: Number.isFinite(r.percentage) ? r.percentage : 0,
+    categories,
+  };
+}
