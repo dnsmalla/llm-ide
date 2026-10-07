@@ -1,9 +1,18 @@
 import crypto from 'node:crypto';
 import { runClaude, resolveLanguage } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
-import { Document, Packer, Paragraph, HeadingLevel, TextRun } from 'docx';
 import * as kb from '../kb/db.mjs';
 import { scanForSecrets } from '../guardrails/scan.mjs';
+
+// docx is imported on first export, not at boot: its bundled util-deprecate
+// shim reads globalThis.localStorage at import time, and on Node 25+ that read
+// prints "`--localstorage-file` was provided without a valid path" on every
+// server start.
+let docxModule;
+async function loadDocx() {
+  docxModule ??= await import('docx');
+  return docxModule;
+}
 
 // Mirror of ai-routes.mjs#ingestGeneratedDoc — kept inline here to avoid
 // a cross-file import cycle. Best-effort, swallows errors so a KB write
@@ -255,7 +264,7 @@ export function buildDocRef({ docTitle, command, sourceNames }) {
 // Build a docx Document from the structured JSON the model returns.
 // Each top-level key becomes an H1 section; multi-line string values are
 // split into one paragraph per line so bullets/owners render naturally.
-function buildMeetingDocx(noteData, { title, dateStr }) {
+function buildMeetingDocx({ Document, Paragraph, HeadingLevel, TextRun }, noteData, { title, dateStr }) {
   const safeTitle = safeStr(noteData.title) || safeStr(title) || 'Meeting';
   const children = [];
   children.push(new Paragraph({
@@ -348,8 +357,9 @@ export async function handleExportRoutes(req, res) {
 
     let buffer;
     try {
-      const doc = buildMeetingDocx(noteData, { title: meetingTitle, dateStr });
-      buffer = await Packer.toBuffer(doc);
+      const docx = await loadDocx();
+      const doc = buildMeetingDocx(docx, noteData, { title: meetingTitle, dateStr });
+      buffer = await docx.Packer.toBuffer(doc);
     } catch (err) {
       sendJSON(res, 500, { error: { code: 'INTERNAL_ERROR', message: `Failed to build DOCX: ${err?.message || 'unknown'}` } });
       return true;
