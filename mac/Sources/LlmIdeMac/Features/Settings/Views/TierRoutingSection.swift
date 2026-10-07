@@ -9,7 +9,17 @@ private let tierRoutingSectionLogger = Logger(subsystem: "com.llmide.macapp", ca
 struct TierRoutingSection: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
+    /// Read for `serverApiVersion` only — routing needs API v67+.
+    @Environment(BackendManager.self) private var backend
     @State private var routing = TierRoutingConfig.load()
+    /// The server's view (version, per-tier status, dropped entries), as last
+    /// fetched — mirrors `TierRoutingServerCache`, which the resolvers read.
+    @State private var serverState = TierRoutingServerCache.shared.state
+    /// A provider picked for a tier whose model list is still empty (Claude's
+    /// live list not loaded, a custom provider with no models): shown in the
+    /// menu but NOT saved, so the table never stores `model: ""`. Saved once a
+    /// model is chosen.
+    @State private var pendingProviders: [String: String] = [:]
     @State private var customProviders = CustomProvider.loadAll()
     @State private var syncError: String?
     /// Bumped when Claude's live model list lands, so the menus re-read it.
@@ -19,6 +29,13 @@ struct TierRoutingSection: View {
         SettingsSectionCard(icon: "dial.medium", title: "Tier Routing") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 SettingsHint("Run each role on a cheaper or stronger model. Pick a provider and model per tier, then choose which tier each role uses. Anything left on Default — or a tier that can't be used — runs exactly as before.")
+
+                if let versionNote = serverVersionNote {
+                    Text(versionNote)
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
 
                 Text("Tiers")
                     .font(Typography.body.weight(.semibold))
@@ -36,6 +53,11 @@ struct TierRoutingSection: View {
                     featureRow(feature)
                 }
 
+                if !serverState.dropped.isEmpty {
+                    note("The server ignored: "
+                         + serverState.dropped.map { "\($0.entry) (\($0.reason))" }.joined(separator: ", "))
+                }
+
                 if let syncError {
                     Text(syncError)
                         .font(Typography.caption)
@@ -47,10 +69,15 @@ struct TierRoutingSection: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .customProvidersChanged)) { _ in
             customProviders = CustomProvider.loadAll()
+            sync()   // the server's per-tier status depends on custom providers
         }
+        .onChange(of: backend.serverApiVersion) { sync() }
         .task {
             routing = TierRoutingConfig.load()
             customProviders = CustomProvider.loadAll()
+            // The version gates everything below; probe rather than trust a
+            // cache that may predate a server restart.
+            await backend.refreshServerApiVersion()
             sync()   // the server's copy is per user; re-push like custom providers
             await loadClaudeModels()
         }
@@ -60,6 +87,7 @@ struct TierRoutingSection: View {
 
     private func tierRow(_ tier: RoutingTier) -> some View {
         let route = routing.tier(tier)
+        let shownProvider = pendingProviders[tier.rawValue] ?? route?.provider
         return VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: Spacing.sm) {
                 Text(tier.displayName)
@@ -83,9 +111,16 @@ struct TierRoutingSection: View {
                 .labelsHidden()
                 .pickerStyle(.menu)
                 .frame(maxWidth: 180)
-                if let route {
+                if let shownProvider {
                     Picker("Model", selection: modelBinding(tier)) {
-                        ForEach(modelChoices(for: route), id: \.id) { model in
+                        // A pending provider has no saved model: a placeholder
+                        // tag keeps the selection matching a row.
+                        if pendingProviders[tier.rawValue] != nil {
+                            Text(models(forProvider: shownProvider).isEmpty ? "No models available" : "Choose a model")
+                                .tag("")
+                        }
+                        ForEach(modelChoices(provider: shownProvider, saved: pendingProviders[tier.rawValue] == nil ? route?.model : nil),
+                                id: \.id) { model in
                             Text(model.displayName).tag(model.id)
                         }
                     }
@@ -96,6 +131,13 @@ struct TierRoutingSection: View {
             }
             if let route, let reason = TierRouting.unusableReason(route, customProviders: customProviders) {
                 note("uses default — \(reason)")
+            } else if route != nil, serverSupported,
+                      let status = serverState.status?[tier.rawValue], !status.usable {
+                note("uses default — the server can't run it: \(TierRouting.describeServerReason(status.reason))")
+            }
+            if pendingProviders[tier.rawValue] != nil {
+                note(route.map { "not saved until a model is chosen — still using \($0.provider) · \($0.model)" }
+                     ?? "not saved until a model is chosen")
             }
         }
     }
@@ -119,21 +161,46 @@ struct TierRoutingSection: View {
             }
             if let reason = featureUnusableReason(feature) {
                 note("uses default — \(reason)")
-            } else if feature == .loop, let reason = loopAgentStepReason() {
+            } else if feature == .loop, let reason = agentEngineReason(for: .loop) {
                 // The replay takes the route; the agent steps (the bulk of a
                 // Loop's cost) run on the Agent SDK and keep their default.
                 note("agent steps use default — \(reason). Only Claude or a custom provider "
+                     + "with an Anthropic-compatible URL can run them.")
+            } else if feature == .quickChat, let reason = agentEngineReason(for: .quickChat) {
+                // Classic-engine chats take the route; a chat stamped for the
+                // Agent engine needs an Anthropic-compatible provider.
+                note("on Agent-engine chats uses default — \(reason). Only Claude or a custom provider "
                      + "with an Anthropic-compatible URL can run them.")
             }
         }
     }
 
-    /// Why the Loop's agent steps (POST /kb/loop/agent-run, Agent SDK) cannot
-    /// take the Loop's route even though the regression replay can — the same
-    /// check `LoopAgentTierRoute` applies per call.
-    private func loopAgentStepReason() -> String? {
-        guard let tier = routing.tier(for: .loop), let route = routing.tier(tier) else { return nil }
-        return TierRouting.unusableReason(route, customProviders: customProviders, requiresAgentEngine: true)
+    /// Why `feature`'s Agent-engine work (Loop agent steps via
+    /// /kb/loop/agent-run, Agent-engine quick chats) cannot take its route even
+    /// though its other calls can — the same local + server checks
+    /// `TierRouting.resolve(requiresAgentEngine: true)` applies per call.
+    private func agentEngineReason(for feature: RoutedFeature) -> String? {
+        guard let tier = routing.tier(for: feature), let route = routing.tier(tier) else { return nil }
+        if let local = TierRouting.unusableReason(route, customProviders: customProviders, requiresAgentEngine: true) {
+            return local
+        }
+        guard serverSupported, let status = serverState.status?[tier.rawValue], !status.agentCapable else { return nil }
+        return "the server can't run it on the Agent engine (\(TierRouting.describeServerReason(status.agentReason)))"
+    }
+
+    private var serverSupported: Bool { TierRouting.serverSupportsRouting(serverState.apiVersion) }
+
+    /// Shown when nothing can route because of the server's version.
+    private var serverVersionNote: String? {
+        let version = backend.serverApiVersion ?? serverState.apiVersion
+        guard !TierRouting.serverSupportsRouting(version) else { return nil }
+        let required = TierRouting.requiredServerApiVersion
+        guard let version else {
+            return "Tier routing needs the LLM-IDE server's API v\(required) or newer, and no running server has "
+                + "reported its version. Every role uses its default until it does."
+        }
+        return "Tier routing needs the LLM-IDE server's API v\(required) or newer; the running server is v\(version). "
+            + "Every role uses its default until the server is restarted on a newer version."
     }
 
     private func note(_ text: String) -> some View {
@@ -146,13 +213,22 @@ struct TierRoutingSection: View {
     // MARK: - Derived state
 
     /// Why a role set to a tier still runs its default. Auto Tasks run a local
-    /// CLI, so they get the CLI constraint; the chat surfaces' Agent-engine
-    /// constraint depends on each chat and is applied per turn instead.
+    /// CLI, so they get the CLI constraint (including whether it's installed);
+    /// the chat surfaces' Agent-engine constraint depends on each chat and is
+    /// applied per turn instead. Server-side refusals come from the last
+    /// status fetch.
     private func featureUnusableReason(_ feature: RoutedFeature) -> String? {
         guard let tier = routing.tier(for: feature) else { return nil }
         guard let route = routing.tier(tier) else { return "the \(tier.displayName) tier is not set" }
-        return TierRouting.unusableReason(route, customProviders: customProviders,
-                                          localCLIOnly: feature == .autoTasks)
+        let localCLIOnly = feature == .autoTasks
+        if let local = TierRouting.unusableReason(route, customProviders: customProviders,
+                                                  localCLIOnly: localCLIOnly,
+                                                  cliInstalled: TierRouting.isCLIInstalled) {
+            return local
+        }
+        // The version note at the top already covers an old server.
+        guard serverSupported else { return nil }
+        return TierRouting.serverUnusableReason(tier, server: serverState, localCLIOnly: localCLIOnly)
     }
 
     private func isListedProvider(_ provider: String) -> Bool {
@@ -169,26 +245,34 @@ struct TierRoutingSection: View {
 
     /// The provider's models, plus the saved model when the list lacks it (a
     /// live list not fetched yet), so the menu never shows a blank selection.
-    private func modelChoices(for route: TierRoute) -> [AIModel] {
-        let list = models(forProvider: route.provider)
-        guard !route.model.isEmpty, !list.contains(where: { $0.id == route.model }) else { return list }
-        return list + [AIModel(id: route.model, displayName: route.model)]
+    private func modelChoices(provider: String, saved: String?) -> [AIModel] {
+        let list = models(forProvider: provider)
+        guard let saved, !saved.isEmpty, !list.contains(where: { $0.id == saved }) else { return list }
+        return list + [AIModel(id: saved, displayName: saved)]
     }
 
     // MARK: - Bindings
 
     private func providerBinding(_ tier: RoutingTier) -> Binding<String> {
         Binding(
-            get: { routing.tier(tier)?.provider ?? "" },
+            get: { pendingProviders[tier.rawValue] ?? routing.tier(tier)?.provider ?? "" },
             set: { provider in
                 var updated = routing
                 if provider.isEmpty {
+                    pendingProviders[tier.rawValue] = nil
                     updated.tiers[tier.rawValue] = nil
-                } else if updated.tiers[tier.rawValue]?.provider != provider {
+                } else if updated.tiers[tier.rawValue]?.provider == provider {
+                    pendingProviders[tier.rawValue] = nil   // back to what is saved
+                } else if let first = models(forProvider: provider).first?.id {
                     // A new provider starts on its first model; the old model
                     // id belongs to the previous provider.
-                    let first = models(forProvider: provider).first?.id ?? ""
+                    pendingProviders[tier.rawValue] = nil
                     updated.tiers[tier.rawValue] = TierRoute(provider: provider, model: first)
+                } else {
+                    // No model to start on: never store `model: ""`. Keep what
+                    // is saved (or unset) until a model is chosen.
+                    pendingProviders[tier.rawValue] = provider
+                    return
                 }
                 apply(updated)
             }
@@ -197,12 +281,13 @@ struct TierRoutingSection: View {
 
     private func modelBinding(_ tier: RoutingTier) -> Binding<String> {
         Binding(
-            get: { routing.tier(tier)?.model ?? "" },
+            get: { pendingProviders[tier.rawValue] != nil ? "" : (routing.tier(tier)?.model ?? "") },
             set: { model in
-                guard var route = routing.tier(tier) else { return }
-                route.model = model
+                guard !model.isEmpty,
+                      let provider = pendingProviders[tier.rawValue] ?? routing.tier(tier)?.provider else { return }
+                pendingProviders[tier.rawValue] = nil
                 var updated = routing
-                updated.tiers[tier.rawValue] = route
+                updated.tiers[tier.rawValue] = TierRoute(provider: provider, model: model)
                 apply(updated)
             }
         )
@@ -231,17 +316,22 @@ struct TierRoutingSection: View {
         }
     }
 
-    /// Fire-and-forget push; the failure is shown, not swallowed, because an
-    /// unsynced table silently leaves the server's roles on their defaults.
+    /// Fire-and-forget push + status fetch (`TierRouting.refreshServerState`,
+    /// which also feeds the resolvers' cache); the failure is shown, not
+    /// swallowed, because an unsynced table silently leaves every role on its
+    /// default. Below API v67 nothing is sent — the version note says why.
     private func sync() {
         let snapshot = routing
+        let version = backend.serverApiVersion
         Task {
             do {
-                try await api.syncTierRouting(snapshot)
+                serverState = try await TierRouting.refreshServerState(api: api, serverApiVersion: version,
+                                                                       config: snapshot)
                 syncError = nil
             } catch {
+                serverState = TierRoutingServerCache.shared.state
                 tierRoutingSectionLogger.error("Tier routing sync failed: \(error.localizedDescription, privacy: .public)")
-                syncError = "Couldn't sync tier routing to the server: \(error.localizedDescription). Server-side roles use their defaults until it succeeds."
+                syncError = "Couldn't sync tier routing to the server: \(error.localizedDescription). Every role uses its default until it succeeds."
             }
         }
     }

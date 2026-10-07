@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 // POST /kb/loop/agent-run — the Loop's headless, confined agent step (skill
 // stages, stage repairs, fault repairs). Wire contract:
@@ -140,9 +141,28 @@ final class APILoopAgentRunner: LoopAgentRunning {
     func run(message: String, skills: [String], repoRoot: URL, extraRoots: [URL],
              timeout: TimeInterval?, model: String?) async throws -> LoopAgentResult {
         let target = Self.target(explicitModel: model, route: model == nil ? routeResolver() : nil)
-        return try await api.loopAgentRun(message: message, skills: skills, repoRoot: repoRoot,
-                                          extraRoots: extraRoots, language: language,
-                                          model: target.model, provider: target.provider,
-                                          timeout: timeout)
+        do {
+            return try await api.loopAgentRun(message: message, skills: skills, repoRoot: repoRoot,
+                                              extraRoots: extraRoots, language: language,
+                                              model: target.model, provider: target.provider,
+                                              timeout: timeout)
+        } catch where Self.shouldRetryWithoutRoute(error, routedProvider: target.provider) {
+            // Backstop for a route the resolver let through but the server
+            // refuses (key removed, provider unsynced since the status fetch):
+            // routing must never fail a step, so retry once as today's request.
+            loopAgentRunnerLogger.notice("Loop agent route \(target.provider ?? "", privacy: .public) refused (\(error.localizedDescription, privacy: .public)); retrying on the default")
+            return try await api.loopAgentRun(message: message, skills: skills, repoRoot: repoRoot,
+                                              extraRoots: extraRoots, language: language,
+                                              model: model, provider: nil, timeout: timeout)
+        }
+    }
+
+    /// Retry without the route only for a ROUTED call (a provider was sent)
+    /// that the server refused as a provider-config problem — never for a
+    /// generic failure, which would just run the step twice.
+    static func shouldRetryWithoutRoute(_ error: Error, routedProvider: String?) -> Bool {
+        routedProvider != nil && TierRouting.isProviderConfigError(error)
     }
 }
+
+private let loopAgentRunnerLogger = Logger(subsystem: "com.llmide.macapp", category: "TierRouting")

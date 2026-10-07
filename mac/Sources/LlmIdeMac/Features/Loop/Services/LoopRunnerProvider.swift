@@ -23,10 +23,10 @@ final class LoopRunnerProvider: LoopRunnerProviding {
     }
 
     func makeRunner(trigger: LoopRunTrigger, regressionVerifyTimeout: TimeInterval) -> LoopRunning {
-        // Tier routing: nil (unset/unusable) keeps the server's default model.
-        let route = TierRouting.resolve(feature: .loop)
-        let prompter = CodeAssistPrompter(api: api, model: route?.model, provider: route?.provider,
-                                          agent: config.activeCLI)
+        // Tier routing, resolved per replay call so a Settings change reaches
+        // this runner: nil (unset/unusable) keeps the server's default model.
+        let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI,
+                                          routeResolver: LoopReplayTierRoute.resolve)
         let judge = CodeAssistJudge(api: api)
         let repairer = AgentFaultRepairer(api: api, routeResolver: LoopAgentTierRoute.resolve)
         let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,
@@ -60,5 +60,13 @@ final class LoopRunnerProvider: LoopRunnerProviding {
 enum LoopAgentTierRoute {
     static let resolve: @Sendable () -> TierRoute? = {
         TierRouting.resolve(feature: .loop, requiresAgentEngine: true)
+    }
+}
+
+/// The Loop's tier route for its regression REPLAY (/code-assist, any
+/// provider the server can run). Read at each call, like `LoopAgentTierRoute`.
+enum LoopReplayTierRoute {
+    static let resolve: @Sendable () -> TierRoute? = {
+        TierRouting.resolve(feature: .loop)
     }
 }

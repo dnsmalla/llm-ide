@@ -357,6 +357,10 @@ public struct LlmIdeMacApp: App {
                         Task { await sourceLinkStore.refresh(api: api) }
                         if case .running = backend.status {
                             CustomProvider.syncAllToBackend(api: api)
+                            // Per-user server status for tier routing (also
+                            // re-syncs custom providers first, which it needs).
+                            TierRouting.refreshServerStateInBackground(
+                                api: api, serverApiVersion: backend.serverApiVersion)
                         }
                         // Refresh the cached language pref here, not only when
                         // Settings → Preferences happens to be opened. That
@@ -364,6 +368,9 @@ public struct LlmIdeMacApp: App {
                         // never visited it scaffolded every project with the
                         // fallback language instead of their real one.
                         Task { await refreshPreferredLanguage() }
+                    } else {
+                        // The routing status belongs to the signed-out user.
+                        TierRouting.resetServerState()
                     }
                 }
                 // Keep the active project's `linkedRepo` bound to the
@@ -381,6 +388,14 @@ public struct LlmIdeMacApp: App {
                         FeatureCatalog.notifyMobileMacEnvironmentChanged()
                     }
                 }
+                // Tier routing is gated on the running server's API version
+                // (v67+): re-check whenever it changes — a server swapped for
+                // an older one turns routing off, a newer one turns it on.
+                .onChange(of: backend.serverApiVersion) { _, version in
+                    if session.isAuthenticated {
+                        TierRouting.refreshServerStateInBackground(api: api, serverApiVersion: version)
+                    }
+                }
                 .onChange(of: backend.status) { _, newStatus in
                     if config.mobileControlEnabled {
                         FeatureCatalog.notifyMobileMacEnvironmentChanged()
@@ -388,6 +403,8 @@ public struct LlmIdeMacApp: App {
                     if case .running = newStatus {
                         if session.isAuthenticated {
                             CustomProvider.syncAllToBackend(api: api)
+                            TierRouting.refreshServerStateInBackground(
+                                api: api, serverApiVersion: backend.serverApiVersion)
                         }
                         if config.mobileControlEnabled {
                             FeatureCatalog.notifyMobileBackendReady()

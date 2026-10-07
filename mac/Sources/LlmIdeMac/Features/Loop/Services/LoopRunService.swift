@@ -95,10 +95,10 @@ final class LoopRunService: ObservableObject, SessionScoped {
         // Same dependency graph LoopEngineView.init used to build: the full
         // chat model tier for stage repair (a multi-file code edit), per
         // AgentLoopStageRepairer's own doc comment.
-        // Tier routing, same as LoopRunnerProvider: nil keeps the default.
-        let route = TierRouting.resolve(feature: .loop)
-        let prompter = CodeAssistPrompter(api: api, model: route?.model, provider: route?.provider,
-                                          agent: "claude_code")
+        // Tier routing, same as LoopRunnerProvider: resolved per replay call
+        // (this runner is cached per loop), nil keeps the default.
+        let prompter = CodeAssistPrompter(api: api, agent: "claude_code",
+                                          routeResolver: LoopReplayTierRoute.resolve)
         let regressionRunner = RegressionRunner(
             prompter: prompter, judge: CodeAssistJudge(api: api),
             verifier: ShellFaultVerifier(),

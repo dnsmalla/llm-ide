@@ -9,6 +9,7 @@
 // can later replace LlmIdeAPIClient without touching this file).
 
 import Foundation
+import os.log
 
 /// Minimal interface the runner needs. Production binds this to
 /// `LlmIdeAPIClient.codeAssist`; tests bind a fake.
@@ -400,27 +401,41 @@ final class RegressionRunner: ObservableObject {
 final class CodeAssistPrompter: RegressionPrompter {
     let api: LlmIdeAPIClient
     let language: String
-    let model: String?
-    /// Explicit backend provider (a tier route's wire id); nil lets the
-    /// server pick from the model id, as before tier routing.
-    let provider: String?
     let agent: String
+    /// The caller's tier route, read at EACH call (like `APILoopAgentRunner`)
+    /// so a Settings change reaches a long-lived runner; nil keeps today's
+    /// request (server default model, provider derived from it). Core does
+    /// not know which role it serves, so the caller injects it.
+    private let routeResolver: @Sendable () -> TierRoute?
 
-    init(api: LlmIdeAPIClient, language: String = "en",
-         model: String? = nil, provider: String? = nil, agent: String = "claude_code") {
+    init(api: LlmIdeAPIClient, language: String = "en", agent: String = "claude_code",
+         routeResolver: @escaping @Sendable () -> TierRoute? = { nil }) {
         self.api = api
         self.language = language
-        self.model = model
-        self.provider = provider
         self.agent = agent
+        self.routeResolver = routeResolver
     }
 
     func ask(prompt: String) async throws -> String {
+        let route = routeResolver()
+        do {
+            return try await send(prompt, route: route)
+        } catch where route != nil && TierRouting.isProviderConfigError(error) {
+            // The server refused the routed provider (400 PROVIDER_UNAVAILABLE:
+            // missing / disabled / keyless). Routing must never fail a replay,
+            // so ask once more as today's request. Generic failures are not
+            // retried — they would fail the same way on the default.
+            codeAssistPrompterLogger.notice("Replay route \(route?.provider ?? "", privacy: .public) refused (\(error.localizedDescription, privacy: .public)); retrying on the default")
+            return try await send(prompt, route: nil)
+        }
+    }
+
+    private func send(_ prompt: String, route: TierRoute?) async throws -> String {
         let resp = try await api.codeAssist(
             message: prompt,
             language: language,
-            model: model,
-            provider: provider,
+            model: route?.model,
+            provider: route?.provider,
             history: [],
             attachments: [],
             agentContext: nil
@@ -428,6 +443,8 @@ final class CodeAssistPrompter: RegressionPrompter {
         return resp.reply
     }
 }
+
+private let codeAssistPrompterLogger = Logger(subsystem: "com.llmide.macapp", category: "TierRouting")
 
 /// Production semantic judge — one constrained codeAssist call per
 /// textually-drifted fault, answered YES/NO. Cheap by construction:

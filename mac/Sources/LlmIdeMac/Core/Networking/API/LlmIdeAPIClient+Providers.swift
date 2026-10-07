@@ -79,8 +79,22 @@ extension LlmIdeAPIClient {
     /// the local copy. Callers re-send on every change and on Settings appear,
     /// and treat a failure as non-fatal — an unsynced table only means the
     /// server keeps using its defaults.
-    func syncTierRouting(_ config: TierRoutingConfig) async throws {
-        struct Ack: Decodable { let success: Bool? }
-        let _: Ack = try await post("/kb/routing-tiers", body: config, authenticated: true)
+    ///
+    /// - Returns: the entries the server dropped as invalid (API v67+; empty
+    ///   from an older server, which does not report them).
+    @discardableResult
+    func syncTierRouting(_ config: TierRoutingConfig) async throws -> [TierRoutingDropped] {
+        struct Ack: Decodable { let success: Bool?; let dropped: [TierRoutingDropped]? }
+        let ack: Ack = try await post("/kb/routing-tiers", body: config, authenticated: true)
+        return ack.dropped ?? []
+    }
+
+    /// The server's per-tier status (GET /kb/routing-tiers, API v67+): whether
+    /// its resolver can run each tier (vault keys, synced custom providers) and
+    /// whether the Agent engine can. Keyed by `RoutingTier.rawValue`.
+    func fetchTierRoutingStatus() async throws -> [String: TierServerStatus] {
+        struct Response: Decodable { let status: [String: TierServerStatus]? }
+        let response: Response = try await get("/kb/routing-tiers", authenticated: true)
+        return response.status ?? [:]
     }
 }
