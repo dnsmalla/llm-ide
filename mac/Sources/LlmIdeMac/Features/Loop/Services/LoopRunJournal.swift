@@ -81,7 +81,11 @@ extension LoopRunJournaling {
 /// `<root>/system/` is the same per-project directory `RegressionRunner`
 /// already owns for `system/faults/` and `faults.csv`, so a project's harness
 /// state stays in one place and travels with the repo.
-final class FileLoopRunJournal: LoopRunJournaling {
+///
+/// `Sendable` (checked): the only instance state is the immutable `eventsBase`,
+/// so `reconcileOncePerLaunch` can hand `self` to a background queue. Shared
+/// mutable state is static and guarded by `liveLock` / `eventQueue`.
+final class FileLoopRunJournal: LoopRunJournaling, Sendable {
     /// Month-bucketed subdirectories keep any single directory small on a
     /// project that loops on a cron for months.
     private static let monthFormatter: DateFormatter = {
@@ -263,9 +267,7 @@ final class FileLoopRunJournal: LoopRunJournaling {
 
     func reconcileOncePerLaunch(root: URL) async -> Int {
         let key = root.resolvingSymlinksInPath().standardizedFileURL.path
-        Self.liveLock.lock()
-        let first = Self.reconciledRoots.insert(key).inserted
-        Self.liveLock.unlock()
+        let first = Self.liveLock.withLock { Self.reconciledRoots.insert(key).inserted }
         guard first else { return 0 }
         return await withCheckedContinuation { cont in
             DispatchQueue.global(qos: .utility).async { cont.resume(returning: self.reconcileInterrupted(root: root)) }

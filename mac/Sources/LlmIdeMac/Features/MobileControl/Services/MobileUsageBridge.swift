@@ -18,7 +18,7 @@ final class MobileUsageBridge: MobileFeatureBridge {
     private var subscriptionSuppressed = false
 
     static let cacheSeconds: TimeInterval = 30
-    static let maxModels = 20
+    nonisolated static let maxModels = 20
 
     init(manager: MobileControlManager) { self.manager = manager }
 

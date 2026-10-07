@@ -76,8 +76,12 @@ extension SweepOutcome {
 /// shared across two adapters/callers is still a hazard, since
 /// `RegressionRunner.run()` no-ops (leaving stale `results`) when it's
 /// already running.
+///
+/// The conformance is main-actor isolated (SE-0470): `RegressionRunner` is
+/// main-actor state, and the only consumer (`LoopEngineRunner`) is itself
+/// `@MainActor`, so the witness may only be used from the main actor.
 @MainActor
-final class RegressionRunnerSweepAdapter: RegressionSweepRunning {
+final class RegressionRunnerSweepAdapter: @MainActor RegressionSweepRunning {
     private let runner: RegressionRunner
 
     init(runner: RegressionRunner) {

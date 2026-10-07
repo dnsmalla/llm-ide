@@ -277,7 +277,7 @@ final class CodeGraphUploadService {
             let deadline = Date().addingTimeInterval(3)
             while process.isRunning {
                 if Date() > deadline { process.terminate(); return nil }
-                Thread.sleep(forTimeInterval: 0.01)
+                try? await Task.sleep(for: .milliseconds(10))
             }
             guard process.terminationStatus == 0 else { return nil }
             let data = pipe.fileHandleForReading.readDataToEndOfFile()

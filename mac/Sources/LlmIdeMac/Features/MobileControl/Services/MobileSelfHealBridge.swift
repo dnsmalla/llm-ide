@@ -21,10 +21,10 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
     /// Patches sent to the phone for review, so apply uses exactly what the user saw.
     private var reviewed = ReviewedPatchCache()
 
-    static let maxIncidents = 50
-    static let maxMessage = 300
-    static let maxNote = 300
-    static let maxDiffChars = 100_000
+    nonisolated static let maxIncidents = 50
+    nonisolated static let maxMessage = 300
+    nonisolated static let maxNote = 300
+    nonisolated static let maxDiffChars = 100_000
 
     init(manager: MobileControlManager) { self.manager = manager }
 

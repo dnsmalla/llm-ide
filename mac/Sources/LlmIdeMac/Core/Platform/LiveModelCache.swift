@@ -20,11 +20,19 @@ enum LiveModelCache {
     private static let memory = OSAllocatedUnfairLock<[String: [AIModel]]?>(initialState: nil)
 
     static func models(for provider: String, defaults: UserDefaults = .standard) -> [AIModel]? {
-        let all = memory.withLock { cached -> [String: [AIModel]] in
-            if let cached { return cached }
+        let all: [String: [AIModel]]
+        if let cached = memory.withLock({ $0 }) {
+            all = cached
+        } else {
+            // Decoded outside the lock (`UserDefaults` is not `Sendable`). Two
+            // first reads may both decode; the first to publish wins, and a
+            // `store` that landed in between is kept rather than overwritten.
             let decoded = decode(defaults)
-            cached = decoded
-            return decoded
+            all = memory.withLock { cached in
+                if let cached { return cached }
+                cached = decoded
+                return decoded
+            }
         }
         guard let list = all[provider], !list.isEmpty else { return nil }
         return list
@@ -32,7 +40,12 @@ enum LiveModelCache {
 
     static func store(_ models: [AIModel], for provider: String, defaults: UserDefaults = .standard) {
         guard !models.isEmpty else { return }
-        memory.withLock { cached in
+        // `withLockUnchecked`, not `withLock`: the persist must stay inside the
+        // same critical section as the in-memory merge. Writing `defaults`
+        // after unlocking would let two concurrent stores persist out of order
+        // and drop a provider on disk. `UserDefaults` is documented
+        // thread-safe; it is only non-`Sendable` by declaration.
+        memory.withLockUnchecked { cached in
             var all = cached ?? decode(defaults)
             all[provider] = models
             cached = all

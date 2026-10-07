@@ -12,7 +12,7 @@ final class MobileProjectBridge: MobileFeatureBridge {
     /// shell because the run guards live in features that may be compiled out.
     var busyReason: (() -> String?)?
 
-    static let maxProjects = 20
+    nonisolated static let maxProjects = 20
 
     init(manager: MobileControlManager) { self.manager = manager }
 
