@@ -22,6 +22,7 @@ import { buildReadableRoots } from './handlers/repo-files.mjs';
 import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { buildDispatch } from '../tools/registry.mjs';
+import { markRouteFailed } from '../../providers/route-health.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor } from '../../kb/usage.mjs';
@@ -113,6 +114,16 @@ export function enforceModeToolRestriction(out, resolvedMode, { canAskCard = tru
  */
 export function clientCanAskCard(clientCaps) {
   return Array.isArray(clientCaps) && clientCaps.includes('question-card');
+}
+
+// A refusal of the named provider itself (it cannot run), tagged with the
+// code /code-assist turns into a 400 (buffered) or SSE `error.code` — the
+// one the Mac's tier-routed callers retry without their route.
+// Progress phases that only report status (no tool ran, nothing acted).
+const STATUS_ONLY_PHASES = new Set(['thinking', 'writing']);
+
+function providerRefusal(message) {
+  return Object.assign(new Error(message), { code: 'PROVIDER_UNAVAILABLE' });
 }
 
 export async function handleCodeAssist({
@@ -475,7 +486,14 @@ export async function handleCodeAssist({
   let nativeKey = null;
   if (typeof effProvider === 'string' && effProvider.startsWith('custom:')) {
     const r = resolveCustomProviderDispatch(effProvider, userId);
-    if (r.error) throw new Error(r.message);
+    if (r.error) {
+      // Missing / disabled / keyless — the provider cannot run. Tagged (and
+      // remembered) so a tier-routed Mac turn, possibly sent on a stale
+      // status, retries once without its route on the code /code-assist
+      // forwards (400 buffered, SSE `error.code` before any progress).
+      markRouteFailed(userId, effProvider, model, 'key');
+      throw providerRefusal(r.message);
+    }
     customResolved = r;
     nativeKey = r.apiKey;
   } else if (NATIVE_PROVIDERS.has(effProvider)) {
@@ -512,6 +530,16 @@ export async function handleCodeAssist({
     // 'custom' provider, whose customBaseUrl() only applies the literal-IP check
     // (not the DNS-resolution check).
     if (nativeBaseUrl) await assertSafeBaseUrlResolved(nativeBaseUrl);
+    // Whether the loop did anything observable (a tool ran) before failing
+    // — an auth refusal after that is NOT tagged, since a retry on another
+    // provider would replay it. The loop's own 'thinking'/'writing' status
+    // lines are not activity.
+    let nativeProgressed = false;
+    const nativeOnProgress = (ev) => {
+      if (!STATUS_ONLY_PHASES.has(ev?.phase)) nativeProgressed = true;
+      onProgress?.(ev);
+    };
+    try {
     out = await runNativeAgentLoop({
       systemPrompt: NATIVE_SYSTEM_PROMPT + (modePersona ? `\n\n${modePersona}` : '') + modeToolNote,
       userMessage: composedUserMessage,
@@ -535,13 +563,26 @@ export async function handleCodeAssist({
       userId,
       handlers,
       kb,
-      onProgress,
+      onProgress: nativeOnProgress,
       signal,
       mcpConfig,
       maxIterations: maxIterationsOverride ?? 50,
       // No deadlineMs: a chat turn is bounded by its call budget and by the
       // user's cancel, not by a clock. See loop.mjs's DEFAULT_DEADLINE_MS.
     });
+    } catch (err) {
+      // A 401/403 from the provider before anything ran means its key is
+      // revoked or lacks access — the provider cannot run this turn. Tag it
+      // like the other provider refusals (and remember the route broken) so
+      // a tier-routed Mac turn retries once on its default.
+      if (!nativeProgressed && !signal?.aborted && (err?.status === 401 || err?.status === 403)) {
+        markRouteFailed(userId, effProvider, model, 'key');
+        throw Object.assign(providerRefusal(
+          `${effProvider} rejected its API key (HTTP ${err.status}). Update the key in Settings → Model Providers.`),
+        { status: err.status });
+      }
+      throw err;
+    }
   } else if (effProvider !== 'anthropic') {
     // An explicitly-selected non-Anthropic provider with no usable API key.
     // Two outcomes, and never a silent Claude answer: the old `else` ran the

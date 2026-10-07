@@ -207,3 +207,99 @@ test('buffered /code-assist end to end: a routed subagent whose CLI cannot run a
     _resetRouteHealthForTests();
   }
 });
+
+// ── #2a / #2b: native-loop + custom-provider refusals carry the code too ──
+
+const { routeFailure } = await import('../providers/route-health.mjs');
+
+test('SSE /code-assist: a revoked provider key (401 on the first hop) is a PROVIDER_UNAVAILABLE refusal, remembered as broken', async () => {
+  _resetRouteHealthForTests();
+  const user = freshUser();
+  setSecret(db.getDb(), user.id, 'openai.apiKey', 'sk-revoked');
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false, status: 401, headers: new Map(),
+    json: async () => ({ error: { message: 'Incorrect API key provided' } }),
+    text: async () => '{"error":{"message":"Incorrect API key provided"}}',
+  });
+  try {
+    const res = fakeRes();
+    await handleAIRoutes(fakeReq(user, {
+      message: 'hi', model: 'gpt-5-mini', provider: 'openai', mode: 'ask',
+      agentContext: { sessionId: 's-rf-4', recentIssues: [], indexedRepos: [] },
+    }, { sse: true }), res);
+    const errors = sseEvents(res).filter((e) => e.type === 'error');
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, 'PROVIDER_UNAVAILABLE');
+    assert.equal(routeFailure(user.id, 'openai', 'gpt-5-mini'), 'route_failed');
+  } finally { globalThis.fetch = original; _resetRouteHealthForTests(); }
+});
+
+test('SSE /code-assist: a content 400 from the provider is NOT a provider refusal', async () => {
+  _resetRouteHealthForTests();
+  const user = freshUser();
+  setSecret(db.getDb(), user.id, 'openai.apiKey', 'sk-ok');
+  const original = globalThis.fetch;
+  globalThis.fetch = async () => ({
+    ok: false, status: 400, headers: new Map(),
+    json: async () => ({ error: { message: 'context_length_exceeded' } }),
+    text: async () => '{"error":{"message":"context_length_exceeded"}}',
+  });
+  try {
+    const res = fakeRes();
+    await handleAIRoutes(fakeReq(user, {
+      message: 'hi', model: 'gpt-5-mini', provider: 'openai', mode: 'ask',
+      agentContext: { sessionId: 's-rf-5', recentIssues: [], indexedRepos: [] },
+    }, { sse: true }), res);
+    const errors = sseEvents(res).filter((e) => e.type === 'error');
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, undefined);
+    assert.equal(routeFailure(user.id, 'openai', 'gpt-5-mini'), null);
+  } finally { globalThis.fetch = original; _resetRouteHealthForTests(); }
+});
+
+test('SSE /code-assist: a custom provider that is missing (stale Mac status) is a PROVIDER_UNAVAILABLE refusal', async () => {
+  _resetRouteHealthForTests();
+  const user = freshUser();
+  try {
+    const res = fakeRes();
+    await handleAIRoutes(fakeReq(user, {
+      message: 'hi', model: 'glm-4.6', provider: 'custom:gone-123', mode: 'ask',
+      agentContext: { sessionId: 's-rf-6', recentIssues: [], indexedRepos: [] },
+    }, { sse: true }), res);
+    const errors = sseEvents(res).filter((e) => e.type === 'error');
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, 'PROVIDER_UNAVAILABLE');
+    assert.equal(routeFailure(user.id, 'custom:gone-123', 'glm-4.6'), 'route_failed');
+  } finally { _resetRouteHealthForTests(); }
+});
+
+test('SSE /code-assist: a 401 AFTER a tool step ran is not a provider refusal (no replay)', async () => {
+  _resetRouteHealthForTests();
+  const user = freshUser();
+  setSecret(db.getDb(), user.id, 'openai.apiKey', 'sk-half');
+  const original = globalThis.fetch;
+  let call = 0;
+  globalThis.fetch = async () => {
+    call += 1;
+    if (call === 1) {
+      const body = { choices: [{ message: { role: 'assistant', content: '', tool_calls: [
+        { id: 't1', type: 'function', function: { name: 'web-search', arguments: '{"query":"x"}' } },
+      ] }, finish_reason: 'tool_calls' }] };
+      return { ok: true, status: 200, headers: new Map(), json: async () => body, text: async () => JSON.stringify(body) };
+    }
+    return { ok: false, status: 401, headers: new Map(), json: async () => ({}), text: async () => '{"error":{"message":"revoked"}}' };
+  };
+  try {
+    const res = fakeRes();
+    await handleAIRoutes(fakeReq(user, {
+      message: 'hi', model: 'gpt-5-mini', provider: 'openai', mode: 'ask',
+      agentContext: { sessionId: 's-rf-7', recentIssues: [], indexedRepos: [] },
+    }, { sse: true }), res);
+    const events = sseEvents(res);
+    assert.ok(events.some((e) => e.type === 'progress' && e.phase === 'tool'), 'a tool step ran first');
+    const errors = events.filter((e) => e.type === 'error');
+    assert.equal(errors.length, 1);
+    assert.equal(errors[0].code, undefined);
+  } finally { globalThis.fetch = original; _resetRouteHealthForTests(); }
+});

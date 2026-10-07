@@ -582,7 +582,8 @@ export async function handleAIRoutes(req, res) {
           // exists after handleCodeAssist returns): the Mac always sends the
           // picker's concrete mode, and a plan-like one yields an empty list
           // — which the emitter skips — so the worst mis-gating is no events.
-          // Set once any progress/chunk event went out (see the catch below).
+          // Set once the turn did anything observable — a tool-step progress
+          // event or streamed text (see the catch below).
           let streamedAnything = false;
           const emitTaskProgress = makeTaskProgressEmitter({
             userId: req.user?.id, agentContext: enrichedAgentContext, mode: body.mode, send: writeEvent,
@@ -616,7 +617,9 @@ export async function handleAIRoutes(req, res) {
               kb,
               userId: req.user?.id,
               onProgress: (ev) => {
-                streamedAnything = true;
+                // The loop's 'thinking'/'writing' status lines are not
+                // activity — only a tool step (or streamed text) is.
+                if (ev?.phase !== 'thinking' && ev?.phase !== 'writing') streamedAnything = true;
                 writeEvent({ type: 'progress', ...ev });
                 // Live task progress, mirroring routes/agent-v2.mjs: without
                 // it a legacy plan-execute turn's bar sat at step 1 until the
@@ -642,8 +645,8 @@ export async function handleAIRoutes(req, res) {
             // provider is missing/disabled/keyless, or its CLI cannot run)
             // keeps its code — the SSE headers are already 200, so this event
             // is the only place the Mac can see it and retry once without its
-            // tier route. Only while NOTHING has streamed yet: after progress
-            // or text the turn may have acted, and a retry would replay it.
+            // tier route. Only while the turn has not acted yet: after a tool
+            // step or streamed text a retry would replay it.
             const code = err?.code === 'PROVIDER_UNAVAILABLE' && !streamedAnything ? err.code : undefined;
             if (!ac.signal.aborted) {
               writeEvent({ type: 'error', error: err?.message || 'code-assist failed', ...(code ? { code } : {}) });

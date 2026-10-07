@@ -51,6 +51,10 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   not ten; failures are tracked per model, so one bad model id no longer disables the provider's other
   tiers; a usage-limit pause on a routed provider uses the default. Summaries and email classification
   report the model that actually answered.
+- Tier routing: a routed chat whose provider's API key was revoked, or whose custom provider was
+  removed or disabled since the Mac last checked, now retries once on its default too; the
+  "thinking…" status line no longer blocks that retry. Settings says a failed route is "retried
+  automatically shortly" instead of promising ten minutes.
 - Loop reliability (Mac app). Loop agent runs are headless and confined to the
   run's git root; a stage whose agent call errored ends the run `error` unless
   that stage later ran cleanly (a passing verify stage no longer launders it);
