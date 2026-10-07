@@ -219,6 +219,28 @@ test('stream: `provider` is forwarded to the engine and metered as sent; absent 
   assert.equal(gotProvider, 'anthropic');
 });
 
+test('stream: a string `effort` is forwarded to the engine; anything else is not', async () => {
+  const user = newUser('v2route-effort@example.com');
+  let got = 'unset';
+  const fakeTurn = async ({ onEvent, effort }) => {
+    got = effort;
+    onEvent({ type: 'init', sessionId: 'sdk-eff', claudeCodeVersion: '2.1.289', tools: [], capabilities: [] });
+    onEvent({ type: 'result', subtype: 'success', costUsd: 0, numTurns: 1, durationMs: 1, sessionId: 'sdk-eff', stopReason: 'end_turn' });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 1, outputTokens: 1 } };
+  };
+  const send = (extra, chat) => handleAgentV2Routes(makeReq({
+    method: 'POST', url: '/agent/v2/stream',
+    body: { message: 'hello', mode: 'execute', agentContext: { chatSessionId: chat, workspaceRoot: WS }, ...extra },
+    user,
+  }), makeRes(), { runTurn: fakeTurn });
+  await send({ effort: 'low' }, 'chat-eff-1');
+  assert.equal(got, 'low');
+  await send({ effort: 5 }, 'chat-eff-2');
+  assert.equal(got, undefined, 'a non-string never reaches the engine');
+  await send({}, 'chat-eff-3');
+  assert.equal(got, undefined);
+});
+
 // The engine refuses a provider it cannot run BEFORE the SDK spawns, with a
 // code of its own; the stream's terminal error event must carry that code
 // (not the catch-all ENGINE_ERROR) so a client can tell the two apart.

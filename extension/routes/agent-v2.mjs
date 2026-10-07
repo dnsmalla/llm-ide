@@ -454,6 +454,9 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       model,
       provider,
       language: body.language,
+      // The composer's effort pick (a level string, or "auto"); the engine
+      // checks it against the model's own levels. Older clients send none.
+      effort: typeof body.effort === 'string' ? body.effort : undefined,
       skills: body.skills,
       // Set by the saved-plan card's "Execute plan" action — the one
       // signal the server can trust that this Execute turn is working an
