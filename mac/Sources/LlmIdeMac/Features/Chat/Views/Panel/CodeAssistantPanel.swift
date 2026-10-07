@@ -601,9 +601,9 @@ struct CodeAssistantPanel: View {
         }
         // `engine` inside this closure is panel @State — i.e. whichever chat
         // is on screen NOW — while a parked engine keeps the closure it was
-        // wired with. Capture the wired instance so a parked chat resolves
-        // ITS OWN settings instead of the displayed chat's.
-        weak let wiredEngine = engine
+        // wired with. Capture the wired instance (weakly, in the closure's
+        // capture list below) so a parked chat resolves ITS OWN settings
+        // instead of the displayed chat's.
         // Parked: the live panel state is another chat's. Use what `owner`
         // last had on screen; with nothing captured, fall back to the most
         // restrictive mode and no repo context so the turn can never escalate
@@ -638,7 +638,7 @@ struct CodeAssistantPanel: View {
             input.effort = snap?.effort
             return input
         }
-        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
+        engine.hooks.resolveTransportInput = { [weak wiredEngine = engine] message, history, attachments, skills in
             if let owner = wiredEngine, owner !== engine {
                 return parkedInput(
                     for: owner, message: message, history: history,

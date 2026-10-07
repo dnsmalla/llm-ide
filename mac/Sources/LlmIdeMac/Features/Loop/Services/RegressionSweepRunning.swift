@@ -77,11 +77,13 @@ extension SweepOutcome {
 /// `RegressionRunner.run()` no-ops (leaving stale `results`) when it's
 /// already running.
 ///
-/// The conformance is main-actor isolated (SE-0470): `RegressionRunner` is
-/// main-actor state, and the only consumer (`LoopEngineRunner`) is itself
-/// `@MainActor`, so the witness may only be used from the main actor.
+/// `@preconcurrency` conformance: `RegressionRunner` is main-actor state and
+/// every use site (`LoopEngineRunner`) is itself `@MainActor`, so the witness
+/// runs with a runtime main-actor check instead of a compile-time crossing.
+/// Not the SE-0470 isolated conformance (`: @MainActor RegressionSweepRunning`):
+/// that spelling is Swift 6.2-only and CI / other machines may run 6.0-6.1.
 @MainActor
-final class RegressionRunnerSweepAdapter: @MainActor RegressionSweepRunning {
+final class RegressionRunnerSweepAdapter: @preconcurrency RegressionSweepRunning {
     private let runner: RegressionRunner
 
     init(runner: RegressionRunner) {

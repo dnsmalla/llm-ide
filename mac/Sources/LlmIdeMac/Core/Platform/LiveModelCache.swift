@@ -45,6 +45,9 @@ enum LiveModelCache {
         // after unlocking would let two concurrent stores persist out of order
         // and drop a provider on disk. `UserDefaults` is documented
         // thread-safe; it is only non-`Sendable` by declaration.
+        // WARNING: `defaults.set` runs while holding a non-reentrant
+        // os_unfair_lock. No synchronous UserDefaults / KVO observer may call
+        // back into LiveModelCache on the storing thread — it would deadlock.
         memory.withLockUnchecked { cached in
             var all = cached ?? decode(defaults)
             all[provider] = models
