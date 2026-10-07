@@ -119,3 +119,36 @@ test('mapSupportedModels: a bare family displayName with a tagline-only descript
   const out = mapSupportedModels([{ value: 'sonnet', resolvedModel: 'claude-sonnet-5-5', displayName: 'Sonnet', description: 'Efficient for routine tasks' }]);
   assert.equal(out[0].displayName, 'Sonnet 5.5');
 });
+
+test('mapSupportedModels: effortLevels are the SDK\'s own list, unknown levels included', () => {
+  const out = mapSupportedModels([
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet 5', description: 'x',
+      supportsEffort: true, supportedEffortLevels: ['low', 'medium', 'high', 'ultra'] },
+    { value: 'haiku', resolvedModel: 'claude-haiku-4-5', displayName: 'Haiku 4.5', description: 'y', supportsEffort: false,
+      supportedEffortLevels: ['low'] },
+    { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus 5', description: 'z' },
+    { value: 'fable', resolvedModel: 'claude-fable-5-1', displayName: 'Fable 5.1', description: 'w',
+      supportedEffortLevels: ['high', '', 7, 'max'] },
+  ]);
+  assert.deepEqual(out.map((m) => [m.id, m.effortLevels]), [
+    ['claude-sonnet-5', ['low', 'medium', 'high', 'ultra']],
+    ['claude-haiku-4-5', []],
+    ['claude-opus-5', []],
+    ['claude-fable-5-1', ['high', 'max']],
+  ]);
+});
+
+test('cachedEffortLevels: null before any listing; the model\'s levels after; the first model for a null id', async () => {
+  const { cachedEffortLevels } = await import('../llm_agent/sdk/models.mjs');
+  assert.equal(cachedEffortLevels('u-eff', 'claude-sonnet-5'), null, 'nothing cached yet');
+  const rows = [
+    { value: 'default', resolvedModel: 'claude-opus-5' },
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5', displayName: 'Sonnet 5', description: 'x', supportedEffortLevels: ['low', 'high'] },
+    { value: 'opus', resolvedModel: 'claude-opus-5', displayName: 'Opus 5', description: 'z', supportedEffortLevels: ['high', 'max'] },
+  ];
+  const queryFn = () => ({ supportedModels: async () => rows, close() {} });
+  await listSdkModels('u-eff', { queryFn });
+  assert.deepEqual(cachedEffortLevels('u-eff', 'claude-sonnet-5'), ['low', 'high']);
+  assert.deepEqual(cachedEffortLevels('u-eff', null), ['high', 'max'], 'null = the SDK default, listed first');
+  assert.deepEqual(cachedEffortLevels('u-eff', 'claude-unknown-9'), []);
+});

@@ -61,6 +61,14 @@ function nameOf(row, id) {
   return nameFromId(id);
 }
 
+// The SDK's own effort levels for one row, verbatim and in order. Unknown
+// values pass through on purpose: a level a newer SDK adds must reach the
+// picker without a code change here or in the Mac app.
+function effortLevelsOf(row) {
+  if (row?.supportsEffort === false || !Array.isArray(row?.supportedEffortLevels)) return [];
+  return row.supportedEffortLevels.filter((l) => typeof l === 'string' && l.length > 0);
+}
+
 export function mapSupportedModels(rows) {
   if (!Array.isArray(rows)) return [];
   const idOf = (r) => (typeof r?.resolvedModel === 'string' && r.resolvedModel) || (typeof r?.value === 'string' ? r.value : '');
@@ -73,7 +81,7 @@ export function mapSupportedModels(rows) {
     if (!/^claude-/i.test(id) || seen.has(id)) continue;
     seen.add(id);
     const description = typeof r.description === 'string' ? r.description : '';
-    out.push({ id, displayName: nameOf(r, id), description });
+    out.push({ id, displayName: nameOf(r, id), description, effortLevels: effortLevelsOf(r) });
   }
   if (defaultId) {
     const i = out.findIndex((m) => m.id === defaultId);
@@ -100,6 +108,20 @@ export async function listSdkModels(userId, { queryFn = query, now = Date.now } 
     .finally(() => inFlight.delete(cacheKey));
   inFlight.set(cacheKey, call);
   return call;
+}
+
+/**
+ * The effort levels the last SDK listing reported for `modelId`, read from
+ * the cache only — never spawns the CLI. `null` = no listing cached for this
+ * user's auth identity (the caller falls back); `modelId` null = the SDK
+ * default, which the listing puts first; an unlisted model = [].
+ */
+export function cachedEffortLevels(userId, modelId) {
+  const { key } = resolveAnthropicKey(userId);
+  const models = cache.get(key ? `key:${userId || ''}` : 'ambient')?.models;
+  if (!Array.isArray(models)) return null;
+  const row = modelId ? models.find((m) => m.id === modelId) : models[0];
+  return row ? [...row.effortLevels] : [];
 }
 
 async function askSdk(userId, key, queryFn) {
