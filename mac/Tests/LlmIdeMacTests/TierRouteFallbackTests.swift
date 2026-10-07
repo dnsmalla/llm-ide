@@ -12,12 +12,17 @@ private final class RefusingTransport: ChatTransport, @unchecked Sendable {
     private(set) var inputs: [ChatTransportInput] = []
     /// Emit one progress event before refusing (the turn had started acting).
     var progressBeforeRefusal = false
+    /// Emit a status-only "thinking" line before refusing (nothing acted).
+    var statusBeforeRefusal = false
 
     func roundTrip(_ input: ChatTransportInput,
                    onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
                    onChunk: @escaping @MainActor (String) -> Void) async throws -> ChatTransportResult {
         inputs.append(input)
         if input.provider == refusedProvider {
+            if statusBeforeRefusal {
+                onProgress(.init(label: "Thinking…", phase: "thinking", tool: nil, detail: nil))
+            }
             if progressBeforeRefusal {
                 onProgress(.init(label: "Searching…", phase: "tool", tool: "web-search", detail: nil))
             }
@@ -71,6 +76,18 @@ struct TierRouteFallbackTests {
         transport.progressBeforeRefusal = true
         await #expect(throws: (any Error).self) { try await send(transport, input(routed: true)) }
         #expect(transport.inputs.count == 1)
+    }
+
+    @Test func aStatusOnlyThinkingLineDoesNotBlockTheRetry() async throws {
+        // The agent loop always says "thinking" before its first model call;
+        // a refusal right after it has not acted, so it is still retried.
+        let transport = RefusingTransport()
+        transport.statusBeforeRefusal = true
+        let result = try await send(transport, input(routed: true))
+        #expect(result.reply == "ok via anthropic")
+        #expect(transport.inputs.count == 2)
+        #expect(TierRouting.isStatusOnlyPhase("thinking") && TierRouting.isStatusOnlyPhase("writing"))
+        #expect(!TierRouting.isStatusOnlyPhase("tool") && !TierRouting.isStatusOnlyPhase("approval_request"))
     }
 
     @Test func legacySSEErrorWithProviderCodeMapsToTheRetryableRefusal() {

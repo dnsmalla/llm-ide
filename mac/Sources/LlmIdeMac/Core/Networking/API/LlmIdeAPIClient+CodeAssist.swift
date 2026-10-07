@@ -150,7 +150,8 @@ extension LlmIdeAPIClient {
     /// What an SSE `error` event becomes. Normally `.agent` (shown verbatim,
     /// never retried on the buffered endpoint). A provider-config refusal
     /// (`code` in `TierRouting.providerConfigErrorCodes`, server v70+) that
-    /// arrived before ANY progress or chunk becomes the same 400 `.http` the
+    /// arrived before any tool step or chunk (`sawProgress` — status-only
+    /// thinking/writing lines don't count) becomes the same 400 `.http` the
     /// buffered path answers, so `TierRouting.isProviderConfigError` matches
     /// and a tier-routed turn can retry once without its route. After
     /// progress the turn may have acted, so it stays `.agent` (no replay).
@@ -375,6 +376,8 @@ extension LlmIdeAPIClient {
         var tasks: [AgentTask]?
         var mode: String?
         var sawProgress = false
+        // A tool step or streamed text — what makes a route retry unsafe.
+        var sawActivity = false
         for try await line in bytes.lines {
             guard line.hasPrefix("data:") else { continue }
             let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
@@ -384,6 +387,9 @@ extension LlmIdeAPIClient {
             switch evt.type {
             case "progress":
                 sawProgress = true
+                // Only a step that may have acted counts against the route
+                // retry; the loop's own thinking/writing status lines don't.
+                if !TierRouting.isStatusOnlyPhase(evt.phase) { sawActivity = true }
                 // The legacy engine's gated run-bash parking a ToolApproval
                 // (Task 8) — arrives as a progress event whose phase is
                 // "approval_request" rather than the usual thinking/tool/
@@ -403,6 +409,7 @@ extension LlmIdeAPIClient {
             case "chunk":
                 if let text = evt.text, !text.isEmpty {
                     sawProgress = true  // a chunk is proof of life, same as a progress event
+                    sawActivity = true
                     await onChunk(text)
                 }
             case "done":
@@ -439,7 +446,7 @@ extension LlmIdeAPIClient {
                 // mistake for a transport failure and retry on the buffered
                 // endpoint, re-running the same failing call and replacing this
                 // real reason with the generic "temporarily unavailable" 502.
-                throw Self.streamError(message: evt.error, code: evt.code, sawProgress: sawProgress)
+                throw Self.streamError(message: evt.error, code: evt.code, sawProgress: sawActivity)
             default:
                 break
             }

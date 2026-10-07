@@ -42,7 +42,8 @@ extension ChatTransport {
     /// `roundTrip`, retried ONCE without the tier route when the server
     /// refuses the routed provider (`TierRouting.isProviderConfigError` — a
     /// missing/disabled/keyless provider or a CLI that cannot run) AND the
-    /// failed attempt produced no progress, text or approval: anything the
+    /// failed attempt produced no tool step, text or approval (status-only
+    /// thinking/writing lines don't count): anything the
     /// turn already did must not be replayed. Routing must never fail a turn
     /// the default would answer; any other failure is a real failure of a
     /// working route and is not retried. A turn with no `routeFallback`
@@ -60,7 +61,10 @@ extension ChatTransport {
         do {
             return try await roundTrip(
                 input,
-                onProgress: { progress in activity.happened = true; onProgress(progress) },
+                onProgress: { progress in
+                    if !TierRouting.isStatusOnlyPhase(progress.phase) { activity.happened = true }
+                    onProgress(progress)
+                },
                 onChunk: { text in activity.happened = true; onChunk(text) },
                 onApproval: { approval in activity.happened = true; onApproval(approval) })
         } catch {

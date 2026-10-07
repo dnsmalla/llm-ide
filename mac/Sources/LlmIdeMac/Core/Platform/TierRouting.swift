@@ -261,10 +261,11 @@ enum TierRouting {
         case "not_agent_capable": return "only Claude or a custom provider with an Anthropic-compatible URL can"
         case "unset":             return "the tier is not set on the server — it has not synced yet"
         case "cli_unverified":    return "the server hasn't checked its CLI yet — reopen Settings in a moment"
-        case "cli_failed":        return "its CLI failed on the server recently (broken install or logged out) "
-                                      + "— it is retried automatically in about 10 minutes"
-        case "route_failed":      return "the provider failed on the server recently — it is retried automatically "
-                                      + "in about 10 minutes"
+        // The status does not say whether the failure was transient (~1 min)
+        // or broken (~10 min), so the wording promises neither.
+        case "cli_failed":        return "its CLI failed on the server recently (broken install, logged out or "
+                                      + "a temporary error) — it is retried automatically shortly"
+        case "route_failed":      return "the provider failed on the server recently — it is retried automatically shortly"
         case "cli_untrusted_input": return "subscription CLIs aren't used for untrusted input; add an API key to route this role"
         case let other?:          return other
         case nil:                 return "unknown reason"
@@ -401,6 +402,13 @@ enum TierRouting {
     /// path's 400 (also what the legacy SSE stream maps such an `error` event
     /// to — `LlmIdeAPIClient.streamError`), or the Agent engine's stream
     /// `error` event with one of these codes.
+    /// Progress phases that only report status (the agent loop's own
+    /// thinking/writing lines): no tool ran, so a refused route may still be
+    /// retried after them. Matches the server's rule (ai-routes.mjs).
+    static func isStatusOnlyPhase(_ phase: String?) -> Bool {
+        phase == "thinking" || phase == "writing"
+    }
+
     static func isProviderConfigError(_ error: Error) -> Bool {
         if case APIError.http(let status, let code, _, _) = error {
             return status == 400 && providerConfigErrorCodes.contains(code)
