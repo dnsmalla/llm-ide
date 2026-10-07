@@ -307,11 +307,19 @@ enum TierRouting {
     /// answer is "nothing routes" with no routing traffic.
     ///
     /// - Parameter config: the table to push; nil = the stored one.
+    /// Per-request timeout for the three refresh calls (custom-provider sync,
+    /// table push, status fetch). The refresh chain is serialized, so a wedged
+    /// backend on the session's 2-hour idle timeout would stall every later
+    /// refresh — and the ordinary custom-provider sync rides this chain too.
+    static let refreshRequestTimeout: TimeInterval = 15
+
     static func fetchServerState(api: LlmIdeAPIClient, serverApiVersion: Int?,
                                  config: TierRoutingConfig?) async throws -> TierRoutingServerState {
         do {
-            try await CustomProvider.syncAllToBackendThrowing(api: api)
+            try await CustomProvider.syncAllToBackendThrowing(api: api, timeout: refreshRequestTimeout)
         } catch {
+            // Including a timeout: the routing push + status below are still
+            // attempted, as when the two syncs ran independently.
             // Not fatal: the status below then reports custom tiers as the
             // server sees them, which is what routing must follow anyway.
             tierRoutingLogger.error("Custom provider sync failed: \(error.localizedDescription, privacy: .public)")

@@ -271,6 +271,14 @@ final class LlmIdeAPIClient: @unchecked Sendable {
         try await send(path: path, method: "GET", body: Optional<EmptyBody>.none, authenticated: authenticated)
     }
 
+    /// GET with a per-request timeout — same contract as the timeout-taking
+    /// `post` below (an idle timer that is effectively the total for a
+    /// non-streaming answer).
+    func get<T: Decodable>(_ path: String, authenticated: Bool, timeout: TimeInterval) async throws -> T {
+        try await send(path: path, method: "GET", body: Optional<EmptyBody>.none, authenticated: authenticated,
+                       timeout: timeout)
+    }
+
     func post<B: Encodable, T: Decodable>(_ path: String, body: B, authenticated: Bool) async throws -> T {
         try await send(path: path, method: "POST", body: body, authenticated: authenticated)
     }

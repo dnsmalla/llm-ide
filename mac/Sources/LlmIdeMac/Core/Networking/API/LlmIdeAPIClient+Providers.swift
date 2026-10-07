@@ -65,12 +65,20 @@ extension LlmIdeAPIClient {
     /// Authenticated: the route is behind the global `authenticate` middleware,
     /// so an unauthenticated POST 401s and the provider silently never
     /// resolves at code-assist time. Call sites fire-and-forget (best-effort).
-    func syncCustomProviders(_ providers: [CustomProvider]) async throws {
+    ///
+    /// - Parameter timeout: per-request timeout; nil keeps the session's
+    ///   default. The tier-routing refresh chain passes a short one so a
+    ///   wedged backend cannot stall every later refresh.
+    func syncCustomProviders(_ providers: [CustomProvider], timeout: TimeInterval? = nil) async throws {
         struct Req: Encodable { let providers: [CustomProvider] }
         struct Ack: Decodable { let success: Bool?; let count: Int? }
-        let _: Ack = try await post("/kb/custom-providers",
-                                    body: Req(providers: providers),
-                                    authenticated: true)
+        if let timeout {
+            let _: Ack = try await post("/kb/custom-providers", body: Req(providers: providers),
+                                        authenticated: true, timeout: timeout)
+        } else {
+            let _: Ack = try await post("/kb/custom-providers", body: Req(providers: providers),
+                                        authenticated: true)
+        }
     }
 
     /// Mirror the tier-routing table into the backend (POST /kb/routing-tiers),
@@ -85,7 +93,10 @@ extension LlmIdeAPIClient {
     @discardableResult
     func syncTierRouting(_ config: TierRoutingConfig) async throws -> [TierRoutingDropped] {
         struct Ack: Decodable { let success: Bool?; let dropped: [TierRoutingDropped]? }
-        let ack: Ack = try await post("/kb/routing-tiers", body: config, authenticated: true)
+        // Short timeout: this runs on the serialized refresh chain, where one
+        // wedged request would hold up every later refresh.
+        let ack: Ack = try await post("/kb/routing-tiers", body: config, authenticated: true,
+                                      timeout: TierRouting.refreshRequestTimeout)
         return ack.dropped ?? []
     }
 
@@ -94,7 +105,8 @@ extension LlmIdeAPIClient {
     /// whether the Agent engine can. Keyed by `RoutingTier.rawValue`.
     func fetchTierRoutingStatus() async throws -> [String: TierServerStatus] {
         struct Response: Decodable { let status: [String: TierServerStatus]? }
-        let response: Response = try await get("/kb/routing-tiers", authenticated: true)
+        let response: Response = try await get("/kb/routing-tiers", authenticated: true,
+                                               timeout: TierRouting.refreshRequestTimeout)
         return response.status ?? [:]
     }
 }

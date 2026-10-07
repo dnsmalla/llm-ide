@@ -75,6 +75,9 @@ struct TierRoutingSection: View {
         // change) lands here, so the notes follow the resolvers' cache.
         .onReceive(NotificationCenter.default.publisher(for: .tierRoutingServerStateChanged)) { _ in
             serverState = TierRoutingServerCache.shared.state
+            // A later successful refresh (possibly app-level) supersedes an
+            // earlier failure this card showed.
+            if serverState.status != nil { syncError = nil }
         }
         .task {
             routing = TierRoutingConfig.load()

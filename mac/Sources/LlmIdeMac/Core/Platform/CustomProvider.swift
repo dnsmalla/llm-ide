@@ -288,8 +288,8 @@ extension CustomProvider {
 
     /// Like `syncAllToBackend`, but awaitable and throwing: refuses to push
     /// when the local list failed to decode, and rethrows the push error.
-    static func syncAllToBackendThrowing(api: LlmIdeAPIClient) async throws {
+    static func syncAllToBackendThrowing(api: LlmIdeAPIClient, timeout: TimeInterval? = nil) async throws {
         guard case .loaded(let all) = load() else { throw SyncError.localListUnreadable }
-        try await api.syncCustomProviders(all)
+        try await api.syncCustomProviders(all, timeout: timeout)
     }
 }
