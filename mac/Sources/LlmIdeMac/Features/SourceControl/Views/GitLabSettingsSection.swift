@@ -526,7 +526,7 @@ struct GitLabSettingsSection: View {
         }
 
         // Full URL — extract the GitLab host directly from the pasted URL
-        var apiBase = config.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        let apiBase = config.gitLabBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
         var path = raw
 
         if raw.hasPrefix("http"), let parsedURL = URL(string: raw),

@@ -190,6 +190,14 @@ if mobileIncluded && !autoTasksIncluded {
         "Features/MobileControl/Services/MobileLoopBridge.swift",
     ])
 }
+if mobileIncluded {
+    // The folder's agent guide is not a resource; without this every build
+    // warns "found 1 file(s) which are unhandled". Only when the folder is
+    // compiled: with mobile_sync off the whole folder is already excluded,
+    // and SwiftPM rejects an exclude nested inside another. Its own `if`
+    // (not the featureDefines one above) for feature-boundaries.sh's parser.
+    libExcludes.append("Features/MobileControl/CLAUDE.md")
+}
 
 // GraphCore/GraphKit are only imported from within
 // Sources/LlmIdeMac/Features/CodeGraph/ (verified in Task 1 Step 1:
@@ -222,6 +230,14 @@ if terminalIncluded {
 if graphIncluded {
     libDependencies.append(.product(name: "GraphCore", package: "graph-kit"))
     libDependencies.append(.product(name: "GraphKit", package: "graph-kit"))   // UNPLUG: remove
+}
+
+// The SharedProtocol PACKAGE is gated with its product: a local path
+// dependency no target uses (mobile_sync off) makes SwiftPM warn "dependency
+// 'sharedprotocol' is not used by any target" on every build-mac-min.
+var sharedProtocolPackage: [Package.Dependency] = []
+if mobileIncluded {
+    sharedProtocolPackage.append(.package(path: "../ios_app/SharedProtocol"))
 }
 
 let package = Package(
@@ -260,8 +276,7 @@ let package = Package(
         // .build/checkouts itself. Pinned to the exact commit currently
         // checked out locally; bump this when graph-kit cuts a new release.
         .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "17ae95de9d0f27820f9014bfaa18cd42a2e20421"),
-        .package(path: "../ios_app/SharedProtocol"),
-    ],
+    ] + sharedProtocolPackage,
     targets: [
         .target(
             name: "LlmIdeMacLib",

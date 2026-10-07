@@ -808,7 +808,7 @@ extension AutoCodeUpdateService {
         onlyStageId: String? = nil, onlyLoopId: String? = nil,
         journalTrigger: LoopRunTrigger = .autoTask
     ) async -> Bool {
-        guard let api else {
+        guard api != nil else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no API client wired."
             return true
         }

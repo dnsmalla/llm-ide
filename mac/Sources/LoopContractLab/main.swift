@@ -505,7 +505,7 @@ print("  skipped — Loop is excluded from this build (auto_tasks not in LLMIDE_
 #endif
 
 runSelfHealCoreChecks()
-await runSdkAdoptionCoreChecks()
+runSdkAdoptionCoreChecks()
 await runSelfHealLoopChecks()
 runSdkAdoptionLoopChecks()
 runRuntimeEnvironmentChecks()

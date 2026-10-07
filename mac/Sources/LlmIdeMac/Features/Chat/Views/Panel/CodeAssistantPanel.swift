@@ -603,7 +603,7 @@ struct CodeAssistantPanel: View {
         // is on screen NOW — while a parked engine keeps the closure it was
         // wired with. Capture the wired instance so a parked chat resolves
         // ITS OWN settings instead of the displayed chat's.
-        weak var wiredEngine = engine
+        weak let wiredEngine = engine
         // Parked: the live panel state is another chat's. Use what `owner`
         // last had on screen; with nothing captured, fall back to the most
         // restrictive mode and no repo context so the turn can never escalate
