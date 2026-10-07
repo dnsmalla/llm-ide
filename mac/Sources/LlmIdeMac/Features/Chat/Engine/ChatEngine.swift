@@ -1505,4 +1505,6 @@ struct TurnSettingsSnapshot {
     /// Last context built while this engine was displayed; `nil` rather than
     /// the displayed chat's repo when none exists.
     var agentContext: AgentContext?
+    /// Effort shown when this chat was last displayed; a parked turn sends it.
+    var effort: String? = nil
 }

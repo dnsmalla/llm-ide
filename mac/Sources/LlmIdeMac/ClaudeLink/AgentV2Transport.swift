@@ -244,6 +244,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         ]
         if let language = input.language { body["language"] = language }
         if let model = input.model { body["model"] = model }
+        if let effort = input.effort { body["effort"] = effort }
         // The resolved provider (`anthropic`, or an Anthropic-compatible
         // `custom:<uuid>`): the server points the SDK at that provider's
         // Anthropic-format endpoint and meters the turn under it. Absent

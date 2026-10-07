@@ -73,6 +73,10 @@ struct ChatTransportInput: Sendable {
     /// Same shape and reasoning as `planExecute`; `var` with a default so
     /// existing call sites are unchanged.
     var planWrite: Bool = false
+    /// The composer's effort for this turn (`EffortChoice.effective`), or nil
+    /// for surfaces with no effort picker (quick chat) — the server then
+    /// chooses. `var` with a default so existing call sites are unchanged.
+    var effort: String? = nil
 
     /// The chat's permission chip for this turn — `"ask"`, `"accept-edits"`
     /// or `"bypass"` (Claude Code's modes), from `EditAcceptanceMode`.

@@ -544,13 +544,21 @@ struct CodeAssistantPanel: View {
     /// Copy the on-screen composer settings onto `target` so it can still
     /// resolve its own turns after it is parked. Keeps the last known
     /// `agentContext` when none is passed.
+    /// The effort this panel's next turn sends — read live, like the mode.
+    func currentTurnEffort() -> String {
+        let stored = UserDefaults.standard.string(forKey: EffortChoice.defaultsKey) ?? EffortChoice.auto
+        return EffortChoice.effective(stored: stored,
+                                      levels: modelState.effortLevelsForNextTurn(config: config))
+    }
+
     func captureTurnSettings(into target: ChatEngine, agentContext: AgentContext? = nil) {
         target.turnSettingsSnapshot = TurnSettingsSnapshot(
             mode: modelState.selectedMode.rawValue,
             provider: modelState.selectedProvider,
             modelID: modelState.effectiveModelIdOrNil(config: config),
             permissionMode: editMode.agentPermissionMode,
-            agentContext: agentContext ?? target.turnSettingsSnapshot?.agentContext)
+            agentContext: agentContext ?? target.turnSettingsSnapshot?.agentContext,
+            effort: currentTurnEffort())
     }
 
     func wireEngine() {
@@ -599,7 +607,7 @@ struct CodeAssistantPanel: View {
             let rank = { (mode: String) in ranked.firstIndex(of: mode) ?? 0 }
             let snapMode = snap?.permissionMode ?? EditAcceptanceMode.review.agentPermissionMode
             let liveMode = editMode.agentPermissionMode
-            return ChatTransportInput(
+            var input = ChatTransportInput(
                 message: message,
                 history: history,
                 attachments: attachments,
@@ -613,6 +621,8 @@ struct CodeAssistantPanel: View {
                 mode: snap?.mode,
                 permissionMode: rank(snapMode) <= rank(liveMode) ? snapMode : liveMode,
                 questionCard: true)
+            input.effort = snap?.effort
+            return input
         }
         engine.hooks.resolveTransportInput = { message, history, attachments, skills in
             if let owner = wiredEngine, owner !== engine {
@@ -631,7 +641,7 @@ struct CodeAssistantPanel: View {
                     attachments: attachments, skills: skills, contextFallback: context)
             }
             captureTurnSettings(into: engine, agentContext: context)
-            return ChatTransportInput(
+            var input = ChatTransportInput(
                 message: message,
                 history: history,
                 attachments: attachments,
@@ -653,6 +663,8 @@ struct CodeAssistantPanel: View {
                 permissionMode: editMode.agentPermissionMode,
                 // This panel renders the classic engine's ask-user card.
                 questionCard: true)
+            input.effort = currentTurnEffort()
+            return input
         }
         let wiredID = ObjectIdentifier(engine)
         // Fresh budget of auto-run git ops for this user turn (commit→push→…).
