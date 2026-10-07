@@ -138,7 +138,7 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundleIdentifier</key>
     <string>com.llmide.macapp</string>
     <!-- The user-visible brand, per ADR 0016 and AppIdentity.displayName —
-         NOT the `llm-ide` slug, which is for the repo, the package and
+         NOT the "llm-ide" slug, which is for the repo, the package and
          on-disk paths. These two keys are how macOS ITSELF names the app:
          the Control Center recording indicator, System Settings → Privacy &
          Security, Force Quit, notifications, the Dock. Carrying the slug
