@@ -3087,8 +3087,10 @@ paths:
         anthropic|openai|google|deepseek|custom:<id>, a model id outside
         `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}(\[1m\])?$`) and reported back in
         `dropped` (API v67+). An unset or unusable tier (custom provider
-        missing/disabled/keyless, OpenAI/Google/DeepSeek without an API key)
-        keeps the role on its default provider and model.
+        missing/disabled/keyless, DeepSeek without an API key, OpenAI/Google
+        with neither an API key nor their logged-in CLI — codex/gemini, API
+        v68+; v67 required the key) keeps the role on its default provider
+        and model.
       requestBody:
         required: true
         content:
@@ -3133,7 +3135,8 @@ paths:
       description: >
         The stored config and, for each tier, whether the server can run it
         right now — the same check the server's resolver applies (custom
-        provider registered/enabled/keyed; OpenAI/Google/DeepSeek keyed) —
+        provider registered/enabled/keyed; DeepSeek keyed; OpenAI/Google keyed
+        or, API v68+, their CLI installed for the logged-in subscription path) —
         and whether it can run on the Agent SDK engine (first-party Anthropic,
         or a custom provider with an Anthropic-compatible endpoint and a key).
         The Mac app uses it to skip a route the server would refuse.
@@ -3154,9 +3157,17 @@ paths:
                       type: object
                       properties:
                         usable: { type: boolean }
-                        reason: { type: string, description: 'unset | not_found | disabled | no_key | error (only when usable is false)' }
+                        reason: { type: string, description: 'unset | not_found | disabled | no_key | no_key_or_cli (OpenAI/Google, v68+) | error (only when usable is false)' }
                         agentCapable: { type: boolean }
                         agentReason: { type: string, description: 'not_agent_capable (only when usable but not agentCapable)' }
+                        via:
+                          type: string
+                          enum: [key, cli]
+                          description: >
+                            API v68+, only when usable. `key` = runs on an API key
+                            (user vault or operator env; custom providers always),
+                            `cli` = runs on the provider's logged-in CLI subscription
+                            (claude / codex / gemini). A key wins when both exist.
 
   /kb/ingest-scip:
     post:

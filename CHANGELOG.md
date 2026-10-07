@@ -31,6 +31,11 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 - Tier routing (API v67): a tier on OpenAI/Google without an API key is unusable and keeps the role on
   its default (it used to fall back to the codex/gemini CLI); `GET /kb/routing-tiers` reports per-tier
   usability; the Mac app routes nothing on a server older than v67.
+- Tier routing (API v68): subscription providers work as tiers. A tier on OpenAI/Google without an API
+  key runs on the logged-in `codex`/`gemini` CLI when it is installed — with the routed model passed
+  (`-m`) and, when no project workspace is involved, in an empty private temp directory (codex
+  read-only) instead of the server's own directory. `GET /kb/routing-tiers` adds `via: key | cli` per
+  usable tier, shown next to each tier in Settings → Tier Routing.
 - Loop reliability (Mac app). Loop agent runs are headless and confined to the
   run's git root; a stage whose agent call errored ends the run `error` unless
   that stage later ran cleanly (a passing verify stage no longer launders it);

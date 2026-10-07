@@ -9,6 +9,9 @@
 // ("subscription mode" — same auth the claude/codex/gemini CLIs use).
 
 import { execFile, spawn } from 'node:child_process';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { lookup } from 'node:dns/promises';
 import { getSecret } from '../server/vault.mjs';
@@ -543,9 +546,16 @@ const CLI_ARG_BUILDERS = {
   // routed through the approval cards the API-key path uses. `--yolo` is
   // deliberately never passed here — auto-approving writes is opted into
   // per-task by the auto-task runner, not by chatting.
-  openai:    (p, { cwd } = {}) => [
+  openai:    (p, { cwd, model, isolated } = {}) => [
     'exec',
+    // An isolated run (runViaCli with no caller workspace) is rooted in a
+    // fresh empty temp dir, which is not a git repo — and `codex exec`
+    // refuses to start outside one unless told to skip the check. A caller's
+    // own workspace keeps the check, exactly as before.
+    ...(isolated ? ['--skip-git-repo-check'] : []),
     ...(cwd ? ['-C', cwd] : []),
+    // `model` is already validated by cliInvocation (cliModelId).
+    ...(model ? ['-m', model] : []),
     '-s', 'read-only',
     p,
   ],
@@ -553,7 +563,7 @@ const CLI_ARG_BUILDERS = {
   // own default (interactive approval, which headless can never grant — the
   // same effect) and is rooted via the child process cwd instead. `--yolo`,
   // which WOULD auto-approve, is likewise never passed here.
-  google:    (p) => ['-p', p],     // gemini -p "<prompt>"
+  google:    (p, { model } = {}) => [...(model ? ['-m', model] : []), '-p', p],  // gemini [-m <model>] -p "<prompt>"
 };
 
 /**
@@ -613,17 +623,97 @@ export function providerHasCli(provider) {
   return typeof cfg?.cli === 'string' && cfg.cli.length > 0;
 }
 
+// Model ids forwarded to a non-Anthropic CLI (`codex -m`, `gemini -m`). The
+// id lands in argv, so it must never be readable as a flag: a leading
+// alphanumeric, a strict charset, a length cap. Same shape as the tier store's
+// MODEL_RE (server/tier-routing.mjs) minus the Claude-only `[1m]` suffix.
+// Claude ids keep their own stricter guard (CLI_MODEL_OK in
+// buildAnthropicCliArgs), which also admits the CLI's bare aliases.
+const FOREIGN_CLI_MODEL_OK = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/;
+
+/**
+ * The model id `provider`'s CLI should be given via `-m`, or null to omit the
+ * flag (the CLI then runs its own default). Null for a provider without a
+ * non-Anthropic CLI, a missing id, or an id that fails FOREIGN_CLI_MODEL_OK.
+ * Google's API resource prefix `models/` is stripped — the gemini CLI wants
+ * the bare id. Callers meter the returned id, never the raw request, so the
+ * usage ledger only names a model the CLI was actually told to run.
+ */
+export function cliModelId(provider, model) {
+  if (provider !== 'openai' && provider !== 'google') return null;
+  if (typeof model !== 'string') return null;
+  const id = provider === 'google' ? model.replace(/^models\//, '') : model;
+  return FOREIGN_CLI_MODEL_OK.test(id) ? id : null;
+}
+
 /** The {bin, args} a provider's CLI is invoked with for a prompt. Pure —
  *  exported so the invocation is testable without spawning anything.
  *  `cwd` is passed through to the provider's arg builder for CLIs that take an
  *  explicit workspace flag (codex `-C`); the child process cwd is set
- *  separately by the spawn helpers, which covers the ones that don't. */
-export function cliInvocation(provider, prompt, { cwd } = {}) {
+ *  separately by the spawn helpers, which covers the ones that don't.
+ *  `model` is validated here (cliModelId) — an invalid id is dropped with a
+ *  log line, never forwarded. `isolated` marks a run rooted in runViaCli's
+ *  private temp dir (codex then skips its git-repo check). */
+export function cliInvocation(provider, prompt, { cwd, model, isolated = false } = {}) {
   const cfg = PROVIDERS[provider];
   if (!cfg) return null;
-  const bin = process.env[`LLMIDE_${provider.toUpperCase()}_CLI`] || cfg.cli;
+  const bin = cliBinFor(provider);
   const build = CLI_ARG_BUILDERS[provider] || ((p) => ['-p', p]);
-  return { bin, args: build(prompt, { cwd }) };
+  const cliModel = cliModelId(provider, model);
+  if (model != null && model !== '' && !cliModel && (provider === 'openai' || provider === 'google')) {
+    log.warn('provider_cli_model_omitted', { provider, reason: 'invalid_model_id' });
+  }
+  return { bin, args: build(prompt, { cwd, model: cliModel || undefined, isolated }) };
+}
+
+// The binary spawnCli runs for `provider` — the LLMIDE_<PROVIDER>_CLI
+// override first, else the provider's own CLI name. Shared by cliInvocation
+// and isCliAvailable so "available" means "the thing we would spawn".
+function cliBinFor(provider) {
+  return process.env[`LLMIDE_${provider.toUpperCase()}_CLI`] || PROVIDERS[provider]?.cli || null;
+}
+
+// How long a CLI-availability answer is trusted. The check runs on every
+// routed call (tier resolver), so it must not stat PATH each time; a minute
+// is short enough that installing/removing a CLI is picked up without a
+// server restart.
+const CLI_AVAILABILITY_TTL_MS = 60_000;
+const cliAvailabilityCache = new Map();
+
+function isExecutableFile(file) {
+  try {
+    fs.accessSync(file, fs.constants.X_OK);
+    return fs.statSync(file).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * True when `provider` has a CLI and its binary resolves to an executable —
+ * the bin spawnCli would run, searched on the same PATH minimalCliEnv hands
+ * the child. A path-like bin (an override) is checked directly. Answers are
+ * cached per bin for CLI_AVAILABILITY_TTL_MS. Presence only: a logged-out or
+ * broken install (e.g. a codex shim whose native binary is missing) still
+ * reads as available and fails at spawn with the usual install/login hint.
+ */
+export function isCliAvailable(provider, { now = Date.now() } = {}) {
+  if (!providerHasCli(provider)) return false;
+  const bin = cliBinFor(provider);
+  if (!bin) return false;
+  const hit = cliAvailabilityCache.get(bin);
+  if (hit && now - hit.at < CLI_AVAILABILITY_TTL_MS) return hit.ok;
+  const ok = bin.includes(path.sep)
+    ? isExecutableFile(bin)
+    : String(process.env.PATH || '').split(path.delimiter).filter(Boolean)
+      .some((dir) => isExecutableFile(path.join(dir, bin)));
+  cliAvailabilityCache.set(bin, { ok, at: now });
+  return ok;
+}
+
+/** Test seam: forget cached CLI-availability answers. */
+export function _resetCliAvailabilityCacheForTests() {
+  cliAvailabilityCache.clear();
 }
 
 // Last-resort HANG BREAKER for a CLI completion — not a work deadline.
@@ -705,8 +795,8 @@ export function minimalCliEnv(extraKeys = {}) {
  * `env` defaults to a minimal allowlist; callers pass their own to add
  * provider-specific vars (an API key, ANTHROPIC_BASE_URL, …).
  */
-export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, signal, args: argsOverride, cwd } = {}) {
-  const inv = cliInvocation(provider, prompt, { cwd });
+export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, signal, args: argsOverride, cwd, model, isolated } = {}) {
+  const inv = cliInvocation(provider, prompt, { cwd, model, isolated });
   if (!inv) return Promise.reject(new Error(`spawnCli: unknown provider '${provider}'`));
   // `argsOverride` lets a caller drive the SAME provider binary with a different
   // argv than the default single-shot completion form — e.g. enabling the
@@ -954,30 +1044,55 @@ export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'a
   return `${bin} failed (exit ${exit}). Run \`claude login\` or add a ${providerLabel} API key in Settings → Model Providers.`;
 }
 
-/** Run a prompt through the provider's logged-in CLI, returning stdout. */
-export function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, cwd } = {}) {
+/**
+ * Run a prompt through the provider's logged-in CLI, returning stdout.
+ *
+ * `model` rides the argv as `-m` when cliModelId accepts it (see there).
+ *
+ * `cwd` roots the CLI in the caller's workspace (Code Assistant turn with a
+ * project root) and is used exactly as given. With NO cwd the CLI does not
+ * inherit the server's directory — codex/gemini are agents, the prompt may
+ * carry untrusted text (email, connector content), and the server's tree
+ * holds kb/ (DB, dev secrets). It instead runs in a fresh, empty, private
+ * (0700) temp dir that is removed afterwards, best-effort, success or not.
+ */
+export async function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, cwd, model } = {}) {
   const cfg = PROVIDERS[provider];
-  if (!cfg) return Promise.reject(new Error(`runViaCli: unknown provider '${provider}'`));
+  if (!cfg) throw new Error(`runViaCli: unknown provider '${provider}'`);
   // Use a minimal env allowlist — never inherit LLMIDE_JWT_SECRET,
   // LLMIDE_VAULT_KEY, or other server secrets into provider CLI subprocesses.
   // Include the provider's own API key env var only when it is available.
+  // HOME (+ XDG_*) stay in it: that is where codex/gemini keep their login.
   const extraKeys = cfg.env && process.env[cfg.env] ? { [cfg.env]: process.env[cfg.env] } : {};
   const env = minimalCliEnv(extraKeys);
-  return spawnCli(provider, prompt, { env, timeoutMs, cwd }).then(
-    ({ stdout, bin }) => {
-      const text = String(stdout || '').trim();
-      if (!text) throw new Error(`${bin} returned empty output`);
-      log.info('provider_cli_complete', { provider, bin });
-      return text;
-    },
-    (err) => {
-      const bin = err.bin || cfg.cli;
+  let isolatedDir = null;
+  if (!cwd) {
+    isolatedDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'llmide-cli-'));
+    await fs.promises.chmod(isolatedDir, 0o700);
+  }
+  try {
+    const { stdout, bin } = await spawnCli(provider, prompt, {
+      env, timeoutMs, model,
+      cwd: cwd || isolatedDir,
+      isolated: Boolean(isolatedDir),
+    }).catch((err) => {
+      const errBin = err.bin || cfg.cli;
       if (err.code === 'ENOENT') {
-        throw new Error(`${bin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`);
+        throw new Error(`${errBin} CLI not found — install it and log in, or add an API key in Settings → Model Providers.`);
       }
-      throw new Error(formatCliSpawnError(err, { bin, provider }));
-    },
-  );
+      throw new Error(formatCliSpawnError(err, { bin: errBin, provider }));
+    });
+    const text = String(stdout || '').trim();
+    if (!text) throw new Error(`${bin} returned empty output`);
+    log.info('provider_cli_complete', { provider, bin, isolated: Boolean(isolatedDir) });
+    return text;
+  } finally {
+    if (isolatedDir) {
+      await fs.promises.rm(isolatedDir, { recursive: true, force: true }).catch((err) => {
+        log.warn('provider_cli_tmp_cleanup_failed', { provider, error: String(err?.message || err) });
+      });
+    }
+  }
 }
 
 // ── Model discovery ───────────────────────────────────────────────────

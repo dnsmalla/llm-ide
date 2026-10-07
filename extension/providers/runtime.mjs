@@ -7,7 +7,7 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
+import { resolveProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
 
@@ -255,12 +255,15 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     // directory they can read it to answer, and without one they inherit the
     // server's cwd and reason about the wrong tree. Anthropic ignores it —
     // that path runs `claude -p` with `--tools ''`, a pure completion.
-    const cliText = await runViaCli(provider, prompt, { cwd });
-    // Use the request's own model id, NOT resolvedModel — the local resolveModel
-    // normalizes any non-Claude id to the Anthropic default, which would mislabel
-    // this (openai/google/custom) provider's usage. `model` is already
-    // same-provider-correct (and reassigned by autoFallback above when on).
-    meterUsage({ userId, provider, model, source: 'cli', endpoint });
+    // `model` rides the CLI argv as `-m` (validated by cliModelId — an id it
+    // refuses is omitted and the CLI runs its own default). A call with no
+    // cwd runs in an isolated empty temp dir, never the server's tree.
+    const cliText = await runViaCli(provider, prompt, { cwd, model });
+    // Meter the model the CLI was actually told to run — the request's own id
+    // (NOT resolvedModel, which normalizes non-Claude ids to the Anthropic
+    // default) when the flag was passed, else 'cli-default': naming a model
+    // the CLI never received would make the ledger (and quota chains) lie.
+    meterUsage({ userId, provider, model: cliModelId(provider, model) || 'cli-default', source: 'cli', endpoint });
     return cliText;
   }
 

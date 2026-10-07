@@ -33,8 +33,12 @@ const {
   syncTierRouting, getTierRoutingConfig, handleTierRoutingSync, _resetTierRoutingCacheForTests,
 } = await import('../server/tier-routing.mjs');
 const {
-  resolveTier, resolveFeatureRoute, routeOpts, tierRoutingStatus,
+  resolveTier, resolveFeatureRoute, routeOpts, tierRoutingStatus, _setCliProbeForTests,
 } = await import('../providers/tier-routing.mjs');
+// Default: no provider CLI installed, so results never depend on this
+// machine's PATH. Tests that need a CLI flip it and restore.
+const cliInstalled = new Set();
+_setCliProbeForTests((provider) => cliInstalled.has(provider));
 const { runClaude } = await import('../providers/runtime.mjs');
 const { loadPlugins } = await import('../plugins/loader.mjs');
 const { askSubagent } = await import('../llm_agent/runtime/handlers/ask-subagent.mjs');
@@ -191,20 +195,34 @@ test('resolveTier: deepseek without a key → null, with a key → route', () =>
   assert.deepEqual(resolveTier(userId, 'cheap'), { provider: 'deepseek', model: 'deepseek-chat' });
 });
 
-test('resolveTier: openai/google without a key → null (no CLI-agent fallback), with a key → route', () => {
-  // Without a key runClaude would fall back to the codex/gemini agent CLI,
-  // which drops the model and runs an agent over untrusted input in the
-  // server cwd — so a keyless non-Anthropic built-in is unusable, not "CLI".
+test('resolveTier: openai/google need a key OR their logged-in CLI (subscription tier)', () => {
+  // Keyless openai/google run codex/gemini — now with the routed model (-m)
+  // and in an isolated temp dir — so they are usable iff that CLI exists.
   const userId = freshUser();
   syncTierRouting({
     tiers: { standard: { provider: 'openai', model: 'gpt-5' }, cheap: { provider: 'google', model: 'gemini-2.5-flash' } },
   }, userId);
-  assert.equal(resolveTier(userId, 'standard'), null);
-  assert.equal(resolveTier(userId, 'cheap'), null);
+  assert.equal(resolveTier(userId, 'standard'), null, 'no key, no CLI');
+  assert.equal(resolveTier(userId, 'cheap'), null, 'no key, no CLI');
+  cliInstalled.add('openai');
+  cliInstalled.add('google');
+  try {
+    assert.deepEqual(resolveTier(userId, 'standard'), { provider: 'openai', model: 'gpt-5' });
+    assert.deepEqual(resolveTier(userId, 'cheap'), { provider: 'google', model: 'gemini-2.5-flash' });
+  } finally { cliInstalled.clear(); }
   setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
   setSecret(db.getDb(), userId, 'google.apiKey', 'g-key');
   assert.deepEqual(resolveTier(userId, 'standard'), { provider: 'openai', model: 'gpt-5' });
   assert.deepEqual(resolveTier(userId, 'cheap'), { provider: 'google', model: 'gemini-2.5-flash' });
+});
+
+test('resolveTier: deepseek/custom stay key-only even with every CLI installed', () => {
+  const userId = freshUser();
+  syncTierRouting({ tiers: { cheap: { provider: 'deepseek', model: 'deepseek-chat' } } }, userId);
+  cliInstalled.add('openai'); cliInstalled.add('google'); cliInstalled.add('deepseek');
+  try {
+    assert.equal(resolveTier(userId, 'cheap'), null);
+  } finally { cliInstalled.clear(); }
 });
 
 test('resolveTier: anthropic needs no key (CLI login is the default path anyway)', () => {
@@ -311,9 +329,34 @@ test('tierRoutingStatus: config + per-tier usability with the resolver\'s reason
   const st = tierRoutingStatus(userId);
   assert.deepEqual(st.tiers, getTierRoutingConfig(userId).tiers);
   assert.deepEqual(st.features, { loop: 'cheap', subagents: 'standard' });
-  assert.deepEqual(st.status.strong, { usable: true, agentCapable: true });
-  assert.deepEqual(st.status.standard, { usable: false, reason: 'no_key', agentCapable: false });
-  assert.deepEqual(st.status.cheap, { usable: true, agentCapable: false, agentReason: 'not_agent_capable' });
+  assert.deepEqual(st.status.strong, { usable: true, agentCapable: true, via: 'cli' });
+  assert.deepEqual(st.status.standard, { usable: false, reason: 'no_key_or_cli', agentCapable: false });
+  assert.deepEqual(st.status.cheap, { usable: true, agentCapable: false, agentReason: 'not_agent_capable', via: 'key' });
+});
+
+test('tierRoutingStatus: `via` says whether a usable tier runs on an API key or the logged-in CLI', () => {
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: {
+      strong: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      standard: { provider: 'openai', model: 'gpt-5' },
+      cheap: { provider: 'google', model: 'gemini-2.5-flash' },
+    },
+  }, userId);
+  cliInstalled.add('openai');
+  cliInstalled.add('google');
+  try {
+    let st = tierRoutingStatus(userId);
+    assert.deepEqual(st.status.standard, { usable: true, agentCapable: false, agentReason: 'not_agent_capable', via: 'cli' });
+    assert.deepEqual(st.status.cheap, { usable: true, agentCapable: false, agentReason: 'not_agent_capable', via: 'cli' });
+    assert.equal(st.status.strong.via, 'cli');
+    setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
+    setSecret(db.getDb(), userId, 'claude.apiKey', 'sk-ant-test');
+    st = tierRoutingStatus(userId);
+    assert.equal(st.status.standard.via, 'key', 'a key wins over the CLI (runClaude tries the key first)');
+    assert.equal(st.status.strong.via, 'key');
+    assert.equal(st.status.cheap.via, 'cli');
+  } finally { cliInstalled.clear(); }
 });
 
 test('tierRoutingStatus: unset tiers, missing custom provider, Anthropic-door custom provider', () => {
@@ -331,7 +374,7 @@ test('tierRoutingStatus: unset tiers, missing custom provider, Anthropic-door cu
   }, userId);
   const st = tierRoutingStatus(userId);
   assert.deepEqual(st.status.strong, { usable: false, reason: 'unset', agentCapable: false });
-  assert.deepEqual(st.status.standard, { usable: true, agentCapable: true });
+  assert.deepEqual(st.status.standard, { usable: true, agentCapable: true, via: 'key' });
   assert.deepEqual(st.status.cheap, { usable: false, reason: 'not_found', agentCapable: false });
 });
 
@@ -392,6 +435,33 @@ test('runClaude: an unrunnable custom/deepseek provider throws code PROVIDER_UNA
     (err) => err.code === 'PROVIDER_UNAVAILABLE' && /not found/.test(err.message));
   await assert.rejects(runClaude('hi', { userId, model: 'deepseek-chat', provider: 'deepseek' }),
     (err) => err.code === 'PROVIDER_UNAVAILABLE');
+});
+
+test('runClaude: keyless openai/google run their CLI WITH the routed model and meter only a model that was passed', async () => {
+  // Subscription tiers: the routed cheap model must actually reach the CLI
+  // (-m), and the ledger must never name a model the CLI was not told to run.
+  const userId = freshUser();
+  const ledger = () => db.getDb().prepare(
+    'SELECT provider, model, source FROM usage_ledger WHERE user_id = ? ORDER BY id').all(userId);
+  process.env.LLMIDE_OPENAI_CLI = 'echo';
+  process.env.LLMIDE_GOOGLE_CLI = 'echo';
+  try {
+    const oa = await runClaude('hi', { userId, model: 'gpt-5-mini', provider: 'openai' });
+    assert.match(oa, /^exec --skip-git-repo-check -C \S+ -m gpt-5-mini -s read-only hi$/);
+    const gg = await runClaude('hi', { userId, model: 'gemini-2.5-flash', provider: 'google' });
+    assert.equal(gg, '-m gemini-2.5-flash -p hi');
+    // An id the CLI guard refuses is omitted from argv AND from the ledger.
+    const bad = await runClaude('hi', { userId, model: 'gemini 2.5', provider: 'google' });
+    assert.equal(bad, '-p hi');
+  } finally {
+    delete process.env.LLMIDE_OPENAI_CLI;
+    delete process.env.LLMIDE_GOOGLE_CLI;
+  }
+  assert.deepEqual(ledger(), [
+    { provider: 'openai', model: 'gpt-5-mini', source: 'cli' },
+    { provider: 'google', model: 'gemini-2.5-flash', source: 'cli' },
+    { provider: 'google', model: 'cli-default', source: 'cli' },
+  ]);
 });
 
 // ── loader: `tier:` frontmatter ──────────────────────────────────────────

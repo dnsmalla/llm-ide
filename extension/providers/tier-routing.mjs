@@ -17,9 +17,18 @@
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { getTierRoutingConfig, ROUTING_TIERS } from '../server/tier-routing.mjs';
-import { resolveCustomProviderDispatch, providerApiKey } from './providers.mjs';
+import { resolveCustomProviderDispatch, providerApiKey, providerHasCli, isCliAvailable } from './providers.mjs';
 
 const log = logger.child({ component: 'tier-routing' });
+
+// "Is this provider's CLI installed?" — isCliAvailable (60 s TTL cache) in
+// production; tests swap it so results never depend on the machine's PATH.
+let cliProbe = (provider) => isCliAvailable(provider);
+
+/** Test seam: replace the CLI-availability probe (`(provider) => boolean`). */
+export function _setCliProbeForTests(probe) {
+  cliProbe = typeof probe === 'function' ? probe : (provider) => isCliAvailable(provider);
+}
 
 // One warn per (user, tier, reason) per window — the resolver runs on every
 // routed call, and a stale config would otherwise log on each of them.
@@ -39,13 +48,26 @@ function unusableReason(route, userId, db) {
     const r = resolveCustomProviderDispatch(route.provider, userId, db);
     return r.error || null;                  // not_found | disabled | no_key
   }
-  // Every non-Anthropic built-in needs its API key. DeepSeek has no CLI mode
-  // at all; OpenAI/Google without a key would fall back to runViaCli, which
-  // drops the routed model and runs the codex/gemini AGENT CLI over untrusted
-  // input in the server's cwd — never an acceptable silent substitute.
   // Anthropic without a key is the `claude -p` path every default call takes.
-  if (route.provider !== 'anthropic' && !providerApiKey(userId, route.provider)) return 'no_key';
-  return null;
+  if (route.provider === 'anthropic') return null;
+  if (providerApiKey(userId, route.provider)) return null;
+  // Keyless OpenAI/Google run their logged-in CLI (subscription): runViaCli
+  // passes the routed model (-m) and, with no caller workspace, roots the
+  // agent CLI in an empty private temp dir (codex read-only) — so it is a
+  // faithful substitute, usable iff the binary is there. DeepSeek (and any
+  // other cli: null provider) has no CLI mode at all.
+  if (providerHasCli(route.provider)) return cliProbe(route.provider) ? null : 'no_key_or_cli';
+  return 'no_key';
+}
+
+/**
+ * How a USABLE `route` authenticates: 'key' (an API key — user vault or
+ * operator env; custom providers always) or 'cli' (the logged-in CLI). Same
+ * precedence as runClaude: a key is tried first.
+ */
+function routeVia(route, userId) {
+  if (route.provider.startsWith('custom:')) return 'key';
+  return providerApiKey(userId, route.provider) ? 'key' : 'cli';
 }
 
 /**
@@ -89,11 +111,12 @@ export function resolveTier(userId, tier, db) {
 
 /**
  * GET /kb/routing-tiers payload: the stored config plus, per tier,
- * `{ usable, reason?, agentCapable, agentReason? }` — `usable` from the same
+ * `{ usable, reason?, agentCapable, agentReason?, via? }` — `usable` from the same
  * check resolveTier applies (so the Mac can drop a route the server would
  * drop anyway instead of sending it and hitting a provider error), and
  * `agentCapable` for features that run on the Agent engine (Loop agent steps,
- * Agent-engine chats). An unset tier is `{ usable: false, reason: 'unset',
+ * Agent-engine chats), and on a usable tier `via` ('key' | 'cli') — whether
+ * it runs on an API key or the logged-in CLI subscription. An unset tier is `{ usable: false, reason: 'unset',
  * agentCapable: false }`. Never throws; a fault reports every tier unusable.
  */
 export function tierRoutingStatus(userId, db) {
@@ -110,9 +133,11 @@ export function tierRoutingStatus(userId, db) {
     if (!route) { status[tier] = { usable: false, reason: 'unset', agentCapable: false }; continue; }
     let reason;
     let agentReason;
+    let via;
     try {
       reason = unusableReason(route, userId, db);
       agentReason = reason || agentUnusableReason(route, userId, db);
+      if (!reason) via = routeVia(route, userId);
     } catch (err) {
       reason = 'error';
       agentReason = 'error';
@@ -120,7 +145,7 @@ export function tierRoutingStatus(userId, db) {
     }
     status[tier] = reason
       ? { usable: false, reason, agentCapable: false }
-      : { usable: true, agentCapable: !agentReason, ...(agentReason ? { agentReason } : {}) };
+      : { usable: true, agentCapable: !agentReason, ...(agentReason ? { agentReason } : {}), via };
   }
   return { tiers: cfg.tiers, features: cfg.features, status };
 }
