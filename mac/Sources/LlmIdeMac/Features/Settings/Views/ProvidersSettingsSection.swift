@@ -38,7 +38,7 @@ struct ProvidersSettingsSection: View {
     var body: some View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. The chat composer switches the model only; for multiple named providers (GLM, Ollama, …) and the Code Assistant's own provider, see Custom Providers below.")
+                SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. The chat composer switches the model only; for multiple named providers (GLM, Ollama, …) and the Code Assistant's own provider, see Custom Providers below. To use several providers at once — each by subscription or API key — one per role, set them in Tier Routing below.")
                 if let configuredLoadError {
                     Text(configuredLoadError)
                         .font(Typography.caption)

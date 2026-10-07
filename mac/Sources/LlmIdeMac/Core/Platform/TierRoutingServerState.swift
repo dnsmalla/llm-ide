@@ -6,13 +6,18 @@ import os.log
 // that fills it. Split out of TierRouting.swift (GRID 500-line file rule).
 
 /// One tier as the SERVER sees it (`GET /kb/routing-tiers`, API v67+):
-/// whether its resolver would run the tier (vault keys, synced custom
-/// providers — state the Mac cannot see) and whether the Agent SDK engine can.
+/// whether its resolver would run the tier (vault keys, installed provider
+/// CLIs, synced custom providers — state the Mac cannot see) and whether the
+/// Agent SDK engine can.
 struct TierServerStatus: Codable, Equatable, Sendable {
     var usable: Bool
     var reason: String?
     var agentCapable: Bool
     var agentReason: String?
+    /// How a usable tier authenticates on the server: "key" (API key) or
+    /// "cli" (the provider's logged-in CLI subscription). API v68+; nil from
+    /// an older server or on an unusable tier — optional so v67 still decodes.
+    var via: String? = nil
 }
 
 /// An entry the server dropped from the synced table (`POST` answer, v67+).

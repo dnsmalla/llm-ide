@@ -233,12 +233,29 @@ enum TierRouting {
     static func describeServerReason(_ code: String?) -> String {
         switch code {
         case "no_key":            return "no API key stored on the server — add one in Model Providers"
+        case "no_key_or_cli":     return "no API key on the server and its CLI (codex / gemini) isn't installed "
+                                      + "where the server runs — add a key in Model Providers, or install the CLI and log in"
         case "not_found":         return "the server doesn't know this custom provider — re-save it in Custom Providers"
         case "disabled":          return "the provider is disabled"
         case "not_agent_capable": return "only Claude or a custom provider with an Anthropic-compatible URL can"
         case "unset":             return "the tier is not set on the server — it has not synced yet"
         case let other?:          return other
         case nil:                 return "unknown reason"
+        }
+    }
+
+    /// Settings wording for the server's `via` on a usable tier (API v68+):
+    /// "via API key" or "via subscription (<cli> CLI)"; nil when the server
+    /// did not say (older server, unusable tier) or sent an unknown value.
+    static func describeVia(_ via: String?, provider: String) -> String? {
+        switch via {
+        case "key":
+            return "via API key"
+        case "cli":
+            guard let tool = cliTool(forProvider: provider) else { return "via subscription (CLI)" }
+            return "via subscription (\(tool.cliExecutable) CLI)"
+        default:
+            return nil
         }
     }
 

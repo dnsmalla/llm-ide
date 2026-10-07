@@ -139,9 +139,12 @@ struct TierRoutingSection: View {
             }
             if let route, let reason = TierRouting.unusableReason(route, customProviders: customProviders) {
                 note("uses default — \(reason)")
-            } else if route != nil, serverSupported,
-                      let status = serverState.status?[tier.rawValue], !status.usable {
-                note("uses default — the server can't run it: \(TierRouting.describeServerReason(status.reason))")
+            } else if let route, serverSupported, let status = serverState.status?[tier.rawValue] {
+                if !status.usable {
+                    note("uses default — the server can't run it: \(TierRouting.describeServerReason(status.reason))")
+                } else if let via = TierRouting.describeVia(status.via, provider: route.provider) {
+                    note(via)
+                }
             }
             if pendingProviders[tier.rawValue] != nil {
                 note(route.map { "not saved until a model is chosen — still using \($0.provider) · \($0.model)" }

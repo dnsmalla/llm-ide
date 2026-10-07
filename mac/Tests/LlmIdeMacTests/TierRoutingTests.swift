@@ -108,6 +108,22 @@ struct TierRoutingTests {
                                            agentReason: "not_agent_capable"))
     }
 
+    @Test func statusDecodesViaFromV68AndToleratesItsAbsence() throws {
+        let v68 = Data(#"{"usable":true,"agentCapable":false,"agentReason":"not_agent_capable","via":"cli"}"#.utf8)
+        #expect(try JSONDecoder().decode(TierServerStatus.self, from: v68).via == "cli")
+        let v67 = Data(#"{"usable":true,"agentCapable":true}"#.utf8)
+        #expect(try JSONDecoder().decode(TierServerStatus.self, from: v67).via == nil)
+    }
+
+    @Test func viaWordingNamesTheSubscriptionCLI() {
+        #expect(TierRouting.describeVia("key", provider: "openai") == "via API key")
+        #expect(TierRouting.describeVia("cli", provider: "openai") == "via subscription (codex CLI)")
+        #expect(TierRouting.describeVia("cli", provider: "google") == "via subscription (gemini CLI)")
+        #expect(TierRouting.describeVia(nil, provider: "openai") == nil)
+        #expect(TierRouting.describeVia("bogus", provider: "openai") == nil)
+        #expect(TierRouting.describeServerReason("no_key_or_cli").contains("CLI"))
+    }
+
     // MARK: - Refresh ordering (generation / stale drop)
 
     private struct Boom: Error {}
