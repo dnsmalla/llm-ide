@@ -147,6 +147,21 @@ extension LlmIdeAPIClient {
     }
 
     // One SSE event from the streaming /code-assist endpoint.
+    /// What an SSE `error` event becomes. Normally `.agent` (shown verbatim,
+    /// never retried on the buffered endpoint). A provider-config refusal
+    /// (`code` in `TierRouting.providerConfigErrorCodes`, server v70+) that
+    /// arrived before ANY progress or chunk becomes the same 400 `.http` the
+    /// buffered path answers, so `TierRouting.isProviderConfigError` matches
+    /// and a tier-routed turn can retry once without its route. After
+    /// progress the turn may have acted, so it stays `.agent` (no replay).
+    static func streamError(message: String?, code: String?, sawProgress: Bool) -> APIError {
+        let text = message ?? "Code Assistant failed"
+        if let code, !sawProgress, TierRouting.providerConfigErrorCodes.contains(code) {
+            return .http(status: 400, code: code, message: text, details: nil)
+        }
+        return .agent(message: text)
+    }
+
     private struct CodeAssistSSEEvent: Decodable {
         let type: String                 // "progress" | "chunk" | "done" | "tasks" | "tasks_progress" | "error"
         let phase: String?               // progress: "thinking" | "tool" | "writing" | "approval_request"
@@ -160,6 +175,7 @@ extension LlmIdeAPIClient {
         let tasks: [AgentTask]?          // tasks — task list from the agent
         let mode: String?                // done — resolved mode
         let error: String?               // error
+        let code: String?                // error — PROVIDER_UNAVAILABLE when the route's provider can't run (v70+)
         // progress (phase == "approval_request"): the legacy engine's gated
         // run-bash parking a ToolApproval (Task 8's `ctx.loopCtx.emit`) —
         // wrapped in the same `{type:'progress', ...ev}` envelope as every
@@ -423,7 +439,7 @@ extension LlmIdeAPIClient {
                 // mistake for a transport failure and retry on the buffered
                 // endpoint, re-running the same failing call and replacing this
                 // real reason with the generic "temporarily unavailable" 502.
-                throw APIError.agent(message: evt.error ?? "Code Assistant failed")
+                throw Self.streamError(message: evt.error, code: evt.code, sawProgress: sawProgress)
             default:
                 break
             }

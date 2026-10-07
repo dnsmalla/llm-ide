@@ -397,8 +397,17 @@ enum TierRouting {
     /// once without the route — today's request.
     static let providerConfigErrorCodes: Set<String> = ["PROVIDER_UNAVAILABLE", "PROVIDER_NOT_AGENT_CAPABLE"]
 
+    /// True for a server refusal of the route's provider: the buffered
+    /// path's 400 (also what the legacy SSE stream maps such an `error` event
+    /// to — `LlmIdeAPIClient.streamError`), or the Agent engine's stream
+    /// `error` event with one of these codes.
     static func isProviderConfigError(_ error: Error) -> Bool {
-        guard case APIError.http(let status, let code, _, _) = error else { return false }
-        return status == 400 && providerConfigErrorCodes.contains(code)
+        if case APIError.http(let status, let code, _, _) = error {
+            return status == 400 && providerConfigErrorCodes.contains(code)
+        }
+        if case AgentV2Error.engine(let code?, _) = error {
+            return providerConfigErrorCodes.contains(code)
+        }
+        return false
     }
 }

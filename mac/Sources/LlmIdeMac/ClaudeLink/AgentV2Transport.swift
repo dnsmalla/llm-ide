@@ -30,6 +30,14 @@ enum AgentV2Error: Error, Equatable, Sendable {
 }
 
 extension AgentV2Error {
+    /// The error a stream `error` event becomes. Provider refusals keep their
+    /// code (`PROVIDER_UNAVAILABLE` / `PROVIDER_NOT_AGENT_CAPABLE`) inside
+    /// `.engine`, which `TierRouting.isProviderConfigError` recognises — the
+    /// tier-routed chat's one retry without its route depends on it.
+    static func forStreamError(code: String?, message: String) -> AgentV2Error {
+        code == "SESSION_UNRESUMABLE" ? .sessionUnresumable : .engine(code: code, message: message)
+    }
+
     /// The user-facing reason for a `result` whose subtype says the turn did
     /// NOT complete, or nil for a successful one (`success`, or no subtype
     /// from an older server).
@@ -405,9 +413,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 }
             case .error(let code, let message):
                 sawTerminal = true
-                failure.record(code == "SESSION_UNRESUMABLE"
-                    ? .sessionUnresumable
-                    : .engine(code: code, message: message))
+                failure.record(AgentV2Error.forStreamError(code: code, message: message))
             case .sdk:
                 break  // unknown/passthrough types: observable on the wire, not actionable here
             }

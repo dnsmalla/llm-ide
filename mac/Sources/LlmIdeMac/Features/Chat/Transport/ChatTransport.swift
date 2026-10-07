@@ -29,22 +29,42 @@ protocol ChatTransport: Sendable {
 
 private let chatTransportRouteLogger = Logger(subsystem: "com.llmide.macapp", category: "TierRouting")
 
+/// Whether a routed attempt produced any progress, text or approval before it
+/// failed — set from the transport's main-actor callbacks.
+@MainActor
+private final class RouteAttemptActivity {
+    var happened = false
+    nonisolated init() {}
+    func didHappen() -> Bool { happened }
+}
+
 extension ChatTransport {
     /// `roundTrip`, retried ONCE without the tier route when the server
     /// refuses the routed provider (`TierRouting.isProviderConfigError` — a
-    /// missing/disabled/keyless provider or a CLI that cannot run). Routing
-    /// must never fail a turn the default would answer; any other failure is
-    /// a real failure of a working route and is not retried. A turn with no
-    /// `routeFallback` behaves exactly like `roundTrip`.
+    /// missing/disabled/keyless provider or a CLI that cannot run) AND the
+    /// failed attempt produced no progress, text or approval: anything the
+    /// turn already did must not be replayed. Routing must never fail a turn
+    /// the default would answer; any other failure is a real failure of a
+    /// working route and is not retried. A turn with no `routeFallback`
+    /// behaves exactly like `roundTrip`.
     func roundTripWithRouteFallback(
         _ input: ChatTransportInput,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: @escaping @MainActor (AgentV2Approval) -> Void
     ) async throws -> ChatTransportResult {
-        do {
+        guard input.routeFallback != nil else {
             return try await roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
-        } catch where input.routeFallback != nil && TierRouting.isProviderConfigError(error) {
+        }
+        let activity = RouteAttemptActivity()
+        do {
+            return try await roundTrip(
+                input,
+                onProgress: { progress in activity.happened = true; onProgress(progress) },
+                onChunk: { text in activity.happened = true; onChunk(text) },
+                onApproval: { approval in activity.happened = true; onApproval(approval) })
+        } catch {
+            guard TierRouting.isProviderConfigError(error), !(await activity.didHappen()) else { throw error }
             var retry = input
             retry.model = input.routeFallback?.model
             retry.provider = input.routeFallback?.provider
