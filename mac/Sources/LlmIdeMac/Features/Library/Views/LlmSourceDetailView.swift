@@ -11,9 +11,11 @@ import SwiftUI
 /// Skills, agents, commands, and templates each carry a CHECKBOX: the user's
 /// per-item selection. An unchecked item leaves the chat "/" menu, the phone,
 /// Loop, and the Doc Gen / Visual menus; for Central Skills it also leaves the
-/// open project's installed skills (`.claude/skills`, …), which is why a
-/// Central Skills change re-runs the project install. Hooks and MCP servers
-/// stay whole-source and have no checkbox.
+/// open project's installed skills (`.claude/skills`, …) — but only once the
+/// user presses **Apply to Project**, which re-runs the project install. A
+/// checkbox saves the selection immediately; the project files change only on
+/// Apply (or Update, or opening the project). Hooks and MCP
+/// servers stay whole-source and have no checkbox.
 ///
 /// **Update** pulls the source (the server refuses rather than discard local
 /// edits or commits), then re-links the open project's skills and reports
@@ -38,9 +40,10 @@ struct LlmSourceDetailView: View {
     @State private var loadError: String?
     @State private var busy = false
     @State private var resultMessage: String?
-    /// Debounces the project re-install a Central Skills checkbox triggers, so
-    /// clicking through several boxes runs install.sh once, not per click.
-    @State private var reinstallTask: Task<Void, Never>?
+    /// A Central Skills selection changed since the open project's skills
+    /// were last re-linked from this view. View-local: it resets when the
+    /// pane is left, but the Apply button stays available regardless.
+    @State private var hasUnappliedSelection = false
     /// A checkbox write is on the wire. Boxes are disabled until it lands, so
     /// two quick clicks can't reach the server out of order.
     @State private var itemWriteInFlight = false
@@ -57,6 +60,7 @@ struct LlmSourceDetailView: View {
                 } else if let source {
                     infoBlock(source)
                     actionsRow(source)
+                    if source.builtin, source.installed { applyToProjectRow }
                     if let discovery {
                         itemsBlock("Skills", kind: .skill, items: discovery.skills ?? [])
                         itemsBlock("Agents", kind: .agent, items: discovery.agents,
@@ -79,7 +83,9 @@ struct LlmSourceDetailView: View {
             await load()
             await checkForUpdate(force: false)
         }
-        .onDisappear { reinstallTask?.cancel() }
+        // Opening a project installs the current selection (ProjectSkillsInstaller),
+        // so a pending flag from the previous project no longer applies.
+        .onChange(of: projectStore.activeProject?.localPath) { _, _ in hasUnappliedSelection = false }
         .alert("LLM source", isPresented: Binding(
             get: { resultMessage != nil },
             set: { if !$0 { resultMessage = nil } }
@@ -265,6 +271,31 @@ struct LlmSourceDetailView: View {
         }
     }
 
+    /// Central Skills only: re-link the open project's skills to the current
+    /// selection. Prominent while a checkbox change is still unapplied.
+    @ViewBuilder
+    private var applyToProjectRow: some View {
+        let project = projectStore.activeProject
+        HStack(spacing: 10) {
+            if hasUnappliedSelection {
+                Label("Selection changed — not yet applied to the project.", systemImage: "exclamationmark.circle")
+                    .foregroundStyle(Color.accentColor).font(.callout)
+            } else {
+                Text(project.map { "Project: \($0.bundle.displayName)" } ?? "No project open.")
+                    .foregroundStyle(.secondary).font(.callout)
+            }
+            Spacer()
+            if hasUnappliedSelection {
+                Button("Apply to Project") { Task { await applyToProject() } }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(busy || itemWriteInFlight || project == nil)
+            } else {
+                Button("Apply to Project") { Task { await applyToProject() } }
+                    .disabled(busy || itemWriteInFlight || project == nil)
+            }
+        }
+    }
+
     /// Upstream status, in words — shown above the actions.
     @ViewBuilder
     private var updateStatusLine: some View {
@@ -341,7 +372,10 @@ struct LlmSourceDetailView: View {
             if let fresh = try? await api.llmSourceDiscovery(id: sourceId) { discovery = fresh }
             announceChange()
             // Central Skills feeds project installs; templates never install.
-            if source?.builtin == true, kind != .template { scheduleProjectReinstall() }
+            // The project changes only on Apply, so the user can see it lags.
+            if source?.builtin == true, kind != .template, projectStore.activeProject != nil {
+                hasUnappliedSelection = true
+            }
         } catch {
             resultMessage = "Couldn't save the selection: \(error.localizedDescription)"
             await load()
@@ -366,14 +400,17 @@ struct LlmSourceDetailView: View {
         discovery = d
     }
 
-    private func scheduleProjectReinstall() {
-        reinstallTask?.cancel()
-        reinstallTask = Task {
-            try? await Task.sleep(nanoseconds: 1_200_000_000)
-            guard !Task.isCancelled else { return }
-            if case .failure(let err) = await reinstallProjectSkills() {
-                resultMessage = "Saved, but the project's skills couldn't be re-linked: \(err.localizedDescription)"
-            }
+    private func applyToProject() async {
+        busy = true
+        defer { busy = false }
+        switch await reinstallProjectSkills() {
+        case .success(let name?):
+            hasUnappliedSelection = false
+            resultMessage = "Applied your selection to \(name)'s skills."
+        case .success(nil):
+            resultMessage = "No project is open — open one, then Apply."
+        case .failure(let err):
+            resultMessage = "The project's skills couldn't be re-linked: \(err.localizedDescription)"
         }
     }
 
@@ -393,9 +430,6 @@ struct LlmSourceDetailView: View {
     private func update() async {
         busy = true
         defer { busy = false }
-        // This run re-links the project itself; a pending checkbox re-install
-        // would only repeat it.
-        reinstallTask?.cancel()
         let wasInstall = source?.builtin == true && source?.installed == false
         do {
             let result = try await api.updateLlmSource(id: sourceId)
@@ -404,7 +438,10 @@ struct LlmSourceDetailView: View {
             // Only Central Skills is installed into projects.
             if source?.builtin == true {
                 switch await reinstallProjectSkills() {
-                case .success(let name): projectName = name
+                case .success(let name):
+                    projectName = name
+                    // Update re-links with the current selection, so it applies it too.
+                    if name != nil { hasUnappliedSelection = false }
                 case .failure(let err): note = " The project's skills couldn't be re-linked: \(err.localizedDescription)"
                 }
             }
