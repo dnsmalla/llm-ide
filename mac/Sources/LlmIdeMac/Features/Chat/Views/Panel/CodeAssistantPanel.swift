@@ -533,18 +533,6 @@ struct CodeAssistantPanel: View {
 
     // MARK: - Event Handlers
 
-    /// Point the engine's injected collaborators at this panel's own state.
-    ///
-    /// Called from `.onAppear` rather than `init` for two reasons: the
-    /// context-building hooks read `@EnvironmentObject`s that aren't available
-    /// in `init`, and the closures must capture a view value whose property
-    /// wrappers are installed. Re-running it on a later appearance just
-    /// reassigns the same closures, so it is idempotent — and it MUST run
-    /// before `handleOnAppearSessions()` below, which fires `onHistoryReplaced`
-    /// while loading the restored chat.
-    /// Copy the on-screen composer settings onto `target` so it can still
-    /// resolve its own turns after it is parked. Keeps the last known
-    /// `agentContext` when none is passed.
     /// The effort this panel's next turn sends — read live, like the mode.
     func currentTurnEffort() -> String {
         let stored = UserDefaults.standard.string(forKey: EffortChoice.defaultsKey) ?? EffortChoice.auto
@@ -552,6 +540,9 @@ struct CodeAssistantPanel: View {
                                       levels: modelState.effortLevelsForNextTurn(config: config))
     }
 
+    /// Copy the on-screen composer settings onto `target` so it can still
+    /// resolve its own turns after it is parked. Keeps the last known
+    /// `agentContext` when none is passed.
     func captureTurnSettings(into target: ChatEngine, agentContext: AgentContext? = nil) {
         target.turnSettingsSnapshot = TurnSettingsSnapshot(
             mode: modelState.selectedMode.rawValue,
@@ -562,6 +553,15 @@ struct CodeAssistantPanel: View {
             effort: currentTurnEffort())
     }
 
+    /// Point the engine's injected collaborators at this panel's own state.
+    ///
+    /// Called from `.onAppear` rather than `init` for two reasons: the
+    /// context-building hooks read `@EnvironmentObject`s that aren't available
+    /// in `init`, and the closures must capture a view value whose property
+    /// wrappers are installed. Re-running it on a later appearance just
+    /// reassigns the same closures, so it is idempotent — and it MUST run
+    /// before `handleOnAppearSessions()` below, which fires `onHistoryReplaced`
+    /// while loading the restored chat.
     func wireEngine() {
         // Refreshed on every (re)wire so the snapshot is current whenever
         // this engine is about to become the displayed one.
