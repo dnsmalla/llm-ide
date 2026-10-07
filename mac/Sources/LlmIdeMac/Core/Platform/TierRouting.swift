@@ -75,17 +75,32 @@ struct TierRoutingConfig: Codable, Equatable {
         features[feature.rawValue].flatMap(RoutingTier.init(rawValue:))
     }
 
-    /// Read the stored table. An absent or unreadable blob is an empty table:
-    /// routing is an optimization, and an empty table is exactly today's
-    /// behaviour, so a decode failure must never block a run.
-    static func load(from defaults: UserDefaults = .standard) -> TierRoutingConfig {
-        guard let data = defaults.data(forKey: defaultsKey) else { return TierRoutingConfig() }
+    /// What is stored: a table (absent = empty), or `.unreadable` when a blob
+    /// exists but does not decode. Kept apart from `load()` so a sync can
+    /// refuse to push — an unreadable blob read as "empty" would make the
+    /// server delete the user's table (same reason as
+    /// `CustomProvider.LoadOutcome`).
+    enum LoadOutcome: Equatable {
+        case loaded(TierRoutingConfig)
+        case unreadable
+    }
+
+    static func loadOutcome(from defaults: UserDefaults = .standard) -> LoadOutcome {
+        guard let data = defaults.data(forKey: defaultsKey) else { return .loaded(TierRoutingConfig()) }
         do {
-            return try JSONDecoder().decode(TierRoutingConfig.self, from: data)
+            return .loaded(try JSONDecoder().decode(TierRoutingConfig.self, from: data))
         } catch {
             tierRoutingLogger.error("Unreadable \(defaultsKey, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            return TierRoutingConfig()
+            return .unreadable
         }
+    }
+
+    /// Read the stored table for RESOLVING. An absent or unreadable blob is an
+    /// empty table: routing is an optimization, and an empty table is exactly
+    /// today's behaviour, so a decode failure must never block a run.
+    static func load(from defaults: UserDefaults = .standard) -> TierRoutingConfig {
+        if case .loaded(let config) = loadOutcome(from: defaults) { return config }
+        return TierRoutingConfig()
     }
 
     @discardableResult
@@ -134,14 +149,53 @@ struct TierRoutingServerState: Equatable, Sendable {
 
 /// Thread-safe holder for this launch's `TierRoutingServerState`; resolvers
 /// run on the main actor and off it (Loop runners), so a lock, not an actor.
+///
+/// Every refresh takes a generation when it is requested; its result is
+/// written only while that generation is still the latest, so an older
+/// refresh finishing late (or after a sign-out reset) can never overwrite a
+/// newer answer.
 final class TierRoutingServerCache: @unchecked Sendable {
     static let shared = TierRoutingServerCache()
     private let lock = NSLock()
     private var value = TierRoutingServerState.unknown
+    private var generation = 0
+
+    /// Internal (not private) so tests can use a fresh instance.
+    init() {}
 
     var state: TierRoutingServerState {
-        get { lock.lock(); defer { lock.unlock() }; return value }
-        set { lock.lock(); value = newValue; lock.unlock() }
+        lock.lock(); defer { lock.unlock() }
+        return value
+    }
+
+    /// Claim a new generation; every earlier one becomes stale.
+    func nextGeneration() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        generation += 1
+        return generation
+    }
+
+    func isLatest(_ candidate: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        return candidate == generation
+    }
+
+    /// Store `newState` only if `candidate` is still the latest generation.
+    /// - Returns: whether it was stored (false = a newer refresh or a reset
+    ///   happened meanwhile, and this result is dropped).
+    @discardableResult
+    func commit(_ newState: TierRoutingServerState, generation candidate: Int) -> Bool {
+        lock.lock(); defer { lock.unlock() }
+        guard candidate == generation else { return false }
+        value = newState
+        return true
+    }
+
+    /// Back to `.unknown` and invalidate every in-flight refresh (sign-out).
+    func reset() {
+        lock.lock(); defer { lock.unlock() }
+        generation += 1
+        value = .unknown
     }
 }
 
@@ -329,56 +383,46 @@ enum TierRouting {
 
     // MARK: - Server sync + status
 
-    /// Bring this launch's server state up to date for `serverApiVersion`:
-    /// below v67 (or unknown) it only records that — no network, nothing
-    /// routes; otherwise it re-syncs custom providers (the server's status
-    /// depends on them), pushes the table, and fetches the per-tier status.
-    /// A failed fetch leaves status nil (fail closed). Returns the new state;
-    /// throws only the table push/fetch error, for Settings to show.
-    @discardableResult
-    static func refreshServerState(api: LlmIdeAPIClient, serverApiVersion: Int?,
-                                   config: TierRoutingConfig = .load()) async throws -> TierRoutingServerState {
-        guard serverSupportsRouting(serverApiVersion) else {
-            let state = TierRoutingServerState(apiVersion: serverApiVersion, status: nil)
-            TierRoutingServerCache.shared.state = state
-            return state
-        }
+    /// One round trip against the server, without touching the cache: re-sync
+    /// custom providers (always — the server needs them whatever its version,
+    /// and the status below depends on them); then, on API v67+, push the
+    /// table (skipped when the stored blob is unreadable, so the server's copy
+    /// is not deleted) and fetch the per-tier status. Below v67 / unknown the
+    /// answer is "nothing routes" with no routing traffic.
+    ///
+    /// - Parameter config: the table to push; nil = the stored one.
+    static func fetchServerState(api: LlmIdeAPIClient, serverApiVersion: Int?,
+                                 config: TierRoutingConfig?) async throws -> TierRoutingServerState {
         do {
             try await CustomProvider.syncAllToBackendThrowing(api: api)
         } catch {
             // Not fatal: the status below then reports custom tiers as the
             // server sees them, which is what routing must follow anyway.
-            tierRoutingLogger.error("Custom provider sync before tier status failed: \(error.localizedDescription, privacy: .public)")
+            tierRoutingLogger.error("Custom provider sync failed: \(error.localizedDescription, privacy: .public)")
         }
-        do {
-            let dropped = try await api.syncTierRouting(config)
-            let status = try await api.fetchTierRoutingStatus()
-            let state = TierRoutingServerState(apiVersion: serverApiVersion, status: status, dropped: dropped)
-            TierRoutingServerCache.shared.state = state
-            return state
-        } catch {
-            TierRoutingServerCache.shared.state = TierRoutingServerState(apiVersion: serverApiVersion, status: nil)
-            throw error
+        guard serverSupportsRouting(serverApiVersion) else {
+            return TierRoutingServerState(apiVersion: serverApiVersion, status: nil)
         }
+        var dropped: [TierRoutingDropped] = []
+        let table: TierRoutingConfig?
+        if let config {
+            table = config
+        } else if case .loaded(let stored) = TierRoutingConfig.loadOutcome() {
+            table = stored
+        } else {
+            table = nil
+            tierRoutingLogger.error("Tier routing table unreadable; not pushing it (the server keeps its copy)")
+        }
+        if let table { dropped = try await api.syncTierRouting(table) }
+        let status = try await api.fetchTierRoutingStatus()
+        return TierRoutingServerState(apiVersion: serverApiVersion, status: status, dropped: dropped)
     }
 
-    /// Fire-and-forget `refreshServerState` (app lifecycle hooks); failures
-    /// are logged and leave routing off.
-    static func refreshServerStateInBackground(api: LlmIdeAPIClient, serverApiVersion: Int?) {
-        Task {
-            do {
-                try await refreshServerState(api: api, serverApiVersion: serverApiVersion)
-            } catch {
-                tierRoutingLogger.error("Tier routing status refresh failed: \(error.localizedDescription, privacy: .public)")
-            }
-        }
-    }
-
-    /// Sign-out: the status belongs to the previous user.
+    /// Sign-out: the status belongs to the previous user. Also invalidates any
+    /// refresh still in flight, so it cannot write the old user's state back.
     static func resetServerState() {
-        TierRoutingServerCache.shared.state = .unknown
+        TierRoutingServerCache.shared.reset()
     }
-
     /// The narrow set of server refusals that mean "this route's provider can't
     /// run" (never a generic failure): a routed call that hits one is retried
     /// once without the route — today's request.
@@ -389,3 +433,92 @@ enum TierRouting {
         return status == 400 && providerConfigErrorCodes.contains(code)
     }
 }
+
+extension Notification.Name {
+    /// Posted (main thread) after `TierRoutingServerCache` stores a new state.
+    static let tierRoutingServerStateChanged = Notification.Name("tierRoutingServerStateChanged")
+}
+
+/// The ONE path every tier-routing refresh goes through (app lifecycle hooks
+/// and the Settings card alike).
+///
+/// Refreshes run strictly one after another (each waits for the previous), so
+/// pushes reach the server in request order and the server ends with the
+/// newest table. Each request claims a generation up front: a request that a
+/// newer one (or a sign-out reset) has superseded is skipped before it starts,
+/// and its result is dropped if it finishes late — the coalescing that keeps a
+/// burst of launch-time triggers from storing a stale status. The result is
+/// also dropped when the server's version moved while it ran.
+@MainActor
+enum TierRoutingRefresh {
+    enum Outcome {
+        case updated(TierRoutingServerState)
+        case failed(Error)
+        /// A newer refresh, a reset, or a version change made this one moot.
+        case superseded
+    }
+
+    private static var tail: Task<Void, Never>?
+
+    /// Request a refresh and wait for its outcome.
+    ///
+    /// - Parameters:
+    ///   - serverApiVersion: read when the refresh starts and again before
+    ///     storing (the backend's live `serverApiVersion`).
+    ///   - config: the table to push; nil = the stored one (never pushed when
+    ///     unreadable).
+    @discardableResult
+    static func request(api: LlmIdeAPIClient, serverApiVersion: @escaping @MainActor () -> Int?,
+                        config: TierRoutingConfig? = nil,
+                        cache: TierRoutingServerCache = .shared) async -> Outcome {
+        let generation = cache.nextGeneration()
+        let previous = tail
+        let work = Task { @MainActor () -> Outcome in
+            await previous?.value
+            guard cache.isLatest(generation) else { return .superseded }
+            let version = serverApiVersion()
+            let fetched: Result<TierRoutingServerState, Error>
+            do {
+                fetched = .success(try await TierRouting.fetchServerState(api: api, serverApiVersion: version,
+                                                                          config: config))
+            } catch {
+                fetched = .failure(error)
+            }
+            return finish(fetched, version: version, liveVersion: serverApiVersion(),
+                          generation: generation, cache: cache)
+        }
+        tail = Task { _ = await work.value }
+        return await work.value
+    }
+
+    /// Fire-and-forget `request` for lifecycle hooks; failures are logged.
+    static func requestInBackground(api: LlmIdeAPIClient, serverApiVersion: @escaping @MainActor () -> Int?) {
+        Task { @MainActor in
+            if case .failed(let error) = await request(api: api, serverApiVersion: serverApiVersion) {
+                tierRoutingRefreshLogger.error("Tier routing refresh failed: \(error.localizedDescription, privacy: .public)")
+            }
+        }
+    }
+
+    /// Decide what a finished refresh stores. Pure over its inputs (plus the
+    /// cache it commits to) so the stale-drop rules are testable: nothing is
+    /// stored when the version moved while it ran or the generation is no
+    /// longer the latest; a failure stores "status unknown" (fail closed).
+    static func finish(_ fetched: Result<TierRoutingServerState, Error>, version: Int?, liveVersion: Int?,
+                       generation: Int, cache: TierRoutingServerCache) -> Outcome {
+        guard version == liveVersion else { return .superseded }
+        let state: TierRoutingServerState
+        switch fetched {
+        case .success(let fresh): state = fresh
+        case .failure: state = TierRoutingServerState(apiVersion: version, status: nil)
+        }
+        guard cache.commit(state, generation: generation) else { return .superseded }
+        NotificationCenter.default.post(name: .tierRoutingServerStateChanged, object: nil)
+        switch fetched {
+        case .success(let fresh): return .updated(fresh)
+        case .failure(let error): return .failed(error)
+        }
+    }
+}
+
+private let tierRoutingRefreshLogger = Logger(subsystem: "com.llmide.macapp", category: "TierRouting")

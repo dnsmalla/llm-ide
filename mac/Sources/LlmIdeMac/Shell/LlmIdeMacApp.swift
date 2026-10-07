@@ -356,11 +356,10 @@ public struct LlmIdeMacApp: App {
                         activityStore.start()
                         Task { await sourceLinkStore.refresh(api: api) }
                         if case .running = backend.status {
-                            CustomProvider.syncAllToBackend(api: api)
-                            // Per-user server status for tier routing (also
-                            // re-syncs custom providers first, which it needs).
-                            TierRouting.refreshServerStateInBackground(
-                                api: api, serverApiVersion: backend.serverApiVersion)
+                            // Syncs custom providers (on every server version)
+                            // and then tier routing's per-user server status.
+                            TierRoutingRefresh.requestInBackground(
+                                api: api, serverApiVersion: { backend.serverApiVersion })
                         }
                         // Refresh the cached language pref here, not only when
                         // Settings → Preferences happens to be opened. That
@@ -391,9 +390,10 @@ public struct LlmIdeMacApp: App {
                 // Tier routing is gated on the running server's API version
                 // (v67+): re-check whenever it changes — a server swapped for
                 // an older one turns routing off, a newer one turns it on.
-                .onChange(of: backend.serverApiVersion) { _, version in
+                .onChange(of: backend.serverApiVersion) { _, _ in
                     if session.isAuthenticated {
-                        TierRouting.refreshServerStateInBackground(api: api, serverApiVersion: version)
+                        TierRoutingRefresh.requestInBackground(
+                            api: api, serverApiVersion: { backend.serverApiVersion })
                     }
                 }
                 .onChange(of: backend.status) { _, newStatus in
@@ -402,9 +402,9 @@ public struct LlmIdeMacApp: App {
                     }
                     if case .running = newStatus {
                         if session.isAuthenticated {
-                            CustomProvider.syncAllToBackend(api: api)
-                            TierRouting.refreshServerStateInBackground(
-                                api: api, serverApiVersion: backend.serverApiVersion)
+                            // Custom providers + tier routing status, as above.
+                            TierRoutingRefresh.requestInBackground(
+                                api: api, serverApiVersion: { backend.serverApiVersion })
                         }
                         if config.mobileControlEnabled {
                             FeatureCatalog.notifyMobileBackendReady()

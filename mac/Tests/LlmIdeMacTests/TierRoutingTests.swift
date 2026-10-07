@@ -108,6 +108,73 @@ struct TierRoutingTests {
                                            agentReason: "not_agent_capable"))
     }
 
+    // MARK: - Refresh ordering (generation / stale drop)
+
+    private struct Boom: Error {}
+
+    @Test func staleGenerationCannotOverwriteANewerState() {
+        let cache = TierRoutingServerCache()
+        let older = cache.nextGeneration()
+        let newer = cache.nextGeneration()
+        #expect(cache.commit(Self.ready, generation: newer))
+        let stale = TierRoutingServerState(apiVersion: 66, status: nil)
+        #expect(!cache.commit(stale, generation: older))
+        #expect(cache.state == Self.ready)
+        #expect(!cache.isLatest(older))
+        #expect(cache.isLatest(newer))
+    }
+
+    @Test func resetDropsAnInFlightRefresh() {
+        let cache = TierRoutingServerCache()
+        let inFlight = cache.nextGeneration()
+        #expect(cache.commit(Self.ready, generation: inFlight))
+        cache.reset()   // sign-out
+        #expect(cache.state == .unknown)
+        #expect(!cache.commit(Self.ready, generation: inFlight))
+        #expect(cache.state == .unknown)
+    }
+
+    @MainActor @Test func finishStoresOnlyTheLatestAndVersionStableResult() {
+        let cache = TierRoutingServerCache()
+        let generation = cache.nextGeneration()
+        // The server's version moved while the refresh ran → dropped.
+        if case .superseded = TierRoutingRefresh.finish(.success(Self.ready), version: 67, liveVersion: 66,
+                                                       generation: generation, cache: cache) {} else {
+            Issue.record("a result for a replaced server version must be dropped")
+        }
+        #expect(cache.state == .unknown)
+        // Same version, latest generation → stored.
+        if case .updated = TierRoutingRefresh.finish(.success(Self.ready), version: 67, liveVersion: 67,
+                                                    generation: generation, cache: cache) {} else {
+            Issue.record("the latest result must be stored")
+        }
+        #expect(cache.state == Self.ready)
+        // A failure from a superseded refresh does not clobber the good state.
+        if case .superseded = TierRoutingRefresh.finish(.failure(Boom()), version: 67, liveVersion: 67,
+                                                       generation: generation - 1, cache: cache) {} else {
+            Issue.record("a stale failure must be dropped")
+        }
+        #expect(cache.state == Self.ready)
+        // The latest refresh failing fails closed: status unknown.
+        let next = cache.nextGeneration()
+        if case .failed = TierRoutingRefresh.finish(.failure(Boom()), version: 67, liveVersion: 67,
+                                                   generation: next, cache: cache) {} else {
+            Issue.record("the latest failure must be reported")
+        }
+        #expect(cache.state == TierRoutingServerState(apiVersion: 67, status: nil))
+    }
+
+    @Test func unreadableTableIsNotAnEmptyOne() throws {
+        let suite = "TierRoutingTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        #expect(TierRoutingConfig.loadOutcome(from: defaults) == .loaded(TierRoutingConfig()))
+        defaults.set(Data("not json".utf8), forKey: TierRoutingConfig.defaultsKey)
+        #expect(TierRoutingConfig.loadOutcome(from: defaults) == .unreadable)
+        // Resolvers still read it as "no routing".
+        #expect(TierRoutingConfig.load(from: defaults) == TierRoutingConfig())
+    }
+
     // MARK: - Local checks
 
     @Test func featureUnsetIsDefault() {

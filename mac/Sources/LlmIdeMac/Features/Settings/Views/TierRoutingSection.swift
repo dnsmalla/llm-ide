@@ -71,12 +71,17 @@ struct TierRoutingSection: View {
             customProviders = CustomProvider.loadAll()
             sync()   // the server's per-tier status depends on custom providers
         }
-        .onChange(of: backend.serverApiVersion) { sync() }
+        // Every refresh (this card's or the app's, e.g. on a server version
+        // change) lands here, so the notes follow the resolvers' cache.
+        .onReceive(NotificationCenter.default.publisher(for: .tierRoutingServerStateChanged)) { _ in
+            serverState = TierRoutingServerCache.shared.state
+        }
         .task {
             routing = TierRoutingConfig.load()
             customProviders = CustomProvider.loadAll()
             // The version gates everything below; probe rather than trust a
-            // cache that may predate a server restart.
+            // cache that may predate a server restart (a change also triggers
+            // the app-level refresh; the shared refresh path coalesces them).
             await backend.refreshServerApiVersion()
             sync()   // the server's copy is per user; re-push like custom providers
             await loadClaudeModels()
@@ -310,29 +315,33 @@ struct TierRoutingSection: View {
         guard updated != routing else { return }
         routing = updated
         if updated.save() {
-            sync()
+            sync(pushing: updated)
         } else {
             syncError = "Couldn't save the routing table."
         }
     }
 
-    /// Fire-and-forget push + status fetch (`TierRouting.refreshServerState`,
-    /// which also feeds the resolvers' cache); the failure is shown, not
-    /// swallowed, because an unsynced table silently leaves every role on its
-    /// default. Below API v67 nothing is sent — the version note says why.
-    private func sync() {
-        let snapshot = routing
-        let version = backend.serverApiVersion
+    /// Push + status fetch through the app's single refresh path
+    /// (`TierRoutingRefresh`); the failure is shown, not swallowed, because an
+    /// unsynced table silently leaves every role on its default. Below API v67
+    /// nothing routes — the version note says why.
+    ///
+    /// - Parameter table: an edit's new table; nil (appear, provider change)
+    ///   pushes the STORED one, which is skipped when it is unreadable so the
+    ///   server's copy is not wiped by an empty stand-in.
+    private func sync(pushing table: TierRoutingConfig? = nil) {
         Task {
-            do {
-                serverState = try await TierRouting.refreshServerState(api: api, serverApiVersion: version,
-                                                                       config: snapshot)
+            switch await TierRoutingRefresh.request(api: api, serverApiVersion: { backend.serverApiVersion },
+                                                    config: table) {
+            case .updated:
                 syncError = nil
-            } catch {
-                serverState = TierRoutingServerCache.shared.state
+            case .failed(let error):
                 tierRoutingSectionLogger.error("Tier routing sync failed: \(error.localizedDescription, privacy: .public)")
                 syncError = "Couldn't sync tier routing to the server: \(error.localizedDescription). Every role uses its default until it succeeds."
+            case .superseded:
+                break   // a newer refresh owns the outcome
             }
+            serverState = TierRoutingServerCache.shared.state
         }
     }
 
