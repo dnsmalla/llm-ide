@@ -101,15 +101,35 @@ test('awaitCliProbes: bounded wait — a slow probe leaves the state unverified'
   } finally { _setCliProbeRunnerForTests(null); _resetRouteHealthForTests(); }
 });
 
-test('markRouteFailed / routeFailure: per user + provider, expires after ~10 min', () => {
+test('markRouteFailed / routeFailure: per user + provider + MODEL, TTL chosen by the caller (default ~10 min)', () => {
   _resetRouteHealthForTests();
   const t0 = 5_000_000;
-  assert.equal(routeFailure('u1', 'openai', { now: t0 }), null);
-  markRouteFailed('u1', 'openai', 'cli', { now: t0 });
-  assert.equal(routeFailure('u1', 'openai', { now: t0 + 1000 }), 'cli_failed');
-  assert.equal(routeFailure('u2', 'openai', { now: t0 + 1000 }), null, 'other users unaffected');
-  markRouteFailed('u1', 'custom:x', 'key', { now: t0 });
-  assert.equal(routeFailure('u1', 'custom:x', { now: t0 + 1000 }), 'route_failed');
-  assert.equal(routeFailure('u1', 'openai', { now: t0 + 11 * 60_000 }), null, 'expired');
+  assert.equal(routeFailure('u1', 'openai', 'gpt-5', { now: t0 }), null);
+  markRouteFailed('u1', 'openai', 'gpt-5', 'cli', { now: t0 });
+  assert.equal(routeFailure('u1', 'openai', 'gpt-5', { now: t0 + 1000 }), 'cli_failed');
+  assert.equal(routeFailure('u1', 'openai', 'gpt-5-mini', { now: t0 + 1000 }), null,
+    'one bad model id does not take the provider\'s other models offline');
+  assert.equal(routeFailure('u2', 'openai', 'gpt-5', { now: t0 + 1000 }), null, 'other users unaffected');
+  markRouteFailed('u1', 'custom:x', 'glm-4.6', 'key', { now: t0 });
+  assert.equal(routeFailure('u1', 'custom:x', 'glm-4.6', { now: t0 + 1000 }), 'route_failed');
+  assert.equal(routeFailure('u1', 'openai', 'gpt-5', { now: t0 + 11 * 60_000 }), null, 'expired');
+  // A transient failure is remembered only briefly.
+  markRouteFailed('u1', 'deepseek', 'deepseek-chat', 'key', { now: t0, ttlMs: 60_000 });
+  assert.equal(routeFailure('u1', 'deepseek', 'deepseek-chat', { now: t0 + 30_000 }), 'route_failed');
+  assert.equal(routeFailure('u1', 'deepseek', 'deepseek-chat', { now: t0 + 61_000 }), null);
   _resetRouteHealthForTests();
+});
+
+test('probeCli: a runner that never settles still resolves false and frees the in-flight slot', async () => {
+  _resetRouteHealthForTests();
+  let calls = 0;
+  _setCliProbeRunnerForTests(() => { calls += 1; return new Promise(() => {}); });   // execFile callback never fires
+  try {
+    const t = Date.now();
+    assert.equal(await probeCli('openai', { timeoutMs: 100 }), false);
+    assert.ok(Date.now() - t < 3000);
+    assert.equal(cliHealth('openai'), 'failed');
+    await probeCli('openai', { timeoutMs: 100 });
+    assert.equal(calls, 2, 'a new probe could start — the stuck one did not hold the slot');
+  } finally { _setCliProbeRunnerForTests(null); _resetRouteHealthForTests(); }
 });

@@ -44,6 +44,13 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   text; plan/code output goes to issue trackers). CLI error messages name the right login command
   (`codex login`, `gemini`) and no longer show stack traces or file paths. Usage rows recorded as
   `cli-default` (the CLI ran its own default model) do not count against same-provider quota chains.
+- Tier routing (API v70): the streaming Code Assistant now tells the Mac when a routed provider cannot
+  run, so the quick chat, menu bar, sheet and phone chats retry once on their default (only if nothing
+  had started yet). A routed plugin subagent inside the Code Assistant now gets the same one-time
+  fallback. A temporary provider error (rate limit, 5xx, network) skips the route for about a minute,
+  not ten; failures are tracked per model, so one bad model id no longer disables the provider's other
+  tiers; a usage-limit pause on a routed provider uses the default. Summaries and email classification
+  report the model that actually answered.
 - Loop reliability (Mac app). Loop agent runs are headless and confined to the
   run's git root; a stage whose agent call errored ends the run `error` unless
   that stage later ran cleanly (a passing verify stage no longer launders it);

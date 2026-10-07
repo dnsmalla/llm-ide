@@ -16,9 +16,10 @@
  *     after a restart takes the default path rather than waiting.
  *
  *  2. Negative cache — a routed call that failed at runtime (runClaude's
- *     route fallback, or a CLI that could not run) marks `(user, provider)`
- *     broken for ~10 min, so the next call (e.g. a JSON-retry right after)
- *     and the Settings status skip it instead of failing again.
+ *     route fallback, or a CLI that could not run) marks `(user, provider,
+ *     model)` failed — ~10 min when broken, ~60 s when transient — so the
+ *     next call (e.g. a JSON-retry right after) and the Settings status skip
+ *     it instead of failing again.
  */
 
 import { execFile } from 'node:child_process';
@@ -30,13 +31,17 @@ const log = logger.child({ component: 'route-health' });
 const PROBE_OK_TTL_MS = 10 * 60_000;
 const PROBE_FAIL_TTL_MS = 60_000;
 const PROBE_TIMEOUT_MS = 5_000;
-const ROUTE_FAIL_TTL_MS = 10 * 60_000;
+const PROBE_GUARD_SLACK_MS = 1_000;
+// How long a failed route is skipped: a broken one (auth, missing/logged-out
+// CLI, rejected model) ~10 min; a transient one (429, 5xx, network) ~60 s.
+export const ROUTE_BROKEN_TTL_MS = 10 * 60_000;
+export const ROUTE_TRANSIENT_TTL_MS = 60_000;
 
 // bin → { ok: boolean, at: number }
 const probeResults = new Map();
 // bin → Promise<boolean> (in-flight probe; deduplicates concurrent callers)
 const probesInFlight = new Map();
-// `${userId}|${provider}` → { reason, at }
+// `${userId}|${provider}|${model}` → { reason, at, ttlMs }
 const routeFailures = new Map();
 
 function defaultProbeRunner(bin, { timeoutMs }) {
@@ -77,9 +82,16 @@ export function probeCli(provider, { now, timeoutMs = PROBE_TIMEOUT_MS } = {}) {
   const bin = cliBinFor(provider);
   const pending = probesInFlight.get(bin);
   if (pending) return pending;
-  const run = Promise.resolve()
-    .then(() => probeRunner(bin, { timeoutMs }))
+  // Outer guard: if the runner never settles (execFile's callback lost, a
+  // child that ignores the kill), the probe still answers `false` shortly
+  // after its own timeout and frees the in-flight slot for the next probe.
+  let guard;
+  const run = Promise.race([
+    Promise.resolve().then(() => probeRunner(bin, { timeoutMs })),
+    new Promise((resolve) => { guard = setTimeout(() => resolve(false), timeoutMs + PROBE_GUARD_SLACK_MS); }),
+  ])
     .catch(() => false)
+    .finally(() => clearTimeout(guard))
     .then((ok) => {
       probeResults.set(bin, { ok: Boolean(ok), at: now ?? Date.now() });
       if (!ok) log.warn('provider_cli_probe_failed', { provider, bin });
@@ -126,19 +138,23 @@ export async function awaitCliProbes(providers, timeoutMs = PROBE_TIMEOUT_MS) {
 }
 
 /**
- * Record that a route on `provider` failed at runtime for `userId`. `via`
- * picks the status reason: 'cli' → 'cli_failed', otherwise 'route_failed'.
+ * Record that the route `(provider, model)` failed at runtime for `userId`.
+ * Keyed by model too, so one bad model id does not take the provider's other
+ * tiers offline. `via` picks the status reason: 'cli' → 'cli_failed',
+ * otherwise 'route_failed'. `ttlMs` defaults to the broken-route window.
  */
-export function markRouteFailed(userId, provider, via, { now = Date.now() } = {}) {
-  routeFailures.set(`${userId || ''}|${provider}`, { reason: via === 'cli' ? 'cli_failed' : 'route_failed', at: now });
+export function markRouteFailed(userId, provider, model, via, { now = Date.now(), ttlMs = ROUTE_BROKEN_TTL_MS } = {}) {
+  routeFailures.set(`${userId || ''}|${provider}|${model || ''}`, {
+    reason: via === 'cli' ? 'cli_failed' : 'route_failed', at: now, ttlMs,
+  });
 }
 
-/** The live failure reason for `(userId, provider)`, or null. */
-export function routeFailure(userId, provider, { now = Date.now() } = {}) {
-  const key = `${userId || ''}|${provider}`;
+/** The live failure reason for `(userId, provider, model)`, or null. */
+export function routeFailure(userId, provider, model, { now = Date.now() } = {}) {
+  const key = `${userId || ''}|${provider}|${model || ''}`;
   const hit = routeFailures.get(key);
   if (!hit) return null;
-  if (now - hit.at >= ROUTE_FAIL_TTL_MS) {
+  if (now - hit.at >= hit.ttlMs) {
     routeFailures.delete(key);
     return null;
   }

@@ -173,6 +173,44 @@ export function agentCallModelProvider(opts, tierModel, composerProvider) {
     : { model: tierModel, provider: composerProvider };
 }
 
+/**
+ * The runClaude the /code-assist agent loop calls (SSE and buffered alike):
+ * stamps the caller's user, the turn's model/provider (agentCallModelProvider),
+ * the loop's maxTokens/tools/mcpConfig, and merges the loop's per-call signal
+ * with the route's own (client disconnect) so EITHER aborts. `routeFallback`
+ * — set by a tier-routed plugin subagent (ask-subagent) — is forwarded so
+ * runClaude can retry that hop once on the default and skip a route it just
+ * saw fail. A call the loop wants streamed (`onChunk`) goes to `stream`
+ * when one is given (the SSE branch). `run`/`stream` are injectable for tests.
+ * Exported for tests.
+ */
+export function makeCodeAssistRunClaude({ userId, tierModel, composerProvider, signal, run = runClaude, stream }) {
+  return (p, opts = {}) => {
+    const callOpts = {
+      userId,
+      ...agentCallModelProvider(opts, tierModel, composerProvider),
+      maxTokens: opts.maxTokens,
+      tools: opts.tools,
+      signal: opts.signal ? AbortSignal.any([opts.signal, signal]) : signal,
+      // The agent loop's mode-gated MCP config (route.mjs) — without this the
+      // whole MCP-plugin feature never reaches the real runClaude /
+      // streamModelReply, since this wrapper is the actual bridge from
+      // loop.mjs's options to them.
+      mcpConfig: opts.mcpConfig,
+      ...(opts.routeFallback ? { routeFallback: opts.routeFallback } : {}),
+    };
+    // The agent loop's sniffing wrapper (loop.mjs) only passes onChunk for a
+    // call it wants streamed live — when present (and this is the SSE
+    // branch), route through streamModelReply instead of the plain buffered
+    // runClaude. Every other call (intermediate delegate/tool-decision turns,
+    // ask-internal, ask-subagent) is unaffected: opts.onChunk is absent.
+    if (stream && typeof opts.onChunk === 'function') {
+      return stream(p, { ...callOpts, onChunk: opts.onChunk });
+    }
+    return run(p, callOpts);
+  };
+}
+
 export async function handleAIRoutes(req, res) {
   // Generate markdown notes
   if (req.method === 'POST' && req.url === '/generate-notes') {
@@ -544,6 +582,8 @@ export async function handleAIRoutes(req, res) {
           // exists after handleCodeAssist returns): the Mac always sends the
           // picker's concrete mode, and a plan-like one yields an empty list
           // — which the emitter skips — so the worst mis-gating is no events.
+          // Set once any progress/chunk event went out (see the catch below).
+          let streamedAnything = false;
           const emitTaskProgress = makeTaskProgressEmitter({
             userId: req.user?.id, agentContext: enrichedAgentContext, mode: body.mode, send: writeEvent,
           });
@@ -566,35 +606,17 @@ export async function handleAIRoutes(req, res) {
               // and maxTokens never reach runClaude, so the deadline-abort is
               // dead code and every call uses the 8192 default. Merge the loop's
               // signal with the route's client-disconnect signal so EITHER aborts.
-              runClaude: (p, opts = {}) => {
-                const callOpts = {
-                  userId: req.user?.id,
-                  ...agentCallModelProvider(opts, tierModel, body.provider),
-                  maxTokens: opts.maxTokens,
-                  tools: opts.tools,
-                  signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
-                  // The agent loop's mode-gated MCP config (route.mjs) — without
-                  // this the whole MCP-plugin feature never reaches the real
-                  // runClaude/streamModelReply, since this wrapper's `callOpts`
-                  // is the actual bridge from loop.mjs's options to them.
-                  mcpConfig: opts.mcpConfig,
-                };
-                // The agent loop's sniffing wrapper (loop.mjs) only passes
-                // onChunk for a call it wants streamed live — when present,
-                // route through streamModelReply instead of the plain
-                // buffered runClaude. Every other call (intermediate
-                // delegate/tool-decision turns, and any caller that never
-                // wired onChunk at all — ask-internal, ask-subagent) is
-                // completely unaffected, since opts.onChunk is simply absent
-                // for those.
-                if (typeof opts.onChunk === 'function') {
-                  return streamModelReply(p, { ...callOpts, onChunk: opts.onChunk });
-                }
-                return runClaude(p, callOpts);
-              },
+              // See makeCodeAssistRunClaude: per-call opts (maxTokens budget,
+              // deadline signal, MCP config, a routed subagent's
+              // routeFallback) merged with this route's disconnect signal.
+              runClaude: makeCodeAssistRunClaude({
+                userId: req.user?.id, tierModel, composerProvider: body.provider, signal: ac.signal,
+                stream: streamModelReply,
+              }),
               kb,
               userId: req.user?.id,
               onProgress: (ev) => {
+                streamedAnything = true;
                 writeEvent({ type: 'progress', ...ev });
                 // Live task progress, mirroring routes/agent-v2.mjs: without
                 // it a legacy plan-execute turn's bar sat at step 1 until the
@@ -605,7 +627,7 @@ export async function handleAIRoutes(req, res) {
                 // state either way.
                 if (ev && ev.phase === 'tool') emitTaskProgress();
               },
-              onChunk: (text) => writeEvent({ type: 'chunk', text }),
+              onChunk: (text) => { streamedAnything = true; writeEvent({ type: 'chunk', text }); },
               // The SAME controller the client-disconnect handler above
               // aborts — not a second one. Until this was forwarded, a Stop
               // aborted the model call but left an approved run-bash command
@@ -616,7 +638,16 @@ export async function handleAIRoutes(req, res) {
             writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage, mode: out.mode });
             writeEvent({ type: 'tasks', tasks: out.tasks ?? [], continueNeeded: out.continueNeeded ?? false });
           } catch (err) {
-            if (!ac.signal.aborted) writeEvent({ type: 'error', error: err?.message || 'code-assist failed' });
+            // A provider-config refusal (PROVIDER_UNAVAILABLE: the named
+            // provider is missing/disabled/keyless, or its CLI cannot run)
+            // keeps its code — the SSE headers are already 200, so this event
+            // is the only place the Mac can see it and retry once without its
+            // tier route. Only while NOTHING has streamed yet: after progress
+            // or text the turn may have acted, and a retry would replay it.
+            const code = err?.code === 'PROVIDER_UNAVAILABLE' && !streamedAnything ? err.code : undefined;
+            if (!ac.signal.aborted) {
+              writeEvent({ type: 'error', error: err?.message || 'code-assist failed', ...(code ? { code } : {}) });
+            }
           }
           if (!res.writableEnded) res.end();
           return true;
@@ -646,13 +677,8 @@ export async function handleAIRoutes(req, res) {
           clientCaps: Array.isArray(body.clientCaps) ? body.clientCaps : [],
           // Forward the loop's per-call opts here too (buffered path): the
           // loop's maxTokens budget + its deadline signal must reach runClaude.
-          runClaude: (p, opts = {}) => runClaude(p, {
-            userId: req.user?.id,
-            ...agentCallModelProvider(opts, tierModel, body.provider),
-            maxTokens: opts.maxTokens,
-            tools: opts.tools,
-            signal: opts.signal ? AbortSignal.any([opts.signal, bufferedAc.signal]) : bufferedAc.signal,
-            mcpConfig: opts.mcpConfig,
+          runClaude: makeCodeAssistRunClaude({
+            userId: req.user?.id, tierModel, composerProvider: body.provider, signal: bufferedAc.signal,
           }),
           kb,
           userId: req.user?.id,

@@ -1107,7 +1107,8 @@ export async function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, 
       if (!err.killed && (!printed || NOT_LOGGED_IN_RE.test(`${printed}\n${err.stderr || ''}`))) {
         throw cliCantRun(message);
       }
-      throw new Error(message);
+      // `killed` (hang breaker) rides along: a route fallback must not re-run it.
+      throw Object.assign(new Error(message), err.killed ? { killed: true } : {});
     }
     const text = String(out.stdout || '').trim();
     if (!text) throw cliCantRun(`${out.bin} returned empty output`);

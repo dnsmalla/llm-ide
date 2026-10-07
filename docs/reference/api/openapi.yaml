@@ -1221,6 +1221,15 @@ paths:
   /code-assist:
     post:
       summary: Code-assist chat with optional file attachments
+      description: >
+        With `Accept: text/event-stream` the answer streams as SSE events
+        (`progress`, `chunk`, `done`, `tasks`, `error`). A turn that fails
+        because the named provider cannot run (missing / disabled / keyless,
+        or its CLI is missing, broken or logged out) before ANY progress or
+        chunk event went out sends `{ type: 'error', error, code:
+        'PROVIDER_UNAVAILABLE' }` (API v70+) — the buffered path's 400 with
+        the same code — so a client can retry once without its tier route.
+        Every other error event has no `code`.
       requestBody:
         required: true
         content:

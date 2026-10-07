@@ -73,7 +73,7 @@ function warnUnusable(userId, tier, route, reason) {
  * precedence as runClaude: a key is tried first. One vault read per check.
  */
 function routeCheck(route, userId, db) {
-  const failed = routeFailure(userId, route.provider);
+  const failed = routeFailure(userId, route.provider, route.model);
   if (failed) return { reason: failed };     // cli_failed | route_failed
   if (route.provider.startsWith('custom:')) {
     const r = resolveCustomProviderDispatch(route.provider, userId, db);

@@ -72,6 +72,10 @@ export async function classifyEmail(opts) {
   // Tier routing (`features.internal`) replaces the default model when it
   // resolves; otherwise the call is exactly as before.
   const claudeOpts = { userId, maxTokens: 1024, ...routeOpts(userId, 'internal', { model: MODEL }) };
+  // The model that actually answered (a routed call may fall back to MODEL);
+  // only the real runClaude reports it — a test stub leaves the routed one.
+  let ranModel = claudeOpts.model;
+  claudeOpts.onModel = (m) => { ranModel = m; };
   const first = await _runClaude(buildPrompt(opts), claudeOpts);
   let parsed = tryParseJSON(first);
   if (!parsed) {
@@ -94,6 +98,6 @@ export async function classifyEmail(opts) {
     noteWorthy,
     summary: noteWorthy ? String(parsed.summary ?? '').slice(0, 200) : '',
     todos,
-    model: claudeOpts.model,
+    model: ranModel,
   };
 }

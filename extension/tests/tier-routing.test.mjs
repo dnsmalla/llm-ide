@@ -269,7 +269,7 @@ test('resolveTier: a route that just failed at runtime is skipped (cli_failed / 
   cliInstalled.add('openai');
   try {
     assert.deepEqual(resolveTier(userId, 'cheap'), { provider: 'openai', model: 'gpt-5' });
-    markRouteFailed(userId, 'openai', 'cli');
+    markRouteFailed(userId, 'openai', 'gpt-5', 'cli');
     assert.equal(resolveTier(userId, 'cheap'), null);
     assert.deepEqual(tierRoutingStatus(userId).status.cheap, { usable: false, reason: 'cli_failed', agentCapable: false });
   } finally { cliInstalled.clear(); _resetRouteHealthForTests(); }
@@ -630,6 +630,121 @@ test('runClaude: a content-related 4xx from a routed key provider is NOT retried
     await assert.rejects(runClaude('hi', { userId, model: 'gpt-5', provider: 'openai', routeFallback: {} }), /HTTP 400/);
     assert.equal(calls, 1, 'no fallback call');
   } finally { globalThis.fetch = original; _resetRouteHealthForTests(); }
+});
+
+// A routed OpenAI-key provider whose HTTP endpoint answers `respond`, and
+// the default path on a mocked Anthropic user key. Returns what each saw.
+function mockRoutedAndDefault(respond) {
+  const original = globalThis.fetch;
+  const seen = { openai: 0, anthropic: [] };
+  globalThis.fetch = async (url, init) => {
+    if (String(url).includes('openai.com')) { seen.openai += 1; return respond(); }
+    seen.anthropic.push(JSON.parse(init?.body || '{}'));
+    return {
+      ok: true, status: 200, headers: new Map(),
+      json: async () => ({ content: [{ type: 'text', text: '{"gist":"g","tldr":["t"],"full":"f","category":"other","noteWorthy":false}' }], usage: {} }),
+      text: async () => '{}',
+    };
+  };
+  return { seen, restore: () => { globalThis.fetch = original; } };
+}
+const httpRes = (status, body = '{}') => ({ ok: false, status, headers: new Map(), json: async () => JSON.parse(body), text: async () => body });
+
+function routedUser() {
+  const userId = freshUser();
+  setSecret(db.getDb(), userId, 'claude.apiKey', 'sk-ant-test');
+  setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
+  syncTierRouting({ tiers: { cheap: { provider: 'openai', model: 'gpt-5-mini' } }, features: { internal: 'cheap' } }, userId);
+  return userId;
+}
+
+test('route fallback: a TRANSIENT failure (network / 429 / 5xx) falls back but blacklists only ~60 s', async () => {
+  _resetRouteHealthForTests();
+  const userId = routedUser();
+  const m = mockRoutedAndDefault(() => { throw new TypeError('fetch failed'); });
+  try {
+    const out = await runClaude('hi', { userId, ...routeOpts(userId, 'internal', { model: 'claude-haiku-4-5' }) });
+    assert.match(out, /gist/);
+    assert.equal(m.seen.anthropic.length, 1, 'answered on the default');
+    const st = tierRoutingStatus(userId).status.cheap;
+    assert.equal(st.reason, 'route_failed');
+    const { routeFailure } = await import('../providers/route-health.mjs');
+    assert.equal(routeFailure(userId, 'openai', 'gpt-5-mini', { now: Date.now() + 61_000 }), null, 'short TTL');
+  } finally { m.restore(); _resetRouteHealthForTests(); }
+});
+
+test('route fallback: a BROKEN route (401) is skipped ~10 min, for that model only', async () => {
+  _resetRouteHealthForTests();
+  const userId = routedUser();
+  const m = mockRoutedAndDefault(() => httpRes(401, '{"error":{"message":"bad key"}}'));
+  try {
+    await runClaude('hi', { userId, ...routeOpts(userId, 'internal', { model: 'claude-haiku-4-5' }) });
+    const { routeFailure } = await import('../providers/route-health.mjs');
+    assert.equal(routeFailure(userId, 'openai', 'gpt-5-mini', { now: Date.now() + 5 * 60_000 }), 'route_failed');
+    assert.equal(routeFailure(userId, 'openai', 'gpt-5', { now: Date.now() }), null, 'other models of the provider unaffected');
+  } finally { m.restore(); _resetRouteHealthForTests(); }
+});
+
+test('route fallback: a usage pause on the ROUTED provider uses the default; unrouted it still stops', async () => {
+  _resetRouteHealthForTests();
+  const userId = routedUser();
+  const { setLimits, flagQuota, getLimits } = await import('../kb/usage.mjs');
+  const m = mockRoutedAndDefault(() => httpRes(500));
+  try {
+    // Every model in the user's openai chain is quota-flagged → paused.
+    assert.equal(setLimits(db.getDb(), userId, { openai: [{ model: 'gpt-5-mini', limit_value: 10, unit: 'runs', window_kind: 'daily' }] }).ok, true);
+    for (const lim of getLimits(db.getDb(), userId, { provider: 'openai' }).chains.openai || []) {
+      flagQuota(db.getDb(), userId, 'openai', lim.model);
+    }
+    await assert.rejects(runClaude('hi', { userId, model: 'gpt-5-mini', provider: 'openai' }), (err) => err.usagePaused === true);
+    const out = await runClaude('hi', { userId, ...routeOpts(userId, 'internal', { model: 'claude-haiku-4-5' }) });
+    assert.match(out, /gist/);
+    assert.equal(m.seen.openai, 0, 'the paused provider was never called');
+  } finally { m.restore(); _resetRouteHealthForTests(); }
+});
+
+test('routeFailureClass: hang-breaker kills and content 4xx never fall back; pauses fall back without a blacklist', async () => {
+  const { routeFailureClass } = await import('../providers/runtime.mjs');
+  assert.equal(routeFailureClass({ killed: true, message: 'codex timed out' }), null);
+  assert.equal(routeFailureClass({ name: 'AbortError' }), null);
+  assert.equal(routeFailureClass({ status: 400, message: 'HTTP 400: context_length_exceeded' }), null);
+  assert.equal(routeFailureClass({ usagePaused: true }), 'paused');
+  assert.equal(routeFailureClass({ status: 429 }), 'transient');
+  assert.equal(routeFailureClass({ status: 503 }), 'transient');
+  assert.equal(routeFailureClass(new TypeError('fetch failed')), 'transient');
+  assert.equal(routeFailureClass({ status: 401 }), 'broken');
+  assert.equal(routeFailureClass({ code: 'PROVIDER_UNAVAILABLE', cliCantRun: true }), 'broken');
+  assert.equal(routeFailureClass({ code: 'MODEL_REJECTED', status: 400 }), 'broken');
+});
+
+test('Anthropic user-key path: a content 400 carries .status, so a routed call does NOT fall back on it', async () => {
+  _resetRouteHealthForTests();
+  const userId = freshUser();
+  setSecret(db.getDb(), userId, 'claude.apiKey', 'sk-ant-test');
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; return httpRes(400, '{"error":{"message":"prompt is malformed"}}'); };
+  try {
+    await assert.rejects(runClaude('hi', { userId, model: 'claude-opus-5-5', provider: 'anthropic', routeFallback: { model: 'claude-haiku-4-5' } }),
+      (err) => err.status === 400);
+    assert.equal(calls, 1, 'no fallback call');
+  } finally { globalThis.fetch = original; _resetRouteHealthForTests(); }
+});
+
+test('summarize / email-classify report the model that actually answered after a route fallback', async () => {
+  _resetRouteHealthForTests();
+  const userId = routedUser();
+  const { summarizeTranscript } = await import('../agents/summarize.mjs');
+  const { classifyEmail } = await import('../agents/email-classify.mjs');
+  const m = mockRoutedAndDefault(() => httpRes(401));
+  try {
+    const sum = await summarizeTranscript({ userId, transcript: 'A: hi', title: 't', language: 'en' });
+    assert.notEqual(sum.model, 'gpt-5-mini', 'not the routed model that failed');
+    assert.equal(sum.model, m.seen.anthropic[0].model, 'the model the default call sent');
+    _resetRouteHealthForTests();
+    const em = await classifyEmail({ userId, subject: 's', from: 'a@b.c', body: 'hello', language: 'en' });
+    assert.notEqual(em.model, 'gpt-5-mini');
+  } finally { m.restore(); _resetRouteHealthForTests(); }
 });
 
 // ── loader: `tier:` frontmatter ──────────────────────────────────────────
