@@ -51,6 +51,12 @@ public enum AgentV2Conformance {
         return AgentV2Transport.freshHistoryField(packed)
     }
 
+    /// Whether the transport still accepts the wire event after `result`/`error`.
+    /// `nil` when the payload does not decode. Exposed for the lab.
+    public static func isAcceptedAfterTerminal(forJSON data: Data) -> Bool? {
+        AgentV2Event.decode(fromJSON: data)?.isAcceptedAfterTerminal
+    }
+
     /// The tool → verb table, same reasoning.
     public static func verb(for tool: String?) -> String {
         ClaudeToolPresentation.verb(tool)
@@ -156,6 +162,18 @@ extension AgentV2Event {
         case .sdk:
             // NOTE: no `subtype`, no `raw` — deliberately dropped.
             return ["sdkType"]
+        }
+    }
+}
+
+extension AgentV2Event {
+    /// Events the transport still honours after a terminal `result`/`error`:
+    /// the server legitimately sends `context_usage` and `tasks` after
+    /// `result`. Everything else (deltas, tool events) would corrupt the reply.
+    var isAcceptedAfterTerminal: Bool {
+        switch self {
+        case .tasks, .tasksProgress, .contextUsage: return true
+        default: return false
         }
     }
 }

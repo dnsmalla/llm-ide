@@ -317,10 +317,17 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 self.onLiveTasks?(tasks)
                 return
             }
+            // `context_usage` is sent AFTER `result` by design (the SDK is
+            // only asked once the turn is done), so it too must bypass the
+            // terminal guard or the meter never shows.
+            if case .contextUsage(let usage) = event {
+                contextUsage = usage
+                return
+            }
             // `result` and `error` are terminal; the route's post-turn
             // bookkeeping could still emit events (a known server-side
             // wrinkle), and deltas after either would corrupt the reply.
-            guard !sawTerminal else { return }
+            guard !sawTerminal || event.isAcceptedAfterTerminal else { return }
             switch event {
             case .tasks, .tasksProgress:
                 break // handled above the terminal guard
@@ -383,8 +390,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 self.onModeResolved?(mode)
             case .memory(let info):
                 memoryInfo = info
-            case .contextUsage(let usage):
-                contextUsage = usage
+            case .contextUsage:
+                break // handled above the terminal guard
             case .result(let result):
                 sawTerminal = true
                 // The SDK ends a turn it could not finish with a `result`

@@ -1454,6 +1454,18 @@ do {
     }
 }
 
+// Post-terminal event contract: the server sends `usage`, `result`,
+// `context_usage`, then `tasks`. The transport drops everything after `result`
+// except what this predicate accepts — `context_usage` must survive.
+do {
+    let contextUsageJSON = Data(#"{"type":"context_usage","totalTokens":10,"maxTokens":100,"percentage":10,"categories":[]}"#.utf8)
+    let deltaJSON = Data(#"{"type":"delta","text":"late"}"#.utf8)
+    expect(AgentV2Conformance.isAcceptedAfterTerminal(forJSON: contextUsageJSON) == true,
+           "context_usage is accepted after the terminal result")
+    expect(AgentV2Conformance.isAcceptedAfterTerminal(forJSON: deltaJSON) == false,
+           "a delta after the terminal result is dropped")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {
