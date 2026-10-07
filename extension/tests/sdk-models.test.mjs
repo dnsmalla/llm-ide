@@ -152,3 +152,19 @@ test('cachedEffortLevels: null before any listing; the model\'s levels after; th
   assert.deepEqual(cachedEffortLevels('u-eff', null), ['high', 'max'], 'null = the SDK default, listed first');
   assert.deepEqual(cachedEffortLevels('u-eff', 'claude-unknown-9'), []);
 });
+
+test('cachedEffortLevels: falls back to a base-id match like the Mac (1M suffix, date snapshot); exact wins', async () => {
+  const { cachedEffortLevels } = await import('../llm_agent/sdk/models.mjs');
+  const rows = [
+    { value: 'default', resolvedModel: 'claude-opus-5[1m]' },
+    { value: 'opus[1m]', resolvedModel: 'claude-opus-5[1m]', supportedEffortLevels: ['high', 'max'] },
+    { value: 'opus', resolvedModel: 'claude-opus-5', supportedEffortLevels: ['low'] },
+    { value: 'haiku', resolvedModel: 'claude-haiku-4-5-20251001', supportedEffortLevels: ['low', 'medium'] },
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5[1m]', supportedEffortLevels: ['medium'] },
+  ];
+  await listSdkModels('u-base', { queryFn: () => ({ supportedModels: async () => rows, close() {} }) });
+  assert.deepEqual(cachedEffortLevels('u-base', 'claude-sonnet-5'), ['medium'], 'plain id requested, [1m] listed');
+  assert.deepEqual(cachedEffortLevels('u-base', 'claude-haiku-4-5'), ['low', 'medium'], 'undated requested, snapshot listed');
+  assert.deepEqual(cachedEffortLevels('u-base', 'claude-opus-5'), ['low'], 'exact match beats a base match');
+  assert.deepEqual(cachedEffortLevels('u-base', 'claude-opus-5[1m]'), ['high', 'max']);
+});

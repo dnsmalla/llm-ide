@@ -13,6 +13,7 @@
 // not per turn, and each call spawns the CLI.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
+// NOTE: cyclic import (engine.mjs imports cachedEffortLevels); safe only because both sides use the imports at call time.
 import { resolveAnthropicKey, agentSdkHomeFor } from './engine.mjs';
 
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
@@ -90,13 +91,24 @@ export function mapSupportedModels(rows) {
   return out;
 }
 
+// One cache slot per auth identity: a user's own key, or the ambient login.
+function cacheKeyFor(key, userId) {
+  return key ? `key:${userId || ''}` : 'ambient';
+}
+
+// Mirrors AIModel.baseId (mac AICliTool.swift): lowercase, no trailing
+// "[1m]", no trailing "-YYYYMMDD".
+function baseId(id) {
+  return String(id).toLowerCase().replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
+}
+
 /**
  * The account's Claude models, first = the SDK's default. Throws when the SDK
  * cannot answer (not logged in, no binary, timeout) — the caller falls back.
  */
 export async function listSdkModels(userId, { queryFn = query, now = Date.now } = {}) {
   const { key } = resolveAnthropicKey(userId);
-  const cacheKey = key ? `key:${userId || ''}` : 'ambient';
+  const cacheKey = cacheKeyFor(key, userId);
   const hit = cache.get(cacheKey);
   if (hit?.models && now() - hit.at < CACHE_MS) return hit.models;
   if (hit?.error && now() - hit.at < FAILURE_CACHE_MS) throw hit.error;
@@ -118,9 +130,13 @@ export async function listSdkModels(userId, { queryFn = query, now = Date.now } 
  */
 export function cachedEffortLevels(userId, modelId) {
   const { key } = resolveAnthropicKey(userId);
-  const models = cache.get(key ? `key:${userId || ''}` : 'ambient')?.models;
+  const models = cache.get(cacheKeyFor(key, userId))?.models;
   if (!Array.isArray(models)) return null;
-  const row = modelId ? models.find((m) => m.id === modelId) : models[0];
+  // Same fallback as the Mac's AIModel.baseId, so a saved pick that names the
+  // model without its [1m] / date suffix still finds its row.
+  const row = modelId
+    ? models.find((m) => m.id === modelId) ?? models.find((m) => baseId(m.id) === baseId(modelId))
+    : models[0];
   return row ? [...row.effortLevels] : [];
 }
 
