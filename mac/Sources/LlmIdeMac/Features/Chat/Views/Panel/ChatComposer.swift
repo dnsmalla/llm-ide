@@ -354,6 +354,7 @@ extension CodeAssistantPanel {
             editModeChip
             memoryButton
             Spacer()
+            contextUsageChip
             keyHint
             voiceControlButton
             sendButton
@@ -385,6 +386,7 @@ extension CodeAssistantPanel {
             }
             HStack(spacing: 6) {
                 Spacer(minLength: 0)
+                contextUsageChip
                 keyHint
                 voiceControlButton
                 sendButton
@@ -682,6 +684,74 @@ extension CodeAssistantPanel {
             .help("Reasoning effort — Auto lets LLM-IDE choose per message")
             .fixedSize()
         }
+    }
+
+    /// Context-window meter: a ring + percentage of the SDK's own numbers for
+    /// this chat's last v2 turn; the popover lists the SDK's categories as
+    /// they come. Nothing until a turn has reported (fresh chat, app restart,
+    /// older server, gateway turn).
+    @ViewBuilder
+    var contextUsageChip: some View {
+        if let usage = engine.lastContextUsage {
+            let tint = ContextUsagePresentation.isWarning(usage) ? theme.current.warning : theme.current.textMuted
+            Button { showContextUsage.toggle() } label: {
+                HStack(spacing: 4) {
+                    ZStack {
+                        Circle().stroke(tint.opacity(0.25), lineWidth: 2)
+                        Circle()
+                            .trim(from: 0, to: min(1, CGFloat(usage.percentage) / 100))
+                            .stroke(tint, style: StrokeStyle(lineWidth: 2, lineCap: .round))
+                            .rotationEffect(.degrees(-90))
+                    }
+                    .frame(width: 12, height: 12)
+                    if !isCompact {
+                        Text(ContextUsagePresentation.percentLabel(usage))
+                            .font(.system(size: 10, design: .monospaced))
+                            .foregroundStyle(tint)
+                    }
+                }
+            }
+            .buttonStyle(.plain)
+            .help("Context used: \(ContextUsagePresentation.tokensLabel(usage))")
+            .accessibilityLabel("Context used \(ContextUsagePresentation.percentLabel(usage))")
+            .popover(isPresented: $showContextUsage, arrowEdge: .top) {
+                contextUsagePopover(usage)
+            }
+            .fixedSize()
+        }
+    }
+
+    func contextUsagePopover(_ usage: AgentV2ContextUsage) -> some View {
+        let rows = ContextUsagePresentation.rows(usage)
+        return VStack(alignment: .leading, spacing: 6) {
+            Text(ContextUsagePresentation.tokensLabel(usage))
+                .font(.system(size: 11, weight: .semibold, design: .monospaced))
+            Divider()
+            ForEach(Array(rows.used.enumerated()), id: \.offset) { _, c in
+                contextUsageRow(c, of: usage, muted: false)
+            }
+            if !rows.other.isEmpty {
+                Divider()
+                ForEach(Array(rows.other.enumerated()), id: \.offset) { _, c in
+                    contextUsageRow(c, of: usage, muted: true)
+                }
+            }
+        }
+        .padding(12)
+        .frame(minWidth: 260)
+    }
+
+    func contextUsageRow(_ c: AgentV2ContextUsage.Category, of usage: AgentV2ContextUsage, muted: Bool) -> some View {
+        HStack {
+            Text(c.name).lineLimit(1)
+            Spacer(minLength: 12)
+            Text(c.tokens.formatted()).monospacedDigit()
+            Text(ContextUsagePresentation.share(c, of: usage))
+                .monospacedDigit()
+                .frame(width: 48, alignment: .trailing)
+        }
+        .font(.system(size: 11))
+        .foregroundStyle(muted ? theme.current.textMuted : theme.current.text)
     }
 
     /// Permission mode selector (Ask / Accept Edits / Bypass).

@@ -1433,6 +1433,27 @@ do {
     expect(empty?.categories.isEmpty == true, "no categories is valid")
 }
 
+print("ContextUsagePresentation")
+do {
+    func usage(_ pct: Int) -> AgentV2ContextUsage? {
+        let json = #"{"totalTokens":10460,"maxTokens":1000000,"percentage":\#(pct),"categories":[{"name":"Free space","kind":"free","tokens":956540},{"name":"System tools","kind":"used","tokens":1809},{"name":"Autocompact buffer","kind":"buffer","tokens":33000},{"name":"Messages","kind":"used","tokens":2078}]}"#
+        return try? JSONDecoder().decode(AgentV2ContextUsage.self, from: Data(json.utf8))
+    }
+    if let u = usage(1), let hot = usage(80), let cool = usage(79) {
+        let rows = ContextUsagePresentation.rows(u)
+        expect(rows.used.map(\.name) == ["System tools", "Messages"], "used rows first, in the SDK's order")
+        expect(rows.other.map(\.name) == ["Free space", "Autocompact buffer"], "everything else after, in the SDK's order")
+        expect(ContextUsagePresentation.percentLabel(u) == "1%", "percent label")
+        expect(ContextUsagePresentation.tokensLabel(u) == "10,460 / 1,000,000 tokens", "tokens label, grouped")
+        expect(ContextUsagePresentation.share(rows.used[1], of: u) == "0.2%", "share of the window, one decimal")
+        expect(ContextUsagePresentation.isWarning(hot) && !ContextUsagePresentation.isWarning(cool),
+               "warning from 80% inclusive")
+        expect(ContextUsagePresentation.warningPercentage == 80, "threshold is 80")
+    } else {
+        expect(false, "fixture decodes")
+    }
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

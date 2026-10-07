@@ -151,6 +151,9 @@ struct CodeAssistantPanel: View {
     /// tab while any prediction is showing.
     @State var ghostDismissed = false
     @State var showingSessionPicker = false
+    /// The composer context meter's breakdown popover (ChatComposer is an
+    /// extension of this view and cannot hold stored state).
+    @State var showContextUsage = false
     /// A delete the user asked for but has not confirmed yet. Deleting a chat
     /// also drops its server-side memory and has no undo, so neither the
     /// header's trash nor the picker row's hover trash may act on one click.
