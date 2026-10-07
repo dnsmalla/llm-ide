@@ -29,3 +29,14 @@ test('execute guidance asks for batched tool calls and ranged reads, briefly', a
   const section = text.slice(text.indexOf('# Context budget'));
   assert.ok(section.split('\n\n')[0].length < 600, 'the section is a few lines, not an essay');
 });
+
+// ask-subagent is not mounted without plugin subagents (sdk/tools.mjs), so the
+// guidance must not send the model looking for it.
+test('v2ExecuteGuidance: names ask-subagent only when subagents exist', async () => {
+  const { v2ExecuteGuidance } = await import('../llm_agent/runtime/execute-guidance.mjs');
+  assert.equal(v2ExecuteGuidance({ hasSubagents: true }), V2_EXECUTE_GUIDANCE);
+  const none = v2ExecuteGuidance({ hasSubagents: false });
+  assert.doesNotMatch(none, /ask-subagent/);
+  assert.match(none, /search-kb/, 'the rest of the delegating guidance stays');
+  assert.match(none, /task-create/);
+});

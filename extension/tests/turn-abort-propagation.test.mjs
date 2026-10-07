@@ -54,6 +54,9 @@ const turnInjectable = (runClaude) => ({
   sessionMemory: () => [],
   persistMemory: async () => null,
   runClaude,
+  // ask-subagent is only mounted when the user has a plugin subagent
+  // (tools.mjs usefulThisTurn); one stands in so the probe below reaches it.
+  perUserSkillSet: () => ({ skills: new Map(), subagents: new Map([['some-agent', { name: 'some-agent' }]]) }),
 });
 
 // Captures the options runAgentV2Turn composed — including the REAL mounted

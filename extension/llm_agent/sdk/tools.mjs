@@ -107,10 +107,25 @@ function v2Description(text) {
 const V2_NATIVE_DUPLICATES = new Set(['list-files', 'read-file', 'ask-internal']);
 const V2_NATIVE_WEB_DUPLICATES = new Set(['web-search', 'fetch-url']);
 
-/** The registry entries mounted on a v2 turn (see V2_NATIVE_DUPLICATES). */
-export function v2MountedEntries({ gateway = false } = {}) {
+// Tools that can do nothing in some turns, and whose definitions would still
+// ride in every call's prompt there (measured 2026-10-07 via getContextUsage:
+// ask-subagent ≈ 503 tokens, check-citations ≈ 235):
+// - ask-subagent delegates to a plugin-defined subagent — none installed, no
+//   use.
+// - check-citations checks a plan or answer about to be presented; an
+//   execute turn changes code instead.
+// `undefined` (an older caller that does not say) keeps the tool mounted.
+function usefulThisTurn(name, { mode, hasSubagents }) {
+  if (name === 'ask-subagent') return hasSubagents !== false;
+  if (name === 'check-citations') return mode !== 'execute';
+  return true;
+}
+
+/** The registry entries mounted on a v2 turn (see V2_NATIVE_DUPLICATES and usefulThisTurn). */
+export function v2MountedEntries({ gateway = false, mode, hasSubagents } = {}) {
   return entries().filter((e) => !V2_NATIVE_DUPLICATES.has(e.name)
-    && (gateway || !V2_NATIVE_WEB_DUPLICATES.has(e.name)));
+    && (gateway || !V2_NATIVE_WEB_DUPLICATES.has(e.name))
+    && usefulThisTurn(e.name, { mode, hasSubagents }));
 }
 
 export function buildLlmIdeServer(userId, agentContext, currentMessage, {
@@ -118,6 +133,8 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
   // True on an Anthropic-compatible gateway turn — keeps the llmide web tools
   // mounted (see V2_NATIVE_WEB_DUPLICATES).
   gateway = false,
+  // The turn's resolved mode — see usefulThisTurn. Omitted = mount everything.
+  mode,
   // The TURN's cancellation (runAgentV2Turn's `abortController.signal`).
   // The SDK's own abortController only kills the CLI SUBPROCESS — every tool
   // mounted here runs in the SERVER process, so without this signal a Stop
@@ -137,7 +154,8 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
   // Every registry entry except the native duplicates mounts, read AND act —
   // canUseTool (sdk/engine.mjs) is what actually restricts act tools
   // (always-allow → gate → allow/deny/prompt), not this mount list.
-  const sdkTools = v2MountedEntries({ gateway }).map((entry) => {
+  const hasSubagents = userSubagents ? (userSubagents.size ?? Object.keys(userSubagents).length) > 0 : undefined;
+  const sdkTools = v2MountedEntries({ gateway, mode, hasSubagents }).map((entry) => {
     const meta = metaFor(entry);
     return tool(
       entry.name,

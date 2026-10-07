@@ -503,3 +503,24 @@ test('telemetry: a tool that aborts MID-EXECUTION (after the signal fires) recor
     entry.execute = original;
   }
 });
+
+// Each mounted llmide tool's definition rides in every call's prompt
+// (measured 2026-10-07: ask-subagent ≈ 503 tokens, check-citations ≈ 235), so a
+// tool that cannot do anything in this turn is not mounted.
+test('v2MountedEntries: ask-subagent only with plugin subagents; check-citations not in execute', async () => {
+  const { v2MountedEntries } = await import('../llm_agent/sdk/tools.mjs');
+  const names = (opts) => v2MountedEntries(opts).map((e) => e.name);
+  assert.ok(!names({ mode: 'execute', hasSubagents: false }).includes('ask-subagent'), 'nothing to delegate to');
+  assert.ok(names({ mode: 'execute', hasSubagents: true }).includes('ask-subagent'));
+  assert.ok(!names({ mode: 'execute', hasSubagents: true }).includes('check-citations'), 'execute changes code, presents no plan');
+  for (const mode of ['plan', 'assist_plan', 'review', 'document', 'ask']) {
+    assert.ok(names({ mode, hasSubagents: true }).includes('check-citations'), mode);
+  }
+  // Unknown mode / subagents (older callers): everything stays mounted, as before.
+  const all = names({});
+  assert.ok(all.includes('ask-subagent') && all.includes('check-citations'));
+  // The rest is never gated.
+  for (const n of ['find-code', 'code-relations', 'search-kb', 'load-skill', 'project_memory', 'task-create', 'task-update', 'task-list']) {
+    assert.ok(names({ mode: 'execute', hasSubagents: false }).includes(n), n);
+  }
+});

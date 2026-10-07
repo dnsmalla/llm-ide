@@ -51,7 +51,7 @@ import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } fr
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
 import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
-import { V2_EXECUTE_GUIDANCE, V2_LOCATE_CODE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../runtime/execute-guidance.mjs';
+import { v2ExecuteGuidance, V2_LOCATE_CODE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../runtime/execute-guidance.mjs';
 import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
@@ -597,7 +597,7 @@ export function buildEngineOptions(
   if (persona) appendParts.push(persona);
   // Plan modes get the locate rule from plan-pipeline.mjs.
   if (!planLike) appendParts.push(V2_LOCATE_CODE_GUIDANCE);
-  if (resolvedMode === 'execute') appendParts.push(V2_EXECUTE_GUIDANCE);
+  if (resolvedMode === 'execute') appendParts.push(v2ExecuteGuidance({ hasSubagents }));
   // Plan modes get the same rule from their binding (QUESTION_CLAUSE_AGENT).
   if (!planLike) appendParts.push(V2_QUESTION_GUIDANCE);
   // User's own custom persona (kb/personas.mjs) — distinct from the MODE
@@ -1156,6 +1156,9 @@ export async function runAgentV2Turn(
   {
     readSkill = readSkillInstructions, roots = buildReadableRoots, resolveBudget = resolveMaxBudgetUsd,
     sessionMemory = listSessionMemory, persistMemory = persistTurnMemory, runClaude = runClaudeImpl,
+    // The user's plugin skills + subagents — injectable like the rest, so a
+    // test can mount subagent-gated tools (tools.mjs usefulThisTurn).
+    perUserSkillSet = buildPerUserSkillSet,
   } = {},
 ) {
   // Without a workspace the SDK would inherit the server process's cwd —
@@ -1480,7 +1483,9 @@ export async function runAgentV2Turn(
       // everything is delivered once.
       delivered: deliveredFor(resume),
     },
-    { readSkill, roots, sessionMemory },
+    // Same subagent source as the mounted tools below, so the guidance and
+    // the tool list cannot disagree about ask-subagent.
+    { readSkill, roots, sessionMemory, getSubagents: (uid) => perUserSkillSet(uid).subagents },
   );
   // `meta` was computed and dropped on the floor here, so a truncated prompt
   // left no trace anywhere — not on the wire, not in the log. The model is
@@ -1528,7 +1533,7 @@ export async function runAgentV2Turn(
   // fence-contract markdown both handlers prepend — same shape route.mjs
   // passes into buildDispatch (`{ base: internalSkills.base }`), not the raw
   // module export.
-  const { skills: userSkills, subagents: userSubagents } = buildPerUserSkillSet(userId);
+  const { skills: userSkills, subagents: userSubagents } = perUserSkillSet(userId);
 
   // The user's consented MCP servers ride alongside the in-process llmide
   // server, with their server-level specs appended to the allowlist composed
@@ -1566,6 +1571,8 @@ export async function runAgentV2Turn(
         userSubagents,
         internalSkills: { base: internalSkills.base },
         gateway: Boolean(gatewayBaseUrl),
+        // Drops tools this turn cannot use (tools.mjs usefulThisTurn).
+        mode: meta.mode,
         // The turn's cancellation, in the shape in-process tools consume.
         // These MCP tools run in the SERVER process, which the SDK's
         // abortController does not kill — it only terminates the CLI

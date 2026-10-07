@@ -32,6 +32,19 @@ Every tool result stays in the conversation and is re-read on each later step. M
 
 For small single-step requests, skip task management.`;
 
+/**
+ * V2_EXECUTE_GUIDANCE for this turn. Without plugin subagents the llmide
+ * server does not mount ask-subagent (sdk/tools.mjs usefulThisTurn), so the
+ * guidance must not name it — a model told to delegate goes looking for a
+ * tool that is not in its list.
+ */
+export function v2ExecuteGuidance({ hasSubagents = true } = {}) {
+  if (hasSubagents) return V2_EXECUTE_GUIDANCE;
+  return V2_EXECUTE_GUIDANCE
+    .replace('(`task-create`, `ask-subagent`, …)', '(`task-create`, `search-kb`, …)')
+    .replace(/- \*\*ask-subagent\*\*[^\n]*\n/, '');
+}
+
 // Every NON-plan Agent-engine turn (Execute, Review, Document, Ask, …); plan
 // bindings carry their own find-code rule (plan-pipeline.mjs). Measured
 // 2026-10-05: 0 find-code calls in 48 recorded v2 tool calls while this rule
