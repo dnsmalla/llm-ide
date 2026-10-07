@@ -71,7 +71,7 @@ import { getSecret, makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { resolveCustomProviderDispatch } from '../../providers/providers.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
-import { mapSdkMessage } from './events.mjs';
+import { mapSdkMessage, mapContextUsage } from './events.mjs';
 import { cachedEffortLevels } from './models.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
@@ -911,12 +911,67 @@ export function buildPromptInput(text, images) {
   })();
 }
 
+/**
+ * Keep the SDK session's input open after the prompt so the session is still
+ * alive when `result` arrives — `getContextUsage()` is a control request and
+ * fails with "Query closed before response received" once the input has
+ * ended (measured 2026-10-07, SDK 0.3.289; with the input held open it
+ * answered in 14 ms and the model still replied normally). `release` ends
+ * the input; calling it again is harmless.
+ */
+export function holdOpenPrompt(prompt) {
+  let release;
+  const released = new Promise((resolve) => { release = resolve; });
+  async function* input() {
+    if (typeof prompt === 'string') {
+      yield { type: 'user', message: { role: 'user', content: prompt }, parent_tool_use_id: null };
+    } else {
+      yield* prompt;
+    }
+    await released;
+  }
+  return { prompt: input(), release: () => release() };
+}
+
+const CONTEXT_USAGE_TIMEOUT_MS = 2000;
+
+/**
+ * The turn's context-window usage as a `context_usage` event, or null. Only
+ * the 'summary' detail: it answers from the last response's usage, with no
+ * per-category token-count API calls. Best-effort — a missing method (fake
+ * or older query), a failure or a slow answer must never hold up the turn.
+ */
+export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS } = {}) {
+  if (typeof q?.getContextUsage !== 'function') return null;
+  let timer;
+  try {
+    const response = await Promise.race([
+      q.getContextUsage({ detail: 'summary' }),
+      new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs); }),
+    ]);
+    return mapContextUsage(response);
+  } catch (err) {
+    console.warn(`context usage unavailable: ${String(err?.message ?? err).slice(0, 200)}`);
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 // --- The turn runner ----------------------------------------------------------
 
 // The injectable factory contract is positional (prompt, options); this
 // default adapts the real SDK query() (one params object) to that shape so
 // the live path (no queryFactory passed) and the test fakes are interchangeable.
-const sdkQueryFactory = (prompt, options) => query({ prompt, options });
+// The real SDK query, with its input held open (holdOpenPrompt) and a
+// `releaseInput` the turn runner calls once it has read the context usage.
+// Test fakes are built without either, and the runner treats both as optional.
+const sdkQueryFactory = (prompt, options) => {
+  const held = holdOpenPrompt(prompt);
+  const q = query({ prompt: held.prompt, options });
+  q.releaseInput = held.release;
+  return q;
+};
 
 const MAX_TURNS = 40;
 
@@ -1688,6 +1743,15 @@ export async function runAgentV2Turn(
         }
         // Per-block usage snapshots stay server-side (see the result branch).
         if (ev.type !== 'usage') onEvent?.(ev);
+        if (ev.type === 'result') {
+          // Read while the session is still open; a gateway's numbers would
+          // describe a model this window math does not know.
+          if (!gatewayBaseUrl) {
+            const contextUsage = await readContextUsage(q);
+            if (contextUsage) onEvent?.(contextUsage);
+          }
+          q.releaseInput?.();
+        }
       }
     }
   } catch (err) {
@@ -1718,6 +1782,9 @@ export async function runAgentV2Turn(
     }
     throw err;
   } finally {
+    // Every exit — abort, SDK error, no `result` at all — ends the held-open
+    // input, or `for await` above would never finish.
+    q.releaseInput?.();
     recordDelivery();
     if (!usageEmitted && streamedUsage.size > 0) {
       try { emitTurnUsage(); } catch { /* the stream may already be gone */ }

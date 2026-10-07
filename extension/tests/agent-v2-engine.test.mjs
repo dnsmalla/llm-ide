@@ -42,7 +42,7 @@ try { fs.rmSync(agentSdkRoot, { recursive: true, force: true }); } catch { /* ok
 
 const {
   buildEngineOptions, resolveAnthropicKey, resolveAgentEngineAuth, runAgentV2Turn, agentSdkHomeFor, resolveMaxBudgetUsd,
-  approvalArgsFor, v2ToolPolicyForMode, buildPromptInput,
+  approvalArgsFor, v2ToolPolicyForMode, buildPromptInput, holdOpenPrompt, readContextUsage,
 } = await import('../llm_agent/sdk/engine.mjs');
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
@@ -125,6 +125,38 @@ test('buildPromptInput: text stays a string, images become one user message', as
   assert.deepEqual(only.message.content[0].source,
     { type: 'base64', media_type: 'image/png', data: PNG_B64 });
   assert.equal(only.message.content[1].text, 'what is this?');
+});
+
+test('holdOpenPrompt: yields the prompt as one user message, then stays open until released', async () => {
+  for (const input of ['hi', buildPromptInput('what is this?', [{ path: 'a.png', mediaType: 'image/png', data: PNG_B64 }])]) {
+    const { prompt, release } = holdOpenPrompt(input);
+    const it = prompt[Symbol.asyncIterator]();
+    const first = await it.next();
+    assert.equal(first.value.type, 'user');
+    assert.equal(first.value.parent_tool_use_id, null);
+    if (input === 'hi') assert.equal(first.value.message.content, 'hi');
+    else assert.deepEqual(first.value.message.content.map((b) => b.type), ['image', 'text']);
+    let ended = false;
+    const next = it.next().then((r) => { ended = r.done; });
+    await new Promise((r) => setTimeout(r, 20));
+    assert.equal(ended, false, 'still open: the SDK session must outlive `result`');
+    release();
+    release();
+    await next;
+    assert.equal(ended, true, 'release ends the input, and a second release is harmless');
+  }
+});
+
+test('readContextUsage: summary detail; null when missing, failing or too slow', async () => {
+  const seen = [];
+  const ok = { getContextUsage: async (opts) => { seen.push(opts); return { totalTokens: 9, rawMaxTokens: 100, percentage: 9, categories: [] }; } };
+  assert.deepEqual(await readContextUsage(ok), { type: 'context_usage', totalTokens: 9, maxTokens: 100, percentage: 9, categories: [] });
+  assert.deepEqual(seen, [{ detail: 'summary' }], 'summary: no per-category token-count API calls');
+  assert.equal(await readContextUsage({}), null, 'a fake/older query without the method');
+  assert.equal(await readContextUsage({ getContextUsage: async () => { throw new Error('closed'); } }), null);
+  const t = Date.now();
+  assert.equal(await readContextUsage({ getContextUsage: () => new Promise(() => {}) }, { timeoutMs: 30 }), null);
+  assert.ok(Date.now() - t < 1000, 'a hung read is cut at the timeout');
 });
 
 // --- The brief's binding contract -------------------------------------------
@@ -809,6 +841,71 @@ function registerGatewayProvider(userId, {
   if (key) setSecret(getDb(), userId, vaultKey, key);
   return `custom:${id}`;
 }
+
+// A fake SDK query with the two extras the real factory provides.
+function contextQuery({ messages, usage, throwAfter = false }) {
+  const calls = { asked: 0, released: 0 };
+  const factory = () => {
+    const gen = (async function* () {
+      for (const m of messages) yield m;
+      if (throwAfter) throw new Error('sdk blew up');
+    })();
+    gen.getContextUsage = async () => { calls.asked += 1; return usage; };
+    gen.releaseInput = () => { calls.released += 1; };
+    return gen;
+  };
+  return { factory, calls };
+}
+
+const RESULT_TURN = [
+  { type: 'system', subtype: 'init', session_id: 'sdk-cu', tools: [], capabilities: [] },
+  { type: 'result', subtype: 'success', session_id: 'sdk-cu', total_cost_usd: 0, num_turns: 1, duration_ms: 5 },
+];
+const SDK_USAGE = { totalTokens: 10460, rawMaxTokens: 1000000, percentage: 1, categories: [{ name: 'Messages', kind: 'used', tokens: 2078 }] };
+
+test('turn end: context_usage follows result, then the input is released',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const { factory, calls } = contextQuery({ messages: RESULT_TURN, usage: SDK_USAGE });
+    const events = [];
+    await runAgentV2Turn({
+      message: 'hi', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+      onEvent: (e) => events.push(e), queryFactory: factory,
+    }, turnInjectable);
+    const types = events.map((e) => e.type);
+    assert.ok(types.indexOf('context_usage') > types.indexOf('result'), 'after result');
+    assert.equal(types.filter((t) => t === 'context_usage').length, 1);
+    assert.equal(events.find((e) => e.type === 'context_usage').maxTokens, 1000000);
+    assert.equal(calls.asked, 1);
+    assert.ok(calls.released >= 1, 'released after the read');
+  }));
+
+test('turn end: an SDK failure with no result still releases the input and sends no context_usage',
+  withAnthropicKey('sk-ant-v2-test', async () => {
+    const { factory, calls } = contextQuery({ messages: [RESULT_TURN[0]], usage: SDK_USAGE, throwAfter: true });
+    const events = [];
+    await assert.rejects(runAgentV2Turn({
+      message: 'hi', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
+      onEvent: (e) => events.push(e), queryFactory: factory,
+    }, turnInjectable));
+    assert.equal(calls.asked, 0);
+    assert.ok(calls.released >= 1, 'finally releases, so the turn can never hang on an open input');
+    assert.ok(!events.some((e) => e.type === 'context_usage'));
+  }));
+
+test('turn end: a gateway turn never reads context usage but still releases',
+  async () => {
+    const user = registerUser(getDb(), { email: 'v2-ctx-gw@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+    const gateway = registerGatewayProvider(user.id);
+    const { factory, calls } = contextQuery({ messages: RESULT_TURN, usage: SDK_USAGE });
+    const events = [];
+    await runAgentV2Turn({
+      message: 'm', userId: user.id, mode: 'execute', provider: gateway, model: 'glm-4.7',
+      agentContext: { workspaceRoot: WS }, onEvent: (e) => events.push(e), queryFactory: factory,
+    }, turnInjectable);
+    assert.equal(calls.asked, 0);
+    assert.ok(calls.released >= 1);
+    assert.ok(!events.some((e) => e.type === 'context_usage'));
+  });
 
 test('resolveAgentEngineAuth: first-party keeps the ladder; a gateway brings its own key + door; the rest is refused',
   withAnthropicKey('sk-ant-first-party', async () => {

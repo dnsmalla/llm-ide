@@ -150,12 +150,14 @@ export function mapContextUsage(r) {
   if (!r || !Number.isFinite(r.totalTokens) || !Number.isFinite(r.rawMaxTokens)) return null;
   const categories = (Array.isArray(r.categories) ? r.categories : [])
     .filter((c) => c && typeof c.name === 'string' && Number.isFinite(c.tokens))
-    .map((c) => ({ name: c.name, kind: typeof c.kind === 'string' && c.kind ? c.kind : 'used', tokens: c.tokens }));
+    .map((c) => ({ name: c.name, kind: typeof c.kind === 'string' && c.kind ? c.kind : 'used', tokens: Math.round(c.tokens) }));
   return {
     type: 'context_usage',
-    totalTokens: r.totalTokens,
-    maxTokens: r.rawMaxTokens,
-    percentage: Number.isFinite(r.percentage) ? r.percentage : 0,
+    // Rounded: the wire schema types these as integers and the Mac decodes Int,
+    // so one fractional SDK value would make it drop the whole event.
+    totalTokens: Math.round(r.totalTokens),
+    maxTokens: Math.round(r.rawMaxTokens),
+    percentage: Number.isFinite(r.percentage) ? Math.round(r.percentage) : 0,
     categories,
   };
 }

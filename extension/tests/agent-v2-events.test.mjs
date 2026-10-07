@@ -159,3 +159,14 @@ test('mapContextUsage: missing numbers → null; bad rows dropped; missing kind 
   assert.deepEqual(ev.categories, [{ name: 'A', kind: 'used', tokens: 2 }]);
   assert.deepEqual(mapContextUsage({ totalTokens: 5, rawMaxTokens: 10 }).categories, []);
 });
+
+test('mapContextUsage: fractional SDK numbers are rounded (the wire schema and the Mac decode integers)', () => {
+  // A fractional value would make the Mac's Int decode fail and drop the whole event.
+  const ev = mapContextUsage({
+    totalTokens: 10460.6, rawMaxTokens: 1000000, percentage: 1.046,
+    categories: [{ name: 'A', kind: 'used', tokens: 2.4 }],
+  });
+  assert.equal(ev.totalTokens, 10461);
+  assert.equal(ev.percentage, 1);
+  assert.equal(ev.categories[0].tokens, 2);
+});

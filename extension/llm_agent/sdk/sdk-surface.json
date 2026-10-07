@@ -450,8 +450,8 @@
       "where": "models.mjs"
     },
     "query.getContextUsage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "adopted",
+      "where": "engine.mjs"
     },
     "query.initializationResult": {
       "status": "needs-human",
