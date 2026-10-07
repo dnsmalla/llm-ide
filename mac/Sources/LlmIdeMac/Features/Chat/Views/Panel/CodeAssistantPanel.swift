@@ -882,7 +882,8 @@ struct CodeAssistantPanel: View {
     func applyComposerProvider() {
         modelState.applyComposerProvider(overrideId: composerProviderId,
                                          activeCLI: config.activeCLI,
-                                         defaultModelId: config.defaultModelId)
+                                         defaultModelId: config.defaultModelId,
+                                         agentEngineOnly: engine.usesAgentV2Engine)
     }
 
     func handleOnAppear() {

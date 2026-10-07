@@ -33,6 +33,17 @@ struct CustomProvidersSection: View {
         }
         .pickerStyle(.menu)
         .font(Typography.body)
+        .onAppear(perform: dropStaleComposerProvider)
+        .onChange(of: providers) { _, _ in dropStaleComposerProvider() }
+    }
+
+    /// An override naming a deleted or disabled provider matches no picker
+    /// tag (a blank menu) while the composer silently runs the default — so
+    /// clear it and let the picker say what actually runs.
+    private func dropStaleComposerProvider() {
+        guard !composerProviderId.isEmpty,
+              !providers.contains(where: { $0.id == composerProviderId && $0.isEnabled }) else { return }
+        composerProviderId = ""
     }
 
     var body: some View {

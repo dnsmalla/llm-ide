@@ -183,9 +183,17 @@ extension CodeAssistantModelState {
     /// provider named by `overrideId` while it exists and is enabled, else the
     /// default provider. A no-op when already there, so an explicit model pick
     /// on the current provider survives a re-apply (appear, Settings edits).
-    func applyComposerProvider(overrideId: String, activeCLI: String, defaultModelId: String) {
+    ///
+    /// `agentEngineOnly`: the chat runs on the Agent v2 engine. A provider
+    /// without an Anthropic-compatible URL would drop that turn to the legacy
+    /// loop while the v2 SDK session sits untouched — the next v2 turn would
+    /// resume with no memory of it — so such an override is skipped there
+    /// (the deleted provider chip filtered the same way).
+    func applyComposerProvider(overrideId: String, activeCLI: String, defaultModelId: String,
+                               agentEngineOnly: Bool = false) {
         if !overrideId.isEmpty,
-           let provider = customProviders.first(where: { $0.id == overrideId && $0.isEnabled }) {
+           let provider = customProviders.first(where: { $0.id == overrideId && $0.isEnabled }),
+           !agentEngineOnly || provider.canRunAgentEngine {
             let target = "custom:\(provider.id)"
             if selectedProvider != target {
                 selectedProvider = target
