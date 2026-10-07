@@ -33,13 +33,16 @@ extension LlmIdeAPIClient {
     /// rather than an empty UI.
     func listProviderModels(_ provider: String) async throws -> [AIModel] {
         struct Req: Encodable { let provider: String }
-        struct Entry: Decodable { let id: String; let displayName: String? }
-        struct Resp: Decodable { let models: [String]; let entries: [Entry]? }
+        struct Resp: Decodable { let models: [String]; let entries: [ProviderModelEntry]? }
         let r: Resp = try await post("/kb/providers/models",
                                      body: Req(provider: provider),
                                      authenticated: true)
         if let entries = r.entries, !entries.isEmpty {
-            return entries.map { AIModel(id: $0.id, displayName: ($0.displayName?.isEmpty == false) ? $0.displayName! : $0.id) }
+            return entries.map {
+                AIModel(id: $0.id,
+                        displayName: ($0.displayName?.isEmpty == false) ? $0.displayName! : $0.id,
+                        effortLevels: $0.effortLevels)
+            }
         }
         return r.models.map { AIModel(id: $0, displayName: $0) }
     }

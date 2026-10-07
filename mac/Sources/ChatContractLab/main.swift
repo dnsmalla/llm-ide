@@ -1381,6 +1381,27 @@ do {
            "each purpose persists under its own UserDefaults key")
 }
 
+print("EffortChoice + ProviderModelEntry")
+do {
+    expect(EffortChoice.effective(stored: "high", levels: ["low", "high"]) == "high",
+           "a stored level the model lists is sent")
+    expect(EffortChoice.effective(stored: "xhigh", levels: ["low", "high"]) == EffortChoice.auto,
+           "a level this model lacks sends auto")
+    expect(EffortChoice.effective(stored: "auto", levels: ["low"]) == EffortChoice.auto, "auto stays auto")
+    expect(EffortChoice.effective(stored: "low", levels: []) == EffortChoice.auto,
+           "a model without levels always sends auto")
+    expect(EffortChoice.label("high") == "High" && EffortChoice.label("xhigh") == "Xhigh"
+           && EffortChoice.label(EffortChoice.auto) == "Auto",
+           "labels are the raw level, first letter capitalised — no table")
+    expect(EffortChoice.defaultsKey == "chat.effort", "one app-wide UserDefaults key")
+
+    let json = #"[{"id":"claude-sonnet-5","displayName":"Sonnet 5","effortLevels":["low","ultra"]},{"id":"claude-x"}]"#
+    let entries = try? JSONDecoder().decode([ProviderModelEntry].self, from: Data(json.utf8))
+    expect(entries?.first?.effortLevels == ["low", "ultra"], "effortLevels decode verbatim, unknown level included")
+    expect(entries?.last?.effortLevels == [] && entries?.last?.displayName == nil,
+           "an older server's entry (no effortLevels) decodes as []")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

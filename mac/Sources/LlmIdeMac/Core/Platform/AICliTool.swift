@@ -264,6 +264,9 @@ extension AICliTool {
 struct AIModel: Identifiable, Hashable, Codable {
     let id: String
     let displayName: String
+    /// The Agent SDK's effort levels for this model (server apiVersion 63+);
+    /// [] = no effort picker for it.
+    var effortLevels: [String] = []
 
     /// A readable name for `id`, taken ONLY from `models` (the account's live
     /// list, from the Agent SDK) — never from a hardcoded table.
@@ -311,5 +314,17 @@ struct AIModel: Identifiable, Hashable, Codable {
               id.lowercased().hasPrefix("claude"),
               let name = knownName(for: id, in: models) else { return models }
         return models + [AIModel(id: id, displayName: name)]
+    }
+}
+
+extension AIModel {
+    private enum CodingKeys: String, CodingKey { case id, displayName, effortLevels }
+
+    /// Lists persisted before effortLevels existed decode with [].
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        displayName = try c.decode(String.self, forKey: .displayName)
+        effortLevels = try c.decodeIfPresent([String].self, forKey: .effortLevels) ?? []
     }
 }
