@@ -197,7 +197,8 @@ export function validate(raw, { modifiable = null } = {}) {
   };
 }
 
-export async function generateCodeForTask(userId, { taskId, language, includeFileContext = true }) {
+// `_runClaude` is a test seam (as in summarize.mjs); callers never pass it.
+export async function generateCodeForTask(userId, { taskId, language, includeFileContext = true, _runClaude = runClaude }) {
   const task = getTaskById(userId, taskId);
   if (!task) throw new Error(`Task ${taskId} not found`);
   const plan = getPlan(userId, task.planId);
@@ -228,12 +229,12 @@ export async function generateCodeForTask(userId, { taskId, language, includeFil
 
   // Tier routing (`features.pipeline`); unrouted → runClaude's default.
   const claudeOpts = { userId, maxTokens: MAX_OUTPUT_TOKENS, ...routeOpts(userId, 'pipeline') };
-  let parsed = tryParseJSON(await runClaude(prompt, claudeOpts));
+  let parsed = tryParseJSON(await _runClaude(prompt, claudeOpts));
   let validated = validate(parsed, { modifiable });
   if (!validated) {
     // Stricter retry — most failures are the model wrapping JSON in prose.
     const stricter = `${prompt}\n\nYour previous response was not valid JSON. Output ONLY the JSON object — start with { and end with }.`;
-    parsed = tryParseJSON(await runClaude(stricter, claudeOpts));
+    parsed = tryParseJSON(await _runClaude(stricter, claudeOpts));
     validated = validate(parsed, { modifiable });
   }
   if (!validated) {

@@ -132,7 +132,8 @@ export function validatePlan(raw, meeting, goal) {
 
 const TRANSCRIPT_CAP = 200_000; // chars fed to the LLM
 
-export async function generatePlan(userId, { meetingId, goal, language }) {
+// `_runClaude` is a test seam (as in summarize.mjs); callers never pass it.
+export async function generatePlan(userId, { meetingId, goal, language, _runClaude = runClaude }) {
   const meeting = getMeeting(userId, meetingId);
   if (!meeting) throw new Error(`Meeting ${meetingId} not found in KB`);
   meeting.transcriptText = getMeetingTranscript(userId, meetingId);
@@ -149,11 +150,11 @@ export async function generatePlan(userId, { meetingId, goal, language }) {
   // Cap output tokens — plan JSON schema is bounded by task count (max ~30).
   // Tier routing (`features.pipeline`); unrouted → runClaude's default.
   const claudeOpts = { userId, maxTokens: 3000, ...routeOpts(userId, 'pipeline') };
-  let parsed = tryParseJSON(await runClaude(
+  let parsed = tryParseJSON(await _runClaude(
     buildPrompt({ meeting, goal, lang, context, strict: false }), claudeOpts));
   let plan = validatePlan(parsed, meeting, goal);
   if (!plan || plan.tasks.length === 0) {
-    parsed = tryParseJSON(await runClaude(
+    parsed = tryParseJSON(await _runClaude(
       buildPrompt({ meeting, goal, lang, context, strict: true }), claudeOpts));
     plan = validatePlan(parsed, meeting, goal);
   }

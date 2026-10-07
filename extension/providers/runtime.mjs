@@ -72,6 +72,15 @@ const ANTHROPIC_VERSION = process.env.LLMIDE_ANTHROPIC_VERSION || '2023-06-01';
 // default rather than failing the request. A regex (not a fixed list)
 // keeps new Claude models working without a code change here.
 const CLAUDE_MODEL_RE = /^claude-[a-z0-9.-]+$/;
+// A provider the caller named cannot run (custom provider missing / disabled /
+// keyless, keyless DeepSeek). Tagged so a route can tell "your provider
+// config" from an upstream failure (ai-routes answers it 400 with this code,
+// which the Mac's tier-routed Loop replay retries without the route). The
+// messages are user-facing Settings hints, safe to return verbatim.
+function providerUnavailable(message) {
+  return Object.assign(new Error(message), { code: 'PROVIDER_UNAVAILABLE' });
+}
+
 function resolveModel(model) {
   // The picker can carry the SDK's 1M-context id ("claude-opus-5[1m]"); that
   // suffix is a Claude Code convention, not a Messages API model id, so the
@@ -217,7 +226,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     // message, and degrades a bad vault key to no_key instead of throwing.
     if (typeof provider === 'string' && provider.startsWith('custom:')) {
       const r = resolveCustomProviderDispatch(provider, userId);
-      if (r.error) throw new Error(r.message);
+      if (r.error) throw providerUnavailable(r.message);
       return completeViaApi(provider, { apiKey: r.apiKey, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: r.baseUrl, signal, meter, tools });
     }
 
@@ -225,7 +234,7 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     if (key) {
       if (provider === 'custom') {
         const baseUrl = customBaseUrl(userId);
-        if (!baseUrl) throw new Error('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
+        if (!baseUrl) throw providerUnavailable('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
         return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter, tools });
       }
       if (provider === 'deepseek') {
@@ -236,10 +245,10 @@ export async function runClaude(prompt, { userId, model, maxTokens, cacheTranscr
     // custom and deepseek have no CLI subscription mode; other providers fall
     // back to their logged-in CLI.
     if (provider === 'custom') {
-      throw new Error('No API key configured for the custom provider. Add one in Settings → Model Providers.');
+      throw providerUnavailable('No API key configured for the custom provider. Add one in Settings → Model Providers.');
     }
     if (provider === 'deepseek') {
-      throw new Error('No API key configured for DeepSeek. Add one in Settings → Model Providers.');
+      throw providerUnavailable('No API key configured for DeepSeek. Add one in Settings → Model Providers.');
     }
     // `cwd` roots the provider's CLI in the caller's workspace. It matters
     // because codex/gemini are agents in their own right: given the project

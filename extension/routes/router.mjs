@@ -33,6 +33,7 @@ import { runClaude } from '../providers/runtime.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { handleTierRoutingSync } from '../server/tier-routing.mjs';
+import { tierRoutingStatus } from '../providers/tier-routing.mjs';
 import { listSdkModels } from '../llm_agent/sdk/models.mjs';
 import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
 import { activeTurnCount } from './agent-v2.mjs';
@@ -197,6 +198,12 @@ export async function handleKB(req, res) {
     // Sync the per-role tier routing config from Mac app (spec: tier routing)
     if (req.method === 'POST' && url === '/kb/routing-tiers') {
       await handleTierRoutingSync(req, res, userId);
+      return true;
+    }
+    // The stored config + per-tier usability (the Mac resolver cannot see
+    // vault keys or the synced custom-provider registry, so it asks).
+    if (req.method === 'GET' && url === '/kb/routing-tiers') {
+      sendJSON(res, 200, tierRoutingStatus(userId));
       return true;
     }
 

@@ -25,6 +25,12 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Changed
 
+- Server `runClaude` now honours an explicit `custom:<id>` provider for EVERY caller, not only tier
+  routes: a composer chat on a custom provider whose model id looks like Claude (`claude-*`) now runs on
+  that custom provider instead of being re-derived to Anthropic from the model id.
+- Tier routing (API v67): a tier on OpenAI/Google without an API key is unusable and keeps the role on
+  its default (it used to fall back to the codex/gemini CLI); `GET /kb/routing-tiers` reports per-tier
+  usability; the Mac app routes nothing on a server older than v67.
 - Loop reliability (Mac app). Loop agent runs are headless and confined to the
   run's git root; a stage whose agent call errored ends the run `error` unless
   that stage later ran cleanly (a passing verify stage no longer launders it);

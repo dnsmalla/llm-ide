@@ -1285,7 +1285,7 @@ paths:
                       attachmentCount: { type: integer }
                       attachmentChars: { type: integer }
                       paths:           { type: array, items: { type: string } }
-        '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '400': { description: 'Validation error, or (API v67+) PROVIDER_UNAVAILABLE — the named provider is missing, disabled or has no API key; message is the Settings hint', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '502': { description: 'Upstream LLM error (error code INTERNAL_ERROR)' }
         '429': { description: Rate limited }
 
@@ -3085,8 +3085,9 @@ paths:
         names a tier. Every entry is optional and invalid entries are dropped
         (unknown tier/feature names, a provider outside
         anthropic|openai|google|deepseek|custom:<id>, a model id outside
-        `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$`). An unset or unusable tier
-        (custom provider missing/disabled/keyless, DeepSeek without a key)
+        `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}(\[1m\])?$`) and reported back in
+        `dropped` (API v67+). An unset or unusable tier (custom provider
+        missing/disabled/keyless, OpenAI/Google/DeepSeek without an API key)
         keeps the role on its default provider and model.
       requestBody:
         required: true
@@ -3116,9 +3117,46 @@ paths:
                 type: object
                 properties:
                   success: { type: boolean }
-        '400': { description: Body is not a JSON object }
+                  dropped:
+                    type: array
+                    description: Entries that were not stored (API v67+)
+                    items:
+                      type: object
+                      properties:
+                        entry:  { type: string, example: 'tiers.cheap' }
+                        reason: { type: string, enum: [invalid_shape, invalid_provider, invalid_model, unknown_tier, unknown_feature] }
+        '400': { description: Body is not a JSON object, or the body could not be read }
         '405': { description: Method not allowed }
         '413': { description: Request body too large }
+    get:
+      summary: The caller's tier routing config plus per-tier usability (API v67+)
+      description: >
+        The stored config and, for each tier, whether the server can run it
+        right now — the same check the server's resolver applies (custom
+        provider registered/enabled/keyed; OpenAI/Google/DeepSeek keyed) —
+        and whether it can run on the Agent SDK engine (first-party Anthropic,
+        or a custom provider with an Anthropic-compatible endpoint and a key).
+        The Mac app uses it to skip a route the server would refuse.
+      responses:
+        '200':
+          description: Config + status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  tiers: { type: object }
+                  features: { type: object }
+                  status:
+                    type: object
+                    description: Keys strong | standard | cheap (always all three)
+                    additionalProperties:
+                      type: object
+                      properties:
+                        usable: { type: boolean }
+                        reason: { type: string, description: 'unset | not_found | disabled | no_key | error (only when usable is false)' }
+                        agentCapable: { type: boolean }
+                        agentReason: { type: string, description: 'not_agent_capable (only when usable but not agentCapable)' }
 
   /kb/ingest-scip:
     post:

@@ -28,7 +28,15 @@ export const ROUTED_FEATURES = Object.freeze(['subagents', 'loop', 'autoTasks', 
 // preserved — the registry is keyed by the exact id the Mac sent).
 const PROVIDER_RE = /^(anthropic|openai|google|deepseek|custom:[A-Za-z0-9-]{1,100})$/;
 // The model id is forwarded into a provider request body, so a strict charset.
-const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}$/;
+// The one bracket form allowed is the SDK's 1M-context suffix `[1m]` (the
+// Settings model menu lists e.g. `claude-opus-5-5[1m]` from the SDK's live
+// list); runClaude's direct-API path strips it (runtime.mjs resolveModel), the
+// CLI and Agent SDK paths accept it as is.
+const MODEL_RE = /^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}(\[1m\])?$/;
+// Cap on reported dropped entries (and on an echoed key's length): the body is
+// already capped, this just keeps the answer small whatever a client sends.
+const MAX_DROPPED = 32;
+const MAX_ECHO_KEY = 64;
 
 const EMPTY = Object.freeze({ tiers: Object.freeze({}), features: Object.freeze({}) });
 
@@ -41,24 +49,38 @@ function cacheFor(db) {
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
-/** Normalize a client config into `{ tiers, features }`, dropping anything invalid. */
-export function normalizeTierRouting(config) {
+/**
+ * Normalize a client config into `{ tiers, features }`, dropping anything
+ * invalid. When `dropped` is an array, each dropped entry is appended to it as
+ * `{ entry: 'tiers.<name>' | 'features.<name>', reason }` (reason ∈
+ * invalid_shape | invalid_provider | invalid_model | unknown_tier |
+ * unknown_feature) so the client can show why a setting did not stick.
+ */
+export function normalizeTierRouting(config, dropped = null) {
   const tiers = {};
   const features = {};
+  const drop = (entry, reason) => {
+    if (Array.isArray(dropped) && dropped.length < MAX_DROPPED) {
+      dropped.push({ entry: entry.slice(0, MAX_ECHO_KEY), reason });
+    }
+  };
   if (!isPlainObject(config)) return { tiers, features };
   if (isPlainObject(config.tiers)) {
-    for (const name of ROUTING_TIERS) {
-      const t = config.tiers[name];
-      if (!isPlainObject(t)) continue;
+    for (const [name, t] of Object.entries(config.tiers)) {
+      if (!ROUTING_TIERS.includes(name)) { drop(`tiers.${name}`, 'unknown_tier'); continue; }
+      if (!isPlainObject(t)) { drop(`tiers.${name}`, 'invalid_shape'); continue; }
       const provider = typeof t.provider === 'string' ? t.provider.trim() : '';
       const model = typeof t.model === 'string' ? t.model.trim() : '';
-      if (PROVIDER_RE.test(provider) && MODEL_RE.test(model)) tiers[name] = { provider, model };
+      if (!PROVIDER_RE.test(provider)) { drop(`tiers.${name}`, 'invalid_provider'); continue; }
+      if (!MODEL_RE.test(model)) { drop(`tiers.${name}`, 'invalid_model'); continue; }
+      tiers[name] = { provider, model };
     }
   }
   if (isPlainObject(config.features)) {
-    for (const name of ROUTED_FEATURES) {
-      const tier = config.features[name];
-      if (typeof tier === 'string' && ROUTING_TIERS.includes(tier)) features[name] = tier;
+    for (const [name, tier] of Object.entries(config.features)) {
+      if (!ROUTED_FEATURES.includes(name)) { drop(`features.${name}`, 'unknown_feature'); continue; }
+      if (typeof tier !== 'string' || !ROUTING_TIERS.includes(tier)) { drop(`features.${name}`, 'unknown_tier'); continue; }
+      features[name] = tier;
     }
   }
   return { tiers, features };
@@ -84,11 +106,12 @@ export function getTierRoutingConfig(userId, db = getDb()) {
 
 /**
  * Replace `userId`'s config (the Mac sends the whole thing on every change).
- * Other users are untouched. Returns the normalized config that was stored.
+ * Other users are untouched. Returns the normalized config that was stored;
+ * entries it dropped are appended to `dropped` when one is passed.
  */
-export function syncTierRouting(config, userId, db = getDb()) {
+export function syncTierRouting(config, userId, db = getDb(), dropped = null) {
   if (!userId) throw new Error('syncTierRouting requires a userId');
-  const cfg = normalizeTierRouting(config);
+  const cfg = normalizeTierRouting(config, dropped);
   if (Object.keys(cfg.tiers).length === 0 && Object.keys(cfg.features).length === 0) {
     db.prepare('DELETE FROM user_flags WHERE user_id = ? AND flag = ?').run(userId, FLAG);
   } else {
@@ -108,7 +131,10 @@ export function _resetTierRoutingCacheForTests(db = getDb()) {
 
 /**
  * POST /kb/routing-tiers — body `{ tiers, features }`, answers
- * `{ success: true }`. Invalid entries are dropped silently (see header).
+ * `{ success: true, dropped: [{ entry, reason }] }`. Invalid entries are
+ * dropped, never rejected (see header); `dropped` tells the client which.
+ * (GET — the stored config plus per-tier status — needs the provider layer,
+ * so it is served from providers/tier-routing.mjs.)
  */
 export async function handleTierRoutingSync(req, res, userId) {
   if (req.method !== 'POST') {
@@ -119,13 +145,19 @@ export async function handleTierRoutingSync(req, res, userId) {
   try {
     data = parseJSON(await readBody(req, MAX_BODY_BYTES));
   } catch (err) {
-    sendJSON(res, 413, { error: { code: 'BODY_TOO_LARGE', message: err?.message || 'Request body too large' } });
+    // readBody tags its own refusals with a status (413 too large, 408 slow);
+    // anything else (socket error, early close) is a bad request, not a size
+    // problem — same `err.status || 400` rule as auth-routes.
+    const status = err?.status || 400;
+    const code = status === 413 ? 'BODY_TOO_LARGE' : (err?.code || 'VALIDATION_FAILED');
+    sendJSON(res, status, { error: { code, message: err?.message || 'Could not read the request body' } });
     return;
   }
   if (!isPlainObject(data)) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: '{ tiers, features } object required' } });
     return;
   }
-  syncTierRouting(data, userId);
-  sendJSON(res, 200, { success: true });
+  const dropped = [];
+  syncTierRouting(data, userId, getDb(), dropped);
+  sendJSON(res, 200, { success: true, dropped });
 }

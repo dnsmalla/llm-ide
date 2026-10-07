@@ -137,6 +137,42 @@ export function buildEnrichedAgentContext(agentContext, recentMeetings) {
   };
 }
 
+/**
+ * /code-assist's error envelope. A provider-config refusal (runtime.mjs tags
+ * it PROVIDER_UNAVAILABLE: the named provider is missing/disabled/keyless) is
+ * the caller's choice, not an upstream fault, so it is a 400 with the code and
+ * its Settings hint kept — the Mac's tier-routed replay retries once without
+ * the route on exactly this code. Everything else stays the generic 502:
+ * internal paths, model names and CLI details never leak to clients (the full
+ * error is logged server-side by the caller). Exported for tests.
+ */
+export function codeAssistErrorResponse(err) {
+  if (err?.code === 'PROVIDER_UNAVAILABLE') {
+    return { status: 400, body: { error: { code: 'PROVIDER_UNAVAILABLE', message: String(err.message || '') } } };
+  }
+  return {
+    status: 502,
+    body: { error: { code: 'INTERNAL_ERROR', message: 'The assistant is temporarily unavailable. Please try again.' } },
+  };
+}
+
+/**
+ * The model + provider one agent-loop runClaude call runs on (/code-assist's
+ * SSE and buffered wrappers). `opts.model` (the agent loop's
+ * GLOBAL_AGENT_MODEL, or a tier-routed subagent's model) overrides the
+ * composer's tier model; the composer's provider is then dropped so it is
+ * derived from the model (e.g. claude-* -> anthropic) — unless the call names
+ * its own provider (a tier-routed subagent on custom:<uuid>/deepseek, see
+ * ask-subagent). Without a per-call model the composer's choice stands.
+ * Exported for tests.
+ */
+export function agentCallModelProvider(opts, tierModel, composerProvider) {
+  const callModel = opts?.model;
+  return callModel
+    ? { model: callModel, provider: opts?.provider }
+    : { model: tierModel, provider: composerProvider };
+}
+
 export async function handleAIRoutes(req, res) {
   // Generate markdown notes
   if (req.method === 'POST' && req.url === '/generate-notes') {
@@ -533,13 +569,7 @@ export async function handleAIRoutes(req, res) {
               runClaude: (p, opts = {}) => {
                 const callOpts = {
                   userId: req.user?.id,
-                  // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
-                  // the user's tier model for agent calls; drop the composer's
-                  // provider so it is derived from the model (e.g. claude-* ->
-                  // anthropic) — unless the call names its own (a tier-routed
-                  // subagent on custom:<uuid>/deepseek, see ask-subagent).
-                  model: opts.model ?? tierModel,
-                  provider: opts.model ? opts.provider : body.provider,
+                  ...agentCallModelProvider(opts, tierModel, body.provider),
                   maxTokens: opts.maxTokens,
                   tools: opts.tools,
                   signal: opts.signal ? AbortSignal.any([opts.signal, ac.signal]) : ac.signal,
@@ -618,13 +648,7 @@ export async function handleAIRoutes(req, res) {
           // loop's maxTokens budget + its deadline signal must reach runClaude.
           runClaude: (p, opts = {}) => runClaude(p, {
             userId: req.user?.id,
-            // opts.model (the agent loop's GLOBAL_AGENT_MODEL) overrides
-            // the user's tier model for agent calls; drop the composer's
-            // provider so it is derived from the model (e.g. claude-* ->
-            // anthropic) — unless the call names its own (a tier-routed
-            // subagent on custom:<uuid>/deepseek, see ask-subagent).
-            model: opts.model ?? tierModel,
-            provider: opts.model ? opts.provider : body.provider,
+            ...agentCallModelProvider(opts, tierModel, body.provider),
             maxTokens: opts.maxTokens,
             tools: opts.tools,
             signal: opts.signal ? AbortSignal.any([opts.signal, bufferedAc.signal]) : bufferedAc.signal,
@@ -659,13 +683,9 @@ export async function handleAIRoutes(req, res) {
         },
       });
     } catch (err) {
-      // Log the full error server-side; respond with a generic envelope
-      // so internal paths, model names, and CLI invocation details never
-      // leak to clients.
       process.stderr.write(`[code-assist] upstream error: ${err?.message || err}\n`);
-      sendJSON(res, 502, {
-        error: { code: 'INTERNAL_ERROR', message: 'The assistant is temporarily unavailable. Please try again.' },
-      });
+      const { status, body: errBody } = codeAssistErrorResponse(err);
+      sendJSON(res, status, errBody);
     }
     return true;
   }

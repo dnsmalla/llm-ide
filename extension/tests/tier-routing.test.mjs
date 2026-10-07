@@ -22,6 +22,8 @@ const tmpDb = path.join(os.tmpdir(), `_tierrouting-${process.pid}-${Math.floor(p
 process.env.LLMIDE_DB_PATH = tmpDb;
 delete process.env.ANTHROPIC_API_KEY;
 delete process.env.DEEPSEEK_API_KEY;
+delete process.env.OPENAI_API_KEY;
+delete process.env.GOOGLE_API_KEY;
 
 const db = await import('../kb/db.mjs');
 const { registerUser } = await import('../server/users.mjs');
@@ -30,7 +32,9 @@ const { syncCustomProviders } = await import('../server/custom-providers.mjs');
 const {
   syncTierRouting, getTierRoutingConfig, handleTierRoutingSync, _resetTierRoutingCacheForTests,
 } = await import('../server/tier-routing.mjs');
-const { resolveTier, resolveFeatureRoute, routeOpts } = await import('../providers/tier-routing.mjs');
+const {
+  resolveTier, resolveFeatureRoute, routeOpts, tierRoutingStatus,
+} = await import('../providers/tier-routing.mjs');
 const { runClaude } = await import('../providers/runtime.mjs');
 const { loadPlugins } = await import('../plugins/loader.mjs');
 const { askSubagent } = await import('../llm_agent/runtime/handlers/ask-subagent.mjs');
@@ -97,6 +101,39 @@ test('syncTierRouting rejects unsafe model ids and oversized custom ids', () => 
   assert.deepEqual(getTierRoutingConfig(userId).tiers, { cheap: { provider: 'deepseek', model: 'deepseek-chat' } });
 });
 
+test('syncTierRouting keeps the SDK 1M-context suffix `[1m]` and nothing like it', () => {
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: {
+      strong: { provider: 'anthropic', model: 'claude-opus-5-5[1m]' },
+      standard: { provider: 'anthropic', model: 'claude-opus-5-5[2m]' },
+      cheap: { provider: 'anthropic', model: 'claude-[1m]-x' },
+    },
+  }, userId);
+  assert.deepEqual(getTierRoutingConfig(userId).tiers, { strong: { provider: 'anthropic', model: 'claude-opus-5-5[1m]' } });
+});
+
+test('syncTierRouting reports what it dropped', () => {
+  const userId = freshUser();
+  const dropped = [];
+  syncTierRouting({
+    tiers: {
+      strong: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      standard: { provider: 'bogus', model: 'x' },
+      cheap: { provider: 'anthropic', model: 'bad model' },
+      ultra: { provider: 'anthropic', model: 'claude-opus-5-5' },
+    },
+    features: { subagents: 'strong', autoTasks: 'mega', nonsense: 'cheap' },
+  }, userId, undefined, dropped);
+  assert.deepEqual(dropped, [
+    { entry: 'tiers.standard', reason: 'invalid_provider' },
+    { entry: 'tiers.cheap', reason: 'invalid_model' },
+    { entry: 'tiers.ultra', reason: 'unknown_tier' },
+    { entry: 'features.autoTasks', reason: 'unknown_tier' },
+    { entry: 'features.nonsense', reason: 'unknown_feature' },
+  ]);
+});
+
 test('syncTierRouting tolerates garbage input (empty config, no throw)', () => {
   const userId = freshUser();
   syncTierRouting(null, userId);
@@ -154,6 +191,28 @@ test('resolveTier: deepseek without a key → null, with a key → route', () =>
   assert.deepEqual(resolveTier(userId, 'cheap'), { provider: 'deepseek', model: 'deepseek-chat' });
 });
 
+test('resolveTier: openai/google without a key → null (no CLI-agent fallback), with a key → route', () => {
+  // Without a key runClaude would fall back to the codex/gemini agent CLI,
+  // which drops the model and runs an agent over untrusted input in the
+  // server cwd — so a keyless non-Anthropic built-in is unusable, not "CLI".
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: { standard: { provider: 'openai', model: 'gpt-5' }, cheap: { provider: 'google', model: 'gemini-2.5-flash' } },
+  }, userId);
+  assert.equal(resolveTier(userId, 'standard'), null);
+  assert.equal(resolveTier(userId, 'cheap'), null);
+  setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
+  setSecret(db.getDb(), userId, 'google.apiKey', 'g-key');
+  assert.deepEqual(resolveTier(userId, 'standard'), { provider: 'openai', model: 'gpt-5' });
+  assert.deepEqual(resolveTier(userId, 'cheap'), { provider: 'google', model: 'gemini-2.5-flash' });
+});
+
+test('resolveTier: anthropic needs no key (CLI login is the default path anyway)', () => {
+  const userId = freshUser();
+  syncTierRouting({ tiers: { strong: { provider: 'anthropic', model: 'claude-opus-5-5' } } }, userId);
+  assert.deepEqual(resolveTier(userId, 'strong'), { provider: 'anthropic', model: 'claude-opus-5-5' });
+});
+
 test('resolveFeatureRoute + routeOpts: feature → tier → route, fallback otherwise', () => {
   const userId = freshUser();
   assert.equal(resolveFeatureRoute(userId, 'pipeline'), null);
@@ -164,6 +223,7 @@ test('resolveFeatureRoute + routeOpts: feature → tier → route, fallback othe
     tiers: { standard: { provider: 'openai', model: 'gpt-5' } },
     features: { pipeline: 'standard', internal: 'cheap' },               // cheap unset
   }, userId);
+  setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
   assert.deepEqual(resolveFeatureRoute(userId, 'pipeline'), { provider: 'openai', model: 'gpt-5' });
   assert.deepEqual(routeOpts(userId, 'pipeline'), { provider: 'openai', model: 'gpt-5' });
   assert.equal(resolveFeatureRoute(userId, 'internal'), null, 'feature → unset tier → null');
@@ -195,7 +255,7 @@ test('POST /kb/routing-tiers stores the config and answers { success: true }', a
     features: { subagents: 'cheap' },
   }), res, userId);
   assert.equal(res.status, 200);
-  assert.deepEqual(res.body, { success: true });
+  assert.deepEqual(res.body, { success: true, dropped: [] });
   assert.deepEqual(getTierRoutingConfig(userId).features, { subagents: 'cheap' });
 });
 
@@ -207,6 +267,72 @@ test('POST /kb/routing-tiers rejects a non-object body and other methods', async
   const wrong = fakeRes();
   await handleTierRoutingSync(fakeReq('GET'), wrong, userId);
   assert.equal(wrong.status, 405);
+});
+
+test('POST /kb/routing-tiers answers the entries it dropped', async () => {
+  const userId = freshUser();
+  const res = fakeRes();
+  await handleTierRoutingSync(fakeReq('POST', {
+    tiers: { cheap: { provider: 'bogus', model: 'x' } }, features: { loop: 'cheap' },
+  }), res, userId);
+  assert.equal(res.status, 200);
+  assert.deepEqual(res.body, { success: true, dropped: [{ entry: 'tiers.cheap', reason: 'invalid_provider' }] });
+});
+
+test('POST /kb/routing-tiers: oversized body → 413, other read failures → 400', async () => {
+  const userId = freshUser();
+  const big = fakeRes();
+  await handleTierRoutingSync(fakeReq('POST', 'x'.repeat(30_000)), big, userId);
+  assert.equal(big.status, 413);
+  assert.equal(big.body.error.code, 'BODY_TOO_LARGE');
+
+  const broken = new Readable({ read() { this.destroy(new Error('socket hang up')); } });
+  broken.method = 'POST';
+  broken.headers = {};
+  const res = fakeRes();
+  await handleTierRoutingSync(broken, res, userId);
+  assert.equal(res.status, 400);
+  assert.notEqual(res.body.error.code, 'BODY_TOO_LARGE');
+});
+
+// ── GET /kb/routing-tiers status ─────────────────────────────────────────
+
+test('tierRoutingStatus: config + per-tier usability with the resolver\'s reasons', () => {
+  const userId = freshUser();
+  registerCustom(userId, { id: 'glm-st' });
+  syncTierRouting({
+    tiers: {
+      strong: { provider: 'anthropic', model: 'claude-opus-5-5' },
+      standard: { provider: 'openai', model: 'gpt-5' },                  // no key
+      cheap: { provider: 'custom:glm-st', model: 'glm-4.6' },             // keyed, no Anthropic door
+    },
+    features: { loop: 'cheap', subagents: 'standard' },
+  }, userId);
+  const st = tierRoutingStatus(userId);
+  assert.deepEqual(st.tiers, getTierRoutingConfig(userId).tiers);
+  assert.deepEqual(st.features, { loop: 'cheap', subagents: 'standard' });
+  assert.deepEqual(st.status.strong, { usable: true, agentCapable: true });
+  assert.deepEqual(st.status.standard, { usable: false, reason: 'no_key', agentCapable: false });
+  assert.deepEqual(st.status.cheap, { usable: true, agentCapable: false, agentReason: 'not_agent_capable' });
+});
+
+test('tierRoutingStatus: unset tiers, missing custom provider, Anthropic-door custom provider', () => {
+  const userId = freshUser();
+  syncCustomProviders([{
+    id: 'zai', name: 'Z', baseURL: 'https://api.example.com/v1', apiKey: 'custom.zai.apiKey',
+    anthropicBaseURL: 'https://api.example.com/anthropic', models: ['glm-4.6'], isOpenAICompatible: true, isEnabled: true,
+  }], userId);
+  setSecret(db.getDb(), userId, 'custom.zai.apiKey', 'sk-z');
+  syncTierRouting({
+    tiers: {
+      standard: { provider: 'custom:zai', model: 'glm-4.6' },
+      cheap: { provider: 'custom:gone', model: 'glm-4.6' },
+    },
+  }, userId);
+  const st = tierRoutingStatus(userId);
+  assert.deepEqual(st.status.strong, { usable: false, reason: 'unset', agentCapable: false });
+  assert.deepEqual(st.status.standard, { usable: true, agentCapable: true });
+  assert.deepEqual(st.status.cheap, { usable: false, reason: 'not_found', agentCapable: false });
 });
 
 // ── runClaude honours an explicit custom:<uuid> provider ─────────────────
@@ -232,6 +358,40 @@ test('runClaude: explicit custom:<uuid> provider dispatches to that provider', a
     assert.equal(urls.length, 1);
     assert.match(urls[0], /api\.example\.com\/v1\/chat\/completions/);
   } finally { globalThis.fetch = original; }
+});
+
+test('runClaude: explicit custom:<uuid> honoured for a NON-tier caller too (claude-* model, composer path)', async () => {
+  // resolveClaudeCall is shared by every runClaude caller, not just tier
+  // routes: a composer chat on a custom provider whose model id happens to
+  // look like Claude must still go to that provider, not Anthropic.
+  const userId = freshUser();
+  const pid = registerCustom(userId, { id: 'plain-chat' });
+  const original = globalThis.fetch;
+  const urls = [];
+  globalThis.fetch = async (url) => {
+    urls.push(String(url));
+    return {
+      ok: true, status: 200, headers: new Map(),
+      json: async () => ({ choices: [{ message: { content: 'custom-reply' } }] }),
+      text: async () => '{}',
+    };
+  };
+  try {
+    const out = await runClaude('hi', { userId, model: 'claude-sonnet-4-5', provider: pid });
+    assert.equal(out, 'custom-reply');
+    assert.equal(urls.length, 1);
+    assert.match(urls[0], /api\.example\.com\/v1\/chat\/completions/);
+  } finally { globalThis.fetch = original; }
+});
+
+test('runClaude: an unrunnable custom/deepseek provider throws code PROVIDER_UNAVAILABLE', async () => {
+  // Tagged so /code-assist can answer a narrow 400 the Mac's replay retries
+  // without the route — instead of a generic 502 it must never retry on.
+  const userId = freshUser();
+  await assert.rejects(runClaude('hi', { userId, model: 'glm-4.6', provider: 'custom:missing' }),
+    (err) => err.code === 'PROVIDER_UNAVAILABLE' && /not found/.test(err.message));
+  await assert.rejects(runClaude('hi', { userId, model: 'deepseek-chat', provider: 'deepseek' }),
+    (err) => err.code === 'PROVIDER_UNAVAILABLE');
 });
 
 // ── loader: `tier:` frontmatter ──────────────────────────────────────────
@@ -351,6 +511,7 @@ test('internal helpers use the features.internal route when it resolves', async 
     tiers: { cheap: { provider: 'openai', model: 'gpt-5-mini' } },
     features: { internal: 'cheap' },
   }, userId);
+  setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
   const { calls, summary, emailOut } = await runInternalHelpers(userId);
   for (const c of calls) assert.deepEqual(c, { model: 'gpt-5-mini', provider: 'openai' });
   assert.equal(summary.model, 'gpt-5-mini', 'reported model is the one that ran');
