@@ -42,6 +42,7 @@ struct SettingsView: View {
                             AgentSdkSettingsSection(api: api)
                             ProvidersSettingsSection(api: api)
                             CustomProvidersSection(api: api)
+                            TierRoutingSection(api: api)
                             if let loopDefaults = FeatureCatalog.loopDefaultsSettingsSection() {
                                 loopDefaults
                             }

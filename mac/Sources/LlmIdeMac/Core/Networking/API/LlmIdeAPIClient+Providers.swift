@@ -72,4 +72,15 @@ extension LlmIdeAPIClient {
                                     body: Req(providers: providers),
                                     authenticated: true)
     }
+
+    /// Mirror the tier-routing table into the backend (POST /kb/routing-tiers),
+    /// which replaces this user's table there. The server routes subagents, the
+    /// pipeline and internal helpers by it; the Mac routes its own surfaces from
+    /// the local copy. Callers re-send on every change and on Settings appear,
+    /// and treat a failure as non-fatal — an unsynced table only means the
+    /// server keeps using its defaults.
+    func syncTierRouting(_ config: TierRoutingConfig) async throws {
+        struct Ack: Decodable { let success: Bool? }
+        let _: Ack = try await post("/kb/routing-tiers", body: config, authenticated: true)
+    }
 }
