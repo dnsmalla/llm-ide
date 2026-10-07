@@ -346,11 +346,7 @@ extension CodeAssistantPanel {
                         .padding(.leading, 4)
                 }
             }
-            if showModelPicker {
-                modelPickerChips
-                effortChip
-            }
-            modePicker
+            if showModelPicker { modelPickerChips }
             editModeChip
             memoryButton
             Spacer()
@@ -369,11 +365,7 @@ extension CodeAssistantPanel {
                 if showFileAttachButtons {
                     contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
                 }
-                if showModelPicker {
-                    modelPickerChips
-                    effortChip
-                }
-                modePicker
+                if showModelPicker { modelPickerChips }
                 editModeChip
                 memoryButton
                 Spacer(minLength: 0)
@@ -493,79 +485,22 @@ extension CodeAssistantPanel {
         }
     }
 
-    /// CLI-branded agent chip + model picker.
-    /// Both chips are `.fixedSize()` so their text never squeezes —
-    /// without this, a narrow parent container collapses the chip
-    /// down past 1-character width and SwiftUI renders the label
-    /// vertically (one glyph per line).  The chips truncate via
-    /// `.lineLimit(1)` as a belt-and-braces guard.
+    /// Model + reasoning-effort picker, one chip ("Sonnet 5.5 · Auto"), like
+    /// Claude's own composer. The provider is not chosen here: the composer
+    /// always uses Settings' default provider (`followDefaultProvider`), so no
+    /// provider chip. The chip is `.fixedSize()` so its text never squeezes —
+    /// without this, a narrow parent container collapses it past 1-character
+    /// width and SwiftUI renders the label vertically (one glyph per line).
     var modelPickerChips: some View {
         let isCustom = modelState.selectedProvider.starts(with: "custom:")
         let currentTool = !isCustom ? (AICliTool(rawValue: modelState.selectedProvider) ?? .claudeCode) : .claudeCode
-        let currentProvider = isCustom
-            ? modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider })
-            : nil
-
-        // Spec §8: "Provider picker narrows to agent-capable providers when
-        // v2 is on." "On" means `engine.usesAgentV2Engine` — toggle AND
-        // transport AND the LOADED CHAT's own engine marker (D3 clean cut) —
-        // not the bare toggle: a chat stamped legacy at creation stays legacy
-        // forever regardless of the toggle, and may already be using a
-        // provider the engine cannot run, so gating on the toggle alone would
-        // wrongly lock a legacy chat's picker. Mirrors the same rule
-        // `usesAgentV2Engine` already applies to the save-plan affordance
-        // (AgentV2ApprovalState.swift), so this can't drift from it.
-        //
-        // The Agent v2 engine only runs turns whose resolved provider it can
-        // take (AgentV2Selection.agentCapableProviders: Anthropic, or an
-        // enabled custom provider with an Anthropic-compatible URL); picking
-        // any other provider mid v2-chat would silently fall back that turn
-        // to the legacy loop while the v2 SDK session sits untouched, so the
-        // NEXT v2 turn resumes with no memory of what happened in between.
-        // While this chat is on the v2 engine, don't offer that footgun at
-        // all: built-ins narrow to Claude, custom providers to the
-        // agent-capable ones. Off, every provider is available again,
-        // unchanged from before this filter existed.
-        let restrictToAgentCapable = engine.usesAgentV2Engine
-        let providerChoices = restrictToAgentCapable
-            ? AICliTool.selectable.filter { $0.provider == AgentV2Selection.anthropicProvider }
-            : AICliTool.selectable
-        let customProviderChoices = restrictToAgentCapable
-            ? modelState.customProviders.filter { $0.isEnabled && $0.canRunAgentEngine }
-            : modelState.customProviders
+        // Effort rides in the model menu only where it takes effect: a model
+        // that reports SDK levels, on a chat running the Agent v2 engine (the
+        // legacy transport drops `effort`).
+        let effortLevels = engine.usesAgentV2Engine ? modelState.effortLevelsForNextTurn(config: config) : []
+        let effort = EffortChoice.effective(stored: effortRaw, levels: effortLevels)
 
         return HStack(spacing: 6) {
-            // Provider chip — a menu to switch among the direct-API providers
-            // (Claude / OpenAI / Gemini) and custom providers.
-            Menu {
-                // Built-in tools
-                ForEach(providerChoices) { tool in
-                    Button { modelState.switchProvider(.builtIn(tool), config: config, api: api) } label: {
-                        Label(tool.displayName, systemImage: tool.icon)
-                    }
-                }
-                if !customProviderChoices.isEmpty {
-                    Divider()
-                    // Custom providers
-                    ForEach(customProviderChoices) { provider in
-                        Button { modelState.switchProvider(.custom(provider), config: config, api: api) } label: {
-                            Label(provider.name, systemImage: "network")
-                        }
-                    }
-                }
-            } label: {
-                let label = currentProvider?.name ?? currentTool.displayName
-                Chip(
-                    icon: isCustom ? "network" : currentTool.icon,
-                    label: isCompact ? "" : label,
-                    trailing: "chevron.down",
-                    compact: isCompact
-                )
-            }
-            .menuStyle(.borderlessButton)
-            .help("Switch model provider")
-            .fixedSize()
-
             // Model picker. Truncate label aggressively when compact so
             // the chip stays one capsule wide instead of wrapping.
             Menu {
@@ -589,6 +524,19 @@ extension CodeAssistantPanel {
                         }
                     }
                 }
+                if !effortLevels.isEmpty {
+                    Divider()
+                    Section("Effort") {
+                        Button { effortRaw = EffortChoice.auto } label: {
+                            Label(EffortChoice.label(EffortChoice.auto), systemImage: effort == EffortChoice.auto ? "checkmark" : "wand.and.stars")
+                        }
+                        ForEach(effortLevels, id: \.self) { level in
+                            Button { effortRaw = level } label: {
+                                Label(EffortChoice.label(level), systemImage: effort == level ? "checkmark" : "gauge.with.dots.needle.33percent")
+                            }
+                        }
+                    }
+                }
                 if !isCustom {
                     Divider()
                     Button("Add model…") { modelState.newModelId = ""; modelState.showAddModel = true }
@@ -597,15 +545,16 @@ extension CodeAssistantPanel {
                 let displayName = isCustom
                     ? (modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider })?.models.first(where: { $0.id == modelState.selectedModel })?.displayName ?? modelState.selectedModel)
                     : currentModelDisplayName(for: currentTool)
+                let label = effortLevels.isEmpty ? displayName : "\(displayName) · \(EffortChoice.label(effort))"
                 Chip(
                     icon: nil,
-                    label: isCompact ? String(displayName.prefix(6)) : displayName,
+                    label: isCompact ? String(displayName.prefix(6)) : label,
                     trailing: "chevron.down",
                     compact: isCompact
                 )
             }
             .menuStyle(.borderlessButton)
-            .help("Select model")
+            .help(effortLevels.isEmpty ? "Select model" : "Select model and reasoning effort — Auto lets LLM-IDE choose per message")
             .fixedSize()
         }
         .alert("Add a model", isPresented: $modelState.showAddModel) {
@@ -630,7 +579,7 @@ extension CodeAssistantPanel {
 
     /// Shared chip-style Menu builder for any `ChipMenuOption` enum — one
     /// generic in place of one hand-written Menu+Chip per mode selector.
-    /// `editModeChip` and `modePicker` below are its only two call sites.
+    /// `editModeChip` below is its only call site.
     func chipMenu<T: ChipMenuOption>(_ selection: Binding<T>) -> some View {
         Menu {
             ForEach(Array(T.allCases)) { option in
@@ -649,41 +598,6 @@ extension CodeAssistantPanel {
         .menuStyle(.borderlessButton)
         .help(selection.wrappedValue.help)
         .fixedSize()
-    }
-
-    /// Reasoning-effort selector. Its options are the chosen model's own
-    /// levels from the Agent SDK (never a list kept here), so it needs a
-    /// dynamic Menu rather than `chipMenu`'s fixed enum. Hidden when the
-    /// model reports none (other providers, an older server). Also hidden when
-    /// the turn will not run on the Agent v2 engine: the legacy transport drops
-    /// `effort`, so a visible chip would promise a setting that has no effect.
-    @ViewBuilder
-    var effortChip: some View {
-        let levels = modelState.effortLevelsForNextTurn(config: config)
-        if engine.usesAgentV2Engine, !levels.isEmpty {
-            let current = EffortChoice.effective(stored: effortRaw, levels: levels)
-            Menu {
-                Button { effortRaw = EffortChoice.auto } label: {
-                    Label(EffortChoice.label(EffortChoice.auto), systemImage: current == EffortChoice.auto ? "checkmark" : "wand.and.stars")
-                }
-                Divider()
-                ForEach(levels, id: \.self) { level in
-                    Button { effortRaw = level } label: {
-                        Label(EffortChoice.label(level), systemImage: current == level ? "checkmark" : "gauge.with.dots.needle.33percent")
-                    }
-                }
-            } label: {
-                Chip(
-                    icon: "gauge.with.dots.needle.50percent",
-                    label: isCompact ? "" : EffortChoice.label(current),
-                    trailing: "chevron.down",
-                    compact: isCompact
-                )
-            }
-            .menuStyle(.borderlessButton)
-            .help("Reasoning effort — Auto lets LLM-IDE choose per message")
-            .fixedSize()
-        }
     }
 
     /// Context-window meter: a ring + percentage of the SDK's own numbers for
@@ -762,14 +676,6 @@ extension CodeAssistantPanel {
             get: { editMode },
             set: { editModeRaw = $0.rawValue }
         ))
-    }
-
-    /// Code-assist mode selector (Auto / Plan / Assist Plan / Code Review / Document / Execute).
-    var modePicker: some View {
-        // The picker is the one place the USER sets the mode; every other
-        // write is the flow's (`setModeByFlow`) — see ModePolicy.Selection.
-        chipMenu(Binding(get: { modelState.selectedMode },
-                         set: { modelState.pickMode($0) }))
     }
 
     func currentModelDisplayName(for cli: AICliTool) -> String {
