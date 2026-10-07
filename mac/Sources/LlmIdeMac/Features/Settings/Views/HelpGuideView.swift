@@ -412,6 +412,9 @@ struct HelpGuideView: View {
                 helpBullet("Claude Agent SDK — how the agent engine runs and loads plugins")
                 helpBullet("Custom Providers — add named OpenAI-compatible providers (optionally with an Anthropic-compatible URL for the Agent engine)")
                 helpBullet("Tool permissions — which agent tools are allowed, asked, or blocked")
+                if FeatureRegistry.shared.compiledFeatures.contains(.autoTasks) {
+                    helpBullet("Loop defaults — budgets and policy inherited by new projects, and default stage timeouts")
+                }
                 if AppSourceRoot.gitRoot != nil {
                     // Settings only shows the Self-Heal card on a source checkout.
                     helpBullet("Self-Heal — review fixes proposed for errors the app captured (source checkouts only)")
@@ -426,10 +429,6 @@ struct HelpGuideView: View {
                 helpBullet("Paths — where your project files and notes are stored (also in Explorer → Project folders)")
                 helpBullet("Repositories — GitLab and GitHub tokens, saved repos, and automation allow-list")
                 helpBullet("Memory — the project graph and memory files the agent can draw on")
-            }
-
-            helpCard("Elsewhere", icon: "arrow.turn.down.right") {
-                helpBullet("Loop → New project defaults — budgets and policy inherited by new projects")
             }
 
             helpTip("Press ⌘, (comma) from anywhere to jump straight to Settings.")

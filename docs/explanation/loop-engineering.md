@@ -519,7 +519,7 @@ Each lane has its own Stop. The Loop page also shows a lane run of the loop it i
 open on — "Running (started from phone)" or "(started from schedule)" in the live
 header — routes its Stop to the lane, and disables Run until that run ends
 (`LoopRunService.laneRuns`, fed by `LoopRunnerProvider`). A stage with no `timeoutSeconds` inherits the app
-defaults (Loop page → New project defaults: 30 min shell, 20 min agent; 0 = no
+defaults (Settings → Loop defaults: 30 min shell, 20 min agent; 0 = no
 limit), every shell stage, agent call and regression-sweep verify is clamped to the
 run's remaining wall-clock budget, and once the budget is used up no repair starts.
 At run start, leftover loop worktrees no live run owns are pruned (clean ones whose

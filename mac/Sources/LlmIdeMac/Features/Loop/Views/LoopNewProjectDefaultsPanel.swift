@@ -1,17 +1,20 @@
 import SwiftUI
 
-/// App-wide Loop defaults for **new** projects — lives on the Loop page, not Settings.
+/// App-wide Loop defaults: budgets and policy inherited by **new** projects,
+/// plus the stage timeouts every run falls back to. A Settings card, composed
+/// into Settings through `FeatureCatalog.loopDefaultsSettingsSection()` — it
+/// used to sit at the bottom of the Loop sidebar, where expanding it reshaped
+/// the loop list.
 struct LoopNewProjectDefaultsPanel: View {
     @EnvironmentObject var theme: ThemeStore
 
     @State private var defaults = LoopEngineConfig(stages: [])
     @State private var templateCount = (builtIn: 0, saved: 0)
-    @State private var isExpanded = false
     @State private var timeouts = LoopEngineDefaults.stageTimeouts()
 
     var body: some View {
         let t = theme.current
-        DisclosureGroup(isExpanded: $isExpanded) {
+        SettingsSectionCard(icon: "repeat", title: "Loop defaults") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 Text("A project that has already been opened in the Loop keeps its own settings — these apply the first time a project's stages are detected.")
                     .font(Typography.caption)
@@ -67,14 +70,14 @@ struct LoopNewProjectDefaultsPanel: View {
                 }
             }
             .font(Typography.caption)
-            .padding(.top, Spacing.xs)
-            .onChange(of: defaults) { _, updated in
+            .onChange(of: defaults) { old, updated in
+                // The card remembers being expanded, so this can already be
+                // attached when .onAppear swaps the placeholder for the loaded
+                // value — that load is not an edit and must not pin the
+                // built-in defaults to disk on a fresh install.
+                guard old != LoopEngineConfig(stages: []) else { return }
                 LoopEngineDefaults.save(updated)
             }
-        } label: {
-            Text("New project defaults")
-                .font(Typography.captionStrong)
-                .foregroundStyle(t.textMuted)
         }
         .onAppear {
             timeouts = LoopEngineDefaults.stageTimeouts()

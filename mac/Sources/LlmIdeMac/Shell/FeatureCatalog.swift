@@ -130,6 +130,19 @@ enum FeatureCatalog {
         AnyView(MeetingCaptureMatrixView())
     }
 
+    // MARK: - Loop
+
+    /// App-wide Loop defaults card (new-project budgets/policy + the stage
+    /// timeouts every run falls back to). Nil when Loop is compiled out
+    /// (it ships with Auto Tasks) — same seam as `graphSettingsSection()`.
+    static func loopDefaultsSettingsSection() -> AnyView? {
+        #if FEATURE_AUTOTASK
+        return AnyView(LoopNewProjectDefaultsPanel())
+        #else
+        return nil
+        #endif
+    }
+
     // MARK: - Explorer
 
     /// Project file browser. No module-owned services — construction happens
