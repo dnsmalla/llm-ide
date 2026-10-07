@@ -401,13 +401,17 @@ final class CodeAssistPrompter: RegressionPrompter {
     let api: LlmIdeAPIClient
     let language: String
     let model: String?
+    /// Explicit backend provider (a tier route's wire id); nil lets the
+    /// server pick from the model id, as before tier routing.
+    let provider: String?
     let agent: String
 
     init(api: LlmIdeAPIClient, language: String = "en",
-         model: String? = nil, agent: String = "claude_code") {
+         model: String? = nil, provider: String? = nil, agent: String = "claude_code") {
         self.api = api
         self.language = language
         self.model = model
+        self.provider = provider
         self.agent = agent
     }
 
@@ -416,6 +420,7 @@ final class CodeAssistPrompter: RegressionPrompter {
             message: prompt,
             language: language,
             model: model,
+            provider: provider,
             history: [],
             attachments: [],
             agentContext: nil

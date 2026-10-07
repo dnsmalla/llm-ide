@@ -982,7 +982,8 @@ final class MobileControlManager {
         // Forward the Mac user's selected provider/model (same source as
         // explore_chat) so a non-Anthropic provider is used instead of the
         // server defaulting to Anthropic → the claude CLI → "not logged in".
-        let (model, provider) = MobileExploreBridge.modelAndProvider(config: config, mode: "auto_read_only")
+        let (model, provider) = MobileExploreBridge.modelAndProvider(
+            config: config, mode: "auto_read_only", requiresAgentEngine: engine.usesAgentV2Engine)
         do {
             let commandId = chat.commandId
             // A parked question goes to the phone to be tapped, not left to
@@ -1107,7 +1108,6 @@ final class MobileControlManager {
         }
         let agentMessage = MobileWorkspaceSearch.promptWithRefs(chat.text, refs: refs)
         let (skillMessage, skillIds) = MobileSkillCatalog.resolveMessage(agentMessage, skills: chat.skills)
-        let (model, provider) = MobileExploreBridge.modelAndProvider(config: config, mode: "auto")
         let agentContext: AgentContext?
         if let config, let projectStore {
             // The slowest step here — up to 4 `repoManager.runGit`
@@ -1127,6 +1127,10 @@ final class MobileControlManager {
             await server?.send(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
             return
         }
+        // Resolved AFTER the engine: a tier route must fit the engine (a v2
+        // chat needs an Agent-engine-capable provider).
+        let (model, provider) = MobileExploreBridge.modelAndProvider(
+            config: config, mode: "auto", requiresAgentEngine: engine.usesAgentV2Engine)
         do {
             let commandId = chat.commandId
             // A parked question goes to the phone to be tapped, not left to

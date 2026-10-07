@@ -315,15 +315,20 @@ extension AutoCodeUpdateService {
     /// chain still has budget. No API client (or a resolver error) never blocks
     /// automation — we proceed with the CLI's own default model.
     ///
-    /// - Parameter mode: the chat mode this task is equivalent to ("execute",
-    ///   "review", "document"), so the Settings model for that purpose applies.
-    ///   nil keeps the old behaviour (the default model as a hint only).
-    func resolveModelForRun(mode: String? = nil) async -> ModelDecision {
-        let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+    /// - Parameters:
+    ///   - mode: the chat mode this task is equivalent to ("execute",
+    ///     "review", "document"), so the Settings model for that purpose applies.
+    ///     nil keeps the old behaviour (the default model as a hint only).
+    ///   - route: the Auto Tasks tier route (`autoTaskRoute()`), when one
+    ///     applies. Its model replaces the purpose/default model, and the usage
+    ///     chain is asked about ITS provider.
+    func resolveModelForRun(mode: String? = nil, route: AutoTaskRoute? = nil) async -> ModelDecision {
+        let tool = route?.tool ?? AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         // A model the user set FOR this purpose is a choice, unlike the default
         // (a hint): it is pinned even when the usage chain is not engaged.
         // Skipped when the provider does not offer it (retired / other provider).
-        let purposeModel = mode.flatMap { config.purposeModels.purposeModelId(forMode: $0) }
+        // A tier route is a choice too, and is pinned the same way.
+        let purposeModel = route?.model ?? mode.flatMap { config.purposeModels.purposeModelId(forMode: $0) }
             .flatMap { AIModel.isOffered($0, in: tool.offeredModels) ? $0 : nil }
         guard let api else { return .proceed(model: purposeModel) }
         let provider = tool.provider
@@ -331,7 +336,9 @@ extension AutoCodeUpdateService {
             // Pass the user's configured model as the preferred entry point so
             // the chain keeps it when healthy and only steps down when it's
             // constrained (rather than always jumping to the chain top).
-            let prefer = purposeModel ?? (config.defaultModelId.isEmpty ? nil : config.defaultModelId)
+            // WHY not defaultModelId under a route: it belongs to activeCLI's
+            // provider, not the routed one.
+            let prefer = purposeModel ?? (route != nil || config.defaultModelId.isEmpty ? nil : config.defaultModelId)
             let r = try await api.resolveUsageModel(provider: provider, prefer: prefer)
             if r.isPaused {
                 return .paused(reason: r.reason ?? "All \(provider) models have reached their usage limit.",
@@ -349,12 +356,26 @@ extension AutoCodeUpdateService {
 
     /// Record one Auto Task run against the global usage ledger (source
     /// "auto-task", no tokens — the CLI can't report them). Best-effort.
-    func recordRun(model: String?, endpoint: String) async {
+    func recordRun(model: String?, endpoint: String, tool: AICliTool? = nil) async {
         guard let api else { return }
-        let provider = (AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
+        let provider = (tool ?? AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
         let m = (model?.isEmpty == false) ? model! : config.defaultModelId
         guard !m.isEmpty else { return }
         _ = try? await api.recordUsage(provider: provider, model: m, source: "auto-task", endpoint: endpoint)
+    }
+
+    /// The CLI tool + model an Auto Task run is routed to by the `autoTasks`
+    /// tier, or nil to use `activeCLI` and its models as before. Only
+    /// providers with a local CLI qualify (Auto Tasks run a CLI subprocess).
+    struct AutoTaskRoute {
+        let tool: AICliTool
+        let model: String
+    }
+
+    func autoTaskRoute() -> AutoTaskRoute? {
+        guard let route = TierRouting.resolve(feature: .autoTasks, localCLIOnly: true),
+              let tool = TierRouting.cliTool(forProvider: route.provider) else { return nil }
+        return AutoTaskRoute(tool: tool, model: route.model)
     }
 
     /// Pin the resolved model on the CLI so same-provider auto-fallback actually
@@ -458,7 +479,8 @@ extension AutoCodeUpdateService {
     /// the user's working tree and current branch are never touched, so none of
     /// that machinery (dirty-tree guard, base checkout, rescue) is needed.
     func runCLI(issue: RepoIssue, localPath: String, logDir: URL) async -> IssueRunOutcome {
-        let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+        let route = autoTaskRoute()
+        let cliTool = route?.tool ?? AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable   // e.g. "claude" or "gh copilot"
         let components = cliCommand.split(separator: " ").map(String.init)
         guard let executable = components.first else { return .skipped }
@@ -466,7 +488,7 @@ extension AutoCodeUpdateService {
         // Auto-fallback: pick the model with remaining budget, or skip if the
         // whole provider chain is paused (every model at its limit).
         var resolvedModel: String?
-        switch await resolveModelForRun(mode: "execute") {
+        switch await resolveModelForRun(mode: "execute", route: route) {
         case .paused(let reason, let resetAt):
             let when = resetAt.map { " Resets \($0)." } ?? ""
             let msg = "Skipped issue #\(issue.number): \(reason)\(when)"
@@ -716,7 +738,7 @@ extension AutoCodeUpdateService {
             _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
         }
         // The model was invoked (it ran, pass or fail) — count it.
-        await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)")
+        await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)", tool: cliTool)
         return IssueRunOutcome(succeeded: result, committed: committed, branch: committed || keepWorktreeForRecovery ? keptBranchName : nil)
     }
 
@@ -724,7 +746,8 @@ extension AutoCodeUpdateService {
     /// model of that purpose (nil = no purpose, the default model applies).
     func runCLI(prompt: String, localPath: String, logSuffix: String, logDir: URL,
                 logStoreId: String, persistChanges: Bool = false, purposeMode: String? = nil) async -> Bool {
-        let cliTool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+        let route = autoTaskRoute()
+        let cliTool = route?.tool ?? AICliTool(rawValue: config.activeCLI) ?? .claudeCode
         let cliCommand = cliTool.cliExecutable
         let components = cliCommand.split(separator: " ").map(String.init)
         guard let executable = components.first else { return false }
@@ -736,7 +759,7 @@ extension AutoCodeUpdateService {
         // Auto-fallback: pick the model with remaining budget, or skip the task
         // if the whole provider chain is paused.
         var resolvedModel: String?
-        switch await resolveModelForRun(mode: purposeMode) {
+        switch await resolveModelForRun(mode: purposeMode, route: route) {
         case .paused(let reason, let resetAt):
             let when = resetAt.map { " Resets \($0)." } ?? ""
             let msg = "Skipped auto-task \(logSuffix): \(reason)\(when)"
@@ -916,7 +939,7 @@ extension AutoCodeUpdateService {
         if let empty = emptyImplementBranch {
             _ = await Task.detached { Self.branchDelete(empty, at: localPath) }.value
         }
-        await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)")
+        await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)", tool: cliTool)
         return result
     }
 }

@@ -23,7 +23,10 @@ final class LoopRunnerProvider: LoopRunnerProviding {
     }
 
     func makeRunner(trigger: LoopRunTrigger, regressionVerifyTimeout: TimeInterval) -> LoopRunning {
-        let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
+        // Tier routing: nil (unset/unusable) keeps the server's default model.
+        let route = TierRouting.resolve(feature: .loop)
+        let prompter = CodeAssistPrompter(api: api, model: route?.model, provider: route?.provider,
+                                          agent: config.activeCLI)
         let judge = CodeAssistJudge(api: api)
         let repairer = AgentFaultRepairer(api: api)
         let regressionRunner = RegressionRunner(prompter: prompter, judge: judge,

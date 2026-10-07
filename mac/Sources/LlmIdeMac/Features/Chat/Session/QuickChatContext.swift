@@ -195,6 +195,20 @@ struct QuickChatContext {
         LiveModelCache.store(models, for: ClaudeCLI.provider)
     }
 
+    /// The tier route a quick-chat turn sends instead of the configured
+    /// provider + model, or nil to send those as before. ONE answer for the
+    /// send closure and the picker label, like `effectiveModelId`.
+    ///
+    /// An explicit model pick wins over the tier (as a subagent's own `model:`
+    /// does server-side): the user chose it in this window. A v2-stamped chat
+    /// needs an Agent-engine-capable provider, or the turn would drop to the
+    /// classic engine mid-chat.
+    @MainActor
+    static func tierRoute(for engine: ChatEngine) -> TierRoute? {
+        if let explicit = engine.quickChatModelId, !explicit.isEmpty { return nil }
+        return TierRouting.resolve(feature: .quickChat, requiresAgentEngine: engine.usesAgentV2Engine)
+    }
+
     /// Install the `.quick` engine's transport closure: project context,
     /// language, provider, the engine-owned model, and the read-only `ask`
     /// mode. Also wires the three approval-decision closures — see below.
@@ -223,6 +237,7 @@ struct QuickChatContext {
                                          // the Documents model from Settings, else the default.
                                          defaultModelId: quickChatFallbackModel(config: config, tool: tool),
                                          models: tool.models)
+            let route = engine.flatMap(tierRoute(for:))
             return ChatTransportInput(
                 message: message,
                 history: history,
@@ -232,8 +247,8 @@ struct QuickChatContext {
                 // neither read nor write project memory.
                 agentContext: resolve(config: config, projectStore: projectStore)?.agentContext,
                 language: config.preferredLanguage.isEmpty ? nil : config.preferredLanguage,
-                model: model,
-                provider: ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
+                model: route?.model ?? model,
+                provider: route?.provider ?? ChatTransportInput.makeProvider(selectedProvider: tool.rawValue),
                 // Read-only: either surface can be closed while the phone
                 // drives the same engine, so a turn that could park on an
                 // approval would hang with nothing able to render the card.

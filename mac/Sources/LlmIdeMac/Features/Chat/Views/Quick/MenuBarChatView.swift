@@ -712,7 +712,11 @@ struct MenuBarChatView: View {
     }
 
     private var selectedModelLabel: String {
-        QuickChatContext.modelLabel(modelId: engine.quickChatModelId,
+        // A tier route replaces the model the send uses, so the label names it.
+        if let route = QuickChatContext.tierRoute(for: engine) {
+            return AIModel.knownName(for: route.model, in: modelsForPicker()) ?? route.model
+        }
+        return QuickChatContext.modelLabel(modelId: engine.quickChatModelId,
                                     // Same fallback the send uses (QuickChatContext), or the label lies.
                                     defaultModelId: QuickChatContext.quickChatFallbackModel(
                                         config: config, tool: AICliTool(rawValue: config.activeCLI) ?? .claudeCode),

@@ -9,7 +9,15 @@ enum MobileExploreBridge {
 
     /// - Parameter mode: the wire mode this turn will send, so the model comes
     ///   from the Settings purpose for that mode (`PurposeModelPolicy`).
-    static func modelAndProvider(config: AppConfig?, mode: String) -> (model: String?, provider: String?) {
+    /// - Parameter requiresAgentEngine: the engine that will run the turn is a
+    ///   v2 chat, so a tier route must be Agent-engine capable to apply.
+    static func modelAndProvider(config: AppConfig?, mode: String,
+                                 requiresAgentEngine: Bool = false) -> (model: String?, provider: String?) {
+        // Tier routing (the phone is a quick-chat surface): when the quickChat
+        // tier resolves it replaces both; nil keeps the Mac's settings below.
+        if let route = TierRouting.resolve(feature: .quickChat, requiresAgentEngine: requiresAgentEngine) {
+            return (route.model, route.provider)
+        }
         guard let config else {
             // When config is unavailable (early app init), default to Claude
             return (nil, AICliTool.claudeCode.provider)
