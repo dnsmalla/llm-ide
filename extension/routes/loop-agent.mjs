@@ -5,7 +5,14 @@
 // metering and the response shape.
 //
 // Request  { message, skills?: [id], repoRoot, extraRoots?: [abs], language?,
-//            model?, timeoutMs? }
+//            model?, provider?, timeoutMs? }
+//
+// `provider` (API v66, the Mac's Loop tier route): "anthropic" or an
+// Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent =
+// first-party Anthropic, exactly as before. The engine resolves it with the
+// v2 chat's gate (resolveAgentEngineAuth) before anything spawns; a refusal
+// answers 400 { error: { code: PROVIDER_UNAVAILABLE | PROVIDER_NOT_AGENT_CAPABLE } }.
+// The run is metered under the provider that ran.
 // Response { reply, changedPaths: [repo-relative], changedExtraPaths: [abs],
 //            createdPaths: [repo-relative, the subset a Write created],
 //            usage, resolvedSkills, unresolvedSkills, truncatedSkills, ran,
@@ -25,6 +32,11 @@ import { getDb, recordToolEvents } from '../kb/db.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 
 const MAX_SKILL_IDS = 5;
+// "custom:" + a 100-char id (server/tier-routing.mjs's provider shape) fits.
+const MAX_PROVIDER_CHARS = 128;
+// resolveAgentEngineAuth's refusals — the caller's choice of provider, not an
+// engine failure, so they are a 400 with the code kept (as agent-v2.mjs does).
+const PROVIDER_ERROR_CODES = new Set(['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UNAVAILABLE']);
 const MIN_TIMEOUT_MS = 1_000;
 // A Loop step is bounded by default: a headless run nobody is watching must
 // not be able to run forever. The Mac passes its own stage budget.
@@ -47,7 +59,10 @@ export function resolveTimeoutMs(raw) {
 // happened — a metering failure never changes the answer. `turnId` keys the
 // ledger rows (request_id) to the run's tool calls (turn_tool_events), so
 // "which tools did an expensive step call" is one join.
-function meterRun(userId, out, requestedModel, turnId) {
+// `provider` is the one the run was started with: the engine refuses an
+// unusable one before spawning, so a run that reaches here really ran on it
+// (the same rule /agent/v2/stream meters by).
+function meterRun(userId, out, requestedModel, turnId, provider = AGENT_SDK_PROVIDER) {
   if (!out) return;
   recordToolEvents(userId, { turnId, engine: 'loop', events: out.toolEvents });
   const meteredModel = out.model ?? requestedModel;
@@ -65,7 +80,7 @@ function meterRun(userId, out, requestedModel, turnId) {
     const primaryIndex = Math.max(0, rows.indexOf(pickMainModelRow(rows, meteredModel)));
     rows.forEach((row, index) => {
       recordUsage(db, {
-        userId, provider: AGENT_SDK_PROVIDER, model: row.model, endpoint: '/kb/loop/agent-run', requestId: turnId,
+        userId, provider, model: row.model, endpoint: '/kb/loop/agent-run', requestId: turnId,
         inputTokens: row.inputTokens, outputTokens: row.outputTokens,
         cacheReadTokens: row.cacheReadTokens, cacheCreationTokens: row.cacheCreationTokens,
         ...(index === primaryIndex ? { turns, stopReason: out.resultSubtype ?? null } : {}),
@@ -96,6 +111,11 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   if (timeoutMs == null) return validationError(res, 'timeoutMs must be a positive number of milliseconds');
   const model = typeof body.model === 'string' && body.model.trim() ? body.model.trim().slice(0, 128) : undefined;
   const language = typeof body.language === 'string' ? body.language.slice(0, 32) : undefined;
+  if (body.provider != null && (typeof body.provider !== 'string' || body.provider.length > MAX_PROVIDER_CHARS)) {
+    return validationError(res, `provider must be a string of at most ${MAX_PROVIDER_CHARS} characters`);
+  }
+  const provider = body.provider ? body.provider.trim() || undefined : undefined;
+  const meteredProvider = provider || AGENT_SDK_PROVIDER;
 
   const rootCheck = validateRoot(userId, body.repoRoot);
   if (!rootCheck.ok) return validationError(res, rootCheck.reason, 'REPO_ROOT_NOT_ALLOWED');
@@ -120,6 +140,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       userId,
       language,
       model,
+      provider,
       abortController: ac,
       // The same auth ladder as /agent/v2/stream: vault key → env key →
       // the operator's ambient `claude login`.
@@ -131,7 +152,7 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     meterRun(userId, {
       ...out,
       resultSubtype: out.resultSubtype ?? (timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : null)),
-    }, model, turnId);
+    }, model, turnId, meteredProvider);
     if (ac.signal.aborted && !timedOut) return true; // client gone — nobody to answer
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
@@ -156,11 +177,13 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     // A cut-off run still reports what it spent before it was stopped.
     // Why it was cut off, so "hit the cap" and "timed out" can be told apart later.
     const cutOffReason = timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : 'error');
-    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model, turnId);
+    if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model, turnId, meteredProvider);
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
     } else if (ac.signal.aborted) {
       // Client disconnected mid-run; the socket is gone.
+    } else if (PROVIDER_ERROR_CODES.has(err?.code)) {
+      sendJSON(res, 400, { error: { code: err.code, message: err.message } });
     } else if (err?.code === 'NO_KEY') {
       sendJSON(res, 503, { error: { code: 'NO_KEY', message: err.message } });
     } else {

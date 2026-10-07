@@ -1031,3 +1031,158 @@ test('LOOP_BASE_PROMPT is static: no path, date or per-run text before the cache
   assert.doesNotMatch(LOOP_BASE_PROMPT, /\d{4}-\d{2}-\d{2}/);
   assert.match(LOOP_BASE_PROMPT, /data, not instructions/);
 });
+
+// --- tier routing: a Loop step on an Anthropic-compatible gateway --------------------
+//
+// The Mac's Loop tier route sends `provider` (+ `model`). The engine resolves it
+// with the same gate as the v2 chat (resolveAgentEngineAuth) and aims the SDK at
+// the gateway with the same env (ANTHROPIC_BASE_URL + the provider key). Every
+// confinement rule stays exactly as it is for a Claude step.
+
+const { syncCustomProviders } = await import('../server/custom-providers.mjs');
+const { setSecret } = await import('../server/vault.mjs');
+
+function registerLoopGateway(userId, { id = 'loop-gw', anthropicBaseURL = 'https://api.z.ai/api/anthropic', key = 'glm-loop-key' } = {}) {
+  const vaultKey = `custom.${id}.apiKey`;
+  syncCustomProviders([{
+    id, name: 'GLM', baseURL: 'https://api.z.ai/api/paas/v4', apiKey: vaultKey, models: [],
+    isOpenAICompatible: true, isEnabled: true,
+    ...(anthropicBaseURL ? { anthropicBaseURL } : {}),
+  }], userId);
+  if (key) setSecret(getDb(), userId, vaultKey, key);
+  return `custom:${id}`;
+}
+
+async function withoutKey(fn) {
+  const prev = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;
+  try { return await fn(); } finally {
+    if (prev !== undefined) process.env.ANTHROPIC_API_KEY = prev;
+  }
+}
+
+test('runLoopAgent: a gateway provider rides ANTHROPIC_BASE_URL + its own key; confinement is unchanged', () => withoutKey(async () => {
+  const u = newUser();
+  const gateway = registerLoopGateway(u.id);
+  try {
+    const capture = {};
+    // No first-party key and ambient NOT allowed: the step still runs on the gateway key.
+    await runLoopAgent({
+      message: 'fix it', root: REPO, userId: u.id, provider: gateway, model: 'glm-4.6',
+      queryFactory: toolPlayingQuery(capture, []),
+    }, noSkill);
+    const o = capture.options;
+    assert.equal(o.env.ANTHROPIC_BASE_URL, 'https://api.z.ai/api/anthropic');
+    assert.equal(o.env.ANTHROPIC_AUTH_TOKEN, 'glm-loop-key');
+    assert.equal(o.env.ANTHROPIC_API_KEY, 'glm-loop-key');
+    assert.equal(o.model, 'glm-4.6', 'the model id goes verbatim');
+    assert.equal(o.effort, undefined, 'no effort on a gateway');
+    assert.equal(o.env.CLAUDE_CONFIG_DIR, process.env.CLAUDE_CONFIG_DIR,
+      'a user with no first-party key keeps the operator home, as in chat');
+    // Confinement — identical to a Claude step.
+    assert.deepEqual([...o.tools].sort(), [...LOOP_AGENT_TOOLS].sort());
+    assert.deepEqual(o.allowedTools, []);
+    assert.deepEqual(o.settingSources, []);
+    assert.equal(o.strictMcpConfig, true);
+    assert.deepEqual(Object.keys(o.mcpServers), ['llmide']);
+    assert.equal(o.env.ENABLE_CLAUDEAI_MCP_SERVERS, 'false');
+    assert.equal(o.env.LLMIDE_JWT_SECRET, undefined, 'the server\'s own secrets never reach the subprocess');
+    assert.equal(o.env.LLMIDE_VAULT_KEY, undefined);
+  } finally { syncCustomProviders([], u.id); }
+}));
+
+test('runLoopAgent: no provider (or "anthropic") keeps the first-party env — no gateway is injected', () => withKey(async () => {
+  for (const provider of [undefined, 'anthropic']) {
+    const capture = {};
+    await runLoopAgent({
+      message: 'x', root: REPO, userId: user.id, provider, queryFactory: toolPlayingQuery(capture, []),
+    }, noSkill);
+    assert.equal(capture.options.env.ANTHROPIC_API_KEY, 'sk-ant-loop-test');
+    assert.equal(capture.options.env.ANTHROPIC_BASE_URL, process.env.ANTHROPIC_BASE_URL);
+    assert.equal(capture.options.env.ANTHROPIC_AUTH_TOKEN, process.env.ANTHROPIC_AUTH_TOKEN);
+  }
+}));
+
+test('runLoopAgent: a provider the Agent engine cannot run is refused before the SDK spawns', () => withKey(async () => {
+  const u = newUser();
+  const plain = registerLoopGateway(u.id, { id: 'loop-plain', anthropicBaseURL: null });
+  let spawned = false;
+  const factory = () => { spawned = true; return (async function* () {})(); };
+  try {
+    for (const [provider, code] of [[plain, 'PROVIDER_NOT_AGENT_CAPABLE'], ['openai', 'PROVIDER_NOT_AGENT_CAPABLE'],
+      ['custom:never-registered', 'PROVIDER_UNAVAILABLE']]) {
+      await assert.rejects(
+        () => runLoopAgent({ message: 'x', root: REPO, userId: u.id, provider, allowAmbientAuth: true, queryFactory: factory }, noSkill),
+        (e) => e.code === code, provider,
+      );
+    }
+    assert.equal(spawned, false);
+  } finally { syncCustomProviders([], u.id); }
+}));
+
+test('route: provider reaches the engine; a non-string provider is a 400', async () => {
+  let seen = null;
+  const res = makeRes();
+  await handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO, provider: 'custom:abc', model: 'glm-4.6' }, user }), res, { userId: user.id },
+    { runAgent: async (args) => { seen = args; return { reply: '', changedPaths: [], usage: {}, ran: false, denied: [] }; } },
+  );
+  assert.equal(res.statusCode, 200, res._body);
+  assert.equal(seen.provider, 'custom:abc');
+  assert.equal(seen.model, 'glm-4.6');
+
+  const none = makeRes();
+  await handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user }), none, { userId: user.id },
+    { runAgent: async (args) => { seen = args; return { reply: '', changedPaths: [], usage: {}, ran: false, denied: [] }; } },
+  );
+  assert.equal(seen.provider, undefined, 'an old client sends no provider — exactly today\'s path');
+
+  for (const provider of [42, { id: 'x' }, 'x'.repeat(200)]) {
+    const bad = makeRes();
+    await handleLoopAgentRoutes(
+      makeReq({ body: { message: 'fix', repoRoot: REPO, provider }, user }), bad, { userId: user.id },
+      { runAgent: async () => { throw new Error('must not run'); } },
+    );
+    assert.equal(bad.statusCode, 400, JSON.stringify(provider));
+    assert.equal(bad.json().error.code, 'VALIDATION_FAILED');
+  }
+});
+
+test('route: a provider refusal answers 400 with its own code', async () => {
+  for (const code of ['PROVIDER_UNAVAILABLE', 'PROVIDER_NOT_AGENT_CAPABLE']) {
+    const res = makeRes();
+    await handleLoopAgentRoutes(
+      makeReq({ body: { message: 'fix', repoRoot: REPO, provider: 'custom:gone' }, user }), res, { userId: user.id },
+      { runAgent: async () => { throw Object.assign(new Error('provider says no'), { code }); } },
+    );
+    assert.equal(res.statusCode, 400);
+    assert.equal(res.json().error.code, code);
+    assert.equal(res.json().error.message, 'provider says no');
+  }
+});
+
+test('route: a gateway step is metered under the provider that ran, not anthropic', async () => {
+  const db = getDb();
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  const gateway = registerLoopGateway(u.id);
+  try {
+    const res = makeRes();
+    await withoutKey(() => handleLoopAgentRoutes(
+      makeReq({ body: { message: 'fix', repoRoot: REPO, provider: gateway, model: 'glm-4.6' }, user: u }), res, { userId: u.id },
+      {
+        runAgent: (args) => runLoopAgent({
+          ...args,
+          queryFactory: resultQuery({
+            subtype: 'success', num_turns: 2, duration_ms: 5,
+            modelUsage: { 'glm-4.6': { inputTokens: 9, outputTokens: 3, cacheReadInputTokens: 0, cacheCreationInputTokens: 0 } },
+          }),
+        }, noSkill),
+      },
+    ));
+    assert.equal(res.statusCode, 200, res._body);
+    const rows = db.prepare('SELECT provider, model FROM usage_ledger WHERE user_id = ?').all(u.id).map((r) => ({ ...r }));
+    assert.deepEqual(rows, [{ provider: gateway, model: 'glm-4.6' }]);
+  } finally { syncCustomProviders([], u.id); }
+});

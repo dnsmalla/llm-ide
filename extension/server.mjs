@@ -257,7 +257,8 @@ const HOST = config.host;
 //   v63 — POST /kb/providers/models entries[] gain effortLevels (the SDK's supportedEffortLevels, verbatim; [] when unsupported); POST /agent/v2/stream accepts optional `effort` (a level the chosen model lists, or "auto"; anything else falls back to auto; LLMIDE_CHAT_EFFORT still wins).
 //   v64 — /agent/v2/stream emits `context_usage` { totalTokens, maxTokens (SDK rawMaxTokens), percentage, categories:[{ name, kind, tokens }] } once after `result` (SDK getContextUsage detail 'summary', ≤ 2 s; omitted on gateway turns and when the read fails).
 //   v65 — POST /kb/routing-tiers { tiers: { strong|standard|cheap: { provider: anthropic|openai|google|deepseek|custom:<id>, model } }, features: { subagents|loop|autoTasks|quickChat|pipeline|internal: <tier> } } → 200 { success: true } (replaces the caller's config; invalid entries dropped; 400 VALIDATION_FAILED on a non-object body). Server-side roles (plugin subagents, planner/codegen, internal helpers) then run on the routed provider+model; an unset/unusable tier keeps the default. Plugin subagent frontmatter gains optional `tier:`.
-const SERVER_API_VERSION = 65;
+//   v66 — POST /kb/loop/agent-run accepts optional `provider` ("anthropic" | Anthropic-compatible "custom:<id>"; the Mac's Loop tier route) → the step runs on that provider through the chat engine's gateway env (ANTHROPIC_BASE_URL + its key), confinement unchanged; 400 PROVIDER_UNAVAILABLE / PROVIDER_NOT_AGENT_CAPABLE on a refused provider (VALIDATION_FAILED on a non-string); metered under the provider that ran. Absent = first-party Anthropic as before.
+const SERVER_API_VERSION = 66;
 const ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',

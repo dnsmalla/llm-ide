@@ -39,7 +39,7 @@ import { z } from 'zod';
 import { handleFindCode, STALE_HINT } from '../runtime/handlers/find-code.mjs';
 import { resolveRepoScope } from '../../kb/db.mjs';
 import {
-  AGENT_SDK_PROVIDER, resolveAgentEngineAuth, resolveAnthropicKey, agentSdkHomeFor, normalizeModelUsage,
+  AGENT_SDK_PROVIDER, resolveAgentEngineAuth, agentEngineHomeFor, agentEngineEnv, normalizeModelUsage,
 } from './engine.mjs';
 import { writePathGate } from '../tools/gates.mjs';
 import {
@@ -49,7 +49,6 @@ import { readSkillInstructions } from '../skills/index.mjs';
 import { buildLoopSkillsText } from '../../core/prompt-framing.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { resolveLanguage } from '../../providers/runtime.mjs';
-import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
 import { createToolAccounting } from './tool-accounting.mjs';
 import { createProgressGuard } from './loop-progress.mjs';
@@ -495,8 +494,8 @@ const sdkQueryFactory = (prompt, options) => query({ prompt, options });
  */
 export async function runLoopAgent(
   {
-    message, skills, root, extraRoots = [], userId, language, model, abortController, allowAmbientAuth = false,
-    queryFactory = sdkQueryFactory,
+    message, skills, root, extraRoots = [], userId, language, model, provider, abortController,
+    allowAmbientAuth = false, queryFactory = sdkQueryFactory,
   } = {},
   { readSkill = readSkillInstructions } = {},
 ) {
@@ -521,8 +520,13 @@ export async function runLoopAgent(
     };
   }
 
-  const auth = resolveAgentEngineAuth(AGENT_SDK_PROVIDER, userId);
-  const { key } = auth;
+  // `provider` (tier routing): absent/"anthropic" keeps the first-party auth
+  // ladder; an Anthropic-compatible custom provider brings its own key + base
+  // URL; anything else throws PROVIDER_UNAVAILABLE / PROVIDER_NOT_AGENT_CAPABLE
+  // here — before anything spawns. Only auth changes: the confinement below
+  // is the same for every provider.
+  const auth = resolveAgentEngineAuth(provider || AGENT_SDK_PROVIDER, userId);
+  const { key, baseUrl: gatewayBaseUrl } = auth;
   if (!key && !allowAmbientAuth) {
     throw Object.assign(
       new Error('No Anthropic API key available (set vault claude.apiKey or ANTHROPIC_API_KEY)'),
@@ -532,10 +536,7 @@ export async function runLoopAgent(
   // Same per-user engine home rule as the chat engine (engine.mjs): only a
   // first-party-keyed user is redirected; ambient auth needs the operator's
   // default config dir to stay logged in.
-  const sdkHome = resolveAnthropicKey(userId).key ? agentSdkHomeFor(userId) : null;
-  if (sdkHome) {
-    try { fs.mkdirSync(sdkHome, { recursive: true }); } catch { /* best-effort, as in engine.mjs */ }
-  }
+  const sdkHome = agentEngineHomeFor(userId, auth);
 
   const lang = resolveLanguage(language);
   const languageLine = lang.directive
@@ -663,11 +664,10 @@ export async function runLoopAgent(
     // A one-shot step: nothing resumes it, so nothing is written to disk.
     persistSession: false,
     ...(typeof model === 'string' && model ? { model } : {}),
-    env: {
-      ...sdkSubprocessEnv(),
-      ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
-      ...(key ? { ANTHROPIC_API_KEY: key, ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}) } : {}),
-    },
+    // The chat engine's env, gateway included (engine.mjs agentEngineEnv):
+    // server secrets stripped, no claude.ai connectors. No `effort` is ever
+    // set on a Loop step, so a gateway has nothing to drop.
+    env: agentEngineEnv({ key, baseUrl: gatewayBaseUrl, sdkHome }),
     abortController: stepAc,
   });
 

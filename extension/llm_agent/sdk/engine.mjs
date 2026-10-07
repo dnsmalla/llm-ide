@@ -173,6 +173,61 @@ export function agentSdkHomeFor(userId) {
   return path.join(path.dirname(config.dbPath), 'agent-sdk', userId);
 }
 
+// --- Auth → engine home + subprocess env (shared by chat and the Loop) ---------
+//
+// One derivation for every SDK spawn (runAgentV2Turn, loop-agent.mjs), so a
+// Loop step on a gateway gets exactly the chat's gateway contract and a
+// change to it cannot land in one engine only.
+
+/**
+ * The CLAUDE_CONFIG_DIR a turn runs under, created best-effort (null = the
+ * operator's default dir). It follows the USER's first-party Claude auth, not
+ * the turn's key: a gateway turn lives wherever that user's Claude turns live
+ * (see the runner's comment on why a per-turn choice lost transcripts).
+ *
+ * @param {string} userId
+ * @param {{ key: string|null, baseUrl: string|null }} auth — resolveAgentEngineAuth's result
+ * @returns {string|null}
+ */
+export function agentEngineHomeFor(userId, auth) {
+  const firstPartyKeyed = auth?.baseUrl ? Boolean(resolveAnthropicKey(userId).key) : Boolean(auth?.key);
+  const sdkHome = firstPartyKeyed ? agentSdkHomeFor(userId) : null;
+  if (sdkHome) {
+    // The CLI would create it too, but if it ever fell back to ~/.claude on a
+    // missing dir, isolation would be silently gone.
+    try { fs.mkdirSync(sdkHome, { recursive: true }); } catch { /* SDK may still create it; best-effort */ }
+  }
+  return sdkHome;
+}
+
+/**
+ * The SDK subprocess env for one spawn. `env` REPLACES the subprocess
+ * environment, so it always starts from sdkSubprocessEnv() (process.env minus
+ * the server's own secrets/config), and always carries
+ * ENABLE_CLAUDEAI_MCP_SERVERS=false (the operator's claude.ai connectors must
+ * never join a turn). With a key: ANTHROPIC_API_KEY, and on a gateway turn
+ * ANTHROPIC_BASE_URL + ANTHROPIC_AUTH_TOKEN — the key rides in BOTH shapes
+ * because gateways differ (Z.AI and Ollama document ANTHROPIC_AUTH_TOKEN,
+ * DeepSeek documents ANTHROPIC_API_KEY). A first-party turn leaves whatever
+ * ANTHROPIC_BASE_URL the operator's process.env carries untouched.
+ *
+ * @param {{ key: string|null, baseUrl: string|null, sdkHome: string|null }} input
+ * @returns {Record<string, string>}
+ */
+export function agentEngineEnv({ key, baseUrl, sdkHome }) {
+  return {
+    ...sdkSubprocessEnv(),
+    ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
+    ...(key
+      ? {
+          ANTHROPIC_API_KEY: key,
+          ...(baseUrl ? { ANTHROPIC_BASE_URL: baseUrl, ANTHROPIC_AUTH_TOKEN: key } : {}),
+          ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}),
+        }
+      : {}),
+  };
+}
+
 // --- Attachment caps + skills text --------------------------------------------
 // Both now live in core/prompt-framing.mjs, shared verbatim with ai-routes'
 // /code-assist (L3 cannot import the L4 route module, so the shared
@@ -1243,11 +1298,7 @@ export async function runAgentV2Turn(
   // Created up front (best-effort): the CLI would create it too, but if it
   // ever fell back to ~/.claude on a missing dir, isolation would be silently
   // gone — an empty dir is cheap insurance.
-  const firstPartyKeyed = gatewayBaseUrl ? Boolean(resolveAnthropicKey(userId).key) : Boolean(key);
-  const sdkHome = firstPartyKeyed ? agentSdkHomeFor(userId) : null;
-  if (sdkHome) {
-    try { fs.mkdirSync(sdkHome, { recursive: true }); } catch { /* SDK may still create it; best-effort */ }
-  }
+  const sdkHome = agentEngineHomeFor(userId, auth);
 
   const resume = typeof resumeSdkSessionId === 'string' && resumeSdkSessionId ? resumeSdkSessionId : null;
   // The SDK session this turn belongs to: the resumed id up front, then
@@ -1616,24 +1667,11 @@ export async function runAgentV2Turn(
     // operator's Drive. settingSources: [] does not cover them (they are not
     // settings); this is the SDK-engine twin of the CLI path's
     // --strict-mcp-config (providers/providers.mjs).
-    env: {
-      ...sdkSubprocessEnv(),
-      ENABLE_CLAUDEAI_MCP_SERVERS: 'false',
-      ...(key
-        ? {
-            ANTHROPIC_API_KEY: key,
-            // Gateway turn (Anthropic-compatible custom provider): aim the
-            // SDK's CLI at the provider's Anthropic door. The key rides in
-            // BOTH shapes because gateways differ — Z.AI and Ollama document
-            // ANTHROPIC_AUTH_TOKEN (Authorization: Bearer), DeepSeek documents
-            // ANTHROPIC_API_KEY (x-api-key). First-party turns leave whatever
-            // ANTHROPIC_BASE_URL the operator's process.env carries untouched,
-            // exactly as before.
-            ...(gatewayBaseUrl ? { ANTHROPIC_BASE_URL: gatewayBaseUrl, ANTHROPIC_AUTH_TOKEN: key } : {}),
-            ...(sdkHome ? { CLAUDE_CONFIG_DIR: sdkHome } : {}),
-          }
-        : {}),
-    },
+    //
+    // Gateway turn (Anthropic-compatible custom provider): agentEngineEnv
+    // aims the SDK's CLI at the provider's Anthropic door — shared with the
+    // Loop's agent steps (loop-agent.mjs).
+    env: agentEngineEnv({ key, baseUrl: gatewayBaseUrl, sdkHome }),
     ...(resume ? { resume } : {}),
     // The SDK's Options takes an `abortController`, NOT a `signal`: its
     // Options type has no `signal` member, so a `signal` key (what this
