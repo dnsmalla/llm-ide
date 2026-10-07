@@ -78,6 +78,11 @@ final class ChatEngine {
     /// The wire shape is produced on the way OUT only, by `wireTurn()` /
     /// `historyForRequest`; the server contract is unchanged.
     var messages: [ChatMessage] = []
+    /// The SDK's context-window usage after this chat's last v2 turn — engine-
+    /// owned, not view-owned, so it survives a section switch. Kept when a
+    /// turn brings none (a failed read must not blank the meter); cleared on
+    /// a session switch (resetTransientSessionState).
+    var lastContextUsage: AgentV2ContextUsage?
     var busy = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
@@ -788,6 +793,7 @@ final class ChatEngine {
                 stopped: false,
                 tokenUsage: resp.tokenUsage
             )
+            if let usage = resp.contextUsage { lastContextUsage = usage }
             // Only the primary turn's chain check runs here — the follow-up
             // turn's own chain check (inside sendFollowup) covers every step
             // after this one, so an agent that keeps proposing edits can't loop.
@@ -993,6 +999,7 @@ final class ChatEngine {
                 stopped: false,
                 tokenUsage: resp.tokenUsage
             )
+            if let usage = resp.contextUsage { lastContextUsage = usage }
             // Chain the NEXT step hands-free when allowed — this is what lets a
             // multi-step plan (e.g. "update A, then update B" or "commit and
             // push") finish without a card for every step. Mirrors runTurn's

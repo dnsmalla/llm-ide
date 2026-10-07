@@ -408,6 +408,8 @@ extension ChatEngine {
         // move the incoming chat's picker — same staleness class as the
         // approval card and SDK session id above.
         resolvedMode = nil
+        // The outgoing chat's context meter must not label the incoming one.
+        lastContextUsage = nil
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString
         agent.agentPendingTasks = []

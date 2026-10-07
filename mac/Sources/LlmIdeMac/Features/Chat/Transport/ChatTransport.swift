@@ -132,6 +132,10 @@ struct ChatTransportResult: Sendable {
     /// `let b: Int? = nil` on `S`), so every construction site would have
     /// silently kept nil forever, including `AgentV2Transport`'s.
     let tokenUsage: AgentV2Usage?
+    /// The SDK's context-window usage after this turn (`context_usage`, server
+    /// API v64). `var` with a default — unlike `tokenUsage` above, a `var`'s
+    /// default IS a memberwise-init parameter — so only AgentV2Transport sets it.
+    var contextUsage: AgentV2ContextUsage? = nil
 }
 
 extension ChatTransportResult: Equatable {
@@ -148,6 +152,7 @@ extension ChatTransportResult: Equatable {
               lhs.continueNeeded == rhs.continueNeeded,
               lhs.mode == rhs.mode,
               lhs.tokenUsage == rhs.tokenUsage,
+              lhs.contextUsage == rhs.contextUsage,
               usageEqual(lhs.usage, rhs.usage)
         else { return false }
         return tasksEqual(lhs.tasks, rhs.tasks)

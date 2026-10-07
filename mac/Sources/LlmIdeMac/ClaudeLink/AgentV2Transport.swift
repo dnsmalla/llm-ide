@@ -278,6 +278,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         // The session-memory footnote (`memory`, v49). Arrives before the
         // query starts; applied to the result's usage below.
         var memoryInfo: AgentV2Memory?
+        var contextUsage: AgentV2ContextUsage?
         // One `usage` event per assistant message (a turn with tool calls
         // has several); summed across the turn to match the server's own
         // `usageTotals` accumulation in engine.mjs, not overwritten like
@@ -382,8 +383,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 self.onModeResolved?(mode)
             case .memory(let info):
                 memoryInfo = info
-            case .contextUsage:
-                break  // TODO: captured in the next task (composer context usage)
+            case .contextUsage(let usage):
+                contextUsage = usage
             case .result(let result):
                 sawTerminal = true
                 // The SDK ends a turn it could not finish with a `result`
@@ -443,7 +444,8 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                     cacheCreationTokens: tokenTotals.cacheCreation,
                     contextPercent: nil
                 )
-                : nil
+                : nil,
+            contextUsage: contextUsage
         )
     }
 
