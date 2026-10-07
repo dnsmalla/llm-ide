@@ -211,6 +211,7 @@ struct CodeAssistantPanel: View {
     /// applies `update-file` edits immediately (to attached files only —
     /// the GitLab actions always confirm regardless).
     @AppStorage(EditAcceptanceMode.defaultsKey) var editModeRaw = EditAcceptanceMode.review.rawValue
+    @AppStorage(EffortChoice.defaultsKey) var effortRaw: String = EffortChoice.auto
     var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
     /// Agent engine — on by default. When on (AND the turn's
     /// provider is Anthropic), the engine's transport answers turns on the

@@ -346,7 +346,10 @@ extension CodeAssistantPanel {
                         .padding(.leading, 4)
                 }
             }
-            if showModelPicker { modelPickerChips }
+            if showModelPicker {
+                modelPickerChips
+                effortChip
+            }
             modePicker
             editModeChip
             memoryButton
@@ -365,7 +368,10 @@ extension CodeAssistantPanel {
                 if showFileAttachButtons {
                     contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
                 }
-                if showModelPicker { modelPickerChips }
+                if showModelPicker {
+                    modelPickerChips
+                    effortChip
+                }
                 modePicker
                 editModeChip
                 memoryButton
@@ -641,6 +647,39 @@ extension CodeAssistantPanel {
         .menuStyle(.borderlessButton)
         .help(selection.wrappedValue.help)
         .fixedSize()
+    }
+
+    /// Reasoning-effort selector. Its options are the chosen model's own
+    /// levels from the Agent SDK (never a list kept here), so it needs a
+    /// dynamic Menu rather than `chipMenu`'s fixed enum. Hidden when the
+    /// model reports none (other providers, an older server).
+    @ViewBuilder
+    var effortChip: some View {
+        let levels = modelState.effortLevelsForNextTurn(config: config)
+        if !levels.isEmpty {
+            let current = EffortChoice.effective(stored: effortRaw, levels: levels)
+            Menu {
+                Button { effortRaw = EffortChoice.auto } label: {
+                    Label(EffortChoice.label(EffortChoice.auto), systemImage: current == EffortChoice.auto ? "checkmark" : "wand.and.stars")
+                }
+                Divider()
+                ForEach(levels, id: \.self) { level in
+                    Button { effortRaw = level } label: {
+                        Label(EffortChoice.label(level), systemImage: current == level ? "checkmark" : "gauge.with.dots.needle.33percent")
+                    }
+                }
+            } label: {
+                Chip(
+                    icon: "gauge.with.dots.needle.50percent",
+                    label: isCompact ? "" : EffortChoice.label(current),
+                    trailing: "chevron.down",
+                    compact: isCompact
+                )
+            }
+            .menuStyle(.borderlessButton)
+            .help("Reasoning effort — Auto lets LLM-IDE choose per message")
+            .fixedSize()
+        }
     }
 
     /// Permission mode selector (Ask / Accept Edits / Bypass).
