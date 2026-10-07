@@ -561,6 +561,9 @@ extension CodeAssistantPanel {
                 )
             }
             .menuStyle(.borderlessButton)
+            // The Chip draws its own trailing chevron; without this macOS adds
+            // a second, leading one to an icon-less menu label.
+            .menuIndicator(.hidden)
             .help(effortLevels.isEmpty ? "Select model" : "Select model and reasoning effort — Auto lets LLM-IDE choose per message")
             .fixedSize()
         }
