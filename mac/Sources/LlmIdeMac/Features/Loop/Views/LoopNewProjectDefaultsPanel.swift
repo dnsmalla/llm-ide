@@ -9,6 +9,9 @@ struct LoopNewProjectDefaultsPanel: View {
     @EnvironmentObject var theme: ThemeStore
 
     @State private var defaults = LoopEngineConfig(stages: [])
+    /// The value last loaded or saved — `.onChange` skips a value equal to it,
+    /// so the initial load is never mistaken for an edit.
+    @State private var persisted: LoopEngineConfig?
     @State private var templateCount = (builtIn: 0, saved: 0)
     @State private var timeouts = LoopEngineDefaults.stageTimeouts()
 
@@ -70,18 +73,22 @@ struct LoopNewProjectDefaultsPanel: View {
                 }
             }
             .font(Typography.caption)
-            .onChange(of: defaults) { old, updated in
+            .onChange(of: defaults) { _, updated in
                 // The card remembers being expanded, so this can already be
-                // attached when .onAppear swaps the placeholder for the loaded
-                // value — that load is not an edit and must not pin the
-                // built-in defaults to disk on a fresh install.
-                guard old != LoopEngineConfig(stages: []) else { return }
+                // attached when .onAppear swaps in the loaded value — that load
+                // is not an edit and must not pin the built-in defaults to disk
+                // on a fresh install. Compare with what is stored, not with the
+                // placeholder: a saved value can equal the placeholder.
+                guard updated != persisted else { return }
                 LoopEngineDefaults.save(updated)
+                persisted = updated
             }
         }
         .onAppear {
             timeouts = LoopEngineDefaults.stageTimeouts()
-            defaults = LoopEngineDefaults.load()
+            let loaded = LoopEngineDefaults.load()
+            persisted = loaded
+            defaults = loaded
             let store = LoopTemplateStore()
             templateCount = (LoopTemplate.builtIns.count, store.customTemplates.count)
         }
