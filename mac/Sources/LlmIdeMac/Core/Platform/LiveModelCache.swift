@@ -47,7 +47,7 @@ enum LiveModelCache {
         // thread-safe; it is only non-`Sendable` by declaration.
         // WARNING: `defaults.set` runs while holding a non-reentrant
         // os_unfair_lock. No synchronous UserDefaults / KVO observer may call
-        // back into LiveModelCache on the storing thread — it would deadlock.
+        // back into LiveModelCache on the storing thread — it would crash (os_unfair_lock traps on a recursive acquire).
         memory.withLockUnchecked { cached in
             var all = cached ?? decode(defaults)
             all[provider] = models
