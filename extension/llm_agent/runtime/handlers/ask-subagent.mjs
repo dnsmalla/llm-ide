@@ -107,18 +107,23 @@ export async function askSubagent(args, ctx) {
   }
   const requestedModel = subagent.model || route?.model || ctx.defaultModel;
 
-  // runClaude's `onModel` reports the model that actually answered — the
-  // routed one, or the default after a routeFallback — so the `meta` the
-  // client shows ("provider · model") never names a model that did not run.
-  // A runClaude that never reports (test stubs, older wrappers) leaves the
-  // requested model standing.
-  let ranModel;
+  // runClaude's `onModel` reports what actually answered — the routed model,
+  // or the default after a routeFallback — so the `meta` the client shows
+  // ("provider · model") never names a model that did not run. Once it has
+  // reported, the requested model is never used again (a fallback to an
+  // undefined default must not read as the route). A runClaude that never
+  // reports (test stubs, older wrappers) leaves the requested model standing.
+  // `ran` is the LAST hop's report: a multi-hop subagent loop overwrites it.
+  let ran = null;
   const runClaude = typeof ctx.runClaude === 'function'
     ? (prompt, opts = {}) => ctx.runClaude(prompt, {
       ...opts,
-      onModel: (m) => {
-        ranModel = m;
-        try { opts.onModel?.(m); } catch { /* reporting only */ }
+      onModel: (m, info) => {
+        ran = {
+          model: (typeof info?.model === 'string' && info.model) || (typeof m === 'string' && m) || null,
+          provider: (typeof info?.provider === 'string' && info.provider) || null,
+        };
+        try { opts.onModel?.(m, info); } catch { /* reporting only */ }
       },
     })
     : ctx.runClaude;
@@ -157,6 +162,10 @@ export async function askSubagent(args, ctx) {
   });
 
   return {
+    // What ran, for the client's subagent activity view. FIRST on purpose:
+    // the client sees the tool_result text cut at 20k chars, so behind a long
+    // answer it would be lost; the model reads the whole JSON either way.
+    meta: subagentMeta({ name, route, routeTier, requestedModel, ran, ms: Date.now() - startedAt }),
     // Redact fence sentinels from the sub-loop reply at the source,
     // consistent with ask-internal.  The outer loop also applies
     // redactDeep() to the whole toolResult, but redacting here adds
@@ -164,23 +173,24 @@ export async function askSubagent(args, ctx) {
     // the outer handler changes.
     answer: redactFence(result.reply || ''),
     pendingTool: result.pendingTool ?? null,
-    // What ran, for the client's subagent activity view. Last on purpose: the
-    // model reads `answer` first, and this costs a handful of tokens.
-    meta: subagentMeta({ name, route, routeTier, requestedModel, ranModel, ms: Date.now() - startedAt }),
   };
 }
 
 /**
  * The `meta` block of a subagent result: `{ subagent, provider, model, tier?, ms }`.
- * `tier` only when the routed model is the one that ran — after a
+ * `ran` is runClaude's last `onModel` report (`{ provider, model }`, either
+ * may be null) or null when it never reported — only then does the requested
+ * model stand in. A reported null model reads "default" (the deployment's).
+ * `tier` only when the routed provider + model are what ran — after a
  * routeFallback the call answered on the default, which belongs to no tier.
- * `provider`/`model` are null when neither the caller nor runClaude named one
- * (runClaude's own deployment default ran).
  */
-export function subagentMeta({ name, route, routeTier, requestedModel, ranModel, ms }) {
-  const model = (typeof ranModel === 'string' && ranModel) ? ranModel : (requestedModel || null);
-  const ranOnRoute = Boolean(route) && model === route.model;
-  const provider = ranOnRoute ? route.provider : (model ? resolveProvider(model) : null);
+export function subagentMeta({ name, route, routeTier, requestedModel, ran, ms }) {
+  const model = ran ? (ran.model || 'default') : (requestedModel || null);
+  const routedModelRan = Boolean(route) && model === route.model;
+  const provider = ran?.provider
+    || (routedModelRan ? route.provider : null)
+    || (model && model !== 'default' ? resolveProvider(model) : null);
+  const ranOnRoute = routedModelRan && provider === route.provider;
   const meta = { subagent: name, provider, model };
   if (ranOnRoute && routeTier) meta.tier = routeTier;
   meta.ms = ms;

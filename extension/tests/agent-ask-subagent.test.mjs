@@ -203,7 +203,8 @@ test('result carries meta { subagent, provider, model, ms } after answer', async
   const subagents = new Map([['echoer', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't' }]]);
   const out = await askSubagent({ name: 'echoer', question: 'q' },
     makeCtx({ subagents, defaultModel: 'claude-haiku-4-5', runClaude: makeStubClaude(['done']) }));
-  assert.deepEqual(Object.keys(out), ['answer', 'pendingTool', 'meta'], 'answer stays first');
+  assert.deepEqual(Object.keys(out), ['meta', 'answer', 'pendingTool'],
+    'meta first: the client sees a 20k-truncated text, so a long answer must not push meta out');
   assert.equal(out.meta.subagent, 'echoer');
   assert.equal(out.meta.model, 'claude-haiku-4-5');
   assert.equal(out.meta.provider, 'anthropic');
@@ -243,4 +244,36 @@ test('meta: feature route tier is named when the route ran', async () => {
   assert.equal(out.meta.provider, 'openai');
   assert.equal(out.meta.model, 'gpt-5');
   assert.equal(out.meta.tier, 'standard');
+});
+
+test('meta after a fallback whose default model is undefined: never the routed tier', async () => {
+  const subagents = new Map([['s', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't', tier: 'cheap' }]]);
+  // runClaude fell back to the deployment default: model arg undefined, the
+  // second arg names what actually ran.
+  const runClaude = async (_p, opts) => { opts.onModel?.(undefined, { provider: 'anthropic', model: 'claude-sonnet-5' }); return 'ok'; };
+  const out = await askSubagent({ name: 's', question: 'q' }, makeCtx({
+    subagents, runClaude, // no defaultModel — the common case
+    resolveTier: () => ({ provider: 'openai', model: 'gpt-5' }),
+  }));
+  assert.equal(out.meta.provider, 'anthropic');
+  assert.equal(out.meta.model, 'claude-sonnet-5');
+  assert.equal(out.meta.tier, undefined);
+});
+
+test('meta: onModel(undefined) with no ran info reads "default", not the requested route', async () => {
+  const subagents = new Map([['s', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't', tier: 'cheap' }]]);
+  const runClaude = async (_p, opts) => { opts.onModel?.(undefined); return 'ok'; };
+  const out = await askSubagent({ name: 's', question: 'q' }, makeCtx({
+    subagents, runClaude, resolveTier: () => ({ provider: 'openai', model: 'gpt-5' }),
+  }));
+  assert.equal(out.meta.model, 'default');
+  assert.notEqual(out.meta.provider, 'openai');
+  assert.equal(out.meta.tier, undefined);
+});
+
+test('meta: a custom provider reported by runClaude is kept, not re-guessed from the model id', async () => {
+  const subagents = new Map([['s', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't' }]]);
+  const runClaude = async (_p, opts) => { opts.onModel?.('glm-4.6', { provider: 'custom:abc', model: 'glm-4.6' }); return 'ok'; };
+  const out = await askSubagent({ name: 's', question: 'q' }, makeCtx({ subagents, runClaude, defaultModel: 'glm-4.6' }));
+  assert.equal(out.meta.provider, 'custom:abc');
 });

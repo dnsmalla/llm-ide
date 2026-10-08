@@ -747,6 +747,21 @@ test('summarize / email-classify report the model that actually answered after a
   } finally { m.restore(); _resetRouteHealthForTests(); }
 });
 
+test('runClaude onModel: second arg names the provider + model that ran, incl. a fallback with no default model', async () => {
+  _resetRouteHealthForTests();
+  const userId = routedUser();
+  const m = mockRoutedAndDefault(() => httpRes(401));
+  try {
+    const seen = [];
+    await runClaude('hi', { userId, model: 'gpt-5-mini', provider: 'openai', routeFallback: { model: undefined },
+      onModel: (model, ran) => seen.push({ model, ran }) });
+    assert.equal(seen.length, 1);
+    assert.equal(seen[0].model, undefined, 'first arg unchanged: the fallback model as given');
+    assert.equal(seen[0].ran.provider, 'anthropic', 'the default ran on anthropic, not the routed openai');
+    assert.equal(seen[0].ran.model, m.seen.anthropic[0].model, 'the model the default call actually sent');
+  } finally { m.restore(); _resetRouteHealthForTests(); }
+});
+
 // ── loader: `tier:` frontmatter ──────────────────────────────────────────
 
 test('loader parses subagent `tier:` and drops an invalid one', () => {
