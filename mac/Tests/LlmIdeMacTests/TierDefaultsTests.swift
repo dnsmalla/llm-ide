@@ -93,7 +93,7 @@ struct TierDefaultsTests {
         let glm = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5")
         let result = TierDefaults.migrate(input(composer: "p1", customs: [glm]), includePurposes: true)
         #expect(result.routing.tier(.standard) == TierRoute(provider: "anthropic", model: "claude-sonnet-5"))
-        #expect(TierDefaults.effectiveTier(for: .loop, routing: result.routing) == nil)
+        #expect(TierDefaults.effectiveTier(for: .loop, routing: result.routing, composerProviderId: "p1") == nil)
     }
 
     @Test func emptyClaudeModelLeavesStandardUnset() {

@@ -1556,19 +1556,26 @@ do {
     let customStd = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom:p1", model: "glm-5"),
                                               "cheap": TierRoute(provider: "openai", model: "gpt-5.4-mini")],
                                       features: ["autoTasks": "cheap"])
-    expect([RoutedFeature.loop, .quickChat].allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customStd) == .standard },
-           "unset Loop / Quick chat resolve through a custom Standard")
-    expect(TierDefaults.effectiveTier(for: .autoTasks, routing: customStd) == .cheap, "a set role keeps its own tier")
+    expect([RoutedFeature.loop, .quickChat]
+               .allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customStd, composerProviderId: "p1") == .standard },
+           "unset Loop / Quick chat resolve through an applied custom Standard (the override names it)")
+    expect([RoutedFeature.loop, .quickChat].allSatisfy {
+               TierDefaults.effectiveTier(for: $0, routing: customStd, composerProviderId: "") == nil
+                   && TierDefaults.effectiveTier(for: $0, routing: customStd, composerProviderId: "p2") == nil
+           },
+           "a custom Standard never applied (no or another override): Background roles keep activeCLI")
+    expect(TierDefaults.effectiveTier(for: .autoTasks, routing: customStd, composerProviderId: "p1") == .cheap,
+           "a set role keeps its own tier")
     expect([RoutedFeature.pipeline, .subagents, .internal, .chatCoding]
-               .allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customStd) == nil },
+               .allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customStd, composerProviderId: "p1") == nil },
            "unset server roles keep the built-in default; unset chat modes keep the chat's default")
     let builtInStd = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "claude-opus-5")])
-    expect(TierDefaults.effectiveTier(for: .loop, routing: builtInStd) == nil,
+    expect(TierDefaults.effectiveTier(for: .loop, routing: builtInStd, composerProviderId: "") == nil,
            "a built-in Standard: unset Background roles read activeCLI, which IS Standard (mode models kept)")
     let sharedStd = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom", model: "llama-3")])
-    expect(TierDefaults.effectiveTier(for: .quickChat, routing: sharedStd) == nil,
+    expect(TierDefaults.effectiveTier(for: .quickChat, routing: sharedStd, composerProviderId: "") == nil,
            "a shared-Custom Standard is activeCLI too")
-    expect(TierDefaults.effectiveTier(for: .loop, routing: TierRoutingConfig()) == nil, "no Standard: nothing routes")
+    expect(TierDefaults.effectiveTier(for: .loop, routing: TierRoutingConfig(), composerProviderId: "p1") == nil, "no Standard: nothing routes")
 }
 
 // Chat modes from tiers: a mode's tier swaps only the MODEL, so it applies
@@ -1648,9 +1655,12 @@ do {
         // Background roles: the tier route each resolves through must not move
         // (an unset role runs a custom Standard — TierDefaults.effectiveTier).
         let background = RoutedFeature.allCases.filter { $0.group == .background }
+        // BEFORE uses the pre-branch rule (an unset role read activeCLI = no
+        // route), so a change caused by new resolver code is caught too.
         let routesSame = background.allSatisfy { feature in
-            TierDefaults.effectiveTier(for: feature, routing: given.routing).flatMap(given.routing.tier)
-                == TierDefaults.effectiveTier(for: feature, routing: result.routing).flatMap(result.routing.tier)
+            given.routing.tier(for: feature).flatMap(given.routing.tier)
+                == TierDefaults.effectiveTier(for: feature, routing: result.routing,
+                                              composerProviderId: given.composerProviderId).flatMap(result.routing.tier)
         }
         guard given.routing.tier(.standard) == nil, let standard = result.routing.tier(.standard) else {
             return chatsSame && routesSame
@@ -1702,7 +1712,7 @@ do {
            "purpose ids keep the provider they were picked for (activeCLI's)")
     expect(invariantHolds(customCase), "chats and every Background role's route are unchanged")
     expect([RoutedFeature.loop, .autoTasks, .quickChat]
-               .allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customResult.routing) == nil },
+               .allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customResult.routing, composerProviderId: "p1") == nil },
            "Loop / Auto Tasks / Quick chat keep reading activeCLI")
     let customPolicy = TierDefaults.purposePolicy(chatProvider: "custom:p1", routing: customResult.routing,
                                                   legacy: customResult.purposeModelIds, legacyProvider: "anthropic",
@@ -1797,6 +1807,15 @@ do {
                && bothResult.purposeModelIds == [.planning: "claude-opus-5"],
            "no unreferenced tier: the purpose stays a legacy value")
     expect(invariantHolds(referencedCase), "referenced tiers: nothing changes")
+
+    // 11. Standard = custom:p1 saved BEFORE this update (◉ was Claude, never
+    // written through): Loop / Quick chat ran Claude and must keep doing so.
+    let preCustomStd = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom:p1", model: "glm-5")])
+    let p1 = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5")
+    expect(invariantHolds(input(customs: [p1], routing: preCustomStd)),
+           "a pre-existing, unapplied custom Standard (no override) does not move Background roles")
+    expect(invariantHolds(input(composer: "p2", customs: [p1], routing: preCustomStd)),
+           "…nor with an override on another provider")
 }
 
 print("TierDefaults Settings wording")

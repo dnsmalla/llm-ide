@@ -150,17 +150,22 @@ public enum TierDefaults {
 
     /// The tier `feature` resolves through: its own when set; for an unset
     /// Background role (Loop, Auto Tasks, Quick chat), Standard when Standard
-    /// is a named custom provider — the one Standard `activeCLI` cannot hold,
-    /// so without this those roles would run the previous built-in default.
+    /// is an APPLIED named custom provider — the one Standard `activeCLI`
+    /// cannot hold, written through as the composer override
+    /// (`composerProviderId` names it). A custom Standard saved before this
+    /// update and never applied is skipped: those roles kept running
+    /// `activeCLI`, and Settings says "still use …" until the user applies it.
     /// Any other unset role is nil: Mac roles then read `activeCLI` /
     /// `defaultModelId`, which Standard's write-through keeps equal to a
     /// built-in Standard (including each chat mode's model for quick chat),
     /// and server roles keep the server's built-in default. The resolver still
     /// applies every usability check to the tier returned.
-    public static func effectiveTier(for feature: RoutedFeature, routing: TierRoutingConfig) -> RoutingTier? {
+    public static func effectiveTier(for feature: RoutedFeature, routing: TierRoutingConfig,
+                                     composerProviderId: String) -> RoutingTier? {
         if let tier = routing.tier(for: feature) { return tier }
         guard feature.group == .background, let standard = routing.tier(.standard),
-              TierRouting.customProviderId(standard.provider) != nil else { return nil }
+              let customId = TierRouting.customProviderId(standard.provider),
+              customId == composerProviderId else { return nil }
         return .standard
     }
 

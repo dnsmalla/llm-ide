@@ -79,12 +79,12 @@ struct ChatModelSelectionTests {
         state.selectedProvider = "custom:glm"
         state.selectedModel = "glm-5"
         state.customProviders = []                                     // deleted
-        state.reconcileCustomSelection(activeCLI: "claude_code", defaultModelId: "claude-x")
+        state.reconcileCustomSelection(activeCLI: "claude_code", defaultModelId: "claude-x", standard: nil)
         #expect(state.selectedProvider == "claude_code" && state.selectedModel == "claude-x")
 
         state.selectedProvider = "custom:glm"
         state.customProviders = [provider("glm", models: ["glm-5"], enabled: false)]   // disabled
-        state.reconcileCustomSelection(activeCLI: "claude_code", defaultModelId: "claude-x")
+        state.reconcileCustomSelection(activeCLI: "claude_code", defaultModelId: "claude-x", standard: nil)
         #expect(state.selectedProvider == "claude_code")
     }
 
@@ -94,7 +94,7 @@ struct ChatModelSelectionTests {
         state.selectedProvider = "custom:glm"
         state.selectedModel = "glm-old"
         state.customProviders = [provider("glm", models: ["glm-5", "glm-5-air"])]
-        state.reconcileCustomSelection(activeCLI: "claude_code", defaultModelId: "claude-x")
+        state.reconcileCustomSelection(activeCLI: "claude_code", defaultModelId: "claude-x", standard: nil)
         #expect(state.selectedProvider == "custom:glm" && state.selectedModel == "glm-5")
     }
 

@@ -206,7 +206,7 @@ struct TierRoutingSection: View {
                     note("New chats start on \(current) — the provider doesn't list \(route.model).")
                 } else {
                     HStack(spacing: Spacing.sm) {
-                        note("New chats still use \(current).")
+                        note("New chats and Mac roles left on Standard still use \(current).")
                         Button("Make Standard the default") { config.applyStandardTier(route) }
                             .controlSize(.small)
                     }

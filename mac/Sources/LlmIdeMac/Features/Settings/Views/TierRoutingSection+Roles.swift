@@ -84,7 +84,8 @@ extension TierRoutingSection {
     /// though its other calls can — the same local + server checks
     /// `TierRouting.resolve(requiresAgentEngine: true)` applies per call.
     private func agentEngineReason(for feature: RoutedFeature) -> String? {
-        guard let tier = TierDefaults.effectiveTier(for: feature, routing: routing),
+        guard let tier = TierDefaults.effectiveTier(for: feature, routing: routing,
+                                                    composerProviderId: composerProviderId),
               let route = routing.tier(tier) else { return nil }
         if let local = TierRouting.unusableReason(route, customProviders: customProviders, requiresAgentEngine: true) {
             return local
@@ -96,13 +97,14 @@ extension TierRoutingSection {
     }
 
     /// Why a role still runs its fallback: its tier (or, for an unset
-    /// Background role, a custom Standard — `TierDefaults.effectiveTier`)
+    /// Background role, an applied custom Standard — `TierDefaults.effectiveTier`)
     /// can't be used. Auto Tasks run a local CLI, so they get the CLI
     /// constraint (including whether it's installed); the chat surfaces'
     /// Agent-engine constraint depends on each chat and is applied per turn
     /// instead. Server-side refusals come from the last status fetch.
     private func featureUnusableReason(_ feature: RoutedFeature) -> String? {
-        guard let tier = TierDefaults.effectiveTier(for: feature, routing: routing) else { return nil }
+        guard let tier = TierDefaults.effectiveTier(for: feature, routing: routing,
+                                                    composerProviderId: composerProviderId) else { return nil }
         guard let route = routing.tier(tier) else {
             // A stored "standard" on a Mac row reads as unset (the menu has no
             // separate entry); Standard's own row warns when it is unset.

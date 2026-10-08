@@ -342,13 +342,18 @@ enum TierRouting {
     }
 
     /// Pure resolver: the feature's tier route (`TierDefaults.effectiveTier` —
-    /// its own, or Standard for an unset Background role on a custom Standard)
-    /// when it is usable both locally and on the server.
+    /// its own, or Standard for an unset Background role on an applied custom
+    /// Standard) when it is usable both locally and on the server.
+    ///
+    /// - Parameter composerProviderId: the stored composer override
+    ///   (`TierDefaults.composerProviderKey`), which marks a custom Standard applied.
     static func resolve(feature: RoutedFeature, config: TierRoutingConfig,
                         customProviders: [CustomProvider], server: TierRoutingServerState,
+                        composerProviderId: String = "",
                         requiresAgentEngine: Bool = false, localCLIOnly: Bool = false,
                         cliInstalled: (AICliTool) -> Bool = { _ in true }) -> TierRoute? {
-        guard let tier = TierDefaults.effectiveTier(for: feature, routing: config),
+        guard let tier = TierDefaults.effectiveTier(for: feature, routing: config,
+                                                    composerProviderId: composerProviderId),
               let route = config.tier(tier) else { return nil }
         let reason = serverUnusableReason(tier, server: server, requiresAgentEngine: requiresAgentEngine,
                                           localCLIOnly: localCLIOnly)
@@ -370,6 +375,7 @@ enum TierRouting {
                         localCLIOnly: Bool = false) -> TierRoute? {
         resolve(feature: feature, config: .load(), customProviders: CustomProvider.loadAll(),
                 server: TierRoutingServerCache.shared.state,
+                composerProviderId: UserDefaults.standard.string(forKey: TierDefaults.composerProviderKey) ?? "",
                 requiresAgentEngine: requiresAgentEngine, localCLIOnly: localCLIOnly,
                 cliInstalled: isCLIInstalled)
     }
