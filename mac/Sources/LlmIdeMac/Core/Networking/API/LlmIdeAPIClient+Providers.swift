@@ -95,7 +95,8 @@ extension LlmIdeAPIClient {
         struct Ack: Decodable { let success: Bool?; let dropped: [TierRoutingDropped]? }
         // Short timeout: this runs on the serialized refresh chain, where one
         // wedged request would hold up every later refresh.
-        let ack: Ack = try await post("/kb/routing-tiers", body: config, authenticated: true,
+        // Chat roles are Mac-only (no server change, no API bump).
+        let ack: Ack = try await post("/kb/routing-tiers", body: TierDefaults.wireBody(config), authenticated: true,
                                       timeout: TierRouting.refreshRequestTimeout)
         return ack.dropped ?? []
     }

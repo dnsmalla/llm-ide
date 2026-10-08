@@ -30,4 +30,10 @@ struct TierDefaultsTests {
                     == [.chatPlanning, .chatCoding, .chatReviewing, .chatDocuments])
         #expect(TierDefaults.purpose(for: .subagents) == nil)
     }
+
+    @Test func wireBodyStripsOnlyChatRoles() {
+        let features = Dictionary(uniqueKeysWithValues: RoutedFeature.allCases.map { ($0.rawValue, "cheap") })
+        let wire = TierDefaults.wireBody(TierRoutingConfig(features: features))
+        #expect(Set(wire.features.keys) == Set(RoutedFeature.allCases.filter { $0.group != .chat }.map(\.rawValue)))
+    }
 }

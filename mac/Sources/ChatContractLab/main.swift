@@ -1517,6 +1517,19 @@ do {
            "persisted keys are stable")
 }
 
+// Chat roles are Mac-only: the server would drop them as unknown_feature and
+// Settings would list them as "ignored".
+print("TierDefaults wire body")
+do {
+    let table = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "m")],
+                                  features: ["chatPlanning": "strong", "chatDocuments": "cheap",
+                                             "loop": "cheap", "futureRole": "cheap"])
+    let wire = TierDefaults.wireBody(table)
+    expect(wire.features == ["loop": "cheap", "futureRole": "cheap"],
+           "chat roles are stripped; server, background and unknown (newer build) roles are sent")
+    expect(wire.tiers == table.tiers, "tiers are sent unchanged")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

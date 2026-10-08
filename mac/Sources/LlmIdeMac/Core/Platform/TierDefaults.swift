@@ -73,4 +73,13 @@ public enum TierDefaults {
         guard let cli = cliRawValue(forProvider: standard.provider) else { return nil }
         return StandardWriteThrough(activeCLI: cli, defaultModelId: model, composerProviderId: "")
     }
+
+    /// The table as `POST /kb/routing-tiers` receives it: chat roles removed
+    /// (Mac-only — the server would drop them as `unknown_feature`). Unknown
+    /// keys from a newer build are kept, as before, so the server reports them.
+    public static func wireBody(_ config: TierRoutingConfig) -> TierRoutingConfig {
+        var body = config
+        body.features = config.features.filter { key, _ in RoutedFeature(rawValue: key)?.group != .chat }
+        return body
+    }
 }
