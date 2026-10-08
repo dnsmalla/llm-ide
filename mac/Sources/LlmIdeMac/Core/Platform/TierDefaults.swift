@@ -49,7 +49,8 @@ public struct TierMigrationInput: Sendable, Equatable {
     public var activeCLI: String
     public var defaultModelId: String
     public var purposeModelIds: [ModelPurpose: String]
-    /// `codeAssistProvider`: a custom provider id, or "".
+    /// `codeAssistProvider`: a custom provider id, or "". Part of the input on
+    /// purpose but never promoted to Standard (`standardFromLegacy`).
     public var composerProviderId: String
     public var customProviders: [TierCustomProviderSummary]
 
@@ -204,21 +205,19 @@ public enum TierDefaults {
         return PurposeModelPolicy(perPurpose: perPurpose, defaultModelId: defaultModelId)
     }
 
-    /// Standard as it effectively is today, or nil when no tier can name it.
+    /// Standard as the Mac roles run it today — (`activeCLI`'s provider,
+    /// `defaultModelId`) — or nil when no tier can name it: only when writing
+    /// it back yields the same `activeCLI` (GLM and Copilot cannot; the shared
+    /// Custom endpoint can) and a model is known (Claude's live list may not be
+    /// loaded — never store "").
     ///
-    /// An enabled custom composer override wins (new chats run on it); one
-    /// with no model yields nil — a built-in Standard would have to clear the
-    /// override and move chats. Otherwise (`activeCLI`'s provider,
-    /// `defaultModelId`), but only when writing it back yields the same
-    /// `activeCLI` (GLM and Copilot cannot; the shared Custom endpoint can) and
-    /// a model is known (Claude's live list may not be loaded — never store "").
-    public static func standardFromLegacy(activeCLI: String, defaultModelId: String, composerProviderId: String,
-                                          customProviders: [TierCustomProviderSummary]) -> TierRoute? {
-        if !composerProviderId.isEmpty,
-           let custom = customProviders.first(where: { $0.id == composerProviderId && $0.isEnabled }) {
-            let first = custom.firstModelId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return first.isEmpty ? nil : TierRoute(provider: "custom:\(custom.id)", model: first)
-        }
+    /// A custom composer override is deliberately NOT promoted to Standard: an
+    /// unset Background role runs a custom Standard (`effectiveTier`), so
+    /// promoting it would move Loop / Quick chat off `activeCLI` and break the
+    /// before/after invariant. The override stays in UserDefaults, chats keep
+    /// running it, and Settings shows "New chats still use <custom> · <model>"
+    /// (`isApplied` false) until the user chooses.
+    public static func standardFromLegacy(activeCLI: String, defaultModelId: String) -> TierRoute? {
         let model = defaultModelId.trimmingCharacters(in: .whitespacesAndNewlines)
         let provider = providerWireId(forActiveCLI: activeCLI)
         guard !model.isEmpty, cliRawValue(forProvider: provider) == activeCLI else { return nil }
@@ -228,7 +227,8 @@ public enum TierDefaults {
     /// The launch migration.
     ///
     /// Rule 1 (every launch while Standard is unset): fill it from
-    /// `standardFromLegacy`. Rule 2 (once, `includePurposes`): each non-empty
+    /// `standardFromLegacy` — activeCLI + defaultModelId only; a custom
+    /// composer override is left as it is. Rule 2 (once, `includePurposes`): each non-empty
     /// purpose model M — on `activeCLI`'s provider P, the provider it was picked
     /// for — gets its chat role pointed at a tier equal to (P, M), else at the
     /// first free of Strong, Cheap; with no free tier it stays a legacy value.
@@ -236,9 +236,7 @@ public enum TierDefaults {
     public static func migrate(_ input: TierMigrationInput, includePurposes: Bool) -> TierMigrationResult {
         var routing = input.routing
         if routing.tier(.standard) == nil,
-           let standard = standardFromLegacy(activeCLI: input.activeCLI, defaultModelId: input.defaultModelId,
-                                             composerProviderId: input.composerProviderId,
-                                             customProviders: input.customProviders) {
+           let standard = standardFromLegacy(activeCLI: input.activeCLI, defaultModelId: input.defaultModelId) {
             routing.tiers[RoutingTier.standard.rawValue] = standard
         }
         guard includePurposes else {

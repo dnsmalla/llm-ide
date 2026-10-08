@@ -34,11 +34,11 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   skipped, and Settings names what runs instead. The shared Custom (OpenAI-compatible) endpoint stays
   selectable as Standard; it runs only on the Mac, so server roles on its tier keep their built-in default.
   The four chat modes are roles that pick a tier, used only in chats on that tier's provider. Server roles
-  left unset keep their built-in default. Existing settings migrate once at launch and chats keep what
-  they ran; if the composer was already on a custom provider, it becomes Standard, so Loop and Quick chat
-  now follow it too where it can run them. A model picked in the chat composer no longer changes the
-  default: it overrides Standard in the composer until Standard or a chat role changes, and the phone and
-  quick chat follow the Quick chat role (or Standard) instead of the last composer pick.
+  left unset keep their built-in default. Existing settings migrate once at launch with no change in what
+  chats or Mac roles run: Standard is built from the old default provider + model, and a composer already
+  on a custom provider stays on it (Settings shows "New chats still use …" until you choose Standard).
+  A model picked in the chat composer no longer changes the default: it overrides Standard in the composer
+  until Standard or a chat role changes, and the phone and quick chat follow the Quick chat role (or Standard) instead of the last composer pick.
 - Server `runClaude` now honours an explicit `custom:<id>` provider for EVERY caller, not only tier
   routes: a composer chat on a custom provider whose model id looks like Claude (`claude-*`) now runs on
   that custom provider instead of being re-derived to Anthropic from the model id.

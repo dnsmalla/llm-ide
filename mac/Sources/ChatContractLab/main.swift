@@ -1645,11 +1645,20 @@ do {
             before.modelId(forMode: $0, explicit: nil, isOffered: isOffered)
                 == after.modelId(forMode: $0, explicit: nil, isOffered: isOffered)
         }
-        guard given.routing.tier(.standard) == nil, let standard = result.routing.tier(.standard) else { return chatsSame }
+        // Background roles: the tier route each resolves through must not move
+        // (an unset role runs a custom Standard — TierDefaults.effectiveTier).
+        let background = RoutedFeature.allCases.filter { $0.group == .background }
+        let routesSame = background.allSatisfy { feature in
+            TierDefaults.effectiveTier(for: feature, routing: given.routing).flatMap(given.routing.tier)
+                == TierDefaults.effectiveTier(for: feature, routing: result.routing).flatMap(result.routing.tier)
+        }
+        guard given.routing.tier(.standard) == nil, let standard = result.routing.tier(.standard) else {
+            return chatsSame && routesSame
+        }
         let write = TierDefaults.writeThrough(for: standard)
         let rolesSame = (write?.activeCLI ?? given.activeCLI) == given.activeCLI
             && (write?.defaultModelId ?? given.defaultModelId) == given.defaultModelId
-        return chatsSame && rolesSame
+        return chatsSame && routesSame && rolesSame
     }
 
     // 1. All default.
@@ -1681,29 +1690,40 @@ do {
            "the rest stay as legacy values Settings names")
     expect(invariantHolds(many), "a legacy value keeps being honoured")
 
-    // 4. Composer on an enabled custom provider.
-    let glm = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5")
+    // 4. Composer on an enabled custom provider: NOT promoted to Standard.
+    // Promoting it would move unset Loop / Quick chat onto it (they run a
+    // custom Standard), so Standard comes from activeCLI + defaultModelId.
+    let glm = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5", name: "Zhipu")
     let customCase = input(purposes: [.planning: "claude-opus-5"], composer: "p1", customs: [glm])
     let customResult = TierDefaults.migrate(customCase, includePurposes: true)
-    expect(customResult.routing.tier(.standard) == TierRoute(provider: "custom:p1", model: "glm-5"),
-           "an enabled custom composer override becomes Standard")
+    expect(customResult.routing.tier(.standard) == TierRoute(provider: "anthropic", model: "claude-sonnet-5"),
+           "an enabled custom composer override is left alone; Standard = activeCLI + defaultModelId")
     expect(customResult.routing.tier(.strong) == TierRoute(provider: "anthropic", model: "claude-opus-5"),
-           "purpose ids keep the provider they were picked for (activeCLI's), not Standard's")
-    expect(invariantHolds(customCase), "built-in chats are unchanged")
+           "purpose ids keep the provider they were picked for (activeCLI's)")
+    expect(invariantHolds(customCase), "chats and every Background role's route are unchanged")
+    expect([RoutedFeature.loop, .autoTasks, .quickChat]
+               .allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customResult.routing) == nil },
+           "Loop / Auto Tasks / Quick chat keep reading activeCLI")
     let customPolicy = TierDefaults.purposePolicy(chatProvider: "custom:p1", routing: customResult.routing,
                                                   legacy: customResult.purposeModelIds, legacyProvider: "anthropic",
                                                   defaultModelId: "glm-5")
     expect(modes.allSatisfy { customPolicy.modelId(forMode: $0) == "glm-5" },
            "chats on the custom provider still send its model in every mode, as before")
+    let migratedStd = customResult.routing.tier(.standard) ?? TierRoute(provider: "", model: "")
+    expect(!TierDefaults.isApplied(migratedStd, activeCLI: "claude_code", defaultModelId: "claude-sonnet-5",
+                                   composerProviderId: "p1", customProviders: [glm])
+               && TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-sonnet-5",
+                                                      composerProviderId: "p1", customProviders: [glm],
+                                                      standard: migratedStd) == "Zhipu · glm-5",
+           "Settings then shows 'New chats still use Zhipu · glm-5' with Make Standard the default")
     let disabled = TierCustomProviderSummary(id: "p1", isEnabled: false, firstModelId: "glm-5")
     expect(TierDefaults.migrate(input(composer: "p1", customs: [disabled]), includePurposes: true).routing.tier(.standard)
                == TierRoute(provider: "anthropic", model: "claude-sonnet-5"),
-           "a DISABLED override is ignored, as the composer ignores it")
-    expect(TierDefaults.migrate(input(composer: "gone"), includePurposes: true).routing.tier(.standard)?.provider == "anthropic",
-           "a DELETED override is ignored too")
+           "a disabled override: Standard from activeCLI")
     let noModels = TierCustomProviderSummary(id: "p2", isEnabled: true, firstModelId: nil)
-    expect(TierDefaults.migrate(input(composer: "p2", customs: [noModels]), includePurposes: true).routing.tier(.standard) == nil,
-           "an enabled override with no model leaves Standard unset rather than move chats off it")
+    expect(TierDefaults.migrate(input(composer: "p2", customs: [noModels]), includePurposes: true).routing.tier(.standard)
+               == TierRoute(provider: "anthropic", model: "claude-sonnet-5"),
+           "an override with no model: Standard from activeCLI too")
 
     // 5. Already migrated: purposes untouched; Standard still filled while unset, never overwritten.
     let again = TierDefaults.migrate(many, includePurposes: false)
@@ -1743,8 +1763,7 @@ do {
     let glmResult = TierDefaults.migrate(glmDefault, includePurposes: true)
     expect(glmResult.routing.tier(.standard) == nil && glmResult.purposeModelIds == [.coding: "glm-5-air"],
            "an unrepresentable default (GLM) leaves Standard unset and purposes as legacy")
-    expect(TierDefaults.standardFromLegacy(activeCLI: "copilot", defaultModelId: "gpt-4o", composerProviderId: "",
-                                           customProviders: []) == nil,
+    expect(TierDefaults.standardFromLegacy(activeCLI: "copilot", defaultModelId: "gpt-4o") == nil,
            "Copilot would read back as openai, so it is not a Standard")
     expect(invariantHolds(glmDefault), "unrepresentable: nothing changes")
 

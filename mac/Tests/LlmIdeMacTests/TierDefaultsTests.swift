@@ -89,6 +89,13 @@ struct TierDefaultsTests {
                     .routing.tier(.standard)?.provider == "anthropic")
     }
 
+    @Test func enabledCustomOverrideIsNotPromoted() {
+        let glm = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5")
+        let result = TierDefaults.migrate(input(composer: "p1", customs: [glm]), includePurposes: true)
+        #expect(result.routing.tier(.standard) == TierRoute(provider: "anthropic", model: "claude-sonnet-5"))
+        #expect(TierDefaults.effectiveTier(for: .loop, routing: result.routing) == nil)
+    }
+
     @Test func emptyClaudeModelLeavesStandardUnset() {
         let result = TierDefaults.migrate(input(defaultModelId: "", purposes: [.planning: "claude-opus-5"]),
                                           includePurposes: true)
