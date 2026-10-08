@@ -1578,6 +1578,136 @@ do {
            "a role on an unset tier means the default")
 }
 
+// Migration: Standard from the old default; purpose models onto tiers.
+// INVARIANT: for every chat mode and every Mac role, the provider + model is
+// identical before and after.
+print("TierDefaults migration")
+do {
+    let modes = ["plan", "assist_plan", "execute", "auto", "review", "document", "ask", "auto_read_only", "bogus"]
+    func input(activeCLI: String = "claude_code", defaultModelId: String = "claude-sonnet-5",
+               purposes: [ModelPurpose: String] = [:], composer: String = "",
+               customs: [TierCustomProviderSummary] = [],
+               routing: TierRoutingConfig = TierRoutingConfig()) -> TierMigrationInput {
+        TierMigrationInput(routing: routing, activeCLI: activeCLI, defaultModelId: defaultModelId,
+                           purposeModelIds: purposes, composerProviderId: composer, customProviders: customs)
+    }
+    /// Built-in chats send the same model for every mode, and Standard's
+    /// write-through leaves the Mac roles' activeCLI / defaultModelId as they were.
+    func invariantHolds(_ given: TierMigrationInput, isOffered: (String) -> Bool = { _ in true }) -> Bool {
+        let result = TierDefaults.migrate(given, includePurposes: true)
+        let provider = TierDefaults.providerWireId(forActiveCLI: given.activeCLI)
+        let before = PurposeModelPolicy(perPurpose: given.purposeModelIds, defaultModelId: given.defaultModelId)
+        let after = TierDefaults.purposePolicy(chatProvider: provider, routing: result.routing,
+                                               legacy: result.purposeModelIds, legacyProvider: provider,
+                                               defaultModelId: given.defaultModelId)
+        let chatsSame = modes.allSatisfy {
+            before.modelId(forMode: $0, explicit: nil, isOffered: isOffered)
+                == after.modelId(forMode: $0, explicit: nil, isOffered: isOffered)
+        }
+        guard given.routing.tier(.standard) == nil, let standard = result.routing.tier(.standard) else { return chatsSame }
+        let write = TierDefaults.writeThrough(for: standard)
+        let rolesSame = (write?.activeCLI ?? given.activeCLI) == given.activeCLI
+            && (write?.defaultModelId ?? given.defaultModelId) == given.defaultModelId
+        return chatsSame && rolesSame
+    }
+
+    // 1. All default.
+    let plain = input()
+    let plainResult = TierDefaults.migrate(plain, includePurposes: true)
+    expect(plainResult.routing.tier(.standard) == TierRoute(provider: "anthropic", model: "claude-sonnet-5"),
+           "an untouched install gets Standard = its current default provider + model")
+    expect(plainResult.routing.features.isEmpty && plainResult.purposeModelIds.isEmpty, "no purposes, no roles")
+    expect(invariantHolds(plain), "all-default: nothing changes")
+
+    // 2. Purposes set.
+    let some = input(purposes: [.planning: "claude-opus-5", .coding: "", .reviewing: "claude-haiku-5",
+                                .documents: "claude-sonnet-5"])
+    let someResult = TierDefaults.migrate(some, includePurposes: true)
+    expect(someResult.routing.tier(.strong) == TierRoute(provider: "anthropic", model: "claude-opus-5")
+               && someResult.routing.tier(.cheap) == TierRoute(provider: "anthropic", model: "claude-haiku-5"),
+           "distinct purpose models take Strong, then Cheap")
+    expect(someResult.routing.features == ["chatPlanning": "strong", "chatReviewing": "cheap", "chatDocuments": "standard"],
+           "a purpose equal to Standard reuses Standard; an empty purpose gets no role")
+    expect(someResult.purposeModelIds.isEmpty, "migrated (and empty) purposes are cleared")
+    expect(invariantHolds(some), "purposes set: nothing changes")
+
+    // 3. More distinct purposes than free tiers.
+    let many = input(purposes: [.planning: "m-a", .coding: "m-b", .reviewing: "m-c", .documents: "m-d"])
+    let manyResult = TierDefaults.migrate(many, includePurposes: true)
+    expect(manyResult.routing.features == ["chatPlanning": "strong", "chatCoding": "cheap"],
+           "only Strong and Cheap are free, so two purposes get roles")
+    expect(manyResult.purposeModelIds == [.reviewing: "m-c", .documents: "m-d"],
+           "the rest stay as legacy values Settings names")
+    expect(invariantHolds(many), "a legacy value keeps being honoured")
+
+    // 4. Composer on an enabled custom provider.
+    let glm = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5")
+    let customCase = input(purposes: [.planning: "claude-opus-5"], composer: "p1", customs: [glm])
+    let customResult = TierDefaults.migrate(customCase, includePurposes: true)
+    expect(customResult.routing.tier(.standard) == TierRoute(provider: "custom:p1", model: "glm-5"),
+           "an enabled custom composer override becomes Standard")
+    expect(customResult.routing.tier(.strong) == TierRoute(provider: "anthropic", model: "claude-opus-5"),
+           "purpose ids keep the provider they were picked for (activeCLI's), not Standard's")
+    expect(invariantHolds(customCase), "built-in chats are unchanged")
+    let customPolicy = TierDefaults.purposePolicy(chatProvider: "custom:p1", routing: customResult.routing,
+                                                  legacy: customResult.purposeModelIds, legacyProvider: "anthropic",
+                                                  defaultModelId: "glm-5")
+    expect(modes.allSatisfy { customPolicy.modelId(forMode: $0) == "glm-5" },
+           "chats on the custom provider still send its model in every mode, as before")
+    let disabled = TierCustomProviderSummary(id: "p1", isEnabled: false, firstModelId: "glm-5")
+    expect(TierDefaults.migrate(input(composer: "p1", customs: [disabled]), includePurposes: true).routing.tier(.standard)
+               == TierRoute(provider: "anthropic", model: "claude-sonnet-5"),
+           "a DISABLED override is ignored, as the composer ignores it")
+    expect(TierDefaults.migrate(input(composer: "gone"), includePurposes: true).routing.tier(.standard)?.provider == "anthropic",
+           "a DELETED override is ignored too")
+    let noModels = TierCustomProviderSummary(id: "p2", isEnabled: true, firstModelId: nil)
+    expect(TierDefaults.migrate(input(composer: "p2", customs: [noModels]), includePurposes: true).routing.tier(.standard) == nil,
+           "an enabled override with no model leaves Standard unset rather than move chats off it")
+
+    // 5. Already migrated: purposes untouched; Standard still filled while unset, never overwritten.
+    let again = TierDefaults.migrate(many, includePurposes: false)
+    expect(again.routing.features.isEmpty && again.purposeModelIds == many.purposeModelIds,
+           "a second run never re-migrates purposes")
+    expect(again.routing.tier(.standard) != nil, "Standard is still filled while unset")
+    let kept = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "openai", model: "gpt-5.5")])
+    expect(TierDefaults.migrate(input(routing: kept), includePurposes: false).routing == kept,
+           "an existing Standard is never overwritten")
+
+    // 6. Claude's live list not loaded yet: no default model to name.
+    let noModel = input(defaultModelId: "", purposes: [.planning: "claude-opus-5"])
+    let noModelResult = TierDefaults.migrate(noModel, includePurposes: true)
+    expect(noModelResult.routing.tier(.standard) == nil,
+           "Standard stays unset (Settings warns) instead of storing model \"\"")
+    expect(noModelResult.routing.features["chatPlanning"] == "strong", "purposes still migrate")
+    expect(invariantHolds(noModel), "no model: still nothing changes")
+
+    // 7. A retired purpose id: filtered at send both before and after.
+    expect(invariantHolds(input(purposes: [.planning: "claude-opus-4-7"]), isOffered: { $0 != "claude-opus-4-7" }),
+           "a retired purpose id is skipped at send before AND after, so the default is sent both times")
+
+    // 8. activeCLI no tier can name (shared Custom endpoint, GLM, Copilot).
+    let shared = input(activeCLI: "custom", defaultModelId: "llama-3", purposes: [.coding: "qwen-3"])
+    let sharedResult = TierDefaults.migrate(shared, includePurposes: true)
+    expect(sharedResult.routing.tier(.standard) == nil && sharedResult.purposeModelIds == [.coding: "qwen-3"],
+           "an unrepresentable default leaves Standard unset and purposes as legacy")
+    expect(TierDefaults.standardFromLegacy(activeCLI: "copilot", defaultModelId: "gpt-4o", composerProviderId: "",
+                                           customProviders: []) == nil,
+           "Copilot would read back as openai, so it is not a Standard")
+    expect(invariantHolds(shared), "unrepresentable: nothing changes")
+
+    // 9. No free tier: Strong and Cheap already used by other roles.
+    let busy = TierRoutingConfig(tiers: ["strong": TierRoute(provider: "anthropic", model: "claude-opus-5"),
+                                         "cheap": TierRoute(provider: "openai", model: "gpt-5.4-mini")],
+                                 features: ["loop": "cheap"])
+    let busyCase = input(purposes: [.planning: "claude-opus-5", .reviewing: "claude-haiku-5"], routing: busy)
+    let busyResult = TierDefaults.migrate(busyCase, includePurposes: true)
+    expect(busyResult.routing.features["chatPlanning"] == "strong", "an equal tier is reused")
+    expect(busyResult.purposeModelIds == [.reviewing: "claude-haiku-5"] && busyResult.routing.tier(.cheap) == busy.tier(.cheap)
+               && busyResult.routing.features["loop"] == "cheap",
+           "no free tier: kept as legacy, other roles' tiers untouched")
+    expect(invariantHolds(busyCase), "busy tiers: nothing changes")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

@@ -47,4 +47,45 @@ struct TierDefaultsTests {
                                                 legacyProvider: "anthropic", defaultModelId: "gpt-5.5")
         #expect(openai.modelId(forMode: "review") == "gpt-5.4-mini")
     }
+
+    private func input(activeCLI: String = "claude_code", defaultModelId: String = "claude-sonnet-5",
+                       purposes: [ModelPurpose: String] = [:], composer: String = "",
+                       customs: [TierCustomProviderSummary] = [],
+                       routing: TierRoutingConfig = TierRoutingConfig()) -> TierMigrationInput {
+        TierMigrationInput(routing: routing, activeCLI: activeCLI, defaultModelId: defaultModelId,
+                           purposeModelIds: purposes, composerProviderId: composer, customProviders: customs)
+    }
+
+    @Test func allDefaultGetsStandardOnly() {
+        let result = TierDefaults.migrate(input(), includePurposes: true)
+        #expect(result.routing == TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "claude-sonnet-5")]))
+    }
+
+    @Test func morePurposesThanFreeTiersKeepsTheRestAsLegacy() {
+        let result = TierDefaults.migrate(input(purposes: [.planning: "a", .coding: "b", .reviewing: "c", .documents: "d"]),
+                                          includePurposes: true)
+        #expect(result.routing.features == ["chatPlanning": "strong", "chatCoding": "cheap"])
+        #expect(result.purposeModelIds == [.reviewing: "c", .documents: "d"])
+    }
+
+    @Test func deletedOrDisabledCustomOverrideIsIgnored() {
+        let disabled = TierCustomProviderSummary(id: "p1", isEnabled: false, firstModelId: "glm-5")
+        #expect(TierDefaults.migrate(input(composer: "p1", customs: [disabled]), includePurposes: true)
+                    .routing.tier(.standard)?.provider == "anthropic")
+        #expect(TierDefaults.migrate(input(composer: "gone"), includePurposes: true)
+                    .routing.tier(.standard)?.provider == "anthropic")
+    }
+
+    @Test func emptyClaudeModelLeavesStandardUnset() {
+        let result = TierDefaults.migrate(input(defaultModelId: "", purposes: [.planning: "claude-opus-5"]),
+                                          includePurposes: true)
+        #expect(result.routing.tier(.standard) == nil)
+        #expect(result.routing.features["chatPlanning"] == "strong")
+    }
+
+    @Test func alreadyMigratedNeverTouchesPurposes() {
+        let given = input(purposes: [.planning: "claude-opus-5"])
+        let result = TierDefaults.migrate(given, includePurposes: false)
+        #expect(result.purposeModelIds == given.purposeModelIds && result.routing.features.isEmpty)
+    }
 }

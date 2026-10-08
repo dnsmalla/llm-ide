@@ -22,6 +22,50 @@ public struct StandardWriteThrough: Sendable, Equatable {
     }
 }
 
+/// A custom provider as the migration sees it — the public projection of the
+/// internal `CustomProvider`, so `chat-contract-lab` can build inputs.
+public struct TierCustomProviderSummary: Sendable, Equatable {
+    public let id: String
+    public let isEnabled: Bool
+    public let firstModelId: String?
+
+    public init(id: String, isEnabled: Bool, firstModelId: String?) {
+        self.id = id
+        self.isEnabled = isEnabled
+        self.firstModelId = firstModelId
+    }
+}
+
+/// Everything the migration reads, as values.
+public struct TierMigrationInput: Sendable, Equatable {
+    public var routing: TierRoutingConfig
+    public var activeCLI: String
+    public var defaultModelId: String
+    public var purposeModelIds: [ModelPurpose: String]
+    /// `codeAssistProvider`: a custom provider id, or "".
+    public var composerProviderId: String
+    public var customProviders: [TierCustomProviderSummary]
+
+    public init(routing: TierRoutingConfig, activeCLI: String, defaultModelId: String,
+                purposeModelIds: [ModelPurpose: String], composerProviderId: String,
+                customProviders: [TierCustomProviderSummary]) {
+        self.routing = routing
+        self.activeCLI = activeCLI
+        self.defaultModelId = defaultModelId
+        self.purposeModelIds = purposeModelIds
+        self.composerProviderId = composerProviderId
+        self.customProviders = customProviders
+    }
+}
+
+/// What the migration decided.
+public struct TierMigrationResult: Sendable, Equatable {
+    public var routing: TierRoutingConfig
+    /// Purpose ids still honoured as legacy values (no tier was free for
+    /// them); empty and migrated entries are removed.
+    public var purposeModelIds: [ModelPurpose: String]
+}
+
 /// The Standard tier is the default, and the chat modes are roles.
 ///
 /// Pure functions over value inputs only — no UserDefaults, no `AppConfig` —
@@ -112,5 +156,72 @@ public enum TierDefaults {
             }
         }
         return PurposeModelPolicy(perPurpose: perPurpose, defaultModelId: defaultModelId)
+    }
+
+    /// Standard as it effectively is today, or nil when no tier can name it.
+    ///
+    /// An enabled custom composer override wins (new chats run on it); one
+    /// with no model yields nil — a built-in Standard would have to clear the
+    /// override and move chats. Otherwise (`activeCLI`'s provider,
+    /// `defaultModelId`), but only when writing it back yields the same
+    /// `activeCLI` (the shared Custom endpoint, GLM and Copilot cannot) and a
+    /// model is known (Claude's live list may not be loaded — never store "").
+    public static func standardFromLegacy(activeCLI: String, defaultModelId: String, composerProviderId: String,
+                                          customProviders: [TierCustomProviderSummary]) -> TierRoute? {
+        if !composerProviderId.isEmpty,
+           let custom = customProviders.first(where: { $0.id == composerProviderId && $0.isEnabled }) {
+            let first = custom.firstModelId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return first.isEmpty ? nil : TierRoute(provider: "custom:\(custom.id)", model: first)
+        }
+        let model = defaultModelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        let provider = providerWireId(forActiveCLI: activeCLI)
+        guard !model.isEmpty, cliRawValue(forProvider: provider) == activeCLI else { return nil }
+        return TierRoute(provider: provider, model: model)
+    }
+
+    /// The launch migration.
+    ///
+    /// Rule 1 (every launch while Standard is unset): fill it from
+    /// `standardFromLegacy`. Rule 2 (once, `includePurposes`): each non-empty
+    /// purpose model M — on `activeCLI`'s provider P, the provider it was picked
+    /// for — gets its chat role pointed at a tier equal to (P, M), else at the
+    /// first free of Strong, Cheap; with no free tier it stays a legacy value.
+    /// A role already set is left alone. Pure: the caller saves.
+    public static func migrate(_ input: TierMigrationInput, includePurposes: Bool) -> TierMigrationResult {
+        var routing = input.routing
+        if routing.tier(.standard) == nil,
+           let standard = standardFromLegacy(activeCLI: input.activeCLI, defaultModelId: input.defaultModelId,
+                                             composerProviderId: input.composerProviderId,
+                                             customProviders: input.customProviders) {
+            routing.tiers[RoutingTier.standard.rawValue] = standard
+        }
+        guard includePurposes else {
+            return TierMigrationResult(routing: routing, purposeModelIds: input.purposeModelIds)
+        }
+        let provider = providerWireId(forActiveCLI: input.activeCLI)
+        // The shared Custom endpoint / GLM are not tier providers: their ids stay legacy.
+        let isTierProvider = cliRawValue(forProvider: provider) == input.activeCLI
+        var remaining: [ModelPurpose: String] = [:]
+        for purpose in ModelPurpose.allCases {
+            let model = (input.purposeModelIds[purpose] ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !model.isEmpty else { continue }
+            let feature = chatFeature(for: purpose)
+            guard isTierProvider, routing.tier(for: feature) == nil,
+                  let tier = tierHolding(TierRoute(provider: provider, model: model), in: &routing) else {
+                remaining[purpose] = model
+                continue
+            }
+            routing.features[feature.rawValue] = tier.rawValue
+        }
+        return TierMigrationResult(routing: routing, purposeModelIds: remaining)
+    }
+
+    /// A tier already equal to `route`, else the first free of Strong, Cheap
+    /// (filled with `route`), else nil. Standard is never taken.
+    private static func tierHolding(_ route: TierRoute, in routing: inout TierRoutingConfig) -> RoutingTier? {
+        if let same = RoutingTier.allCases.first(where: { routing.tier($0) == route }) { return same }
+        guard let free = [RoutingTier.strong, .cheap].first(where: { routing.tier($0) == nil }) else { return nil }
+        routing.tiers[free.rawValue] = route
+        return free
     }
 }
