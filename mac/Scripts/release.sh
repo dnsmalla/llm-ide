@@ -41,6 +41,9 @@ echo -e "${BLUE}[release]${NC} build → sign → notarize → dmg"
 
 # Distributed bundles must not carry the build machine's local paths.
 export LLMIDE_OMIT_SOURCE_ROOT=1
+# Notarization needs a secure timestamp; sign.sh only adds one on its own for
+# an identity NAMED "Developer ID Application: …", not for one given by hash.
+export LLMIDE_SIGN_TIMESTAMP=1
 "$SCRIPT_DIR/build.sh"
 "$SCRIPT_DIR/sign.sh"
 "$SCRIPT_DIR/notarize.sh"

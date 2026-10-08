@@ -49,17 +49,26 @@ if [ ! -d "$APP_DIR" ]; then
   exit 1
 fi
 
-# A secure timestamp is REQUIRED for notarization. Ad-hoc signatures cannot
-# carry one (and the timestamp server round-trip would make every local build
-# need the network), so only real identities get --timestamp.
+# A secure timestamp is REQUIRED for notarization, and ONLY for it: it costs a
+# round-trip to Apple's timestamp server, so a build that requests it fails
+# whenever that server is unreachable ("The timestamp service is not
+# available."). Ad-hoc signatures cannot carry one, and a local self-signed
+# dev cert (Scripts/make-dev-cert.sh) can never be notarized, so neither gets
+# it. A Developer ID identity does; release.sh also forces it with
+# LLMIDE_SIGN_TIMESTAMP=1 because the identity may be given as a SHA-1 hash,
+# which the name check below cannot recognise.
 if [ "$IDENTITY" = "-" ]; then
   TIMESTAMP_FLAG="--timestamp=none"
   echo -e "${BLUE}[sign]${NC} ad-hoc signing — every rebuild will re-prompt for keychain access;"
   echo -e "${BLUE}[sign]${NC} run Scripts/make-dev-cert.sh once to fix this for local dev builds."
   echo -e "${BLUE}[sign]${NC} NOTE: no secure timestamp — this build cannot be notarized."
-else
+elif [ "${LLMIDE_SIGN_TIMESTAMP:-0}" = "1" ] || [[ "$IDENTITY" == "Developer ID Application:"* ]]; then
   TIMESTAMP_FLAG="--timestamp"
+  echo -e "${BLUE}[sign]${NC} signing with identity: $IDENTITY (secure timestamp)"
+else
+  TIMESTAMP_FLAG="--timestamp=none"
   echo -e "${BLUE}[sign]${NC} signing with identity: $IDENTITY"
+  echo -e "${BLUE}[sign]${NC} NOTE: local dev identity — no secure timestamp (set LLMIDE_SIGN_TIMESTAMP=1 to request one)."
 fi
 
 # Nested code: hardened runtime, NO entitlements.
