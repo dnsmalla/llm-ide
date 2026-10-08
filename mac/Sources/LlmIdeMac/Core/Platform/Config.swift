@@ -290,11 +290,6 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(explicitModelId, forKey: "explicitModelId") }
     }
 
-    /// Forget every per-purpose pick (they were made for another provider).
-    func resetPurposeModels() {
-        purposeModelIds = [:]
-    }
-
     /// Local mirror of the server-synced LLM output language pref.
     ///
     /// The server stays the source of truth (`/auth/me/prefs`, edited in

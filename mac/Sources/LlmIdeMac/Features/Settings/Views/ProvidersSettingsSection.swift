@@ -14,11 +14,6 @@ struct ProvidersSettingsSection: View {
     /// cannot be offered in one place and missing from another (it was, twice).
     private var providers: [ProviderCatalog.Entry] { ProviderCatalog.all }
 
-    /// The composer's user-added model ids, keyed by backend provider id — the
-    /// same store `CodeAssistantModelState.addCustomModel` writes. Read here so this
-    /// picker offers the same set the composer does (see `modelOptions`).
-    @AppStorage("MEETNOTES_CUSTOM_MODELS") private var customModelsRaw = "{}"
-
     @State private var drafts: [String: String] = [:]
     @State private var baseURLDraft: String = ""
     /// Non-secret copy of the last saved custom base URL. The vault is
@@ -37,14 +32,11 @@ struct ProvidersSettingsSection: View {
     /// Per-provider "Check CLI" verdicts, seeded from `ProviderCliCheckCache`
     /// so a result survives this view being rebuilt on a section switch.
     @State private var cliReady: [String: Bool] = [:]
-    /// Bumped after a live model list lands in `LiveModelCache` (not
-    /// observable) so the pickers re-read it.
-    @State private var modelsVersion = 0
 
     var body: some View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                SettingsHint("Every provider you connect here can be used at the same time. ◉ only picks the default for new chats and for roles without a tier — choosing another provider does not disconnect this one. To use several providers per role (subscription or API key), set them in Tier Routing below.")
+                SettingsHint("Connect providers here. Choose what runs where in Tiers & Roles below.")
                 SettingsHint("A key runs over the fast HTTP API and is stored in the server vault, never on disk here. With no key, “Check CLI” confirms the CLI is installed; your CLI login (subscription) is used when it runs. For several named endpoints (GLM, Ollama, …) see Custom Providers below.")
                 if let configuredLoadError {
                     Text(configuredLoadError)
@@ -66,7 +58,6 @@ struct ProvidersSettingsSection: View {
             await refreshLiveModels()
         }
         .onChange(of: config.activeCLI) { _, _ in Task { await refreshLiveModels() } }
-        .onAppear(perform: normalizeActiveCLI)
     }
 
     @AppStorage(AgentV2Selection.toggleKey) private var useAgentV2 = true
@@ -88,47 +79,10 @@ struct ProvidersSettingsSection: View {
         SettingsHint("The Agent engine answers AskUserQuestion cards mid-turn and keeps its own server-side session per chat. It speaks the Anthropic API only: the built-in OpenAI, Gemini, DeepSeek and GLM entries above stay on the classic engine — to run GLM, DeepSeek or Ollama on the Agent engine, register them under Custom Providers with their Anthropic-compatible URL. Phone-driven background chats always use the classic engine.")
     }
 
-    private func isActive(_ p: ProviderCatalog.Entry) -> Bool {
-        guard let tool = p.tool else { return false }
-        return config.activeCLI == tool.rawValue
-    }
-
-    private func setActive(_ p: ProviderCatalog.Entry) {
-        guard let tool = p.tool else { return }
-        let changed = config.activeCLI != tool.rawValue
-        config.activeCLI = tool.rawValue
-        // Re-clicking the active provider must not wipe the user's Default
-        // model or the purpose picks — only a real provider change resets them.
-        guard changed else { return }
-        config.defaultModelId = tool.defaultModelId
-        config.resetPurposeModels()
-        config.modelPickIsExplicit = false
-    }
-
-    /// Keep `activeCLI` pointing at a selectable provider (a stale persisted
-    /// value falls back to Claude).
-    private func normalizeActiveCLI() {
-        guard !AICliTool.selectable.contains(where: { $0.rawValue == config.activeCLI }) else { return }
-        config.activeCLI = AICliTool.claudeCode.rawValue
-        config.defaultModelId = AICliTool.claudeCode.defaultModelId
-        config.resetPurposeModels()
-        config.modelPickIsExplicit = false
-    }
-
     @ViewBuilder
     private func providerRow(_ p: ProviderCatalog.Entry) -> some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: Spacing.sm) {
-                // Active-default selector (replaces the old CLI Tool radio list).
-                // Only show for model providers (tool != nil).
-                if p.tool != nil {
-                    Button { setActive(p) } label: {
-                        Image(systemName: isActive(p) ? "circle.inset.filled" : "circle")
-                            .foregroundStyle(isActive(p) ? theme.current.accent : theme.current.textMuted)
-                    }
-                    .buttonStyle(.plain)
-                    .help("Make this the default for new chats and roles without a tier. Other providers stay connected and usable.")
-                }
                 // Badges move to a second line rather than squeezing the
                 // provider name when the card is narrow.
                 ViewThatFits(in: .horizontal) {
@@ -177,29 +131,6 @@ struct ProvidersSettingsSection: View {
                 }
             }
 
-            // Default model for the active provider (folded in from the old
-            // CLI Tool section). Custom has no built-in list — its model is
-            // chosen in the composer ("Add model…"). Only shown for model
-            // providers (tool != nil).
-            if isActive(p), let tool = p.tool {
-                let options = modelOptions(for: tool)
-                if !options.isEmpty {
-                    HStack(spacing: Spacing.sm) {
-                        Text("Default model")
-                            .font(Typography.caption)
-                            .foregroundStyle(theme.current.textMuted)
-                        Picker("", selection: defaultModelBinding) {
-                            // Custom (and Claude before its first fetch) has no
-                            // default id; without this tag the picker is blank.
-                            if config.defaultModelId.isEmpty { Text("Provider default").tag("") }
-                            ForEach(options) { Text($0.displayName).tag($0.id) }
-                        }
-                        .labelsHidden().pickerStyle(.menu).fixedSize()
-                    }
-                    PurposeModelPickers(options: options)
-                }
-            }
-
             Text(p.hint)
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.textMuted)
@@ -212,29 +143,9 @@ struct ProvidersSettingsSection: View {
         .padding(.vertical, 4)
     }
 
-    /// Provider name plus, on the default row, the "Default · for new chats" pill.
-    @ViewBuilder
+    /// Provider name. The default is chosen in Tiers & Roles (Standard), not here.
     private func providerTitle(_ p: ProviderCatalog.Entry) -> some View {
-        HStack(spacing: Spacing.sm) {
-            Text(p.label).font(Typography.bodyStrong).lineLimit(1)
-            if isActive(p) {
-                HStack(spacing: 4) {
-                    Text("Default")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(theme.current.accent)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(theme.current.accent.opacity(0.12)).clipShape(Capsule())
-                    Text("for new chats")
-                        .font(Typography.caption)
-                        .foregroundStyle(theme.current.textMuted)
-                        .lineLimit(1)
-                }
-                .help("Default for new chats and roles without a tier in Tier Routing")
-                .accessibilityElement(children: .combine)
-                .accessibilityLabel("Default for new chats")
-            }
-        }
-        .fixedSize()
+        Text(p.label).font(Typography.bodyStrong).lineLimit(1).fixedSize()
     }
 
     /// Whether this row offers "Check CLI" (subscription mode) — the same
@@ -300,39 +211,6 @@ struct ProvidersSettingsSection: View {
         .accessibilityLabel(accessibility)
     }
 
-    /// Models to offer for `tool`: its built-in list, plus the ids the user
-    /// added in the composer, plus the current selection when it is neither.
-    ///
-    /// That last clause is the important one. A SwiftUI `Picker` whose
-    /// selection matches no tag renders an EMPTY selection, and
-    /// `config.defaultModelId` is written from the composer — which offers
-    /// live-fetched ids and "Add model…" ids this static list never had. So
-    /// adding a model in the composer used to blank out this picker. Including
-    /// the live selection guarantees a tag always matches.
-    ///
-    /// It also gives the Custom provider a picker at all: `tool.models` is
-    /// empty for it by design, but a user-added id is a real choice.
-    private func modelOptions(for tool: AICliTool) -> [AIModel] {
-        _ = modelsVersion   // re-read the live cache after a refresh
-        _ = customModelsRaw // re-read when "Add model…" changes
-        var out = tool.pickerModels
-        var seen = Set(out.map(\.id))
-        let current = config.defaultModelId
-        if !current.isEmpty && seen.insert(current).inserted {
-            out.append(AIModel(id: current, displayName: AIModel.knownName(for: current, in: out) ?? current))
-        }
-        return out
-    }
-
-    /// The Default picker must also drop a composer pick, like the purpose
-    /// pickers do — the hint under them promises "until you change a model here".
-    // NOTE: uses the property directly; fold into a Config API if one appears.
-    private var defaultModelBinding: Binding<String> {
-        Binding(
-            get: { config.defaultModelId },
-            set: { config.defaultModelId = $0; config.modelPickIsExplicit = false })
-    }
-
     /// A key is needed unless the row only changes the base URL of a provider
     /// whose key is already in the vault.
     private func canSave(_ p: ProviderCatalog.Entry) -> Bool {
@@ -348,14 +226,13 @@ struct ProvidersSettingsSection: View {
 
     // MARK: - Actions
 
-    /// Fetch the active provider's live model list so the Default and
-    /// per-purpose pickers offer everything the account can use. Best-effort:
-    /// on failure the built-in list stays.
+    /// Fetch the default provider's live model list into `LiveModelCache`, so
+    /// the Tiers & Roles model menus offer everything the account can use.
+    /// Best-effort: on failure the built-in list stays.
     private func refreshLiveModels() async {
         guard let tool = AICliTool(rawValue: config.activeCLI),
               let models = try? await api.listProviderModels(tool.provider), !models.isEmpty else { return }
         LiveModelCache.store(models, for: tool.provider)
-        modelsVersion += 1
     }
 
     private func loadConfigured() async {
@@ -395,7 +272,7 @@ struct ProvidersSettingsSection: View {
                 configured.insert("custom.baseUrl")
                 savedBaseURL = base
                 status[p.id] = (true, "Base URL saved (key unchanged — not re-verified).")
-                if isActive(p) { await refreshLiveModels() }
+                if p.tool?.rawValue == config.activeCLI { await refreshLiveModels() }
                 return
             }
             // Verify BEFORE saving (the server accepts the candidate key and
@@ -422,7 +299,7 @@ struct ProvidersSettingsSection: View {
             }
             // A new key (or endpoint) can unlock a different model list. After
             // the base-URL write: the server lists from the STORED base URL.
-            if isActive(p) { await refreshLiveModels() }
+            if p.tool?.rawValue == config.activeCLI { await refreshLiveModels() }
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }

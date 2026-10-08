@@ -16,30 +16,14 @@ struct CustomProvidersSection: View {
     /// top of it would overwrite (lose) the user's real providers.
     @State private var isListUnreadable = CustomProvider.isListUnreadable
     @State private var showDiscardConfirm = false
-    /// The Code Assistant's provider override — a custom provider's id, or ""
-    /// to use the default provider (Model Providers ◉ above). The composer has
-    /// no provider chip, so this is the only place a custom provider is chosen.
-    @AppStorage(CodeAssistantModelState.composerProviderKey) private var composerProviderId = ""
+    /// The Code Assistant's provider override — a custom provider's id, or "".
+    /// Set by choosing a custom provider as Standard in Tiers & Roles
+    /// (`AppConfig.applyStandardTier`); read here only to drop a stale one.
+    @AppStorage(TierDefaults.composerProviderKey) private var composerProviderId = ""
 
-    /// Enabled providers only: a disabled one cannot run a turn, and the
-    /// composer falls back to the default provider for it anyway.
-    private var composerProviderPicker: some View {
-        Picker("Code Assistant provider", selection: $composerProviderId) {
-            Text("Default provider (Model Providers ◉)").tag("")
-            ForEach(providers.filter(\.isEnabled)) { provider in
-                Text(provider.canRunAgentEngine ? provider.name : "\(provider.name) — classic engine only")
-                    .tag(provider.id)
-            }
-        }
-        .pickerStyle(.menu)
-        .font(Typography.body)
-        .onAppear(perform: dropStaleComposerProvider)
-        .onChange(of: providers) { _, _ in dropStaleComposerProvider() }
-    }
-
-    /// An override naming a deleted or disabled provider matches no picker
-    /// tag (a blank menu) while the composer silently runs the default — so
-    /// clear it and let the picker say what actually runs.
+    /// An override naming a deleted or disabled provider would leave Standard
+    /// pointing nowhere while chats silently ran the last default — clear it
+    /// so chats follow `activeCLI` and Tiers & Roles warns on Standard.
     private func dropStaleComposerProvider() {
         guard !composerProviderId.isEmpty,
               !providers.contains(where: { $0.id == composerProviderId && $0.isEnabled }) else { return }
@@ -49,7 +33,7 @@ struct CustomProvidersSection: View {
     var body: some View {
         SettingsSectionCard(icon: "atom", title: "Custom Providers") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                Text("Add named LLM providers (GLM, Ollama, OpenRouter, etc.). Pick one under “Code Assistant provider” to use it in the Code Assistant.")
+                Text("Add named LLM providers (GLM, Ollama, OpenRouter, etc.). To use one in chats, choose it as Standard in Tiers & Roles.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
                 SettingsHint("For Anthropic, OpenAI, Gemini, DeepSeek, and a single shared custom endpoint, use Model Providers above. This section is for multiple named providers with their own model lists — e.g. Z.AI GLM: base URL https://api.z.ai/api/paas/v4 with models glm-5.2 / glm-5-turbo / glm-4.7. To run a provider on the Claude Agent engine, also give it its Anthropic-compatible URL (Z.AI: https://api.z.ai/api/anthropic).")
@@ -98,7 +82,6 @@ struct CustomProvidersSection: View {
                         .buttonStyle(.bordered)
                         .controlSize(.small)
 
-                    composerProviderPicker
                 }
 
                 if let syncError {
@@ -109,6 +92,8 @@ struct CustomProvidersSection: View {
                 }
             }
         }
+        .onAppear(perform: dropStaleComposerProvider)
+        .onChange(of: providers) { _, _ in dropStaleComposerProvider() }
         .confirmationDialog(
             "Delete \(pendingDelete?.name ?? "provider")?",
             isPresented: Binding(get: { pendingDelete != nil },
