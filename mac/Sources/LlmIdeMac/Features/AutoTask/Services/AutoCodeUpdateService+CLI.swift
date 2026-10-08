@@ -328,7 +328,7 @@ extension AutoCodeUpdateService {
         // (a hint): it is pinned even when the usage chain is not engaged.
         // Skipped when the provider does not offer it (retired / other provider).
         // A tier route is a choice too, and is pinned the same way.
-        let purposeModel = route?.model ?? mode.flatMap { config.purposeModels.purposeModelId(forMode: $0) }
+        let purposeModel = route?.model ?? mode.flatMap { config.purposeModels(forProvider: tool.provider).purposeModelId(forMode: $0) }
             .flatMap { AIModel.isOffered($0, in: tool.offeredModels) ? $0 : nil }
         guard let api else { return .proceed(model: purposeModel) }
         let provider = tool.provider

@@ -48,14 +48,19 @@ extension CodeAssistantModelState {
     /// The model the NEXT turn sends and the composer chip names — one answer
     /// for both, so the chip never labels one model while the chat sends another.
     ///
-    /// An explicit pick wins; otherwise the Settings model for the current
-    /// mode (`PurposeModelPolicy`), skipping one this provider does not offer;
-    /// otherwise `selectedModel`. Custom providers bypass purposes: those ids
-    /// belong to the built-in provider the user set them for.
+    /// An explicit pick wins; otherwise the current mode's tier model when that
+    /// tier is on THIS chat's provider (`AppConfig.purposeModels(forProvider:)`),
+    /// skipping one the provider does not offer; otherwise the default. A
+    /// custom provider's default is its own selected model — `defaultModelId`
+    /// belongs to `activeCLI`'s provider.
     func effectiveModelId(config: AppConfig) -> String {
-        if modelIsExplicit || selectedProvider.starts(with: "custom:") { return selectedModel }
+        if modelIsExplicit { return selectedModel }
+        let isCustom = selectedProvider.starts(with: "custom:")
+        let provider = isCustom ? selectedProvider : (AICliTool(rawValue: selectedProvider) ?? .claudeCode).provider
+        var policy = config.purposeModels(forProvider: provider)
+        if isCustom { policy.defaultModelId = selectedModel }
         let offered = modelsForCurrentProvider()
-        let id = config.purposeModels.modelId(forMode: selectedMode.rawValue, explicit: nil) { candidate in
+        let id = policy.modelId(forMode: selectedMode.rawValue, explicit: nil) { candidate in
             AIModel.isOffered(candidate, in: offered)
         }
         return id ?? selectedModel

@@ -111,6 +111,9 @@ public struct LlmIdeMacApp: App {
         // SwiftUI requires it.  The API client needs SessionStore
         // so it can mint authorization headers from the live token.
         let cfg = AppConfig.shared
+        // Before any view reads the model config: Standard becomes the
+        // default and purpose models become chat roles (one-time part flagged).
+        cfg.migrateToTierDefaults(customProviders: CustomProvider.load())
         KeychainStore.warmSessionCache(
             refreshTokenHost: cfg.serverURL,
             gitLabHost: cfg.gitLabBaseURL)

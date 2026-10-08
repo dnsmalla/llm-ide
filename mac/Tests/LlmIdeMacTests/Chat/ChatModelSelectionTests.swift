@@ -97,4 +97,26 @@ struct ChatModelSelectionTests {
         state.reconcileCustomSelection(activeCLI: "claude_code", defaultModelId: "claude-x")
         #expect(state.selectedProvider == "custom:glm" && state.selectedModel == "glm-5")
     }
+
+    @Test("A custom provider's chat takes a mode tier on that provider")
+    func customChatTakesItsModeTier() throws {
+        let suite = "ChatModelSelectionTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let config = AppConfig(userDefaults: defaults)
+        #expect(TierRoutingConfig(tiers: ["cheap": TierRoute(provider: "custom:glm", model: "glm-5-turbo"),
+                                          "strong": TierRoute(provider: "anthropic", model: "claude-opus-5")],
+                                  features: ["chatCoding": "cheap", "chatPlanning": "strong"]).save(to: defaults))
+        let state = CodeAssistantModelState()
+        state.customProviders = [provider("glm", models: ["glm-5", "glm-5-turbo"])]
+        state.selectedProvider = "custom:glm"
+        state.selectedModel = "glm-5"
+        state.pickMode(.execute)
+        #expect(state.effectiveModelId(config: config) == "glm-5-turbo")
+        state.pickMode(.plan)
+        #expect(state.effectiveModelId(config: config) == "glm-5", "an Anthropic tier does not apply to a GLM chat")
+        state.modelIsExplicit = true
+        state.pickMode(.execute)
+        #expect(state.effectiveModelId(config: config) == "glm-5", "an explicit pick still wins")
+    }
 }

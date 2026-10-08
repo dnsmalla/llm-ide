@@ -89,3 +89,92 @@ struct TierDefaultsTests {
         #expect(result.purposeModelIds == given.purposeModelIds && result.routing.features.isEmpty)
     }
 }
+
+/// AppConfig glue: run against an isolated UserDefaults suite.
+@Suite("Tier defaults: AppConfig")
+struct TierDefaultsConfigTests {
+    private func withSuite(_ body: (UserDefaults) throws -> Void) throws {
+        let suite = "TierDefaultsConfigTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        try body(defaults)
+    }
+
+    @Test func migrationFillsStandardAndMovesARetiredPurposeOnce() throws {
+        try withSuite { defaults in
+            defaults.set("openai", forKey: "activeCLI")
+            defaults.set("gpt-5.5", forKey: "defaultModelId")
+            // Retired: AppConfig.init maps it to its successor before the migration sees it.
+            defaults.set("gpt-4o", forKey: ModelPurpose.planning.settingsKey)
+            let config = AppConfig(userDefaults: defaults)
+            config.migrateToTierDefaults(customProviders: .loaded([]))
+            let table = TierRoutingConfig.load(from: defaults)
+            #expect(table.tier(.standard) == TierRoute(provider: "openai", model: "gpt-5.5"))
+            #expect(table.tier(.strong) == TierRoute(provider: "openai", model: "gpt-5.6-sol"))
+            #expect(table.features["chatPlanning"] == "strong")
+            #expect((config.purposeModelIds[.planning] ?? "").isEmpty)
+            #expect(defaults.bool(forKey: TierDefaults.migratedFlagKey))
+            #expect(config.activeCLI == "openai" && config.defaultModelId == "gpt-5.5")
+            // Second run: the user's later edit (role removed) is not undone.
+            var edited = table
+            edited.features["chatPlanning"] = nil
+            #expect(edited.save(to: defaults))
+            config.migrateToTierDefaults(customProviders: .loaded([]))
+            #expect(TierRoutingConfig.load(from: defaults).features["chatPlanning"] == nil)
+        }
+    }
+
+    @Test func migrationKeepsAComposerPick() throws {
+        try withSuite { defaults in
+            defaults.set("claude_code", forKey: "activeCLI")
+            defaults.set("claude-opus-5", forKey: "defaultModelId")
+            defaults.set(true, forKey: "modelPickIsExplicit")
+            let config = AppConfig(userDefaults: defaults)
+            config.explicitModelId = "claude-opus-5"
+            config.migrateToTierDefaults(customProviders: .loaded([]))
+            #expect(config.modelPickIsExplicit && config.explicitModelId == "claude-opus-5")
+        }
+    }
+
+    @Test func unreadableCustomProvidersDeferTheMigration() throws {
+        try withSuite { defaults in
+            let config = AppConfig(userDefaults: defaults)
+            config.migrateToTierDefaults(customProviders: .failed)
+            #expect(!defaults.bool(forKey: TierDefaults.migratedFlagKey))
+            #expect(TierRoutingConfig.load(from: defaults) == TierRoutingConfig())
+        }
+    }
+
+    @Test func applyStandardOnlyResetsThePickOnAChange() throws {
+        try withSuite { defaults in
+            let config = AppConfig(userDefaults: defaults)
+            config.activeCLI = "claude_code"
+            config.defaultModelId = "claude-sonnet-5"
+            config.modelPickIsExplicit = true
+            config.explicitModelId = "claude-opus-5"
+            #expect(config.applyStandardTier(TierRoute(provider: "anthropic", model: "claude-sonnet-5")))
+            #expect(config.modelPickIsExplicit, "re-saving the same Standard keeps the composer pick")
+            config.purposeModelIds = [.coding: "claude-haiku-5"]
+            #expect(config.applyStandardTier(TierRoute(provider: "openai", model: "gpt-5.5")))
+            #expect(config.activeCLI == "openai" && config.defaultModelId == "gpt-5.5")
+            #expect(!config.modelPickIsExplicit && config.explicitModelId.isEmpty)
+            #expect((config.purposeModelIds[.coding] ?? "").isEmpty, "legacy ids belonged to the old provider")
+            #expect(config.applyStandardTier(TierRoute(provider: "custom:p1", model: "glm-5")))
+            #expect(config.activeCLI == "openai", "a custom Standard leaves activeCLI")
+            #expect(defaults.string(forKey: TierDefaults.composerProviderKey) == "p1")
+            #expect(!config.applyStandardTier(TierRoute(provider: "anthropic", model: "")))
+        }
+    }
+
+    @Test func purposeModelsFollowTiersOnTheirProviderOnly() throws {
+        try withSuite { defaults in
+            let config = AppConfig(userDefaults: defaults)
+            config.activeCLI = "claude_code"
+            config.defaultModelId = "claude-sonnet-5"
+            #expect(TierRoutingConfig(tiers: ["strong": TierRoute(provider: "anthropic", model: "claude-opus-5")],
+                                      features: ["chatPlanning": "strong"]).save(to: defaults))
+            #expect(config.purposeModels(forProvider: "anthropic").modelId(forMode: "plan") == "claude-opus-5")
+            #expect(config.purposeModels(forProvider: "openai").modelId(forMode: "plan") == "claude-sonnet-5")
+        }
+    }
+}

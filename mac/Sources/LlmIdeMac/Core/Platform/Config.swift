@@ -259,10 +259,11 @@ final class AppConfig: ObservableObject {
         didSet { defaults.set(defaultModelId, forKey: "defaultModelId") }
     }
 
-    /// Model per purpose (planning / coding / reviewing / documents). An empty
-    /// value means "use `defaultModelId`", so a fresh install behaves exactly
-    /// as before. Ids belong to the ACTIVE provider, so a provider switch
-    /// clears them (`resetPurposeModels`) just as it resets `defaultModelId`.
+    /// LEGACY per-purpose model ids. No UI edits them any more: the launch
+    /// migration moves them onto chat roles (`TierDefaults.migrate`), and only
+    /// the ones no tier was free for remain, honoured until the user sets that
+    /// chat role. Ids belong to `activeCLI`'s provider, so Standard's
+    /// write-through clears them when it changes the provider.
     @Published var purposeModelIds: [ModelPurpose: String] {
         didSet {
             for purpose in ModelPurpose.allCases {
@@ -271,21 +272,22 @@ final class AppConfig: ObservableObject {
         }
     }
 
-    /// Whether the user's last composer model pick should beat the purpose
-    /// models. The composer's own flag lives in view state, which dies on a
+    /// Whether the user's last composer model pick should beat the chat-mode
+    /// tiers. The composer's own flag lives in view state, which dies on a
     /// section switch — without this an explicit pick silently became the
     /// Settings model after visiting another section. Cleared by anything that
-    /// re-decides the model from Settings: a provider switch or editing a
-    /// purpose picker.
+    /// re-decides the model from Settings: Standard changing, or a chat role
+    /// being edited.
     @Published var modelPickIsExplicit: Bool {
         didSet { defaults.set(modelPickIsExplicit, forKey: "modelPickIsExplicit") }
     }
 
-    /// The single place a chat mode is turned into a model — every surface
-    /// (panel, quick chat, phone bridge, Auto Tasks) asks this, never
-    /// `defaultModelId` directly, or it would ignore the Settings choice.
-    var purposeModels: PurposeModelPolicy {
-        PurposeModelPolicy(perPurpose: purposeModelIds, defaultModelId: defaultModelId)
+    /// The composer's explicit pick itself, restored with `modelPickIsExplicit`
+    /// after the panel's view state dies. A pick used to be written into
+    /// `defaultModelId`, which restored it; that write is gone because it
+    /// silently edited Standard.
+    @Published var explicitModelId: String {
+        didSet { defaults.set(explicitModelId, forKey: "explicitModelId") }
     }
 
     /// Forget every per-purpose pick (they were made for another provider).
@@ -789,6 +791,7 @@ final class AppConfig: ObservableObject {
             return (purpose, AppConfig.retiredModelIds[stored] ?? stored)
         })
         self.modelPickIsExplicit = defaults.bool(forKey: "modelPickIsExplicit")
+        self.explicitModelId = defaults.string(forKey: "explicitModelId") ?? ""
         self.lastSeenAppVersion = defaults.string(forKey: "lastSeenAppVersion") ?? ""
         if defaults.object(forKey: "lastRegressionRunAt") != nil {
             let ts = defaults.double(forKey: "lastRegressionRunAt")

@@ -33,7 +33,7 @@ enum MobileExploreBridge {
             return (nil, AICliTool.claudeCode.provider)
         }
         let cli = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
-        let model = config.purposeModels.modelId(forMode: mode, explicit: nil) {
+        let model = config.purposeModels(forProvider: cli.provider).modelId(forMode: mode, explicit: nil) {
             AIModel.isOffered($0, in: cli.offeredModels)
         }
         return (model, cli.provider)

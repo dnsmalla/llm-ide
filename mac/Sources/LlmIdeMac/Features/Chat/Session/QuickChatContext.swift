@@ -177,11 +177,11 @@ struct QuickChatContext {
     }
 
     /// The model a quick chat falls back to when nothing was picked: the
-    /// Documents model from Settings (the quick chat sends mode "ask"), skipped
+    /// Chat · Documents tier model (the quick chat sends mode "ask"), skipped
     /// when the provider does not offer it, else the Default model. One place
     /// for the send and the label, so the label never names another model.
     static func quickChatFallbackModel(config: AppConfig, tool: AICliTool) -> String {
-        config.purposeModels.modelId(forMode: "ask", explicit: nil) {
+        config.purposeModels(forProvider: tool.provider).modelId(forMode: "ask", explicit: nil) {
             AIModel.isOffered($0, in: tool.offeredModels)
         } ?? ""
     }
@@ -234,7 +234,7 @@ struct QuickChatContext {
             let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
             let model = effectiveModelId(explicit: engine?.quickChatModelId,
                                          // The quick chat sends mode "ask", so its fallback is
-                                         // the Documents model from Settings, else the default.
+                                         // the Chat · Documents tier model, else the default.
                                          defaultModelId: quickChatFallbackModel(config: config, tool: tool),
                                          models: tool.models)
             let route = engine.flatMap(tierRoute(for:))
