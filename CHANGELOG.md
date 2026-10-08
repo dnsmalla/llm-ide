@@ -25,6 +25,15 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Changed
 
+- **Settings: tiers replace the default provider (Mac).** Model Providers now only connects providers
+  (keys, Check CLI, readiness); the ◉ default, the Default model and the Planning / Coding / Reviewing /
+  Documents model pickers are gone, and so is Custom Providers' "Code Assistant provider" picker. Tier
+  Routing is now **Tiers & Roles**: **Standard** is required and is the default for new chats and every
+  Mac role left on Standard (choosing a custom provider as Standard is how chats use it); the four chat
+  modes are roles that pick a tier, used only in chats on that tier's provider. Server roles left unset
+  keep their built-in default. Existing settings migrate once at launch with no change in what runs.
+  A model picked in the chat composer is now a per-chat override only and no longer changes the default,
+  so the phone and quick chat follow the Quick chat role (or Standard) instead of the last composer pick.
 - Server `runClaude` now honours an explicit `custom:<id>` provider for EVERY caller, not only tier
   routes: a composer chat on a custom provider whose model id looks like Claude (`claude-*`) now runs on
   that custom provider instead of being re-derived to Anthropic from the model id.
