@@ -46,9 +46,13 @@ how Sparkle's updater previously ended up holding
 `com.apple.security.cs.disable-library-validation`. Only the app itself gets
 the entitlements file.
 
-`--timestamp` is applied automatically for a real identity (notarization
-requires a secure timestamp) and skipped for ad-hoc builds, which cannot
-carry one.
+`--timestamp` (a secure timestamp, which notarization requires) is applied
+when the identity's name starts with `Developer ID Application:` or when
+`LLMIDE_SIGN_TIMESTAMP=1` is set — `release.sh` always sets it. It is skipped
+for ad-hoc builds, which cannot carry one, and for a local dev cert, which
+can never be notarized, so local builds don't depend on Apple's timestamp
+server. If you run `sign.sh` directly with an identity given as a SHA-1 hash,
+set `LLMIDE_SIGN_TIMESTAMP=1` yourself or notarization will reject the build.
 
 ### 3. Notarize
 

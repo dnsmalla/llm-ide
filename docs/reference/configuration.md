@@ -119,6 +119,7 @@ JS code.
 | Setting | Store | Default | Notes |
 |---|---|---|---|
 | `LLMIDE_SIGN_IDENTITY` | shell env | `-` (ad-hoc) | Passed to `codesign -s`. Use a Developer ID for distribution. |
+| `LLMIDE_SIGN_TIMESTAMP` | shell env | `0` | `1` makes `sign.sh` request a secure timestamp (needed for notarization). Automatic for a `Developer ID Application:` identity; `release.sh` always sets it. Off for ad-hoc and local dev certs. |
 | `LLMIDE_NOTARY_PROFILE` | shell env | unset | Keychain profile name for `xcrun notarytool`. Notarize step skips if unset. |
 
 See `mac/Scripts/` for the per-phase build scripts.
