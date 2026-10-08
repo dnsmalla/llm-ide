@@ -102,6 +102,14 @@ function baseId(id) {
   return String(id).toLowerCase().replace(/\[1m\]$/, '').replace(/-\d{8}$/, '');
 }
 
+// Mirrors ModelDisplayName.normalizedId (mac Core/Platform): baseId plus no
+// "-latest" alias suffix and dots as dashes ("claude-sonnet-5.5"). The last
+// fallback, so the Mac's effort picker and this lookup agree on which row an
+// id names.
+function normalizedId(id) {
+  return baseId(String(id).trim()).replace(/-latest$/, '').replace(/\./g, '-');
+}
+
 /**
  * The account's Claude models, first = the SDK's default. Throws when the SDK
  * cannot answer (not logged in, no binary, timeout) — the caller falls back.
@@ -136,6 +144,7 @@ export function cachedEffortLevels(userId, modelId) {
   // model without its [1m] / date suffix still finds its row.
   const row = modelId
     ? models.find((m) => m.id === modelId) ?? models.find((m) => baseId(m.id) === baseId(modelId))
+      ?? models.find((m) => normalizedId(m.id) === normalizedId(modelId))
     : models[0];
   return row ? [...row.effortLevels] : [];
 }

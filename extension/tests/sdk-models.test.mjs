@@ -168,3 +168,14 @@ test('cachedEffortLevels: falls back to a base-id match like the Mac (1M suffix,
   assert.deepEqual(cachedEffortLevels('u-base', 'claude-opus-5'), ['low'], 'exact match beats a base match');
   assert.deepEqual(cachedEffortLevels('u-base', 'claude-opus-5[1m]'), ['high', 'max']);
 });
+
+test('cachedEffortLevels: a dotted or -latest spelling finds its row (mirrors the Mac\'s normalizedId)', async () => {
+  const { cachedEffortLevels } = await import('../llm_agent/sdk/models.mjs');
+  const rows = [
+    { value: 'sonnet', resolvedModel: 'claude-sonnet-5-5', supportedEffortLevels: ['low', 'medium', 'high'] },
+  ];
+  await listSdkModels('u-norm', { queryFn: () => ({ supportedModels: async () => rows, close() {} }) });
+  assert.deepEqual(cachedEffortLevels('u-norm', 'claude-sonnet-5.5'), ['low', 'medium', 'high']);
+  assert.deepEqual(cachedEffortLevels('u-norm', 'claude-sonnet-5-5-latest'), ['low', 'medium', 'high']);
+  assert.deepEqual(cachedEffortLevels('u-norm', 'claude-sonnet-5'), [], 'a different model is still unlisted');
+});
