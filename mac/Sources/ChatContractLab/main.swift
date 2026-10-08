@@ -1485,6 +1485,38 @@ do {
            "the routing table is readable from outside the app target")
 }
 
+// Standard is the default: saving it writes the legacy default fields the ~20
+// readers still use. Built-ins map to their AICliTool raw value; a custom
+// provider cannot live in activeCLI, so it only sets the composer override.
+print("TierDefaults write-through")
+do {
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "anthropic", model: "claude-opus-5"))
+               == StandardWriteThrough(activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: ""),
+           "anthropic Standard writes activeCLI claude_code + its model and clears the composer override")
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "openai", model: "gpt-5.5"))?.activeCLI == "openai",
+           "openai maps to openai")
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "google", model: "gemini-3.6-flash"))?.activeCLI == "gemini",
+           "google maps to gemini")
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "deepseek", model: "deepseek-chat"))?.activeCLI == "deepseek",
+           "deepseek maps to deepseek")
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "custom:p1", model: "glm-5"))
+               == StandardWriteThrough(activeCLI: nil, defaultModelId: nil, composerProviderId: "p1"),
+           "a custom Standard leaves activeCLI/defaultModelId and points the composer at it")
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "anthropic", model: "  ")) == nil,
+           "no model: nothing is written")
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "glm", model: "glm-5")) == nil,
+           "an unknown provider is never written into activeCLI")
+    expect(TierDefaults.providerWireId(forActiveCLI: "claude_code") == "anthropic"
+               && TierDefaults.providerWireId(forActiveCLI: "gemini") == "google"
+               && TierDefaults.providerWireId(forActiveCLI: "") == "anthropic",
+           "activeCLI reads as its wire provider; empty reads as Claude like AppConfig's readers")
+    expect(ModelPurpose.allCases.allSatisfy { TierDefaults.purpose(for: TierDefaults.chatFeature(for: $0)) == $0 },
+           "every purpose has exactly one chat role and back")
+    expect(TierDefaults.purpose(for: .loop) == nil, "a non-chat role has no purpose")
+    expect(TierDefaults.migratedFlagKey == "tierDefaultMigrated" && TierDefaults.composerProviderKey == "codeAssistProvider",
+           "persisted keys are stable")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {
