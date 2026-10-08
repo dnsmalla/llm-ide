@@ -185,7 +185,10 @@ struct TierRoutingSection: View {
     /// applied (a Standard from before this update), and the Agent-engine note.
     @ViewBuilder
     private func standardNotes(_ route: TierRoute?) -> some View {
-        let current = TierDefaults.describeCurrentDefault(activeCLI: config.activeCLI, defaultModelId: config.defaultModelId)
+        let current = TierDefaults.describeCurrentDefault(
+            activeCLI: config.activeCLI, defaultModelId: config.defaultModelId,
+            composerProviderId: composerProviderId,
+            customProviders: customProviders.map(TierCustomProviderSummary.init))
         let reason = route.flatMap { TierRouting.unusableReason($0, customProviders: customProviders) }
         if let warning = TierDefaults.standardWarning(isSet: route != nil, unusableReason: reason, currentDefault: current) {
             Text(warning)

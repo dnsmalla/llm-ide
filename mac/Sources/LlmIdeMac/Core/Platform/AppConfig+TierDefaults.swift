@@ -5,7 +5,8 @@ private let tierDefaultsLogger = Logger(subsystem: "com.llmide.macapp", category
 
 extension TierCustomProviderSummary {
     init(_ provider: CustomProvider) {
-        self.init(id: provider.id, isEnabled: provider.isEnabled, firstModelId: provider.models.first?.id)
+        self.init(id: provider.id, isEnabled: provider.isEnabled, firstModelId: provider.models.first?.id,
+                  name: provider.name)
     }
 }
 

@@ -28,11 +28,14 @@ public struct TierCustomProviderSummary: Sendable, Equatable {
     public let id: String
     public let isEnabled: Bool
     public let firstModelId: String?
+    /// Display name, for Settings wording only ("" reads as the id).
+    public let name: String
 
-    public init(id: String, isEnabled: Bool, firstModelId: String?) {
+    public init(id: String, isEnabled: Bool, firstModelId: String?, name: String = "") {
         self.id = id
         self.isEnabled = isEnabled
         self.firstModelId = firstModelId
+        self.name = name
     }
 }
 
@@ -229,7 +232,20 @@ public enum TierDefaults {
 
     /// What new chats run on right now: "Claude · claude-opus-5", or
     /// "· account default" when no model is set.
-    public static func describeCurrentDefault(activeCLI: String, defaultModelId: String) -> String {
+    ///
+    /// Mirrors the composer (`CodeAssistantModelState.applyComposerProvider`):
+    /// an override naming an existing, enabled custom provider wins, on that
+    /// provider's FIRST model — the model a new chat starts on there; a dead
+    /// or disabled override is ignored and the built-in default applies.
+    public static func describeCurrentDefault(activeCLI: String, defaultModelId: String,
+                                              composerProviderId: String,
+                                              customProviders: [TierCustomProviderSummary]) -> String {
+        if !composerProviderId.isEmpty,
+           let custom = customProviders.first(where: { $0.id == composerProviderId && $0.isEnabled }) {
+            let name = custom.name.isEmpty ? custom.id : custom.name
+            let first = custom.firstModelId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return "\(name) · \(first.isEmpty ? "no model" : first)"
+        }
         let tool = AICliTool(rawValue: activeCLI) ?? .claudeCode
         let model = defaultModelId.trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(tool.displayName) · \(model.isEmpty ? "account default" : model)"

@@ -96,6 +96,15 @@ struct TierDefaultsTests {
                     .hasSuffix("New chats keep using Claude · m, the last default.") == true)
     }
 
+    @Test func currentDefaultNamesALeftoverComposerOverride() {
+        let custom = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5", name: "Zhipu")
+        #expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                                    composerProviderId: "p1", customProviders: [custom]) == "Zhipu · glm-5")
+        #expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                                    composerProviderId: "gone", customProviders: [custom])
+                    == "Claude · claude-opus-5", "a dead override is ignored, as the composer ignores it")
+    }
+
     @Test func nonAgentStandardIsFlaggedForV2Chats() {
         let openai = TierRoute(provider: "openai", model: "gpt-5.5")
         #expect(TierRouting.unusableReason(openai, customProviders: [], requiresAgentEngine: true) != nil)

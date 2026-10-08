@@ -1710,10 +1710,44 @@ do {
 
 print("TierDefaults Settings wording")
 do {
-    expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5") == "Claude · claude-opus-5",
+    expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                               composerProviderId: "", customProviders: []) == "Claude · claude-opus-5",
            "the current default names provider and model")
-    expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "") == "Claude · account default",
+    expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "",
+                                               composerProviderId: "", customProviders: []) == "Claude · account default",
            "no model (Claude's list not loaded) reads as the account default")
+    let p1 = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5", name: "Zhipu")
+    let p2 = TierCustomProviderSummary(id: "p2", isEnabled: true, firstModelId: "kimi-k3", name: "Moonshot")
+    // Leftover override on a built-in Standard: new chats run on p1, not Standard.
+    expect(!TierDefaults.isApplied(TierRoute(provider: "anthropic", model: "claude-opus-5"), activeCLI: "claude_code",
+                                   defaultModelId: "claude-opus-5", composerProviderId: "p1")
+               && TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                                      composerProviderId: "p1", customProviders: [p1, p2]) == "Zhipu · glm-5",
+           "a leftover custom override is what the row names, not Standard")
+    // Custom Standard p1 vs a different override p2.
+    expect(!TierDefaults.isApplied(TierRoute(provider: "custom:p1", model: "glm-5"), activeCLI: "claude_code",
+                                   defaultModelId: "claude-opus-5", composerProviderId: "p2")
+               && TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                                      composerProviderId: "p2", customProviders: [p1, p2]) == "Moonshot · kimi-k3",
+           "a custom Standard vs another override names the override")
+    expect(TierDefaults.describeCurrentDefault(activeCLI: "openai", defaultModelId: "gpt-5.5", composerProviderId: "p1",
+                                               customProviders: [TierCustomProviderSummary(id: "p1", isEnabled: false,
+                                                                                           firstModelId: "glm-5", name: "Zhipu")])
+               == "OpenAI · gpt-5.5"
+               && TierDefaults.describeCurrentDefault(activeCLI: "openai", defaultModelId: "gpt-5.5", composerProviderId: "gone",
+                                                      customProviders: [p1]) == "OpenAI · gpt-5.5",
+           "a disabled or deleted override is ignored, as the composer ignores it")
+    expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "", composerProviderId: "p3",
+                                               customProviders: [TierCustomProviderSummary(id: "p3", isEnabled: true,
+                                                                                           firstModelId: nil)])
+               == "p3 · no model",
+           "an unnamed override with no models falls back to its id")
+    expect(TierDefaults.standardWarning(isSet: false, unusableReason: nil,
+                                        currentDefault: TierDefaults.describeCurrentDefault(
+                                            activeCLI: "claude_code", defaultModelId: "", composerProviderId: "p1",
+                                            customProviders: [p1]))
+               == "Standard isn't set — new chats and roles on Standard keep using Zhipu · glm-5 until you choose one.",
+           "the unset warning names the override new chats really use")
     let std = TierRoute(provider: "anthropic", model: "claude-opus-5")
     expect(TierDefaults.isApplied(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: ""),
            "a written-through Standard is applied")
