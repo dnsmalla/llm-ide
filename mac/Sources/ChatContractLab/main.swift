@@ -1530,6 +1530,54 @@ do {
     expect(wire.tiers == table.tiers, "tiers are sent unchanged")
 }
 
+// Chat modes from tiers: a mode's tier swaps only the MODEL, so it applies
+// only to chats already on that tier's provider. Precedence is unchanged:
+// explicit composer pick → mode tier model → default (Standard).
+print("TierDefaults purpose policy")
+do {
+    let routing = TierRoutingConfig(
+        tiers: ["strong": TierRoute(provider: "anthropic", model: "claude-opus-5"),
+                "cheap": TierRoute(provider: "openai", model: "gpt-5.4-mini"),
+                "standard": TierRoute(provider: "anthropic", model: "claude-sonnet-5")],
+        features: ["chatPlanning": "strong", "chatReviewing": "cheap"])
+    let onClaude = TierDefaults.purposePolicy(chatProvider: "anthropic", routing: routing, legacy: [:],
+                                              legacyProvider: "anthropic", defaultModelId: "claude-sonnet-5")
+    expect(onClaude.modelId(forMode: "plan") == "claude-opus-5", "a mode's tier model is used on its provider")
+    expect(onClaude.modelId(forMode: "execute") == "claude-sonnet-5", "an unset chat role means Standard")
+    expect(onClaude.modelId(forMode: "review") == "claude-sonnet-5",
+           "a tier on another provider is skipped (a v2 Claude chat never takes an OpenAI mode tier)")
+    expect(onClaude.modelId(forMode: "plan", explicit: "picked") == "picked", "an explicit composer pick still wins")
+    expect(onClaude.modelId(forMode: "plan", explicit: nil, isOffered: { $0 != "claude-opus-5" }) == "claude-sonnet-5",
+           "a tier model the provider does not offer falls back to the default")
+    let onOpenAI = TierDefaults.purposePolicy(chatProvider: "openai", routing: routing, legacy: [:],
+                                              legacyProvider: "anthropic", defaultModelId: "gpt-5.5")
+    expect(onOpenAI.modelId(forMode: "review") == "gpt-5.4-mini" && onOpenAI.modelId(forMode: "plan") == "gpt-5.5",
+           "an OpenAI chat takes only the OpenAI tier")
+
+    let legacy: [ModelPurpose: String] = [.coding: "claude-haiku-5", .reviewing: "claude-old"]
+    let withLegacy = TierDefaults.purposePolicy(chatProvider: "anthropic", routing: routing, legacy: legacy,
+                                                legacyProvider: "anthropic", defaultModelId: "claude-sonnet-5")
+    expect(withLegacy.modelId(forMode: "execute") == "claude-haiku-5",
+           "a legacy purpose model is honoured while its role is unset")
+    expect(withLegacy.modelId(forMode: "review") == "claude-sonnet-5",
+           "a set role replaces the legacy value, even when its tier does not apply here")
+    expect(TierDefaults.purposePolicy(chatProvider: "openai", routing: TierRoutingConfig(), legacy: legacy,
+                                      legacyProvider: "anthropic", defaultModelId: "gpt-5.5")
+               .modelId(forMode: "execute") == "gpt-5.5",
+           "a legacy value only applies on the provider it was picked for")
+
+    let custom = TierRoutingConfig(tiers: ["cheap": TierRoute(provider: "custom:p1", model: "glm-5-turbo")],
+                                   features: ["chatCoding": "cheap"])
+    let onCustom = TierDefaults.purposePolicy(chatProvider: "custom:p1", routing: custom, legacy: [:],
+                                              legacyProvider: "anthropic", defaultModelId: "glm-5")
+    expect(onCustom.modelId(forMode: "execute") == "glm-5-turbo" && onCustom.modelId(forMode: "plan") == "glm-5",
+           "a custom provider's chats take a tier on that same custom provider")
+    let roleWithoutTier = TierRoutingConfig(features: ["chatPlanning": "strong"])
+    expect(TierDefaults.purposePolicy(chatProvider: "anthropic", routing: roleWithoutTier, legacy: [.planning: "x"],
+                                      legacyProvider: "anthropic", defaultModelId: "d").modelId(forMode: "plan") == "d",
+           "a role on an unset tier means the default")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

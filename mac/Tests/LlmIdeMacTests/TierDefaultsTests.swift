@@ -36,4 +36,15 @@ struct TierDefaultsTests {
         let wire = TierDefaults.wireBody(TierRoutingConfig(features: features))
         #expect(Set(wire.features.keys) == Set(RoutedFeature.allCases.filter { $0.group != .chat }.map(\.rawValue)))
     }
+
+    @Test func purposePolicyUsesATierOnlyOnItsProvider() {
+        let routing = TierRoutingConfig(tiers: ["cheap": TierRoute(provider: "openai", model: "gpt-5.4-mini")],
+                                        features: ["chatReviewing": "cheap"])
+        let claude = TierDefaults.purposePolicy(chatProvider: "anthropic", routing: routing, legacy: [:],
+                                                legacyProvider: "anthropic", defaultModelId: "claude-sonnet-5")
+        #expect(claude.modelId(forMode: "review") == "claude-sonnet-5")
+        let openai = TierDefaults.purposePolicy(chatProvider: "openai", routing: routing, legacy: [:],
+                                                legacyProvider: "anthropic", defaultModelId: "gpt-5.5")
+        #expect(openai.modelId(forMode: "review") == "gpt-5.4-mini")
+    }
 }

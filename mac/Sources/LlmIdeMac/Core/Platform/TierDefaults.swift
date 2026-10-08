@@ -82,4 +82,35 @@ public enum TierDefaults {
         body.features = config.features.filter { key, _ in RoutedFeature(rawValue: key)?.group != .chat }
         return body
     }
+
+    /// The chat-mode model policy for a chat on `chatProvider`.
+    ///
+    /// Per purpose: when its chat role names a tier, that tier's model — but
+    /// only if the tier's provider IS the chat's provider (a chat's provider is
+    /// fixed per chat; a mode only swaps the model). A set role decides even
+    /// when it does not apply here, so a replaced legacy value never returns.
+    /// When the role is unset, a leftover legacy purpose model (one the
+    /// migration had no free tier for) applies on the provider it was picked
+    /// for. Otherwise the default.
+    ///
+    /// - Parameters:
+    ///   - chatProvider: the chat's wire provider (`anthropic`, `openai`, …, `custom:<id>`).
+    ///   - legacy: `AppConfig.purposeModelIds` left by the migration.
+    ///   - legacyProvider: the wire provider those ids belong to (`activeCLI`'s).
+    ///   - defaultModelId: the model when no purpose applies.
+    public static func purposePolicy(chatProvider: String, routing: TierRoutingConfig,
+                                     legacy: [ModelPurpose: String], legacyProvider: String,
+                                     defaultModelId: String) -> PurposeModelPolicy {
+        var perPurpose: [ModelPurpose: String] = [:]
+        for purpose in ModelPurpose.allCases {
+            if let tier = routing.tier(for: chatFeature(for: purpose)) {
+                if let route = routing.tier(tier), route.provider == chatProvider {
+                    perPurpose[purpose] = route.model
+                }
+            } else if chatProvider == legacyProvider, let id = legacy[purpose] {
+                perPurpose[purpose] = id
+            }
+        }
+        return PurposeModelPolicy(perPurpose: perPurpose, defaultModelId: defaultModelId)
+    }
 }

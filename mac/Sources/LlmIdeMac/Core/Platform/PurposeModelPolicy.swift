@@ -1,8 +1,8 @@
 import Foundation
 
-/// What a model is being chosen FOR. Settings offers one model per purpose
-/// (empty = the Default model) so a user can, say, plan with a large model and
-/// review with a small one.
+/// What a model is being chosen FOR. Each purpose is a chat role in Settings →
+/// Tiers & Roles (`TierDefaults.chatFeature(for:)`), so a user can, say, plan
+/// on the Strong tier and review on Cheap.
 ///
 /// Keyed by the chat's wire `mode` string, not by `CodeAssistMode`: this lives
 /// in `Core`, which must not import `Features/Chat`, and the wire value is the
@@ -38,8 +38,9 @@ public enum ModelPurpose: String, CaseIterable, Sendable {
 ///
 /// Precedence, highest first:
 ///   1. a model the user picked explicitly in the composer for this chat;
-///   2. the purpose's model from Settings;
-///   3. the Default model from Settings;
+///   2. the purpose's tier model, on that tier's provider only
+///      (`TierDefaults.purposePolicy` builds `perPurpose`);
+///   3. the default model (Standard's, written through to `defaultModelId`);
 ///   4. nil — send no model, so the engine uses the account default.
 ///
 /// Pure value logic so the choice is asserted by `chat-contract-lab` (this
