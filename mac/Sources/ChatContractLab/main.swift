@@ -1708,6 +1708,37 @@ do {
     expect(invariantHolds(busyCase), "busy tiers: nothing changes")
 }
 
+print("TierDefaults Settings wording")
+do {
+    expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5") == "Claude · claude-opus-5",
+           "the current default names provider and model")
+    expect(TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "") == "Claude · account default",
+           "no model (Claude's list not loaded) reads as the account default")
+    let std = TierRoute(provider: "anthropic", model: "claude-opus-5")
+    expect(TierDefaults.isApplied(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: ""),
+           "a written-through Standard is applied")
+    expect(!TierDefaults.isApplied(std, activeCLI: "openai", defaultModelId: "gpt-5.5", composerProviderId: ""),
+           "a Standard saved before this update and never written through is reported")
+    expect(!TierDefaults.isApplied(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: "p1"),
+           "a leftover custom override means new chats are not on Standard")
+    expect(TierDefaults.isApplied(TierRoute(provider: "custom:p1", model: "glm-5"), activeCLI: "openai",
+                                  defaultModelId: "gpt-5.5", composerProviderId: "p1"),
+           "a custom Standard is applied through the override alone")
+    expect(TierDefaults.standardWarning(isSet: false, unusableReason: nil, currentDefault: "Claude · account default")
+               == "Standard isn't set — new chats and roles on Standard keep using Claude · account default until you choose one.",
+           "an unset Standard (e.g. Claude's list was empty at migration) is warned about")
+    expect(TierDefaults.standardWarning(isSet: true, unusableReason: "its provider was deleted", currentDefault: "Claude · claude-opus-5")
+               == "Standard can't be used — its provider was deleted. New chats keep using Claude · claude-opus-5, the last default.",
+           "an unusable Standard (deleted/disabled custom) keeps the last written default")
+    expect(TierDefaults.standardWarning(isSet: true, unusableReason: nil, currentDefault: "x") == nil, "a usable Standard has no warning")
+    expect(TierDefaults.legacyNote(purpose: .planning, model: "claude-opus-4-7")
+               == "Planning: kept old model claude-opus-4-7 — choose a tier to replace it",
+           "a legacy purpose value is named on its row")
+    expect(TierDefaults.chatRoleProviderNote(providerName: "OpenAI") == "used only in chats on OpenAI",
+           "a chat role says which chats it applies to")
+    expect(TierDefaults.modesHelp(.coding) == "Used by Execute and Auto", "row help names the modes")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

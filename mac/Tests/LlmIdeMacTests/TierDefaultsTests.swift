@@ -88,6 +88,20 @@ struct TierDefaultsTests {
         let result = TierDefaults.migrate(given, includePurposes: false)
         #expect(result.purposeModelIds == given.purposeModelIds && result.routing.features.isEmpty)
     }
+
+    @Test func standardOnADeletedCustomProviderWarnsAndKeepsTheDefault() {
+        let reason = TierRouting.unusableReason(TierRoute(provider: "custom:gone", model: "glm-5"), customProviders: [])
+        #expect(reason == "its provider was deleted")
+        #expect(TierDefaults.standardWarning(isSet: true, unusableReason: reason, currentDefault: "Claude · m")?
+                    .hasSuffix("New chats keep using Claude · m, the last default.") == true)
+    }
+
+    @Test func nonAgentStandardIsFlaggedForV2Chats() {
+        let openai = TierRoute(provider: "openai", model: "gpt-5.5")
+        #expect(TierRouting.unusableReason(openai, customProviders: [], requiresAgentEngine: true) != nil)
+        #expect(TierRouting.unusableReason(openai, customProviders: []) == nil, "still a valid Standard for classic chats")
+        #expect(TierDefaults.writeThrough(for: openai)?.activeCLI == "openai")
+    }
 }
 
 /// AppConfig glue: run against an isolated UserDefaults suite.

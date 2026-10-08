@@ -224,4 +224,60 @@ public enum TierDefaults {
         routing.tiers[free.rawValue] = route
         return free
     }
+
+    // MARK: - Settings wording (pure, so the lab asserts it)
+
+    /// What new chats run on right now: "Claude · claude-opus-5", or
+    /// "· account default" when no model is set.
+    public static func describeCurrentDefault(activeCLI: String, defaultModelId: String) -> String {
+        let tool = AICliTool(rawValue: activeCLI) ?? .claudeCode
+        let model = defaultModelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "\(tool.displayName) · \(model.isEmpty ? "account default" : model)"
+    }
+
+    /// Whether `standard` is what the legacy default fields already say (a
+    /// Standard set before this update was never written through).
+    public static func isApplied(_ standard: TierRoute, activeCLI: String, defaultModelId: String,
+                                 composerProviderId: String) -> Bool {
+        guard let write = writeThrough(for: standard) else { return false }
+        return (write.activeCLI.map { $0 == activeCLI } ?? true)
+            && (write.defaultModelId.map { $0 == defaultModelId } ?? true)
+            && write.composerProviderId == composerProviderId
+    }
+
+    /// The warning on the Standard row, or nil. Runtime never errors: an unset
+    /// or unusable Standard keeps the last written default.
+    public static func standardWarning(isSet: Bool, unusableReason: String?, currentDefault: String) -> String? {
+        guard isSet else {
+            return "Standard isn't set — new chats and roles on Standard keep using \(currentDefault) until you choose one."
+        }
+        guard let unusableReason else { return nil }
+        return "Standard can't be used — \(unusableReason). New chats keep using \(currentDefault), the last default."
+    }
+
+    /// Shown under a Standard the Agent (v2) engine cannot run.
+    public static let standardAgentEngineNote =
+        "Agent-engine chats need Claude or a custom provider with an Anthropic-compatible URL — "
+        + "with this Standard, new chats use the classic engine."
+
+    /// A purpose model the migration had no free tier for.
+    public static func legacyNote(purpose: ModelPurpose, model: String) -> String {
+        "\(purpose.rawValue.capitalized): kept old model \(model) — choose a tier to replace it"
+    }
+
+    /// A chat role only swaps the model of chats already on its tier's provider.
+    public static func chatRoleProviderNote(providerName: String) -> String {
+        "used only in chats on \(providerName)"
+    }
+
+    /// Which chat modes a purpose's role covers (moved from the removed
+    /// PurposeModelPickers).
+    public static func modesHelp(_ purpose: ModelPurpose) -> String {
+        switch purpose {
+        case .planning:  return "Used by Plan and Assist Plan"
+        case .coding:    return "Used by Execute and Auto"
+        case .reviewing: return "Used by Code Review"
+        case .documents: return "Used by Document and Ask"
+        }
+    }
 }
