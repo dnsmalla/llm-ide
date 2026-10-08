@@ -42,7 +42,7 @@ struct ProvidersSettingsSection: View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
                 SettingsHint("Every provider you connect here can be used at the same time. ◉ only picks the default for new chats and for roles without a tier — choosing another provider does not disconnect this one. To use several providers per role (subscription or API key), set them in Tier Routing below.")
-                SettingsHint("A key runs over the fast HTTP API and is stored in the server vault, never on disk here. With no key, “Check CLI” confirms your logged-in CLI (subscription). For several named endpoints (GLM, Ollama, …) see Custom Providers below.")
+                SettingsHint("A key runs over the fast HTTP API and is stored in the server vault, never on disk here. With no key, “Check CLI” confirms the CLI is installed; your CLI login (subscription) is used when it runs. For several named endpoints (GLM, Ollama, …) see Custom Providers below.")
                 if let configuredLoadError {
                     Text(configuredLoadError)
                         .font(Typography.caption)
@@ -126,21 +126,19 @@ struct ProvidersSettingsSection: View {
                     .buttonStyle(.plain)
                     .help("Make this the default for new chats and roles without a tier. Other providers stay connected and usable.")
                 }
-                Text(p.label).font(Typography.bodyStrong)
-                if isActive(p) {
-                    Text("Default")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundStyle(theme.current.accent)
-                        .padding(.horizontal, 8).padding(.vertical, 3)
-                        .background(theme.current.accent.opacity(0.12)).clipShape(Capsule())
-                        .help("Default for new chats and roles without a tier in Tier Routing")
-                    Text("for new chats")
-                        .font(Typography.caption)
-                        .foregroundStyle(theme.current.textMuted)
-                        .lineLimit(1)
+                // Badges move to a second line rather than squeezing the
+                // provider name when the card is narrow.
+                ViewThatFits(in: .horizontal) {
+                    HStack(spacing: Spacing.sm) {
+                        providerTitle(p)
+                        readinessBadges(p)
+                    }
+                    VStack(alignment: .leading, spacing: 4) {
+                        providerTitle(p)
+                        HStack(spacing: Spacing.sm) { readinessBadges(p) }
+                    }
                 }
-                readinessBadges(p)
-                Spacer()
+                Spacer(minLength: 0)
                 if let s = status[p.id] {
                     Image(systemName: s.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
                         .foregroundStyle(s.ok ? theme.current.accent3 : theme.current.danger)
@@ -169,10 +167,10 @@ struct ProvidersSettingsSection: View {
                     Button("Clear") { Task { await clear(p) } }
                         .disabled(busy.contains(p.id))
                 }
-                if let tool = p.tool, !tool.cliExecutable.isEmpty, !p.needsBaseURL {
+                if hasCliMode(p) {
                     Button("Check CLI") { Task { await checkCli(p) } }
                         .disabled(busy.contains(p.id))
-                        .help("Verify this provider's logged-in CLI for subscription mode (no key needed)")
+                        .help("Confirm this provider's CLI is installed; your CLI login (subscription) is used when it runs — no key needed")
                 }
             }
 
@@ -211,6 +209,31 @@ struct ProvidersSettingsSection: View {
         .padding(.vertical, 4)
     }
 
+    /// Provider name plus, on the default row, the "Default · for new chats" pill.
+    @ViewBuilder
+    private func providerTitle(_ p: ProviderCatalog.Entry) -> some View {
+        HStack(spacing: Spacing.sm) {
+            Text(p.label).font(Typography.bodyStrong).lineLimit(1)
+            if isActive(p) {
+                HStack(spacing: 4) {
+                    Text("Default")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundStyle(theme.current.accent)
+                        .padding(.horizontal, 8).padding(.vertical, 3)
+                        .background(theme.current.accent.opacity(0.12)).clipShape(Capsule())
+                    Text("for new chats")
+                        .font(Typography.caption)
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(1)
+                }
+                .help("Default for new chats and roles without a tier in Tier Routing")
+                .accessibilityElement(children: .combine)
+                .accessibilityLabel("Default for new chats")
+            }
+        }
+        .fixedSize()
+    }
+
     /// Whether this row offers "Check CLI" (subscription mode) — the same
     /// condition that shows the button.
     private func hasCliMode(_ p: ProviderCatalog.Entry) -> Bool {
@@ -222,37 +245,46 @@ struct ProvidersSettingsSection: View {
     /// the vault listing (`configured`, names only — a key is saved only after
     /// it verifies) and this app session's "Check CLI" results. The CLI state
     /// is never probed on appear, so an unchecked CLI reads as unknown rather
-    /// than "Not set up".
+    /// than "Not set up". The CLI check only proves the CLI is installed (the
+    /// server runs `<cli> --version`), not that it is logged in. Negative
+    /// badges are suppressed when the vault listing failed: `configured` is
+    /// then empty, not known to be empty.
     @ViewBuilder
     private func readinessBadges(_ p: ProviderCatalog.Entry) -> some View {
         let hasKey = configured.contains(p.vaultKey)
         let cli = cliReady[p.id]
         if hasKey {
             readinessBadge("API key", icon: "checkmark", color: theme.current.success,
-                           help: "An API key is saved in the server vault (it was verified when saved).")
+                           help: "An API key is saved in the server vault.",
+                           accessibility: "API key saved")
         }
         if cli == true {
-            readinessBadge("Subscription (CLI)", icon: "checkmark", color: theme.current.success,
-                           help: "The provider's CLI was found on this Mac in this session. Its login is used when no key is set.")
+            readinessBadge("CLI installed", icon: "checkmark", color: theme.current.success,
+                           help: "The provider's CLI was found on this Mac in this session. Your CLI login (subscription) is used when it runs; the login itself is not checked.",
+                           accessibility: "CLI installed")
         }
         // A non-chat row (web search) is optional: no badge when it has no key.
-        if !hasKey && cli != true && p.tool != nil {
+        if !hasKey && cli != true && p.tool != nil && configuredLoadError == nil {
             if hasCliMode(p) && cli == nil {
                 readinessBadge("No key · CLI not checked", icon: nil, color: theme.current.textMuted,
-                               help: "No API key is saved. Click “Check CLI” to confirm your logged-in CLI (subscription).")
+                               help: "No API key is saved. Click “Check CLI” to confirm the CLI is installed.",
+                               accessibility: "No API key, CLI not checked")
             } else {
                 readinessBadge("Not set up", icon: nil, color: theme.current.warning,
                                help: hasCliMode(p)
                                    ? "No API key is saved and the CLI check failed."
-                                   : "No API key is saved. This provider needs a key.")
+                                   : "No API key is saved. This provider needs a key.",
+                               accessibility: "Not set up")
             }
         }
     }
 
-    private func readinessBadge(_ label: String, icon: String?, color: Color, help: String) -> some View {
+    private func readinessBadge(_ label: String, icon: String?, color: Color, help: String,
+                                accessibility: String) -> some View {
         HStack(spacing: 3) {
             if let icon {
                 Image(systemName: icon).font(.system(size: 9, weight: .bold))
+                    .accessibilityHidden(true)
             }
             Text(label).font(Typography.caption).lineLimit(1)
         }
@@ -261,6 +293,8 @@ struct ProvidersSettingsSection: View {
         .foregroundStyle(color)
         .fixedSize()
         .help(help)
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(accessibility)
     }
 
     /// Models to offer for `tool`: its built-in list, plus the ids the user
@@ -401,7 +435,7 @@ struct ProvidersSettingsSection: View {
         }
     }
 
-    /// Verify the provider's logged-in CLI (subscription mode — no key). Lets
+    /// Check the provider's CLI is installed (subscription mode — no key). Lets
     /// users who run codex/gemini/claude via their own login confirm the CLI
     /// is installed and reachable from the server.
     private func checkCli(_ p: ProviderCatalog.Entry) async {
@@ -412,7 +446,11 @@ struct ProvidersSettingsSection: View {
             cliReady[p.id] = result.ok
             ProviderCliCheckCache.results[p.id] = result.ok
         } catch {
+            // A transport failure says nothing about the CLI: drop any earlier
+            // verdict instead of keeping a stale "installed".
             status[p.id] = (false, error.localizedDescription)
+            cliReady[p.id] = nil
+            ProviderCliCheckCache.results[p.id] = nil
         }
     }
 }
