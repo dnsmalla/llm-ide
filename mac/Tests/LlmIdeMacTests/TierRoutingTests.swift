@@ -296,4 +296,14 @@ struct TierRoutingTests {
         defaults.set(Data("not json".utf8), forKey: TierRoutingConfig.defaultsKey)
         #expect(TierRoutingConfig.load(from: defaults) == TierRoutingConfig())
     }
+
+    @Test func chatRolesAreMacOnlyAndGrouped() {
+        let chat = RoutedFeature.allCases.filter { $0.group == .chat }
+        #expect(chat == [.chatPlanning, .chatCoding, .chatReviewing, .chatDocuments])
+        #expect(chat.allSatisfy { $0.unsetLabel == "Standard" })
+        #expect(RoutedFeature.subagents.unsetLabel == "Built-in default")
+        #expect(RoutedFeature.quickChat.group == .background)
+        // An existing wire key must not move.
+        #expect(RoutedFeature.autoTasks.rawValue == "autoTasks" && RoutedFeature.internal.rawValue == "internal")
+    }
 }

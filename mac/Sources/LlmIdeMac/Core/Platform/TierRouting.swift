@@ -5,11 +5,13 @@ private let tierRoutingLogger = Logger(subsystem: "com.llmide.macapp", category:
 
 /// A cost tier a role can be routed to. Each tier names one provider + model
 /// in Settings; roles (`RoutedFeature`) pick a tier, not a model, so a price
-/// change is one edit instead of six.
-enum RoutingTier: String, CaseIterable, Identifiable {
+/// change is one edit instead of six. Standard is required and is the
+/// default (`TierDefaults`). Public so `chat-contract-lab` can assert the pure
+/// logic over it.
+public enum RoutingTier: String, CaseIterable, Identifiable, Sendable {
     case strong, standard, cheap
 
-    var id: String { rawValue }
+    public var id: String { rawValue }
 
     var displayName: String {
         switch self {
@@ -20,24 +22,66 @@ enum RoutingTier: String, CaseIterable, Identifiable {
     }
 }
 
-/// A role whose provider + model can be routed by tier. The raw values are the
-/// wire keys of `features` in `POST /kb/routing-tiers` — do not rename.
-enum RoutedFeature: String, CaseIterable, Identifiable {
-    case subagents, loop, autoTasks, quickChat, pipeline, `internal`
+/// Where a role runs. Decides what "unset" means and whether the server ever
+/// sees the role (chat roles never do — `TierDefaults.wireBody`).
+public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
+    /// The four chat modes: they only pick the MODEL of a chat already on the
+    /// tier's provider, so they are Mac-only.
+    case chat
+    /// Mac surfaces that read `activeCLI` / `defaultModelId` when unset.
+    case background
+    /// Server-side work; unset keeps the server's built-in default.
+    case server
 
-    var id: String { rawValue }
-
-    var displayName: String {
+    /// Settings heading for the group.
+    public var title: String {
         switch self {
-        case .subagents: return "Plugin subagents"
-        case .loop:      return "Loop (agent steps, regression replay)"
-        case .autoTasks: return "Auto Tasks"
-        case .quickChat: return "Quick chat & phone"
-        case .pipeline:  return "Server pipeline (plan, codegen)"
-        case .internal:  return "Internal helpers (summaries, classify)"
+        case .chat:       return "Chat (by mode)"
+        case .background: return "Background (this Mac)"
+        case .server:     return "Server"
         }
     }
 }
+
+/// A role whose provider + model can be routed by tier. The raw values are the
+/// wire keys of `features` in `POST /kb/routing-tiers` — do not rename. The
+/// `chat*` cases are Mac-only and are stripped from that body.
+public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
+    case subagents, loop, autoTasks, quickChat, pipeline, `internal`
+    case chatPlanning, chatCoding, chatReviewing, chatDocuments
+
+    public var id: String { rawValue }
+
+    var displayName: String {
+        switch self {
+        case .subagents:     return "Plugin subagents"
+        case .loop:          return "Loop (agent steps, regression replay)"
+        case .autoTasks:     return "Auto Tasks"
+        case .quickChat:     return "Quick chat & phone"
+        case .pipeline:      return "Server pipeline (plan, codegen)"
+        case .internal:      return "Internal helpers (summaries, classify)"
+        case .chatPlanning:  return "Chat · Planning"
+        case .chatCoding:    return "Chat · Coding"
+        case .chatReviewing: return "Chat · Reviewing"
+        case .chatDocuments: return "Chat · Documents"
+        }
+    }
+
+    public var group: RoutedFeatureGroup {
+        switch self {
+        case .chatPlanning, .chatCoding, .chatReviewing, .chatDocuments: return .chat
+        case .loop, .autoTasks, .quickChat:                               return .background
+        case .subagents, .pipeline, .internal:                            return .server
+        }
+    }
+
+    /// What this role runs when no tier is chosen. Mac roles fall back to
+    /// `activeCLI` / `defaultModelId`, which Standard's write-through keeps
+    /// equal to Standard; server roles keep the server's own default (e.g.
+    /// summaries stay on their cheap built-in model).
+    public var unsetLabel: String { group == .server ? "Built-in default" : "Standard" }
+}
+
 
 /// What a tier-routed chat turn sends instead when the server refuses its
 /// route (400 PROVIDER_UNAVAILABLE / PROVIDER_NOT_AGENT_CAPABLE): the model +
@@ -50,37 +94,42 @@ struct TierRouteFallback: Sendable, Equatable {
 
 /// One tier's target: the server wire provider id
 /// (`anthropic | openai | google | deepseek | custom:<uuid>`) and a model id.
-struct TierRoute: Codable, Equatable {
-    var provider: String
-    var model: String
+public struct TierRoute: Codable, Equatable, Sendable {
+    public var provider: String
+    public var model: String
+
+    public init(provider: String, model: String) {
+        self.provider = provider
+        self.model = model
+    }
 }
 
 /// The whole routing table. Keys are raw values of `RoutingTier` /
 /// `RoutedFeature`; strings rather than enums so an entry written by a newer
 /// build (an unknown tier/feature) decodes instead of failing the whole table.
 /// Mirrored verbatim to the server as the body of `POST /kb/routing-tiers`.
-struct TierRoutingConfig: Codable, Equatable {
-    var tiers: [String: TierRoute] = [:]
-    var features: [String: String] = [:]
+public struct TierRoutingConfig: Codable, Equatable, Sendable {
+    public var tiers: [String: TierRoute] = [:]
+    public var features: [String: String] = [:]
 
     static let defaultsKey = "tierRouting"
 
-    init(tiers: [String: TierRoute] = [:], features: [String: String] = [:]) {
+    public init(tiers: [String: TierRoute] = [:], features: [String: String] = [:]) {
         self.tiers = tiers
         self.features = features
     }
 
     /// Tolerant: a missing half decodes as empty, so a partial blob never
     /// reads as "no routing" for the half that is present.
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         tiers = try container.decodeIfPresent([String: TierRoute].self, forKey: .tiers) ?? [:]
         features = try container.decodeIfPresent([String: String].self, forKey: .features) ?? [:]
     }
 
-    func tier(_ tier: RoutingTier) -> TierRoute? { tiers[tier.rawValue] }
+    public func tier(_ tier: RoutingTier) -> TierRoute? { tiers[tier.rawValue] }
 
-    func tier(for feature: RoutedFeature) -> RoutingTier? {
+    public func tier(for feature: RoutedFeature) -> RoutingTier? {
         features[feature.rawValue].flatMap(RoutingTier.init(rawValue:))
     }
 

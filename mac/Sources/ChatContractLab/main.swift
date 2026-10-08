@@ -1466,6 +1466,25 @@ do {
            "a delta after the terminal result is dropped")
 }
 
+// Tier roles: the four chat modes are Mac-only roles; what an unset role runs
+// depends on where it runs (Standard on the Mac, the server's own default there).
+print("Tier roles")
+do {
+    expect(RoutedFeature.allCases.filter { $0.group == .chat }.map(\.rawValue)
+               == ["chatPlanning", "chatCoding", "chatReviewing", "chatDocuments"],
+           "the four chat-mode roles exist with stable raw values")
+    expect([RoutedFeature.loop, .autoTasks, .quickChat].allSatisfy { $0.group == .background && $0.unsetLabel == "Standard" },
+           "Loop, Auto Tasks and Quick chat are Mac roles whose unset value is Standard")
+    expect([RoutedFeature.subagents, .pipeline, .internal].allSatisfy { $0.group == .server && $0.unsetLabel == "Built-in default" },
+           "server roles left unset keep the server's built-in default")
+    expect(RoutedFeature.chatCoding.unsetLabel == "Standard", "an unset chat role means Standard")
+    expect(RoutedFeatureGroup.allCases.map(\.title) == ["Chat (by mode)", "Background (this Mac)", "Server"],
+           "Settings groups the roles in this order")
+    expect(TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "m")])
+               .tier(.standard)?.model == "m",
+           "the routing table is readable from outside the app target")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {
