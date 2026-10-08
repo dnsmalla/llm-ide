@@ -892,9 +892,9 @@ struct CodeAssistantPanel: View {
         // View state dies on a section switch; the persisted flag restores it.
         modelState.modelIsExplicit = config.modelPickIsExplicit
         if modelState.selectedModel.isEmpty {
-            modelState.selectedModel = config.defaultModelId.isEmpty
-                ? AICliTool.claudeCode.defaultModelId
-                : config.defaultModelId
+            modelState.selectedModel = CodeAssistantModelState.restoredModel(
+                isExplicit: config.modelPickIsExplicit, explicitId: config.explicitModelId,
+                defaultModelId: config.defaultModelId)
         }
         if modelState.selectedProvider.isEmpty {
             modelState.selectedProvider = config.activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : config.activeCLI

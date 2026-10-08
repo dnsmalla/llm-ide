@@ -119,4 +119,41 @@ struct ChatModelSelectionTests {
         state.pickMode(.execute)
         #expect(state.effectiveModelId(config: config) == "glm-5", "an explicit pick still wins")
     }
+
+    @Test("A composer pick no longer edits the default model")
+    func composerPickLeavesTheDefault() throws {
+        let suite = "ChatModelSelectionTests-\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let config = AppConfig(userDefaults: defaults)
+        config.activeCLI = "claude_code"
+        config.defaultModelId = "claude-sonnet-5"
+        let state = CodeAssistantModelState()
+        state.selectedProvider = AICliTool.claudeCode.rawValue
+        state.liveModels[ClaudeCLI.provider] = [AIModel(id: "claude-opus-5", displayName: "Opus 5"),
+                                                AIModel(id: "claude-sonnet-5", displayName: "Sonnet 5")]
+        #expect(state.resolveModelCommand("opus", config: config) == nil)
+        #expect(config.defaultModelId == "claude-sonnet-5", "Standard's model is untouched")
+        #expect(config.modelPickIsExplicit && config.explicitModelId == "claude-opus-5")
+        state.addCustomModel("claude-next", provider: ClaudeCLI.provider, config: config)
+        #expect(config.defaultModelId == "claude-sonnet-5" && config.explicitModelId == "claude-next")
+    }
+
+    @Test("A rebuilt composer restores the explicit pick, else the default")
+    func restoredModel() {
+        #expect(CodeAssistantModelState.restoredModel(isExplicit: true, explicitId: "claude-opus-5",
+                                                      defaultModelId: "claude-sonnet-5") == "claude-opus-5")
+        // A pick made before this update was persisted only as defaultModelId.
+        #expect(CodeAssistantModelState.restoredModel(isExplicit: true, explicitId: "",
+                                                      defaultModelId: "claude-sonnet-5") == "claude-sonnet-5")
+        #expect(CodeAssistantModelState.restoredModel(isExplicit: false, explicitId: "claude-opus-5",
+                                                      defaultModelId: "claude-sonnet-5") == "claude-sonnet-5")
+        #expect(CodeAssistantModelState.restoredModel(isExplicit: false, explicitId: "",
+                                                      defaultModelId: "") == AICliTool.claudeCode.defaultModelId)
+    }
+
+    @Test("The composer provider key is the one Standard's write-through sets")
+    func composerKeyIsShared() {
+        #expect(CodeAssistantModelState.composerProviderKey == TierDefaults.composerProviderKey)
+    }
 }

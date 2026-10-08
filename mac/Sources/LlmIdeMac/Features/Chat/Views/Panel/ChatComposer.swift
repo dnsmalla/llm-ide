@@ -515,19 +515,14 @@ extension CodeAssistantPanel {
                     Button(model.displayName) {
                         modelState.selectedModel = model.id
                         modelState.modelIsExplicit = true
-                        if !isCustom { config.modelPickIsExplicit = true }
-                        // Persist the pick (the phone follows it only while no
-                        // purpose model is set for its mode) so surfaces that read AppConfig —
-                        // notably the iPhone chat proxy (MobileExploreBridge
-                        // reads config.defaultModelId) — forward the actually-
-                        // selected model instead of the stale tool default
-                        // (empty for the generic Custom tool). Without this the
-                        // phone sent provider with no model → GLM "Unknown
-                        // Model". Skip custom:<uuid> providers: those aren't
-                        // represented by config.activeCLI (mobile proxy support
-                        // is built-in providers only).
-                        if !modelState.selectedProvider.starts(with: "custom:") {
-                            config.defaultModelId = model.id
+                        // A per-chat override only. It no longer writes
+                        // `config.defaultModelId` — that is Standard's model
+                        // now, and the phone / quick chat follow their role.
+                        // Persisted (built-in providers only) so the pick
+                        // survives the panel's view state.
+                        if !isCustom {
+                            config.modelPickIsExplicit = true
+                            config.explicitModelId = model.id
                         }
                     }
                 }

@@ -3,8 +3,7 @@ import Foundation
 /// Model/provider resolution, fetching and persistence.
 ///
 /// This logic used to sit in `ChatComposer.swift` — i.e. in a *view* — where it
-/// held `api.listProviderModels` networking, `@AppStorage` JSON encoding, and
-/// `config.defaultModelId` writes. It lives on the state object instead so the
+/// held `api.listProviderModels` networking and `@AppStorage` JSON encoding. It lives on the state object instead so the
 /// composer is only markup, and so a second surface can drive model selection
 /// without copying any of it.
 ///
@@ -103,12 +102,11 @@ extension CodeAssistantModelState {
         }
         selectedModel = id
         modelIsExplicit = true
-        config.modelPickIsExplicit = true
-        // Persist so the iPhone chat proxy forwards this model too. Only
-        // reachable from the built-in "Add model…" alert, so the provider is
-        // always a built-in tool — but the guard keeps that assumption local.
+        // Only reachable from the built-in "Add model…" alert, but the guard
+        // keeps that assumption local. Never `defaultModelId` (Standard's).
         if !selectedProvider.starts(with: "custom:") {
-            config.defaultModelId = id
+            config.modelPickIsExplicit = true
+            config.explicitModelId = id
         }
     }
 
@@ -123,30 +121,6 @@ extension CodeAssistantModelState {
         LiveModelCache.store(models, for: cli.provider)
     }
 
-    /// Switch the active model provider and reset the selected model.
-    func switchProvider(_ provider: ProviderSwitch, config: AppConfig, api: LlmIdeAPIClient) {
-        switch provider {
-        case .builtIn(let tool):
-            // Coming back from a custom provider, or re-clicking the active one,
-            // is not a provider change: the purpose models still apply.
-            let changed = config.activeCLI != tool.rawValue
-            selectedProvider = tool.rawValue
-            selectedModel = tool.defaultModelId
-            modelIsExplicit = false
-            config.activeCLI = tool.rawValue
-            config.defaultModelId = tool.defaultModelId
-            if changed {
-                // Purpose models were picked for the previous provider.
-                config.resetPurposeModels()
-                config.modelPickIsExplicit = false
-            }
-            Task { await loadModels(for: tool, api: api) }
-        case .custom(let customProvider):
-            selectedProvider = "custom:\(customProvider.id)"
-            selectedModel = customProvider.models.first?.id ?? ""
-        }
-    }
-
     /// Settings changed the DEFAULT provider (`config.activeCLI`): move the
     /// composer's provider with it, not just its model. Moving only the model
     /// left e.g. provider `anthropic` paired with a `gpt-…` model (or a
@@ -158,6 +132,15 @@ extension CodeAssistantModelState {
         selectedProvider = activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : activeCLI
         selectedModel = defaultModelId
         modelIsExplicit = false
+    }
+
+    /// The model a freshly built composer starts on: the persisted explicit
+    /// pick, else the default (Standard's model), else Claude's default. A
+    /// pick made before tiers was persisted only as `defaultModelId`, which
+    /// the second branch still restores.
+    static func restoredModel(isExplicit: Bool, explicitId: String, defaultModelId: String) -> String {
+        if isExplicit, !explicitId.isEmpty { return explicitId }
+        return defaultModelId.isEmpty ? AICliTool.claudeCode.defaultModelId : defaultModelId
     }
 
     /// After the custom-provider list changed: if the selected
@@ -179,10 +162,11 @@ extension CodeAssistantModelState {
 
     /// UserDefaults key of Settings' "Code Assistant provider" override: a
     /// custom provider's id, or "" to follow the default provider
-    /// (`config.activeCLI`). Kept apart from `activeCLI` on purpose — Loop,
+    /// (`config.activeCLI`). Standard's write-through sets it (`AppConfig.applyStandardTier`).
+    /// Kept apart from `activeCLI` on purpose — Loop,
     /// Auto Tasks, the phone bridge and quick chat all read `activeCLI` as an
     /// `AICliTool` raw value, and a `custom:<id>` there would leak into them.
-    static let composerProviderKey = "codeAssistProvider"
+    static let composerProviderKey = TierDefaults.composerProviderKey
 
     /// Point the composer at the provider Settings chose for it: the custom
     /// provider named by `overrideId` while it exists and is enabled, else the
@@ -214,15 +198,10 @@ extension CodeAssistantModelState {
         }
     }
 
-    enum ProviderSwitch {
-        case builtIn(AICliTool)
-        case custom(CustomProvider)
-    }
-
     /// Resolve `/model <query>` against the current provider's known models —
     /// exact id/displayName match first, substring fallback — and select it the
-    /// same way tapping a picker item does, including the `config.defaultModelId`
-    /// sync for built-in providers so the iPhone chat proxy sees the change.
+    /// same way tapping a picker item does, persisted as the explicit pick
+    /// for built-in providers.
     ///
     /// - Returns: `nil` on success, or the message to show the user. The caller
     ///   decides where that message goes; this type does not reach into a chat
@@ -241,10 +220,11 @@ extension CodeAssistantModelState {
         }
         selectedModel = match.id
         modelIsExplicit = true
-        // Persisted flag is for the built-in provider only (see handleOnAppear).
-        if !selectedProvider.starts(with: "custom:") { config.modelPickIsExplicit = true }
+        // Persisted for the built-in provider only (see handleOnAppear); never
+        // into `defaultModelId`, which is Standard's model.
         if !selectedProvider.starts(with: "custom:") {
-            config.defaultModelId = match.id
+            config.modelPickIsExplicit = true
+            config.explicitModelId = match.id
         }
         return nil
     }
