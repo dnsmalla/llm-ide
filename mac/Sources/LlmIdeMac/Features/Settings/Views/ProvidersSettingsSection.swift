@@ -31,6 +31,9 @@ struct ProvidersSettingsSection: View {
     @State private var status: [String: (ok: Bool, msg: String)] = [:]
     @State private var configured: Set<String> = []
     @State private var busy: Set<String> = []
+    /// Per-provider "Check CLI" verdicts, seeded from `ProviderCliCheckCache`
+    /// so a result survives this view being rebuilt on a section switch.
+    @State private var cliReady: [String: Bool] = [:]
     /// Bumped after a live model list lands in `LiveModelCache` (not
     /// observable) so the pickers re-read it.
     @State private var modelsVersion = 0
@@ -38,7 +41,8 @@ struct ProvidersSettingsSection: View {
     var body: some View {
         SettingsSectionCard(icon: "key.horizontal", title: "Model Providers") {
             VStack(alignment: .leading, spacing: Spacing.md) {
-                SettingsHint("Pick the default provider (◉) and model for new Code & Doc Review chats, and add each provider's credentials. A key runs over the fast HTTP API; with no key, “Check CLI” uses your logged-in CLI (subscription). Keys are stored in the server vault — never on disk here. The chat composer switches the model only; for multiple named providers (GLM, Ollama, …) and the Code Assistant's own provider, see Custom Providers below. To use several providers at once — each by subscription or API key — one per role, set them in Tier Routing below.")
+                SettingsHint("Every provider you connect here can be used at the same time. ◉ only picks the default for new chats and for roles without a tier — choosing another provider does not disconnect this one. To use several providers per role (subscription or API key), set them in Tier Routing below.")
+                SettingsHint("A key runs over the fast HTTP API and is stored in the server vault, never on disk here. With no key, “Check CLI” confirms your logged-in CLI (subscription). For several named endpoints (GLM, Ollama, …) see Custom Providers below.")
                 if let configuredLoadError {
                     Text(configuredLoadError)
                         .font(Typography.caption)
@@ -54,6 +58,7 @@ struct ProvidersSettingsSection: View {
         }
         .task {
             if baseURLDraft.isEmpty { baseURLDraft = savedBaseURL }
+            cliReady = ProviderCliCheckCache.results
             await loadConfigured()
             await refreshLiveModels()
         }
@@ -119,21 +124,22 @@ struct ProvidersSettingsSection: View {
                             .foregroundStyle(isActive(p) ? theme.current.accent : theme.current.textMuted)
                     }
                     .buttonStyle(.plain)
-                    .help("Use as the default provider for new chats")
+                    .help("Make this the default for new chats and roles without a tier. Other providers stay connected and usable.")
                 }
                 Text(p.label).font(Typography.bodyStrong)
                 if isActive(p) {
-                    Text("Active")
+                    Text("Default")
                         .font(.system(size: 10, weight: .semibold))
                         .foregroundStyle(theme.current.accent)
                         .padding(.horizontal, 8).padding(.vertical, 3)
                         .background(theme.current.accent.opacity(0.12)).clipShape(Capsule())
-                }
-                if configured.contains(p.vaultKey) {
-                    Text("• configured")
+                        .help("Default for new chats and roles without a tier in Tier Routing")
+                    Text("for new chats")
                         .font(Typography.caption)
-                        .foregroundStyle(theme.current.accent3)
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(1)
                 }
+                readinessBadges(p)
                 Spacer()
                 if let s = status[p.id] {
                     Image(systemName: s.ok ? "checkmark.circle.fill" : "xmark.circle.fill")
@@ -203,6 +209,58 @@ struct ProvidersSettingsSection: View {
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Whether this row offers "Check CLI" (subscription mode) — the same
+    /// condition that shows the button.
+    private func hasCliMode(_ p: ProviderCatalog.Entry) -> Bool {
+        guard let tool = p.tool else { return false }
+        return !tool.cliExecutable.isEmpty && !p.needsBaseURL
+    }
+
+    /// How this provider can run right now, from what the view already knows:
+    /// the vault listing (`configured`, names only — a key is saved only after
+    /// it verifies) and this app session's "Check CLI" results. The CLI state
+    /// is never probed on appear, so an unchecked CLI reads as unknown rather
+    /// than "Not set up".
+    @ViewBuilder
+    private func readinessBadges(_ p: ProviderCatalog.Entry) -> some View {
+        let hasKey = configured.contains(p.vaultKey)
+        let cli = cliReady[p.id]
+        if hasKey {
+            readinessBadge("API key", icon: "checkmark", color: theme.current.success,
+                           help: "An API key is saved in the server vault (it was verified when saved).")
+        }
+        if cli == true {
+            readinessBadge("Subscription (CLI)", icon: "checkmark", color: theme.current.success,
+                           help: "The provider's CLI was found on this Mac in this session. Its login is used when no key is set.")
+        }
+        // A non-chat row (web search) is optional: no badge when it has no key.
+        if !hasKey && cli != true && p.tool != nil {
+            if hasCliMode(p) && cli == nil {
+                readinessBadge("No key · CLI not checked", icon: nil, color: theme.current.textMuted,
+                               help: "No API key is saved. Click “Check CLI” to confirm your logged-in CLI (subscription).")
+            } else {
+                readinessBadge("Not set up", icon: nil, color: theme.current.warning,
+                               help: hasCliMode(p)
+                                   ? "No API key is saved and the CLI check failed."
+                                   : "No API key is saved. This provider needs a key.")
+            }
+        }
+    }
+
+    private func readinessBadge(_ label: String, icon: String?, color: Color, help: String) -> some View {
+        HStack(spacing: 3) {
+            if let icon {
+                Image(systemName: icon).font(.system(size: 9, weight: .bold))
+            }
+            Text(label).font(Typography.caption).lineLimit(1)
+        }
+        .padding(.horizontal, 6).padding(.vertical, 1)
+        .background(Capsule().fill(color.opacity(0.15)))
+        .foregroundStyle(color)
+        .fixedSize()
+        .help(help)
     }
 
     /// Models to offer for `tool`: its built-in list, plus the ids the user
@@ -351,8 +409,20 @@ struct ProvidersSettingsSection: View {
         do {
             let result = try await api.verifyProvider(p.id, mode: "cli", apiKey: nil)
             status[p.id] = (result.ok, result.detail ?? (result.ok ? "CLI ready" : "CLI not found"))
+            cliReady[p.id] = result.ok
+            ProviderCliCheckCache.results[p.id] = result.ok
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }
     }
+}
+
+/// "Check CLI" verdicts for the life of the app process, keyed by backend
+/// provider id. The server has no per-provider CLI status endpoint and the
+/// check spawns the CLI, so it only runs on a click; this keeps that answer
+/// across the section view being torn down. A CLI install is per machine,
+/// not per account, so sign-out does not need to clear it.
+@MainActor
+enum ProviderCliCheckCache {
+    static var results: [String: Bool] = [:]
 }
