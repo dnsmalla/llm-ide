@@ -30,6 +30,9 @@ struct ProvidersSettingsSection: View {
     @State private var configuredLoadError: String?
     @State private var status: [String: (ok: Bool, msg: String)] = [:]
     @State private var configured: Set<String> = []
+    /// False until the first vault listing succeeds, so negative badges don't
+    /// flash "Not set up" while `configured` is still the empty placeholder.
+    @State private var isConfiguredLoaded = false
     @State private var busy: Set<String> = []
     /// Per-provider "Check CLI" verdicts, seeded from `ProviderCliCheckCache`
     /// so a result survives this view being rebuilt on a section switch.
@@ -242,13 +245,13 @@ struct ProvidersSettingsSection: View {
     }
 
     /// How this provider can run right now, from what the view already knows:
-    /// the vault listing (`configured`, names only — a key is saved only after
-    /// it verifies) and this app session's "Check CLI" results. The CLI state
+    /// the vault listing (`configured`, names only — whether a key is stored,
+    /// not whether it still works) and this app session's "Check CLI" results. The CLI state
     /// is never probed on appear, so an unchecked CLI reads as unknown rather
     /// than "Not set up". The CLI check only proves the CLI is installed (the
     /// server runs `<cli> --version`), not that it is logged in. Negative
-    /// badges are suppressed when the vault listing failed: `configured` is
-    /// then empty, not known to be empty.
+    /// badges are suppressed until the vault listing has loaded, and when it
+    /// failed: `configured` is then empty, not known to be empty.
     @ViewBuilder
     private func readinessBadges(_ p: ProviderCatalog.Entry) -> some View {
         let hasKey = configured.contains(p.vaultKey)
@@ -264,7 +267,7 @@ struct ProvidersSettingsSection: View {
                            accessibility: "CLI installed")
         }
         // A non-chat row (web search) is optional: no badge when it has no key.
-        if !hasKey && cli != true && p.tool != nil && configuredLoadError == nil {
+        if !hasKey && cli != true && p.tool != nil && isConfiguredLoaded && configuredLoadError == nil {
             if hasCliMode(p) && cli == nil {
                 readinessBadge("No key · CLI not checked", icon: nil, color: theme.current.textMuted,
                                help: "No API key is saved. Click “Check CLI” to confirm the CLI is installed.",
@@ -359,6 +362,7 @@ struct ProvidersSettingsSection: View {
         do {
             configured = try await api.configuredSecretKeys()
             configuredLoadError = nil
+            isConfiguredLoaded = true
         } catch {
             configuredLoadError = "Couldn't read which keys are stored (\(error.localizedDescription)). Rows below may show as not configured when they are."
         }
