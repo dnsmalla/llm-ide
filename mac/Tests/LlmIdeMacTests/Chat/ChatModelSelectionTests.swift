@@ -98,6 +98,32 @@ struct ChatModelSelectionTests {
         #expect(state.selectedProvider == "custom:glm" && state.selectedModel == "glm-5")
     }
 
+    @Test("A custom Standard's model is the one the composer starts on")
+    func customStandardModel() {
+        let state = CodeAssistantModelState()
+        state.customProviders = [provider("glm", models: ["glm-5", "glm-5-turbo"])]
+        state.selectedProvider = "claude_code"
+        let standard = TierRoute(provider: "custom:glm", model: "glm-5-turbo")
+        state.applyComposerProvider(overrideId: "glm", activeCLI: "claude_code", defaultModelId: "claude-x",
+                                    standard: standard)
+        #expect(state.selectedProvider == "custom:glm" && state.selectedModel == "glm-5-turbo")
+        // Standard's model changed in Settings: a re-apply follows it unless a model was picked.
+        state.applyComposerProvider(overrideId: "glm", activeCLI: "claude_code", defaultModelId: "claude-x",
+                                    standard: TierRoute(provider: "custom:glm", model: "glm-5"))
+        #expect(state.selectedModel == "glm-5")
+        state.selectedModel = "glm-5-turbo"
+        state.modelIsExplicit = true
+        state.applyComposerProvider(overrideId: "glm", activeCLI: "claude_code", defaultModelId: "claude-x",
+                                    standard: TierRoute(provider: "custom:glm", model: "glm-5"))
+        #expect(state.selectedModel == "glm-5-turbo", "an explicit composer pick wins")
+        // A model the provider does not list: its first model.
+        let fresh = CodeAssistantModelState()
+        fresh.customProviders = [provider("glm", models: ["glm-5"])]
+        fresh.applyComposerProvider(overrideId: "glm", activeCLI: "claude_code", defaultModelId: "claude-x",
+                                    standard: standard)
+        #expect(fresh.selectedModel == "glm-5")
+    }
+
     @Test("A custom provider's chat takes a mode tier on that provider")
     func customChatTakesItsModeTier() throws {
         let suite = "ChatModelSelectionTests-\(UUID().uuidString)"

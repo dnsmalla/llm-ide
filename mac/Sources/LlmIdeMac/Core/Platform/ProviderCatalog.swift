@@ -62,7 +62,7 @@ enum ProviderCatalog {
         Entry(id: "custom", tool: .custom,
               label: "Custom (OpenAI-compatible)", shortLabel: "Custom",
               vaultKey: "custom.apiKey", placeholder: "API key (any value for local servers)",
-              hint: "One shared OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), Mistral. Add a model below or in the composer. For several named endpoints at once, use Custom Providers.",
+              hint: "One shared OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), Mistral. Choose it as a tier (e.g. Standard) in Tiers & Roles below — its models are read from the endpoint; add one by hand with Add model… in the chat composer. For several named endpoints at once, use Custom Providers.",
               needsBaseURL: true),
         Entry(id: "web-search", tool: nil,
               label: "Web Search (SerpAPI, optional)", shortLabel: "Web Search",

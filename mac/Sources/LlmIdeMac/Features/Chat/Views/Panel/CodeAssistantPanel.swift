@@ -889,8 +889,9 @@ struct CodeAssistantPanel: View {
     func handleOnAppear() {
         wireEngine()
         modelState.customProviders = CustomProvider.loadAll()
-        // View state dies on a section switch; the persisted flag restores it.
-        modelState.modelIsExplicit = config.modelPickIsExplicit
+        // View state dies on a section switch; the persisted flag restores it
+        // (built-in picks only — a surviving custom pick keeps its own flag).
+        if !modelState.selectedProvider.starts(with: "custom:") { modelState.modelIsExplicit = config.modelPickIsExplicit }
         if modelState.selectedModel.isEmpty {
             modelState.selectedModel = CodeAssistantModelState.restoredModel(
                 isExplicit: config.modelPickIsExplicit, explicitId: config.explicitModelId,

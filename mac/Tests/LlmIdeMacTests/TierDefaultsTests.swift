@@ -22,7 +22,20 @@ struct TierDefaultsTests {
 
     @Test func unwritableStandardWritesNothing() {
         #expect(TierDefaults.writeThrough(for: TierRoute(provider: "anthropic", model: "")) == nil)
-        #expect(TierDefaults.writeThrough(for: TierRoute(provider: "custom", model: "llama")) == nil)
+        #expect(TierDefaults.writeThrough(for: TierRoute(provider: "glm", model: "glm-5")) == nil)
+    }
+
+    @Test func sharedCustomStandardWritesActiveCLI() {
+        #expect(TierDefaults.writeThrough(for: TierRoute(provider: "custom", model: "llama"))
+                    == StandardWriteThrough(activeCLI: "custom", defaultModelId: "llama", composerProviderId: ""))
+    }
+
+    @Test func wireBodyDropsSharedCustomTiers() {
+        let wire = TierDefaults.wireBody(TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom", model: "llama"),
+                                                                   "cheap": TierRoute(provider: "custom:p1", model: "glm-5")],
+                                                           features: ["pipeline": "standard"]))
+        #expect(wire.tiers.keys.sorted() == ["cheap"])
+        #expect(wire.features == ["pipeline": "standard"])
     }
 
     @Test func purposeAndRoleMapOneToOne() {

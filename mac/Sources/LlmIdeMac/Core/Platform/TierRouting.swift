@@ -28,7 +28,8 @@ public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
     /// The four chat modes: they only pick the MODEL of a chat already on the
     /// tier's provider, so they are Mac-only.
     case chat
-    /// Mac surfaces that read `activeCLI` / `defaultModelId` when unset.
+    /// Mac surfaces that read `activeCLI` / `defaultModelId` when unset — or
+    /// a custom Standard's route (`TierDefaults.effectiveTier`).
     case background
     /// Server-side work; unset keeps the server's built-in default.
     case server
@@ -75,10 +76,11 @@ public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
         }
     }
 
-    /// What this role runs when no tier is chosen. Mac roles fall back to
-    /// `activeCLI` / `defaultModelId`, which Standard's write-through keeps
-    /// equal to Standard; server roles keep the server's own default (e.g.
-    /// summaries stay on their cheap built-in model).
+    /// What this role runs when no tier is chosen. Mac roles run Standard
+    /// (`activeCLI` / `defaultModelId`, which Standard's write-through keeps
+    /// equal to a built-in Standard; a custom Standard's route for Background
+    /// roles); server roles keep the server's own default (e.g. summaries stay
+    /// on their cheap built-in model).
     public var unsetLabel: String { group == .server ? "Built-in default" : "Standard" }
 }
 
@@ -191,12 +193,15 @@ enum TierRouting {
         return apiVersion >= requiredServerApiVersion
     }
 
-    /// Built-in wire provider ids a tier may name, in menu order.
+    /// Built-in wire provider ids a tier may name, in menu order. `custom` is
+    /// the shared OpenAI-compatible endpoint (Model Providers → Custom): Mac-only
+    /// — `TierDefaults.wireBody` never sends its tiers to the server.
     static let builtInProviders: [(wireId: String, tool: AICliTool)] = [
         (ClaudeCLI.provider, .claudeCode),
         ("openai", .openai),
         ("google", .gemini),
         ("deepseek", .deepseek),
+        (AICliTool.custom.provider, .custom),
     ]
 
     /// The local CLI that runs `provider`'s models, or nil when it has none
@@ -336,13 +341,15 @@ enum TierRouting {
         }
     }
 
-    /// Pure resolver: the feature's tier route when one is set and usable both
-    /// locally and on the server.
+    /// Pure resolver: the feature's tier route (`TierDefaults.effectiveTier` —
+    /// its own, or Standard for an unset Background role on a custom Standard)
+    /// when it is usable both locally and on the server.
     static func resolve(feature: RoutedFeature, config: TierRoutingConfig,
                         customProviders: [CustomProvider], server: TierRoutingServerState,
                         requiresAgentEngine: Bool = false, localCLIOnly: Bool = false,
                         cliInstalled: (AICliTool) -> Bool = { _ in true }) -> TierRoute? {
-        guard let tier = config.tier(for: feature), let route = config.tier(tier) else { return nil }
+        guard let tier = TierDefaults.effectiveTier(for: feature, routing: config),
+              let route = config.tier(tier) else { return nil }
         let reason = serverUnusableReason(tier, server: server, requiresAgentEngine: requiresAgentEngine,
                                           localCLIOnly: localCLIOnly)
             ?? unusableReason(route, customProviders: customProviders,

@@ -1502,6 +1502,12 @@ do {
     expect(TierDefaults.writeThrough(for: TierRoute(provider: "custom:p1", model: "glm-5"))
                == StandardWriteThrough(activeCLI: nil, defaultModelId: nil, composerProviderId: "p1"),
            "a custom Standard leaves activeCLI/defaultModelId and points the composer at it")
+    expect(TierDefaults.writeThrough(for: TierRoute(provider: "custom", model: "llama-3"))
+               == StandardWriteThrough(activeCLI: "custom", defaultModelId: "llama-3", composerProviderId: ""),
+           "the shared Custom endpoint is a Standard: activeCLI custom + its model, composer override cleared")
+    expect(TierDefaults.isApplied(TierRoute(provider: "custom", model: "llama-3"), activeCLI: "custom",
+                                  defaultModelId: "llama-3", composerProviderId: "", customProviders: []),
+           "a shared-Custom Standard written through is applied")
     expect(TierDefaults.writeThrough(for: TierRoute(provider: "anthropic", model: "  ")) == nil,
            "no model: nothing is written")
     expect(TierDefaults.writeThrough(for: TierRoute(provider: "glm", model: "glm-5")) == nil,
@@ -1528,6 +1534,41 @@ do {
     expect(wire.features == ["loop": "cheap", "futureRole": "cheap"],
            "chat roles are stripped; server, background and unknown (newer build) roles are sent")
     expect(wire.tiers == table.tiers, "tiers are sent unchanged")
+    let shared = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom", model: "llama-3"),
+                                           "cheap": TierRoute(provider: "custom:p1", model: "glm-5")],
+                                   features: ["pipeline": "standard"])
+    let sharedWire = TierDefaults.wireBody(shared)
+    expect(sharedWire.tiers == ["cheap": TierRoute(provider: "custom:p1", model: "glm-5")],
+           "a tier on the shared Custom endpoint (bare `custom`) is never sent; a named custom provider is")
+    expect(sharedWire.features == ["pipeline": "standard"],
+           "a server role on that tier is still sent: the server finds the tier unset and keeps its built-in default")
+    expect(TierDefaults.isMacOnlyProvider("custom") && !TierDefaults.isMacOnlyProvider("custom:p1")
+               && !TierDefaults.isMacOnlyProvider("anthropic"),
+           "only the bare shared endpoint is Mac-only")
+}
+
+// Which tier a role resolves through (the resolver then applies every
+// usability check — agent engine, local CLI, server status — and falls back to
+// activeCLI when the route can't be used). An unset Background role runs a
+// custom Standard; a built-in Standard already IS activeCLI.
+print("TierDefaults effective tier")
+do {
+    let customStd = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom:p1", model: "glm-5"),
+                                              "cheap": TierRoute(provider: "openai", model: "gpt-5.4-mini")],
+                                      features: ["autoTasks": "cheap"])
+    expect([RoutedFeature.loop, .quickChat].allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customStd) == .standard },
+           "unset Loop / Quick chat resolve through a custom Standard")
+    expect(TierDefaults.effectiveTier(for: .autoTasks, routing: customStd) == .cheap, "a set role keeps its own tier")
+    expect([RoutedFeature.pipeline, .subagents, .internal, .chatCoding]
+               .allSatisfy { TierDefaults.effectiveTier(for: $0, routing: customStd) == nil },
+           "unset server roles keep the built-in default; unset chat modes keep the chat's default")
+    let builtInStd = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "claude-opus-5")])
+    expect(TierDefaults.effectiveTier(for: .loop, routing: builtInStd) == nil,
+           "a built-in Standard: unset Background roles read activeCLI, which IS Standard (mode models kept)")
+    let sharedStd = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom", model: "llama-3")])
+    expect(TierDefaults.effectiveTier(for: .quickChat, routing: sharedStd) == nil,
+           "a shared-Custom Standard is activeCLI too")
+    expect(TierDefaults.effectiveTier(for: .loop, routing: TierRoutingConfig()) == nil, "no Standard: nothing routes")
 }
 
 // Chat modes from tiers: a mode's tier swaps only the MODEL, so it applies
@@ -1685,15 +1726,27 @@ do {
     expect(invariantHolds(input(purposes: [.planning: "claude-opus-4-7"]), isOffered: { $0 != "claude-opus-4-7" }),
            "a retired purpose id is skipped at send before AND after, so the default is sent both times")
 
-    // 8. activeCLI no tier can name (shared Custom endpoint, GLM, Copilot).
+    // 8. The shared Custom endpoint is a tier provider; GLM / Copilot are not.
     let shared = input(activeCLI: "custom", defaultModelId: "llama-3", purposes: [.coding: "qwen-3"])
     let sharedResult = TierDefaults.migrate(shared, includePurposes: true)
-    expect(sharedResult.routing.tier(.standard) == nil && sharedResult.purposeModelIds == [.coding: "qwen-3"],
-           "an unrepresentable default leaves Standard unset and purposes as legacy")
+    expect(sharedResult.routing.tier(.standard) == TierRoute(provider: "custom", model: "llama-3"),
+           "a shared-Custom default becomes Standard (no permanent 'not set' warning)")
+    expect(sharedResult.routing.tier(.strong) == TierRoute(provider: "custom", model: "qwen-3")
+               && sharedResult.routing.features["chatCoding"] == "strong" && sharedResult.purposeModelIds.isEmpty,
+           "its purpose models move onto tiers like any built-in's")
+    expect(invariantHolds(shared), "shared Custom: nothing changes")
+    let sharedNoModel = input(activeCLI: "custom", defaultModelId: "", purposes: [.coding: "qwen-3"])
+    expect(TierDefaults.migrate(sharedNoModel, includePurposes: true).routing.tier(.standard) == nil
+               && invariantHolds(sharedNoModel),
+           "a shared-Custom default with no model leaves Standard unset, never model \"\"")
+    let glmDefault = input(activeCLI: "glm", defaultModelId: "glm-5", purposes: [.coding: "glm-5-air"])
+    let glmResult = TierDefaults.migrate(glmDefault, includePurposes: true)
+    expect(glmResult.routing.tier(.standard) == nil && glmResult.purposeModelIds == [.coding: "glm-5-air"],
+           "an unrepresentable default (GLM) leaves Standard unset and purposes as legacy")
     expect(TierDefaults.standardFromLegacy(activeCLI: "copilot", defaultModelId: "gpt-4o", composerProviderId: "",
                                            customProviders: []) == nil,
            "Copilot would read back as openai, so it is not a Standard")
-    expect(invariantHolds(shared), "unrepresentable: nothing changes")
+    expect(invariantHolds(glmDefault), "unrepresentable: nothing changes")
 
     // 9. No free tier: Strong and Cheap already used by other roles.
     let busy = TierRoutingConfig(tiers: ["strong": TierRoute(provider: "anthropic", model: "claude-opus-5"),
@@ -1706,6 +1759,25 @@ do {
                && busyResult.routing.features["loop"] == "cheap",
            "no free tier: kept as legacy, other roles' tiers untouched")
     expect(invariantHolds(busyCase), "busy tiers: nothing changes")
+
+    // 10. An EMPTY tier a role already points at is not free: filling it would
+    // move that role off its built-in default.
+    let referenced = TierRoutingConfig(features: ["pipeline": "strong"])
+    let referencedCase = input(purposes: [.planning: "claude-opus-5"], routing: referenced)
+    let referencedResult = TierDefaults.migrate(referencedCase, includePurposes: true)
+    expect(referencedResult.routing.tier(.strong) == nil,
+           "Pipeline → Strong (empty) keeps Strong empty")
+    expect(referencedResult.routing.tier(.cheap) == TierRoute(provider: "anthropic", model: "claude-opus-5")
+               && referencedResult.routing.features["chatPlanning"] == "cheap"
+               && referencedResult.routing.features["pipeline"] == "strong",
+           "the purpose takes the next free tier; the role's choice is untouched")
+    let bothReferenced = TierRoutingConfig(features: ["pipeline": "strong", "internal": "cheap"])
+    let bothResult = TierDefaults.migrate(input(purposes: [.planning: "claude-opus-5"], routing: bothReferenced),
+                                          includePurposes: true)
+    expect(bothResult.routing.tier(.strong) == nil && bothResult.routing.tier(.cheap) == nil
+               && bothResult.purposeModelIds == [.planning: "claude-opus-5"],
+           "no unreferenced tier: the purpose stays a legacy value")
+    expect(invariantHolds(referencedCase), "referenced tiers: nothing changes")
 }
 
 print("TierDefaults Settings wording")
@@ -1720,13 +1792,13 @@ do {
     let p2 = TierCustomProviderSummary(id: "p2", isEnabled: true, firstModelId: "kimi-k3", name: "Moonshot")
     // Leftover override on a built-in Standard: new chats run on p1, not Standard.
     expect(!TierDefaults.isApplied(TierRoute(provider: "anthropic", model: "claude-opus-5"), activeCLI: "claude_code",
-                                   defaultModelId: "claude-opus-5", composerProviderId: "p1")
+                                   defaultModelId: "claude-opus-5", composerProviderId: "p1", customProviders: [p1, p2])
                && TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
                                                       composerProviderId: "p1", customProviders: [p1, p2]) == "Zhipu · glm-5",
            "a leftover custom override is what the row names, not Standard")
     // Custom Standard p1 vs a different override p2.
     expect(!TierDefaults.isApplied(TierRoute(provider: "custom:p1", model: "glm-5"), activeCLI: "claude_code",
-                                   defaultModelId: "claude-opus-5", composerProviderId: "p2")
+                                   defaultModelId: "claude-opus-5", composerProviderId: "p2", customProviders: [p1, p2])
                && TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
                                                       composerProviderId: "p2", customProviders: [p1, p2]) == "Moonshot · kimi-k3",
            "a custom Standard vs another override names the override")
@@ -1749,15 +1821,45 @@ do {
                == "Standard isn't set — new chats and roles on Standard keep using Zhipu · glm-5 until you choose one.",
            "the unset warning names the override new chats really use")
     let std = TierRoute(provider: "anthropic", model: "claude-opus-5")
-    expect(TierDefaults.isApplied(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: ""),
+    expect(TierDefaults.isApplied(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: "",
+                                  customProviders: []),
            "a written-through Standard is applied")
-    expect(!TierDefaults.isApplied(std, activeCLI: "openai", defaultModelId: "gpt-5.5", composerProviderId: ""),
+    expect(!TierDefaults.isApplied(std, activeCLI: "openai", defaultModelId: "gpt-5.5", composerProviderId: "",
+                                   customProviders: []),
            "a Standard saved before this update and never written through is reported")
-    expect(!TierDefaults.isApplied(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: "p1"),
+    expect(!TierDefaults.isApplied(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5", composerProviderId: "p1",
+                                   customProviders: [p1]),
            "a leftover custom override means new chats are not on Standard")
     expect(TierDefaults.isApplied(TierRoute(provider: "custom:p1", model: "glm-5"), activeCLI: "openai",
-                                  defaultModelId: "gpt-5.5", composerProviderId: "p1"),
+                                  defaultModelId: "gpt-5.5", composerProviderId: "p1", customProviders: [p1]),
            "a custom Standard is applied through the override alone")
+    // I1: a custom Standard is provider + model — the composer starts on Standard's model.
+    let zhipu = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5", name: "Zhipu",
+                                          modelIds: ["glm-5", "glm-5-turbo"])
+    let turbo = TierRoute(provider: "custom:p1", model: "glm-5-turbo")
+    expect(TierDefaults.composerStartModel(customProviderId: "p1", modelIds: zhipu.modelIds, standard: turbo) == "glm-5-turbo",
+           "the composer starts on Standard's model when the override is Standard's custom provider")
+    expect(TierDefaults.composerStartModel(customProviderId: "p1", modelIds: ["glm-5"], standard: turbo) == "glm-5"
+               && TierDefaults.composerStartModel(customProviderId: "p2", modelIds: ["kimi-k3"], standard: turbo) == "kimi-k3"
+               && TierDefaults.composerStartModel(customProviderId: "p1", modelIds: [], standard: turbo) == "",
+           "else the provider's first model (Standard's model unlisted, or another provider)")
+    expect(TierDefaults.isApplied(turbo, activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                  composerProviderId: "p1", customProviders: [zhipu])
+               && TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                                      composerProviderId: "p1", customProviders: [zhipu], standard: turbo)
+               == "Zhipu · glm-5-turbo",
+           "a custom Standard on a non-first model is applied and named by its own model")
+    let zhipuNoTurbo = TierCustomProviderSummary(id: "p1", isEnabled: true, firstModelId: "glm-5", name: "Zhipu",
+                                                 modelIds: ["glm-5"])
+    expect(!TierDefaults.isApplied(turbo, activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                   composerProviderId: "p1", customProviders: [zhipuNoTurbo])
+               && TierDefaults.describeCurrentDefault(activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                                      composerProviderId: "p1", customProviders: [zhipuNoTurbo],
+                                                      standard: turbo) == "Zhipu · glm-5",
+           "a custom Standard whose model the provider no longer lists is reported, naming what runs")
+    expect(!TierDefaults.isApplied(turbo, activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                   composerProviderId: "p1", customProviders: []),
+           "a custom Standard on a deleted provider is not applied")
     expect(TierDefaults.standardWarning(isSet: false, unusableReason: nil, currentDefault: "Claude · account default")
                == "Standard isn't set — new chats and roles on Standard keep using Claude · account default until you choose one.",
            "an unset Standard (e.g. Claude's list was empty at migration) is warned about")

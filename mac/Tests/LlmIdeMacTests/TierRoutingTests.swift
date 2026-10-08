@@ -52,6 +52,27 @@ struct TierRoutingTests {
                                     server: Self.ready) == route)
     }
 
+    // MARK: - Unset Background roles run a custom Standard
+
+    @Test func unsetBackgroundRoleUsesCustomStandard() {
+        let standard = TierRoute(provider: "custom:p1", model: "glm-5.2")
+        let table = TierRoutingConfig(tiers: ["standard": standard])
+        let capable = custom(id: "p1", anthropicURL: "https://api.z.ai/api/anthropic")
+        #expect(Self.resolveReady(feature: .loop, config: table, customProviders: [capable]) == standard)
+        #expect(Self.resolveReady(feature: .quickChat, config: table, customProviders: [capable],
+                                  requiresAgentEngine: true) == standard)
+        // Still subject to every check: no local CLI, no Anthropic URL, server status.
+        #expect(Self.resolveReady(feature: .autoTasks, config: table, customProviders: [capable], localCLIOnly: true) == nil)
+        #expect(Self.resolveReady(feature: .loop, config: table, customProviders: [custom(id: "p1")],
+                                  requiresAgentEngine: true) == nil)
+        #expect(TierRouting.resolve(feature: .loop, config: table, customProviders: [capable],
+                                    server: TierRoutingServerState(apiVersion: 67, status: nil)) == nil)
+        // Server roles keep the built-in default; a built-in Standard is activeCLI already.
+        #expect(Self.resolveReady(feature: .pipeline, config: table, customProviders: [capable]) == nil)
+        let builtIn = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "claude-opus-5")])
+        #expect(Self.resolveReady(feature: .loop, config: builtIn, customProviders: []) == nil)
+    }
+
     @Test func statusNotFetchedRoutesNothing() {
         let route = TierRoute(provider: "anthropic", model: "claude-haiku-4-5")
         let server = TierRoutingServerState(apiVersion: 67, status: nil)

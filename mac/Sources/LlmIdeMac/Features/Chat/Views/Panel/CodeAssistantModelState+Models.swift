@@ -145,10 +145,12 @@ extension CodeAssistantModelState {
 
     /// After the custom-provider list changed: if the selected
     /// `custom:<uuid>` was deleted or disabled, fall back to the default
-    /// provider; if only its selected model went away, take its first model.
-    /// Left alone, the dead id kept being sent (the server couldn't resolve
-    /// it) while the chip fell back to reading "Claude".
-    func reconcileCustomSelection(activeCLI: String, defaultModelId: String) {
+    /// provider; if only its selected model went away, take its start model
+    /// (`TierDefaults.composerStartModel`). Left alone, the dead id kept being
+    /// sent (the server couldn't resolve it) while the chip fell back to
+    /// reading "Claude".
+    func reconcileCustomSelection(activeCLI: String, defaultModelId: String,
+                                  standard: TierRoute? = TierRoutingConfig.load().tier(.standard)) {
         guard selectedProvider.starts(with: "custom:") else { return }
         guard let provider = customProviders.first(where: { "custom:\($0.id)" == selectedProvider }),
               provider.isEnabled else {
@@ -156,8 +158,15 @@ extension CodeAssistantModelState {
             return
         }
         if !provider.models.contains(where: { $0.id == selectedModel }) {
-            selectedModel = provider.models.first?.id ?? ""
+            selectedModel = Self.startModel(on: provider, standard: standard)
         }
+    }
+
+    /// The model a chat on custom `provider` starts on: Standard's model when
+    /// Standard is this provider (and it still lists it), else its first.
+    private static func startModel(on provider: CustomProvider, standard: TierRoute?) -> String {
+        TierDefaults.composerStartModel(customProviderId: provider.id, modelIds: provider.models.map(\.id),
+                                        standard: standard)
     }
 
     /// UserDefaults key of Settings' "Code Assistant provider" override: a
@@ -178,17 +187,27 @@ extension CodeAssistantModelState {
     /// loop while the v2 SDK session sits untouched — the next v2 turn would
     /// resume with no memory of it — so such an override is skipped there
     /// (the deleted provider chip filtered the same way).
+    ///
+    /// The model: Standard's when the override is Standard's custom provider
+    /// (Standard = provider + model), else the provider's first. While no
+    /// model was picked in the composer, a re-apply (appear, Settings edits)
+    /// also follows a changed Standard model — as a built-in Standard's model
+    /// is followed live through `defaultModelId`.
+    ///
+    /// - Parameter standard: the Standard tier; the stored one by default.
     func applyComposerProvider(overrideId: String, activeCLI: String, defaultModelId: String,
-                               agentEngineOnly: Bool = false) {
+                               agentEngineOnly: Bool = false,
+                               standard: TierRoute? = TierRoutingConfig.load().tier(.standard)) {
         if !overrideId.isEmpty,
            let provider = customProviders.first(where: { $0.id == overrideId && $0.isEnabled }),
            !agentEngineOnly || provider.canRunAgentEngine {
             let target = "custom:\(provider.id)"
+            let start = Self.startModel(on: provider, standard: standard)
             if selectedProvider != target {
                 selectedProvider = target
-                selectedModel = provider.models.first?.id ?? ""
-            } else if !provider.models.contains(where: { $0.id == selectedModel }) {
-                selectedModel = provider.models.first?.id ?? ""
+                selectedModel = start
+            } else if !modelIsExplicit || !provider.models.contains(where: { $0.id == selectedModel }) {
+                selectedModel = start
             }
             return
         }

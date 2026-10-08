@@ -30,12 +30,16 @@ public struct TierCustomProviderSummary: Sendable, Equatable {
     public let firstModelId: String?
     /// Display name, for Settings wording only ("" reads as the id).
     public let name: String
+    /// Every model id, in order (nil at init = just `firstModelId`): the
+    /// composer starts on Standard's model only when the provider lists it.
+    public let modelIds: [String]
 
-    public init(id: String, isEnabled: Bool, firstModelId: String?, name: String = "") {
+    public init(id: String, isEnabled: Bool, firstModelId: String?, name: String = "", modelIds: [String]? = nil) {
         self.id = id
         self.isEnabled = isEnabled
         self.firstModelId = firstModelId
         self.name = name
+        self.modelIds = modelIds ?? firstModelId.map { [$0] } ?? []
     }
 }
 
@@ -98,7 +102,8 @@ public enum TierDefaults {
 
     /// The `AICliTool` raw value that runs a built-in tier provider
     /// (anthropic→claude_code, openai→openai, google→gemini,
-    /// deepseek→deepseek), or nil for a custom or unknown provider.
+    /// deepseek→deepseek, custom→custom — the shared OpenAI-compatible
+    /// endpoint), or nil for a named custom (`custom:<id>`) or unknown provider.
     public static func cliRawValue(forProvider provider: String) -> String? {
         TierRouting.builtInProviders.first { $0.wireId == provider }?.tool.rawValue
     }
@@ -121,13 +126,51 @@ public enum TierDefaults {
         return StandardWriteThrough(activeCLI: cli, defaultModelId: model, composerProviderId: "")
     }
 
+    /// Whether a tier provider never reaches the server: the shared Custom
+    /// endpoint (wire id exactly `custom`), which the server's provider check
+    /// rejects. It runs as Standard (`activeCLI` = `custom`) and in chat modes;
+    /// server roles on its tier keep their built-in default.
+    public static func isMacOnlyProvider(_ provider: String) -> Bool {
+        provider == AICliTool.custom.provider
+    }
+
     /// The table as `POST /kb/routing-tiers` receives it: chat roles removed
-    /// (Mac-only — the server would drop them as `unknown_feature`). Unknown
-    /// keys from a newer build are kept, as before, so the server reports them.
+    /// (Mac-only — the server would drop them as `unknown_feature`), and tiers
+    /// on a Mac-only provider removed (the server would drop them as
+    /// `invalid_provider`; a server role on that tier then finds it unset and
+    /// keeps its built-in default). Unknown keys from a newer build are kept,
+    /// as before, so the server reports them.
     public static func wireBody(_ config: TierRoutingConfig) -> TierRoutingConfig {
         var body = config
+        body.tiers = config.tiers.filter { _, route in !isMacOnlyProvider(route.provider) }
         body.features = config.features.filter { key, _ in RoutedFeature(rawValue: key)?.group != .chat }
         return body
+    }
+
+    /// The tier `feature` resolves through: its own when set; for an unset
+    /// Background role (Loop, Auto Tasks, Quick chat), Standard when Standard
+    /// is a named custom provider — the one Standard `activeCLI` cannot hold,
+    /// so without this those roles would run the previous built-in default.
+    /// Any other unset role is nil: Mac roles then read `activeCLI` /
+    /// `defaultModelId`, which Standard's write-through keeps equal to a
+    /// built-in Standard (including each chat mode's model for quick chat),
+    /// and server roles keep the server's built-in default. The resolver still
+    /// applies every usability check to the tier returned.
+    public static func effectiveTier(for feature: RoutedFeature, routing: TierRoutingConfig) -> RoutingTier? {
+        if let tier = routing.tier(for: feature) { return tier }
+        guard feature.group == .background, let standard = routing.tier(.standard),
+              TierRouting.customProviderId(standard.provider) != nil else { return nil }
+        return .standard
+    }
+
+    /// The model the composer starts on for custom provider `customProviderId`:
+    /// Standard's model when Standard IS that provider and it still lists the
+    /// model, else the provider's first model ("" when it has none).
+    public static func composerStartModel(customProviderId: String, modelIds: [String], standard: TierRoute?) -> String {
+        if let standard, standard.provider == "custom:\(customProviderId)", modelIds.contains(standard.model) {
+            return standard.model
+        }
+        return modelIds.first ?? ""
     }
 
     /// The chat-mode model policy for a chat on `chatProvider`.
@@ -167,8 +210,8 @@ public enum TierDefaults {
     /// with no model yields nil — a built-in Standard would have to clear the
     /// override and move chats. Otherwise (`activeCLI`'s provider,
     /// `defaultModelId`), but only when writing it back yields the same
-    /// `activeCLI` (the shared Custom endpoint, GLM and Copilot cannot) and a
-    /// model is known (Claude's live list may not be loaded — never store "").
+    /// `activeCLI` (GLM and Copilot cannot; the shared Custom endpoint can) and
+    /// a model is known (Claude's live list may not be loaded — never store "").
     public static func standardFromLegacy(activeCLI: String, defaultModelId: String, composerProviderId: String,
                                           customProviders: [TierCustomProviderSummary]) -> TierRoute? {
         if !composerProviderId.isEmpty,
@@ -202,7 +245,7 @@ public enum TierDefaults {
             return TierMigrationResult(routing: routing, purposeModelIds: input.purposeModelIds)
         }
         let provider = providerWireId(forActiveCLI: input.activeCLI)
-        // The shared Custom endpoint / GLM are not tier providers: their ids stay legacy.
+        // GLM / Copilot are not tier providers: their ids stay legacy.
         let isTierProvider = cliRawValue(forProvider: provider) == input.activeCLI
         var remaining: [ModelPurpose: String] = [:]
         for purpose in ModelPurpose.allCases {
@@ -220,10 +263,15 @@ public enum TierDefaults {
     }
 
     /// A tier already equal to `route`, else the first free of Strong, Cheap
-    /// (filled with `route`), else nil. Standard is never taken.
+    /// (filled with `route`), else nil. Standard is never taken. A tier is
+    /// free only when it is unset AND no role points at it — filling an empty
+    /// tier a role already names would change what that role runs.
     private static func tierHolding(_ route: TierRoute, in routing: inout TierRoutingConfig) -> RoutingTier? {
         if let same = RoutingTier.allCases.first(where: { routing.tier($0) == route }) { return same }
-        guard let free = [RoutingTier.strong, .cheap].first(where: { routing.tier($0) == nil }) else { return nil }
+        let referenced = Set(routing.features.values)
+        guard let free = [RoutingTier.strong, .cheap].first(where: {
+            routing.tier($0) == nil && !referenced.contains($0.rawValue)
+        }) else { return nil }
         routing.tiers[free.rawValue] = route
         return free
     }
@@ -234,30 +282,43 @@ public enum TierDefaults {
     /// "· account default" when no model is set.
     ///
     /// Mirrors the composer (`CodeAssistantModelState.applyComposerProvider`):
-    /// an override naming an existing, enabled custom provider wins, on that
-    /// provider's FIRST model — the model a new chat starts on there; a dead
-    /// or disabled override is ignored and the built-in default applies.
+    /// an override naming an existing, enabled custom provider wins, on the
+    /// model a new chat starts on there (`composerStartModel`: Standard's when
+    /// Standard is that provider, else its first); a dead or disabled override
+    /// is ignored and the built-in default applies. Pass `composerProviderId:
+    /// ""` for the Mac roles, which never read the override.
     public static func describeCurrentDefault(activeCLI: String, defaultModelId: String,
                                               composerProviderId: String,
-                                              customProviders: [TierCustomProviderSummary]) -> String {
+                                              customProviders: [TierCustomProviderSummary],
+                                              standard: TierRoute? = nil) -> String {
         if !composerProviderId.isEmpty,
            let custom = customProviders.first(where: { $0.id == composerProviderId && $0.isEnabled }) {
             let name = custom.name.isEmpty ? custom.id : custom.name
-            let first = custom.firstModelId?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            return "\(name) · \(first.isEmpty ? "no model" : first)"
+            let start = composerStartModel(customProviderId: custom.id, modelIds: custom.modelIds, standard: standard)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            return "\(name) · \(start.isEmpty ? "no model" : start)"
         }
         let tool = AICliTool(rawValue: activeCLI) ?? .claudeCode
         let model = defaultModelId.trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(tool.displayName) · \(model.isEmpty ? "account default" : model)"
     }
 
-    /// Whether `standard` is what the legacy default fields already say (a
-    /// Standard set before this update was never written through).
+    /// Whether `standard` is what new chats already run (a Standard set
+    /// before this update was never written through). A custom Standard is
+    /// applied through the composer override, and only when the composer
+    /// starts on Standard's model — i.e. the provider still lists it.
     public static func isApplied(_ standard: TierRoute, activeCLI: String, defaultModelId: String,
-                                 composerProviderId: String) -> Bool {
+                                 composerProviderId: String,
+                                 customProviders: [TierCustomProviderSummary]) -> Bool {
         guard let write = writeThrough(for: standard) else { return false }
-        return (write.activeCLI.map { $0 == activeCLI } ?? true)
-            && (write.defaultModelId.map { $0 == defaultModelId } ?? true)
+        if let customId = TierRouting.customProviderId(standard.provider) {
+            guard write.composerProviderId == composerProviderId,
+                  let custom = customProviders.first(where: { $0.id == customId && $0.isEnabled }) else { return false }
+            return composerStartModel(customProviderId: customId, modelIds: custom.modelIds, standard: standard)
+                == standard.model
+        }
+        return write.activeCLI == activeCLI
+            && write.defaultModelId == defaultModelId
             && write.composerProviderId == composerProviderId
     }
 
@@ -275,6 +336,10 @@ public enum TierDefaults {
     public static let standardAgentEngineNote =
         "Agent-engine chats need Claude or a custom provider with an Anthropic-compatible URL — "
         + "with this Standard, new chats use the classic engine."
+
+    /// Why a role or tier on the shared Custom endpoint is not routed.
+    public static let macOnlyProviderNote =
+        "the shared Custom endpoint runs only on this Mac — as Standard or in chat modes, never for server roles"
 
     /// A purpose model the migration had no free tier for.
     public static func legacyNote(purpose: ModelPurpose, model: String) -> String {
