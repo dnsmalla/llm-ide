@@ -247,6 +247,19 @@ export function resolveFeatureRoute(userId, feature, db) {
 }
 
 /**
+ * The tier name `feature` is configured to (e.g. 'cheap'), or null. Display
+ * only — resolveFeatureRoute decides whether that tier is usable. Never throws.
+ */
+export function featureTierName(userId, feature, db) {
+  if (!userId) return null;
+  try {
+    db ??= getDb();
+    const tier = getTierRoutingConfig(userId, db).features[feature];
+    return typeof tier === 'string' && tier ? tier : null;
+  } catch { return null; }
+}
+
+/**
  * Spread-ready runClaude options for `feature`: `{ model, provider,
  * routeFallback }` when routed — `routeFallback` is the caller's own default
  * (`fallback`), which runClaude retries once on when the routed provider

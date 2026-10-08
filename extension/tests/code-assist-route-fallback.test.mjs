@@ -160,6 +160,8 @@ for (const sse of [false, true]) {
       assert.equal(sub.opts.provider, 'openai');
       assert.equal(sub.opts.model, 'gpt-5');
       assert.ok(sub.opts.routeFallback && typeof sub.opts.routeFallback === 'object', 'routeFallback forwarded');
+      // ask-subagent's "which model actually answered" probe (result meta, v71).
+      assert.equal(typeof sub.opts.onModel, 'function', 'onModel forwarded');
       const global = calls.find((c) => !c.subagent);
       assert.equal(global.opts.routeFallback, undefined, 'the unrouted global hop carries none');
     } finally { _setCliProbeForTests(null); }

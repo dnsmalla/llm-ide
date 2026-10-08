@@ -196,3 +196,51 @@ test('subagent does not inherit global chat history', async () => {
   }));
   assert.doesNotMatch(stub.seen[0], /Previous conversation/);
 });
+
+// ── result meta (API v71): what ran, for the client's subagent activity view ──
+
+test('result carries meta { subagent, provider, model, ms } after answer', async () => {
+  const subagents = new Map([['echoer', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't' }]]);
+  const out = await askSubagent({ name: 'echoer', question: 'q' },
+    makeCtx({ subagents, defaultModel: 'claude-haiku-4-5', runClaude: makeStubClaude(['done']) }));
+  assert.deepEqual(Object.keys(out), ['answer', 'pendingTool', 'meta'], 'answer stays first');
+  assert.equal(out.meta.subagent, 'echoer');
+  assert.equal(out.meta.model, 'claude-haiku-4-5');
+  assert.equal(out.meta.provider, 'anthropic');
+  assert.equal(out.meta.tier, undefined, 'unrouted → no tier');
+  assert.ok(Number.isInteger(out.meta.ms) && out.meta.ms >= 0);
+});
+
+test('meta names the tier and routed provider when the routed model ran', async () => {
+  const subagents = new Map([['s', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't', tier: 'cheap' }]]);
+  const runClaude = async (_p, opts) => { opts.onModel?.(opts.model); return 'ok'; };
+  const out = await askSubagent({ name: 's', question: 'q' }, makeCtx({
+    subagents, runClaude, defaultModel: 'claude-sonnet-5-5',
+    resolveTier: () => ({ provider: 'custom:glm', model: 'glm-4.6' }),
+  }));
+  assert.deepEqual({ ...out.meta, ms: 0 }, { subagent: 's', provider: 'custom:glm', model: 'glm-4.6', tier: 'cheap', ms: 0 });
+});
+
+test('meta reports the default model after a routeFallback, without a tier', async () => {
+  const subagents = new Map([['s', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't' }]]);
+  // runClaude fell back: it reports the fallback model, not the routed one.
+  const runClaude = async (_p, opts) => { opts.onModel?.(opts.routeFallback.model); return 'ok'; };
+  const out = await askSubagent({ name: 's', question: 'q' }, makeCtx({
+    subagents, runClaude, defaultModel: 'claude-sonnet-5-5',
+    resolveFeatureRoute: () => ({ provider: 'openai', model: 'gpt-5', tier: 'cheap' }),
+  }));
+  assert.equal(out.meta.model, 'claude-sonnet-5-5');
+  assert.equal(out.meta.provider, 'anthropic');
+  assert.equal(out.meta.tier, undefined);
+});
+
+test('meta: feature route tier is named when the route ran', async () => {
+  const subagents = new Map([['s', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't' }]]);
+  const out = await askSubagent({ name: 's', question: 'q' }, makeCtx({
+    subagents, runClaude: makeStubClaude(['ok']), defaultModel: 'claude-sonnet-5-5',
+    resolveFeatureRoute: () => ({ provider: 'openai', model: 'gpt-5', tier: 'standard' }),
+  }));
+  assert.equal(out.meta.provider, 'openai');
+  assert.equal(out.meta.model, 'gpt-5');
+  assert.equal(out.meta.tier, 'standard');
+});

@@ -198,6 +198,8 @@ export function makeCodeAssistRunClaude({ userId, tierModel, composerProvider, s
       // loop.mjs's options to them.
       mcpConfig: opts.mcpConfig,
       ...(opts.routeFallback ? { routeFallback: opts.routeFallback } : {}),
+      // ask-subagent's "which model actually answered" probe (its result meta).
+      ...(typeof opts.onModel === 'function' ? { onModel: opts.onModel } : {}),
     };
     // The agent loop's sniffing wrapper (loop.mjs) only passes onChunk for a
     // call it wants streamed live — when present (and this is the SSE

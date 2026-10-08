@@ -22,6 +22,7 @@
 import { runAgentLoop } from '../loop.mjs';
 import { searchKb } from './search-kb.mjs';
 import { redactFence } from '../redaction.mjs';
+import { resolveProvider } from '../../../providers/providers.mjs';
 
 // Same registry as ask-internal — extend here when new read tools
 // become available to subagents.
@@ -92,10 +93,36 @@ export async function askSubagent(args, ctx) {
   // resolvers come from the caller bound to this user and return null for an
   // unset or unusable tier, so each step falls through instead of failing.
   let route = null;
+  let routeTier = null;
   if (!subagent.model) {
-    if (subagent.tier && typeof ctx.resolveTier === 'function') route = ctx.resolveTier(subagent.tier);
-    if (!route && typeof ctx.resolveFeatureRoute === 'function') route = ctx.resolveFeatureRoute('subagents');
+    if (subagent.tier && typeof ctx.resolveTier === 'function') {
+      route = ctx.resolveTier(subagent.tier);
+      if (route) routeTier = subagent.tier;
+    }
+    if (!route && typeof ctx.resolveFeatureRoute === 'function') {
+      route = ctx.resolveFeatureRoute('subagents');
+      // The feature route names its tier when the caller knows it (registry.mjs).
+      if (route) routeTier = typeof route.tier === 'string' ? route.tier : null;
+    }
   }
+  const requestedModel = subagent.model || route?.model || ctx.defaultModel;
+
+  // runClaude's `onModel` reports the model that actually answered — the
+  // routed one, or the default after a routeFallback — so the `meta` the
+  // client shows ("provider · model") never names a model that did not run.
+  // A runClaude that never reports (test stubs, older wrappers) leaves the
+  // requested model standing.
+  let ranModel;
+  const runClaude = typeof ctx.runClaude === 'function'
+    ? (prompt, opts = {}) => ctx.runClaude(prompt, {
+      ...opts,
+      onModel: (m) => {
+        ranModel = m;
+        try { opts.onModel?.(m); } catch { /* reporting only */ }
+      },
+    })
+    : ctx.runClaude;
+  const startedAt = Date.now();
 
   const result = await runAgentLoop({
     skills: new Map(),         // no skill bodies — body IS the prompt
@@ -107,7 +134,7 @@ export async function askSubagent(args, ctx) {
       // get the app-state block. If a subagent needs project info,
       // pass it inside `question`.
     },
-    runClaude: ctx.runClaude,
+    runClaude,
     kb: ctx.kb,
     userId: ctx.userId,
     handlers,
@@ -116,7 +143,7 @@ export async function askSubagent(args, ctx) {
     // then the tier route above, then the deployment-wide
     // LLMIDE_SUBAGENT_MODEL, then the runClaude default.  Leaf calls are
     // the natural place to run a cheaper/faster tier.
-    model: subagent.model || route?.model || ctx.defaultModel,
+    model: requestedModel,
     // A routed hop that cannot run retries once on today's default model.
     ...(route ? { provider: route.provider, routeFallback: { model: ctx.defaultModel } } : {}),
     depth: ctx.depth ?? 1,
@@ -137,5 +164,25 @@ export async function askSubagent(args, ctx) {
     // the outer handler changes.
     answer: redactFence(result.reply || ''),
     pendingTool: result.pendingTool ?? null,
+    // What ran, for the client's subagent activity view. Last on purpose: the
+    // model reads `answer` first, and this costs a handful of tokens.
+    meta: subagentMeta({ name, route, routeTier, requestedModel, ranModel, ms: Date.now() - startedAt }),
   };
+}
+
+/**
+ * The `meta` block of a subagent result: `{ subagent, provider, model, tier?, ms }`.
+ * `tier` only when the routed model is the one that ran — after a
+ * routeFallback the call answered on the default, which belongs to no tier.
+ * `provider`/`model` are null when neither the caller nor runClaude named one
+ * (runClaude's own deployment default ran).
+ */
+export function subagentMeta({ name, route, routeTier, requestedModel, ranModel, ms }) {
+  const model = (typeof ranModel === 'string' && ranModel) ? ranModel : (requestedModel || null);
+  const ranOnRoute = Boolean(route) && model === route.model;
+  const provider = ranOnRoute ? route.provider : (model ? resolveProvider(model) : null);
+  const meta = { subagent: name, provider, model };
+  if (ranOnRoute && routeTier) meta.tier = routeTier;
+  meta.ms = ms;
+  return meta;
 }

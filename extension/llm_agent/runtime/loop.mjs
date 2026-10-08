@@ -441,6 +441,17 @@ export function makeSniffingChunkHandler(outerOnChunk) {
   return { onChunk, flush };
 }
 
+/**
+ * The `phase:'tool'` progress event for one tool call. An `ask-subagent` call
+ * also names its subagent (`subagent`) — `detail` is the question, so without
+ * it the client cannot say WHICH subagent is running.
+ */
+export function toolProgressEvent(toolName, args, iteration) {
+  const ev = { phase: 'tool', tool: toolName, detail: toolActivityDetail(toolName, args), iteration };
+  if (toolName === 'ask-subagent' && typeof args?.name === 'string' && args.name) ev.subagent = args.name;
+  return ev;
+}
+
 // Output-token ceiling per FENCE-loop hop — runClaude's own default (providers/
 // runtime.mjs), which also halves it and retries on a context overflow. Output is billed as produced, so a higher ceiling costs
 // nothing on a short reply.
@@ -751,7 +762,7 @@ export async function runAgentLoop({
     // `detail` names WHAT the tool is acting on (the file, the query, the
     // command) so the client can render "Reading UpdateFileSheet.swift"
     // rather than a bare "Using read-file…" — see toolActivityDetail.
-    emit({ phase: 'tool', tool: skill.name, detail: toolActivityDetail(skill.name, validation.value), iteration: i + 1 });
+    emit(toolProgressEvent(skill.name, validation.value, i + 1));
     let result;
     const cacheKey = `${skill.name}:${stableStringify(validation.value)}`;
     if (readCache.has(cacheKey)) {
@@ -944,7 +955,7 @@ export async function runNativeAgentLoop({
         // One write per turn — surface for client confirmation (pendingTool).
         return { reply: stripFenceRemnants((text || '').trim()), pendingTool: { name: tc.name, arguments: validation.value }, iterations: i + 1, cacheHits: 0 };
       }
-      emit({ phase: 'tool', tool: skill.name, detail: toolActivityDetail(skill.name, validation.value), iteration: i + 1 });
+      emit(toolProgressEvent(skill.name, validation.value, i + 1));
       let result;
       try {
         result = await handlers[skill.name](validation.value, { userId, kb, handlers, depth: depth + 1, emit, signal });
