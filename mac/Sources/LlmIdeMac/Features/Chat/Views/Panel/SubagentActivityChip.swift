@@ -83,19 +83,25 @@ private struct SubagentActivityPopover: View {
                 Text("No subagents used in this turn.")
                     .font(.system(size: 11))
                     .foregroundStyle(theme.current.textMuted)
-            } else {
-                // Elapsed ticks once a second while anything runs.
+            } else if activity.runningCount > 0 {
+                // Elapsed ticks once a second, only while something runs.
                 TimelineView(.periodic(from: .now, by: 1)) { context in
-                    VStack(alignment: .leading, spacing: 8) {
-                        ForEach(activity.runs) { run in
-                            row(run, now: context.date)
-                        }
-                    }
+                    rows(now: context.date)
                 }
+            } else {
+                rows(now: Date())
             }
         }
         .padding(12)
         .frame(minWidth: 260, alignment: .leading)
+    }
+
+    private func rows(now: Date) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            ForEach(activity.runs) { run in
+                row(run, now: now)
+            }
+        }
     }
 
     private func row(_ run: SubagentActivity.Run, now: Date) -> some View {

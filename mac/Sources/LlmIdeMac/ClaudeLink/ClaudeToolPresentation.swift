@@ -17,6 +17,14 @@ enum ClaudeToolPresentation {
     /// as "Using mcp__llmide__task-update" — a column of wire identifiers
     /// where the legacy engine showed sentences. Normalizing here rather
     /// than adding cases keeps ONE verb table for both engines.
+    /// LLM-IDE's plugin-subagent tool, bare (legacy) or MCP-prefixed (v2:
+    /// `mcp__llmide__ask-subagent`). The SDK's own Agent/Task tool is disabled
+    /// server-side, so this is the only delegation the transcript counts.
+    static func isSubagentTool(_ tool: String?) -> Bool {
+        guard let tool else { return false }
+        return tool == "ask-subagent" || (tool.hasPrefix("mcp__") && tool.hasSuffix("__ask-subagent"))
+    }
+
     static func normalizedToolName(_ tool: String) -> String {
         // mcp__<server>__<tool> → <tool>. The server segment is an install
         // detail; the tool is the part with a verb.

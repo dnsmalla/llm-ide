@@ -396,7 +396,7 @@ do {
     let nameless = derive([step("mcp__llmide__ask-subagent")], .streaming)
     expect(nameless.runs.first?.name == nil, "args still streaming → no name yet")
 
-    let result = #"{"answer":"ok","pendingTool":null,"meta":{"subagent":"reviewer","provider":"anthropic","model":"claude-haiku-4-5","tier":"cheap","ms":4000}}"#
+    let result = #"{"meta":{"subagent":"reviewer","provider":"anthropic","model":"claude-haiku-4-5","tier":"cheap","ms":4000},"answer":"ok","pendingTool":null}"#
     let done = derive([step("mcp__llmide__ask-subagent", args: #"{"name":"reviewer"}"#, result: result,
                             ended: t0.addingTimeInterval(4))], .done)
     let run = done.runs.first
@@ -425,8 +425,15 @@ do {
     expect(three.runs.map(\.id) == [0, 2, 3], "run ids are the steps' positions")
 
     expect(SubagentActivity.meta(resultText: "plain text") == nil, "non-JSON result → no meta")
-    let truncated = String(result.prefix(40))
-    expect(SubagentActivity.meta(resultText: truncated) == nil, "a truncated result → no meta, not a crash")
+    let cutInMeta = String(result.prefix(40))
+    expect(SubagentActivity.meta(resultText: cutInMeta) == nil, "a result cut inside meta → no meta, not a crash")
+    let longAnswer = #"{"meta":{"subagent":"r","provider":"openai","model":"gpt-5","ms":1},"answer":"a } { \" "# + String(repeating: "x", count: 30)
+    expect(SubagentActivity.meta(resultText: longAnswer)?.model == "gpt-5",
+           "meta first survives the wire cutting a long answer")
+    let braceInMeta = #"{"meta":{"subagent":"r","provider":"x}","model":"m","ms":1},"answer":"cut"#
+    expect(SubagentActivity.meta(resultText: braceInMeta)?.provider == "x}", "a brace inside a meta string does not end it")
+    let oldOrder = #"{"answer":"ok","pendingTool":null,"meta":{"model":"m"}}"#
+    expect(SubagentActivity.meta(resultText: oldOrder)?.model == "m", "a whole result in the old key order still parses")
 
     expect(SubagentActivity.routeLabel(provider: "anthropic", model: "claude-haiku-4-5", tier: "cheap")
            == "anthropic · Haiku 4.5 (cheap)", "route label: provider · friendly model (tier)")

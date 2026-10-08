@@ -101,8 +101,7 @@ public struct SubagentActivity: Equatable, Sendable {
 
     /// `ask-subagent`, bare (legacy) or MCP-prefixed (v2).
     public static func isSubagentTool(_ tool: String?) -> Bool {
-        guard let tool else { return false }
-        return tool == "ask-subagent" || (tool.hasPrefix("mcp__") && tool.hasSuffix("__ask-subagent"))
+        ClaudeToolPresentation.isSubagentTool(tool)
     }
 
     /// The `name` argument of an `ask-subagent` call.
@@ -113,14 +112,17 @@ public struct SubagentActivity: Equatable, Sendable {
         return name
     }
 
-    /// The `meta` block of an `ask-subagent` result (API v71+). Nil when the
-    /// result is not JSON — an older server, or one truncated at the wire's
-    /// 20k cap (the meta rides after the answer, so a long answer loses it).
+    /// The `meta` block of an `ask-subagent` result (API v71+). The server puts
+    /// it FIRST, so a result the wire cut at 20k chars (a long answer) still
+    /// carries it: when the whole text does not parse, the leading
+    /// `{"meta":{…}` object is cut out and parsed alone. Nil for an older
+    /// server's result or plain text.
     public static func meta(resultText: String) -> (provider: String?, model: String?, tier: String?)? {
         // Cheap reject first: results are up to 20k chars and this runs on
         // every composer render.
         guard resultText.contains("\"meta\""),
-              let meta = jsonObject(resultText)?["meta"] as? [String: Any] else { return nil }
+              let meta = (jsonObject(resultText)?["meta"] as? [String: Any])
+                ?? leadingMetaObject(resultText) else { return nil }
         func text(_ key: String) -> String? {
             guard let value = meta[key] as? String, !value.isEmpty else { return nil }
             return value
@@ -163,6 +165,36 @@ public struct SubagentActivity: Equatable, Sendable {
     private static func isErrorResult(_ text: String?) -> Bool {
         guard let text, text.hasPrefix("{\"error\"") else { return false }
         return jsonObject(text)?["error"] != nil
+    }
+
+    /// The object after a leading `{"meta":` — brace-balanced, skipping
+    /// braces inside strings — parsed on its own.
+    private static func leadingMetaObject(_ text: String) -> [String: Any]? {
+        let prefix = "{\"meta\":"
+        guard text.hasPrefix(prefix) else { return nil }
+        let body = text.utf8.dropFirst(prefix.utf8.count)
+        guard body.first == UInt8(ascii: "{") else { return nil }
+        var depth = 0
+        var inString = false
+        var escaped = false
+        var end = body.startIndex
+        scan: for index in body.indices {
+            let byte = body[index]
+            if inString {
+                if escaped { escaped = false } else if byte == UInt8(ascii: "\\") { escaped = true } else if byte == UInt8(ascii: "\"") { inString = false }
+                continue
+            }
+            switch byte {
+            case UInt8(ascii: "\""): inString = true
+            case UInt8(ascii: "{"): depth += 1
+            case UInt8(ascii: "}"):
+                depth -= 1
+                if depth == 0 { end = body.index(after: index); break scan }
+            default: break
+            }
+        }
+        guard depth == 0, end > body.startIndex else { return nil }
+        return (try? JSONSerialization.jsonObject(with: Data(body[body.startIndex..<end]))) as? [String: Any]
     }
 
     private static func jsonObject(_ text: String?) -> [String: Any]? {

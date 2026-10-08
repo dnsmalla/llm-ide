@@ -369,10 +369,13 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                     // Report the arguments as soon as they are whole, not only
                     // with the result: a delegated subagent runs for minutes,
                     // and until now its NAME was unknown for that whole time.
-                    if !argsReported.contains(useId), let args = pendingArgs[useId],
-                       Self.isCompleteArgsJSON(args) {
+                    // Subagent calls only: the completeness check copies the
+                    // buffer, so running it on every delta of a large Write
+                    // would be quadratic, and no other tool needs it early.
+                    let name = toolNames[useId]
+                    if ClaudeToolPresentation.isSubagentTool(name), !argsReported.contains(useId),
+                       let args = pendingArgs[useId], Self.isCompleteArgsJSON(args) {
                         argsReported.insert(useId)
-                        let name = toolNames[useId]
                         self.fireToolProgress(
                             name,
                             detail: ClaudeToolPresentation.salientArgument(tool: name, argsJSON: args),
