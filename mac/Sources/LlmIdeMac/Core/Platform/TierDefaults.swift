@@ -325,6 +325,28 @@ public enum TierDefaults {
             && write.composerProviderId == composerProviderId
     }
 
+    /// The note under a Standard that is not applied yet (`isApplied` false):
+    /// what new chats run, and — only when it is not Standard — what the Mac
+    /// roles left on Standard run. The two differ: chats follow the composer
+    /// override, Mac roles read `activeCLI` / `defaultModelId`, or an applied
+    /// custom Standard's route (`effectiveTier`).
+    public static func notAppliedNote(_ standard: TierRoute, activeCLI: String, defaultModelId: String,
+                                      composerProviderId: String,
+                                      customProviders: [TierCustomProviderSummary]) -> String {
+        let chats = describeCurrentDefault(activeCLI: activeCLI, defaultModelId: defaultModelId,
+                                           composerProviderId: composerProviderId,
+                                           customProviders: customProviders, standard: standard)
+        let isAppliedCustom = TierRouting.customProviderId(standard.provider).map { $0 == composerProviderId } ?? false
+        let write = writeThrough(for: standard)
+        let rolesRunStandard = isAppliedCustom
+            || (write?.activeCLI == activeCLI && write?.defaultModelId == defaultModelId)
+        guard !rolesRunStandard else { return "New chats still use \(chats)." }
+        let roles = describeCurrentDefault(activeCLI: activeCLI, defaultModelId: defaultModelId,
+                                           composerProviderId: "", customProviders: [])
+        if roles == chats { return "New chats and Mac roles left on Standard still use \(chats)." }
+        return "New chats still use \(chats). Mac roles left on Standard use \(roles)."
+    }
+
     /// The warning on the Standard row, or nil. Runtime never errors: an unset
     /// or unusable Standard keeps the last written default.
     public static func standardWarning(isSet: Bool, unusableReason: String?, currentDefault: String) -> String? {

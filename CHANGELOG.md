@@ -37,6 +37,8 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   left unset keep their built-in default. Existing settings migrate once at launch with no change in what
   chats or Mac roles run: Standard is built from the old default provider + model, and a composer already
   on a custom provider stays on it (Settings shows "New chats still use …" until you choose Standard).
+  One exception: if Standard was already set to a custom provider AND the composer was already on that
+  same provider, that Standard is in effect, so Loop, Quick chat and the phone now follow it too.
   A model picked in the chat composer no longer changes the default: it overrides Standard in the composer
   until Standard or a chat role changes, and the phone and quick chat follow the Quick chat role (or Standard) instead of the last composer pick.
 - Server `runClaude` now honours an explicit `custom:<id>` provider for EVERY caller, not only tier

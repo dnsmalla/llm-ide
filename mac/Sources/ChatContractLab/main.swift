@@ -1816,6 +1816,16 @@ do {
            "a pre-existing, unapplied custom Standard (no override) does not move Background roles")
     expect(invariantHolds(input(composer: "p2", customs: [p1], routing: preCustomStd)),
            "…nor with an override on another provider")
+
+    // 12. ACCEPTED CHANGE: Standard = custom:p1 saved before this update AND the
+    // composer already on p1 — the custom Standard is applied, so after the
+    // update Loop / Quick chat / the phone follow it (before: activeCLI).
+    // Called out in the CHANGELOG; the invariant intentionally does not hold.
+    let appliedPre = input(composer: "p1", customs: [p1], routing: preCustomStd)
+    expect(!invariantHolds(appliedPre)
+               && TierDefaults.effectiveTier(for: .loop, routing: TierDefaults.migrate(appliedPre, includePurposes: true).routing,
+                                             composerProviderId: "p1") == .standard,
+           "accepted: an already-applied custom Standard now also drives unset Background roles")
 }
 
 print("TierDefaults Settings wording")
@@ -1898,6 +1908,20 @@ do {
     expect(!TierDefaults.isApplied(turbo, activeCLI: "claude_code", defaultModelId: "claude-opus-5",
                                    composerProviderId: "p1", customProviders: []),
            "a custom Standard on a deleted provider is not applied")
+    // "Not applied" note: chats follow the override, Mac roles read activeCLI.
+    expect(TierDefaults.notAppliedNote(std, activeCLI: "claude_code", defaultModelId: "claude-opus-5",
+                                       composerProviderId: "p1", customProviders: [p1, p2])
+               == "New chats still use Zhipu · glm-5.",
+           "composer on GLM, Standard Claude = activeCLI: only the chats sentence")
+    expect(TierDefaults.notAppliedNote(TierRoute(provider: "custom:p1", model: "glm-5"), activeCLI: "claude_code",
+                                       defaultModelId: "claude-opus-5", composerProviderId: "p2",
+                                       customProviders: [p1, p2])
+               == "New chats still use Moonshot · kimi-k3. Mac roles left on Standard use Claude · claude-opus-5.",
+           "unapplied custom Standard p1 with override p2: chats name p2, Mac roles name activeCLI")
+    expect(TierDefaults.notAppliedNote(std, activeCLI: "openai", defaultModelId: "gpt-5.5", composerProviderId: "",
+                                       customProviders: [])
+               == "New chats and Mac roles left on Standard still use OpenAI · gpt-5.5.",
+           "a built-in Standard never written through, no override: one sentence for both")
     expect(TierDefaults.standardWarning(isSet: false, unusableReason: nil, currentDefault: "Claude · account default")
                == "Standard isn't set — new chats and roles on Standard keep using Claude · account default until you choose one.",
            "an unset Standard (e.g. Claude's list was empty at migration) is warned about")
