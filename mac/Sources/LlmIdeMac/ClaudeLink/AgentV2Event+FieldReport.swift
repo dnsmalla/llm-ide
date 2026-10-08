@@ -34,6 +34,12 @@ public enum AgentV2Conformance {
         ClaudeToolPresentation.salientArgument(tool: tool, argsJSON: argsJSON)
     }
 
+    /// Whether streamed tool arguments are a whole JSON object yet — when the
+    /// transport reports them before the result (a running subagent's name).
+    public static func isCompleteArgsJSON(_ text: String) -> Bool {
+        AgentV2Transport.isCompleteArgsJSON(text)
+    }
+
     /// The tool → SF Symbol table, exposed for the lab. `AgentProgressLabelTests`
     /// asserts the same mapping, but it is an XCTest file and this toolchain
     /// cannot even compile those — so the lab is where these actually run.

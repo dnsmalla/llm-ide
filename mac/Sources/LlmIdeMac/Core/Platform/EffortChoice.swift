@@ -35,6 +35,11 @@ public enum EffortChoice {
         if modelId.isEmpty { return rows.first?.levels ?? [] }
         if let exact = rows.first(where: { $0.id == modelId }) { return exact.levels }
         let base = baseId(modelId)
-        return rows.first(where: { baseId($0.id) == base })?.levels ?? []
+        if let same = rows.first(where: { baseId($0.id) == base }) { return same.levels }
+        // Last chance: the same model spelled differently ("claude-sonnet-5.5",
+        // a "-latest" alias). Without it the effort section vanished for an id
+        // the list does carry, just not in this spelling.
+        let normalized = ModelDisplayName.normalizedId(modelId)
+        return rows.first(where: { ModelDisplayName.normalizedId($0.id) == normalized })?.levels ?? []
     }
 }

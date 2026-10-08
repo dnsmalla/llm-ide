@@ -353,6 +353,7 @@ extension CodeAssistantPanel {
                         .padding(.leading, 4)
                 }
             }
+            subagentsChip
             if showModelPicker { modelPickerChips }
             editModeChip
             memoryButton
@@ -372,6 +373,7 @@ extension CodeAssistantPanel {
                 if showFileAttachButtons {
                     contextButton(icon: "plus", label: "Add from Library", action: { sheets.showLibraryPicker = true })
                 }
+                subagentsChip
                 if showModelPicker { modelPickerChips }
                 editModeChip
                 memoryButton
@@ -391,6 +393,15 @@ extension CodeAssistantPanel {
                 sendButton
             }
         }
+    }
+
+    /// "N agents" — the plugin subagents the current (last) turn delegated to.
+    /// See `SubagentActivityChip`.
+    var subagentsChip: some View {
+        SubagentActivityChip(
+            activity: SubagentActivity.of(engine.messages.last(where: { $0.role == .assistant })),
+            compact: isCompact
+        )
     }
 
     /// Opens the project-memory viewer (auto-captured facts about this repo).
@@ -492,7 +503,7 @@ extension CodeAssistantPanel {
         }
     }
 
-    /// Model + reasoning-effort picker, one chip ("Sonnet 5.5 · Auto"), like
+    /// Model + reasoning-effort picker, one chip ("Sonnet 5.5 Medium"), like
     /// Claude's own composer. The provider is not chosen here: the composer
     /// always uses Settings' default provider (`followDefaultProvider`), so no
     /// provider chip. The chip is `.fixedSize()` so its text never squeezes —
@@ -547,7 +558,10 @@ extension CodeAssistantPanel {
                 let displayName = isCustom
                     ? (modelState.customProviders.first(where: { "custom:\($0.id)" == modelState.selectedProvider })?.models.first(where: { $0.id == modelState.selectedModel })?.displayName ?? modelState.selectedModel)
                     : currentModelDisplayName(for: currentTool)
-                let label = effortLevels.isEmpty ? displayName : "\(displayName) · \(EffortChoice.label(effort))"
+                let label = ModelDisplayName.chipLabel(
+                    name: displayName,
+                    effort: effortLevels.isEmpty ? nil : EffortChoice.label(effort)
+                )
                 Chip(
                     icon: nil,
                     label: isCompact ? String(displayName.prefix(6)) : label,
@@ -598,6 +612,8 @@ extension CodeAssistantPanel {
             )
         }
         .menuStyle(.borderlessButton)
+        // The Chip draws its own trailing chevron — see modelPickerChips.
+        .menuIndicator(.hidden)
         .help(selection.wrappedValue.help)
         .fixedSize()
     }
@@ -689,7 +705,11 @@ extension CodeAssistantPanel {
         // labelled one model while the chat sent another. The live-derived
         // name, else the id itself; the first model only when nothing is
         // selected (it is then the default that will be sent).
-        if !selected.isEmpty { return AIModel.knownName(for: selected, in: models) ?? selected }
+        // An id the list lacks is named from the id itself ("claude-sonnet-5-5"
+        // → "Sonnet 5.5", the server's own rule) before falling back to the raw id.
+        if !selected.isEmpty {
+            return AIModel.knownName(for: selected, in: models) ?? ModelDisplayName.fromId(selected) ?? selected
+        }
         // Nothing chosen and no list yet: no id is sent, so the account's
         // default runs — say so rather than show a blank chip.
         return models.first?.displayName ?? "Default"

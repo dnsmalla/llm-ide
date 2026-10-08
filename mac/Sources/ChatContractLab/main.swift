@@ -335,6 +335,132 @@ do {
            "a legacy step reports no v2 fields rather than defaulting to empty strings")
 }
 
+// ToolStep's v71 fields: the tool-use id results merge by, and the end time
+// the subagent chip's elapsed reads. Both optional — old files keep loading.
+do {
+    let withIds = Data(#"{"id":"1B4E28BA-2FA1-11D2-883F-0016D3CCE4A1","label":"Delegating","tool":"mcp__llmide__ask-subagent","at":768000000,"toolUseId":"toolu_1","endedAt":768000004}"#.utf8)
+    let report = ChatMessageConformance.toolStepFields(forJSON: withIds)
+    expect(report?.contains("toolUseId") == true, "toolUseId survives the round trip")
+    expect(report?.contains("endedAt") == true, "endedAt survives the round trip")
+    let legacy = Data(#"{"id":"1B4E28BA-2FA1-11D2-883F-0016D3CCE4A1","label":"Reading","tool":"Read","at":768000000}"#.utf8)
+    expect(ChatMessageConformance.toolStepFields(forJSON: legacy)?.contains("toolUseId") == false,
+           "a step persisted before the ids decodes with none")
+}
+
+// Merge by tool-use id — the last-step rule put a concurrent call's result on
+// the WRONG row.
+do {
+    let ix = ToolStepMergePolicy.index(forToolUseId:in:)
+    expect(ix("b", ["a", "b", "c"]) == 1, "a result finds its own call, not the last one")
+    expect(ix("z", ["a", "b"]) == nil, "an unknown id matches nothing")
+    expect(ix(nil, ["a", nil]) == nil, "no id (legacy) never matches a nil-id step")
+    expect(ix("", [""]) == nil, "an empty id is no id")
+
+    let d = ToolStepMergePolicy.decideWithIds
+    expect(d("Read", "Reading", false, "a", "Read", "Reading", false, "b") == .append,
+           "a second concurrent Read with its own id is a new row, not a label-dedupe")
+    expect(d("Read", "Reading", false, "a", "Read", "Reading x", true, "b") == .append,
+           "a result never completes a step that carries a different id")
+    expect(d("Read", "Reading", false, nil, "Read", "Reading x", true, "b") == .completeLast,
+           "a result completes a last step opened without an id (older server)")
+    expect(d("read-file", "Reading a", false, nil, "read-file", "Reading a", false, nil) == .ignore,
+           "no ids: the legacy label-dedupe still applies")
+
+    let close = ToolStepMergePolicy.closesPrevious
+    expect(close(nil, false, nil), "a legacy step ends when the next legacy step begins")
+    expect(!close("a", false, "b"), "a v2 step ends only with its result")
+    expect(!close(nil, true, nil), "an ended step is not re-stamped")
+}
+
+// SubagentActivity — the composer's "N agents" chip, from the turn's steps.
+do {
+    let t0 = Date(timeIntervalSince1970: 1_000)
+    func step(_ tool: String?, args: String? = nil, result: String? = nil, isError: Bool? = nil,
+              at: Date = t0, ended: Date? = nil) -> SubagentActivity.Step {
+        .init(tool: tool, args: args, resultText: result, isError: isError, at: at, endedAt: ended)
+    }
+    let derive = SubagentActivity.derive(steps:turn:)
+
+    expect(derive([], .done).chipLabel == "0 agents", "no subagents reads 0 agents")
+    expect(derive([step("Read")], .done).total == 0, "other tools are not subagents")
+    expect(SubagentActivity.isSubagentTool("ask-subagent"), "legacy bare name")
+    expect(SubagentActivity.isSubagentTool("mcp__llmide__ask-subagent"), "v2 MCP-prefixed name")
+    expect(!SubagentActivity.isSubagentTool("ask-internal"), "ask-internal is not a subagent")
+
+    let running = derive([step("mcp__llmide__ask-subagent", args: #"{"name":"reviewer","question":"q"}"#)], .streaming)
+    expect(running.runs.first?.name == "reviewer", "the name is known from args while it runs")
+    expect(running.runs.first?.state == .running, "no result on a streaming turn = running")
+    expect(running.chipLabel == "1 running", "running reads N running")
+    expect(running.runs.first?.elapsed(now: t0.addingTimeInterval(7)) == 7, "running elapsed counts to now")
+
+    let nameless = derive([step("mcp__llmide__ask-subagent")], .streaming)
+    expect(nameless.runs.first?.name == nil, "args still streaming → no name yet")
+
+    let result = #"{"answer":"ok","pendingTool":null,"meta":{"subagent":"reviewer","provider":"anthropic","model":"claude-haiku-4-5","tier":"cheap","ms":4000}}"#
+    let done = derive([step("mcp__llmide__ask-subagent", args: #"{"name":"reviewer"}"#, result: result,
+                            ended: t0.addingTimeInterval(4))], .done)
+    let run = done.runs.first
+    expect(run?.state == .done, "a result = done")
+    expect(run?.provider == "anthropic" && run?.model == "claude-haiku-4-5" && run?.tier == "cheap",
+           "meta names what ran")
+    expect(run?.elapsed(now: t0.addingTimeInterval(99)) == 4, "done elapsed is start→end, not →now")
+    expect(done.chipLabel == "1 agent", "one finished subagent reads 1 agent")
+
+    let failed = derive([step("ask-subagent", args: #"{"name":"x"}"#, result: #"{"error":"no subagent named 'x' is enabled"}"#)], .done)
+    expect(failed.runs.first?.state == .error, "the handler's {error} envelope is a failure, not done")
+    expect(derive([step("ask-subagent", result: "boom", isError: true)], .done).runs.first?.state == .error,
+           "isError is a failure")
+
+    let legacy = derive([step("ask-subagent", args: #"{"name":"planner"}"#, ended: t0.addingTimeInterval(3))], .done)
+    expect(legacy.runs.first?.state == .done, "legacy: the next step / turn end closing it = done")
+    expect(legacy.runs.first?.provider == nil, "legacy carries no meta")
+
+    expect(derive([step("ask-subagent")], .stopped).runs.first?.state == .stopped, "Stop before an answer = stopped")
+    expect(derive([step("ask-subagent")], .failed).runs.first?.state == .error, "a failed turn's open call = error")
+
+    let three = derive([step("ask-subagent", ended: t0), step("Read"), step("ask-subagent"),
+                        step("mcp__llmide__ask-subagent")], .streaming)
+    expect(three.total == 3 && three.runningCount == 2, "counts every call; only open ones run")
+    expect(three.chipLabel == "2 running", "running wins the label")
+    expect(three.runs.map(\.id) == [0, 2, 3], "run ids are the steps' positions")
+
+    expect(SubagentActivity.meta(resultText: "plain text") == nil, "non-JSON result → no meta")
+    let truncated = String(result.prefix(40))
+    expect(SubagentActivity.meta(resultText: truncated) == nil, "a truncated result → no meta, not a crash")
+
+    expect(SubagentActivity.routeLabel(provider: "anthropic", model: "claude-haiku-4-5", tier: "cheap")
+           == "anthropic · Haiku 4.5 (cheap)", "route label: provider · friendly model (tier)")
+    expect(SubagentActivity.routeLabel(provider: "openai", model: "gpt-5", tier: nil) == "openai · gpt-5",
+           "a non-Claude model shows its id")
+    expect(SubagentActivity.routeLabel(provider: nil, model: nil, tier: nil) == nil, "nothing known → nil")
+    expect(SubagentActivity.elapsedLabel(4.9) == "4s", "seconds")
+    expect(SubagentActivity.elapsedLabel(65) == "1m 05s", "minutes")
+}
+
+// The v2 transport reports a call's arguments once they are whole JSON — the
+// moment a running subagent's name becomes known.
+do {
+    let whole = AgentV2Conformance.isCompleteArgsJSON
+    expect(whole(#"{"name":"reviewer","question":"q"}"#), "a whole object is complete")
+    expect(!whole(#"{"name":"rev"#), "a fragment is not")
+    expect(!whole(#"{"q":"a}"#), "a brace inside a string does not fool it")
+    expect(!whole("[1]"), "an array is not tool arguments")
+}
+
+// ModelDisplayName — the model chip names an unlisted id like the server does.
+do {
+    expect(ModelDisplayName.fromId("claude-sonnet-5-5") == "Sonnet 5.5", "claude-sonnet-5-5 → Sonnet 5.5")
+    expect(ModelDisplayName.fromId("claude-opus-5[1m]") == "Opus 5", "the 1M suffix is not part of the name")
+    expect(ModelDisplayName.fromId("claude-haiku-4-5-20251001") == "Haiku 4.5", "a date snapshot is dropped")
+    expect(ModelDisplayName.fromId("gpt-5") == nil, "a non-Claude id has no derived name")
+    expect(ModelDisplayName.fromId("claude-") == nil, "a malformed id has no derived name")
+    expect(ModelDisplayName.chipLabel(name: "Sonnet 5.5", effort: "Medium") == "Sonnet 5.5 Medium",
+           "chip: name then effort, no separator")
+    expect(ModelDisplayName.chipLabel(name: "Sonnet 5.5", effort: nil) == "Sonnet 5.5", "no effort → name only")
+    expect(ModelDisplayName.normalizedId("claude-sonnet-5.5") == "claude-sonnet-5-5", "dots normalize to dashes")
+    expect(ModelDisplayName.normalizedId("claude-sonnet-5-5-latest") == "claude-sonnet-5-5", "-latest is dropped")
+}
+
 // ChatStreamBuffer — the coalescing arithmetic, independent of scheduling.
 do {
     let a = UUID(), b = UUID()
@@ -1417,6 +1543,11 @@ do {
            "no model chosen = the SDK default, listed first")
     expect(EffortChoice.levels(forModelId: "claude-gone", in: rows, baseId: base) == [],
            "an unlisted model has no picker")
+    let dashed: [(id: String, levels: [String])] = [(id: "claude-sonnet-5-5", levels: ["low", "medium"])]
+    expect(EffortChoice.levels(forModelId: "claude-sonnet-5.5", in: dashed, baseId: base) == ["low", "medium"],
+           "the same model spelled with a dot keeps its effort levels")
+    expect(EffortChoice.levels(forModelId: "claude-sonnet-5-5-latest", in: dashed, baseId: base) == ["low", "medium"],
+           "a -latest alias keeps its effort levels")
 }
 
 print("AgentV2ContextUsage")

@@ -168,6 +168,7 @@ extension LlmIdeAPIClient {
         let phase: String?               // progress: "thinking" | "tool" | "writing" | "approval_request"
         let tool: String?                // progress (phase == "tool"): tool name
         let detail: String?              // progress (phase == "tool"): what it's acting on
+        let subagent: String?            // progress (tool == "ask-subagent", API v71+): which subagent
         let text: String?                // chunk: a text delta
         let reply: String?               // done
         let pendingTool: PendingTool?    // done
@@ -221,6 +222,12 @@ extension LlmIdeAPIClient {
         let isError: Bool?
         /// Whether the server truncated `resultText` at its cap.
         let truncated: Bool?
+        /// v2: the call's tool-use id, so `ChatEngine` merges a later tick
+        /// into the step it belongs to rather than the last one.
+        let toolUseId: String?
+        /// Legacy: the subagent an `ask-subagent` call runs (API v71+). The
+        /// v2 wire names it inside `args` instead.
+        let subagent: String?
 
         var isTool: Bool { phase == "tool" }
 
@@ -232,7 +239,9 @@ extension LlmIdeAPIClient {
             args: String? = nil,
             resultText: String? = nil,
             isError: Bool? = nil,
-            truncated: Bool? = nil
+            truncated: Bool? = nil,
+            toolUseId: String? = nil,
+            subagent: String? = nil
         ) {
             self.label = label
             self.phase = phase
@@ -242,6 +251,8 @@ extension LlmIdeAPIClient {
             self.resultText = resultText
             self.isError = isError
             self.truncated = truncated
+            self.toolUseId = toolUseId
+            self.subagent = subagent
         }
     }
 
@@ -405,7 +416,8 @@ extension LlmIdeAPIClient {
                 }
                 let label = Self.progressLabel(phase: evt.phase, tool: evt.tool, detail: evt.detail)
                 await onProgress(AgentProgress(label: label, phase: evt.phase,
-                                               tool: evt.tool, detail: evt.detail))
+                                               tool: evt.tool, detail: evt.detail,
+                                               subagent: evt.subagent))
             case "chunk":
                 if let text = evt.text, !text.isEmpty {
                     sawProgress = true  // a chunk is proof of life, same as a progress event

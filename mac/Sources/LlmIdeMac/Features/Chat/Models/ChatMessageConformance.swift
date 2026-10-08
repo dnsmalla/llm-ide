@@ -26,6 +26,8 @@ public enum ChatMessageConformance {
         if step.args != nil { names.append("args") }
         if step.resultText != nil { names.append("resultText") }
         if step.isError != nil { names.append("isError") }
+        if step.toolUseId != nil { names.append("toolUseId") }
+        if step.endedAt != nil { names.append("endedAt") }
         return names.sorted()
     }
 }

@@ -53,6 +53,14 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
         let resultText: String?
         /// Whether that output is an error rather than a result.
         let isError: Bool?
+        /// The v2 wire's tool-use id. A result merges into the step with this
+        /// id — with concurrent calls the LAST step is not necessarily the one
+        /// finishing. Nil on legacy steps and on steps persisted before it.
+        let toolUseId: String?
+        /// When the call finished: its result landed (v2), or the next step
+        /// began / the turn completed (legacy, whose loop runs tools one at a
+        /// time and sends no end event). Nil while running, and on old steps.
+        let endedAt: Date?
 
         init(
             id: UUID = UUID(),
@@ -61,7 +69,9 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
             at: Date = Date(),
             args: String? = nil,
             resultText: String? = nil,
-            isError: Bool? = nil
+            isError: Bool? = nil,
+            toolUseId: String? = nil,
+            endedAt: Date? = nil
         ) {
             self.id = id
             self.label = label
@@ -70,6 +80,31 @@ struct ChatMessage: Identifiable, Codable, Equatable, Sendable {
             self.args = args
             self.resultText = resultText
             self.isError = isError
+            self.toolUseId = toolUseId
+            self.endedAt = endedAt
+        }
+
+        /// A copy with the given fields replaced (nil = keep). Identity and
+        /// start time never change: it is the same call progressing.
+        func updated(
+            label: String? = nil,
+            args: String? = nil,
+            resultText: String? = nil,
+            isError: Bool? = nil,
+            toolUseId: String? = nil,
+            endedAt: Date? = nil
+        ) -> ToolStep {
+            ToolStep(
+                id: id,
+                label: label ?? self.label,
+                tool: tool,
+                at: at,
+                args: args ?? self.args,
+                resultText: resultText ?? self.resultText,
+                isError: isError ?? self.isError,
+                toolUseId: toolUseId ?? self.toolUseId,
+                endedAt: endedAt ?? self.endedAt
+            )
         }
 
         /// SF Symbol for this step. Delegates to the linker, which owns the tool-name vocabulary for

@@ -306,6 +306,9 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         // Tool-use id → arguments assembled so far. Emptied as each result
         // lands, so a long turn does not accumulate every call's arguments.
         var pendingArgs: [String: String] = [:]
+        // Tool-use ids whose arguments already finished streaming and were
+        // reported — the args tick fires once per call, not per delta.
+        var argsReported: Set<String> = []
 
         try await streamer.agentV2Stream(body) { event in
             // `tasks` may arrive after `result` — same ordering as legacy
@@ -357,12 +360,27 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 // wrong row. Display-only, and strictly better than the previous
                 // behaviour of discarding every argument.
                 if let id { toolIndexToUseId[index] = id }
-                self.fireToolProgress(name, onProgress: onProgress)
+                self.fireToolProgress(name, toolUseId: id, onProgress: onProgress)
             case .toolArgsDelta(let index, let partialJson):
                 // Accumulate. The model emits arguments as a JSON string in
                 // fragments, so a single delta is not parseable on its own.
                 if let useId = toolIndexToUseId[index] {
                     pendingArgs[useId, default: ""] += partialJson
+                    // Report the arguments as soon as they are whole, not only
+                    // with the result: a delegated subagent runs for minutes,
+                    // and until now its NAME was unknown for that whole time.
+                    if !argsReported.contains(useId), let args = pendingArgs[useId],
+                       Self.isCompleteArgsJSON(args) {
+                        argsReported.insert(useId)
+                        let name = toolNames[useId]
+                        self.fireToolProgress(
+                            name,
+                            detail: ClaudeToolPresentation.salientArgument(tool: name, argsJSON: args),
+                            args: args,
+                            toolUseId: useId,
+                            onProgress: onProgress
+                        )
+                    }
                 }
             case .toolResult(let payload):
                 let name = payload.toolUseId.flatMap { toolNames[$0] }
@@ -378,6 +396,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                     resultText: payload.text,
                     isError: payload.isError,
                     truncated: payload.truncated,
+                    toolUseId: payload.toolUseId,
                     onProgress: onProgress
                 )
             case .usage(let u):
@@ -477,6 +496,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         resultText: String? = nil,
         isError: Bool? = nil,
         truncated: Bool? = nil,
+        toolUseId: String? = nil,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void
     ) {
         onProgress(LlmIdeAPIClient.AgentProgress(
@@ -487,8 +507,18 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
             args: args,
             resultText: resultText,
             isError: isError,
-            truncated: truncated
+            truncated: truncated,
+            toolUseId: toolUseId
         ))
+    }
+
+    /// Whether streamed tool arguments form a whole JSON object yet. The cheap
+    /// suffix check first: deltas arrive many times per call, and a large
+    /// Write's arguments would otherwise be re-parsed on every one.
+    nonisolated static func isCompleteArgsJSON(_ text: String) -> Bool {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("{"), trimmed.hasSuffix("}"), let data = trimmed.data(using: .utf8) else { return false }
+        return (try? JSONSerialization.jsonObject(with: data)) is [String: Any]
     }
 }
 
