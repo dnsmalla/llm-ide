@@ -10,12 +10,25 @@ import { config } from '../core/config.mjs';
 import { readSkillInstructions } from '../llm_agent/skills/index.mjs';
 import { resolveTierModel } from '../llm_agent/runtime/model-tier.mjs';
 import * as kb from '../kb/db.mjs';
+import { newTurnTokenTotals, countTurnTokens } from '../kb/usage.mjs';
 import { scanForSecrets } from '../guardrails/scan.mjs';
 import { sanitizePersonaSuffix } from '../providers/prompt-utils.mjs';
 
 // Copy the per-request memory-block overhead (set by handleCodeAssist) onto the
 // response `usage` so the client can show how many tokens the always-on project
 // memory cost this turn. No-op when the agent path didn't run.
+// The turn's model tokens, summed over every call it made (see
+// `countTurnTokens`). Omitted when no call reported tokens — a CLI that prints
+// no usage — so the client shows nothing rather than a false zero.
+function mergeTurnTokens(usage, totals) {
+  if (!totals || totals.inputTokens + totals.outputTokens === 0) return;
+  usage.inputTokens = totals.inputTokens;
+  usage.outputTokens = totals.outputTokens;
+  if (totals.cacheReadTokens) usage.cacheReadTokens = totals.cacheReadTokens;
+  if (totals.cacheCreationTokens) usage.cacheCreationTokens = totals.cacheCreationTokens;
+  usage.modelCalls = totals.calls;
+}
+
 function mergeMemoryUsage(usage, out) {
   const m = out?.memoryUsage;
   if (!m) return;
@@ -591,7 +604,8 @@ export async function handleAIRoutes(req, res) {
             userId: req.user?.id, agentContext: enrichedAgentContext, mode: body.mode, send: writeEvent,
           });
           try {
-            const out = await handleCodeAssist({
+            const turnTokens = newTurnTokenTotals();
+            const out = await countTurnTokens(turnTokens, () => handleCodeAssist({
               message,
               history: Array.isArray(body.history) ? body.history : [],
               agentContext: enrichedAgentContext,
@@ -638,8 +652,9 @@ export async function handleAIRoutes(req, res) {
               // aborted the model call but left an approved run-bash command
               // (and its whole process tree) running out its timeout.
               signal: ac.signal,
-            });
+            }));
             mergeMemoryUsage(usage, out);
+            mergeTurnTokens(usage, turnTokens);
             writeEvent({ type: 'done', reply: out.reply, pendingTool: out.pendingTool, usage, mode: out.mode });
             writeEvent({ type: 'tasks', tasks: out.tasks ?? [], continueNeeded: out.continueNeeded ?? false });
           } catch (err) {
@@ -667,7 +682,8 @@ export async function handleAIRoutes(req, res) {
           bufferedAc.abort();
           if (sessionId) abortDecisionsForSession(sessionId);
         });
-        const out = await handleCodeAssist({
+        const turnTokens = newTurnTokenTotals();
+        const out = await countTurnTokens(turnTokens, () => handleCodeAssist({
           message,
           history: Array.isArray(body.history) ? body.history : [],
           agentContext: enrichedAgentContext,
@@ -688,9 +704,10 @@ export async function handleAIRoutes(req, res) {
           kb,
           userId: req.user?.id,
           signal: bufferedAc.signal,
-        });
+        }));
         if (bufferedAc.signal.aborted) return true;
         mergeMemoryUsage(usage, out);
+        mergeTurnTokens(usage, turnTokens);
         sendJSON(res, 200, {
           reply: out.reply,
           pendingTool: out.pendingTool,

@@ -15,6 +15,7 @@
 // never throw into the model call that triggered it (mirrors activity.mjs).
 
 import { readFileSync } from 'node:fs';
+import { AsyncLocalStorage } from 'node:async_hooks';
 
 // ---------------------------------------------------------------------------
 // Built-in fallback chains. Order = default priority (lower index tried first).
@@ -302,6 +303,34 @@ export function pickMainModelRow(rows, meteredModel) {
     || [...list].sort((a, b) => (b.outputTokens || 0) - (a.outputTokens || 0))[0];
 }
 
+// Per-turn token totals for the classic /code-assist engine. A turn makes many
+// model calls (tool loop, subagents, retries) on different paths, and every one
+// already lands here — so a request-scoped accumulator collects them without
+// threading a counter through the whole loop. The Agent v2 engine reports its
+// own usage and does not use this.
+const turnTokens = new AsyncLocalStorage();
+
+/** Fresh totals for one turn: `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, calls }`. */
+export function newTurnTokenTotals() {
+  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, calls: 0 };
+}
+
+/** Run `fn` so every `recordUsage` inside it (any await depth) adds to `totals`. */
+export function countTurnTokens(totals, fn) {
+  return turnTokens.run(totals, fn);
+}
+
+function addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }) {
+  const totals = turnTokens.getStore();
+  if (!totals) return;
+  const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
+  totals.inputTokens += n(inputTokens);
+  totals.outputTokens += n(outputTokens);
+  totals.cacheReadTokens += n(cacheReadTokens);
+  totals.cacheCreationTokens += n(cacheCreationTokens);
+  totals.calls += 1;
+}
+
 export function recordUsage(db, {
   userId, provider, model, source = 'api', endpoint = null,
   inputTokens = null, outputTokens = null, runs = 1, requestId = null,
@@ -313,6 +342,7 @@ export function recordUsage(db, {
   // Null = not reported; a caller that does not know leaves both out.
   turns = null, stopReason = null,
 } = {}) {
+  addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens });
   if (!userId || !provider || !model) return null;
   try {
     const info = db.prepare(
