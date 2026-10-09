@@ -25,7 +25,11 @@ struct SessionStoreTokenPersistTests {
         var calls = 0
         let store = store { _ in calls += 1; return calls >= 3 }
         store.adopt(session: try session(token: "rt-1"))
-        try await Task.sleep(for: .milliseconds(200))
+        // Wait for the third attempt rather than a fixed 200 ms: the retries
+        // hop through the main actor, and a slow CI runner missed that window.
+        let deadline = ContinuousClock.now + .seconds(5)
+        while calls < 3, ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(10)) }
+        try await Task.sleep(for: .milliseconds(50))   // and nothing after the accepted write
         #expect(calls == 3)
     }
 
