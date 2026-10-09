@@ -1574,14 +1574,14 @@ final class MobileControlManager {
     }
 
     /// Forget every paired phone: the account that paired them is gone. Each
-    /// has to pair with the PIN again.
+    /// has to pair with the PIN again. The connected phone is dropped whether
+    /// or not it is in the registry: a PIN-only phone has no device id, so a
+    /// per-id disconnect would never reach it.
     func revokeAllDevices() {
         let ids = pairedDeviceStore.revokeAll()
         refreshPairedDevices()
-        for id in ids {
-            server?.disconnectClient(deviceId: id, code: .revoked,
-                                     message: "The Mac signed out of the account this phone was paired with")
-        }
+        server?.disconnectCurrentClient(code: .revoked,
+                                        message: "The Mac signed out of the account this phone was paired with")
         if !ids.isEmpty { append(.info, "Revoked \(ids.count) paired device(s) after an account change") }
     }
 

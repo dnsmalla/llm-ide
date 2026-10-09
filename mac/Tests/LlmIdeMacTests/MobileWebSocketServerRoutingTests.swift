@@ -41,4 +41,22 @@ final class MobileWebSocketServerRoutingTests: XCTestCase {
         XCTAssertFalse(MobileWebSocketServer.isHeartbeatFrame(Data("not json".utf8)))
         XCTAssertFalse(MobileWebSocketServer.isHeartbeatFrame(Data(#"{"foo":"bar"}"#.utf8)))
     }
+
+    /// Revoking every device (sign-out, "disconnect all") must drop whoever is
+    /// connected — including a phone paired with the PIN alone, which has no
+    /// device id and so matched none of the revoked ids. It kept issuing
+    /// commands against the next account.
+    func testRevokeAllDropsAPinOnlyClientThatHasNoDeviceId() {
+        XCTAssertTrue(MobileWebSocketServer.disconnectMatches(clientDeviceId: nil, target: nil),
+                      "a PIN-only client (no device id) is dropped by a revoke-all")
+        XCTAssertTrue(MobileWebSocketServer.disconnectMatches(clientDeviceId: "phone-a", target: nil),
+                      "an identified client is dropped by a revoke-all too")
+    }
+
+    func testRevokingOneDeviceDropsOnlyThatDevice() {
+        XCTAssertTrue(MobileWebSocketServer.disconnectMatches(clientDeviceId: "phone-a", target: "phone-a"))
+        XCTAssertFalse(MobileWebSocketServer.disconnectMatches(clientDeviceId: "phone-a", target: "phone-b"))
+        XCTAssertFalse(MobileWebSocketServer.disconnectMatches(clientDeviceId: nil, target: "phone-a"),
+                       "a PIN-only client is not the device being revoked in Settings")
+    }
 }

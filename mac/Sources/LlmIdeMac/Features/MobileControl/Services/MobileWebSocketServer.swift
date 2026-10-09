@@ -595,8 +595,28 @@ final class MobileWebSocketServer: @unchecked Sendable {
     /// is the live half of revoking a device in Settings: the registry refuses
     /// the token from now on; this ends the session it may currently hold.
     func disconnectClient(deviceId: String, code: Disconnected.Code, message: String) {
+        disconnect(target: deviceId, code: code, message: message)
+    }
+
+    /// Drop whoever is connected, device id or not. A phone paired with the
+    /// PIN alone has no device id, so a per-device revoke can never name it —
+    /// after a sign-out or "disconnect all" it would otherwise keep its
+    /// session against the next account.
+    func disconnectCurrentClient(code: Disconnected.Code, message: String) {
+        disconnect(target: nil, code: code, message: message)
+    }
+
+    /// `target == nil` matches any connected client; otherwise only the
+    /// client that identified itself as `target`.
+    static func disconnectMatches(clientDeviceId: String?, target: String?) -> Bool {
+        guard let target else { return true }
+        return clientDeviceId == target
+    }
+
+    private func disconnect(target: String?, code: Disconnected.Code, message: String) {
         queue.async {
-            guard let conn = self.client, self.paired, self.clientDeviceId == deviceId else { return }
+            guard let conn = self.client,
+                  Self.disconnectMatches(clientDeviceId: self.clientDeviceId, target: target) else { return }
             self.onLog("Disconnecting paired client (\(code.rawValue))")
             self.sendDirect(Disconnected(code: code, message: message), to: conn)
             // The state handler stays installed: its `.cancelled` branch clears
