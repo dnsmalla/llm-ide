@@ -1,5 +1,5 @@
 {
-  "sdkVersion": "0.3.289",
+  "sdkVersion": "0.3.292",
   "items": {
     "messages.SDKAPIRetryMessage": {
       "status": "needs-human",
@@ -688,6 +688,10 @@
     "tools.ShowOnboardingRolePickerInput": {
       "status": "needs-human",
       "reason": "seed: not yet reviewed"
+    },
+    "tools.OfferChromeSetupInput": {
+      "status": "ignored",
+      "reason": "Claude Code's own offer to set up the user's Chrome; LLM-IDE drives its browser surface through the extension, nothing to adopt"
     },
     "tools.TaskCreateInput": {
       "status": "needs-human",
