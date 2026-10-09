@@ -310,14 +310,40 @@ export function pickMainModelRow(rows, meteredModel) {
 // own usage and does not use this.
 const turnTokens = new AsyncLocalStorage();
 
-/** Fresh totals for one turn: `{ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, calls }`. */
+/**
+ * Fresh totals for one turn: `{ inputTokens, outputTokens, cacheReadTokens,
+ * cacheCreationTokens, calls, unmeteredCalls }`. `unmeteredCalls` counts model
+ * calls that reported no usage (CLI text mode, the CLI streaming reply) — a
+ * turn with any is incomplete and must not be reported as a total.
+ */
 export function newTurnTokenTotals() {
-  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, calls: 0 };
+  return { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, calls: 0, unmeteredCalls: 0 };
 }
 
 /** Run `fn` so every `recordUsage` inside it (any await depth) adds to `totals`. */
 export function countTurnTokens(totals, fn) {
   return turnTokens.run(totals, fn);
+}
+
+/** Mark a model call that produced no usage at all on the current turn (no-op outside a turn). */
+export function noteUnmeteredModelCall() {
+  const totals = turnTokens.getStore();
+  if (totals) totals.unmeteredCalls += 1;
+}
+
+/**
+ * The response fields for a turn's totals — `{ inputTokens, outputTokens,
+ * cacheReadTokens?, cacheCreationTokens?, modelCalls }` — or null when the
+ * turn made no metered call or any call went unmetered (fail closed: the
+ * client shows nothing rather than a partial sum presented as the whole turn).
+ */
+export function turnTokenUsageFields(totals) {
+  if (!totals || totals.calls === 0 || totals.unmeteredCalls > 0) return null;
+  const fields = { inputTokens: totals.inputTokens, outputTokens: totals.outputTokens };
+  if (totals.cacheReadTokens) fields.cacheReadTokens = totals.cacheReadTokens;
+  if (totals.cacheCreationTokens) fields.cacheCreationTokens = totals.cacheCreationTokens;
+  fields.modelCalls = totals.calls;
+  return fields;
 }
 
 function addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }) {
@@ -326,7 +352,10 @@ function addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCrea
   // Same clamp as the ledger row, so a poisoned count can't reach the client.
   const n = (v) => tokenCountOrNull(v) ?? 0;
   const counts = [n(inputTokens), n(outputTokens), n(cacheReadTokens), n(cacheCreationTokens)];
-  if (counts.every((c) => c === 0)) return;   // a call that reported no tokens (CLI text mode)
+  if (counts.every((c) => c === 0)) {
+    totals.unmeteredCalls += 1;
+    return;
+  }
   totals.inputTokens += counts[0];
   totals.outputTokens += counts[1];
   totals.cacheReadTokens += counts[2];

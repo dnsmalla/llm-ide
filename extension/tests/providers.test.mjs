@@ -824,3 +824,30 @@ test('sweepStaleCliTempDirs: removes llmide-cli-* dirs older than the cutoff, no
     fs.rmSync(root, { recursive: true, force: true });
   }
 });
+
+test('completeViaApi meters an OpenAI reply into the turn total with prompt_tokens kept whole (the quota counts it)', async () => {
+  const { newTurnTokenTotals, countTurnTokens } = await import('../kb/usage.mjs');
+  const restore = mockFetch(async () => jsonRes(200, {
+    choices: [{ message: { content: 'hi' } }],
+    usage: { prompt_tokens: 50, completion_tokens: 8, prompt_tokens_details: { cached_tokens: 30 } },
+  }));
+  try {
+    const totals = newTurnTokenTotals();
+    await countTurnTokens(totals, () =>
+      completeViaApi('openai', { apiKey: 'k', model: 'gpt-4o', prompt: 'hello', meter: { userId: 'u-meter', endpoint: '/t' } }));
+    assert.deepEqual(totals, { inputTokens: 50, outputTokens: 8, cacheReadTokens: 0, cacheCreationTokens: 0, calls: 1, unmeteredCalls: 0 });
+  } finally { restore(); }
+});
+
+test('completeViaApi without a metering user notes an unmetered call on the turn', async () => {
+  const { newTurnTokenTotals, countTurnTokens } = await import('../kb/usage.mjs');
+  const restore = mockFetch(async () => jsonRes(200, {
+    choices: [{ message: { content: 'hi' } }], usage: { prompt_tokens: 50, completion_tokens: 8 },
+  }));
+  try {
+    const totals = newTurnTokenTotals();
+    await countTurnTokens(totals, () => completeViaApi('openai', { apiKey: 'k', model: 'gpt-4o', prompt: 'hello' }));
+    assert.equal(totals.calls, 0);
+    assert.equal(totals.unmeteredCalls, 1);
+  } finally { restore(); }
+});

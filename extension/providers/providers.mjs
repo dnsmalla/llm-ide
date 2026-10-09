@@ -20,7 +20,7 @@ import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { Semaphore } from '../core/semaphore.mjs';
-import { recordUsage, flagQuota, recordRateLimits, resolveModel as resolveUsageModel } from '../kb/usage.mjs';
+import { recordUsage, flagQuota, recordRateLimits, resolveModel as resolveUsageModel, noteUnmeteredModelCall } from '../kb/usage.mjs';
 import { recordActivity } from '../kb/activity.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
@@ -345,6 +345,9 @@ export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, s
   if (!res.ok) throw chatRouteError(await readError(res, apiKey), base);
   const data = await res.json();
   const msg = data?.choices?.[0]?.message;
+  // prompt_tokens already includes any cached prefix and the per-model quota
+  // (usedForModel) counts it — so it stays whole here, not split into a
+  // cache-read field the quota would then skip.
   const usage = { inputTokens: data?.usage?.prompt_tokens, outputTokens: data?.usage?.completion_tokens };
   // Return tool_calls STRUCTURED (id/name/arguments) so callers can choose:
   // the native loop appends them as assistant+tool messages; the fence path
@@ -445,10 +448,14 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
         try {
           recordUsage(getDb(), {
             userId: meter.userId, provider, model, source: 'api', endpoint: meter.endpoint,
-            inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens, requestId: meter.requestId,
+            inputTokens: usage?.inputTokens, outputTokens: usage?.outputTokens,
+            cacheReadTokens: usage?.cacheReadTokens, cacheCreationTokens: usage?.cacheCreationTokens,
+            requestId: meter.requestId,
           });
         } catch { /* ignore */ }
         try { if (headers) recordRateLimits(meter.userId, { provider, model, headers }); } catch { /* ignore */ }
+      } else {
+        noteUnmeteredModelCall();
       }
       // Fence-path callers get a single synthesized fence from the first native
       // tool_call so the existing <<<TOOL_CALL>>> loop dispatches unchanged.

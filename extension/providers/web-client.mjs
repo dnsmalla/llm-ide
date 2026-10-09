@@ -14,6 +14,7 @@
 
 import { spawnCli, minimalCliEnv, anthropicWebCliArgs, assertSafeBaseUrlResolved } from './providers.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
+import { noteUnmeteredModelCall } from '../kb/usage.mjs';
 import { readFileSync } from 'node:fs';
 
 // The one source for Claude model ids (schema/models/anthropic-models.json).
@@ -64,6 +65,8 @@ async function runAnthropicWebTool({ apiKey, tool, userText, timeoutMs, signal }
       throw new Error(`Anthropic web tool ${res.status}${detail ? `: ${detail}` : ''}`);
     }
     last = await res.json();
+    // Not written to the ledger (no user here) — the turn total must know.
+    noteUnmeteredModelCall();
     if (last.stop_reason === 'pause_turn' && Array.isArray(last.content)) {
       messages = [...messages, { role: 'assistant', content: last.content }];
       continue;
@@ -148,6 +151,7 @@ export async function searchWebViaCli(query, { timeoutMs = CLI_TIMEOUT_MS, signa
     timeoutMs,
     signal,
   });
+  noteUnmeteredModelCall();
   return { answer: String(stdout || '').trim(), sources: [] };
 }
 
@@ -164,6 +168,7 @@ export async function fetchUrlViaCli(urlString, { timeoutMs = CLI_TIMEOUT_MS, si
     timeoutMs,
     signal,
   });
+  noteUnmeteredModelCall();
   return { title: '', text: String(stdout || '').trim() };
 }
 

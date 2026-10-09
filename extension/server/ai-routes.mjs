@@ -10,20 +10,17 @@ import { config } from '../core/config.mjs';
 import { readSkillInstructions } from '../llm_agent/skills/index.mjs';
 import { resolveTierModel } from '../llm_agent/runtime/model-tier.mjs';
 import * as kb from '../kb/db.mjs';
-import { newTurnTokenTotals, countTurnTokens } from '../kb/usage.mjs';
+import { newTurnTokenTotals, countTurnTokens, turnTokenUsageFields } from '../kb/usage.mjs';
 import { scanForSecrets } from '../guardrails/scan.mjs';
 import { sanitizePersonaSuffix } from '../providers/prompt-utils.mjs';
 
 // The turn's model tokens, summed over every call it made (see
-// `countTurnTokens`). Omitted when no call reported tokens — a CLI that prints
-// no usage — so the client shows nothing rather than a false zero.
+// `countTurnTokens`). Omitted when no call reported tokens or ANY call went
+// unmetered — a CLI that prints no usage — so the client shows nothing rather
+// than a false zero or a side call's count posing as the whole turn.
 function mergeTurnTokens(usage, totals) {
-  if (!totals || totals.inputTokens + totals.outputTokens === 0) return;
-  usage.inputTokens = totals.inputTokens;
-  usage.outputTokens = totals.outputTokens;
-  if (totals.cacheReadTokens) usage.cacheReadTokens = totals.cacheReadTokens;
-  if (totals.cacheCreationTokens) usage.cacheCreationTokens = totals.cacheCreationTokens;
-  usage.modelCalls = totals.calls;
+  const fields = turnTokenUsageFields(totals);
+  if (fields) Object.assign(usage, fields);
 }
 
 // Copy the per-request memory-block overhead (set by handleCodeAssist) onto the

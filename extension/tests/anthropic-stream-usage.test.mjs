@@ -41,3 +41,26 @@ test('runClaudeStream meters the streamed reply from message_start / message_del
     if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = prevKey;
   }
 });
+
+test('runClaude (buffered Anthropic HTTP) meters cache read + creation tokens too', async () => {
+  const { runClaude } = await import('../providers/runtime.mjs');
+  const original = globalThis.fetch;
+  const prevKey = process.env.ANTHROPIC_API_KEY;
+  process.env.ANTHROPIC_API_KEY = 'sk-ant-test';
+  globalThis.fetch = async () => ({
+    ok: true, status: 200, headers: new Map(),
+    json: async () => ({
+      content: [{ type: 'text', text: 'Hello' }],
+      usage: { input_tokens: 10, output_tokens: 7, cache_read_input_tokens: 400, cache_creation_input_tokens: 25 },
+    }),
+  });
+  try {
+    const totals = newTurnTokenTotals();
+    const text = await countTurnTokens(totals, () => runClaude('hi', { model: 'claude-sonnet-5' }));
+    assert.equal(text, 'Hello');
+    assert.deepEqual(totals, { inputTokens: 10, outputTokens: 7, cacheReadTokens: 400, cacheCreationTokens: 25, calls: 1, unmeteredCalls: 0 });
+  } finally {
+    globalThis.fetch = original;
+    if (prevKey === undefined) delete process.env.ANTHROPIC_API_KEY; else process.env.ANTHROPIC_API_KEY = prevKey;
+  }
+});

@@ -158,3 +158,20 @@ test('searchWebViaAnthropic: surfaces a non-OK status', async () => {
     await assert.rejects(() => searchWebViaAnthropic('q', { apiKey: 'k' }), /Anthropic web tool 401/);
   } finally { restore(); }
 });
+
+test('searchWebViaAnthropic: every Messages hop is noted as an unmetered call on the turn', async () => {
+  const { newTurnTokenTotals, countTurnTokens } = await import('../kb/usage.mjs');
+  let hop = 0;
+  const restore = mockFetch(async () => ({
+    ok: true, status: 200,
+    json: async () => (hop++ === 0
+      ? { stop_reason: 'pause_turn', content: [{ type: 'text', text: 'thinking' }] }
+      : { stop_reason: 'end_turn', content: [{ type: 'text', text: 'Done.' }] }),
+  }));
+  try {
+    const totals = newTurnTokenTotals();
+    await countTurnTokens(totals, () => searchWebViaAnthropic('q', { apiKey: 'k' }));
+    assert.equal(totals.calls, 0);
+    assert.equal(totals.unmeteredCalls, 2, 'the pause_turn hop and the final hop are both model calls');
+  } finally { restore(); }
+});

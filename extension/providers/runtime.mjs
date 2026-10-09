@@ -10,7 +10,7 @@ import { redactWithKey } from '../core/redact-secrets.mjs';
 import { markRouteFailed, routeFailure, ROUTE_BROKEN_TTL_MS, ROUTE_TRANSIENT_TTL_MS } from './route-health.mjs';
 import { resolveProvider, assertChatProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
-import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
+import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits, noteUnmeteredModelCall } from '../kb/usage.mjs';
 
 // Best-effort metering wrappers — a ledger write or quota flag must NEVER throw
 // into a live model call. Used across the Anthropic HTTP, CLI, and provider
@@ -484,6 +484,8 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
             meterUsage({
               userId, provider: 'anthropic', model: resolvedModel, source: 'api', endpoint,
               inputTokens: data.usage?.input_tokens, outputTokens: data.usage?.output_tokens,
+              cacheReadTokens: data.usage?.cache_read_input_tokens,
+              cacheCreationTokens: data.usage?.cache_creation_input_tokens,
             });
             return data.content[0].text;
           }
@@ -833,6 +835,9 @@ export async function streamModelReply(prompt, {
       // direct-API branch above would already have returned. No provider's
       // CLI needs ANTHROPIC_API_KEY injected via this path.
       const { stdoutText } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk, argsOverride });
+      // The stream parsers yield text only, never usage — the turn total
+      // must know a call went unmetered or it reports the side calls alone.
+      noteUnmeteredModelCall();
       return stdoutText;
     } catch (err) {
       if (deliveredAnyChunk) {
