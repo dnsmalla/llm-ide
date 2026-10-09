@@ -117,6 +117,13 @@ enum LoopRunQueueMirror {
         held = roots
     }
 
+    /// Whether a run currently holds a root that contains `url`.
+    nonisolated static func isActive(containing url: URL) -> Bool {
+        let path = url.resolvingSymlinksInPath().path
+        lock.lock(); defer { lock.unlock() }
+        return held.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
+
     /// Whether a run currently holds `gitRoot` (same keying as `LoopRunQueue`).
     nonisolated static func isActive(gitRoot: URL) -> Bool {
         let key = gitRoot.resolvingSymlinksInPath().path

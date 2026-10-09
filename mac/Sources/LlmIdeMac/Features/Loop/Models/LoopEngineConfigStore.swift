@@ -148,9 +148,26 @@ enum LoopEngineConfigStore {
             }
             return
         }
+        let url = fileURL(projectRoot: projectRoot)
         LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
-        write(store, to: fileURL(projectRoot: projectRoot), recordAsAppWrite: recordAsAppWrite)
+        write(store, to: url, recordAsAppWrite: recordAsAppWrite && mayBless(url))
         LoopStoreCache.shared.invalidate(projectRoot: projectRoot.path)
+    }
+
+    /// Whether a UI save of `url` may be recorded as the app's own write.
+    ///
+    /// Every UI writer is a read-modify-write: it re-reads `loop.json` from
+    /// disk and changes one loop. During a run, what it re-reads may already
+    /// carry the repair agent's edit; recording that save as the app's would
+    /// hide the edit from the repair guard. So while a run holds this repo, a
+    /// save is only the app's when the file still holds what the app last
+    /// wrote, or what was there when the supervised edit began
+    /// (`AppWrittenFiles.adoptCurrentContent`). Otherwise the write lands
+    /// unrecorded and the guard judges the file as it would the agent's edit.
+    private static func mayBless(_ url: URL) -> Bool {
+        guard LoopRunQueueMirror.isActive(containing: url),
+              FileManager.default.fileExists(atPath: url.path) else { return true }
+        return AppWrittenFiles.isUnchangedSinceAppWrite(url)
     }
 
     /// This project's loops **as the app actually runs them**: `load`, then
