@@ -90,6 +90,37 @@ final class AutoTaskWorktreeTests: XCTestCase {
         XCTAssertFalse(AutoCodeUpdateService.localBranches(prefix: "fix/custom-noop", at: repo.path).contains(branch))
     }
 
+    /// A custom template may tell the CLI to commit. The app's own commit then
+    /// finds nothing to commit and the tree is clean — the branch must still be
+    /// kept, because its tip moved past the start commit.
+    func testCLIMadeCommitKeepsTheImplementBranch() throws {
+        let branch = AutoCodeUpdateService.customImplementBranch(slug: "selfcommit", token: "11111111")
+        let wt = AutoCodeUpdateService.taskWorktreePath(token: "t-self-\(UUID().uuidString.prefix(6))")
+        XCTAssertTrue(AutoCodeUpdateService.worktreeAdd(at: repo.path, path: wt, branch: branch))
+        let base = try XCTUnwrap(AutoCodeUpdateService.headSha(at: wt))
+        // The CLI edits and commits by itself.
+        try "by the cli\n".write(to: URL(fileURLWithPath: wt).appendingPathComponent("c.txt"), atomically: true, encoding: .utf8)
+        _ = try sh(["git", "add", "-A"], cwd: URL(fileURLWithPath: wt))
+        _ = try sh(["git", "commit", "-q", "-m", "cli commit"], cwd: URL(fileURLWithPath: wt))
+
+        XCTAssertFalse(AutoCodeUpdateService.commitAll(at: wt, message: "Auto task: selfcommit"), "nothing left to commit")
+        let treeClean = AutoCodeUpdateService.isWorkingTreeClean(at: wt)
+        let tip = AutoCodeUpdateService.headSha(at: wt)
+        XCTAssertTrue(treeClean)
+        XCTAssertNotEqual(tip, base)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: treeClean, cliCommitted: tip != base),
+                       .keepBranch)
+        AutoCodeUpdateService.worktreeRemove(at: repo.path, path: wt)
+        XCTAssertEqual(try sh(["git", "log", "-1", "--format=%s", branch]), "cli commit")
+    }
+
+    func testUncommittedImplementCleanupDecision() {
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: true, cliCommitted: false), .deleteBranch)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: true, cliCommitted: true), .keepBranch)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: false, cliCommitted: false), .keepWorktree)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: false, cliCommitted: true), .keepWorktree)
+    }
+
     /// Absolute paths under the main checkout are redirected into the worktree.
     func testPromptIsRetargetedToTheWorktree() {
         let out = AutoCodeUpdateService.retargetPrompt(

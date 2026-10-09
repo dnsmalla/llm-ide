@@ -742,6 +742,19 @@ extension AutoCodeUpdateService {
         return IssueRunOutcome(succeeded: result, committed: committed, branch: committed || keepWorktreeForRecovery ? keptBranchName : nil)
     }
 
+    /// What to do with a `.implement` task's branch when the app's own
+    /// `commitAll` produced nothing (it exits non-zero both for "nothing to
+    /// commit" and for a failing hook / missing identity).
+    enum ImplementCleanup: Equatable { case keepBranch, deleteBranch, keepWorktree }
+
+    /// A dirty tree keeps the worktree (its edits are the CLI's finished
+    /// work). A clean tree is "nothing to commit" — but if the branch tip moved,
+    /// the CLI committed on its own, and deleting the branch would destroy it.
+    nonisolated static func uncommittedImplementCleanup(treeClean: Bool, cliCommitted: Bool) -> ImplementCleanup {
+        guard treeClean else { return .keepWorktree }
+        return cliCommitted ? .keepBranch : .deleteBranch
+    }
+
     /// `purposeMode`: the chat mode this task corresponds to, for the Settings
     /// model of that purpose (nil = no purpose, the default model applies).
     func runCLI(prompt: String, localPath: String, logSuffix: String, logDir: URL,
@@ -826,6 +839,23 @@ extension AutoCodeUpdateService {
             log.error("auto_task_skip_worktree suffix=\(logSuffix, privacy: .public)")
             return false
         }
+        // `.implement`: the commit the branch STARTS at, so "did the CLI commit?"
+        // can be answered by the tip moving — a custom template may tell the CLI
+        // to commit, and deleting its branch afterwards would destroy that work.
+        // Without it the question cannot be answered, so do not run (same rule
+        // as Implement Issues).
+        var baseSha: String?
+        if let implementBranch {
+            baseSha = await Task.detached { Self.headSha(at: worktree) }.value
+            if baseSha == nil {
+                await Task.detached { Self.worktreeRemove(at: localPath, path: worktree) }.value
+                _ = await Task.detached { Self.branchDelete(implementBranch, at: localPath) }.value
+                let msg = "Skipped auto-task \(logSuffix): could not read the starting commit of the isolated checkout."
+                lastError = msg
+                taskErrors[logSuffix] = msg
+                return false
+            }
+        }
         logStore.append(logStoreId, "Running in an isolated checkout (\(worktree)); your working tree is not touched.")
         // Re-point the prompt at the worktree — an absolute input/output path
         // under the main checkout would otherwise send the CLI's edits there.
@@ -896,11 +926,18 @@ extension AutoCodeUpdateService {
         activeProcess = nil
         var emptyImplementBranch: String?
         var keepWorktreeForRecovery = false
+        // Commits the CLI made itself, judged by the tip moving in the worktree.
+        let tip = implementBranch == nil ? nil : await Task.detached { Self.headSha(at: worktree) }.value
+        let cliCommitted = tip != nil && tip != baseSha
         if let implementBranch, wasCancelled, !result {
-            // Stopped mid-run (the CLI did not finish cleanly): the edits are half-done — drop the worktree and
-            // its branch instead of committing them as if the task finished.
-            logStore.append(logStoreId, "Stopped; discarded the unfinished checkout.")
-            emptyImplementBranch = implementBranch
+            // Stopped mid-run (the CLI did not finish cleanly): the edits are half-done — drop the worktree
+            // instead of committing them as if the task finished. Commits the CLI already made stay on the branch.
+            if cliCommitted {
+                logStore.append(logStoreId, "Stopped; the commits already made are kept on \(implementBranch), unfinished edits discarded.")
+            } else {
+                logStore.append(logStoreId, "Stopped; discarded the unfinished checkout.")
+                emptyImplementBranch = implementBranch
+            }
         } else if let implementBranch {
             // `.implement`: persist the CLI's edits as a commit on its branch,
             // inside the worktree — the only changes there are this task's.
@@ -916,10 +953,13 @@ extension AutoCodeUpdateService {
                 // an unverifiable tree is kept too. Removing the worktree of a
                 // dirty one would destroy the CLI's finished edits.
                 let isTreeClean = await Task.detached { Self.isWorkingTreeClean(at: worktree) }.value
-                if isTreeClean {
+                switch Self.uncommittedImplementCleanup(treeClean: isTreeClean, cliCommitted: cliCommitted) {
+                case .keepBranch:
+                    logStore.append(logStoreId, "Committed on branch \(implementBranch) by the CLI (your checkout is unchanged).")
+                case .deleteBranch:
                     logStore.append(logStoreId, "No commit produced (nothing to commit).", level: .error)
                     emptyImplementBranch = implementBranch
-                } else {
+                case .keepWorktree:
                     keepWorktreeForRecovery = true
                     logStore.append(
                         logStoreId,
