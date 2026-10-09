@@ -28,13 +28,14 @@ import { cliHealth, awaitCliProbes, routeFailure } from './route-health.mjs';
 const log = logger.child({ component: 'tier-routing' });
 
 // Features whose prompts carry untrusted third-party text (email, connector
-// items, transcripts → `internal`) or whose output is dispatched onward to
-// issue trackers (`pipeline`). A keyless OpenAI/Google route runs the codex /
+// items, transcripts → `internal`; the decide tool's `state` is ticket text /
+// test output → `decisions`) or whose output is dispatched onward to issue
+// trackers (`pipeline`). A keyless OpenAI/Google route runs the codex /
 // gemini AGENT CLI — read-only, in an empty temp dir, but codex's read-only
 // sandbox can still read absolute paths — so those routes never serve these
 // features; an API-key route (plain HTTP completion) or Claude's tool-less
 // `claude -p` may.
-const UNTRUSTED_INPUT_FEATURES = new Set(['internal', 'pipeline']);
+const UNTRUSTED_INPUT_FEATURES = new Set(['internal', 'pipeline', 'decisions']);
 const AGENT_CLI_PROVIDERS = new Set(['openai', 'google']);
 
 // CLI health for a keyless OpenAI/Google route: 'ok' | 'failed' |
@@ -242,8 +243,8 @@ export async function tierRoutingStatusFresh(userId, db, { waitMs = 3000 } = {})
 /**
  * The route for `feature` (via its tier), or null → the caller's default.
  * A keyless OpenAI/Google (agent CLI) route never serves an untrusted-input
- * feature (`internal`, `pipeline`) — see UNTRUSTED_INPUT_FEATURES — and a
- * decision-only (jev) route serves `decisions` alone (DECISION_FEATURE).
+ * feature (`internal`, `pipeline`, `decisions`) — see UNTRUSTED_INPUT_FEATURES
+ * — and a decision-only (jev) route serves `decisions` alone (DECISION_FEATURE).
  */
 export function resolveFeatureRoute(userId, feature, db) {
   if (!userId) return null;

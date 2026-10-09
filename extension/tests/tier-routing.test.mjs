@@ -307,6 +307,27 @@ test('keyless CLI routes never serve untrusted-input features (internal, pipelin
   assert.deepEqual(resolveFeatureRoute(u2, 'internal'), { provider: 'anthropic', model: 'claude-haiku-4-5' });
 });
 
+test('keyless CLI routes never serve decisions (its state is ticket text / test output)', () => {
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: { cheap: { provider: 'openai', model: 'gpt-5' }, standard: { provider: 'google', model: 'gemini-2.5-flash' } },
+    features: { decisions: 'cheap', subagents: 'standard' },
+  }, userId);
+  cliInstalled.add('openai');
+  cliInstalled.add('google');
+  try {
+    assert.equal(resolveFeatureRoute(userId, 'decisions'), null);
+    assert.deepEqual(routeOpts(userId, 'decisions', { model: 'm-default' }), { model: 'm-default' });
+    assert.deepEqual(tierRoutingStatus(userId).featureStatus, {
+      decisions: { usable: false, reason: 'cli_untrusted_input' },
+      subagents: { usable: true },
+    });
+    setSecret(db.getDb(), userId, 'openai.apiKey', 'sk-oa');
+    assert.deepEqual(resolveFeatureRoute(userId, 'decisions'), { provider: 'openai', model: 'gpt-5' });
+    assert.deepEqual(tierRoutingStatus(userId).featureStatus.decisions, { usable: true });
+  } finally { cliInstalled.clear(); }
+});
+
 test('tierRoutingStatus: featureStatus carries the tier\'s own reason for an unusable tier', () => {
   const userId = freshUser();
   syncTierRouting({ tiers: { cheap: { provider: 'deepseek', model: 'deepseek-chat' } }, features: { loop: 'cheap', subagents: 'strong' } }, userId);
