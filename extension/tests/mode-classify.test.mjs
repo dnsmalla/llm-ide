@@ -249,3 +249,134 @@ for (const msg of [
     assert.equal(run.calls, 1);
   });
 }
+
+// Short chit-chat and plain information questions: the model answered
+// execute for these anyway, at ~8-12 s of serial pre-turn latency each
+// (a `claude -p` spawn on the CLI path). Answered locally now.
+for (const msg of [
+  'hi',
+  'hello',
+  'thanks!',
+  'test',
+  'ありがとう',
+  'こんにちは',
+  'where is parseConfig defined?',
+  'what does fetchUser return?',
+  'which file owns sessionLock?',
+  'which module exports `runTurn`?',
+  'parseConfig はどこで定義されてる？',
+  'この関数は何を返す？',
+  'いいよ',
+  // Identifiers that merely contain a guard word stem.
+  'where is validateToken defined?',
+  'where is ErrorBoundary used?',
+  'which file has handleChange?',
+  'where is src/server/auth.mjs?',
+  'fetchUser は何を返す？',
+  'where is parseConfig?',
+  'parseConfig はどのファイルで定義されてる？',
+  'parseConfig はどこにありますか？',
+  'where is the parseConfig function?',
+  'where is the handleLogin route defined?',
+]) {
+  test(`chit-chat / plain question → execute without a model call: ${msg}`, async () => {
+    const run = counting('{"mode": "plan"}');
+    assert.deepEqual(await classifyCodeAssistMode(msg, { _runClaude: run }), { mode: 'execute' });
+    assert.equal(run.calls, 0);
+  });
+}
+
+// A question about whether something is broken, safe or correct is a review
+// in disguise, and a long message is a real request — both stay with the
+// model, as does a short statement that reports a problem.
+for (const msg of [
+  'is there a bug in parser.mjs?',
+  'any errors in this file?',
+  'why does login fail?',
+  'is this safe?',
+  'is this code correct?',
+  'does the build still crash?',
+  'is the cache leaking memory?',
+  'what changed in this diff?',
+  'parser.mjs has a bug',
+  'ログイン画面が動かない？',
+  'これは安全？',
+  'このコードは正しい？',
+  'テストが落ちる',
+  `where is parseConfig defined? ${'and how is it loaded across the server, the mac app and the extension '.repeat(3)}`,
+  'the release branch was cut yesterday and the changelog still lists the old version numbers',
+  // Short review / plan asks with no guard word: only a whitelisted SHAPE
+  // may skip the model, never mere shortness (code review of the first cut).
+  'does this look right?',
+  'is this the right fix?',
+  'can this be simplified?',
+  'anything I missed?',
+  'what does this module do?',
+  'how to add caching to the server?',
+  'would caching help here?',
+  'next steps?',
+  'ここ怪しくない？',
+  'このテスト十分？',
+  'この関数何してる？',
+  '次は何をやる？',
+  'take a look',
+  'これ読んで',
+  'PR #42',
+  'parser.mjs',
+  'auth.mjs is too long',
+  'I want to add dark mode',
+  'リファクタしたい',
+  'server.mjs が長すぎる',
+  'push back on this',
+  'where do I start?',
+  'where is the best place to put the cache?',
+  'where is the right place for this helper?',
+  // Evaluative questions that open like a lookup (re-review): the WHOLE
+  // question must be a lookup, not just its first words.
+  'このコードはどこがおかしい？',
+  'この関数はどこが変？',
+  'auth.mjsはどこを直せばいい？',
+  'どのファイルを直せばいい？',
+  'どのファイルが一番汚い？',
+  'いくつか気になる点ある？',
+  'ここ、何行か無駄じゃない？',
+  'which file is the messiest?',
+  'which file needs refactoring?',
+  'which module is too big?',
+  'which tests are flaky?',
+  'where are the weak spots?',
+  'where is the code smelly?',
+  'where is the logic duplicated?',
+  'how many issues are open?',
+  // Evaluative subjects in a lookup's middle (re-review #3): the subject
+  // must be a code identifier, not free text.
+  'which file has the most tech debt?',
+  'which file contains dead code?',
+  'which function has too many parameters?',
+  'which lines have hardcoded secrets?',
+  'where is dead code located?',
+  'where are race conditions located?',
+  'where is TODO?',
+  'このコードの怪しいところはどこ？',
+  '無駄なコードはどこにある？',
+  '技術的負債はどこにある？',
+  'ボトルネックはどこ？',
+  'テストがない関数はどのファイルにある？',
+  'ハードコードされた秘密鍵はどこにある？',
+  'what does this return?',
+  // A free word after the identifier (final review): only a code noun may
+  // follow it, and backticks must hold an identifier, not prose.
+  'where is parseConfig buggy?',
+  'where is handleLogin unsafe?',
+  'where is auth.mjs insecure?',
+  'where are the parseConfig hacks?',
+  'where is `the messy part`?',
+  'what does `this code` return?',
+  '`このコードの怪しいところ` はどこ？',
+]) {
+  test(`problem-, review- or plan-shaped message still goes to the model: ${msg.slice(0, 60)}`, async () => {
+    const run = counting('{"mode": "review"}');
+    assert.deepEqual(await classifyCodeAssistMode(msg, { _runClaude: run }), { mode: 'review' });
+    assert.equal(run.calls, 1);
+  });
+}

@@ -138,13 +138,63 @@ ${clipForClassifier(message)}
 // and review asks phrased loosely ("このコード見てほしい", "thoughts on this?")
 // slipped through to execute — with write tools.
 // (No "bug" here on purpose: with the imperative-verb gate, "fix the bug" /
-// 「バグを直して」 is an instruction, and a bug QUESTION already carries ?/？.)
+// 「バグを直して」 is an instruction, and a bug QUESTION already carries ?/？ —
+// the one question shape that skips the model, a fact lookup, is guarded by
+// PROBLEM_WORDS below.)
 const NON_EXECUTE_WORDS_EN = /(plan|approach|design|architect|strateg|roadmap|option|alternative|trade-?off|pros\b|cons\b|compar|versus|\bvs\b|better|worse|best way|right way|how (would|should|do|can|could)|what (would|should|do you)|should\b|recommend|suggest|propos|idea|brainstorm|think|thought|opinion|concern|review|critique|feedback|audit|wrong|issue with|problem|check|inspect|look (at|over)|see if|evaluat|assess|improve|optimi[sz]|speed up|why\b|document|\bdocs?\b|jsdoc|readme|docstring|changelog|\bspec|\bguides?\b|tutorial|\bwiki|\badr\b|\breports?\b|postmortem|\bwrite[- ]up\b|\bnotes\b|\bmeeting notes?\b|overview|list of|\brisks?\b|comment|explain|describe|summar|grill|poke holes|challenge|question me|ask me|stress-?test|interrogat|work through|together)/i;
 const NON_EXECUTE_WORDS_JA = /(計画|プラン|設計|方針|方法|やり方|進め方|手順を考|検討|案|選択肢|比較|相談|提案|おすすめ|どう|べき|なぜ|どうして|思う|思い|考え|意見|教えて|見て|見直|レビュー|確認|チェック|指摘|問題|改善|最適化|高速化|評価|点検|監査|アーキ|アプローチ|戦略|ロードマップ|仕様|ドキュメント|文書|手順書|ガイド|レポート|概要|議事録|一覧|リスク|説明|README|コメント|まとめ|要約|整理|質問|詰めて|洗い出|一緒に)/i;
 const IMPERATIVE_EN = /^\s*(please\s+)?(fix|add|implement|create|remove|delete|rename|update|change|replace|move|run|install|build|bump|make|refactor|convert|migrate|wire|set up|enable|disable|apply|commit|revert|format|lint|write)\b/i;
 const GO_AHEAD_EN = /^\s*(ok(ay)?|yes|yep|sure|go( ahead)?|continue|proceed|do it|lgtm)[.!\s]*$/i;
 const IMPERATIVE_JA = /(直して|修正して|追加して|実装して|作成して|作って|削除して|消して|変更して|更新して|実行して|インストールして|置き換えて|移動して|リネームして|書き換えて|適用して|反映して|入れて|ビルドして|コミットして|続けて|進めて)(ください|下さい)?[。！!\s]*$/;
 const GO_AHEAD_JA = /^\s*(はい|うん|ええ)?[、,\s]*(お願いします|おねがいします|それでお願いします)?[。！!\s]*$/;
+
+// Two more shapes answer execute locally: whole-message chit-chat ("hi",
+// "ありがとう") and fact-lookup questions ("where is X defined?", "what does
+// X return?"). The model returned execute for both anyway, after ~8-12 s of
+// serial pre-turn latency (a `claude -p` spawn on the CLI path). Both are
+// ANCHORED shapes, never "short enough": the first cut admitted any message
+// under a length cap, and short review/plan asks ("does this look right?",
+// "ここ怪しくない？", "PR #42") went to execute with write tools. A lookup is
+// matched on the WHOLE question, opening AND tail: an evaluative question can
+// open like one ("which file is the messiest?", 「このコードはどこがおかしい？」),
+// and a word blocklist alone keeps losing to that.
+// The problem words are a second guard: "where is the bug?" asks for a
+// review, and "bug" is deliberately absent from NON_EXECUTE_WORDS (above).
+const CHIT_CHAT = /^\s*(hi|hello|hey|thanks?( you)?|thx|ty|test(ing)?|good (morning|afternoon|evening)|ありがとう(ございます)?|こんにちは|こんばんは|おはよう(ございます)?|お疲れ様です|お疲れさま|いいよ|了解(です)?|テスト)[!.！。〜~\s]*$/i;
+// The lookup's SUBJECT must be a code identifier too (camelCase, PascalCase,
+// snake_case, a dotted/slashed path, or `backticked`): with free text in that
+// slot, "which file contains dead code?" / 「技術的負債はどこにある？」 are
+// review asks in a lookup's clothes. A plain-noun lookup ("where is the
+// session lock?") goes to the model — slower, never misrouted.
+// Case-SENSITIVE on purpose: under /i every word looks camelCase.
+const IDENT = '(?:`[\\w.$/:#@-]+`|[a-z]+[A-Z]\\w*|[A-Z][a-z]+[A-Z]\\w*|\\w+_\\w+|[\\w-]+(?:[./][\\w-]+)+)';
+// The only word allowed between a `where` lookup's identifier and its verb:
+// a free word there let "where is parseConfig buggy?" through.
+const CODE_NOUN = '(?:function|method|class|type|struct|enum|module|file|constant|variable|config|route|handler|test|helper|hook|component)';
+const LOCATION_VERB = '(?:defined|declared|used|called|set|configured|stored|registered|implemented|located)';
+const UNIT_VERB = '(?:defines?|declares?|contains?|has|have|owns?|exports?|imports?|calls?|uses?|handles?|registers?|implements?)';
+const LOOKUP_QUESTIONS = [
+  // "where is parseConfig?" / "where is the parseConfig helper defined?"
+  new RegExp(`^\\s*[Ww]here (?:is|are) (?:the )?${IDENT}(?: ${CODE_NOUN})?(?: ${LOCATION_VERB})?\\s*[?？]\\s*$`),
+  // "which file owns sessionLock?"
+  new RegExp(`^\\s*[Ww]hich (?:files?|modules?|functions?|class(?:es)?|tests?|packages?|lines?) ${UNIT_VERB} (?:the )?${IDENT}\\s*[?？]\\s*$`),
+  // "what does fetchUser return?"
+  new RegExp(`^\\s*[Ww]hat (?:does|do) ${IDENT} (?:return|export|import|contain)s?\\s*[?？]\\s*$`),
+  // 「parseConfig はどこで定義されてる？」「fetchUser は何を返す？」
+  new RegExp(`^\\s*${IDENT}\\s*(?:は|って)\\s*(?:どこ(?:で定義|にあります|にある|で使われ)?|何を返す|どのファイル(?:で定義|にある|で使われ))(?:されて|して|て)?(?:る|います|ますか|ある|あります)?(?:の|か)?\\s*[?？]\\s*$`),
+  // 「この関数は何を返す？」 — the one subject-less shape, as a literal.
+  /^\s*この(関数|メソッド|クラス)は何を返す(の|か)?\s*[?？]\s*$/,
+];
+const LOOKUP_QUESTION_CHARS = 160;
+const PROBLEM_WORDS_EN = /\b(bugs?|errors?|exceptions?|fail(s|ed|ing|ure)?|broken|crash(es|ed|ing)?|safe(ly|ty)?|secure|security|vulnerab\w*|leak(s|ed|ing)?|correct(ly|ness)?|valid|slow(er)?|ok|okay|fine|good|bad|missing|diff|best|right|place|start)\b/i;
+const PROBLEM_WORDS_JA = /(バグ|エラー|例外|失敗|落ち|壊れ|動かない|安全|脆弱|漏れ|正し|合って|遅い|大丈夫|差分)/;
+
+function isPlainShortMessage(message) {
+  if (CHIT_CHAT.test(message)) return true;
+  if (!/[?？]\s*$/.test(message) || message.trim().length > LOOKUP_QUESTION_CHARS) return false;
+  if (PROBLEM_WORDS_EN.test(message) || PROBLEM_WORDS_JA.test(message)) return false;
+  return LOOKUP_QUESTIONS.some((shape) => shape.test(message));
+}
 
 /**
  * The mode when it can be decided without a model call, else null. Pure.
@@ -153,8 +203,9 @@ const GO_AHEAD_JA = /^\s*(はい|うん|ええ)?[、,\s]*(お願いします|お
  */
 export function quickMode(message) {
   if (typeof message !== 'string' || !message.trim()) return null;
-  if (/[?？]/.test(message)) return null;
   if (NON_EXECUTE_WORDS_EN.test(message) || NON_EXECUTE_WORDS_JA.test(message)) return null;
+  if (isPlainShortMessage(message)) return 'execute';
+  if (/[?？]/.test(message)) return null;
   const instruction = IMPERATIVE_EN.test(message) || GO_AHEAD_EN.test(message)
     || IMPERATIVE_JA.test(message) || GO_AHEAD_JA.test(message);
   return instruction ? 'execute' : null;
