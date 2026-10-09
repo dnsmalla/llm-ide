@@ -94,4 +94,20 @@ struct MobilePairedDeviceStoreTests {
         _ = store.issueToken(deviceId: "A", name: "   ")
         #expect(store.device(id: "A")?.name == "iPhone")
     }
+
+    @Test("revokeAll forgets every paired phone and reports which, so live connections can be dropped")
+    func revokeAllPairedDevices() {
+        let file = tempFile()
+        let store = MobilePairedDeviceStore(fileURL: file)
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let a = store.issueToken(deviceId: "A", name: "A", now: now)
+        let b = store.issueToken(deviceId: "B", name: "B", now: now)
+
+        #expect(Set(store.revokeAll()) == ["A", "B"])
+        #expect(store.all.isEmpty)
+        #expect(!store.authenticate(deviceId: "A", token: a, now: now))
+        #expect(!store.authenticate(deviceId: "B", token: b, now: now))
+        #expect(MobilePairedDeviceStore(fileURL: file).all.isEmpty, "the revoke is persisted")
+        #expect(store.revokeAll().isEmpty)
+    }
 }
