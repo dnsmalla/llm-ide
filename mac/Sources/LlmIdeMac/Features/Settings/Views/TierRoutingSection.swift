@@ -101,6 +101,11 @@ struct TierRoutingSection: View {
             await backend.refreshServerApiVersion()
             sync()   // the server's copy is per user; re-push like custom providers
             await loadLiveModels(for: ClaudeCLI.provider)
+            // Jev's pinned versions; without a key (or below v73) the
+            // fallback aliases stay.
+            if TierRouting.serverSupportsDecisions(backend.serverApiVersion) {
+                await loadLiveModels(for: TierRouting.decisionOnlyProvider)
+            }
         }
     }
 
@@ -133,12 +138,16 @@ struct TierRoutingSection: View {
                     ForEach(TierRouting.builtInProviders, id: \.wireId) { entry in
                         Text(entry.tool.displayName).tag(entry.wireId)
                     }
+                    // Decision-only: never Standard, which drives the chat composer.
+                    if tier != .standard {
+                        Text(TierRouting.decisionOnlyProviderName).tag(TierRouting.decisionOnlyProvider)
+                    }
                     ForEach(customProviders.filter(\.isEnabled)) { provider in
                         Text(provider.name).tag(provider.wireId)
                     }
                     // A deleted/disabled provider still stored here keeps a tag,
                     // so the menu names what is saved instead of going blank.
-                    if let route, !isListedProvider(route.provider) {
+                    if let route, !isListedProvider(route.provider, tier: tier) {
                         Text("\(route.provider) (unavailable)").tag(route.provider)
                     }
                 }
@@ -165,6 +174,8 @@ struct TierRoutingSection: View {
             }
             if tier == .standard {
                 standardNotes(route)
+            } else if let route, TierRouting.isDecisionOnlyProvider(route.provider) {
+                decisionTierNotes(tier)
             } else if let route, let reason = TierRouting.unusableReason(route, customProviders: customProviders) {
                 note("roles on \(tier.displayName) use their unset choice — \(reason)")
             } else if let route, TierDefaults.isMacOnlyProvider(route.provider) {
@@ -230,6 +241,23 @@ struct TierRoutingSection: View {
         }
     }
 
+    /// A Jev tier: who may use it, and whether the server can (API v73+).
+    @ViewBuilder
+    private func decisionTierNotes(_ tier: RoutingTier) -> some View {
+        note("only the Decisions role uses \(tier.displayName) — other roles on it use their unset choice")
+        if serverSupported, !TierRouting.serverSupportsDecisions(serverState.apiVersion) {
+            note(decisionsServerNote)
+        } else if serverSupported, let status = serverState.status?[tier.rawValue], !status.usable {
+            note("Decisions use their built-in default — the server can't run it: \(TierRouting.describeServerReason(status.reason))")
+        }
+    }
+
+    /// Below API v73 neither Jev tiers nor the Decisions role are sent.
+    var decisionsServerNote: String {
+        "the server is API v\(serverState.apiVersion.map(String.init) ?? "?"); Jev and the Decisions role need "
+            + "v\(TierRouting.decisionsServerApiVersion) — update the server. Until then they are not sent"
+    }
+
     var serverSupported: Bool { TierRouting.serverSupportsRouting(serverState.apiVersion) }
 
     /// Shown when nothing can route because of the server's version.
@@ -254,14 +282,20 @@ struct TierRoutingSection: View {
 
     // MARK: - Derived state
 
-    private func isListedProvider(_ provider: String) -> Bool {
-        TierRouting.builtInProviders.contains { $0.wireId == provider }
+    private func isListedProvider(_ provider: String, tier: RoutingTier) -> Bool {
+        // The menu offers Jev on Strong / Cheap only (never Standard).
+        if TierRouting.isDecisionOnlyProvider(provider) { return tier != .standard }
+        return TierRouting.builtInProviders.contains { $0.wireId == provider }
             || customProviders.contains { $0.isEnabled && $0.wireId == provider }
     }
 
     private func models(forProvider provider: String) -> [AIModel] {
         if let customId = TierRouting.customProviderId(provider) {
             return customProviders.first { $0.id == customId }?.models ?? []
+        }
+        if TierRouting.isDecisionOnlyProvider(provider) {
+            // Jev's own live list (pinned versions too), else its two aliases.
+            return LiveModelCache.models(for: provider) ?? TierRouting.decisionFallbackModels
         }
         return TierRouting.builtInProviders.first { $0.wireId == provider }?.tool.pickerModels ?? []
     }
@@ -281,6 +315,8 @@ struct TierRoutingSection: View {
             get: { pendingProviders[tier.rawValue] ?? routing.tier(tier)?.provider ?? "" },
             set: { provider in
                 var updated = routing
+                // Standard drives the chat composer; Jev cannot chat.
+                guard tier != .standard || TierDefaults.canBeStandard(provider: provider) else { return }
                 if provider.isEmpty {
                     // Standard is required; its menu offers no unset entry once set.
                     guard tier != .standard else { return }

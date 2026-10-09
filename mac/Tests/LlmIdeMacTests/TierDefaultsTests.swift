@@ -33,7 +33,8 @@ struct TierDefaultsTests {
     @Test func wireBodyDropsSharedCustomTiers() {
         let wire = TierDefaults.wireBody(TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom", model: "llama"),
                                                                    "cheap": TierRoute(provider: "custom:p1", model: "glm-5")],
-                                                           features: ["pipeline": "standard"]))
+                                                           features: ["pipeline": "standard"]),
+                                         serverApiVersion: 73)
         #expect(wire.tiers.keys.sorted() == ["cheap"])
         #expect(wire.features == ["pipeline": "standard"])
     }
@@ -46,7 +47,7 @@ struct TierDefaultsTests {
 
     @Test func wireBodyStripsOnlyChatRoles() {
         let features = Dictionary(uniqueKeysWithValues: RoutedFeature.allCases.map { ($0.rawValue, "cheap") })
-        let wire = TierDefaults.wireBody(TierRoutingConfig(features: features))
+        let wire = TierDefaults.wireBody(TierRoutingConfig(features: features), serverApiVersion: 73)
         #expect(Set(wire.features.keys) == Set(RoutedFeature.allCases.filter { $0.group != .chat }.map(\.rawValue)))
     }
 

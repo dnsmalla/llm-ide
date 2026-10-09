@@ -90,13 +90,17 @@ extension LlmIdeAPIClient {
     ///
     /// - Returns: the entries the server dropped as invalid (API v67+; empty
     ///   from an older server, which does not report them).
+    /// - Parameter serverApiVersion: the server's API version, which decides
+    ///   what may be sent (`TierDefaults.wireBody`: no `decisions` role or
+    ///   Jev tier below v73).
     @discardableResult
-    func syncTierRouting(_ config: TierRoutingConfig) async throws -> [TierRoutingDropped] {
+    func syncTierRouting(_ config: TierRoutingConfig, serverApiVersion: Int?) async throws -> [TierRoutingDropped] {
         struct Ack: Decodable { let success: Bool?; let dropped: [TierRoutingDropped]? }
         // Short timeout: this runs on the serialized refresh chain, where one
         // wedged request would hold up every later refresh.
         // Chat roles are Mac-only (no server change, no API bump).
-        let ack: Ack = try await post("/kb/routing-tiers", body: TierDefaults.wireBody(config), authenticated: true,
+        let body = TierDefaults.wireBody(config, serverApiVersion: serverApiVersion)
+        let ack: Ack = try await post("/kb/routing-tiers", body: body, authenticated: true,
                                       timeout: TierRouting.refreshRequestTimeout)
         return ack.dropped ?? []
     }

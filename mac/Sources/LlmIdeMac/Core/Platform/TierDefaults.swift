@@ -119,7 +119,8 @@ public enum TierDefaults {
     /// model; a provider that is neither built-in nor `custom:<id>`).
     public static func writeThrough(for standard: TierRoute) -> StandardWriteThrough? {
         let model = standard.model.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !model.isEmpty else { return nil }
+        // Jev is no chat provider: never written into activeCLI / the composer.
+        guard !model.isEmpty, canBeStandard(provider: standard.provider) else { return nil }
         if let customId = TierRouting.customProviderId(standard.provider) {
             return StandardWriteThrough(activeCLI: nil, defaultModelId: nil, composerProviderId: customId)
         }
@@ -135,16 +136,35 @@ public enum TierDefaults {
         provider == AICliTool.custom.provider
     }
 
+    /// Whether `provider` may be Standard. Standard drives the chat composer
+    /// and `activeCLI` (`writeThrough`), so a decision-only provider (Jev),
+    /// which cannot chat, never can — Settings does not offer it there.
+    public static func canBeStandard(provider: String) -> Bool {
+        !TierRouting.isDecisionOnlyProvider(provider)
+    }
+
     /// The table as `POST /kb/routing-tiers` receives it: chat roles removed
     /// (Mac-only — the server would drop them as `unknown_feature`), and tiers
     /// on a Mac-only provider removed (the server would drop them as
     /// `invalid_provider`; a server role on that tier then finds it unset and
-    /// keeps its built-in default). Unknown keys from a newer build are kept,
-    /// as before, so the server reports them.
-    public static func wireBody(_ config: TierRoutingConfig) -> TierRoutingConfig {
+    /// keeps its built-in default). Below API v73 (or unknown) the
+    /// `decisions` role and Jev tiers are removed too, for the same two
+    /// reasons — that server knows neither. Unknown keys from a newer build
+    /// are kept, as before, so the server reports them.
+    ///
+    /// - Parameter serverApiVersion: the running server's `/health.apiVersion`.
+    public static func wireBody(_ config: TierRoutingConfig, serverApiVersion: Int?) -> TierRoutingConfig {
+        let decisions = TierRouting.serverSupportsDecisions(serverApiVersion)
         var body = config
-        body.tiers = config.tiers.filter { _, route in !isMacOnlyProvider(route.provider) }
-        body.features = config.features.filter { key, _ in RoutedFeature(rawValue: key)?.group != .chat }
+        body.tiers = config.tiers.filter { _, route in
+            !isMacOnlyProvider(route.provider) && (decisions || !TierRouting.isDecisionOnlyProvider(route.provider))
+        }
+        body.features = config.features.filter { key, _ in
+            guard let feature = RoutedFeature(rawValue: key) else { return true }
+            if feature.group == .chat { return false }
+            guard let required = feature.requiredServerApiVersion else { return true }
+            return (serverApiVersion ?? 0) >= required
+        }
         return body
     }
 

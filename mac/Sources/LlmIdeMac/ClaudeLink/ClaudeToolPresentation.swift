@@ -54,6 +54,8 @@ enum ClaudeToolPresentation {
         case "git-op":        return "Git"
         case "update-file":   return "Editing"
         case "task-create", "task-update", "task-list": return "Planning"
+        // Read-only: a yes/no, pick-one or score decision (Jev or an LLM).
+        case "decide":        return "Deciding"
         // SDK built-ins (v2 engine). Same verbs as their llm-ide analogues
         // above, so a chat reads identically whichever engine ran the turn.
         case "read":          return "Reading"
@@ -238,6 +240,7 @@ extension ClaudeToolPresentation {
         case "project_memory":                           return "brain"
         case "load-skill", "slashcommand":               return "sparkle"
         case "exitplanmode":                             return "checkmark.seal"
+        case "decide":                                   return "scale.3d"
         default:                                         return "wrench.and.screwdriver"
         }
     }

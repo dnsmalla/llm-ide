@@ -48,7 +48,7 @@ public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
 /// wire keys of `features` in `POST /kb/routing-tiers` — do not rename. The
 /// `chat*` cases are Mac-only and are stripped from that body.
 public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
-    case subagents, loop, autoTasks, quickChat, pipeline, `internal`
+    case subagents, loop, autoTasks, quickChat, pipeline, `internal`, decisions
     case chatPlanning, chatCoding, chatReviewing, chatDocuments
 
     public var id: String { rawValue }
@@ -61,6 +61,7 @@ public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
         case .quickChat:     return "Quick chat & phone"
         case .pipeline:      return "Server pipeline (plan, codegen)"
         case .internal:      return "Internal helpers (summaries, classify)"
+        case .decisions:     return "Decisions"
         case .chatPlanning:  return "Chat · Planning"
         case .chatCoding:    return "Chat · Coding"
         case .chatReviewing: return "Chat · Reviewing"
@@ -72,7 +73,7 @@ public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .chatPlanning, .chatCoding, .chatReviewing, .chatDocuments: return .chat
         case .loop, .autoTasks, .quickChat:                               return .background
-        case .subagents, .pipeline, .internal:                            return .server
+        case .subagents, .pipeline, .internal, .decisions:                return .server
         }
     }
 
@@ -95,7 +96,7 @@ struct TierRouteFallback: Sendable, Equatable {
 }
 
 /// One tier's target: the server wire provider id
-/// (`anthropic | openai | google | deepseek | custom:<uuid>`) and a model id.
+/// (`anthropic | openai | google | deepseek | jev | custom:<uuid>`) and a model id.
 public struct TierRoute: Codable, Equatable, Sendable {
     public var provider: String
     public var model: String
@@ -232,11 +233,19 @@ enum TierRouting {
     ///   - localCLIOnly: the work is a local CLI subprocess (Auto Tasks).
     ///   - cliInstalled: whether a local CLI tool's executable can be found;
     ///     consulted only with `localCLIOnly`.
+    ///   - forDecisions: the role is `RoutedFeature.decisions` — the only one
+    ///     a decision-only (Jev) route can serve.
     static func unusableReason(_ route: TierRoute, customProviders: [CustomProvider],
                                requiresAgentEngine: Bool = false, localCLIOnly: Bool = false,
-                               cliInstalled: (AICliTool) -> Bool = { _ in true }) -> String? {
+                               cliInstalled: (AICliTool) -> Bool = { _ in true },
+                               forDecisions: Bool = false) -> String? {
         if route.model.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
             return "no model chosen"
+        }
+        if isDecisionOnlyProvider(route.provider) {
+            // WHY before every other check: Jev has no CLI, no Agent engine and
+            // no chat — the one thing to say is which role it is for.
+            return forDecisions ? nil : decisionOnlyNote
         }
         if let customId = customProviderId(route.provider) {
             guard let custom = customProviders.first(where: { $0.id == customId }) else {
@@ -295,12 +304,14 @@ enum TierRouting {
     /// Why the server will not run `feature`'s route although its tier is
     /// usable (API v69+ `featureStatus`), or nil. Today that is only
     /// `cli_untrusted_input` — a keyless codex/gemini tier is never used for
-    /// Internal helpers or the Server pipeline. A tier-level refusal is left
-    /// to `serverUnusableReason`, so the two never repeat each other.
+    /// Internal helpers or the Server pipeline — and (API v73+)
+    /// `decision_only` — a Jev tier on any role but Decisions. A tier-level
+    /// refusal is left to `serverUnusableReason`, so the two never repeat
+    /// each other.
     static func serverFeatureUnusableReason(_ feature: RoutedFeature, server: TierRoutingServerState) -> String? {
         guard serverSupportsRouting(server.apiVersion),
               let status = server.featureStatus?[feature.rawValue], !status.usable,
-              status.reason == "cli_untrusted_input" else { return nil }
+              status.reason == "cli_untrusted_input" || status.reason == "decision_only" else { return nil }
         return describeServerReason(status.reason)
     }
 
@@ -321,6 +332,7 @@ enum TierRouting {
                                       + "a temporary error) — it is retried automatically shortly"
         case "route_failed":      return "the provider failed on the server recently — it is retried automatically shortly"
         case "cli_untrusted_input": return "subscription CLIs aren't used for untrusted input; add an API key to route this role"
+        case "decision_only":     return decisionOnlyNote
         case let other?:          return other
         case nil:                 return "unknown reason"
         }
@@ -359,7 +371,7 @@ enum TierRouting {
                                           localCLIOnly: localCLIOnly)
             ?? unusableReason(route, customProviders: customProviders,
                               requiresAgentEngine: requiresAgentEngine, localCLIOnly: localCLIOnly,
-                              cliInstalled: cliInstalled)
+                              cliInstalled: cliInstalled, forDecisions: feature == .decisions)
         if let reason {
             // NOTE: logged so a silent fallback to a pricier default is visible.
             tierRoutingLogger.info("Route \(feature.rawValue, privacy: .public)→\(tier.rawValue, privacy: .public) uses default: \(reason, privacy: .public)")
@@ -444,7 +456,7 @@ enum TierRouting {
             table = nil
             tierRoutingLogger.error("Tier routing table unreadable; not pushing it (the server keeps its copy)")
         }
-        if let table { dropped = try await api.syncTierRouting(table) }
+        if let table { dropped = try await api.syncTierRouting(table, serverApiVersion: serverApiVersion) }
         let fetched = try await api.fetchTierRoutingStatus()
         return TierRoutingServerState(apiVersion: serverApiVersion, status: fetched.status, dropped: dropped,
                                       featureStatus: fetched.featureStatus)

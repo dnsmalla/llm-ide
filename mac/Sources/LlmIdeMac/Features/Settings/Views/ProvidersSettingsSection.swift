@@ -12,7 +12,12 @@ struct ProvidersSettingsSection: View {
     /// Rows come from `ProviderCatalog` — the one list the composer's provider
     /// menu and the usage-limits picker are also built from, so a provider
     /// cannot be offered in one place and missing from another (it was, twice).
-    private var providers: [ProviderCatalog.Entry] { ProviderCatalog.all }
+    /// Jev's row needs server API v73+ (`ProviderCatalog.visibleRows`).
+    private var providers: [ProviderCatalog.Entry] {
+        ProviderCatalog.visibleRows(serverApiVersion: backend.serverApiVersion)
+    }
+    /// Read for `serverApiVersion` only — gates the Jev row.
+    @Environment(BackendManager.self) private var backend
 
     @State private var drafts: [String: String] = [:]
     @State private var baseURLDraft: String = ""
@@ -55,6 +60,8 @@ struct ProvidersSettingsSection: View {
             if baseURLDraft.isEmpty { baseURLDraft = savedBaseURL }
             cliReady = ProviderCliCheckCache.results
             await loadConfigured()
+            // Probe rather than trust a cache that may predate a server restart.
+            await backend.refreshServerApiVersion()
             await refreshLiveModels()
         }
         .onChange(of: config.activeCLI) { _, _ in Task { await refreshLiveModels() } }
@@ -300,6 +307,12 @@ struct ProvidersSettingsSection: View {
             // A new key (or endpoint) can unlock a different model list. After
             // the base-URL write: the server lists from the STORED base URL.
             if p.tool?.rawValue == config.activeCLI { await refreshLiveModels() }
+            // Jev lists its models (pinned versions too) only with a key; the
+            // Tiers & Roles model menu reads them from LiveModelCache.
+            if p.id == ProviderCatalog.jevId,
+               let models = try? await api.listProviderModels(p.id), !models.isEmpty {
+                LiveModelCache.store(models, for: p.id)
+            }
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }

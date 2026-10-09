@@ -291,6 +291,13 @@ do {
     // Verb and icon must agree about what a tool IS — the old split let them
     // disagree on the same transcript row.
     expect(AgentV2Conformance.verb(for: "Bash").hasPrefix("Running"), "Bash's verb still says Running")
+
+    // The read-only `decide` tool (Jev or an LLM), legacy and v2 MCP names.
+    expect(icon("decide") == "scale.3d" && icon("mcp__llmide__decide") == "scale.3d",
+           "decide → scale.3d on both engines")
+    expect(AgentV2Conformance.verb(for: "decide") == "Deciding"
+               && AgentV2Conformance.verb(for: "mcp__llmide__decide") == "Deciding",
+           "decide reads as Deciding on both engines")
 }
 
 // ClaudeToolPresentation.salientArgument — the v2 half of what the legacy
@@ -1613,7 +1620,7 @@ do {
            "the four chat-mode roles exist with stable raw values")
     expect([RoutedFeature.loop, .autoTasks, .quickChat].allSatisfy { $0.group == .background && $0.unsetLabel == "Standard" },
            "Loop, Auto Tasks and Quick chat are Mac roles whose unset value is Standard")
-    expect([RoutedFeature.subagents, .pipeline, .internal].allSatisfy { $0.group == .server && $0.unsetLabel == "Built-in default" },
+    expect([RoutedFeature.subagents, .pipeline, .internal, .decisions].allSatisfy { $0.group == .server && $0.unsetLabel == "Built-in default" },
            "server roles left unset keep the server's built-in default")
     expect(RoutedFeature.chatCoding.unsetLabel == "Standard", "an unset chat role means Standard")
     expect(RoutedFeatureGroup.allCases.map(\.title) == ["Chat (by mode)", "Background (this Mac)", "Server"],
@@ -1668,18 +1675,29 @@ do {
     let table = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "m")],
                                   features: ["chatPlanning": "strong", "chatDocuments": "cheap",
                                              "loop": "cheap", "futureRole": "cheap"])
-    let wire = TierDefaults.wireBody(table)
+    let wire = TierDefaults.wireBody(table, serverApiVersion: 73)
     expect(wire.features == ["loop": "cheap", "futureRole": "cheap"],
            "chat roles are stripped; server, background and unknown (newer build) roles are sent")
     expect(wire.tiers == table.tiers, "tiers are sent unchanged")
     let shared = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "custom", model: "llama-3"),
                                            "cheap": TierRoute(provider: "custom:p1", model: "glm-5")],
                                    features: ["pipeline": "standard"])
-    let sharedWire = TierDefaults.wireBody(shared)
+    let sharedWire = TierDefaults.wireBody(shared, serverApiVersion: 73)
     expect(sharedWire.tiers == ["cheap": TierRoute(provider: "custom:p1", model: "glm-5")],
            "a tier on the shared Custom endpoint (bare `custom`) is never sent; a named custom provider is")
     expect(sharedWire.features == ["pipeline": "standard"],
            "a server role on that tier is still sent: the server finds the tier unset and keeps its built-in default")
+    let jev = TierRoutingConfig(tiers: ["cheap": TierRoute(provider: "jev", model: "jev-latest"),
+                                        "standard": TierRoute(provider: "anthropic", model: "m")],
+                                features: ["decisions": "cheap", "pipeline": "standard"])
+    let oldJev = TierDefaults.wireBody(jev, serverApiVersion: 72)
+    expect(oldJev.tiers.keys.sorted() == ["standard"] && oldJev.features == ["pipeline": "standard"],
+           "below API v73 neither a Jev tier nor the Decisions role is sent")
+    expect(TierDefaults.wireBody(jev, serverApiVersion: nil) == oldJev, "an unknown server version fails closed")
+    expect(TierDefaults.wireBody(jev, serverApiVersion: 73) == jev, "on v73 both are sent")
+    expect(!TierDefaults.canBeStandard(provider: "jev") && TierDefaults.canBeStandard(provider: "anthropic")
+               && TierDefaults.writeThrough(for: TierRoute(provider: "jev", model: "jev-latest")) == nil,
+           "Jev is never Standard and never written into activeCLI")
     expect(TierDefaults.isMacOnlyProvider("custom") && !TierDefaults.isMacOnlyProvider("custom:p1")
                && !TierDefaults.isMacOnlyProvider("anthropic"),
            "only the bare shared endpoint is Mac-only")

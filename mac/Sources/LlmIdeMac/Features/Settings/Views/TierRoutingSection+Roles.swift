@@ -16,7 +16,7 @@ extension TierRoutingSection {
                     // server's own default for server roles. On this Mac unset
                     // IS Standard, so Standard is not listed twice.
                     Text(feature.unsetLabel).tag("")
-                    ForEach(RoutingTier.allCases.filter { feature.group == .server || $0 != .standard }) { tier in
+                    ForEach(tierChoices(feature)) { tier in
                         Text(tier.displayName).tag(tier.rawValue)
                     }
                 }
@@ -25,6 +25,9 @@ extension TierRoutingSection {
                 .frame(maxWidth: 160)
             }
             .help(TierDefaults.purpose(for: feature).map(TierDefaults.modesHelp) ?? "")
+            if let explanation = feature.explanation {
+                note(explanation)
+            }
             if let reason = featureUnusableReason(feature) {
                 note("uses \(fallbackLabel(feature)) — \(reason)")
             } else if feature.group == .chat {
@@ -38,6 +41,20 @@ extension TierRoutingSection {
                 note("on Agent-engine chats uses \(fallbackLabel(.quickChat)) — \(reason). Only Claude or a custom provider "
                      + "with an Anthropic-compatible URL can run them.")
             }
+        }
+    }
+
+    /// The tiers `feature`'s menu offers: on this Mac unset IS Standard, so
+    /// Standard is listed for server roles only; a Jev (decision-only) tier
+    /// only for Decisions — plus whatever is stored, so the menu never loses
+    /// its selection (its row then says why it isn't used).
+    private func tierChoices(_ feature: RoutedFeature) -> [RoutingTier] {
+        let stored = routing.features[feature.rawValue]
+        return RoutingTier.allCases.filter { tier in
+            guard feature.group == .server || tier != .standard else { return false }
+            guard feature != .decisions, let route = routing.tier(tier),
+                  TierRouting.isDecisionOnlyProvider(route.provider) else { return true }
+            return stored == tier.rawValue
         }
     }
 
@@ -76,6 +93,7 @@ extension TierRoutingSection {
         if let customId = TierRouting.customProviderId(provider) {
             return customProviders.first { $0.id == customId }?.name ?? provider
         }
+        if TierRouting.isDecisionOnlyProvider(provider) { return TierRouting.decisionOnlyProviderName }
         return TierRouting.builtInProviders.first { $0.wireId == provider }?.tool.displayName ?? provider
     }
 
@@ -103,6 +121,12 @@ extension TierRoutingSection {
     /// Agent-engine constraint depends on each chat and is applied per turn
     /// instead. Server-side refusals come from the last status fetch.
     private func featureUnusableReason(_ feature: RoutedFeature) -> String? {
+        // A role newer than the running server is never sent (wireBody); the
+        // top note covers a server too old for routing at all.
+        if serverSupported, let required = feature.requiredServerApiVersion,
+           (serverState.apiVersion ?? 0) < required {
+            return decisionsServerNote
+        }
         guard let tier = TierDefaults.effectiveTier(for: feature, routing: routing,
                                                     composerProviderId: composerProviderId) else { return nil }
         guard let route = routing.tier(tier) else {
@@ -113,7 +137,8 @@ extension TierRoutingSection {
         let localCLIOnly = feature == .autoTasks
         if let local = TierRouting.unusableReason(route, customProviders: customProviders,
                                                   localCLIOnly: localCLIOnly,
-                                                  cliInstalled: TierRouting.isCLIInstalled) {
+                                                  cliInstalled: TierRouting.isCLIInstalled,
+                                                  forDecisions: feature == .decisions) {
             return local
         }
         // Chat roles only pick a model on the Mac — no server status applies.

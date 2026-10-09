@@ -41,6 +41,9 @@ enum ProviderCatalog {
         var needsBaseURL: Bool = false
     }
 
+    /// Backend id of the Jev decision provider (vault key `jev.apiKey`).
+    static let jevId = "jev"
+
     /// Every row Settings → Model Providers renders, in display order.
     static let all: [Entry] = [
         Entry(id: ClaudeCLI.provider, tool: .claudeCode,
@@ -64,6 +67,16 @@ enum ProviderCatalog {
               vaultKey: "custom.apiKey", placeholder: "API key (any value for local servers)",
               hint: "One shared OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), Mistral. Choose it as a tier (e.g. Standard) in Tiers & Roles below — its models are read from the endpoint; add one by hand with Add model… in the chat composer. For several named endpoints at once, use Custom Providers.",
               needsBaseURL: true),
+        // WHY tool nil: Jev is a decision API, not a chat model. With no
+        // `tool` it is left out of `modelProviders` — so it never reaches the
+        // composer, `AICliTool.selectable` or the usage-limits picker (the
+        // server's limits know only anthropic/openai/google/custom). It is
+        // reached as a tier provider for the Decisions role only
+        // (`TierRouting.decisionOnlyProvider`).
+        Entry(id: jevId, tool: nil,
+              label: "Jev (decisions)", shortLabel: "Jev",
+              vaultKey: "jev.apiKey", placeholder: "Jev API key",
+              hint: "Decision-only: answers yes/no, pick-one and score questions with calibrated probabilities. Used by the Decisions role in Tiers & Roles below and by the agent's `decide` tool — not a chat model, so it never appears in the chat composer. Key required."),
         Entry(id: "web-search", tool: nil,
               label: "Web Search (SerpAPI, optional)", shortLabel: "Web Search",
               vaultKey: "serpapi.apiKey",
@@ -71,7 +84,16 @@ enum ProviderCatalog {
               hint: "Web search works automatically through your Claude login (or Anthropic API key) — no setup needed. A SerpAPI key is only an optional fallback."),
     ]
 
-    /// Rows that are chat providers — everything with a `tool`.
+    /// The rows Settings → Model Providers shows against a server on
+    /// `serverApiVersion`: Jev only from API v73 (`decisionsServerApiVersion`)
+    /// — an older server's vault refuses `jev.apiKey`, so its row could only
+    /// fail. Unknown version hides it too (fail closed).
+    static func visibleRows(serverApiVersion: Int?) -> [Entry] {
+        all.filter { $0.id != jevId || TierRouting.serverSupportsDecisions(serverApiVersion) }
+    }
+
+    /// Rows that are chat providers — everything with a `tool`. Excludes the
+    /// credential-only rows (web search) and the decision-only Jev row.
     static var modelProviders: [Entry] { all.filter { $0.tool != nil } }
 
     /// The tools the composer may offer. `AICliTool.selectable` returns this.
