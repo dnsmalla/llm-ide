@@ -14,9 +14,6 @@ import { newTurnTokenTotals, countTurnTokens } from '../kb/usage.mjs';
 import { scanForSecrets } from '../guardrails/scan.mjs';
 import { sanitizePersonaSuffix } from '../providers/prompt-utils.mjs';
 
-// Copy the per-request memory-block overhead (set by handleCodeAssist) onto the
-// response `usage` so the client can show how many tokens the always-on project
-// memory cost this turn. No-op when the agent path didn't run.
 // The turn's model tokens, summed over every call it made (see
 // `countTurnTokens`). Omitted when no call reported tokens — a CLI that prints
 // no usage — so the client shows nothing rather than a false zero.
@@ -29,6 +26,9 @@ function mergeTurnTokens(usage, totals) {
   usage.modelCalls = totals.calls;
 }
 
+// Copy the per-request memory-block overhead (set by handleCodeAssist) onto the
+// response `usage` so the client can show how many tokens the always-on project
+// memory cost this turn. No-op when the agent path didn't run.
 function mergeMemoryUsage(usage, out) {
   const m = out?.memoryUsage;
   if (!m) return;

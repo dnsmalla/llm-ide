@@ -32,3 +32,15 @@ test('two concurrent turns keep separate totals', async () => {
   assert.equal(a.inputTokens, 1);
   assert.equal(b.inputTokens, 10);
 });
+
+test('a call that reported no tokens is not a counted call; a poisoned count is clamped like the ledger', async () => {
+  const db = new Database(':memory:');
+  const totals = newTurnTokenTotals();
+  await countTurnTokens(totals, async () => {
+    recordUsage(db, { userId: 'u', provider: 'openai', model: 'm', inputTokens: null, outputTokens: null }); // CLI text mode
+    recordUsage(db, { userId: 'u', provider: 'openai', model: 'm', inputTokens: 1e18, outputTokens: 1 });
+  });
+  assert.equal(totals.calls, 1);
+  assert.ok(totals.inputTokens < 1e18, 'clamped');
+  assert.equal(totals.outputTokens, 1);
+});

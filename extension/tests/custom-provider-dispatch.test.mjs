@@ -22,6 +22,7 @@ const tmpDb = path.join(os.tmpdir(), `_customprov-${process.pid}-${Math.floor(pe
 process.env.LLMIDE_DB_PATH = tmpDb;
 
 const { handleCodeAssist } = await import('../llm_agent/runtime/route.mjs');
+const { newTurnTokenTotals, countTurnTokens } = await import('../kb/usage.mjs');
 const { syncCustomProviders, getCustomProvider, handleCustomProvidersSync, _resetCustomProviderCacheForTests } = await import('../server/custom-providers.mjs');
 
 let getDb, registerUser, setSecret, closeDb;
@@ -108,6 +109,29 @@ test('handleCodeAssist custom:<uuid>: routes to the provider baseURL with the st
     assert.equal(captured.auth, 'Bearer sk-glm-test');
     assert.match(out.reply, /GLM-REPLY/);
     assert.ok(!out.reply.includes('CLAUDE-FALLBACK'), 'reply must not come from the Anthropic fallback');
+  } finally {
+    restore();
+    syncCustomProviders([], userId);
+  }
+});
+
+test('handleCodeAssist custom:<uuid>: the native loop meters each call into the turn total and the ledger', async () => {
+  // callOpenAI returns usage but records nothing; the loop's calls used to
+  // reach neither the usage ledger nor the per-turn token total (API v72).
+  const { userId } = await setupUser();
+  const pid = registerProvider(userId);
+  const { restore } = mockFetchCapture();   // reports prompt_tokens 5, completion_tokens 3
+  try {
+    const totals = newTurnTokenTotals();
+    await countTurnTokens(totals, () => handleCodeAssist({
+      message: 'hi', history: [], agentContext: { recentIssues: [], recentMeetings: [] },
+      kb: minimalKb, userId, provider: pid, model: 'glm-4', mode: 'execute',
+      runClaude: claudeFallback,
+    }));
+    assert.equal(totals.inputTokens, 5);
+    assert.equal(totals.outputTokens, 3);
+    const row = getDb().prepare('SELECT provider, model, input_tokens, output_tokens FROM usage_ledger WHERE user_id = ?').get(userId);
+    assert.deepEqual({ ...row }, { provider: pid, model: 'glm-4', input_tokens: 5, output_tokens: 3 });
   } finally {
     restore();
     syncCustomProviders([], userId);

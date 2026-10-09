@@ -742,7 +742,9 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
 
     if (response.ok) {
       // Success — read the SSE stream.
-      return _readAnthropicStream(response, onChunk, signal);
+      return _readAnthropicStream(response, onChunk, signal, (u) => meterUsage({
+        userId, provider: 'anthropic', model: resolvedModel, source: 'api', ...u,
+      }));
     }
 
     const transient = response.status === 529 || response.status === 503;
@@ -854,8 +856,11 @@ export async function streamModelReply(prompt, {
 }
 
 /** Parse an Anthropic SSE stream and call onChunk for each text delta. */
-async function _readAnthropicStream(response, onChunk, signal) {
+async function _readAnthropicStream(response, onChunk, signal, onUsage) {
   let fullText = '';
+  // Usage arrives in `message_start` (input + cache) and `message_delta`
+  // (cumulative output); reported once the stream completes.
+  const usage = { inputTokens: null, outputTokens: null, cacheReadTokens: null, cacheCreationTokens: null };
   const reader = response.body.getReader();
   const decoder = new TextDecoder();
   let buffer = '';
@@ -893,6 +898,16 @@ async function _readAnthropicStream(response, onChunk, signal) {
             fullText += parsed.delta.text;
             onChunk(parsed.delta.text);
           }
+          if (parsed.type === 'message_start' && parsed.message?.usage) {
+            const u = parsed.message.usage;
+            usage.inputTokens = u.input_tokens ?? null;
+            usage.outputTokens = u.output_tokens ?? usage.outputTokens;
+            usage.cacheReadTokens = u.cache_read_input_tokens ?? null;
+            usage.cacheCreationTokens = u.cache_creation_input_tokens ?? null;
+          }
+          if (parsed.type === 'message_delta' && parsed.usage?.output_tokens != null) {
+            usage.outputTokens = parsed.usage.output_tokens;
+          }
           // Anthropic sends an error event when something goes wrong
           // mid-stream (e.g. context window exceeded).
           if (parsed.type === 'error') {
@@ -912,6 +927,7 @@ async function _readAnthropicStream(response, onChunk, signal) {
   if (!fullText) {
     throw new Error('Anthropic streaming returned no content');
   }
+  try { onUsage?.(usage); } catch { /* metering must never break a reply */ }
   return fullText;
 }
 

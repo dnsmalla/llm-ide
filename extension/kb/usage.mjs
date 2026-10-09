@@ -323,11 +323,14 @@ export function countTurnTokens(totals, fn) {
 function addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens }) {
   const totals = turnTokens.getStore();
   if (!totals) return;
-  const n = (v) => (Number.isFinite(Number(v)) && Number(v) > 0 ? Math.floor(Number(v)) : 0);
-  totals.inputTokens += n(inputTokens);
-  totals.outputTokens += n(outputTokens);
-  totals.cacheReadTokens += n(cacheReadTokens);
-  totals.cacheCreationTokens += n(cacheCreationTokens);
+  // Same clamp as the ledger row, so a poisoned count can't reach the client.
+  const n = (v) => tokenCountOrNull(v) ?? 0;
+  const counts = [n(inputTokens), n(outputTokens), n(cacheReadTokens), n(cacheCreationTokens)];
+  if (counts.every((c) => c === 0)) return;   // a call that reported no tokens (CLI text mode)
+  totals.inputTokens += counts[0];
+  totals.outputTokens += counts[1];
+  totals.cacheReadTokens += counts[2];
+  totals.cacheCreationTokens += counts[3];
   totals.calls += 1;
 }
 

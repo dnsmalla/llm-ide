@@ -25,7 +25,7 @@ import { buildDispatch } from '../tools/registry.mjs';
 import { markRouteFailed } from '../../providers/route-health.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
-import { fastModelFor } from '../../kb/usage.mjs';
+import { fastModelFor, recordUsage } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from './mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES, QUESTION_TOOL_NAME } from './mode-personas.mjs';
 import { pipelineSkillIdFor, buildExecuteBinding } from './plan-pipeline.mjs';
@@ -559,7 +559,19 @@ export async function handleCodeAssist({
       // those providers. `readOnly: false` is safe here specifically because
       // activeSkills can't contain any OTHER write-kind tool in these modes.
       tools: skillsToOpenAITools(activeSkills, { readOnly: !PLAN_LIKE_MODES.has(resolvedMode) }),
-      complete: (opts) => callOpenAI({ apiKey: nativeKey, model, baseUrl: nativeBaseUrl, ...opts }),
+      // Metered per call: `callOpenAI` returns usage but records nothing, so
+      // the native loop's calls never reached the usage ledger (or the turn's
+      // token total, see countTurnTokens). Best-effort — never break a call.
+      complete: async (opts) => {
+        const resp = await callOpenAI({ apiKey: nativeKey, model, baseUrl: nativeBaseUrl, ...opts });
+        try {
+          recordUsage(getDb(), {
+            userId, provider: effProvider, model, source: 'api', endpoint: '/code-assist',
+            inputTokens: resp?.usage?.inputTokens, outputTokens: resp?.usage?.outputTokens,
+          });
+        } catch { /* ignore */ }
+        return resp;
+      },
       userId,
       handlers,
       kb,
