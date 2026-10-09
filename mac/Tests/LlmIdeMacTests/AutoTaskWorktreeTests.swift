@@ -108,17 +108,29 @@ final class AutoTaskWorktreeTests: XCTestCase {
         let tip = AutoCodeUpdateService.headSha(at: wt)
         XCTAssertTrue(treeClean)
         XCTAssertNotEqual(tip, base)
-        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: treeClean, cliCommitted: tip != base),
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: treeClean, tip: tip, base: base),
                        .keepBranch)
         AutoCodeUpdateService.worktreeRemove(at: repo.path, path: wt)
         XCTAssertEqual(try sh(["git", "log", "-1", "--format=%s", branch]), "cli commit")
     }
 
     func testUncommittedImplementCleanupDecision() {
-        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: true, cliCommitted: false), .deleteBranch)
-        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: true, cliCommitted: true), .keepBranch)
-        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: false, cliCommitted: false), .keepWorktree)
-        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: false, cliCommitted: true), .keepWorktree)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: true, tip: "base", base: "base"), .deleteBranch)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: true, tip: "moved", base: "base"), .keepBranch)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: false, tip: "base", base: "base"), .keepWorktree)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: false, tip: "moved", base: "base"), .keepWorktree)
+    }
+
+    /// Reading the tip after the run can fail (git error, disk, a vanished
+    /// worktree). "Unknown" is not "unchanged": concluding the CLI did not
+    /// commit would `branch -D` whatever it did commit. An unknown tip keeps
+    /// the branch, as the unknown base refuses to run at all.
+    func testUnknownTipAssumesTheCLICommittedAndKeepsTheBranch() {
+        XCTAssertTrue(AutoCodeUpdateService.cliMadeCommits(tip: nil, base: "base"))
+        XCTAssertFalse(AutoCodeUpdateService.cliMadeCommits(tip: "base", base: "base"))
+        XCTAssertTrue(AutoCodeUpdateService.cliMadeCommits(tip: "moved", base: "base"))
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: true, tip: nil, base: "base"), .keepBranch)
+        XCTAssertEqual(AutoCodeUpdateService.uncommittedImplementCleanup(treeClean: false, tip: nil, base: "base"), .keepWorktree)
     }
 
     /// Absolute paths under the main checkout are redirected into the worktree.
