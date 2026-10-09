@@ -194,7 +194,7 @@ final class SourceControlSafetyTests: XCTestCase {
     /// An untracked symlink to a repo directory is discardable: trashing
     /// removes only the link. A `.git` gitlink FILE is still refused.
     func testSymlinkToRepoIsDiscardableAndGitlinkFileIsRefused() async throws {
-        let target = rootB // a real repo
+        let target: URL = rootB // a real repo (annotated: `let x = iuo` infers `URL?`)
         let link = rootA.appendingPathComponent("linked")
         try FileManager.default.createSymbolicLink(at: link, withDestinationURL: target)
         XCTAssertFalse(SourceControlService.containsGitRepo(link))
