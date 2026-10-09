@@ -100,6 +100,15 @@ final class ChatEngine {
             }
         }
     }
+    /// Whether `error` only repeats the failure the last reply already shows
+    /// (a failed turn sets both `error` and the reply's `failedError`, and the
+    /// reply carries Retry). The banner then stays hidden so the same text is
+    /// not printed twice; errors not tied to a reply still get the banner.
+    static func errorIsShownOnLastReply(_ error: String, messages: [ChatMessage]) -> Bool {
+        guard let last = messages.last, last.status == .failed else { return false }
+        return last.metadata?.failedError == error
+    }
+
     /// Messages the user submitted while a turn was running, in FIFO order; they
     /// auto-send one per turn as the current run finishes (or is stopped).
     var queued: [QueuedMessage] = []

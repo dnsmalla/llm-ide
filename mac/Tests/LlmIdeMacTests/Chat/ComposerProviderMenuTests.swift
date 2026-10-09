@@ -129,6 +129,17 @@ struct ComposerProviderMenuTests {
         #expect(s.selectedModel == "claude-opus-5" && s.modelIsExplicit)
     }
 
+    @Test("the error banner is hidden when it only repeats the last failed reply's error")
+    func bannerDedupe() {
+        var failed = ChatMessage(role: .assistant, content: "", status: .failed, createdAt: Date())
+        failed.metadata = ChatMessage.Metadata(failedError: "HTTP 404")
+        let user = ChatMessage(role: .user, content: "hi", status: .done, createdAt: Date())
+        #expect(ChatEngine.errorIsShownOnLastReply("HTTP 404", messages: [user, failed]))
+        #expect(!ChatEngine.errorIsShownOnLastReply("Couldn't apply the edit", messages: [user, failed]),
+                "an error the reply does not show keeps the banner")
+        #expect(!ChatEngine.errorIsShownOnLastReply("HTTP 404", messages: [failed, user]))
+    }
+
     @Test("an empty chat is re-stamped for the provider picked; a chat with messages keeps its engine")
     func restampOnlyWhenEmpty() async {
         await ChatStoreOverrideGate.shared.acquire()

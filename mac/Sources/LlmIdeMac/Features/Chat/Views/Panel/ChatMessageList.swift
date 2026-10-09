@@ -250,7 +250,8 @@ struct ChatMessageList: View {
                             .id("typing-indicator")
                             .transition(.opacity)
                         }
-                        if let err = engine.error {
+                        if let err = engine.error,
+                           !ChatEngine.errorIsShownOnLastReply(err, messages: engine.messages) {
                             errorBubble(err)
                                 .transition(.opacity)
                         }
