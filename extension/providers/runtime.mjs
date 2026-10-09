@@ -8,7 +8,7 @@ import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { markRouteFailed, routeFailure, ROUTE_BROKEN_TTL_MS, ROUTE_TRANSIENT_TTL_MS } from './route-health.mjs';
-import { resolveProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
+import { resolveProvider, assertChatProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits } from '../kb/usage.mjs';
 
@@ -962,6 +962,10 @@ function resolveClaudeCall({ userId, model, provider: explicitProvider }) {
   const explicitOk = typeof explicitProvider === 'string'
     && (PROVIDER_IDS.includes(explicitProvider) || /^custom:./.test(explicitProvider));
   const provider = explicitOk ? explicitProvider : resolveProvider(model);
+  // A decision-only provider (jev) never answers a prompt — refuse here, the
+  // one resolver runClaude / runClaudeStream / streamModelReply all share,
+  // before any key lookup or spawn.
+  assertChatProvider(provider);
   const userScopedKey = userId ? safeLookupApiKey(userId) : null;
   const apiKey = userScopedKey || process.env.ANTHROPIC_API_KEY;
   const resolvedModel = provider === 'anthropic' ? resolveModel(model) : model;

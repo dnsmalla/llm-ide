@@ -21,14 +21,32 @@
 
 import { runAgentLoop } from '../loop.mjs';
 import { searchKb } from './search-kb.mjs';
+import { handleDecide } from './decide.mjs';
 import { redactFence } from '../redaction.mjs';
 import { resolveProvider } from '../../../providers/providers.mjs';
 
 // Same registry as ask-internal — extend here when new read tools
-// become available to subagents.
+// become available to subagents. A subagent opts in per tool through its
+// frontmatter `allowed_tools: [search-kb, decide]` (or vendor `tools:`);
+// nothing is granted by default. Handlers get the sub-loop's per-call ctx
+// (`{ userId, kb, handlers, depth, emit, signal }` — loop.mjs runReadHandler).
 const ALL_SUBAGENT_TOOLS = {
   'search-kb': searchKb,
+  decide: (args, loopCtx) => handleDecide(args, { userId: loopCtx?.userId, signal: loopCtx?.signal }),
 };
+
+// The global skill docs (schema + call shape) for the subagent's granted
+// tools. The loop validates and dispatches a fence ONLY for a name in its
+// `skills` map, so an empty map left every granted tool answering "Unknown
+// tool". Loaded lazily: skills/registry.mjs imports this module's importer
+// chain at boot (global-handlers → tools/registry → here), so a static
+// import would be a cycle.
+async function grantedToolSkills(handlers) {
+  const names = Object.keys(handlers);
+  if (!names.length) return new Map();
+  const { globalSkills } = await import('../../skills/index.mjs');
+  return new Map(names.map((n) => [n, globalSkills.skills.get(n)]).filter(([, s]) => s));
+}
 
 /**
  * Compose the body the subagent runs with. We don't add the internal
@@ -79,10 +97,10 @@ export async function askSubagent(args, ctx) {
   const hasTools = Object.keys(handlers).length > 0;
 
   // Skills the subagent sees: nothing by default — pure prompt agent.
-  // If allowed_tools were declared, we pass an empty Map; the
-  // global/internal skill set is NOT shared because subagents are a
-  // separate trust boundary. Tool-call awareness comes from
-  // internalSkills.base (the fence contract markdown).
+  // If allowed_tools were declared, only those tools' own docs are passed
+  // (grantedToolSkills); the rest of the global/internal skill set is NOT
+  // shared because subagents are a separate trust boundary. Tool-call
+  // awareness comes from internalSkills.base (the fence contract markdown).
   const baseParts = [subagent.systemPrompt];
   if (hasTools && ctx.internalSkillsBase) baseParts.unshift(ctx.internalSkillsBase);
   const base = baseParts.join('\n\n');
@@ -130,7 +148,9 @@ export async function askSubagent(args, ctx) {
   const startedAt = Date.now();
 
   const result = await runAgentLoop({
-    skills: new Map(),         // no skill bodies — body IS the prompt
+    // Only the docs of the tools this subagent was granted (none by default):
+    // the subagent body IS the prompt, these just make the grants callable.
+    skills: await grantedToolSkills(handlers),
     userMessage: sanitisedQuestion,
     history: [],               // isolated from global's chat history
     agentContext: {

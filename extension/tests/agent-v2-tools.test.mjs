@@ -520,7 +520,7 @@ test('v2MountedEntries: ask-subagent only with plugin subagents; check-citations
   const all = names({});
   assert.ok(all.includes('ask-subagent') && all.includes('check-citations'));
   // The rest is never gated.
-  for (const n of ['find-code', 'code-relations', 'search-kb', 'load-skill', 'project_memory', 'task-create', 'task-update', 'task-list']) {
+  for (const n of ['find-code', 'code-relations', 'search-kb', 'load-skill', 'project_memory', 'decide', 'task-create', 'task-update', 'task-list']) {
     assert.ok(names({ mode: 'execute', hasSubagents: false }).includes(n), n);
   }
 });

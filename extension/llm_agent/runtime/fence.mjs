@@ -178,6 +178,17 @@ export function validateArgs(schema, args, toolName) {
           }
         }
       }
+    } else if (def.type === 'object') {
+      // A plain JSON object; its inner shape is the handler's to validate.
+      // maxLength bounds the SERIALIZED size (default 64k chars) so a forged
+      // fence can't pass an unbounded structure.
+      if (v === null || typeof v !== 'object' || Array.isArray(v)) {
+        return { error: `argument '${name}' must be an object` };
+      }
+      const cap = def.maxLength != null ? def.maxLength : 65_536;
+      let size;
+      try { size = JSON.stringify(v).length; } catch { return { error: `argument '${name}' must be JSON-serializable` }; }
+      if (size > cap) return { error: `argument '${name}' exceeds maxLength ${cap} (serialized)` };
     } else {
       return { error: `argument '${name}' has unsupported type` };
     }

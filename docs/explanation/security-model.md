@@ -33,7 +33,7 @@ version (1 byte) || iv (12 bytes) || AES-256-GCM(plaintext) || tag (16 bytes)
 
 Each user's data key is derived as `HKDF-SHA256(masterKey, salt=userId, info='llmide-vault-v1', length=32)`. The master key never leaves the server process. A DB-only leak yields ciphertext that cannot be decrypted without the master key; one user's ciphertext cannot be used to attack another's because the derived keys differ.
 
-Allowed secret keys are `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, and `custom.baseUrl` (11 keys total). Attempts to store keys outside this allowlist are rejected at the route layer.
+Allowed secret keys include `github.token`, `backlog.apiKey`, `linear.apiKey`, `slack.webhookUrl`, `slack.botToken`, `email.imapPassword`, `claude.apiKey`, `openai.apiKey`, `google.apiKey`, `custom.apiKey`, `custom.baseUrl`, and `jev.apiKey` (the decision-only Jev provider — read only by the `decide` path, never sent to a chat model); the authoritative list is `ALLOWED_KEYS` in `extension/server/vault.mjs`. Attempts to store keys outside this allowlist are rejected at the route layer.
 
 ## Tenancy
 

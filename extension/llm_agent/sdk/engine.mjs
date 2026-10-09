@@ -69,7 +69,7 @@ import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { getSecret, makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
-import { resolveCustomProviderDispatch } from '../../providers/providers.mjs';
+import { resolveCustomProviderDispatch, isDecisionOnlyProvider, DECISION_ONLY_MESSAGE } from '../../providers/providers.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage, mapContextUsage } from './events.mjs';
 import { cachedEffortLevels } from './models.mjs';
@@ -144,9 +144,11 @@ export function resolveAgentEngineAuth(provider, userId, { resolveCustom = resol
     }
     return { provider, key: resolved.apiKey, source: 'vault', baseUrl: resolved.anthropicBaseUrl };
   }
-  const err = new Error(
-    `The Agent engine runs on Anthropic-compatible providers only; "${provider}" is not one.`,
-  );
+  // Jev would be refused by the generic line below too; name the real reason
+  // (a decision API, not a chat model) so the user knows where it belongs.
+  const err = new Error(isDecisionOnlyProvider(provider)
+    ? DECISION_ONLY_MESSAGE
+    : `The Agent engine runs on Anthropic-compatible providers only; "${provider}" is not one.`);
   err.code = 'PROVIDER_NOT_AGENT_CAPABLE';
   throw err;
 }

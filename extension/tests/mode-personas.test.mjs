@@ -155,7 +155,7 @@ test('allowedToolNames(execute) includes all kind:read tools except task-list', 
   const names = [...allowedToolNames('execute')].sort();
   // ask-user is the one non-read tool every restricted mode gets: it changes
   // nothing, it only ends the turn so the user can answer a question card.
-  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'ask-user', 'check-citations', 'code-relations', 'fetch-url', 'find-code', 'list-files', 'load-skill', 'project_memory', 'read-file', 'search-kb', 'web-search']);
+  assert.deepEqual(names, ['ask-internal', 'ask-subagent', 'ask-user', 'check-citations', 'code-relations', 'decide', 'fetch-url', 'find-code', 'list-files', 'load-skill', 'project_memory', 'read-file', 'search-kb', 'web-search']);
 });
 
 test('allowedToolNames(execute) explicitly excludes task-list despite it being kind:read', () => {
@@ -163,11 +163,11 @@ test('allowedToolNames(execute) explicitly excludes task-list despite it being k
   assert.equal(names.has('task-list'), false, 'task-list should be excluded even though it is kind:read in the registry');
 });
 
-test('allowedToolNames(plan) adds save-plan on top of the base 12-tool read set + ask-user', () => {
+test('allowedToolNames(plan) adds save-plan on top of the base 13-tool read set + ask-user', () => {
   const names = [...allowedToolNames('plan')].sort();
   assert.ok(names.includes('save-plan'));
   assert.ok(names.includes('ask-user'));
-  assert.equal(names.length, 14);
+  assert.equal(names.length, 15);
 });
 
 // load-skill is what makes a skill's "now invoke <other skill>" line

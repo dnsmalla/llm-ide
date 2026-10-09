@@ -24,6 +24,7 @@ delete process.env.ANTHROPIC_API_KEY;
 delete process.env.DEEPSEEK_API_KEY;
 delete process.env.OPENAI_API_KEY;
 delete process.env.GOOGLE_API_KEY;
+delete process.env.JEV_AI_API_KEY;
 
 const db = await import('../kb/db.mjs');
 const { registerUser } = await import('../server/users.mjs');
@@ -902,4 +903,66 @@ test('internal helpers keep their default model when internal is not routed', as
     assert.equal(c.provider, undefined, 'no provider forced on the default path');
     assert.notEqual(c.model, 'gpt-5-mini');
   }
+});
+
+// ── decision-only provider (jev) + the `decisions` feature (API v73) ─────
+
+test('syncTierRouting accepts a jev tier and the decisions feature', () => {
+  const userId = freshUser();
+  const dropped = [];
+  syncTierRouting({
+    tiers: { cheap: { provider: 'jev', model: 'jev-latest' } },
+    features: { decisions: 'cheap' },
+  }, userId, db.getDb(), dropped);
+  assert.deepEqual(dropped, []);
+  const cfg = getTierRoutingConfig(userId);
+  assert.deepEqual(cfg.tiers, { cheap: { provider: 'jev', model: 'jev-latest' } });
+  assert.deepEqual(cfg.features, { decisions: 'cheap' });
+});
+
+test('a jev tier routes ONLY the decisions feature; every other feature reports decision_only and keeps its default', () => {
+  const userId = freshUser();
+  setSecret(db.getDb(), userId, 'jev.apiKey', 'jev-test-key');
+  const others = ['subagents', 'loop', 'autoTasks', 'quickChat', 'pipeline', 'internal'];
+  syncTierRouting({
+    tiers: { cheap: { provider: 'jev', model: 'jev-latest' } },
+    features: Object.fromEntries(['decisions', ...others].map((f) => [f, 'cheap'])),
+  }, userId);
+  assert.deepEqual(resolveFeatureRoute(userId, 'decisions'), { provider: 'jev', model: 'jev-latest' });
+  for (const f of others) {
+    assert.equal(resolveFeatureRoute(userId, f), null, `${f} must never route to jev`);
+    assert.deepEqual(routeOpts(userId, f, { model: 'm-default' }), { model: 'm-default' }, f);
+  }
+  // runClaude can never run jev, so even `decisions` gets the caller's default
+  // from routeOpts (decide.mjs calls Jev directly for the routed case).
+  assert.deepEqual(routeOpts(userId, 'decisions', { model: 'm-default' }), { model: 'm-default' });
+  // A bare tier lookup (a subagent's `tier:`) is a chat call too.
+  assert.equal(resolveTier(userId, 'cheap'), null);
+  const st = tierRoutingStatus(userId);
+  assert.deepEqual(st.status.cheap, { usable: true, agentCapable: false, agentReason: 'not_agent_capable', via: 'key' });
+  assert.deepEqual(st.featureStatus.decisions, { usable: true });
+  for (const f of others) assert.deepEqual(st.featureStatus[f], { usable: false, reason: 'decision_only' }, f);
+});
+
+test('a jev tier without a key is unusable (no_key) — there is no CLI mode', () => {
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: { cheap: { provider: 'jev', model: 'jev-latest' } },
+    features: { decisions: 'cheap' },
+  }, userId);
+  assert.equal(resolveFeatureRoute(userId, 'decisions'), null);
+  assert.deepEqual(tierRoutingStatus(userId).status.cheap, { usable: false, reason: 'no_key', agentCapable: false });
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus.decisions, { usable: false, reason: 'no_key' });
+});
+
+test('the decisions feature may use an ordinary LLM tier (other providers unchanged)', () => {
+  const userId = freshUser();
+  syncTierRouting({
+    tiers: { strong: { provider: 'anthropic', model: 'claude-opus-5-5' } },
+    features: { decisions: 'strong', pipeline: 'strong' },
+  }, userId);
+  assert.deepEqual(resolveFeatureRoute(userId, 'decisions'), { provider: 'anthropic', model: 'claude-opus-5-5' });
+  assert.deepEqual(routeOpts(userId, 'decisions'), { provider: 'anthropic', model: 'claude-opus-5-5', routeFallback: {} });
+  assert.deepEqual(routeOpts(userId, 'pipeline'), { provider: 'anthropic', model: 'claude-opus-5-5', routeFallback: {} });
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus, { decisions: { usable: true }, pipeline: { usable: true } });
 });

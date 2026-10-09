@@ -146,6 +146,9 @@ const ALLOWED_KEYS = new Set([
   // rides the same per-user secrets channel for simplicity).
   'custom.apiKey',
   'custom.baseUrl',
+  // Jev decision API key (jev-ai.pro). Read only by the decide path
+  // (providers/jev.mjs); Jev is decision-only and never answers chat.
+  'jev.apiKey',
   'serpapi.apiKey',
   // Gmail Google Sign-In (OAuth2 PKCE, connectors/google-oauth.mjs). clientId/
   // clientSecret come from the user's own Google Cloud "Desktop app" OAuth

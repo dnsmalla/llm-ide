@@ -51,9 +51,39 @@ export const PROVIDERS = {
   // (vault `custom.baseUrl`); it is NOT id-prefix routable, so callers must
   // select it explicitly (the picker passes provider="custom").
   custom:    { vaultKey: 'custom.apiKey',    env: 'OPENAI_COMPAT_API_KEY', cli: null  },
+  // Jev (jev-ai.pro) is a hosted DECISION API, not a chat model: it answers
+  // structured yes/no / pick-one / score questions about given material and
+  // returns calibrated probabilities. It is reachable ONLY through the
+  // `decide` path (providers/jev.mjs ← llm_agent/runtime/decide.mjs); every
+  // chat/completion dispatch that names it is refused with
+  // DECISION_ONLY_MESSAGE (assertChatProvider) — see the guards in
+  // runtime.mjs resolveClaudeCall, completeViaApi, llm_agent/runtime/route.mjs
+  // and llm_agent/sdk/engine.mjs, plus the tier resolver's `decision_only`.
+  jev:       { vaultKey: 'jev.apiKey',       env: 'JEV_AI_API_KEY',      cli: null,  decisionOnly: true },
 };
 
 export const PROVIDER_IDS = Object.keys(PROVIDERS);
+
+// The user-facing refusal for a chat/completion call that names a
+// decision-only provider. One string so every guard reads the same.
+export const DECISION_ONLY_MESSAGE =
+  "Jev is a decision provider — it can't answer chat; use it for the Decisions role.";
+
+/** True for a provider that only serves the `decide` path (today: jev). */
+export function isDecisionOnlyProvider(provider) {
+  return typeof provider === 'string' && PROVIDERS[provider]?.decisionOnly === true;
+}
+
+/**
+ * Throw when `provider` cannot answer a chat/completion call. Tagged
+ * PROVIDER_UNAVAILABLE (+ `decisionOnly`) so /code-assist answers the same
+ * 400 a misconfigured provider gets — the Mac's tier-routed callers then
+ * retry once without the route — instead of a generic 502.
+ */
+export function assertChatProvider(provider) {
+  if (!isDecisionOnlyProvider(provider)) return;
+  throw Object.assign(new Error(DECISION_ONLY_MESSAGE), { code: 'PROVIDER_UNAVAILABLE', decisionOnly: true });
+}
 
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
 // DeepSeek's API root. Exported because the same literal was otherwise
@@ -178,6 +208,10 @@ export function resolveProvider(model) {
   // explicit: a bare `glm-*` id now reaches a provider with no adapter and
   // fails loudly, instead of being answered by Claude under a GLM label.
   if (/^glm[-/]/.test(m)) return 'glm';
+  // Jev model ids (jev-latest, jev-preview, jev-1.13.0) resolve to 'jev' so a
+  // bare id reaching a chat path is REFUSED (assertChatProvider) rather than
+  // falling through to the default and being answered by Claude.
+  if (/^jev[-/]/.test(m)) return 'jev';
   return 'anthropic';
 }
 
@@ -392,6 +426,7 @@ function resolveAdapter(provider) {
  * non-transient error or after exhausting retries.
  */
 export async function completeViaApi(provider, { apiKey, model, prompt, maxTokens = 8192, signal, baseUrl, meter, tools } = {}) {
+  assertChatProvider(provider);
   const adapter = resolveAdapter(provider);
   if (!adapter) throw new Error(`completeViaApi: unsupported provider '${provider}'`);
   if (!apiKey) throw new Error(`completeViaApi: no API key for ${provider}`);
@@ -1091,6 +1126,7 @@ function cliCantRun(message) {
  * PROVIDER_UNAVAILABLE and `cliCantRun: true`; an AbortError is rethrown as is.
  */
 export async function runViaCli(provider, prompt, { timeoutMs = CLI_TIMEOUT_MS, cwd, model, signal } = {}) {
+  assertChatProvider(provider);
   const cfg = PROVIDERS[provider];
   if (!cfg) throw new Error(`runViaCli: unknown provider '${provider}'`);
   // Use a minimal env allowlist — never inherit LLMIDE_JWT_SECRET,
@@ -1178,7 +1214,22 @@ const MODELS_ENDPOINT = {
     headers: {} }),
   deepseek: (key) => ({ url: `${DEFAULT_DEEPSEEK_BASE}/v1/models`,
     headers: { Authorization: `Bearer ${key}` } }),
+  jev: (key) => ({ url: `${jevBaseUrl()}/v1/models`,
+    headers: { Authorization: `Bearer ${key}` } }),
 };
+
+// Jev's API root. JEV_AI_BASE_URL is operator-controlled (env, not a user
+// setting), but it still receives the user's key in Authorization, so it gets
+// the same literal SSRF check as a custom base URL (https, no
+// loopback/private literal) — a bad override throws rather than leaking.
+export const DEFAULT_JEV_BASE = 'https://jev-ai.pro/api';
+export function jevBaseUrl() {
+  const raw = process.env.JEV_AI_BASE_URL;
+  if (!raw) return DEFAULT_JEV_BASE;
+  const stripped = raw.replace(/\/+$/, '');
+  assertSafeBaseUrl(stripped);
+  return stripped;
+}
 
 function parseModelIds(provider, data) {
   if (provider === 'google') {
@@ -1186,7 +1237,16 @@ function parseModelIds(provider, data) {
       .map((m) => String(m?.name || '').replace(/^models\//, ''))
       .filter(Boolean);
   }
-  // anthropic + openai both return { data: [{ id }, …] }
+  // anthropic + openai both return { data: [{ id }, …] }. Jev documents the
+  // same OpenAI-style shape; tolerate a bare array / `{ models: [...] }` of
+  // ids or `{ id }` objects too, so a shape change degrades to "fewer ids"
+  // rather than an empty picker.
+  if (provider === 'jev') {
+    const list = Array.isArray(data) ? data : (data?.data || data?.models || []);
+    return (Array.isArray(list) ? list : [])
+      .map((m) => (typeof m === 'string' ? m : m?.id))
+      .filter((id) => typeof id === 'string' && id);
+  }
   return (data?.data || []).map((m) => m?.id).filter((id) => typeof id === 'string');
 }
 
@@ -1237,6 +1297,8 @@ export function chatModels(provider, ids) {
   if (provider === 'deepseek') {
     return list.filter((id) => /deepseek/i.test(id));
   }
+  // Jev's list is decision models only — nothing to narrow (the picker that
+  // shows it is the Decisions role's, never a chat picker).
   return list;
 }
 
@@ -1255,6 +1317,8 @@ export async function verifyProvider({ provider, mode, apiKey, baseUrl } = {}) {
   if (mode === 'cli') return verifyCli(provider);
   if (!apiKey) return { ok: false, detail: 'no API key provided' };
   if (provider === 'custom' && !baseUrl) return { ok: false, detail: 'no base URL configured' };
+  // Jev (decision-only) is verified by listing its models — the same zero-
+  // cost check as every keyed provider; there is no chat probe to run.
   try {
     const models = await listProviderModels(provider, { apiKey, baseUrl });
     // A custom endpoint can list models and still have no chat API — then

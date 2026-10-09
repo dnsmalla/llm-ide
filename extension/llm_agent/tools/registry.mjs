@@ -34,6 +34,7 @@ import { tasks } from '../runtime/handlers/session-tasks.mjs';
 import { handleRunBash, resolveBashCwd } from '../runtime/handlers/run-bash.mjs';
 import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
 import { handleLoadSkill } from '../runtime/handlers/load-skill.mjs';
+import { handleDecide } from '../runtime/handlers/decide.mjs';
 import { runBashGate, autoGate } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { isAllowedByRule, suggestRule, addRule } from '../../kb/tool-permissions.mjs';
@@ -105,6 +106,11 @@ const ENTRIES = [
     }),
   },
   { name: 'web-search', kind: 'read', execute: (args, ctx) => handleWebSearch(args, { userId: ctx.userId }) },
+  // Calibrated yes/no / pick-one / score decisions about given material —
+  // Jev when the user's `decisions` role routes to it, else one LLM call in
+  // Jev's answer shape (runtime/decide.mjs). Read-only: it judges, never acts,
+  // so every mode (and a subagent that opts in) may use it.
+  { name: 'decide', kind: 'read', execute: (args, ctx) => handleDecide(args, { userId: ctx.userId, signal: signalFor(ctx) }) },
   { name: 'fetch-url', kind: 'read', execute: (args, ctx) => handleFetchUrl(args, { userId: ctx.userId }) },
   { name: 'list-files', kind: 'read', execute: (args, ctx) => handleListFiles(args, { roots: ctx.readableRoots }) },
   { name: 'read-file', kind: 'read', execute: (args, ctx) => handleReadFile(args, { roots: ctx.readableRoots }) },

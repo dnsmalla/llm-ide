@@ -7,6 +7,14 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **Decisions role + Jev provider + `decide` agent tool (server API v73).** The new `decide` tool makes
+  calibrated yes/no, pick-one or score decisions about material the agent already has, returning
+  probabilities and confidence (`{ engine, model, answers, fallback? }`, one answer shape whichever engine
+  answered). It runs on Jev (jev-ai.pro, vault `jev.apiKey`) when the `decisions` tier role points at a Jev
+  tier, otherwise on the role's LLM; a transient Jev failure or an over-size request falls back to the LLM
+  and says so. Jev is decision-only: every chat/completion path refuses it, and a Jev tier on any other
+  role reports `decision_only` and keeps that role's default. Tool schemas may now declare `type: object`.
+
 - **iPhone app redesign + much more from the Mac.** Chat is the first screen; project work lives in a
   Project tab (Explorer, Auto Tasks, Loop, Docs, Files, Git, Issues, Self-Heal) with a project switcher;
   a new Activity tab mirrors the bell; Settings has Usage & limits. The phone can run Doc Gen / Visual
@@ -22,6 +30,12 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 - Phone reads are bounded and safe by construction: paths resolve inside the project (symlink targets
   are re-checked), dotfiles/secret names/PEM keys are never shown, git runs with literal pathspecs and no
   textconv/fsmonitor, and all redaction is line-bounded (`PhoneRedaction`).
+
+### Fixed
+
+- **Plugin subagent tool grants now work.** A subagent's `allowed_tools` (e.g. `[search-kb]`) never
+  actually reached its loop — every granted tool answered "Unknown tool". Granted tools are now callable;
+  `decide` can be granted the same way (`allowed_tools: [decide]`).
 
 ### Changed
 

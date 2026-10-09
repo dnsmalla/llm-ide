@@ -23,7 +23,7 @@ import { redactFence } from './redaction.mjs';
 import { logger } from '../../core/logger.mjs';
 import { buildDispatch } from '../tools/registry.mjs';
 import { markRouteFailed } from '../../providers/route-health.mjs';
-import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
+import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, assertChatProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
 import { fastModelFor, recordUsage } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from './mode-classify.mjs';
@@ -174,6 +174,10 @@ export async function handleCodeAssist({
   // here and the native-dispatch routing below share ONE rule (two copies
   // drift the moment one is edited).
   const effProvider = (typeof provider === 'string' && provider) || resolveProvider(model);
+  // Jev is a decision API, not a chat model: refuse the turn up front (a
+  // PROVIDER_UNAVAILABLE 400, same as any provider that cannot run) instead
+  // of letting it reach a loop branch that would answer it as Claude.
+  assertChatProvider(effProvider);
   // Utility model for this turn's background calls (mode classify below,
   // memory extraction at the bottom): the fast tier of the TURN's OWN
   // provider chain, so a codex/OpenAI chat never forces an Anthropic call

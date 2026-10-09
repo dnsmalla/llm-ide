@@ -31,6 +31,12 @@ function zodFor(paramDef, key) {
     case 'number': z_ = z.number(); break;
     case 'boolean': z_ = z.boolean(); break;
     case 'string[]': z_ = z.array(z.string()); break;
+    // A plain JSON object (decide's `questions`); its inner shape — and its
+    // serialized-size cap — are the HANDLER's to enforce (zod `.max` would not
+    // mean size for a record). decide's does: providers/jev.mjs
+    // validateJevQuestions (MAX_QUESTIONS_CHARS), run before any model call.
+    // A future object-typed tool must cap its own input the same way.
+    case 'object': z_ = z.record(z.string(), z.unknown()); break;
     default:
       throw new Error(`unsupported schema type "${paramDef.type}" for param "${key}" — llm_agent/sdk/tools.mjs must learn it before a skill can declare it`);
   }

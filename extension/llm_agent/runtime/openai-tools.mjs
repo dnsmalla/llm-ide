@@ -6,19 +6,22 @@
 // this is the only place that needs to know the OpenAI tool-definition shape.
 //
 // Skill schema shape: { [arg]: { type, required, maxLength, description, enum } }
-// type ∈ 'string' | 'number' | 'boolean' | 'string[]'
+// type ∈ 'string' | 'number' | 'boolean' | 'string[]' | 'object'
 
 const SCHEMA_TYPE_TO_OPENAI = {
   string: () => ({ type: 'string' }),
   number: () => ({ type: 'number' }),
   boolean: () => ({ type: 'boolean' }),
   'string[]': () => ({ type: 'array', items: { type: 'string' } }),
+  object: () => ({ type: 'object' }),
 };
 
 function toProperty(def) {
   const prop = (SCHEMA_TYPE_TO_OPENAI[def.type] || (() => ({ type: 'string' })))();
   if (typeof def.description === 'string' && def.description) prop.description = def.description;
-  if (typeof def.maxLength === 'number') prop.maxLength = def.maxLength;
+  // maxLength is a JSON-Schema string keyword; on an object it means the
+  // serialized cap (enforced by validateArgs), so it is not advertised.
+  if (typeof def.maxLength === 'number' && def.type !== 'object') prop.maxLength = def.maxLength;
   if (Array.isArray(def.enum) && def.enum.length) prop.enum = def.enum;
   return prop;
 }

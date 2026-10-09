@@ -9,7 +9,9 @@ import { join } from 'node:path';
 import * as yaml from 'js-yaml';
 
 const VALID_KINDS = new Set(['read', 'write']);
-const VALID_SCHEMA_TYPES = new Set(['string', 'number', 'boolean', 'string[]']);
+// `object`: a plain JSON object argument (e.g. decide's `questions` map). Its
+// shape is the handler's to validate; `maxLength` caps its serialized size.
+const VALID_SCHEMA_TYPES = new Set(['string', 'number', 'boolean', 'string[]', 'object']);
 // `question-card`: ask-user — the client renders the question as a tappable
 // card and returns the chosen label(s) as the tool result.
 const VALID_CONFIRMATIONS = new Set(['editable-sheet', 'gitop-sheet', 'question-card']);

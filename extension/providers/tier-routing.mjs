@@ -22,7 +22,7 @@
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { getTierRoutingConfig, ROUTING_TIERS } from '../server/tier-routing.mjs';
-import { resolveCustomProviderDispatch, providerApiKey, providerHasCli } from './providers.mjs';
+import { resolveCustomProviderDispatch, providerApiKey, providerHasCli, isDecisionOnlyProvider } from './providers.mjs';
 import { cliHealth, awaitCliProbes, routeFailure } from './route-health.mjs';
 
 const log = logger.child({ component: 'tier-routing' });
@@ -96,8 +96,15 @@ function routeCheck(route, userId, db) {
   return { reason: 'no_key' };
 }
 
+// The one feature a decision-only provider (jev) may serve. Every other
+// feature runs prompts through runClaude / an agent loop, which Jev cannot
+// answer — a Jev tier misassigned to one of them reports `decision_only` and
+// is never routed (the feature keeps its default).
+const DECISION_FEATURE = 'decisions';
+
 /** Why `feature` may not take a usable route with `via`, or null. */
 function featureReason(feature, route, via) {
+  if (isDecisionOnlyProvider(route.provider) && feature !== DECISION_FEATURE) return 'decision_only';
   if (via === 'cli' && AGENT_CLI_PROVIDERS.has(route.provider) && UNTRUSTED_INPUT_FEATURES.has(feature)) {
     return 'cli_untrusted_input';
   }
@@ -146,7 +153,15 @@ function checkTier(userId, tier, db) {
  */
 export function resolveTier(userId, tier, db) {
   const hit = checkTier(userId, tier, db);
-  return hit ? { provider: hit.route.provider, model: hit.route.model } : null;
+  if (!hit) return null;
+  // A bare tier lookup serves a CHAT call (a plugin subagent's `tier:`), so a
+  // decision-only tier is never an answer here — the caller falls through to
+  // its next route / default exactly as for an unusable tier.
+  if (isDecisionOnlyProvider(hit.route.provider)) {
+    warnUnusable(userId, tier, hit.route, 'decision_only');
+    return null;
+  }
+  return { provider: hit.route.provider, model: hit.route.model };
 }
 
 /**
@@ -161,8 +176,9 @@ export function resolveTier(userId, tier, db) {
  *
  * `featureStatus` (API v69+) has one `{ usable, reason? }` per CONFIGURED
  * feature: a feature is unusable when its tier is (same reason) or when the
- * tier's route may not serve it (`cli_untrusted_input`). Never throws; a
- * fault reports every tier unusable.
+ * tier's route may not serve it (`cli_untrusted_input`; `decision_only` (v73)
+ * — a jev tier on any feature but `decisions`). Never throws; a fault reports
+ * every tier unusable.
  */
 export function tierRoutingStatus(userId, db) {
   const status = {};
@@ -226,7 +242,8 @@ export async function tierRoutingStatusFresh(userId, db, { waitMs = 3000 } = {})
 /**
  * The route for `feature` (via its tier), or null → the caller's default.
  * A keyless OpenAI/Google (agent CLI) route never serves an untrusted-input
- * feature (`internal`, `pipeline`) — see UNTRUSTED_INPUT_FEATURES.
+ * feature (`internal`, `pipeline`) — see UNTRUSTED_INPUT_FEATURES — and a
+ * decision-only (jev) route serves `decisions` alone (DECISION_FEATURE).
  */
 export function resolveFeatureRoute(userId, feature, db) {
   if (!userId) return null;
@@ -268,5 +285,9 @@ export function featureTierName(userId, feature, db) {
  */
 export function routeOpts(userId, feature, fallback = {}, db) {
   const route = resolveFeatureRoute(userId, feature, db);
-  return route ? { model: route.model, provider: route.provider, routeFallback: { ...fallback } } : fallback;
+  // runClaude can never run a decision-only provider (it refuses one), so a
+  // Jev route — reachable here only for `decisions`, whose Jev path calls
+  // providers/jev.mjs directly — yields the caller's default instead.
+  if (!route || isDecisionOnlyProvider(route.provider)) return fallback;
+  return { model: route.model, provider: route.provider, routeFallback: { ...fallback } };
 }

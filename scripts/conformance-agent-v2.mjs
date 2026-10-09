@@ -235,6 +235,7 @@ const NON_WIRE_TYPE_LITERALS = new Set([
   'web_search_result',
   'image',                    // sdk/engine.mjs buildPromptInput — Anthropic image block
   'user',                     // sdk/engine.mjs buildPromptInput — SDKUserMessage envelope
+  'noul', 'choice', 'score',  // runtime/decide.mjs — Jev answer shapes inside the `decide` tool result, never stream events
   // JSON-Schema fragments inside tool definitions.
   'text', 'object', 'string', 'boolean', 'number', 'integer', 'array',
 ]);

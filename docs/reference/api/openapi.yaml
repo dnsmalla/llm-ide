@@ -314,7 +314,7 @@ paths:
               type: object
               required: [key]
               properties:
-                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl, slack.botToken, box.clientSecret, email.imapPassword, claude.apiKey, openai.apiKey, google.apiKey, deepseek.apiKey, custom.apiKey, custom.baseUrl, google.email.clientId, google.email.clientSecret, google.email.refreshToken] }
+                key:   { type: string, enum: [github.token, backlog.apiKey, linear.apiKey, slack.webhookUrl, slack.botToken, box.clientSecret, email.imapPassword, claude.apiKey, openai.apiKey, google.apiKey, deepseek.apiKey, jev.apiKey, custom.apiKey, custom.baseUrl, google.email.clientId, google.email.clientSecret, google.email.refreshToken] }
                 value: { type: string, nullable: true, description: 'null/empty deletes' }
       responses:
         '200': { description: ok }
@@ -3093,13 +3093,15 @@ paths:
         persisted per user. Each tier names a provider + model; each feature
         names a tier. Every entry is optional and invalid entries are dropped
         (unknown tier/feature names, a provider outside
-        anthropic|openai|google|deepseek|custom:<id>, a model id outside
+        anthropic|openai|google|deepseek|jev|custom:<id>, a model id outside
         `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}(\[1m\])?$`) and reported back in
         `dropped` (API v67+). An unset or unusable tier (custom provider
         missing/disabled/keyless, DeepSeek without an API key, OpenAI/Google
         with neither an API key nor their logged-in CLI — codex/gemini, API
         v68+; v67 required the key) keeps the role on its default provider
-        and model.
+        and model. API v73+: `jev` (decision-only, key required) is a valid
+        tier provider but serves ONLY the `decisions` feature; any other
+        feature on a jev tier keeps its default.
       requestBody:
         required: true
         content:
@@ -3117,7 +3119,7 @@ paths:
                       model:    { type: string, example: 'glm-4.6' }
                 features:
                   type: object
-                  description: Keys subagents | loop | autoTasks | quickChat | pipeline | internal; values a tier name
+                  description: Keys subagents | loop | autoTasks | quickChat | pipeline | internal | decisions (API v73+); values a tier name
                   additionalProperties: { type: string, enum: [strong, standard, cheap] }
       responses:
         '200':
@@ -3187,7 +3189,9 @@ paths:
                       `cli_untrusted_input` when the tier runs on a keyless
                       codex/gemini CLI and the feature is `internal` or
                       `pipeline` (untrusted email/connector/transcript input;
-                      pipeline output is dispatched to issue trackers).
+                      pipeline output is dispatched to issue trackers), or
+                      `decision_only` (API v73+) when the tier runs on `jev` and
+                      the feature is anything but `decisions`.
                     additionalProperties:
                       type: object
                       properties:

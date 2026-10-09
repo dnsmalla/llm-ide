@@ -3,7 +3,7 @@
  *
  * Per-user "which provider + model runs each role" config, synced from the
  * Mac app (`POST /kb/routing-tiers`). Three tiers (strong / standard / cheap)
- * each name a `{ provider, model }`; six features (subagents, loop, …) each
+ * each name a `{ provider, model }`; seven features (subagents, loop, …) each
  * name a tier. Every entry is optional — an unset feature means "today's
  * default path", which is why invalid entries are dropped rather than
  * rejected: routing must never make a normal call fail.
@@ -22,11 +22,15 @@ const FLAG = 'routing.tiers';
 const MAX_BODY_BYTES = 20_000;
 
 export const ROUTING_TIERS = Object.freeze(['strong', 'standard', 'cheap']);
-export const ROUTED_FEATURES = Object.freeze(['subagents', 'loop', 'autoTasks', 'quickChat', 'pipeline', 'internal']);
+// `decisions` (API v73) — the `decide` tool and other calibrated
+// yes/no / pick-one / score calls (llm_agent/runtime/decide.mjs). The only
+// feature a decision-only (jev) tier may serve; see providers/tier-routing.mjs.
+export const ROUTED_FEATURES = Object.freeze(['subagents', 'loop', 'autoTasks', 'quickChat', 'pipeline', 'internal', 'decisions']);
 
 // Server wire ids only. `custom:<id>` ids are the Mac's provider UUIDs (case
-// preserved — the registry is keyed by the exact id the Mac sent).
-const PROVIDER_RE = /^(anthropic|openai|google|deepseek|custom:[A-Za-z0-9-]{1,100})$/;
+// preserved — the registry is keyed by the exact id the Mac sent). `jev` is
+// accepted as a tier provider, but the resolver lets it serve `decisions` only.
+const PROVIDER_RE = /^(anthropic|openai|google|deepseek|jev|custom:[A-Za-z0-9-]{1,100})$/;
 // The model id is forwarded into a provider request body, so a strict charset.
 // The one bracket form allowed is the SDK's 1M-context suffix `[1m]` (the
 // Settings model menu lists e.g. `claude-opus-5-5[1m]` from the SDK's live
