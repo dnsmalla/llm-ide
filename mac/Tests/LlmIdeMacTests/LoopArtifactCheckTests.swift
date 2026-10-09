@@ -133,9 +133,10 @@ final class LoopArtifactCheckTests: XCTestCase {
     }
 
     func testValidTreePasses() throws {
-        try write("llm-doc/docs/INDEX.md", lines: 10)
+        // The docs loop writes under `LoopOutputLayout.docsDir` (`llm-doc/loop/docs/`).
+        try write(LoopOutputLayout.docsIndex, lines: 10)
         try write("src/x.swift")
-        try write("llm-doc/docs/a.md", text: "see `src/x.swift:1`\n")
+        try write("\(LoopOutputLayout.docsDir)/a.md", text: "see `src/x.swift:1`\n")
         let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.docs, gitRoot: root)
         XCTAssertTrue(ArtifactCheckEvaluator.evaluate(LoopStageDetector.docCheckSpec,
                                                       roots: .init(repo: root, project: nil), stages: stages).passed)

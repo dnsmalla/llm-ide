@@ -82,8 +82,10 @@ struct MobilePairedDeviceStoreTests {
         }
         #expect(store.all.count == MobilePairedDeviceStore.maxDevices)
         #expect(store.device(id: "d0") == nil, "the oldest record is the one evicted")
-        #expect(!store.authenticate(deviceId: "d0", token: tokens["d0"]!))
-        #expect(store.authenticate(deviceId: "d1", token: tokens["d1"]!))
+        // Pass `now` near t0: the default (today) is past the 30-day idle expiry.
+        let later = t0.addingTimeInterval(Double(MobilePairedDeviceStore.maxDevices + 1))
+        #expect(!store.authenticate(deviceId: "d0", token: tokens["d0"]!, now: later))
+        #expect(store.authenticate(deviceId: "d1", token: tokens["d1"]!, now: later))
     }
 
     @Test("a blank device name falls back rather than storing an empty label")
