@@ -92,6 +92,19 @@ struct AgentV2Usage: Sendable, Equatable, Codable {
         TokenCostPolicy.billableTokens(input: inputTokens, output: outputTokens,
                                        cacheRead: cacheReadTokens, cacheWrite: cacheCreationTokens)
     }
+
+    /// Several turns' usage as one: every count summed. The weighting in
+    /// `billableTokens` is linear, so the total's billable count equals the
+    /// turns' own labels added up. Nil for no usages at all.
+    static func total(_ usages: [AgentV2Usage]) -> AgentV2Usage? {
+        guard !usages.isEmpty else { return nil }
+        let writes = usages.compactMap(\.cacheCreationTokens)
+        return AgentV2Usage(inputTokens: usages.reduce(0) { $0 + $1.inputTokens },
+                            outputTokens: usages.reduce(0) { $0 + $1.outputTokens },
+                            cacheReadTokens: usages.reduce(0) { $0 + $1.cacheReadTokens },
+                            cacheCreationTokens: writes.isEmpty ? nil : writes.reduce(0, +),
+                            contextPercent: nil)
+    }
 }
 
 /// `{"type":"memory", …}` — how much of this turn's prompt is the chat's

@@ -18,6 +18,15 @@ extension CodeAssistantPanel {
                     .font(.system(size: 10, design: .monospaced))
                     .foregroundStyle(theme.current.textMuted)
                     .lineLimit(1)
+                // This chat's total, summed from every reply's own label.
+                if let total = engine.sessionTokenUsage {
+                    Text("\(ChatMessageList.compactTokenCount(total.billableTokens)) tokens")
+                        .font(.system(size: 10, design: .monospaced))
+                        .foregroundStyle(theme.current.textMuted)
+                        .lineLimit(1)
+                        .help("This chat: " + ChatMessageList.tokenUsageTooltip(total))
+                        .accessibilityLabel("This chat used \(total.billableTokens) tokens")
+                }
             }
             Spacer(minLength: 4)
             sessionDropdownButton
