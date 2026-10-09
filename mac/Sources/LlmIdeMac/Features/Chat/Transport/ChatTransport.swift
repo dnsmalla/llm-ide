@@ -182,8 +182,9 @@ struct ChatTransportResult: Sendable {
     /// Real per-turn LLM token counts. Only `AgentV2Transport` populates
     /// this (summed across the turn's `usage` events, matching the
     /// server's own `usageTotals` accumulation in engine.mjs); the legacy
-    /// `CodeAssistTransport` has no token data, so `init(_ response:)`
-    /// below always passes nil for it.
+    /// `CodeAssistTransport` passes nil here and carries its totals in
+    /// `usage` instead (`Usage.turnTokenUsage`, server API v72), which the
+    /// engine falls back to.
     ///
     /// Deliberately required rather than `= nil`: a `let` stored property's
     /// default value is NOT exposed as a memberwise-init parameter at all

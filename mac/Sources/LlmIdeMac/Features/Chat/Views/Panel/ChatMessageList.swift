@@ -714,7 +714,7 @@ struct ChatMessageList: View {
             ?? turn.content
     }
 
-    private static func compactTokenCount(_ n: Int) -> String {
+    static func compactTokenCount(_ n: Int) -> String {
         if n >= 1_000_000 { return String(format: "%.1fM", Double(n) / 1_000_000) }
         if n >= 1_000 { return String(format: "%.1fK", Double(n) / 1_000) }
         return "\(n)"
@@ -724,7 +724,7 @@ struct ChatMessageList: View {
     /// the rates are the whole reason the headline is not a flat sum (see
     /// `AgentV2Usage.billableTokens`), so hiding them would leave the
     /// weighted number unexplainable.
-    private static func tokenUsageTooltip(_ usage: AgentV2Usage) -> String {
+    static func tokenUsageTooltip(_ usage: AgentV2Usage) -> String {
         var parts = ["\(usage.inputTokens) in", "\(usage.outputTokens) out"]
         if usage.cacheReadTokens > 0 { parts.append("\(usage.cacheReadTokens) cache read (×0.1)") }
         if let created = usage.cacheCreationTokens, created > 0 { parts.append("\(created) cache write (×1.25)") }

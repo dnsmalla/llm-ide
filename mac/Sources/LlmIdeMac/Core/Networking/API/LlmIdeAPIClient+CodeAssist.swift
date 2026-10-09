@@ -103,6 +103,23 @@ extension LlmIdeAPIClient {
             let memoryApproxTokens: Int?
             let memoryChars: Int?
             let memoryHasChatMemory: Bool?
+            /// The turn's model tokens, summed over every call it made (server
+            /// API v72). Nil from an older server, or when no call reported
+            /// tokens (a CLI that prints no usage).
+            var inputTokens: Int? = nil
+            var outputTokens: Int? = nil
+            var cacheReadTokens: Int? = nil
+            var cacheCreationTokens: Int? = nil
+            var modelCalls: Int? = nil
+
+            /// The turn's tokens in the shape Agent-engine turns report, so a
+            /// classic reply gets the same per-reply label and composer chip.
+            var turnTokenUsage: AgentV2Usage? {
+                guard let inputTokens, let outputTokens else { return nil }
+                return AgentV2Usage(inputTokens: inputTokens, outputTokens: outputTokens,
+                                    cacheReadTokens: cacheReadTokens ?? 0,
+                                    cacheCreationTokens: cacheCreationTokens, contextPercent: nil)
+            }
         }
     }
 

@@ -410,6 +410,7 @@ extension ChatEngine {
         resolvedMode = nil
         // The outgoing chat's context meter must not label the incoming one.
         lastContextUsage = nil
+        lastTurnTokenUsage = nil
         agent.nudgePrompt = nil
         agent.agentSessionId = UUID().uuidString
         agent.agentPendingTasks = []

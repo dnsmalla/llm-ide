@@ -667,7 +667,16 @@ extension CodeAssistantPanel {
     /// clears when the chat is switched or cleared.
     @ViewBuilder
     var contextUsageChip: some View {
-        if let usage = engine.lastContextUsage {
+        if engine.lastContextUsage == nil, let tokens = engine.lastTurnTokenUsage {
+            // No context meter (classic engine): the last turn's tokens, in the
+            // same weighted count as the reply's own label.
+            Text("\(ChatMessageList.compactTokenCount(tokens.billableTokens)) tokens")
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundStyle(theme.current.textMuted)
+                .help("Last turn: " + ChatMessageList.tokenUsageTooltip(tokens))
+                .accessibilityLabel("Last turn used \(tokens.billableTokens) tokens")
+                .fixedSize()
+        } else if let usage = engine.lastContextUsage {
             let tint = ContextUsagePresentation.isWarning(usage) ? theme.current.warning : theme.current.textMuted
             Button { showContextUsage.toggle() } label: {
                 HStack(spacing: 4) {

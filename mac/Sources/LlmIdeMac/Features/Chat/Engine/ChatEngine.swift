@@ -83,6 +83,11 @@ final class ChatEngine {
     /// turn brings none (a failed read must not blank the meter); cleared on
     /// a session switch (resetTransientSessionState).
     var lastContextUsage: AgentV2ContextUsage?
+    /// The last completed turn's model tokens — the composer's token chip for
+    /// chats with no context meter (the classic engine reports tokens, not a
+    /// context window). Same keep-previous / clear-on-switch rules as
+    /// `lastContextUsage`.
+    var lastTurnTokenUsage: AgentV2Usage?
     var busy = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a
@@ -800,9 +805,10 @@ final class ChatEngine {
                 usage: resp.usage,
                 mode: resp.mode,
                 stopped: false,
-                tokenUsage: resp.tokenUsage
+                tokenUsage: resp.tokenUsage ?? resp.usage?.turnTokenUsage
             )
             if let usage = resp.contextUsage { lastContextUsage = usage }
+            if let tokens = resp.tokenUsage ?? resp.usage?.turnTokenUsage { lastTurnTokenUsage = tokens }
             // Only the primary turn's chain check runs here — the follow-up
             // turn's own chain check (inside sendFollowup) covers every step
             // after this one, so an agent that keeps proposing edits can't loop.
@@ -1006,9 +1012,10 @@ final class ChatEngine {
                 usage: resp.usage,
                 mode: resp.mode,
                 stopped: false,
-                tokenUsage: resp.tokenUsage
+                tokenUsage: resp.tokenUsage ?? resp.usage?.turnTokenUsage
             )
             if let usage = resp.contextUsage { lastContextUsage = usage }
+            if let tokens = resp.tokenUsage ?? resp.usage?.turnTokenUsage { lastTurnTokenUsage = tokens }
             // Chain the NEXT step hands-free when allowed — this is what lets a
             // multi-step plan (e.g. "update A, then update B" or "commit and
             // push") finish without a card for every step. Mirrors runTurn's
