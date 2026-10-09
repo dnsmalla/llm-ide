@@ -153,7 +153,7 @@ extension CodeAssistantModelState {
 
     /// Fill what the grouped menu needs: which keys are stored, then each
     /// listed built-in provider's live models. Best-effort, like `loadModels`.
-    func loadComposerProviders(api: LlmIdeAPIClient) async {
+    @MainActor func loadComposerProviders(api: LlmIdeAPIClient) async {
         if let keys = try? await api.configuredSecretKeys() { configuredSecretKeys = keys }
         for tool in AICliTool.selectable {
             let hasKey = tool.vaultKey.map { configuredSecretKeys?.contains($0) == true } ?? false

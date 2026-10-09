@@ -18,6 +18,8 @@ enum LiveModelCache {
     /// Decoded once per process and on every `store`, not on each read:
     /// `AICliTool.models` is read from SwiftUI bodies.
     private static let memory = OSAllocatedUnfairLock<[String: [AIModel]]?>(initialState: nil)
+    /// Serializes `store`s so they persist in order. Readers never take it.
+    private static let persistLock = NSLock()
 
     static func models(for provider: String, defaults: UserDefaults = .standard) -> [AIModel]? {
         let all: [String: [AIModel]]
@@ -40,21 +42,24 @@ enum LiveModelCache {
 
     static func store(_ models: [AIModel], for provider: String, defaults: UserDefaults = .standard) {
         guard !models.isEmpty else { return }
-        // `withLockUnchecked`, not `withLock`: the persist must stay inside the
-        // same critical section as the in-memory merge. Writing `defaults`
-        // after unlocking would let two concurrent stores persist out of order
-        // and drop a provider on disk. `UserDefaults` is documented
-        // thread-safe; it is only non-`Sendable` by declaration.
-        // WARNING: `defaults.set` runs while holding a non-reentrant
-        // os_unfair_lock. No synchronous UserDefaults / KVO observer may call
-        // back into LiveModelCache on the storing thread — it would crash (os_unfair_lock traps on a recursive acquire).
-        memory.withLockUnchecked { cached in
+        // `defaults.set` must NOT run under `memory`: it posts
+        // UserDefaults.didChange synchronously on the storing thread, and
+        // SwiftUI's @AppStorage observer then waits for the view-update lock.
+        // A body reading `models(for:)` holds that update lock while waiting
+        // for `memory` — a deadlock that froze the app at launch. So the merge
+        // happens under `memory` (readers' lock), the persist under
+        // `persistLock` only, which keeps concurrent stores in order without
+        // ever making a reader wait on a UserDefaults write. `UserDefaults` is
+        // documented thread-safe; it is only non-`Sendable` by declaration.
+        persistLock.lock(); defer { persistLock.unlock() }
+        let all = memory.withLockUnchecked { cached -> [String: [AIModel]] in
             var all = cached ?? decode(defaults)
             all[provider] = models
             cached = all
-            if let data = try? JSONEncoder().encode(all) {
-                defaults.set(data, forKey: defaultsKey)
-            }
+            return all
+        }
+        if let data = try? JSONEncoder().encode(all) {
+            defaults.set(data, forKey: defaultsKey)
         }
     }
 

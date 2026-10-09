@@ -112,7 +112,8 @@ extension CodeAssistantModelState {
 
     /// Fetch the provider's live chat models. Best-effort: silent on failure,
     /// leaving `models(for:)` on the built-in fallback list.
-    func loadModels(for cli: AICliTool, api: LlmIdeAPIClient) async {
+    /// On the main actor: it mutates `liveModels`, which views observe.
+    @MainActor func loadModels(for cli: AICliTool, api: LlmIdeAPIClient) async {
         guard let models = try? await api.listProviderModels(cli.provider), !models.isEmpty else { return }
         liveModels[cli.provider] = models
         // Persist every provider's list so every other surface (menu-bar chat,
