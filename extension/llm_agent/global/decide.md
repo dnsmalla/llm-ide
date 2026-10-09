@@ -74,7 +74,8 @@ Each question id (letters, digits, `_ . -`) maps to:
   `jev_server_error`, `jev_timeout`, `jev_network`, `jev_bad_response`,
   `jev_too_large`, `jev_unavailable` (this call failed on Jev), `jev_route_failed`
   (Jev is cooling down after a recent failure), `jev_no_key` (no Jev key
-  stored), `jev_unusable` (the Jev tier cannot run for another reason).
+  stored), `jev_error` / `jev_unusable` (the Jev tier cannot run for another
+  reason).
   Mention it to the user when the decision matters.
 - An answer of `{"type": ..., "error": "..."}` means that one question got no
   valid answer — do not treat it as a no. When NO question got one, the call
