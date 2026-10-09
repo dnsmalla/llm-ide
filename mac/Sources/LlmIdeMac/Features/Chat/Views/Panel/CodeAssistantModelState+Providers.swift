@@ -86,6 +86,7 @@ extension CodeAssistantModelState {
     /// Settings' own provider is an ordinary model pick; any other provider is
     /// remembered for this chat only.
     @MainActor func pick(model: String, provider: String, sessionID: String, settingsProvider: String) {
+        displayedSessionID = sessionID
         selectedProvider = provider
         selectedModel = model
         modelIsExplicit = true
@@ -98,11 +99,39 @@ extension CodeAssistantModelState {
         }
     }
 
+    /// Remember a model chosen on the CURRENT provider (a menu pick, "Add
+    /// model…", `/model`). On Settings' own built-in provider it is the
+    /// persisted explicit pick that `handleOnAppear` restores; on a provider
+    /// picked for this chat only it updates that chat's pick instead —
+    /// persisting it would restore another provider's model onto Settings'.
+    @MainActor func persistModelChoice(_ id: String, config: AppConfig) {
+        if providerIsExplicit {
+            if !displayedSessionID.isEmpty {
+                ComposerProviderPicks.bySession[displayedSessionID] = ProviderPick(provider: selectedProvider, model: id)
+            }
+        } else if !selectedProvider.starts(with: "custom:") {
+            config.modelPickIsExplicit = true
+            config.explicitModelId = id
+        }
+    }
+
+    /// Back on Settings' provider after a chat that had its own: the model the
+    /// user saved for it, not Standard's (`followDefaultProvider` resets to
+    /// `defaultModelId` and drops the explicit flag).
+    func restoreSettingsModel(config: AppConfig) {
+        guard !selectedProvider.starts(with: "custom:") else { return }
+        selectedModel = Self.restoredModel(isExplicit: config.modelPickIsExplicit,
+                                           explicitId: config.explicitModelId,
+                                           defaultModelId: config.defaultModelId)
+        modelIsExplicit = config.modelPickIsExplicit
+    }
+
     /// The displayed chat changed: restore its own provider pick, if it made
     /// one and that provider still exists. Returns false when the chat follows
     /// Settings, after dropping the previous chat's pick from the composer.
     @discardableResult @MainActor
     func restoreProviderPick(for sessionID: String) -> Bool {
+        displayedSessionID = sessionID
         if let pick = ComposerProviderPicks.bySession[sessionID], providerExists(pick.provider) {
             selectedProvider = pick.provider
             selectedModel = pick.model

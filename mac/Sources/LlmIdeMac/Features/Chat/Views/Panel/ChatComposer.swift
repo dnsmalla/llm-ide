@@ -338,7 +338,11 @@ extension CodeAssistantPanel {
         .onChange(of: engine.usesAgentV2Engine) { _, _ in applyComposerProvider() }
         // Another chat is displayed: its own provider pick, else Settings'.
         .onChange(of: engine.currentSessionIDString) { _, id in
-            if !modelState.restoreProviderPick(for: id) { applyComposerProvider() }
+            let leftPerChatPick = modelState.providerIsExplicit
+            if !modelState.restoreProviderPick(for: id) {
+                applyComposerProvider()
+                if leftPerChatPick { modelState.restoreSettingsModel(config: config) }
+            }
             restampEngineIfEmpty()
         }
     }
@@ -360,10 +364,7 @@ extension CodeAssistantPanel {
     func pickModel(_ modelId: String, on provider: String, settingsProvider: String) {
         modelState.pick(model: modelId, provider: provider,
                         sessionID: engine.currentSessionIDString, settingsProvider: settingsProvider)
-        if provider == settingsProvider, !provider.hasPrefix("custom:") {
-            config.modelPickIsExplicit = true
-            config.explicitModelId = modelId
-        }
+        modelState.persistModelChoice(modelId, config: config)
         restampEngineIfEmpty()
     }
 

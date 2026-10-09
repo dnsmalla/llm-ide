@@ -109,6 +109,9 @@ final class CodeAssistantModelState {
     /// composer for the displayed chat, not Settings' default. Settings'
     /// re-apply (`applyComposerProvider`) leaves such a pick alone.
     var providerIsExplicit = false
+    /// The chat the composer currently serves, as last told by a pick or a
+    /// chat switch — where `persistModelChoice` records a per-chat model.
+    var displayedSessionID = ""
     var showAddModel = false
     var newModelId = ""
     /// Mode for the NEXT turn. Defaults to `.auto` — the server classifies

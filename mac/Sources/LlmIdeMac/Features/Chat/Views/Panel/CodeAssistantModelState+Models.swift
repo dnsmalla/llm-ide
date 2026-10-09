@@ -96,7 +96,7 @@ extension CodeAssistantModelState {
     }
 
     /// Append a custom model id for a provider and select it.
-    func addCustomModel(_ id: String, provider: String, config: AppConfig) {
+    @MainActor func addCustomModel(_ id: String, provider: String, config: AppConfig) {
         var dict = Self.customModelsDict()
         var list = dict[provider] ?? []
         if !list.contains(id) { list.append(id) }
@@ -106,12 +106,8 @@ extension CodeAssistantModelState {
         }
         selectedModel = id
         modelIsExplicit = true
-        // Only reachable from the built-in "Add model…" alert, but the guard
-        // keeps that assumption local. Never `defaultModelId` (Standard's).
-        if !selectedProvider.starts(with: "custom:") {
-            config.modelPickIsExplicit = true
-            config.explicitModelId = id
-        }
+        // Never `defaultModelId` (Standard's); see `persistModelChoice`.
+        persistModelChoice(id, config: config)
     }
 
     /// Fetch the provider's live chat models. Best-effort: silent on failure,
@@ -232,7 +228,7 @@ extension CodeAssistantModelState {
     /// - Returns: `nil` on success, or the message to show the user. The caller
     ///   decides where that message goes; this type does not reach into a chat
     ///   engine to display it.
-    func resolveModelCommand(_ query: String, config: AppConfig) -> String? {
+    @MainActor func resolveModelCommand(_ query: String, config: AppConfig) -> String? {
         guard !query.isEmpty else {
             return "Usage: /model <name> — e.g. /model sonnet, /model gpt-5"
         }
@@ -246,12 +242,8 @@ extension CodeAssistantModelState {
         }
         selectedModel = match.id
         modelIsExplicit = true
-        // Persisted for the built-in provider only (see handleOnAppear); never
-        // into `defaultModelId`, which is Standard's model.
-        if !selectedProvider.starts(with: "custom:") {
-            config.modelPickIsExplicit = true
-            config.explicitModelId = match.id
-        }
+        // Never into `defaultModelId`, which is Standard's model.
+        persistModelChoice(match.id, config: config)
         return nil
     }
 }

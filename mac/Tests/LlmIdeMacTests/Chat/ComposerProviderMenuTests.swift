@@ -84,6 +84,51 @@ struct ComposerProviderMenuTests {
         #expect(ComposerProviderPicks.bySession[chatA] == nil && !s.providerIsExplicit)
     }
 
+    private func freshConfig() -> AppConfig {
+        AppConfig(userDefaults: UserDefaults(suiteName: "composer-menu-\(UUID().uuidString)")!)
+    }
+
+    @Test("/model and Add model on a per-chat provider update that chat's pick, never Settings' saved model")
+    func modelChoiceOnPerChatProvider() {
+        let chat = UUID().uuidString
+        defer { ComposerProviderPicks.bySession[chat] = nil }
+        let config = freshConfig()
+        config.modelPickIsExplicit = true
+        config.explicitModelId = "claude-opus-5"
+        let s = state(selected: AICliTool.claudeCode.rawValue, model: "claude-opus-5", keys: ["deepseek.apiKey"])
+        s.pick(model: "deepseek-flash", provider: AICliTool.deepseek.rawValue, sessionID: chat,
+               settingsProvider: AICliTool.claudeCode.rawValue)
+
+        #expect(s.resolveModelCommand("v4-pro", config: config) == nil)
+        #expect(config.explicitModelId == "claude-opus-5", "Settings' saved Claude pick is untouched")
+        #expect(ComposerProviderPicks.bySession[chat] == ProviderPick(provider: AICliTool.deepseek.rawValue,
+                                                                       model: "deepseek-v4-pro"))
+        // On Settings' own provider the pick is still persisted as before.
+        s.pick(model: "claude-sonnet-5", provider: AICliTool.claudeCode.rawValue, sessionID: chat,
+               settingsProvider: AICliTool.claudeCode.rawValue)
+        s.persistModelChoice("claude-sonnet-5", config: config)
+        #expect(config.explicitModelId == "claude-sonnet-5")
+    }
+
+    @Test("leaving a chat with its own provider restores the user's saved model, not Standard's")
+    func leavingPerChatPickRestoresSavedModel() {
+        let chatA = UUID().uuidString
+        defer { ComposerProviderPicks.bySession[chatA] = nil }
+        let config = freshConfig()
+        config.modelPickIsExplicit = true
+        config.explicitModelId = "claude-opus-5"
+        let s = state(selected: AICliTool.claudeCode.rawValue, model: "claude-opus-5", keys: ["deepseek.apiKey"])
+        s.pick(model: "deepseek-flash", provider: AICliTool.deepseek.rawValue, sessionID: chatA,
+               settingsProvider: AICliTool.claudeCode.rawValue)
+
+        // Switch to chat B, which follows Settings (what ChatComposer's onChange does).
+        #expect(!s.restoreProviderPick(for: UUID().uuidString))
+        s.applyComposerProvider(overrideId: "", activeCLI: AICliTool.claudeCode.rawValue, defaultModelId: "claude-sonnet-5")
+        s.restoreSettingsModel(config: config)
+        #expect(s.selectedProvider == AICliTool.claudeCode.rawValue)
+        #expect(s.selectedModel == "claude-opus-5" && s.modelIsExplicit)
+    }
+
     @Test("an empty chat is re-stamped for the provider picked; a chat with messages keeps its engine")
     func restampOnlyWhenEmpty() async {
         await ChatStoreOverrideGate.shared.acquire()
