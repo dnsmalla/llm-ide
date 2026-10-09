@@ -336,6 +336,41 @@ extension CodeAssistantPanel {
         // The displayed chat switched between the Agent v2 and the legacy
         // engine: re-decide whether a classic-only override may apply.
         .onChange(of: engine.usesAgentV2Engine) { _, _ in applyComposerProvider() }
+        // Another chat is displayed: its own provider pick, else Settings'.
+        .onChange(of: engine.currentSessionIDString) { _, id in
+            if !modelState.restoreProviderPick(for: id) { applyComposerProvider() }
+            restampEngineIfEmpty()
+        }
+    }
+
+    /// "DeepSeek · classic engine — new chat only": which engine a provider
+    /// runs on (only while the Agent engine is on at all), and why it can't
+    /// be picked in this chat.
+    static func sectionTitle(_ section: ComposerProviderSection, tagEngines: Bool, pickable: Bool) -> String {
+        var title = section.title
+        if tagEngines && !section.runsOnAgentEngine { title += " · classic engine" }
+        if !pickable { title += " — new chat only" }
+        return title
+    }
+
+    /// A pick from the grouped menu. On Settings' own provider it is the
+    /// ordinary model pick, persisted (built-in providers only) so it survives
+    /// the panel's view state; it never writes `config.defaultModelId`, which
+    /// is Standard's model. Any other provider applies to this chat only.
+    func pickModel(_ modelId: String, on provider: String, settingsProvider: String) {
+        modelState.pick(model: modelId, provider: provider,
+                        sessionID: engine.currentSessionIDString, settingsProvider: settingsProvider)
+        if provider == settingsProvider, !provider.hasPrefix("custom:") {
+            config.modelPickIsExplicit = true
+            config.explicitModelId = modelId
+        }
+        restampEngineIfEmpty()
+    }
+
+    /// An empty chat takes the engine of the provider it will now run on.
+    func restampEngineIfEmpty() {
+        engine.restampEngineIfEmpty(
+            resolvedProvider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider))
     }
 
     // MARK: - Toolbar layouts (used by ViewThatFits)
@@ -504,9 +539,9 @@ extension CodeAssistantPanel {
     }
 
     /// Model + reasoning-effort picker, one chip ("Sonnet 5.5 Medium"), like
-    /// Claude's own composer. The provider is not chosen here: the composer
-    /// always uses Settings' default provider (`followDefaultProvider`), so no
-    /// provider chip. The chip is `.fixedSize()` so its text never squeezes —
+    /// Claude's own composer. The menu groups the models of every provider that
+    /// is set up; a pick on a provider other than Settings' changes this chat
+    /// only (`CodeAssistantModelState.pick`). The chip is `.fixedSize()` so its text never squeezes —
     /// without this, a narrow parent container collapses it past 1-character
     /// width and SwiftUI renders the label vertically (one glyph per line).
     var modelPickerChips: some View {
@@ -522,18 +557,23 @@ extension CodeAssistantPanel {
             // Model picker. Truncate label aggressively when compact so
             // the chip stays one capsule wide instead of wrapping.
             Menu {
-                ForEach(modelState.modelsForCurrentProvider()) { model in
-                    Button(model.displayName) {
-                        modelState.selectedModel = model.id
-                        modelState.modelIsExplicit = true
-                        // A per-chat override only. It no longer writes
-                        // `config.defaultModelId` — that is Standard's model
-                        // now, and the phone / quick chat follow their role.
-                        // Persisted (built-in providers only) so the pick
-                        // survives the panel's view state.
-                        if !isCustom {
-                            config.modelPickIsExplicit = true
-                            config.explicitModelId = model.id
+                let settingsProvider = modelState.settingsProvider(overrideId: composerProviderId,
+                                                                   activeCLI: config.activeCLI)
+                let capable = AgentV2Selection.agentCapableProviders(customProviders: modelState.customProviders)
+                let chatIsEmpty = engine.messages.isEmpty
+                let tagEngines = AgentV2Selection.toggleEnabled()
+                ForEach(modelState.composerProviderSections(capableProviders: capable)) { section in
+                    let pickable = CodeAssistantModelState.canPick(
+                        section, chatIsEmpty: chatIsEmpty, chatRunsOnAgentEngine: engine.usesAgentV2Engine)
+                    Section(Self.sectionTitle(section, tagEngines: tagEngines, pickable: pickable)) {
+                        ForEach(section.models) { model in
+                            let isCurrent = section.id == modelState.selectedProvider && model.id == modelState.selectedModel
+                            Button {
+                                pickModel(model.id, on: section.id, settingsProvider: settingsProvider)
+                            } label: {
+                                if isCurrent { Label(model.displayName, systemImage: "checkmark") } else { Text(model.displayName) }
+                            }
+                            .disabled(!pickable)
                         }
                     }
                 }

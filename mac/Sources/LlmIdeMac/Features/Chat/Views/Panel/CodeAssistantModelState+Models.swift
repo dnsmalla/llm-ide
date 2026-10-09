@@ -30,7 +30,7 @@ extension CodeAssistantModelState {
     /// Models to offer for a built-in provider: the live list when one has been
     /// fetched, otherwise the built-in static list (keeps the picker populated
     /// when no key is set or the fetch failed), plus any user-added ids.
-    func models(for cli: AICliTool) -> [AIModel] {
+    func models(for cli: AICliTool, includingSelected: Bool = true) -> [AIModel] {
         // Panel's own fetch, else the persisted list Settings also offers from
         // (so a Settings pick is never filtered out as "not offered"), else built-ins.
         let base = (liveModels[cli.provider]?.isEmpty == false)
@@ -41,7 +41,11 @@ extension CodeAssistantModelState {
             .filter { !baseIds.contains($0) }
             .map { AIModel(id: $0, displayName: $0) }
         let all = base + custom
-        return cli == .claudeCode ? AIModel.including(selected: selectedModel, in: all) : all
+        // The selected model is always listed under the provider it runs on,
+        // even when the live list no longer reports it — otherwise the chip
+        // names a model the menu does not show.
+        let selectedHere = includingSelected && cli.rawValue == selectedProvider
+        return selectedHere ? AIModel.including(selected: selectedModel, in: all) : all
     }
 
     /// The model the NEXT turn sends and the composer chip names — one answer
@@ -132,6 +136,7 @@ extension CodeAssistantModelState {
         selectedProvider = activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : activeCLI
         selectedModel = defaultModelId
         modelIsExplicit = false
+        providerIsExplicit = false
     }
 
     /// The model a freshly built composer starts on: the persisted explicit
@@ -198,6 +203,8 @@ extension CodeAssistantModelState {
     func applyComposerProvider(overrideId: String, activeCLI: String, defaultModelId: String,
                                agentEngineOnly: Bool = false,
                                standard: TierRoute? = TierRoutingConfig.load().tier(.standard)) {
+        // The user picked a provider for this chat in the composer.
+        if providerIsExplicit { return }
         if !overrideId.isEmpty,
            let provider = customProviders.first(where: { $0.id == overrideId && $0.isEnabled }),
            !agentEngineOnly || provider.canRunAgentEngine {
