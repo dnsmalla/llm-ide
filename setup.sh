@@ -113,6 +113,25 @@ if [ -f "$REPO_ROOT/scripts/sync-skills.sh" ]; then
     bash "$REPO_ROOT/scripts/sync-skills.sh" 2>/dev/null && echo "✅ Agent tool definitions synced from .skills" || echo "⚠️  sync-skills skipped (central repo unavailable)"
 fi
 
+# 6. Optional token-saving tools — checked, never installed or enabled here
+# (they change the user's global AI-tool config). See FIRST_TIME_SETUP.md
+# "Optional: token-saving tools". Never fails setup.
+echo ""
+echo "⚙️  Optional token-saving tools..."
+if command -v rtk &> /dev/null; then
+    if rtk init --show 2>/dev/null | grep -qiE "hook:.*not found|hook not configured"; then
+        echo "⚠️  rtk $(rtk --version 2>/dev/null | awk '{print $2}') is installed but its Claude Code hook is off — it saves nothing yet."
+        echo "    Enable:  rtk init -g --auto-patch --hook-only   (undo: rtk init -g --uninstall)"
+    else
+        echo "✅ rtk detected with its Claude Code hook: $(rtk --version 2>/dev/null)"
+    fi
+else
+    echo "ℹ️  rtk not installed (recommended: compresses shell output 60-90% for Claude Code sessions)."
+    echo "    Install: brew install rtk"
+    echo "         or curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh"
+    echo "    Enable:  rtk init -g --auto-patch --hook-only"
+fi
+
 echo ""
 echo "========================================="
 echo "🎉 Setup Complete!"

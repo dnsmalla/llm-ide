@@ -56,6 +56,50 @@ This ensures:
 
 ---
 
+## Optional: token-saving tools
+
+These cut how many tokens Claude Code spends while you work in this repo.
+`./setup.sh` checks for rtk and prints the commands below; it never installs
+or enables anything, because each tool changes your global AI-tool config.
+
+| Tool | What it cuts | Status |
+|------|--------------|--------|
+| [rtk](https://github.com/rtk-ai/rtk) | Shell command output (`git`, tests, builds, package managers) by 60–90% | **Recommended** |
+| [caveman](https://github.com/JuliusBrussee/caveman) | Claude's replies (skill) and what it reads (local proxy) | Optional |
+| [headroom](https://github.com/headroomlabs-ai/headroom) | Tool outputs, logs, files, RAG chunks (local proxy or library) | Optional |
+
+**rtk** — a single binary; its installer verifies the release checksum and
+writes only `~/.local/bin/rtk`.
+
+```bash
+brew install rtk          # or: curl -fsSL https://raw.githubusercontent.com/rtk-ai/rtk/refs/heads/master/install.sh | sh
+rtk init -g --auto-patch --hook-only   # adds one Bash hook to ~/.claude/settings.json
+rtk init --show                        # confirm the hook is configured
+rtk gain                               # tokens saved so far
+rtk init -g --uninstall                # remove it again
+```
+
+Installing the binary alone does nothing: rtk only works once the hook rewrites
+commands (`git status` → `rtk git status`). The hook covers Bash calls only —
+Claude Code's own Read / Grep / Glob tools bypass it.
+
+**caveman** — the skill makes every reply very terse; the proxy routes all
+your Claude traffic through a local server. Try the skill alone first
+(`npx skills add JuliusBrussee/caveman -g`) and drop it if replies get too
+clipped.
+
+**headroom** — `pip install "headroom-ai[all]"`, then `headroom proxy`; also a
+local proxy for all traffic. Worth it mainly for log- and JSON-heavy sessions.
+
+**Not for LLM-IDE's own chats.** The server runs Claude with your user hooks
+and settings switched off (`--setting-sources ''`, see
+`extension/providers/providers.mjs`), so these tools speed up *your* Claude
+Code sessions, not the chats inside the LLM-IDE app.
+
+Already covered elsewhere: Serena (semantic code retrieval) and context7
+(library docs). Skipped: code-review-graph (overlaps LLM-IDE's code graph) and
+chop (same job as rtk, little adoption).
+
 ## Common Errors After Pull
 
 ### ❌ "Cannot find module 'docx'"
