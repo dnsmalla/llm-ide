@@ -88,6 +88,14 @@ final class ChatEngine {
     /// context window). Same keep-previous / clear-on-switch rules as
     /// `lastContextUsage`.
     var lastTurnTokenUsage: AgentV2Usage?
+
+    /// Every reply's tokens in the displayed chat, summed. Read from the
+    /// messages themselves (each reply keeps its `tokenUsage`), so it survives
+    /// a relaunch or a chat switch and drops a deleted turn's share. Nil
+    /// until some reply reports tokens.
+    var sessionTokenUsage: AgentV2Usage? {
+        AgentV2Usage.total(messages.compactMap { $0.metadata?.tokenUsage })
+    }
     var busy = false
     /// Live agent status streamed from /code-assist (SSE): "Searching the web…",
     /// "Writing the answer…", etc. Shown in place of a static "Thinking…" so a

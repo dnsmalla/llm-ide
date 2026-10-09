@@ -40,4 +40,29 @@ struct ClassicTurnTokensTests {
         #expect(engine.lastTurnTokenUsage?.outputTokens == 40)
         #expect(engine.lastContextUsage == nil, "classic turns have no context meter")
     }
+
+    @Test("the chat's total sums every reply, weighted exactly like the replies' own labels")
+    func sessionTotal() {
+        let a = AgentV2Usage(inputTokens: 1000, outputTokens: 200, cacheReadTokens: 4000,
+                             cacheCreationTokens: 800, contextPercent: nil)
+        let b = AgentV2Usage(inputTokens: 300, outputTokens: 50, cacheReadTokens: 0,
+                             cacheCreationTokens: nil, contextPercent: nil)
+        let total = AgentV2Usage.total([a, b])
+        #expect(total == AgentV2Usage(inputTokens: 1300, outputTokens: 250, cacheReadTokens: 4000,
+                                      cacheCreationTokens: 800, contextPercent: nil))
+        #expect(total?.billableTokens == a.billableTokens + b.billableTokens)
+        #expect(AgentV2Usage.total([]) == nil)
+
+        let engine = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
+        func reply(_ u: AgentV2Usage?) -> ChatMessage {
+            var m = ChatMessage(role: .assistant, content: "r", status: .done, createdAt: Date())
+            if let u { m.metadata = ChatMessage.Metadata(tokenUsage: u) }
+            return m
+        }
+        let user = ChatMessage(role: .user, content: "q", status: .done, createdAt: Date())
+        engine.messages = [user, reply(a), user, reply(nil), user, reply(b)]   // a turn with no token data is skipped
+        #expect(engine.sessionTokenUsage == total)
+        engine.messages = [user, reply(nil)]
+        #expect(engine.sessionTokenUsage == nil)
+    }
 }

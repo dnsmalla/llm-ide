@@ -668,13 +668,19 @@ extension CodeAssistantPanel {
     @ViewBuilder
     var contextUsageChip: some View {
         if engine.lastContextUsage == nil, let tokens = engine.lastTurnTokenUsage {
-            // No context meter (classic engine): the last turn's tokens, in the
-            // same weighted count as the reply's own label.
-            Text("\(ChatMessageList.compactTokenCount(tokens.billableTokens)) tokens")
+            // No context meter (classic engine): the last turn's tokens and the
+            // chat's total, in the same weighted count as the replies' labels.
+            let total = engine.sessionTokenUsage
+            let last = ChatMessageList.compactTokenCount(tokens.billableTokens)
+            let label = total.map { $0.billableTokens > tokens.billableTokens
+                ? "\(last) · \(ChatMessageList.compactTokenCount($0.billableTokens)) total" : "\(last) tokens" } ?? "\(last) tokens"
+            Text(label)
                 .font(.system(size: 10, design: .monospaced))
                 .foregroundStyle(theme.current.textMuted)
-                .help("Last turn: " + ChatMessageList.tokenUsageTooltip(tokens))
-                .accessibilityLabel("Last turn used \(tokens.billableTokens) tokens")
+                .help("Last turn: " + ChatMessageList.tokenUsageTooltip(tokens)
+                      + (total.map { "\nThis chat: " + ChatMessageList.tokenUsageTooltip($0) } ?? ""))
+                .accessibilityLabel("Last turn used \(tokens.billableTokens) tokens"
+                                    + (total.map { ", this chat \($0.billableTokens)" } ?? ""))
                 .fixedSize()
         } else if let usage = engine.lastContextUsage {
             let tint = ContextUsagePresentation.isWarning(usage) ? theme.current.warning : theme.current.textMuted
