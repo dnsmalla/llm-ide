@@ -305,6 +305,45 @@ test('custom: listProviderModels reads <baseUrl>/models', async () => {
   } finally { restore(); }
 });
 
+test('custom: verifyProvider fails an endpoint that lists models but has no chat API', async () => {
+  // e.g. a "decision API" that implements only GET /models: verification used
+  // to pass on the model list alone, then every chat turn 404'd.
+  const restore = mockFetch(async (url, opts) => {
+    if (url.endsWith('/models')) return jsonRes(200, { data: [{ id: 'glm-5.1' }] });
+    assert.equal(opts.method, 'POST');
+    assert.equal(opts.body, '{}', 'no model, no messages: the probe runs no completion');
+    return jsonRes(404, { statusMessage: 'Page not found: /api/v1/chat/completions' });
+  });
+  try {
+    const r = await verifyProvider({ provider: 'custom', mode: 'key', apiKey: 'k', baseUrl: 'https://decisions.example/api/v1/' });
+    assert.equal(r.ok, false);
+    assert.match(r.detail, /decisions\.example\/api\/v1\/chat\/completions does not exist/);
+  } finally { restore(); }
+});
+
+test('custom: verifyProvider passes when the chat route rejects the empty probe', async () => {
+  const restore = mockFetch(async (url) => url.endsWith('/models')
+    ? jsonRes(200, { data: [{ id: 'llama3' }] })
+    : jsonRes(400, { error: { message: 'model is required' } }));
+  try {
+    const r = await verifyProvider({ provider: 'custom', mode: 'key', apiKey: 'k', baseUrl: 'https://local.example/v1' });
+    assert.equal(r.ok, true);
+  } finally { restore(); }
+});
+
+test('callOpenAI: a 404 with no chat route says so; an unknown-model 404 keeps its text', async () => {
+  let restore = mockFetch(async () => jsonRes(404, { statusMessage: 'Page not found: /api/v1/chat/completions' }));
+  try {
+    await assert.rejects(
+      () => callOpenAI({ apiKey: 'k', model: 'glm-5.1', prompt: 'hi', baseUrl: 'https://decisions.example/api/v1' }),
+      /no OpenAI-compatible chat API: https:\/\/decisions\.example\/api\/v1\/chat\/completions returned 404/);
+  } finally { restore(); }
+  restore = mockFetch(async () => jsonRes(404, { error: { code: 'model_not_found', message: 'The model `x` does not exist' } }));
+  try {
+    await assert.rejects(() => callOpenAI({ apiKey: 'k', model: 'x', prompt: 'hi' }), /model_not_found/);
+  } finally { restore(); }
+});
+
 test('custom: verifyProvider reports failure when no base URL is set', async () => {
   const r = await verifyProvider({ provider: 'custom', mode: 'key', apiKey: 'k' });
   assert.equal(r.ok, false);

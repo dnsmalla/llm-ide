@@ -251,6 +251,24 @@ async function readError(res, key) {
   return err;
 }
 
+// A 404 from `<base>/chat/completions` whose body does not mention the model
+// means the endpoint has no chat API at all (e.g. a service that implements
+// only `/models`), not a bad model id — OpenAI answers an unknown model with a
+// 404 too, but names it. Say so instead of echoing the provider's raw page.
+function isMissingChatRoute(status, detail) {
+  return status === 404 && !/model/i.test(detail || '');
+}
+
+function chatRouteError(err, base) {
+  if (!isMissingChatRoute(err.status, err.message)) return err;
+  const clear = new Error(
+    `This endpoint has no OpenAI-compatible chat API: ${base}/chat/completions returned 404. `
+    + 'Check the base URL in Settings → Model Providers, or pick another provider.');
+  clear.status = 404;
+  clear.transient = false;
+  return clear;
+}
+
 // OpenAI Chat Completions. Newer reasoning models reject `temperature` and
 // use `max_completion_tokens`, so we send only the portable fields.
 export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, signal, baseUrl, tools }) {
@@ -290,7 +308,7 @@ export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, s
     redirect: 'error',
     signal: signal || AbortSignal.timeout(DEFAULT_TIMEOUT_MS),
   });
-  if (!res.ok) throw await readError(res, apiKey);
+  if (!res.ok) throw chatRouteError(await readError(res, apiKey), base);
   const data = await res.json();
   const msg = data?.choices?.[0]?.message;
   const usage = { inputTokens: data?.usage?.prompt_tokens, outputTokens: data?.usage?.completion_tokens };
@@ -1239,9 +1257,42 @@ export async function verifyProvider({ provider, mode, apiKey, baseUrl } = {}) {
   if (provider === 'custom' && !baseUrl) return { ok: false, detail: 'no base URL configured' };
   try {
     const models = await listProviderModels(provider, { apiKey, baseUrl });
+    // A custom endpoint can list models and still have no chat API — then
+    // every message fails. Listing models alone used to pass verification.
+    if (provider === 'custom' && await chatRouteMissing(baseUrl, apiKey)) {
+      const base = baseUrl.replace(/\/+$/, '');
+      return { ok: false, detail: `models listed, but ${base}/chat/completions does not exist (404) — this endpoint has no OpenAI-compatible chat API` };
+    }
     return { ok: true, detail: `key verified — ${models.length} models available` };
   } catch (err) {
     return { ok: false, detail: redact(err.message || String(err), apiKey) };
+  }
+}
+
+/**
+ * Whether `<baseUrl>/chat/completions` is missing. POSTs an empty JSON object:
+ * a real OpenAI-compatible endpoint rejects it (400/422 — no model, no
+ * messages) without running a completion, so the probe spends no tokens. Only
+ * a 404 that does not name a model counts as missing; anything else, including
+ * a network error, is not evidence and leaves verification as it was.
+ * `baseUrl` already passed `assertSafeBaseUrlResolved` in `listProviderModels`.
+ */
+async function chatRouteMissing(baseUrl, apiKey) {
+  const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  try {
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: '{}',
+      redirect: 'error',   // the key rides in Authorization; never forward it on a 3xx
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.status !== 404) return false;
+    let detail = '';
+    try { detail = await res.text(); } catch { /* ignore */ }
+    return isMissingChatRoute(404, detail);
+  } catch {
+    return false;
   }
 }
 
