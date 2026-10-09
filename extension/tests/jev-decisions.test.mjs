@@ -18,7 +18,7 @@ delete process.env.JEV_AI_BASE_URL;
 
 const db = await import('../kb/db.mjs');
 const { registerUser } = await import('../server/users.mjs');
-const { countTurnTokens } = await import('../kb/usage.mjs');
+const { countTurnTokens, newTurnTokenTotals } = await import('../kb/usage.mjs');
 const { jevDecide, validateJevQuestions } = await import('../providers/jev.mjs');
 const {
   resolveProvider, completeViaApi, runViaCli, verifyProvider, listProviderModels, jevBaseUrl,
@@ -34,6 +34,12 @@ const { validateArgs } = await import('../llm_agent/runtime/fence.mjs');
 const { globalSkills } = await import('../llm_agent/skills/index.mjs');
 const { skillToOpenAITool } = await import('../llm_agent/runtime/openai-tools.mjs');
 const { askSubagent } = await import('../llm_agent/runtime/handlers/ask-subagent.mjs');
+const { setSecret } = await import('../server/vault.mjs');
+const { syncTierRouting } = await import('../server/tier-routing.mjs');
+const { resolveFeatureRoute, tierRoutingStatus } = await import('../providers/tier-routing.mjs');
+const {
+  routeFailure, _resetRouteHealthForTests, ROUTE_TRANSIENT_TTL_MS,
+} = await import('../providers/route-health.mjs');
 
 function newUser() {
   return registerUser(db.getDb(), {
@@ -78,7 +84,7 @@ test('jevDecide: POSTs /v1/systemone with Bearer auth, redirect:error and the va
       usage: { input_tokens: 120, output_tokens: 7 },
     });
   });
-  const totals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, calls: 0 };
+  const totals = newTurnTokenTotals();
   try {
     const out = await countTurnTokens(totals, () => jevDecide({ apiKey: 'jev-secret-key', state: 'diff text', questions: QUESTIONS, userId }));
     assert.equal(seen.url, 'https://jev-ai.pro/api/v1/systemone');
@@ -466,6 +472,111 @@ test('a malformed 200 is still metered before the fallback', async () => {
     const row = db.getDb().prepare("SELECT * FROM usage_ledger WHERE user_id = ? AND provider = 'jev'").get(userId);
     assert.equal(row.input_tokens, 50);
   } finally { restore(); }
+});
+
+// ── route health + visible fallbacks (review follow-ups) ─────────────────
+
+// A real routed user: Decisions → a jev tier, optionally keyed.
+function jevRoutedUser({ key = 'jev-test-key' } = {}) {
+  const userId = newUser();
+  syncTierRouting({ tiers: { cheap: { provider: 'jev', model: 'jev-latest' } }, features: { decisions: 'cheap' } }, userId);
+  if (key) setSecret(db.getDb(), userId, 'jev.apiKey', key);
+  return userId;
+}
+const llmOk = async () => JSON.stringify({ answers: { safe: { type: 'noul', noul: 0.4 } } });
+const transientJev = Object.assign(new Error('Jev rate limit reached (HTTP 429)'),
+  { code: 'JEV_HTTP_ERROR', status: 429, transient: true, auth: false, reason: 'jev_rate_limited' });
+const authJev = Object.assign(new Error('Jev rejected the API key (HTTP 401)'),
+  { code: 'JEV_HTTP_ERROR', status: 401, transient: false, auth: true, reason: 'jev_http_401' });
+
+test('a transient Jev failure marks the route failed for the transient cool-down; the next call skips Jev and says so', async () => {
+  _resetRouteHealthForTests();
+  const userId = jevRoutedUser();
+  assert.deepEqual(resolveFeatureRoute(userId, 'decisions'), { provider: 'jev', model: 'jev-latest' });
+  let jevCalls = 0;
+  const run = () => decide({
+    userId, state: 's', questions: { safe: QUESTIONS.safe }, _routeOpts: passOpts, _runClaude: llmOk,
+    _jevDecide: async () => { jevCalls += 1; throw transientJev; },
+  });
+  const first = await run();
+  assert.equal(first.engine, 'llm');
+  assert.equal(first.fallback, 'jev_rate_limited');
+  assert.equal(jevCalls, 1);
+  // The route is now skipped by the resolver and reported in the status…
+  assert.equal(resolveFeatureRoute(userId, 'decisions'), null);
+  assert.deepEqual(tierRoutingStatus(userId).featureStatus.decisions, { usable: false, reason: 'route_failed' });
+  assert.equal(routeFailure(userId, 'jev', 'jev-latest'), 'route_failed');
+  // A second decide inside the window never waits on Jev, and the LLM answer is still marked.
+  const second = await run();
+  assert.equal(jevCalls, 1, 'Jev was not called again');
+  assert.equal(second.engine, 'llm');
+  assert.equal(second.fallback, 'jev_route_failed');
+  // …and the mark lasts the TRANSIENT window (~60 s), not the broken one.
+  // (Probing with a future `now` evicts an expired mark — keep this last.)
+  assert.equal(routeFailure(userId, 'jev', 'jev-latest', { now: Date.now() + ROUTE_TRANSIENT_TTL_MS + 1 }), null);
+  _resetRouteHealthForTests();
+});
+
+test('an auth Jev failure is thrown every time and marks nothing (a cool-down would hide it behind LLM answers); a content error marks nothing', async () => {
+  _resetRouteHealthForTests();
+  const userId = jevRoutedUser();
+  for (let i = 0; i < 2; i++) {
+    await assert.rejects(() => decide({
+      userId, state: 's', questions: { safe: QUESTIONS.safe }, _routeOpts: passOpts, _runClaude: llmOk,
+      _jevDecide: async () => { throw authJev; },
+    }), /rejected the API key/);
+    assert.equal(routeFailure(userId, 'jev', 'jev-latest'), null);
+  }
+
+  // 422 (Jev could not process these questions) is this request's problem, not the route's.
+  const contentErr = Object.assign(new Error('Jev could not process these questions (HTTP 422)'),
+    { code: 'JEV_HTTP_ERROR', status: 422, transient: false, auth: false, reason: 'jev_http_422' });
+  await assert.rejects(() => decide({
+    userId, state: 's', questions: { safe: QUESTIONS.safe }, _routeOpts: passOpts, _runClaude: llmOk,
+    _jevDecide: async () => { throw contentErr; },
+  }), /could not process/);
+  assert.equal(routeFailure(userId, 'jev', 'jev-latest'), null);
+  // Nor is an over-size request (nothing was sent).
+  await decide({
+    userId, state: 's', questions: { safe: QUESTIONS.safe }, _routeOpts: passOpts, _runClaude: llmOk,
+    _jevDecide: async () => { throw Object.assign(new Error('too big'), { code: 'JEV_TOO_LARGE', transient: true, auth: false, reason: 'jev_too_large' }); },
+  });
+  assert.equal(routeFailure(userId, 'jev', 'jev-latest'), null);
+});
+
+test('Decisions → Jev with the key deleted answers on the LLM with fallback jev_no_key', async () => {
+  _resetRouteHealthForTests();
+  const userId = jevRoutedUser({ key: null });
+  assert.equal(resolveFeatureRoute(userId, 'decisions'), null, 'the resolver drops a keyless jev tier');
+  let jevCalled = false;
+  const out = await decide({
+    userId, state: 's', questions: { safe: QUESTIONS.safe }, _routeOpts: passOpts, _runClaude: llmOk,
+    _jevDecide: async () => { jevCalled = true; return { model: 'jev-latest', answers: {} }; },
+  });
+  assert.equal(jevCalled, false);
+  assert.equal(out.engine, 'llm');
+  assert.equal(out.fallback, 'jev_no_key');
+  assert.deepEqual(out.answers.safe, { type: 'noul', noul: 0.4 });
+  // The race the in-line branch guards (key removed between resolve and call) says the same.
+  const raced = await decide({
+    userId: 'u1', state: 's', questions: { safe: QUESTIONS.safe }, _routeOpts: passOpts, _runClaude: llmOk,
+    _resolveFeatureRoute: jevRoute, _jevKey: () => null, _jevDecide: async () => { throw new Error('must not run'); },
+  });
+  assert.equal(raced.fallback, 'jev_no_key');
+  // A user whose Decisions role is NOT on Jev gets no marker.
+  const plain = newUser();
+  syncTierRouting({ tiers: { strong: { provider: 'anthropic', model: 'claude-sonnet-4-5' } }, features: { decisions: 'strong' } }, plain);
+  const unrouted = await decide({ userId: plain, state: 's', questions: { safe: QUESTIONS.safe }, _routeOpts: passOpts, _runClaude: llmOk });
+  assert.equal(unrouted.engine, 'llm');
+  assert.equal(unrouted.fallback, undefined);
+});
+
+test('a Jev 200 with no usable answer at all is DECIDE_FAILED, same as the LLM path', async () => {
+  await assert.rejects(() => decide({
+    userId: 'u1', state: 's', questions: QUESTIONS, _resolveFeatureRoute: jevRoute, _jevKey: () => 'jk',
+    _jevDecide: async () => ({ model: 'jev-latest', answers: { safe: { type: 'choice', choice: 'x' }, pick: { choice: 'nope' } } }),
+    _runClaude: async () => { throw new Error('LLM must not run'); },
+  }), (e) => e.code === 'DECIDE_FAILED' && /Jev/.test(e.message));
 });
 
 test('question text is fence-neutralized in the LLM prompt', async () => {

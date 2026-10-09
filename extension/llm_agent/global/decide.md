@@ -69,10 +69,16 @@ Each question id (letters, digits, `_ . -`) maps to:
   keyed by level index.
 - The shape is the same whichever engine answered.
 - `engine` says what answered: Jev (when the user's Decisions role points at
-  a Jev tier) or the configured LLM; `fallback` appears when Jev was
-  unavailable and the LLM answered instead.
+  a Jev tier) or the configured LLM; `fallback` appears whenever the Decisions
+  role is on Jev but the LLM answered instead — `jev_rate_limited`,
+  `jev_server_error`, `jev_timeout`, `jev_network`, `jev_bad_response`,
+  `jev_too_large`, `jev_unavailable` (this call failed on Jev), `jev_route_failed`
+  (Jev is cooling down after a recent failure), `jev_no_key` (no Jev key
+  stored), `jev_unusable` (the Jev tier cannot run for another reason).
+  Mention it to the user when the decision matters.
 - An answer of `{"type": ..., "error": "..."}` means that one question got no
-  valid answer — do not treat it as a no.
+  valid answer — do not treat it as a no. When NO question got one, the call
+  returns `{"error": ...}` instead (either engine).
 
 Treat a low probability or confidence as "unsure", not as the opposite answer;
 say so to the user rather than acting on it.

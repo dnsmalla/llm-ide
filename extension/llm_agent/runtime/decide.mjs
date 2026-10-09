@@ -13,6 +13,16 @@
 // auth/billing or request error does not — the user has to fix it, and a
 // silent LLM answer would hide that.
 //
+// Route health: a transient failure marks (user, jev, model) failed for
+// ~60 s (providers/route-health), so the next decide skips Jev instead of
+// waiting out its 30 s timeout again. An auth/billing error marks NOTHING —
+// a cooling-down route would turn the next ten minutes of decides into
+// quiet LLM answers and bury the cause the user has to fix. A request-level
+// error (422, over-size) marks nothing either. When the CONFIGURED
+// Decisions route is Jev but the resolver dropped it (no key, cooling down),
+// the LLM answer still carries `fallback: 'jev_<reason>'` — a fallback is
+// never silent.
+//
 // Result: { engine: 'jev'|'llm', model, answers, fallback? } where answers is
 //   { <id>: { type:'noul', noul } |
 //           { type:'choice', choice, probabilities: { <option>: p }, confidence } |
@@ -27,7 +37,11 @@
 
 import { runClaude as defaultRunClaude, tryParseJSON } from '../../providers/runtime.mjs';
 import { providerApiKey, isDecisionOnlyProvider } from '../../providers/providers.mjs';
-import { resolveFeatureRoute as defaultResolveFeatureRoute, routeOpts as defaultRouteOpts } from '../../providers/tier-routing.mjs';
+import {
+  resolveFeatureRoute as defaultResolveFeatureRoute, routeOpts as defaultRouteOpts,
+  tierRoutingStatus as defaultTierRoutingStatus,
+} from '../../providers/tier-routing.mjs';
+import { markRouteFailed, ROUTE_TRANSIENT_TTL_MS } from '../../providers/route-health.mjs';
 import { jevDecide as defaultJevDecide, validateJevQuestions, validateJevState } from '../../providers/jev.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { logger } from '../../core/logger.mjs';
@@ -219,18 +233,47 @@ async function decideViaLlm({ userId, state, questions, signal, runClaude, route
     const retry = normalizeAll(questions, tryParseJSON(await runClaude(buildPrompt(state, questions, { strict: true }), claudeOpts)));
     for (const id of first.missing) if (retry.answers[id]) answers[id] = retry.answers[id];
   }
-  const ordered = withErrors(questions, answers, 'the model gave no valid answer for this question');
+  return { model: ranModel || 'default', answers: orderedOrFail(questions, answers, 'the model gave no valid answer for this question', 'The model') };
+}
+
+// Every asked id with its answer or error stub — unless NOTHING was usable,
+// which is DECIDE_FAILED on both engines (a result of only error stubs would
+// read as "answered" to the calling model).
+function orderedOrFail(questions, answers, perIdMessage, who) {
+  const ordered = withErrors(questions, answers, perIdMessage);
   if (Object.values(ordered).every((a) => a.error)) {
-    throw Object.assign(new Error('The model did not return a valid decision. Try rephrasing the questions.'), { code: 'DECIDE_FAILED' });
+    throw Object.assign(new Error(`${who} did not return a valid decision. Try rephrasing the questions.`), { code: 'DECIDE_FAILED' });
   }
-  return { model: ranModel || 'default', answers: ordered };
+  return ordered;
+}
+
+// Only a transient Jev failure (429 / 5xx / network / timeout / malformed
+// 200) cools the route down; auth/billing is thrown every time (see header)
+// and a request-level error (422, over-size) is this call's problem.
+function jevFailureClass(err) {
+  if (err?.code === 'JEV_TOO_LARGE' || err?.auth) return null;
+  return err?.transient ? 'transient' : null;
+}
+
+// `fallback` for a Decisions role CONFIGURED on Jev that the resolver did
+// not route (keyless, cooling down after a failure…): 'jev_<status reason>'.
+// Null when the role is not on Jev at all — then the LLM is the engine, not
+// a fallback. Status is read only on this (already un-routed) path.
+function unroutedJevFallback(userId, tierRoutingStatus) {
+  let status;
+  try { status = tierRoutingStatus(userId); } catch { return null; }
+  const tier = status?.features?.[DECISIONS_FEATURE];
+  const configured = tier ? status.tiers?.[tier] : null;
+  if (!configured || !isDecisionOnlyProvider(configured.provider)) return null;
+  return `jev_${status.featureStatus?.[DECISIONS_FEATURE]?.reason || 'unusable'}`;
 }
 
 /**
  * Answer `questions` about `state` (see the header). Throws VALIDATION_FAILED
  * on bad input (before any model call), Jev's own error on a non-transient
  * Jev failure (bad key, no credit, a request Jev refuses), DECIDE_FAILED when
- * the LLM returned nothing usable, and the caller's AbortError on Stop.
+ * the engine (either one) returned nothing usable, and the caller's
+ * AbortError on Stop.
  *
  * The `_`-prefixed options are test seams (ESM exports cannot be mocked
  * under the CI Node — same reason mode-classify.mjs takes `_runClaude`).
@@ -241,6 +284,7 @@ export async function decide({
   _jevDecide = defaultJevDecide,
   _resolveFeatureRoute = defaultResolveFeatureRoute,
   _routeOpts = defaultRouteOpts,
+  _tierRoutingStatus = defaultTierRoutingStatus,
   _jevKey = (uid) => providerApiKey(uid, 'jev'),
 } = {}) {
   const validState = validateJevState(state);
@@ -255,9 +299,13 @@ export async function decide({
         const out = await _jevDecide({ apiKey, model: route.model, state: validState, questions: validQuestions, signal, userId });
         // Same normalizer as the LLM path → one answer shape per type.
         const { answers } = normalizeAll(validQuestions, { answers: out.answers });
-        return { engine: 'jev', model: out.model, answers: withErrors(validQuestions, answers, 'Jev gave no valid answer for this question') };
+        return { engine: 'jev', model: out.model, answers: orderedOrFail(validQuestions, answers, 'Jev gave no valid answer for this question', 'Jev') };
       } catch (err) {
         if (signal?.aborted || err?.name === 'AbortError') throw err;
+        if (err?.code === 'DECIDE_FAILED') throw err;
+        if (jevFailureClass(err) === 'transient') {
+          markRouteFailed(userId, route.provider, route.model, 'key', { ttlMs: ROUTE_TRANSIENT_TTL_MS });
+        }
         if (!err?.transient || err?.auth) throw err;
         fallback = err.reason || 'jev_unavailable';
         log.warn('decide_jev_fallback', { userId, reason: fallback, status: err.status });
@@ -267,6 +315,11 @@ export async function decide({
       // removed mid-turn) — answer on the LLM and say why.
       fallback = 'jev_no_key';
     }
+  } else if (!route) {
+    // Unrouted: either no Decisions role, or one on Jev that cannot run right
+    // now — the latter is a fallback and must say so (jev_no_key, jev_route_failed).
+    fallback = unroutedJevFallback(userId, _tierRoutingStatus);
+    if (fallback) log.warn('decide_jev_fallback', { userId, reason: fallback });
   }
   const out = await decideViaLlm({
     userId, state: validState, questions: validQuestions, signal,
