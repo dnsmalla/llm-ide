@@ -107,6 +107,18 @@ final class MobilePairedDeviceStore: @unchecked Sendable {
         if devices.count != before { persistLocked() }
     }
 
+    /// Forget every device; returns the ids that were removed so the caller
+    /// can drop a live connection.
+    @discardableResult
+    func revokeAll() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        let ids = devices.map(\.id)
+        guard !ids.isEmpty else { return [] }
+        devices.removeAll()
+        persistLocked()
+        return ids
+    }
+
     func device(id: String) -> Device? {
         lock.lock(); defer { lock.unlock() }
         return devices.first { $0.id == id }

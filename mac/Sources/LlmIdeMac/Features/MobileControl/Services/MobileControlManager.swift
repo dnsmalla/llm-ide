@@ -284,6 +284,18 @@ final class MobileControlManager {
                 self?.stop()
             }
         }
+        // A paired phone's token is a long-lived credential of the account
+        // that paired it; the Keychain wipe on "disconnect all" never reached
+        // it (its hash lives in `MobilePairedDeviceStore`'s file).
+        NotificationCenter.default.addObserver(
+            forName: .accountCredentialsRevoked,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.revokeAllDevices()
+            }
+        }
     }
 
     // MARK: - Start / stop
@@ -1559,6 +1571,18 @@ final class MobileControlManager {
         server?.disconnectClient(deviceId: id, code: .revoked,
                                  message: "This device was removed in Settings → Mobile Control on the Mac")
         append(.info, "Revoked paired device \(id.prefix(8))…")
+    }
+
+    /// Forget every paired phone: the account that paired them is gone. Each
+    /// has to pair with the PIN again.
+    func revokeAllDevices() {
+        let ids = pairedDeviceStore.revokeAll()
+        refreshPairedDevices()
+        for id in ids {
+            server?.disconnectClient(deviceId: id, code: .revoked,
+                                     message: "The Mac signed out of the account this phone was paired with")
+        }
+        if !ids.isEmpty { append(.info, "Revoked \(ids.count) paired device(s) after an account change") }
     }
 
     /// Explicit "push now" for the Auto Tasks page's Refresh button, and for

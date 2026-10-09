@@ -109,13 +109,15 @@ struct ChangeShippingTests {
     @Test("the user's checkout is never written, in any outcome")
     func neverTouchesTheCheckout() async {
         var all: [FakeGit] = []
-        func record(_ git: FakeGit, _ backend: FakeBackend = FakeBackend()) async { _ = await shipper(git, backend).ship(request); all.append(git) }
-        await record(happyGit())
-        let pushFails = happyGit(); pushFails.pushError = Boom(text: "down"); await record(pushFails)
+        // No default argument: a default-argument expression is evaluated outside the suite's
+        // main-actor isolation, and FakeBackend's initializer is isolated to it.
+        func record(_ git: FakeGit, _ backend: FakeBackend) async { _ = await shipper(git, backend).ship(request); all.append(git) }
+        await record(happyGit(), FakeBackend())
+        let pushFails = happyGit(); pushFails.pushError = Boom(text: "down"); await record(pushFails, FakeBackend())
         let mrFails = happyGit(); let failing = FakeBackend(); failing.createError = Boom(text: "403"); await record(mrFails, failing)
         let commitFails = happyGit(); let base = commitFails.handler
         commitFails.handler = { args in if args.first == "commit-tree" { throw Boom(text: "no identity") }; return try base(args) }
-        await record(commitFails)
+        await record(commitFails, FakeBackend())
         for git in all {
             for call in git.calls {
                 #expect(!checkoutMutators.contains(call.args.first ?? ""), "\(call.args) would change the checkout")

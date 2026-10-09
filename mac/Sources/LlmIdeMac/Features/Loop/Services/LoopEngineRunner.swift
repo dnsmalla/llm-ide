@@ -2034,6 +2034,12 @@ final class LoopEngineRunner: ObservableObject {
             return .completed(.notChecked, violations: [], changed: [])
         }
 
+        // What `system/loop.json` holds now predates this agent; a UI save later
+        // in the edit may only count as the app's write while the file still
+        // holds it (see `LoopEngineConfigStore.save`).
+        if let projectRoot = currentRunContext?.faultsRoot {
+            AppWrittenFiles.adoptCurrentContent(of: LoopEngineConfigStore.fileURL(projectRoot: projectRoot))
+        }
         let before = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
                                                scopeGlobs: scopeGlobs)
         var thrown: Error?

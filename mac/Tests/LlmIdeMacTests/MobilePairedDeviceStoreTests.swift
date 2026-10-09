@@ -82,8 +82,10 @@ struct MobilePairedDeviceStoreTests {
         }
         #expect(store.all.count == MobilePairedDeviceStore.maxDevices)
         #expect(store.device(id: "d0") == nil, "the oldest record is the one evicted")
-        #expect(!store.authenticate(deviceId: "d0", token: tokens["d0"]!))
-        #expect(store.authenticate(deviceId: "d1", token: tokens["d1"]!))
+        // Pass `now` near t0: the default (today) is past the 30-day idle expiry.
+        let later = t0.addingTimeInterval(Double(MobilePairedDeviceStore.maxDevices + 1))
+        #expect(!store.authenticate(deviceId: "d0", token: tokens["d0"]!, now: later))
+        #expect(store.authenticate(deviceId: "d1", token: tokens["d1"]!, now: later))
     }
 
     @Test("a blank device name falls back rather than storing an empty label")
@@ -91,5 +93,21 @@ struct MobilePairedDeviceStoreTests {
         let store = MobilePairedDeviceStore(fileURL: tempFile())
         _ = store.issueToken(deviceId: "A", name: "   ")
         #expect(store.device(id: "A")?.name == "iPhone")
+    }
+
+    @Test("revokeAll forgets every paired phone and reports which, so live connections can be dropped")
+    func revokeAllPairedDevices() {
+        let file = tempFile()
+        let store = MobilePairedDeviceStore(fileURL: file)
+        let now = Date(timeIntervalSince1970: 1_000_000)
+        let a = store.issueToken(deviceId: "A", name: "A", now: now)
+        let b = store.issueToken(deviceId: "B", name: "B", now: now)
+
+        #expect(Set(store.revokeAll()) == ["A", "B"])
+        #expect(store.all.isEmpty)
+        #expect(!store.authenticate(deviceId: "A", token: a, now: now))
+        #expect(!store.authenticate(deviceId: "B", token: b, now: now))
+        #expect(MobilePairedDeviceStore(fileURL: file).all.isEmpty, "the revoke is persisted")
+        #expect(store.revokeAll().isEmpty)
     }
 }

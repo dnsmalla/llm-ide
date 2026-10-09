@@ -461,6 +461,24 @@ extension ChatEngine {
         resetTransientSessionState()
     }
 
+    /// Re-choose the engine of an EMPTY chat for the provider the composer now
+    /// uses. A chat's engine is stamped at creation from the provider at that
+    /// moment (`mintFreshSession`); a provider picked before the first message
+    /// would otherwise run on the engine chosen for the previous one. A chat
+    /// with any message keeps its engine (the D3 clean cut).
+    func restampEngineIfEmpty(resolvedProvider: String?,
+                              capableProviders: Set<String> = AgentV2Selection.liveAgentCapableProviders()) {
+        guard messages.isEmpty, !busy,
+              let id = UUID(uuidString: currentSessionIDString),
+              var session = ChatSessionStore.load(id: id), session.messages.isEmpty else { return }
+        let marker = AgentV2Selection.engineForNewChat(resolvedProvider: resolvedProvider,
+                                                       capableProviders: capableProviders)
+        guard session.engine != marker else { return }
+        session.engine = marker
+        ChatSessionStore.save(session, touch: false)
+        engineMarkerMemo = (sessionID: currentSessionIDString, marker: marker)
+    }
+
     /// The loaded chat's engine marker (`ChatSession.engine`; nil = legacy,
     /// or no session loaded). Read at TURN time by the engine-selection
     /// transport and by view-level v2 affordances (`usesAgentV2Engine`).

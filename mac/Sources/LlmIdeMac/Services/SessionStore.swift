@@ -163,6 +163,8 @@ final class SessionStore: ObservableObject {
             // Preferences load refreshes it. Back to the init default.
             config.preferredLanguage = "en"
             defaults.removeObject(forKey: Self.customBaseURLHintKey)
+            // Phones paired by the previous account must not reach this one.
+            NotificationCenter.default.post(name: .accountCredentialsRevoked, object: nil)
         }
         defaults.set(newUser.id, forKey: Self.lastUserIdKey)
     }

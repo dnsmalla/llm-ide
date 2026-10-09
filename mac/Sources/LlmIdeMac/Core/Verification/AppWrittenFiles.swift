@@ -37,6 +37,16 @@ enum AppWrittenFiles {
         digests[k] = d
     }
 
+    /// Record `url`'s CURRENT content as the app's own. Called when a
+    /// supervised edit starts: what is on disk then predates the agent, so a
+    /// UI save made later in the run can tell whether the file it is about to
+    /// rewrite was changed by someone else in between (see
+    /// `LoopEngineConfigStore.save`). A no-op when the file cannot be read.
+    static func adoptCurrentContent(of url: URL) {
+        guard let data = try? Data(contentsOf: url) else { return }
+        recordWrite(of: data, to: url)
+    }
+
     /// True when `url` exists and still holds exactly what the app last wrote to it.
     static func isUnchangedSinceAppWrite(_ url: URL) -> Bool {
         let k = key(url)

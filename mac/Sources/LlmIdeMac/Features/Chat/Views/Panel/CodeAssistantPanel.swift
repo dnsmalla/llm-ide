@@ -344,7 +344,11 @@ struct CodeAssistantPanel: View {
                 showProjectMemorySheet
             }
             .task { await refreshRecentIssuesLoop() }
-            .task { await modelState.loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode, api: api) }
+            .task {
+                await modelState.loadModels(for: AICliTool(rawValue: config.activeCLI) ?? .claudeCode, api: api)
+                // The grouped model menu lists every provider that is set up.
+                await modelState.loadComposerProviders(api: api)
+            }
             .onAppear { handleOnAppear() }
             .onChange(of: projectStore.activeProject?.bundle.id) { _, _ in
                 applyExplorerProject()
@@ -900,6 +904,9 @@ struct CodeAssistantPanel: View {
         if modelState.selectedProvider.isEmpty {
             modelState.selectedProvider = config.activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : config.activeCLI
         }
+        // A provider picked in the composer for the displayed chat outlives
+        // this view's state (`ComposerProviderPicks`).
+        modelState.restoreProviderPick(for: engine.currentSessionIDString)
         applyComposerProvider()
         // Task 12: the engine is now shared (`ChatEngineRegistry`), so it may
         // already have a session loaded — from a PRIOR appearance of this

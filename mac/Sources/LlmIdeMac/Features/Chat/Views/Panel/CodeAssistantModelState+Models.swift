@@ -30,7 +30,7 @@ extension CodeAssistantModelState {
     /// Models to offer for a built-in provider: the live list when one has been
     /// fetched, otherwise the built-in static list (keeps the picker populated
     /// when no key is set or the fetch failed), plus any user-added ids.
-    func models(for cli: AICliTool) -> [AIModel] {
+    func models(for cli: AICliTool, includingSelected: Bool = true) -> [AIModel] {
         // Panel's own fetch, else the persisted list Settings also offers from
         // (so a Settings pick is never filtered out as "not offered"), else built-ins.
         let base = (liveModels[cli.provider]?.isEmpty == false)
@@ -41,7 +41,11 @@ extension CodeAssistantModelState {
             .filter { !baseIds.contains($0) }
             .map { AIModel(id: $0, displayName: $0) }
         let all = base + custom
-        return cli == .claudeCode ? AIModel.including(selected: selectedModel, in: all) : all
+        // The selected model is always listed under the provider it runs on,
+        // even when the live list no longer reports it — otherwise the chip
+        // names a model the menu does not show.
+        let selectedHere = includingSelected && cli.rawValue == selectedProvider
+        return selectedHere ? AIModel.including(selected: selectedModel, in: all) : all
     }
 
     /// The model the NEXT turn sends and the composer chip names — one answer
@@ -92,7 +96,7 @@ extension CodeAssistantModelState {
     }
 
     /// Append a custom model id for a provider and select it.
-    func addCustomModel(_ id: String, provider: String, config: AppConfig) {
+    @MainActor func addCustomModel(_ id: String, provider: String, config: AppConfig) {
         var dict = Self.customModelsDict()
         var list = dict[provider] ?? []
         if !list.contains(id) { list.append(id) }
@@ -102,12 +106,8 @@ extension CodeAssistantModelState {
         }
         selectedModel = id
         modelIsExplicit = true
-        // Only reachable from the built-in "Add model…" alert, but the guard
-        // keeps that assumption local. Never `defaultModelId` (Standard's).
-        if !selectedProvider.starts(with: "custom:") {
-            config.modelPickIsExplicit = true
-            config.explicitModelId = id
-        }
+        // Never `defaultModelId` (Standard's); see `persistModelChoice`.
+        persistModelChoice(id, config: config)
     }
 
     /// Fetch the provider's live chat models. Best-effort: silent on failure,
@@ -132,6 +132,7 @@ extension CodeAssistantModelState {
         selectedProvider = activeCLI.isEmpty ? AICliTool.claudeCode.rawValue : activeCLI
         selectedModel = defaultModelId
         modelIsExplicit = false
+        providerIsExplicit = false
     }
 
     /// The model a freshly built composer starts on: the persisted explicit
@@ -198,6 +199,8 @@ extension CodeAssistantModelState {
     func applyComposerProvider(overrideId: String, activeCLI: String, defaultModelId: String,
                                agentEngineOnly: Bool = false,
                                standard: TierRoute? = TierRoutingConfig.load().tier(.standard)) {
+        // The user picked a provider for this chat in the composer.
+        if providerIsExplicit { return }
         if !overrideId.isEmpty,
            let provider = customProviders.first(where: { $0.id == overrideId && $0.isEnabled }),
            !agentEngineOnly || provider.canRunAgentEngine {
@@ -225,7 +228,7 @@ extension CodeAssistantModelState {
     /// - Returns: `nil` on success, or the message to show the user. The caller
     ///   decides where that message goes; this type does not reach into a chat
     ///   engine to display it.
-    func resolveModelCommand(_ query: String, config: AppConfig) -> String? {
+    @MainActor func resolveModelCommand(_ query: String, config: AppConfig) -> String? {
         guard !query.isEmpty else {
             return "Usage: /model <name> — e.g. /model sonnet, /model gpt-5"
         }
@@ -239,12 +242,8 @@ extension CodeAssistantModelState {
         }
         selectedModel = match.id
         modelIsExplicit = true
-        // Persisted for the built-in provider only (see handleOnAppear); never
-        // into `defaultModelId`, which is Standard's model.
-        if !selectedProvider.starts(with: "custom:") {
-            config.modelPickIsExplicit = true
-            config.explicitModelId = match.id
-        }
+        // Never into `defaultModelId`, which is Standard's model.
+        persistModelChoice(match.id, config: config)
         return nil
     }
 }

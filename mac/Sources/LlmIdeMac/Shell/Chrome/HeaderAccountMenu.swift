@@ -51,19 +51,15 @@ struct HeaderAccountMenu: View {
                             // set up independently; revoking them here meant
                             // signing back in landed on "No repository
                             // connected". Use the option below to drop those.
+                            // clear() also wipes chats (ChatEngineRegistry is SessionScoped).
                             session.clear()
-                            // Engines first: a live one would otherwise write
-                            // the previous user's chats straight back.
-                            ChatEngineRegistry.shared.forgetAllForSignOut()
-                            ChatSessionStore.clear()
                         }
                     }
                     Button("Sign out and disconnect all accounts", role: .destructive) {
                         Task { @MainActor in
                             session.clear()
-                            ChatEngineRegistry.shared.forgetAllForSignOut()
-                            ChatSessionStore.clear()
                             KeychainStore.wipeAllSecrets()
+                            NotificationCenter.default.post(name: .accountCredentialsRevoked, object: nil)
                         }
                     }
                     Button("Cancel", role: .cancel) { }

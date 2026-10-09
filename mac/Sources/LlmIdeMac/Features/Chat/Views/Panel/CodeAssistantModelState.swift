@@ -102,6 +102,16 @@ final class CodeAssistantModelState {
     var liveModels: [String: [AIModel]] = [:]
     /// Custom providers loaded from UserDefaults, refreshed on panel appear.
     var customProviders: [CustomProvider] = []
+    /// Vault keys the account has stored (`/auth/me/secrets`): which built-in
+    /// providers the grouped model menu lists. nil until loaded.
+    var configuredSecretKeys: Set<String>?
+    /// True while `selectedProvider` is a provider the user picked in the
+    /// composer for the displayed chat, not Settings' default. Settings'
+    /// re-apply (`applyComposerProvider`) leaves such a pick alone.
+    var providerIsExplicit = false
+    /// The chat the composer currently serves, as last told by a pick or a
+    /// chat switch — where `persistModelChoice` records a per-chat model.
+    var displayedSessionID = ""
     var showAddModel = false
     var newModelId = ""
     /// Mode for the NEXT turn. Defaults to `.auto` — the server classifies

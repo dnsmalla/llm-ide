@@ -161,6 +161,7 @@ public struct LlmIdeMacApp: App {
         let activity = ActivityStore(api: client)
         activity.start()
         SessionScopedRegistry.shared.register(activity)
+        SessionScopedRegistry.shared.register(ChatEngineRegistry.shared)
         self._activityStore = State(wrappedValue: activity)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)

@@ -70,9 +70,15 @@ final class PluginMarketplaceTests: XCTestCase {
     }
 
     func testResolveKeepsPathsInsideTheClone() throws {
-        let root = URL(fileURLWithPath: "/tmp/clone")
+        // `resolve` fails closed on a missing path, so the clone must exist on disk.
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("clone-\(UUID().uuidString)").resolvingSymlinksInPath()
+        try FileManager.default.createDirectory(at: root.appendingPathComponent("plugins/a"),
+                                                withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
         let inside = try PluginMarketplace.resolve("plugins/a", inside: root)
-        XCTAssertEqual(inside.path, "/tmp/clone/plugins/a")
+        XCTAssertEqual(inside.path, root.appendingPathComponent("plugins/a").path)
+        XCTAssertThrowsError(try PluginMarketplace.resolve("plugins/missing", inside: root))
         XCTAssertThrowsError(try PluginMarketplace.resolve("../escape", inside: root))
         XCTAssertThrowsError(try PluginMarketplace.resolve("plugins/../../escape", inside: root))
     }

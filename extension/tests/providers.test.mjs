@@ -600,7 +600,7 @@ test('cliInvocation: an isolated codex run skips the git-repo check (temp dir is
 function fakeCli() {
   const dir = fs.mkdtempSync(`${os.tmpdir()}/fakecli-`);
   const bin = `${dir}/fake-cli`;
-  fs.writeFileSync(bin, '#!/bin/sh\necho "cwd=$(pwd)"\necho "entries=$(ls -A | wc -l | tr -d \' \')"\necho "mode=$(stat -f %Lp . 2>/dev/null || stat -c %a .)"\necho "argv=$*"\n', { mode: 0o755 });
+  fs.writeFileSync(bin, '#!/bin/sh\necho "cwd=$(pwd)"\necho "entries=$(ls -A | wc -l | tr -d \' \')"\necho "mode=$(stat -c %a . 2>/dev/null || stat -f %Lp .)"\necho "argv=$*"\n', { mode: 0o755 });
   return { bin, cleanup: () => fs.rmSync(dir, { recursive: true, force: true }) };
 }
 const field = (out, k) => out.split('\n').find((l) => l.startsWith(`${k}=`))?.slice(k.length + 1);

@@ -39,6 +39,9 @@ final class MobileLoopStopTests: XCTestCase {
     /// A Stop sent while a start is still loading its snapshot cancels the start.
     func testStopSentDuringAStartsAwaitCancelsTheStart() async throws {
         let manager = MobileControlManager()
+        // Starting a Loop from the phone is behind a switch that defaults off.
+        manager.phoneAccess.set(.loopControl, true)
+        defer { UserDefaults.standard.removeObject(forKey: PhoneAccessSettings.key(.loopControl)) }
         let bridge = MobileLoopBridge(manager: manager, autoCode: makeService())
         XCTAssertTrue(bridge.handle(type: "loop_start", data: nil))
         XCTAssertTrue(bridge.handle(type: "loop_stop", data: nil))   // before the start's Task runs

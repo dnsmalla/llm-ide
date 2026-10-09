@@ -423,3 +423,17 @@ final class ChatEngineRegistry {
         }
     }
 }
+
+// Every definitive sign-out (the account menu, a server change, the Reconnect
+// screen, AND a 401/403 from a token refresh) goes through
+// `SessionStore.clear()`, which drains `SessionScopedRegistry`. The chat wipe
+// used to live only at the UI buttons, so a server-side rejection left the
+// previous account's chats on disk and in live engines for the next user.
+extension ChatEngineRegistry: SessionScoped {
+    /// Engines first: a live one would otherwise write the previous user's
+    /// chats straight back after the store is wiped.
+    func resetForSignOut() {
+        forgetAllForSignOut()
+        ChatSessionStore.clear()
+    }
+}

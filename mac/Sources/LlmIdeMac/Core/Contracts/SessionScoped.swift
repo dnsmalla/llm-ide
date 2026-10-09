@@ -14,6 +14,17 @@ protocol SessionScoped: AnyObject {
     func resetForSignOut()
 }
 
+extension Notification.Name {
+    /// Posted on the main thread when credentials tied to the previous account
+    /// must stop working: a DIFFERENT user signed in, or the user chose
+    /// "Sign out and disconnect all accounts". A plain sign-out does not post
+    /// it, so the same user signing back in keeps what they set up.
+    ///
+    /// A notification rather than a `SessionScoped` method so Core never names
+    /// a build-excludable feature (Mobile Control observes it).
+    static let accountCredentialsRevoked = Notification.Name("llmide.accountCredentialsRevoked")
+}
+
 /// Weak registry of `SessionScoped` objects, drained by `SessionStore.clear()`.
 ///
 /// Features register themselves (or the Shell registers them) so Core never
