@@ -301,6 +301,8 @@ extension ChatEngine {
             if let idx = messages.firstIndex(where: { $0.id == streamingID }) {
                 messages[idx].content = resp.reply
             }
+            let tokenUsage = resp.tokenUsage ?? resp.usage?.turnTokenUsage
+            lastTurnTokenUsage = tokenUsage
             finishStreamingTurn(
                 streamingID,
                 pendingTool: resp.pendingTool,
@@ -309,7 +311,7 @@ extension ChatEngine {
                 usage: resp.usage,
                 mode: resp.mode,
                 stopped: false,
-                tokenUsage: resp.tokenUsage
+                tokenUsage: tokenUsage
             )
             // No autoChain here either — see doc comment: a phone-driven
             // turn never auto-executes a proposed tool. The card lands on

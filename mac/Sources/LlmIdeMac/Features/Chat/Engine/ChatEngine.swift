@@ -816,7 +816,10 @@ final class ChatEngine {
                 tokenUsage: resp.tokenUsage ?? resp.usage?.turnTokenUsage
             )
             if let usage = resp.contextUsage { lastContextUsage = usage }
-            if let tokens = resp.tokenUsage ?? resp.usage?.turnTokenUsage { lastTurnTokenUsage = tokens }
+            // Every completed turn, nil included: the chip says "Last turn", so a
+            // turn with no usage (e.g. after switching to a CLI provider) must
+            // clear it rather than keep labelling the previous turn's count.
+            lastTurnTokenUsage = resp.tokenUsage ?? resp.usage?.turnTokenUsage
             // Only the primary turn's chain check runs here — the follow-up
             // turn's own chain check (inside sendFollowup) covers every step
             // after this one, so an agent that keeps proposing edits can't loop.
@@ -1023,7 +1026,7 @@ final class ChatEngine {
                 tokenUsage: resp.tokenUsage ?? resp.usage?.turnTokenUsage
             )
             if let usage = resp.contextUsage { lastContextUsage = usage }
-            if let tokens = resp.tokenUsage ?? resp.usage?.turnTokenUsage { lastTurnTokenUsage = tokens }
+            lastTurnTokenUsage = resp.tokenUsage ?? resp.usage?.turnTokenUsage
             // Chain the NEXT step hands-free when allowed — this is what lets a
             // multi-step plan (e.g. "update A, then update B" or "commit and
             // push") finish without a card for every step. Mirrors runTurn's

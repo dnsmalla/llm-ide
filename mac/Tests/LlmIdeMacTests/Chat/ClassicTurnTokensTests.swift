@@ -41,6 +41,29 @@ struct ClassicTurnTokensTests {
         #expect(engine.lastContextUsage == nil, "classic turns have no context meter")
     }
 
+    @Test("a turn without token data clears the chip instead of showing the previous turn as 'Last turn'")
+    func turnWithoutUsageClearsLastTurnTokens() async throws {
+        let t = ScriptedChatTransport()
+        let engine = ChatEngine(scope: .explorer, transport: t)
+        engine.hooks.resolveTransportInput = { msg, history, _, skills in
+            ChatTransportInput(message: msg, history: history, attachments: [], skills: skills,
+                               agentContext: nil, language: "en", model: nil, provider: "deepseek", mode: "auto")
+        }
+        let json = #"{"attachmentCount":0,"attachmentChars":0,"paths":[],"inputTokens":500,"outputTokens":40}"#
+        let usage = try JSONDecoder().decode(LlmIdeAPIClient.CodeAssistResponse.Usage.self, from: Data(json.utf8))
+        t.result = .init(reply: "hi", pendingTool: nil, tasks: nil, continueNeeded: nil,
+                         usage: usage, mode: nil, tokenUsage: nil)
+        await engine.runTurn("hello")
+        #expect(engine.lastTurnTokenUsage?.outputTokens == 40)
+
+        // e.g. the user switched to a CLI provider: the reply carries no usage.
+        t.result = .init(reply: "again", pendingTool: nil, tasks: nil, continueNeeded: nil,
+                         usage: nil, mode: nil, tokenUsage: nil)
+        await engine.runTurn("hello again")
+        #expect(engine.lastTurnTokenUsage == nil)
+        #expect(engine.messages.last?.metadata?.tokenUsage == nil)
+    }
+
     @Test("the chat's total sums every reply, weighted exactly like the replies' own labels")
     func sessionTotal() {
         let a = AgentV2Usage(inputTokens: 1000, outputTokens: 200, cacheReadTokens: 4000,
