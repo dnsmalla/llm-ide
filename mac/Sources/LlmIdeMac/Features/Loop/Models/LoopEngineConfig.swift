@@ -27,6 +27,13 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// never a hard kill of a stage already running.
     public var wallClockBudgetSeconds: Double?
 
+    /// How long a run may sit paused before it is auto-aborted ("pause timed
+    /// out"). A paused run keeps the per-git-root `LoopRunQueue` lock, so an
+    /// unbounded pause blocks every other run on the repo. 0 = unlimited.
+    /// Non-optional with a decode fallback (an absent key => 1800), so older
+    /// saved configs pick up the default.
+    public var pauseTimeoutSeconds: Double = 1800
+
     /// Maximum repair attempts per stage per run. `maxIterations` bounds how many
     /// times the loop goes round, but a single stubborn stage can consume every
     /// one of them; this bounds the spend on one stage independently of the
@@ -134,7 +141,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         case stages, maxIterations, consecutiveFailureStop
         case wallClockBudgetSeconds, maxRepairsPerStage, protectedPathPolicy, extraProtectedGlobs
         case writeSummaryNote, useWorktreesForConcurrentRuns, repairModel, alwaysUseWorktree
-        case openMergeRequest
+        case openMergeRequest, pauseTimeoutSeconds
     }
 
     public init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
@@ -142,7 +149,7 @@ public struct LoopEngineConfig: Codable, Equatable {
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
          writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false,
          repairModel: String? = nil, alwaysUseWorktree: Bool = false,
-         openMergeRequest: Bool = true) {
+         openMergeRequest: Bool = true, pauseTimeoutSeconds: Double = 1800) {
         self.stages = stages
         self.maxIterations = maxIterations
         self.consecutiveFailureStop = consecutiveFailureStop
@@ -155,6 +162,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         self.repairModel = repairModel
         self.alwaysUseWorktree = alwaysUseWorktree
         self.openMergeRequest = openMergeRequest
+        self.pauseTimeoutSeconds = pauseTimeoutSeconds
     }
 
     /// Same rule as `LoopStage.init(from:)`: every field added after the first
@@ -183,6 +191,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         repairModel = try container.decodeIfPresent(String.self, forKey: .repairModel)
         alwaysUseWorktree = try container.decodeIfPresent(Bool.self, forKey: .alwaysUseWorktree) ?? false
         openMergeRequest = try container.decodeIfPresent(Bool.self, forKey: .openMergeRequest) ?? true
+        pauseTimeoutSeconds = try container.decodeIfPresent(Double.self, forKey: .pauseTimeoutSeconds) ?? 1800
     }
 
     /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
@@ -205,6 +214,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         try container.encodeIfPresent(repairModel, forKey: .repairModel)
         try container.encode(alwaysUseWorktree, forKey: .alwaysUseWorktree)
         try container.encode(openMergeRequest, forKey: .openMergeRequest)
+        try container.encode(pauseTimeoutSeconds, forKey: .pauseTimeoutSeconds)
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

@@ -402,10 +402,36 @@ final class LoopEngineRunner: ObservableObject {
     /// exact failure a Pause button must never have. A 200 ms wake-up while
     /// explicitly paused is free, and `Task.sleep` throwing on cancellation
     /// is what lets Stop end a paused run.
-    private func holdWhilePaused() async {
-        while paused && !Task.isCancelled {
-            try? await Task.sleep(nanoseconds: 200_000_000)
+    ///
+    /// Returns `.timedOut` when the hold outlasted `config.pauseTimeoutSeconds`:
+    /// a forgotten pause holds the per-root `LoopRunQueue` lock, so it is bounded
+    /// (the caller aborts the run, whose `defer` releases the lock).
+    private func holdWhilePaused(timeout: TimeInterval) async -> PauseWaitOutcome {
+        await Self.waitWhilePaused(
+            isPaused: { [weak self] in self?.paused ?? false },
+            isCancelled: { Task.isCancelled },
+            timeout: timeout, now: Date.init, pollNanoseconds: 200_000_000)
+    }
+
+    enum PauseWaitOutcome: Equatable { case notPaused, resumed, cancelled, timedOut }
+
+    /// The pause poll loop, with every environment dependency injected so the
+    /// timeout is unit-testable without real time. The clock starts when the hold
+    /// BEGINS (the stage boundary), not when Pause was pressed mid-stage.
+    /// `timeout <= 0` means unlimited.
+    static func waitWhilePaused(isPaused: () -> Bool,
+                                isCancelled: () -> Bool,
+                                timeout: TimeInterval,
+                                now: () -> Date,
+                                pollNanoseconds: UInt64) async -> PauseWaitOutcome {
+        guard isPaused() else { return .notPaused }
+        let heldSince = now()
+        while isPaused() {
+            if isCancelled() { return .cancelled }
+            if timeout > 0, now().timeIntervalSince(heldSince) >= timeout { return .timedOut }
+            try? await Task.sleep(nanoseconds: pollNanoseconds)
         }
+        return .resumed
     }
 
     /// What the loop should do after one stage finished.
@@ -828,7 +854,13 @@ final class LoopEngineRunner: ObservableObject {
                 // BETWEEN stages was previously invisible until the next
                 // iteration — the verifier notices cancellation mid-stage,
                 // but nothing checked before starting the following one.
-                await holdWhilePaused()
+                if await holdWhilePaused(timeout: config.pauseTimeoutSeconds) == .timedOut {
+                    // Unreleased pause: end the run so the queue lock frees.
+                    // The `defer` clears `paused`/`pausedRootKeys` and releases.
+                    appendLog(.warn, "Pause timed out after \(Int(config.pauseTimeoutSeconds / 60)) min without a resume — aborting the run to release the repo lock")
+                    status = .aborted
+                    break iterationLoop
+                }
                 if Task.isCancelled {
                     status = .aborted
                     break iterationLoop
