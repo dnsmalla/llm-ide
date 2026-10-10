@@ -182,7 +182,7 @@ final class LoopEngineRunner: ObservableObject {
         activeLoopCounts[rootKey] = loops.isEmpty ? nil : loops
     }
 
-    private let verifier: FaultVerifier
+    let verifier: FaultVerifier
     private let stageRepairer: LoopStageRepairer
     private let regressionSweep: RegressionSweepRunning
     private let skillExecutor: LoopSkillExecuting
@@ -264,6 +264,10 @@ final class LoopEngineRunner: ObservableObject {
     /// (the stage ends the run or repairs, so the ledger's own position after it
     /// is never reached). Flushed before a repair starts or when the stage returns;
     /// dropped when the flake re-run passes.
+    /// Test roots the writer created files under this run (keyed by package + test
+    /// dir). The Test stage also runs each root's own command when it differs
+    /// from its own, so a written test is never left unexecuted.
+    var writtenRoots: [String: TestRoot] = [:]
     var pendingFailureLedger: (stageId: String, output: String, gitRoot: URL)?
     /// How many times each shell stage ran its command this run, and the
     /// "stage#attempt" keys the ledger already recorded — so the ledger's normal
@@ -621,6 +625,7 @@ final class LoopEngineRunner: ObservableObject {
         testMapBefore = nil
         lastVerifyOutputs = [:]
         pendingFailureLedger = nil
+        writtenRoots = [:]
         shellAttemptSeq = [:]
         ledgerRecordedKeys = []
         lastGuardSnapshot = nil
@@ -1158,7 +1163,8 @@ final class LoopEngineRunner: ObservableObject {
         // failing to score it — see the unrecognised-runner notice below.
         var didTimeOut = false
         do {
-            outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: timeout)
+            outcome = try await verifyIncludingWrittenRoots(stage: stage, command: command,
+                                                            gitRoot: gitRoot, timeout: timeout)
         } catch is CancellationError {
             // Terminate paths must not leave the state stuck at `.running` —
             // the retained post-run states would then claim a stage was still
@@ -1336,8 +1342,8 @@ final class LoopEngineRunner: ObservableObject {
             stageStates[stage.id] = .running
             let rerunStartedAt = Date()
             do {
-                let again = try await verifier.verify(command: command, repoRoot: gitRoot,
-                                                      timeout: shellTimeout(for: stage))
+                let again = try await verifyIncludingWrittenRoots(stage: stage, command: command,
+                                                                  gitRoot: gitRoot, timeout: shellTimeout(for: stage))
                 // The ledger op must see the output of the attempt it picks (the last one).
                 lastVerifyOutputs[stage.id] = again.output
                 if again.exitCode == 0 {

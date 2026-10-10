@@ -3236,6 +3236,55 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: outside), "precious\n")
     }
 
+    private final class CreatingSkillExecutor: LoopSkillExecuting {
+        let created: [String]
+        init(created: [String]) { self.created = created }
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
+            for path in created {
+                let url = repoRoot.appendingPathComponent(path)
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try "def test_x(): pass\n".write(to: url, atomically: true, encoding: .utf8)
+            }
+            return LoopAgentResult(createdPaths: created)
+        }
+    }
+
+    /// The writer created a file under a root whose command differs from the Test
+    /// stage's: the Test stage must run that command too, and fail with its exit code.
+    func testTestStageAlsoRunsTheWrittenRootsCommand() async throws {
+        let repo = try makeTempRepo()
+        for (name, text) in ["package.json": "{\"scripts\":{\"test\":\"node --test tests/\"}}",
+                             "tests/a.test.mjs": "test('x',()=>{})",
+                             "sub/pytest.ini": "[pytest]\n"] {
+            let url = repo.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent("sub/tests"), withIntermediateDirectories: true)
+        let verifier = StubVerifier { command in
+            command == "cd sub && pytest" ? VerifyOutcome(exitCode: 3, output: "boom") : VerifyOutcome(exitCode: 0, output: "ok")
+        }
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "t1", command: "echo ok")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "echo ok", order: 1),
+        ], maxIterations: 2, maxRepairsPerStage: 0)
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: CreatingSkillExecutor(created: ["sub/tests/test_x.py"]),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertNotEqual(result, .success)
+        XCTAssertEqual(verifier.calls, ["echo ok", "cd sub && pytest"])
+        XCTAssertTrue(runner.lastVerifyOutputs["t1"]?.contains("--- also ran: cd sub && pytest ---") == true)
+        let attempt = journal.written.last?.iterations.flatMap(\.attempts).last { $0.stageId == "t1" }
+        XCTAssertEqual(attempt?.exitCode, 3)
+    }
+
     private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
         LoopEngineConfig(stages: [
             LoopStage(id: "g1", name: "Generate", kind: .skill, order: 0, skillId: "skills/plan-director"),

@@ -92,7 +92,12 @@ struct TestStructureDetector {
         guard let dir = firstExisting(pkg, ["tests", "test", "__tests__", "src/__tests__"]) else {
             notes.append("\(label(pkg)): no test directory found for package.json"); return
         }
-        let runner: TestRunner = script.contains("jest") ? .jest : .nodeTest
+        // `.nodeTest` only for a plain `node --test [path]`: its single-test verify
+        // command assumes `tests/` and no flags, so any other script (flags, globs,
+        // a loader) is `.npm` and falls back to the suite command.
+        let trimmed = script.trimmingCharacters(in: .whitespaces)
+        let plainNodeTest = trimmed.range(of: #"^node --test( +[^- ][^ ]*)?$"#, options: .regularExpression) != nil
+        let runner: TestRunner = script.contains("jest") ? .jest : (plainNodeTest ? .nodeTest : .npm)
         roots.append(root(pkg, dir, runner, cd(pkg, "npm test"), ["mjs", "js"]))
     }
 

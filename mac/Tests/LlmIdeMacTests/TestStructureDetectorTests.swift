@@ -26,6 +26,18 @@ final class TestStructureDetectorTests: XCTestCase {
         XCTAssertEqual(s.testRoot(forSourcePath: "mac/Sources/App/Foo.swift")?.testDir, "mac/Tests/AppTests")
         XCTAssertEqual(s.testRoot(forSourcePath: "extension/kb/db.mjs")?.testDir, "extension/tests")
     }
+    func testFlaggedNodeTestScriptIsNpmNotNodeTest() throws {
+        let root = try make([
+            "package.json": "{\"scripts\":{\"test\":\"node --experimental-strip-types --test tests/**/*.test.{ts,mjs}\"}}",
+            "tests/a.test.mjs": "test('x',()=>{})",
+        ])
+        XCTAssertEqual(TestStructureDetector(gitRoot: root).detect().roots.first?.runner, .npm)
+        let plain = try make([
+            "package.json": "{\"scripts\":{\"test\":\"node --test\"}}",
+            "tests/a.test.mjs": "test('x',()=>{})",
+        ])
+        XCTAssertEqual(TestStructureDetector(gitRoot: plain).detect().roots.first?.runner, .nodeTest)
+    }
     func testMissingStructureIsReportedNotCreated() throws {
         let root = try make(["src/a.py": "def f(): pass", "mac/Package.swift": "let p = Package(targets: [.target(name: \"A\")])"])
         let s = TestStructureDetector(gitRoot: root).detect()

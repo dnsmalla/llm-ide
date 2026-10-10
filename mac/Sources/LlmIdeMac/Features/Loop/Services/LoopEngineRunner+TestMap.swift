@@ -98,6 +98,25 @@ extension LoopEngineRunner {
         return .terminate(.error(output))
     }
 
+    /// Runs the stage's command and, for a verifying stage, the command of every
+    /// root the writer created files under whose command differs. Output is
+    /// concatenated with a `--- also ran: <command> ---` header; the exit code is
+    /// the first non-zero one.
+    func verifyIncludingWrittenRoots(stage: LoopStage, command: String, gitRoot: URL,
+                                     timeout: TimeInterval) async throws -> VerifyOutcome {
+        var outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: timeout)
+        guard stage.verifies, !writtenRoots.isEmpty else { return outcome }
+        let own = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        var seen: Set<String> = [own]
+        for extra in writtenRoots.values.map({ $0.command.trimmingCharacters(in: .whitespacesAndNewlines) }).sorted()
+        where !extra.isEmpty && seen.insert(extra).inserted {
+            let more = try await verifier.verify(command: extra, repoRoot: gitRoot, timeout: timeout)
+            outcome = VerifyOutcome(exitCode: outcome.exitCode != 0 ? outcome.exitCode : more.exitCode,
+                                    output: outcome.output + "\n--- also ran: \(extra) ---\n" + more.output)
+        }
+        return outcome
+    }
+
     /// Hands a blocking shell stage's pending FAILING output to the enabled ledger
     /// stage positioned after it (the normal position is never reached once the
     /// stage fails), recording faults with `runPassed = false`. Runs at most once
@@ -259,6 +278,12 @@ extension LoopEngineRunner {
         let all = Array(Set(changed).union(result?.changedPaths ?? []).union(created))
         let bad = Self.testWriteViolations(changed: all, created: created, allowedDirs: dirs,
                                            testNamedPackageDirs: beside)
+        // Files that stay: remember their roots so the Test stage runs them.
+        for path in created where !bad.created.contains(path) {
+            if let root = structure.testRoot(forSourcePath: path) {
+                writtenRoots["\(root.packageDir)|\(root.testDir)"] = root
+            }
+        }
         guard !bad.modified.isEmpty || !bad.created.isEmpty else { return nil }
         // No snapshot means we cannot tell the user's earlier edits from the
         // writer's: revert nothing, fail, and say so.
@@ -306,8 +331,9 @@ extension LoopEngineRunner {
         "Package.swift", "package.json", "pytest.ini", "pyproject.toml", "setup.cfg", "go.mod", "Cargo.toml"]
 
     /// What Setup did that it may not. Modified files may only be package
-    /// manifests; created files only test-named files, `__init__.py`/`pytest.ini`
-    /// under a test directory, or a manifest (a bare repo has none to modify).
+    /// manifests; created files only test-named files, `__init__.py` under a test
+    /// directory, or `pytest.ini`/`pyproject.toml`. Setup never creates a build
+    /// manifest (`Package.swift`, `package.json`, `go.mod`, `Cargo.toml`).
     nonisolated static func testSetupViolations(changed: [String], created: [String]) -> (modified: [String], created: [String]) {
         func name(_ p: String) -> String { (p as NSString).lastPathComponent }
         let createdSet = Set(created)
