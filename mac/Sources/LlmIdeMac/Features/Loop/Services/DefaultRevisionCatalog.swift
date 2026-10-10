@@ -21,8 +21,11 @@ struct DefaultRevisionCatalog {
     /// Optimization loops under `llm-doc/loop/<key>/` (`LoopOutputLayout`).
     static let shipped = DefaultRevisionCatalog(
         currentRevisions: Dictionary(uniqueKeysWithValues:
-            LoopOutputLayout.movedStageKeys.map { ($0, LoopOutputLayout.revision) }),
+            LoopOutputLayout.movedStageKeys.map { ($0, LoopOutputLayout.revision) })
+            // Revision 2 of `test`: the Test loop grew its structure/map/write/ledger stages.
+            .merging(["test": 2]) { a, _ in a },
         history: [
+            "test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 0)],
             "plan-structure-index": [1: LoopStage(
                 name: "Structure Index", kind: .skill, order: 0,
                 skillId: "skills/plan-structure-index",

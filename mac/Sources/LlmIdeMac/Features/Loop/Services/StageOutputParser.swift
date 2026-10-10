@@ -48,6 +48,8 @@ public enum StageOutputParser {
         Pattern(regex: #"(\d+) failed"#, group: 1),
         // jest: "Tests:  3 failed, 9 passed, 12 total"
         Pattern(regex: #"Tests:\s+(\d+) failed"#, group: 1),
+        // cargo test: "test result: FAILED. 3 passed; 2 failed; 0 ignored"
+        Pattern(regex: #"test result: \w+\. \d+ passed; (\d+) failed"#, group: 1),
         // go test: "FAIL\tpkg/foo\t0.5s" — no count in the output, so each
         // failing package line counts as one.
         Pattern(regex: #"(?m)^--- FAIL: "#, group: 0)

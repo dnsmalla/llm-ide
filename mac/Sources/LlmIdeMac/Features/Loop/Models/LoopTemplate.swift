@@ -67,7 +67,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
     /// `testAndFix` is what a project with no template history should reach for.
     static let builtIns: [LoopTemplate] = [
         testAndFix, fullVerify, regressionOnly, testOnly, skillLoop, docsRefresh,
-        operationDiagnosis, systemCheck, planDirector, refactoring, docOptimization
+        operationDiagnosis, systemCheck, planDirector, refactoring, docOptimization, testGrowth
     ]
 
     /// The default recipe, and the one that matches what the loop did before
@@ -356,5 +356,34 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           check: LoopStageDetector.docCheckSpec)
             ],
             maxIterations: 3, consecutiveFailureStop: 3),
+        isBuiltIn: true)
+
+    /// The Test default loop's recipe (`LoopDefaultLoopKey.test`): check the test
+    /// structure, set one up when missing, rank untested functions from the code
+    /// graph, write tests for one file, run the suite, record failures, re-map.
+    /// Prompts are shared with the default loop so the two cannot drift.
+    static let testGrowth = LoopTemplate(
+        id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AC")!,
+        name: "Test Growth",
+        summary: "Find the most-used untested functions from the code graph, write real tests for them, "
+            + "run the suite, and record every new failure as a fault.",
+        config: LoopEngineConfig(
+            stages: [
+                LoopStage(name: "Test Structure", kind: .testMap, order: 0, testOp: .structure),
+                LoopStage(name: "Test Setup", kind: .skill, order: 1,
+                          skillId: "skills/test-structure-setup",
+                          targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
+                          prompt: LoopStageDetector.testSetupPrompt),
+                LoopStage(name: "Test Map", kind: .testMap, order: 2, testOp: .map),
+                LoopStage(name: "Test Write", kind: .skill, order: 3,
+                          skillId: "skills/test-gap-writer",
+                          targetPath: LoopOutputLayout.testMapMD, outputPath: ".",
+                          prompt: LoopStageDetector.testWritePrompt),
+                LoopStage(name: "Test", kind: .shellCommand,
+                          command: detectedTestCommand, order: 4),
+                LoopStage(name: "Test Ledger", kind: .testMap, order: 5, testOp: .ledger),
+                LoopStage(name: "Test Map Check", kind: .testMap, order: 6, testOp: .map)
+            ],
+            maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)
 }
