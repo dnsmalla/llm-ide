@@ -47,7 +47,7 @@ extension LoopEngineRunner {
             let built: TestMap
             do {
                 built = try await Task.detached(priority: .utility) { () throws -> TestMap in
-                    let builder = TestMapBuilder(gitRoot: gitRoot, structure: structure)
+                    let builder = TestMapBuilder(gitRoot: gitRoot, structure: structure, graphRoot: mainRoot)
                     let map = try builder.build()
                     _ = try builder.write(map, outputRoot: mainRoot)
                     return map
