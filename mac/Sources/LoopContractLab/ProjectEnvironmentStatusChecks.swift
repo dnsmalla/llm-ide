@@ -289,7 +289,9 @@ func runProjectEnvironmentInspectorChecks() async {
                                                       runInterpreterProbes: true)
     expect(late.pipCheck == .timedOut, "a probe that exceeds the time limit is timedOut")
     expect(late.pythonVersion == .ok("Python 9.9.9 dwb=1"), "the other probes still answer when one times out")
-    expect(Date().timeIntervalSince(started) < 15, "a timed-out probe does not hold up the inspection")
+    // The slow probe sleeps 30 s; anything well under that proves the 1 s timeout cut it off. 25 s leaves
+    // headroom for a loaded machine (the pre-push gate runs this beside three swift builds).
+    expect(Date().timeIntervalSince(started) < 25, "a timed-out probe does not hold up the inspection")
     let pidText = (try? String(contentsOf: slow.appendingPathComponent(".venv/bin/pid"), encoding: .utf8)) ?? ""
     let probePid = pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     var isGone = false
