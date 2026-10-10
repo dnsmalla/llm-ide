@@ -202,4 +202,37 @@ extension LoopEngineRunner {
         guard let index = iterationRecords[last].attempts.lastIndex(where: { $0.stageId == stageId }) else { return }
         update(&iterationRecords[last].attempts[index])
     }
+    // MARK: - Next batch (the refactor test writer's Input)
+
+    /// Writes the plan's first todo batch, verbatim, to `NEXT-BATCH.md` for the
+    /// refactor test writer. Returns nil so the stage goes on to the agent; a
+    /// decision when it must not: no todo batch (a passed skip, the agent is not
+    /// called) or the file could not be written (failed). Any other stage: nil.
+    func prepareNextBatchFile(stage: LoopStage, gitRoot: URL, startedAt: Date) -> StageDecision? {
+        guard stage.testWriteOnly, (stage.targetPath ?? "").hasSuffix("NEXT-BATCH.md") else { return nil }
+        let mainRoot = currentRunContext?.mainGitRoot ?? gitRoot
+        let planURL = mainRoot.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let plan = (try? String(contentsOf: planURL, encoding: .utf8)) ?? ""
+        guard let todo = RefactorPlanDiff.firstTodo(in: plan),
+              let section = RefactorPlanDiff.section(of: todo.id, in: plan) else {
+            let message = "no todo batch in the refactor plan"
+            stageStates[stage.id] = .passed
+            appendLog(.info, "  [\(stage.name)] \(message); skipped")
+            record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt),
+                   exitCode: nil, passed: true, output: message, score: nil)
+            return .proceed
+        }
+        do {
+            try Self.writeGraphFile(Data((section + "\n").utf8), to: LoopOutputLayout.refactorNextBatch, root: mainRoot)
+        } catch {
+            let message = "could not write the next batch: \(error.localizedDescription)"
+            stageStates[stage.id] = .failed
+            appendLog(.error, "  [\(stage.name)] \(message)")
+            record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt),
+                   exitCode: nil, passed: false, output: message, score: nil)
+            return .terminate(.error(message))
+        }
+        appendLog(.info, "  [\(stage.name)] batch \(todo.id) written to NEXT-BATCH.md")
+        return nil
+    }
 }

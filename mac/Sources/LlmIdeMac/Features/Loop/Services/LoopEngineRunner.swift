@@ -1951,6 +1951,9 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.error, "  [\(stage.name)] \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))
         }
+        if let decision = prepareNextBatchFile(stage: stage, gitRoot: gitRoot, startedAt: startedAt) {
+            return decision
+        }
         var agentResult: LoopAgentResult?
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
                                            scopeGlobs: scopeGlobs) {

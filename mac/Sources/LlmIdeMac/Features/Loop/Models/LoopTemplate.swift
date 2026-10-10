@@ -303,30 +303,48 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
             maxIterations: 3, consecutiveFailureStop: 3),
         isBuiltIn: true)
 
-    /// The Refactoring default loop's recipe (`LoopDefaultLoopKey.refactor`):
-    /// plan, apply ONE batch, verify. Prompts are shared with the default loop
-    /// (`LoopStageDetector.refactorPlanPrompt` / `refactorApplyPrompt`), so the
-    /// two cannot drift. The Test stage is the detected-command placeholder, so
-    /// applying it to a repo with no detectable tooling drops that stage.
+    /// The Refactoring default loop's recipe (`LoopDefaultLoopKey.refactor`): the
+    /// same stages, in the same order, as `LoopStageDetector`'s premium loop. The
+    /// two shell stages carry the placeholder, so applying the template to a repo
+    /// with no detectable tooling drops them, and with them every stage that
+    /// needs a verify after it (the test writer, the apply). Prompts are shared
+    /// with the default loop, so the two cannot drift.
     static let refactoring = LoopTemplate(
         id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AA")!,
         name: "Refactoring",
-        summary: "Plan a professional, AI-friendly restructuring in small batches, apply one batch, "
-            + "then run the tests to prove nothing changed behaviour.",
+        summary: "Measure the code graph and test map, plan batches of graph-verified refactors, then for "
+            + "each batch write its tests, prove them green, apply it, and check the graph moved the right way.",
         config: LoopEngineConfig(
             stages: [
-                LoopStage(name: "Refactor Plan", kind: .skill, order: 0,
+                LoopStage(name: "Refactor Structure", kind: .testMap, order: 0, testOp: .structure),
+                LoopStage(name: "Refactor Setup", kind: .skill, order: 1,
+                          skillId: "skills/test-structure-setup",
+                          targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
+                          prompt: LoopStageDetector.testSetupPrompt),
+                LoopStage(name: "Refactor Structure Check", kind: .testMap, order: 2, testOp: .structure),
+                LoopStage(name: "Refactor Graph", kind: .codeGraph, order: 3, graphOp: .snapshot),
+                LoopStage(name: "Refactor Test Map", kind: .testMap, order: 4, testOp: .map),
+                LoopStage(name: "Refactor Plan", kind: .skill, order: 5,
                           skillId: "skills/refactor-planner",
                           targetPath: ".",
                           outputPath: LoopOutputLayout.refactorPlan,
                           prompt: LoopStageDetector.refactorPlanPrompt),
-                LoopStage(name: "Refactor Apply", kind: .skill, order: 1,
+                LoopStage(name: "Refactor Plan Check", kind: .artifactCheck, order: 6,
+                          check: LoopStageDetector.refactorPlanCheckSpec),
+                LoopStage(name: "Refactor Test Write", kind: .skill, order: 7,
+                          skillId: "skills/test-gap-writer",
+                          targetPath: LoopOutputLayout.refactorNextBatch, outputPath: ".",
+                          prompt: LoopStageDetector.refactorTestWritePrompt),
+                LoopStage(name: "Test Baseline", kind: .shellCommand,
+                          command: detectedTestCommand, order: 8, allowsRepair: false),
+                LoopStage(name: "Refactor Apply", kind: .skill, order: 9,
                           skillId: "skills/refactor-apply",
-                          targetPath: LoopOutputLayout.refactorPlan,
-                          outputPath: ".",
+                          targetPath: LoopOutputLayout.refactorPlan, outputPath: ".",
                           prompt: LoopStageDetector.refactorApplyPrompt),
                 LoopStage(name: "Test", kind: .shellCommand,
-                          command: detectedTestCommand, order: 2)
+                          command: detectedTestCommand, order: 10),
+                LoopStage(name: "Test Ledger", kind: .testMap, order: 11, testOp: .ledger),
+                LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: 12, graphOp: .verify)
             ],
             maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)

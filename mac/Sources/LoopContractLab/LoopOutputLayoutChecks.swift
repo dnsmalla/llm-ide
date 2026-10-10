@@ -20,8 +20,12 @@ private func asRevisionOne(_ stage: LoopStage) -> LoopStage {
     switch stage.defaultKey {
     case "plan-structure-index": legacy.outputPath = "llm-doc/plans/INDEX.md"
     case "plan-director": legacy.outputPath = "llm-doc/plans/PLAN.md"
-    case "refactor-plan": legacy.outputPath = "llm-doc/refactor/REFACTOR.md"
-    case "refactor-apply": legacy.targetPath = "llm-doc/refactor/REFACTOR.md"
+    case "refactor-plan":
+        legacy.outputPath = "llm-doc/refactor/REFACTOR.md"
+        legacy.prompt = LoopStageDetector.shippedStage(key: "refactor-plan", revision: 1)?.prompt
+    case "refactor-apply":
+        legacy.targetPath = "llm-doc/refactor/REFACTOR.md"
+        legacy.prompt = LoopStageDetector.shippedStage(key: "refactor-apply", revision: 1)?.prompt
     case "doc-index": legacy.outputPath = "llm-doc/docs/INDEX.md"
     case "doc-writer":
         legacy.targetPath = "llm-doc/docs/INDEX.md"
@@ -79,8 +83,8 @@ func runLoopOutputLayoutChecks() {
            && stage("doc-writer", in: fresh)?.outputPath == "llm-doc/loop/docs",
            "the doc tree lives under llm-doc/loop/docs/")
     let moved = ["plan-structure-index", "plan-director", "refactor-plan", "refactor-apply", "doc-index", "doc-writer"]
-    expect(moved.allSatisfy { stage($0, in: fresh)?.defaultRevision == 2 },
-           "every moved default is stamped revision 2 when it is created")
+    expect(moved.allSatisfy { stage($0, in: fresh)?.defaultRevision == LoopStageDetector.shippedRevision(key: $0) },
+           "every moved default is stamped its current revision when it is created")
     let freshPlan = fresh.loops.first { $0.defaultKey == LoopDefaultLoopKey.plan }
     expect(freshPlan?.acceptanceCriteria?.contains("llm-doc/loop/plan/INDEX.md") == true,
            "a new Plan loop states the new output path in its acceptance criteria")
@@ -97,8 +101,8 @@ func runLoopOutputLayoutChecks() {
     expect(stage("doc-index", in: upgraded)?.outputPath == "llm-doc/loop/docs/INDEX.md"
            && stage("doc-writer", in: upgraded)?.outputPath == "llm-doc/loop/docs",
            "an unedited Doc Optimization loop is moved to llm-doc/loop/docs/")
-    expect(moved.allSatisfy { stage($0, in: upgraded)?.defaultRevision == 2 },
-           "the upgraded stages carry revision 2")
+    expect(moved.allSatisfy { stage($0, in: upgraded)?.defaultRevision == LoopStageDetector.shippedRevision(key: $0) },
+           "the upgraded stages carry their current revision")
     let names = upgradedStageNames(changes)
     expect(["Structure Index", "Plan Director", "Refactor Plan", "Refactor Apply", "Doc Index", "Doc Writer"]
         .allSatisfy(names.contains), "every upgrade is reported, so the rewrite of loop.json is never silent")

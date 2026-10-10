@@ -3446,4 +3446,76 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
         XCTAssertEqual(result, .success)
     }
+
+    // MARK: - Refactor next batch (the test writer's Input)
+
+    private static let refactorPlanForNextBatch = """
+    # Refactor plan
+
+    ### R1 Split the parser (status: done)
+    - Files: `a.swift`
+
+    ### R2 Move helpers (status: todo)
+    - Files: `b.swift`
+    - Expect: fileCount 10 → 9
+
+    ### R3 Rename things (status: todo)
+    - Files: `c.swift`
+
+    """
+
+    private func nextBatchConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Refactor Test Write", kind: .skill, order: 0,
+                      skillId: "skills/test-gap-writer",
+                      targetPath: LoopOutputLayout.refactorNextBatch, outputPath: "."),
+            LoopStage(id: "t1", name: "Test Baseline", kind: .shellCommand, command: "swift test", order: 1,
+                      allowsRepair: false),
+        ], maxIterations: 1, consecutiveFailureStop: 2)
+    }
+
+    /// Approvals are hashed by repo path, so the temp repo needs its own grant for the baseline command.
+    private func nextBatchApprovals(_ repo: URL) -> VerifyApprovalStore {
+        let store = VerifyApprovalStore(defaults: UserDefaults(suiteName: "next-batch-\(UUID().uuidString)")!)
+        store.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        return store
+    }
+
+    /// The writer's Input is the plan's first todo batch, verbatim, and nothing else.
+    func testNextBatchFileHoldsOnlyTheFirstTodoBatchVerbatim() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.refactorPlanForNextBatch])
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        _ = await runner.run(config: nextBatchConfig(), faultsRoot: repo, gitRoot: repo)
+        let next = (try? String(contentsOf: repo.appendingPathComponent(LoopOutputLayout.refactorNextBatch),
+                                encoding: .utf8)) ?? ""
+        let log = runner.log.map(\.text).joined(separator: "\n")
+        XCTAssertTrue(next.hasPrefix("### R2 Move helpers (status: todo)"), "NEXT-BATCH.md: \(next)\n\(log)")
+        XCTAssertTrue(next.contains("- Expect: fileCount 10 → 9"))
+        XCTAssertFalse(next.contains("### R1"))
+        XCTAssertFalse(next.contains("### R3"))
+        XCTAssertEqual(skillExecutor.callCount, 1)
+    }
+
+    /// No todo batch left: the writer passes as a skip and the agent is never called.
+    func testWithNoTodoBatchTheWriterSkipsWithoutCallingTheAgent() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan:
+            "### R1 Split the parser (status: done)\n- Files: `a.swift`\n"])
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        let result = await runner.run(config: nextBatchConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skillExecutor.callCount, 0)
+        XCTAssertTrue(runner.log.contains { $0.text.contains("no todo batch") })
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: repo.appendingPathComponent(LoopOutputLayout.refactorNextBatch).path))
+    }
 }

@@ -29,6 +29,8 @@ enum LoopOutputLayout {
     static let refactorGraphAfter = "llm-doc/loop/refactor/graph/after.json"
     static let refactorGraphMD = "llm-doc/loop/refactor/GRAPH.md"
     static let refactorGraphDelta = "llm-doc/loop/refactor/GRAPH-DELTA.md"
+    /// The next refactor batch, written by the runner for the test writer (`refactor-test-write`).
+    static let refactorNextBatch = "llm-doc/loop/refactor/NEXT-BATCH.md"
     static let docsDir = "llm-doc/loop/docs"
     static let docsIndex = "llm-doc/loop/docs/INDEX.md"
     static let testDir = "llm-doc/loop/test"

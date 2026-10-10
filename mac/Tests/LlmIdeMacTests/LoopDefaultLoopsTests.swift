@@ -175,36 +175,48 @@ final class LoopDefaultLoopsTests: XCTestCase {
     }
 
     /// Code is never edited without a verify stage: with no detectable test
-    /// command the Refactoring loop only writes the plan.
+    /// command the Refactoring loop only plans (the first seven stages), so no
+    /// stage that edits code is even present.
     func testRefactorLoopIsPlanOnlyWithoutATestCommand() throws {
         let refactor = try XCTUnwrap(loop(LoopDefaultLoopKey.refactor,
                                           in: LoopStageDetector.defaultLoops(gitRoot: repo)))
         XCTAssertEqual(refactor.name, "Refactoring")
-        XCTAssertEqual(refactor.config.stages.count, 1)
-        let plan = try XCTUnwrap(refactor.config.stages.first)
+        let stages = LoopStage.runOrder(refactor.config.stages)
+        XCTAssertEqual(stages.compactMap(\.defaultKey),
+                       ["refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph",
+                        "refactor-test-map", "refactor-plan", "refactor-plan-check"])
+        let plan = try XCTUnwrap(stages.first { $0.defaultKey == "refactor-plan" })
         XCTAssertEqual(plan.name, "Refactor Plan")
         XCTAssertEqual(plan.kind, .skill)
         XCTAssertEqual(plan.skillId, "skills/refactor-planner")
         XCTAssertEqual(plan.targetPath, ".")
         XCTAssertEqual(plan.outputPath, "llm-doc/loop/refactor/REFACTOR.md")
-        XCTAssertEqual(plan.defaultKey, "refactor-plan")
         XCTAssertTrue(plan.isDefault)
     }
 
-    /// With a test command: plan, apply ONE batch, then prove behaviour held.
+    /// With a test command: the whole graph-verified pipeline. The test writer
+    /// proves the next batch's tests green before the apply, the apply is
+    /// verified by the suite, and the graph confirms the batch's counter fell.
     func testRefactorLoopPlansAppliesAndTestsWhenATestCommandIsDetected() throws {
         try write("Package.swift")
         let refactor = try XCTUnwrap(loop(LoopDefaultLoopKey.refactor,
                                           in: LoopStageDetector.defaultLoops(gitRoot: repo)))
         let stages = LoopStage.runOrder(refactor.config.stages)
-        XCTAssertEqual(stages.map(\.name), ["Refactor Plan", "Refactor Apply", "Test"])
-        XCTAssertEqual(stages.map(\.kind), [.skill, .skill, .shellCommand])
-        XCTAssertEqual(stages.compactMap(\.defaultKey), ["refactor-plan", "refactor-apply", "refactor-test"])
-        XCTAssertEqual(stages.map(\.skillId), ["skills/refactor-planner", "skills/refactor-apply", nil])
-        XCTAssertEqual(stages[1].targetPath, "llm-doc/loop/refactor/REFACTOR.md")
-        XCTAssertEqual(stages[1].outputPath, ".")
-        XCTAssertEqual(stages[2].command, "swift test")
-        XCTAssertEqual(stages[2].detectedCommand, "swift test")
+        XCTAssertEqual(stages.compactMap(\.defaultKey), [
+            "refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph",
+            "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write",
+            "refactor-test-baseline", "refactor-apply", "refactor-test", "refactor-ledger", "refactor-graph-check",
+        ])
+        let byKey = Dictionary(uniqueKeysWithValues: stages.map { ($0.defaultKey ?? "", $0) })
+        XCTAssertEqual(byKey["refactor-apply"]?.skillId, "skills/refactor-apply")
+        XCTAssertEqual(byKey["refactor-apply"]?.targetPath, "llm-doc/loop/refactor/REFACTOR.md")
+        XCTAssertEqual(byKey["refactor-apply"]?.outputPath, ".")
+        XCTAssertEqual(byKey["refactor-test-write"]?.targetPath, "llm-doc/loop/refactor/NEXT-BATCH.md")
+        XCTAssertEqual(byKey["refactor-test"]?.command, "swift test")
+        XCTAssertEqual(byKey["refactor-test"]?.detectedCommand, "swift test")
+        XCTAssertEqual(byKey["refactor-test-baseline"]?.command, "swift test")
+        XCTAssertEqual(byKey["refactor-test-baseline"]?.allowsRepair, false)
+        XCTAssertEqual(byKey["refactor-graph-check"]?.graphOp, .verify)
         XCTAssertTrue(stages.allSatisfy(\.isDefault))
     }
 
@@ -258,7 +270,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
         let stages = [LoopDefaultLoopKey.refactor, LoopDefaultLoopKey.docs]
             .flatMap { loop($0, in: loops)?.config.stages ?? [] }
             .filter { $0.kind == .skill }
-        XCTAssertEqual(stages.count, 4)
+        // Refactoring: setup, plan, test writer and apply (the writer and apply exist beside a test command, which this repo has); Doc: index and writer.
+        XCTAssertEqual(stages.count, 6)
         for stage in stages {
             let prompt = try XCTUnwrap(stage.prompt, "\(stage.name) has no prompt")
             XCTAssertFalse(prompt.contains("llm-doc"), "\(stage.name) bakes a path into its prompt")
@@ -282,11 +295,12 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testRefactorAndDocLoopsShipTheirContracts() {
         let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
         XCTAssertEqual(loop(LoopDefaultLoopKey.refactor, in: loops)?.goal,
-                       "Move the codebase toward a professional, AI-friendly structure one safe, "
+                       "Move the codebase toward a professional, graph-verified structure one tested, "
                            + "behaviour-preserving batch at a time.")
         XCTAssertEqual(loop(LoopDefaultLoopKey.refactor, in: loops)?.acceptanceCriteria,
-                       "The refactor plan exists with every batch marked todo/done/skipped, the applied "
-                           + "batch changed no behaviour, and the test command still passes.")
+                       "Every file the batch touches has tests that passed before the change, the suite passes "
+                           + "after it, and the fresh code-graph snapshot shows the batch's declared counter lower "
+                           + "with no structural counter higher.")
         XCTAssertEqual(loop(LoopDefaultLoopKey.docs, in: loops)?.goal,
                        "Keep a generated, code-cited doc tree that explains what the code does and why, so "
                            + "people, agents and the code graph are pointed at the right code.")
@@ -367,15 +381,20 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertTrue(LoopDefinition.isManualOnly(defaultKey: LoopDefaultLoopKey.refactor, stages: []))
     }
 
-    /// The template must never yield code edits without a verify stage: with
-    /// no test tooling the Test placeholder is dropped, so Refactor Apply goes
-    /// too and the template applies plan-only — like its default loop.
-    func testRefactoringTemplateAppliesPlanOnlyWithoutATestCommand() throws {
-        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.map(\.name), ["Refactor Plan"])
-        XCTAssertEqual(LoopTemplate.refactoring.applied(to: nil).stages.map(\.name), ["Refactor Plan"])
+    /// The template must never yield code edits without a verify stage: with no
+    /// test tooling the two shell placeholders are dropped, which takes the
+    /// writer, the baseline and the apply with them (each needs a verify after
+    /// it). What remains is the plan side plus the ledger and graph verify,
+    /// which need no shell command. With tooling it has the default loop's shape.
+    func testRefactoringTemplateDropsEveryCodeEditWithoutATestCommand() throws {
+        for applied in [LoopTemplate.refactoring.applied(to: repo).stages,
+                        LoopTemplate.refactoring.applied(to: nil).stages] {
+            XCTAssertFalse(applied.contains { $0.isRefactorApply || $0.testWriteOnly })
+            XCTAssertFalse(applied.contains { $0.kind == .shellCommand })
+            XCTAssertTrue(applied.map(\.name).contains("Refactor Plan"))
+        }
         try write("Package.swift")
-        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.map(\.name),
-                       ["Refactor Plan", "Refactor Apply", "Test"])
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.count, 13)
     }
 
     /// An existing project (the four earlier default loops, one tuned) gains

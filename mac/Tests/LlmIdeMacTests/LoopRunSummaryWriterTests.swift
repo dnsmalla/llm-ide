@@ -201,4 +201,28 @@ final class LoopRunSummaryWriterTests: XCTestCase {
             return XCTFail("expected .failed, got \(result)")
         }
     }
+
+    /// The refactor loop's batch renders when an attempt names one; the counter table
+    /// renders only when some attempt carries a graph delta, and uses the LAST one.
+    func testRefactorBatchAndGraphDeltaRenderOnlyWhenPresent() {
+        var apply = LoopStageAttempt(
+            stageId: "a", stageName: "Refactor Apply", kind: .skill, severity: .blocking,
+            startedAt: Date(timeIntervalSince1970: 1_760_000_000), durationSeconds: 1,
+            exitCode: nil, passed: true, outputTail: "", outputHash: nil, score: nil)
+        apply.batchId = "R2"
+        var verify = LoopStageAttempt(
+            stageId: "g", stageName: "Refactor Graph Check", kind: .codeGraph, severity: .blocking,
+            startedAt: Date(timeIntervalSince1970: 1_760_000_000), durationSeconds: 1,
+            exitCode: nil, passed: true, outputTail: "", outputHash: nil, score: nil)
+        verify.batchId = "R2"
+        verify.graphDelta = ["cycleCount": -1, "filesOver500Count": -2]
+        let plain = render(makeRecord(attempts: [apply]))
+        XCTAssertTrue(plain.contains("**Batch:** R2"))
+        XCTAssertFalse(plain.contains("| Counter | Δ |"))
+        let md = render(makeRecord(attempts: [apply, verify]))
+        XCTAssertTrue(md.contains("**Batch:** R2"))
+        XCTAssertTrue(md.contains("| Counter | Δ |"))
+        XCTAssertTrue(md.contains("| cycleCount | -1 |"))
+        XCTAssertTrue(md.contains("| filesOver500Count | -2 |"))
+    }
 }

@@ -23,7 +23,10 @@ struct DefaultRevisionCatalog {
         currentRevisions: Dictionary(uniqueKeysWithValues:
             LoopOutputLayout.movedStageKeys.map { ($0, LoopOutputLayout.revision) })
             // Revision 2 of `test`: the Test loop grew its structure/map/write/ledger stages.
-            .merging(["test": 2]) { a, _ in a },
+            .merging(["test": 2]) { a, _ in a }
+            // Revision 3 of the Refactoring plan and apply stages: the premium loop's prompts.
+            // Revision 2 of its test stage: it records its detected command as provenance.
+            .merging(["refactor-plan": 3, "refactor-apply": 3, "refactor-test": 2]) { _, new in new },
         history: [
             "test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 0)],
             "plan-structure-index": [1: LoopStage(
@@ -38,18 +41,37 @@ struct DefaultRevisionCatalog {
                 targetPath: LoopOutputLayout.collectedPlansDir,
                 outputPath: LoopOutputLayout.Legacy.planMaster,
                 prompt: LoopStageDetector.planDirectorPrompt)],
-            "refactor-plan": [1: LoopStage(
-                name: "Refactor Plan", kind: .skill, order: 0,
-                skillId: "skills/refactor-planner",
-                targetPath: ".",
-                outputPath: LoopOutputLayout.Legacy.refactorPlan,
-                prompt: LoopStageDetector.refactorPlanPrompt)],
-            "refactor-apply": [1: LoopStage(
-                name: "Refactor Apply", kind: .skill, order: 1,
-                skillId: "skills/refactor-apply",
-                targetPath: LoopOutputLayout.Legacy.refactorPlan,
-                outputPath: ".",
-                prompt: LoopStageDetector.refactorApplyPrompt)],
+            "refactor-plan": [
+                1: LoopStage(
+                    name: "Refactor Plan", kind: .skill, order: 0,
+                    skillId: "skills/refactor-planner",
+                    targetPath: ".",
+                    outputPath: LoopOutputLayout.Legacy.refactorPlan,
+                    prompt: refactorPlanPromptRevision2),
+                2: LoopStage(
+                    name: "Refactor Plan", kind: .skill, order: 0,
+                    skillId: "skills/refactor-planner",
+                    targetPath: ".",
+                    outputPath: LoopOutputLayout.refactorPlan,
+                    prompt: refactorPlanPromptRevision2),
+            ],
+            "refactor-apply": [
+                1: LoopStage(
+                    name: "Refactor Apply", kind: .skill, order: 1,
+                    skillId: "skills/refactor-apply",
+                    targetPath: LoopOutputLayout.Legacy.refactorPlan,
+                    outputPath: ".",
+                    prompt: refactorApplyPromptRevision2),
+                2: LoopStage(
+                    name: "Refactor Apply", kind: .skill, order: 1,
+                    skillId: "skills/refactor-apply",
+                    targetPath: LoopOutputLayout.refactorPlan,
+                    outputPath: ".",
+                    prompt: refactorApplyPromptRevision2),
+            ],
+            // Revision 2 of the test stage: it records its detected command as provenance
+            // (`detectedCommand`); its content is unchanged from revision 1.
+            "refactor-test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 2)],
             "doc-index": [1: LoopStage(
                 name: "Doc Index", kind: .skill, order: 0,
                 skillId: "skills/doc-structure-index",
@@ -64,6 +86,32 @@ struct DefaultRevisionCatalog {
                 prompt: LoopStageDetector.docWriterPrompt)],
         ])
 
+    /// Frozen revision-2 texts (the revision-1 text was identical). History must
+    /// keep the exact strings users were shipped, so these never follow the live prompts.
+    private static let resolvePathsRuleRevision2 = "Resolve relative paths against the repo root first, then the "
+        + "project root (the directory containing system/project.json — the repo root itself, or two "
+        + "levels up when the repo is checked out under code/)."
+
+    private static let refactorPlanPromptRevision2 = "Write or update the refactor plan at the Output path for the code "
+        + "under the Input (the repo, or a subtree of it). " + resolvePathsRuleRevision2 + " Survey the structure "
+        + "and write batches, each with a stable ID (R1, R2, …), a status (todo, done or skipped), the "
+        + "files it touches, its intent, and its risk. Cover: directory layout by responsibility, files "
+        + "over 500 lines to split, duplicated logic, naming consistency, dead code only when provably "
+        + "unreferenced, and an AI-friendly setup — a root CLAUDE.md/AGENTS.md describing commands, "
+        + "architecture and invariants, per-area READMEs, an index of entry points, and module-boundary "
+        + "rules. Keep each batch small (one concern, at most about 10 files) and behaviour-preserving, "
+        + "ordered safest first. When the plan already exists, update statuses and add new batches; never "
+        + "reorder or renumber existing ones. Never edit code."
+
+    private static let refactorApplyPromptRevision2 = "Apply exactly one batch of the refactor plan at the Input to the "
+        + "code under the Output path: the FIRST batch whose status is todo. " + resolvePathsRuleRevision2
+        + " Apply it behaviour-preservingly: a move or rename updates every import and reference, no "
+        + "public API changes unless the batch says so, and no test is weakened, skipped or deleted "
+        + "(updating import and path references inside tests and build config is allowed when the move "
+        + "requires it). Then mark the "
+        + "batch done in the plan with a one-line note — or skipped with the reason when it cannot be done "
+        + "safely. Never touch more than that batch, and never commit. With no todo batch left, change "
+        + "nothing."
     func current(_ key: String) -> Int { currentRevisions[key] ?? 1 }
 }
 
@@ -192,6 +240,7 @@ extension LoopStageDetector {
         LoopDefaultLoopKey.plan: "plan-director",
         LoopDefaultLoopKey.docs: "doc-writer",
         LoopDefaultLoopKey.test: "test-write",
+        LoopDefaultLoopKey.refactor: "refactor-graph",
     ]
 
     /// Whether a newer shipped revision of this default exists that was not
@@ -208,5 +257,18 @@ extension LoopStageDetector {
               let def = defaultStages(forLoop: loopKey, gitRoot: gitRoot).first(where: { $0.defaultKey == key })
         else { return nil }
         return stage.adoptingDefaultContent(of: def)
+    }
+}
+
+extension LoopStageDetector {
+    /// What a stage default shipped as at `revision`, for fixtures that simulate an
+    /// older build's saved stages (the contract lab). Nil when none was recorded.
+    public static func shippedStage(key: String, revision: Int) -> LoopStage? {
+        DefaultRevisionCatalog.shipped.history[key]?[revision]
+    }
+
+    /// The revision a stage default is shipped at now.
+    public static func shippedRevision(key: String) -> Int {
+        DefaultRevisionCatalog.shipped.current(key)
     }
 }
