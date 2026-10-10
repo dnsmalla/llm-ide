@@ -29,6 +29,13 @@ struct MonacoDiffRequest: Equatable {
     let language: String
 }
 
+/// Lets the owner of a `MonacoHost` ask Monaco for its current full text.
+/// `contentChanged` posts are debounced (~150 ms) in the page, so right
+/// after typing the Swift-side buffer can lag; save paths call `fetch()` first.
+final class MonacoContentFetcher {
+    fileprivate(set) var fetch: (() async -> String?)?
+}
+
 /// Hosts the vendored Monaco editor in a `WKWebView`, loaded ONCE via
 /// `loadFileURL` (Monaco is a multi-file asset tree — `loader.js` fetches
 /// sibling files by relative path, which `loadHTMLString`'s `baseURL: nil`
@@ -45,6 +52,13 @@ struct MonacoDiffRequest: Equatable {
 /// `Coordinator`: nothing outside this file calls them directly.
 struct MonacoHost: NSViewRepresentable {
     var content: String?
+    /// Stable identity of the file `content` belongs to (its path). Monaco
+    /// keeps one model per path so undo history and cursor/scroll survive a
+    /// file switch. nil = one anonymous slot (legacy behaviour).
+    var path: String?
+    /// Receives a closure that flushes Monaco's pending (debounced) edits and
+    /// returns the full text; the save path awaits it. See `MonacoContentFetcher`.
+    var fetcher: MonacoContentFetcher?
     var language: String = "plaintext"
     var decorations: [Int: GitGutter.Mark] = [:]
     var theme: Theme
@@ -134,25 +148,45 @@ struct MonacoHost: NSViewRepresentable {
         /// sees `.ready` (picking up whatever `parent` was last set to).
         private var documentReady = false
         private var lastContent: String?
+        private var lastPath: String?
         private var lastDecorations: [Int: GitGutter.Mark] = [:]
         private var lastTheme: Theme?
         private var lastRevealRequestId: UUID?
         private var lastDiffRequest: MonacoDiffRequest?
         private var lastReadOnly = false
 
-        init(_ parent: MonacoHost) { self.parent = parent }
+        init(_ parent: MonacoHost) {
+            self.parent = parent
+            super.init()
+            parent.fetcher?.fetch = { [weak self] in await self?.fetchContent() }
+        }
+
+        /// Round trip to `window.__llmide.getContent()` (flushes the debounce).
+        @MainActor
+        private func fetchContent() async -> String? {
+            guard documentReady, let webView else { return nil }
+            let result = try? await webView.callAsyncJavaScript(
+                "return window.__llmide.getContent();", arguments: [:], in: nil, contentWorld: .page)
+            guard let text = result as? String else { return nil }
+            lastContent = text
+            return text
+        }
 
         /// Called from `updateNSView` on every SwiftUI re-render.
         func sync(_ newParent: MonacoHost) {
             parent = newParent
+            newParent.fetcher?.fetch = { [weak self] in await self?.fetchContent() }
             applyPendingChanges()
         }
 
         private func applyPendingChanges() {
             guard documentReady else { return }
-            if let content = parent.content, content != lastContent {
-                setContent(content, language: parent.language)
+            // A path change must push even when the text is identical to the
+            // previous file's, or Monaco would keep showing the old model.
+            if let content = parent.content, content != lastContent || parent.path != lastPath {
+                setContent(content, language: parent.language, path: parent.path)
                 lastContent = content
+                lastPath = parent.path
             }
             if parent.decorations != lastDecorations {
                 setDecorations(parent.decorations)
@@ -213,10 +247,10 @@ struct MonacoHost: NSViewRepresentable {
         // `MonacoHost`'s declarative properties are the public surface, not
         // these methods.
 
-        private func setContent(_ text: String, language: String) {
+        private func setContent(_ text: String, language: String, path: String?) {
             webView?.callAsyncJavaScript(
-                "window.__llmide.setContent(text, language);",
-                arguments: ["text": text, "language": language],
+                "window.__llmide.setContent(text, language, path);",
+                arguments: ["text": text, "language": language, "path": path ?? ""],
                 in: nil, in: .page, completionHandler: nil)
         }
 

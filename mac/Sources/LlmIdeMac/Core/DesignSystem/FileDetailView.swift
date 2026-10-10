@@ -363,6 +363,7 @@ struct CodeDetailView: View {
                 MonacoEditorView(
                     content: .constant(content),
                     language: MonacoLanguageMap.id(for: url.pathExtension),
+                    path: url.path,
                     decorations: changedLines,
                     revealRequest: reveal,
                     readOnly: true
@@ -478,6 +479,8 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     @State private var acknowledgedDiskContent: String?
     @State private var showSavedToast: Bool = false
     @State private var showRevertConfirm: Bool = false
+    /// Monaco debounces its content posts; save() pulls the live text through this.
+    @State private var contentFetcher = MonacoContentFetcher()
 
     @EnvironmentObject private var theme: ThemeStore
 
@@ -606,6 +609,8 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
         MonacoEditorView(
             content: $content,
             language: language,
+            path: url.path,
+            fetcher: contentFetcher,
             decorations: decorations,
             revealRequest: revealRequest,
             onRequestSave: { Task { await saveWithToast() } }
@@ -656,6 +661,10 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
 
     @MainActor
     private func save() async {
+        // Cmd-S right after typing: the page may still hold unposted edits.
+        if !isPreview, loadError == nil, let live = await contentFetcher.fetch?(), live != content {
+            content = live
+        }
         guard isDirty else { return }
         saving = true
         defer { saving = false }

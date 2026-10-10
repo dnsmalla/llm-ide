@@ -56,6 +56,10 @@ enum MonacoEditorMessageHandler {
 struct MonacoEditorView: View {
     @Binding var content: String
     var language: String = "plaintext"
+    /// Stable file identity (path) so Monaco keeps per-file undo/view state.
+    var path: String? = nil
+    /// Lets the owner flush the page's debounced edits before saving.
+    var fetcher: MonacoContentFetcher? = nil
     var decorations: [Int: GitGutter.Mark] = [:]
     var revealRequest: MonacoRevealRequest? = nil
     var readOnly: Bool = false
@@ -76,6 +80,8 @@ struct MonacoEditorView: View {
             } else {
                 MonacoHost(
                     content: content,
+                    path: path,
+                    fetcher: fetcher,
                     language: language,
                     decorations: decorations,
                     theme: theme.current,
