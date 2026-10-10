@@ -43,4 +43,65 @@ final class GraphReportTests: XCTestCase {
         let count = await BoundaryWarningsProbe.count(gitRoot: dir)
         XCTAssertNil(count)
     }
+    // MARK: - Pinned contracts
+
+    private func file(_ path: String, loc: Int = 1, imports: [String] = [], usedBy: [String] = []) -> String {
+        func array(_ items: [String]) -> String { "[" + items.map { "\"\($0)\"" }.joined(separator: ",") + "]" }
+        return "{\"path\":\"\(path)\",\"language\":\"mjs\",\"loc\":\(loc),\"imports\":\(array(imports)),\"usedBy\":\(array(usedBy)),\"types\":[],\"functions\":[]}"
+    }
+    private func indexJSON(_ files: [String]) -> String {
+        "{\"version\":\"1.1\",\"files\":[" + files.joined(separator: ",") + "]}"
+    }
+
+    func testRenderHeaderFormat() throws {
+        let md = GraphReport.build(from: try index(cyclic), commit: "abc", boundaryWarnings: nil).render()
+        let first = md.components(separatedBy: "\n")[0]
+        XCTAssertNotNil(first.range(of: #"^# Code graph \(1\.1, abc, \d{4}-\d{2}-\d{2}\)$"#, options: .regularExpression))
+        let unknown = GraphReport.build(from: try index(cyclic), commit: nil, boundaryWarnings: nil).render()
+        XCTAssertTrue(unknown.components(separatedBy: "\n")[0].contains(", unknown, "))
+    }
+
+    func testTotalLocToleranceBoundary() throws {
+        let before = GraphReport.build(from: try index(cyclic), commit: nil, boundaryWarnings: nil)
+        XCTAssertEqual(before.counters["totalLoc"], 850)
+        var atEdge = before; atEdge.counters["totalLoc"] = 867          // 850 * 1.02 exactly
+        XCTAssertEqual(GraphReport.delta(before: before, after: atEdge, expect: nil).regressions, [])
+        var over = before; over.counters["totalLoc"] = 868              // one line past the tolerance
+        XCTAssertEqual(GraphReport.delta(before: before, after: over, expect: nil).regressions, ["totalLoc"])
+    }
+
+    func testCycleOrderingBySizeThenFirstPath() throws {
+        let json = indexJSON([
+            file("a.mjs", imports: ["b.mjs"]), file("b.mjs", imports: ["c.mjs"]), file("c.mjs", imports: ["a.mjs"]),
+            file("x.mjs", imports: ["y.mjs"]), file("y.mjs", imports: ["x.mjs"]),
+            file("m2.mjs", imports: ["m1.mjs"]), file("m1.mjs", imports: ["m2.mjs"]),
+            file("k1.mjs", imports: ["k2.mjs"]), file("k2.mjs", imports: ["k1.mjs"]),
+        ])
+        let r = GraphReport.build(from: try index(json), commit: nil, boundaryWarnings: nil)
+        XCTAssertEqual(r.cycles, [["a.mjs", "b.mjs", "c.mjs"], ["k1.mjs", "k2.mjs"], ["m1.mjs", "m2.mjs"], ["x.mjs", "y.mjs"]])
+        XCTAssertEqual(r.counters["cycleCount"], 4)
+        XCTAssertEqual(r.counters["filesInCycles"], 9)
+    }
+
+    func testParseTotal() {
+        XCTAssertEqual(BoundaryWarningsProbe.parseTotal("total: 47  sealed violations: 0"), 47)
+        XCTAssertNil(BoundaryWarningsProbe.parseTotal("total: abc"))
+        XCTAssertEqual(BoundaryWarningsProbe.parseTotal("header line\nnoise\ntotal: 5  sealed violations: 1\n"), 5)
+        XCTAssertNil(BoundaryWarningsProbe.parseTotal("no total line here"))
+    }
+
+    func testSelfLoopOnlyIsNotACycle() throws {
+        let json = indexJSON([file("a.mjs", imports: ["a.mjs"])])
+        let r = GraphReport.build(from: try index(json), commit: nil, boundaryWarnings: nil)
+        XCTAssertEqual(r.cycles, [])
+        XCTAssertEqual(r.counters["cycleCount"], 0)
+    }
+
+    func testFanInTiesSortByAscendingPath() throws {
+        let json = indexJSON([
+            file("q.mjs", usedBy: ["r.mjs"]), file("p.mjs", usedBy: ["r.mjs"]), file("r.mjs"),
+        ])
+        let r = GraphReport.build(from: try index(json), commit: nil, boundaryWarnings: nil)
+        XCTAssertEqual(r.topFanIn, [GraphReport.FileFanIn(path: "p.mjs", fanIn: 1), GraphReport.FileFanIn(path: "q.mjs", fanIn: 1)])
+    }
 }

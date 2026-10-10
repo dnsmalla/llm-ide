@@ -35,7 +35,7 @@ struct GraphReport: Codable, Equatable {
 
     /// Counters whose growth is tolerated up to 2 %; every other counter tolerates none.
     static let growthTolerantCounters: Set<String> = ["totalLoc", "avgLoc"]
-    static let growthTolerance = 0.02
+    static let growthTolerancePercent = 2.0
 
     static func build(from index: GraphIndex, commit: String?, boundaryWarnings: Int?) -> GraphReport {
         let paths = Set(index.files.map(\.path))
@@ -43,7 +43,7 @@ struct GraphReport: Codable, Equatable {
         let avgLoc = index.files.isEmpty ? 0 : Double(totalLoc) / Double(index.files.count)
 
         let over500All = index.files.filter { $0.loc > over500Threshold }
-            .sorted { ($0.loc, $1.path) > ($1.loc, $0.path) }
+            .sorted { $0.loc != $1.loc ? $0.loc > $1.loc : $0.path < $1.path }
         let filesOver500 = over500All.prefix(listLimit).map { FileLoc(path: $0.path, lines: $0.loc) }
 
         // Fan-in: files that import/use this one, plus files that call into it.
@@ -51,7 +51,7 @@ struct GraphReport: Codable, Equatable {
             let users = Set(file.usedBy).union(index.callerFiles(of: file.path))
             return FileFanIn(path: file.path, fanIn: users.count)
         }
-        fanIns.sort { ($0.fanIn, $1.path) > ($1.fanIn, $0.path) }
+        fanIns.sort { $0.fanIn != $1.fanIn ? $0.fanIn > $1.fanIn : $0.path < $1.path }
         let maxFanIn = fanIns.first?.fanIn ?? 0
         let topFanIn = Array(fanIns.filter { $0.fanIn > 0 }.prefix(fanInLimit))
 
@@ -89,7 +89,7 @@ struct GraphReport: Codable, Equatable {
         let cycles = components
             .filter { $0.count >= 2 }
             .map { $0.sorted() }
-            .sorted { ($0.count, $1.first ?? "") > ($1.count, $0.first ?? "") }
+            .sorted { $0.count != $1.count ? $0.count > $1.count : ($0.first ?? "") < ($1.first ?? "") }
         return Array(cycles.prefix(cycleLimit))
     }
 
@@ -132,7 +132,7 @@ struct GraphReport: Codable, Equatable {
 
     /// `GRAPH.md`. The header format is parsed by a kit skill: keep it exact.
     func render() -> String {
-        var out = "# Code graph (\(graphVersion), \(commit ?? "no-commit"), \(Self.dateString(generatedAt)))\n\n"
+        var out = "# Code graph (\(graphVersion), \(commit ?? "unknown"), \(Self.dateString(generatedAt)))\n\n"
 
         out += "## Counters\n\n| Counter | Value |\n|---|---|\n"
         for key in counters.keys.sorted() {
@@ -171,23 +171,24 @@ struct GraphReport: Codable, Equatable {
         - avgLoc: mean lines per file. May grow by up to 2 % without counting as a regression.
         - totalLoc: total lines across all files. May grow by up to 2 % without counting as a regression.
         - boundaryWarnings: cross-feature boundary warnings from mac/Scripts/feature-boundaries.sh (llm-ide only; absent elsewhere).
+        Cycle members are listed alphabetically, not in call order. A file with no role is counted under `unassigned`.
 
         """
         return out
     }
 
-    /// Compares two reports. Only counters present in both reports are judged for regressions.
+    /// Compares two reports. Only counters present in both reports are judged for regressions and listed in `changes`; a counter present on one side only is omitted from `changes`.
     static func delta(before: GraphReport, after: GraphReport, expect: String?) -> GraphDelta {
-        let keys = Set(before.counters.keys).union(after.counters.keys)
+        let keys = Set(before.counters.keys).intersection(after.counters.keys)
         var changes: [String: Double] = [:]
         for key in keys {
-            changes[key] = (after.counters[key] ?? 0) - (before.counters[key] ?? 0)
+            changes[key] = after.counters[key]! - before.counters[key]!
         }
 
         var regressions: [String] = []
         for key in before.counters.keys where after.counters[key] != nil {
             let b = before.counters[key]!, a = after.counters[key]!
-            let tolerance = growthTolerantCounters.contains(key) ? b * growthTolerance : 0
+            let tolerance = growthTolerantCounters.contains(key) ? b * growthTolerancePercent / 100 : 0
             if a > b + tolerance { regressions.append(key) }
         }
         regressions.sort()
