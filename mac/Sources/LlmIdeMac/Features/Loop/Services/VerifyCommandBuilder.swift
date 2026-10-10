@@ -18,7 +18,7 @@ enum VerifyCommandBuilder {
         case .goTest:   body = "go test ./... -run \(quote("^" + rx(testId) + "$"))"
         case .cargo, .npm, .make: return fallback
         }
-        return packageDir.isEmpty ? body : "cd \(packageDir) && \(body)"
+        return packageDir.isEmpty ? body : "cd \(shellWord(packageDir)) && \(body)"
     }
 
     /// Escape regex metacharacters (`/` stays literal).
@@ -29,6 +29,11 @@ enum VerifyCommandBuilder {
             out.append(ch)
         }
         return out
+    }
+
+    /// `s` as-is when it only has path-safe characters, else single-quoted.
+    static func shellWord(_ s: String) -> String {
+        s.range(of: #"^[A-Za-z0-9._/-]+$"#, options: .regularExpression) != nil ? s : quote(s)
     }
 
     private static func quote(_ s: String) -> String {

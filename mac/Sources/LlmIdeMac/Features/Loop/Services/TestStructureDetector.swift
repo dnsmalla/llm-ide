@@ -57,7 +57,7 @@ struct TestStructureDetector {
     private func exists(_ rel: String) -> Bool { FileManager.default.fileExists(atPath: gitRoot.appendingPathComponent(rel).path) }
     private func read(_ rel: String) -> String? { try? String(contentsOf: gitRoot.appendingPathComponent(rel), encoding: .utf8) }
     private func label(_ pkg: String) -> String { pkg.isEmpty ? "." : pkg }
-    private func cd(_ pkg: String, _ cmd: String) -> String { pkg.isEmpty ? cmd : "cd \(pkg) && \(cmd)" }
+    private func cd(_ pkg: String, _ cmd: String) -> String { pkg.isEmpty ? cmd : "cd \(VerifyCommandBuilder.shellWord(pkg)) && \(cmd)" }
     private func firstExisting(_ pkg: String, _ candidates: [String]) -> String? {
         candidates.map { join(pkg, $0) }.first(where: exists)
     }

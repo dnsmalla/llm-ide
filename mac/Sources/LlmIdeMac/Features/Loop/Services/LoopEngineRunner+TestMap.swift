@@ -106,15 +106,46 @@ extension LoopEngineRunner {
                                      timeout: TimeInterval) async throws -> VerifyOutcome {
         var outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: timeout)
         guard stage.verifies, !writtenRoots.isEmpty else { return outcome }
-        let own = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        var seen: Set<String> = [own]
-        for extra in writtenRoots.values.map({ $0.command.trimmingCharacters(in: .whitespacesAndNewlines) }).sorted()
-        where !extra.isEmpty && seen.insert(extra).inserted {
+        let (extras, skipped) = Self.writtenRootCommands(Array(writtenRoots.values), excluding: command)
+        for dir in skipped {
+            appendLog(.warn, "  [\(stage.name)] skipped written-root verify for \(dir): unsafe path characters")
+        }
+        for extra in extras {
             let more = try await verifier.verify(command: extra, repoRoot: gitRoot, timeout: timeout)
             outcome = VerifyOutcome(exitCode: outcome.exitCode != 0 ? outcome.exitCode : more.exitCode,
                                     output: outcome.output + "\n--- also ran: \(extra) ---\n" + more.output)
         }
         return outcome
+    }
+
+    /// The distinct commands (trimmed, sorted) of written roots that differ from
+    /// `command`; roots whose `packageDir` has a character outside `[A-Za-z0-9._/-]`
+    /// are skipped and reported, since these commands run without approval.
+    nonisolated static func writtenRootCommands(_ roots: [TestRoot], excluding command: String)
+        -> (commands: [String], skipped: [String]) {
+        var seen: Set<String> = [command.trimmingCharacters(in: .whitespacesAndNewlines)]
+        var skipped: [String] = []
+        var out: [String] = []
+        for root in roots.sorted(by: { $0.command < $1.command }) {
+            if root.packageDir.range(of: #"^[A-Za-z0-9._/-]*$"#, options: .regularExpression) == nil {
+                skipped.append(root.packageDir); continue
+            }
+            let c = root.command.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !c.isEmpty, seen.insert(c).inserted { out.append(c) }
+        }
+        return (out.sorted(), skipped)
+    }
+
+    /// The ledger stage a failing shell stage feeds: the first enabled ledger op
+    /// after it, and only when no other enabled verifying stage sits between them
+    /// (a failing Build is not a Test run).
+    nonisolated static func ledgerStage(after failingId: String, in stages: [LoopStage]) -> LoopStage? {
+        guard let index = stages.firstIndex(where: { $0.id == failingId }) else { return nil }
+        for stage in stages[(index + 1)...] where stage.enabled {
+            if stage.kind == .testMap, stage.testOp == .ledger { return stage }
+            if stage.verifies { return nil }
+        }
+        return nil
     }
 
     /// Hands a blocking shell stage's pending FAILING output to the enabled ledger
@@ -124,9 +155,7 @@ extension LoopEngineRunner {
     func flushFailureLedger(stages: [LoopStage]) async {
         guard let pending = pendingFailureLedger else { return }
         pendingFailureLedger = nil
-        guard let index = stages.firstIndex(where: { $0.id == pending.stageId }),
-              let ledger = stages[(index + 1)...].first(where: {
-                  $0.enabled && $0.kind == .testMap && $0.testOp == .ledger }) else { return }
+        guard let ledger = Self.ledgerStage(after: pending.stageId, in: stages) else { return }
         let mainRoot = currentRunContext?.mainGitRoot ?? pending.gitRoot
         _ = await runLedgerOp(ledger, startedAt: Date(), gitRoot: mainRoot, stages: stages,
                               failing: (pending.stageId, pending.output))
