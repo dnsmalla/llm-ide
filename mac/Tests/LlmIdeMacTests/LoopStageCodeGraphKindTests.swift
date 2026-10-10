@@ -24,6 +24,13 @@ final class LoopStageCodeGraphKindTests: XCTestCase {
         XCTAssertFalse(b.allowsRepair)
     }
 
+    func testRefactorApplyIsRecognised() {
+        let apply = LoopStage(name: "Apply", kind: .skill, order: 0, skillId: "skills/refactor-apply")
+        XCTAssertTrue(apply.isRefactorApply)
+        let other = LoopStage(name: "Apply", kind: .skill, order: 0, skillId: "skills/test-gap-writer")
+        XCTAssertFalse(other.isRefactorApply)
+    }
+
     func testAttemptFields() throws {
         var a = LoopStageAttempt(stageId: "x", stageName: "Graph Check", kind: .codeGraph,
                                  severity: .blocking, startedAt: Date(), durationSeconds: 0,

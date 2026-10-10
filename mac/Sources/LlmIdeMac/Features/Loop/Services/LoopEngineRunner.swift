@@ -260,9 +260,11 @@ final class LoopEngineRunner: ObservableObject {
     var testStructure: TestStructure?
     var testMapBefore: TestMap?
     /// Refactor loop run state (`LoopEngineRunner+CodeGraph.swift`), reset per run:
-    /// the graph snapshot the run compares against, and the batch the apply
-    /// stage changed (its id, expected counter, and whether it was skipped).
+    /// the graph snapshot the run compares against, the plan text before the apply
+    /// stage, and the batch that apply changed (its id, expected counter, and
+    /// whether it was skipped).
     var graphBefore: GraphReport?
+    var refactorPlanBefore: String?
     var currentBatchId: String?
     var currentExpect: String?
     var currentBatchSkipped = false
@@ -635,6 +637,7 @@ final class LoopEngineRunner: ObservableObject {
         testStructure = nil
         testMapBefore = nil
         graphBefore = nil
+        refactorPlanBefore = nil
         currentBatchId = nil
         currentExpect = nil
         currentBatchSkipped = false
@@ -967,9 +970,15 @@ final class LoopEngineRunner: ObservableObject {
                     stageStates[stage.id] = .passed
                     decision = .proceed
                 case .skill:
+                    if stage.isRefactorApply {
+                        captureRefactorPlanBefore(stage, gitRoot: runGitRoot, faultsRoot: faultsRoot)
+                    }
                     decision = await runSkillStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                    if stage.isRefactorApply {
+                        captureRefactorBatchAfter(stage, gitRoot: runGitRoot, faultsRoot: faultsRoot)
+                    }
                     // Only an apply that actually RAN counts as applied: an
                     // errored one (the agent never answered) applied nothing,
                     // so the retry must run it again, not skip it as done.
@@ -1301,6 +1310,16 @@ final class LoopEngineRunner: ObservableObject {
             pendingFailureLedger = (stage.id, outcome.output, gitRoot)
         }
 
+        // A stage that refuses repair fails the run here: no flake re-run, no
+        // repair. The failure still reaches a ledger stage after it (flushed when
+        // this attempt returns).
+        if !stage.allowsRepair {
+            let message = "stage \(stage.name) failed and does not allow repair"
+            appendLog(.error, "  [\(stage.name)] \(message)")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
+            return .terminate(.error(message))
+        }
 
         let used = repairsUsed[stage.id] ?? 0
         // The same failure set back after two repairs with DIFFERENT diffs: a

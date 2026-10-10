@@ -344,6 +344,10 @@ extension LoopStage {
     // only" (`soloing`, the phone's `loop_start_stage`), a disabled Test stage,
     // a template applied to a repo with no test tooling, or a user-built loop.
 
+    /// The Refactoring loop's apply stage: rewrites the tree one batch of
+    /// `REFACTOR.md` at a time, so the runner captures which batch it applied.
+    var isRefactorApply: Bool { kind == .skill && skillId == "skills/refactor-apply" }
+
     /// Skill ids whose stage applies code edits that must be verified.
     static let codeApplySkillIds: Set<String> = [
         "skills/refactor-apply", "skills/test-gap-writer", "skills/test-structure-setup",

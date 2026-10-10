@@ -3400,6 +3400,24 @@ final class LoopEngineRunnerTests: XCTestCase {
         if case .error = advisory {} else { XCTFail("advisory check must not vouch for an errored skill: \(advisory)") }
     }
 
+    /// A blocking shell stage that refuses repair fails the run at once: no flake
+    /// re-run, no repair agent call, and the message names the stage.
+    func testBlockingShellStageThatDisallowsRepairFailsWithoutRepairOrFlakeRerun() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "build broke") }
+        let repairer = StubRepairer()
+        var build = LoopStage(id: "b1", name: "Build", kind: .shellCommand, command: "swift build", order: 0)
+        build.allowsRepair = false
+        let config = LoopEngineConfig(stages: [build], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("b1", "swift build")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .error("stage Build failed and does not allow repair"))
+        XCTAssertEqual(repairer.repairCount, 0)
+        XCTAssertEqual(verifier.calls.count, 1, "the flake re-run must be skipped too")
+    }
 
     /// Without a rescanner in this build, a snapshot stage is advisory by nature:
     /// it logs that the graph is unavailable and passes.

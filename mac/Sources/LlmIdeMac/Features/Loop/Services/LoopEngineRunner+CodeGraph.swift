@@ -148,6 +148,53 @@ extension LoopEngineRunner {
         return .terminate(.error(output))
     }
 
+    // MARK: - Refactor batch capture
+
+    /// Reads the plan the apply stage edits (its resolved Input), or nil.
+    private func refactorPlanText(_ stage: LoopStage, gitRoot: URL, faultsRoot: URL) -> String? {
+        guard let url = LoopStagePaths.resolve(stage, gitRoot: gitRoot, projectRoot: faultsRoot).input else {
+            return nil
+        }
+        return try? String(contentsOf: url, encoding: .utf8)
+    }
+
+    /// Before the apply stage runs: remember the plan text and clear this batch's state.
+    func captureRefactorPlanBefore(_ stage: LoopStage, gitRoot: URL, faultsRoot: URL) {
+        refactorPlanBefore = refactorPlanText(stage, gitRoot: gitRoot, faultsRoot: faultsRoot)
+        currentBatchId = nil
+        currentExpect = nil
+        currentBatchSkipped = false
+    }
+
+    /// After the apply stage ran: the batch whose status it changed, or the
+    /// `Applied: R<n>` line of its reply when the plan itself did not change.
+    /// Sets the batch the verify stage checks and stamps it on the apply attempt.
+    func captureRefactorBatchAfter(_ stage: LoopStage, gitRoot: URL, faultsRoot: URL) {
+        let before = refactorPlanBefore
+        refactorPlanBefore = nil
+        let after = refactorPlanText(stage, gitRoot: gitRoot, faultsRoot: faultsRoot)
+        var applied: RefactorPlanDiff.Applied?
+        if let before, let after {
+            applied = RefactorPlanDiff.appliedBatch(before: before, after: after)
+        }
+        if applied == nil, let reply = lastSkillResults[stage.id]?.reply,
+           let id = RefactorPlanDiff.appliedReplyBatchId(reply) {
+            applied = after.flatMap { RefactorPlanDiff.batch(id: id, in: $0) }
+                ?? RefactorPlanDiff.Applied(id: id, status: "done", expect: nil, files: [])
+        }
+        guard let applied else {
+            appendLog(.info, "  [\(stage.name)] no refactor batch recorded as applied")
+            return
+        }
+        let skipped = applied.status == "skipped"
+        currentBatchId = applied.id
+        currentExpect = skipped ? nil : applied.expect
+        currentBatchSkipped = skipped
+        annotateLastAttempt(stageId: stage.id) { $0.batchId = applied.id }
+        appendLog(.info, "  [\(stage.name)] batch \(applied.id) \(skipped ? "skipped" : "applied")"
+                  + (applied.expect.map { " · expects \($0) to fall" } ?? ""))
+    }
+
     /// Sets a field on the most recent attempt recorded for `stageId`.
     func annotateLastAttempt(stageId: String, _ update: (inout LoopStageAttempt) -> Void) {
         guard !iterationRecords.isEmpty else { return }

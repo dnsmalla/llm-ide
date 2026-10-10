@@ -1004,6 +1004,16 @@ struct LoopEngineView: View {
                             get: { stage.wrappedValue.timeoutSeconds ?? 0 },
                             set: { stage.wrappedValue.timeoutSeconds = $0 == 0 ? nil : $0 }
                         ), in: 0...3600, step: 30)
+
+                Toggle("Repairable", isOn: Binding(
+                    get: { stage.wrappedValue.allowsRepair },
+                    set: { stage.wrappedValue.allowsRepair = $0 }
+                ))
+                .font(Typography.caption)
+                Text(stage.wrappedValue.allowsRepair
+                     ? "A failure is sent to the repair agent (after a flake re-run)."
+                     : "A failure ends the run at once — no flake re-run, no repair.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
             }
         }
     }

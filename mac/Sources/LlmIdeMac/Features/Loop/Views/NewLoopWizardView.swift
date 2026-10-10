@@ -340,6 +340,16 @@ struct NewLoopWizardView: View {
                 ))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11, design: .monospaced))
+
+                Toggle("Repairable", isOn: Binding(
+                    get: { stage.wrappedValue.allowsRepair },
+                    set: { stage.wrappedValue.allowsRepair = $0 }
+                ))
+                .font(Typography.caption)
+                Text(stage.wrappedValue.allowsRepair
+                     ? "A failure is sent to the repair agent (after a flake re-run)."
+                     : "A failure ends the run at once — no flake re-run, no repair.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
             case .regressionSweep:
                 Text("Re-runs the fault sweep (known regressions + repo checks) against this project.")
                     .font(Typography.caption)
