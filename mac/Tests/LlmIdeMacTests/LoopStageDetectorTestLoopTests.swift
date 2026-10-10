@@ -97,6 +97,9 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         let v = LoopEngineRunner.testSetupViolations(
             changed: ["Package.swift", "Sources/App/main.swift", "tests/test_a.py", "tests/__init__.py", "pytest.ini", "src/__init__.py", "src/new.py"],
             created: ["tests/test_a.py", "tests/__init__.py", "pytest.ini", "src/__init__.py", "src/new.py"])
+        let m = LoopEngineRunner.testSetupViolations(changed: ["Package.swift", "go.mod"],
+                                                     created: ["Package.swift", "go.mod", "package.json", "pytest.ini"])
+        XCTAssertEqual(m.created, ["Package.swift", "go.mod", "package.json"])
         XCTAssertEqual(v.modified, ["Sources/App/main.swift"])
         XCTAssertEqual(v.created, ["src/__init__.py", "src/new.py"])
     }

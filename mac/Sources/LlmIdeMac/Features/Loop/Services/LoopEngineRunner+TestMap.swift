@@ -270,8 +270,9 @@ extension LoopEngineRunner {
         let modified = Set(changed).subtracting(createdSet).filter { !testManifestNames.contains(name($0)) }.sorted()
         let outside = createdSet.filter { p in
             if TestSourceMapper.sourceStem(forTestPath: p) != nil { return false }
-            if testManifestNames.contains(name(p)) { return false }
-            if ["__init__.py", "pytest.ini"].contains(name(p)), underTestDir(p) { return false }
+            // Setup never invents a build system: only pytest config may be created.
+            if ["pytest.ini", "pyproject.toml"].contains(name(p)) { return false }
+            if name(p) == "__init__.py", underTestDir(p) { return false }
             return true
         }.sorted()
         return (modified, outside)
