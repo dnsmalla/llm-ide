@@ -111,6 +111,11 @@ public struct MemoryStore: Sendable {
         return url
     }
 
+    /// Rewrite an existing fault file in place (status changes). Same YAML path as `writeFault`.
+    func rewriteFault(at url: URL, _ fault: FaultReport) throws {
+        try fault.toMarkdown().write(to: url, atomically: true, encoding: .utf8)
+    }
+
     func loadFault(at url: URL) throws -> FaultReport {
         let md = try String(contentsOf: url, encoding: .utf8)
         return try FaultReport.fromMarkdown(md)
