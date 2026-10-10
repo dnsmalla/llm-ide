@@ -19,4 +19,14 @@ final class RegressionFaultSyncTests: XCTestCase {
         XCTAssertEqual(fixed.markedFixed, ["T.FooTests/testBar"])
         XCTAssertEqual(try MemoryStore().loadFault(at: MemoryStore().listFaults(at: root)[0]).status, .fixed)
     }
+
+    func testSameSecondFailuresGetDistinctFiles() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let ids = (1...3).map { "T.FooTests/testCase\($0)" }
+        let xroot = TestRoot(packageDir: "", testDir: "Tests/T", runner: .xctest, command: "swift test", namingRule: "", languages: ["swift"])
+        let out = try RegressionFaultSync(gitRoot: root).apply(diff: .init(newFailures: ids, stillFailing: [], fixed: []), root: xroot, suiteCommand: "swift test", gitHead: nil, appVersion: "1")
+        XCTAssertEqual(out.created, ids)
+        XCTAssertEqual(MemoryStore().listFaults(at: root).count, 3)
+    }
 }

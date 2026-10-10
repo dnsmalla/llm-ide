@@ -31,13 +31,16 @@ struct TestLedger: Codable, Equatable {
         try e.encode(self).write(to: u, options: .atomic)
     }
 
-    /// `fixed` = previously failing and now either seen passing, or the whole run passed (no failures).
-    static func diff(previous: TestLedger?, currentFailing: [String], currentPassing: [String]) -> Diff {
+    /// `fixed` = previously failing, no longer failing, and either seen passing or `runPassed`.
+    /// The caller MUST pass the Test stage's real exit status as `runPassed`: an empty failing
+    /// list alone is also what a crashed or timed-out run looks like.
+    static func diff(previous: TestLedger?, currentFailing: [String], currentPassing: [String],
+                     runPassed: Bool) -> Diff {
         let prevFailing = previous?.failing ?? []
         let cur = Set(currentFailing), pass = Set(currentPassing), prev = Set(prevFailing)
         return Diff(
             newFailures: currentFailing.filter { !prev.contains($0) },
             stillFailing: currentFailing.filter { prev.contains($0) },
-            fixed: prevFailing.filter { !cur.contains($0) && (pass.contains($0) || currentFailing.isEmpty) })
+            fixed: prevFailing.filter { !cur.contains($0) && (runPassed || pass.contains($0)) })
     }
 }

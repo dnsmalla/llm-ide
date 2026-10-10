@@ -9,4 +9,9 @@ final class VerifyCommandBuilderTests: XCTestCase {
         XCTAssertEqual(VerifyCommandBuilder.command(runner: .make, testId: "anything", packageDir: "", fallback: "make test"), "make test")
         XCTAssertEqual(VerifyCommandBuilder.command(runner: .jest, testId: "it's", packageDir: "", fallback: "x"), "npx jest -t 'it'\\''s'")
     }
+    func testNodeLeafAndEscaping() {
+        XCTAssertEqual(VerifyCommandBuilder.command(runner: .nodeTest, testId: "suite/adds numbers", packageDir: "extension", fallback: "x"), "cd extension && node --test --test-name-pattern '^adds numbers$' tests/")
+        XCTAssertEqual(VerifyCommandBuilder.command(runner: .jest, testId: "a.b (c)", packageDir: "", fallback: "x"), "npx jest -t 'a\\.b \\(c\\)'")
+        XCTAssertEqual(VerifyCommandBuilder.command(runner: .xctest, testId: "M.Foo/test[1]", packageDir: "", fallback: "x"), "swift test --filter 'Foo/test\\[1\\]'")
+    }
 }
