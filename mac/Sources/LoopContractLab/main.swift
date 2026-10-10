@@ -239,8 +239,14 @@ do {
 
     let (ensured, changes) = LoopStageDetector.ensureDefaultLoops(in: saved, gitRoot: swiftRoot)
     let testLoopResult = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }
-    expect(testLoopResult?.config.stages.count == 2,
-           "the user's stage is joined by a separate, genuine Test default — never merged into it")
+    let eightKeys = ["test-structure", "test-setup", "test-structure-check", "test-map",
+                     "test-write", LoopDefaultLoopKey.test, "test-ledger", "test-map-check"]
+    let resultStages = testLoopResult?.config.stages ?? []
+    expect(resultStages.contains { $0.defaultKey == nil && $0.command == "npm run e2e" }
+               && resultStages.filter { $0.defaultKey == LoopDefaultLoopKey.test }.count == 1
+               && resultStages.count == 1 + eightKeys.count
+               && Set(resultStages.compactMap(\.defaultKey)) == Set(eightKeys),
+           "the user's stage is joined by the eight genuine Test defaults (exactly one `test`) — never merged into it")
     let mineStage = testLoopResult?.config.stages.first { $0.defaultKey == nil }
     let defaultStage = testLoopResult?.config.stages.first { $0.defaultKey == LoopDefaultLoopKey.test }
     expect(mineStage?.command == "npm run e2e" && mineStage?.isDefault == false,
@@ -265,7 +271,7 @@ do {
 
     let (ensured, changes) = LoopStageDetector.ensureDefaultLoops(in: saved, gitRoot: swiftRoot)
     let testLoopResult = ensured.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }
-    expect(testLoopResult?.config.stages.first?.command == "swift test",
+    expect(testLoopResult?.config.stages.first { $0.defaultKey == LoopDefaultLoopKey.test }?.command == "swift test",
            "driven end-to-end through ensureDefaultLoops, an already-keyed stale command is still corrected — "
                + "proving step 4.5 is actually wired in, not just correct in isolation")
     expect(changes.contains(LoopStageDetector.RevalidationChange(
