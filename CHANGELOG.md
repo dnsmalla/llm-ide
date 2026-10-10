@@ -18,9 +18,9 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   llm-ide boundary warnings) with each batch's `Expect:` counter. A failed rescan
   fails the attempt rather than comparing a stale graph. Stages gain
   `allowsRepair` (a blocking failure with it off ends the run). Graph `graph.json`
-  is version 1.1: it adds file-level `calls` so Swift gets dependency data, and is
+  is version 1.1: it adds file-level `calls` and `files[].role`, so Swift gets dependency data, and is
   a strict superset of 1.0. Saved Refactoring loops upgrade in place. The kit
-  `refactor-planner`, `refactor-apply` and `test-gap-writer` skills are at v1.1.0.
+  `refactor-planner`, `refactor-apply` and `test-gap-writer` skills are at version 1.1.0 in the kit's `registry.yaml` (pin 146ea8c).
   Downgrade note: builds older than this read `.codeGraph` stages as unsupported
   and leave them untouched; graph.json 1.1 is readable by 1.0 readers.
 - **Test loop upgrade: structure, code-graph test map, test writing and regression faults.** The Test loop is no
