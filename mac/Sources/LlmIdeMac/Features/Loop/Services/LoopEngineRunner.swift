@@ -2150,6 +2150,13 @@ final class LoopEngineRunner: ObservableObject {
                                 edit: () async throws -> LoopAgentResult?) async -> GuardedEditResult {
         lastGuardSnapshot = nil
         guard Self.effectivePolicy(for: stage, config: config) != .off else {
+            // Policy `.off` skips the scope check, but the test writer/setup guards
+            // still need to know what was already dirty before the agent ran, or
+            // they would revert the user's own uncommitted edits.
+            if stage.testWriteOnly || stage.isTestSetup {
+                lastGuardSnapshot = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
+                                                              scopeGlobs: scopeGlobs)
+            }
             do { _ = try await edit() } catch { return .failed(error, .notChecked, violations: [], changed: []) }
             return .completed(.notChecked, violations: [], changed: [])
         }

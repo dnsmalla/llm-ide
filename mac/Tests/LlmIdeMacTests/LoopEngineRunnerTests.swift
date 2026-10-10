@@ -3153,6 +3153,89 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: repo.appendingPathComponent("A.swift")), "user edit\n")
     }
 
+    private func gitRepo(files: [String: String]) throws -> URL {
+        let repo = try makeTempRepo()
+        for (name, text) in files {
+            try text.write(to: repo.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "cd '\(repo.path)' && git init -q && git add . && git -c user.email=a@b -c user.name=t commit -qm init"]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        try p.run(); p.waitUntilExit()
+        return repo
+    }
+
+    private func swiftStructure() -> TestStructure {
+        TestStructure(generatedAt: Date(), roots: [
+            TestRoot(packageDir: "", testDir: "Tests", runner: .xctest, command: "swift test", namingRule: "", languages: ["swift"])
+        ], status: "ok", notes: [])
+    }
+
+    /// Policy `.off` used to skip the snapshot, so the guard reverted the user's
+    /// own uncommitted edits to HEAD. With no snapshot it must revert nothing.
+    func testWriteGuardWithoutSnapshotRevertsNothingAndFails() async throws {
+        let repo = try gitRepo(files: ["A.swift": "one\n"])
+        try "user edit\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(), scopeGuard: GitRepairScopeGuard())
+        runner.testStructure = swiftStructure()
+        runner.lastGuardSnapshot = nil
+        let writer = LoopStage(name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer")
+        let message = await runner.enforceTestWriteOnly(
+            stage: writer, result: LoopAgentResult(changedPaths: ["A.swift"]), changed: ["A.swift"], gitRoot: repo)
+        XCTAssertTrue(message?.contains("no snapshot") == true, message ?? "nil")
+        XCTAssertEqual(try String(contentsOf: repo.appendingPathComponent("A.swift")), "user edit\n")
+        let setup = LoopStage(name: "Test Setup", kind: .skill, order: 0, skillId: "skills/test-structure-setup")
+        try "user edit\n".write(to: repo.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        let setupMessage = await runner.enforceTestSetupOnly(
+            stage: setup, result: LoopAgentResult(changedPaths: ["A.swift"]), changed: ["A.swift"], gitRoot: repo)
+        XCTAssertTrue(setupMessage?.contains("no snapshot") == true, setupMessage ?? "nil")
+        XCTAssertEqual(try String(contentsOf: repo.appendingPathComponent("A.swift")), "user edit\n")
+    }
+
+    /// Under policy `.off` the writer stage still snapshots before the agent runs.
+    func testTestWriterStageSnapshotsUnderProtectedPathPolicyOff() async throws {
+        let repo = try makeTempRepo()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: { let a = makeApprovals(); a.approveStage(repo: repo, stageId: "t1", command: "echo ok"); return a }())
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "echo ok", order: 1),
+        ], maxIterations: 2, protectedPathPolicy: .off)
+        _ = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertNotNil(runner.lastGuardSnapshot)
+    }
+
+    /// A created path the server reports outside the repo is never deleted.
+    func testWriteGuardNeverDeletesACreatedPathOutsideTheRepo() async throws {
+        let parent = try makeTempRepo()
+        let repo = parent.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try "keep\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "cd '\(repo.path)' && git init -q && git add . && git -c user.email=a@b -c user.name=t commit -qm init"]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        try p.run(); p.waitUntilExit()
+        let outside = parent.appendingPathComponent("outside.swift")
+        try "precious\n".write(to: outside, atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(), scopeGuard: GitRepairScopeGuard())
+        runner.testStructure = swiftStructure()
+        runner.lastGuardSnapshot = RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+        let writer = LoopStage(name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer")
+        let message = await runner.enforceTestWriteOnly(
+            stage: writer, result: LoopAgentResult(changedPaths: ["../outside.swift"], createdPaths: ["../outside.swift"]),
+            changed: ["../outside.swift"], gitRoot: repo)
+        XCTAssertTrue(message?.contains("left in place: ../outside.swift") == true, message ?? "nil")
+        XCTAssertEqual(try String(contentsOf: outside), "precious\n")
+    }
+
     private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
         LoopEngineConfig(stages: [
             LoopStage(id: "g1", name: "Generate", kind: .skill, order: 0, skillId: "skills/plan-director"),

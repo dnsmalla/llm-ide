@@ -215,6 +215,13 @@ extension LoopEngineRunner {
         return p.terminationStatus == 0 && !out.isEmpty ? out : nil
     }
 
+    /// The guards' fail-closed answer when no pre-edit snapshot exists: nothing is
+    /// reverted, because a revert could destroy the user's own uncommitted edits.
+    nonisolated static func noSnapshotMessage(stage: LoopStage, offenders: [String]) -> String {
+        "\(stage.name) broke its file rules; no pre-edit snapshot was taken, so nothing was reverted. "
+            + "Left in place (no snapshot): \(offenders.joined(separator: ", "))"
+    }
+
     // MARK: - Test Write create-only guard
 
     /// What the writer did that it may not: `modified` = any changed file it did
@@ -253,10 +260,14 @@ extension LoopEngineRunner {
         let bad = Self.testWriteViolations(changed: all, created: created, allowedDirs: dirs,
                                            testNamedPackageDirs: beside)
         guard !bad.modified.isEmpty || !bad.created.isEmpty else { return nil }
+        // No snapshot means we cannot tell the user's earlier edits from the
+        // writer's: revert nothing, fail, and say so.
+        guard let snapshot = lastGuardSnapshot else {
+            return Self.noSnapshotMessage(stage: stage, offenders: bad.modified + bad.created)
+        }
         // Same rule as `handleViolation`: a path that was already dirty holds the
         // user's earlier edits, which a checkout would destroy — leave it, say so.
-        let snapshot = lastGuardSnapshot
-        let preDirty = bad.modified.filter { snapshot?.dirtyPaths.contains($0) == true }
+        let preDirty = bad.modified.filter { snapshot.dirtyPaths.contains($0) }
         let revertable = bad.modified.filter { !preDirty.contains($0) }
         if !preDirty.isEmpty {
             appendLog(.warn, "  [\(stage.name)] not reverting already-modified path(s), to keep their earlier uncommitted edits: \(preDirty.joined(separator: ", "))")
@@ -266,16 +277,20 @@ extension LoopEngineRunner {
             // Restores tracked files; deletes an untracked one only when it sits under
             // a test root (the server may report a Bash-made file as modified).
             let deletable = Set(revertable.filter { p in dirs.filter { !$0.isEmpty }.contains { p.hasPrefix($0 + "/") } })
-            let snap = snapshot ?? RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
             if let error = await scopeGuard.revertUnlisted(paths: revertable, created: deletable,
-                                                           before: snap, gitRoot: gitRoot) {
+                                                           before: snapshot, gitRoot: gitRoot) {
                 appendLog(.warn, "  [\(stage.name)] \(error)")
                 notReverted += revertable
             }
         }
+        // Per path, through the guard: it refuses `..`/absolute entries and never
+        // deletes a tracked file.
         for path in bad.created {
-            let url = gitRoot.appendingPathComponent(path)
-            if (try? FileManager.default.removeItem(at: url)) == nil { notReverted.append(path) }
+            if let error = await scopeGuard.revertUnlisted(paths: [path], created: [path],
+                                                           before: snapshot, gitRoot: gitRoot) {
+                appendLog(.warn, "  [\(stage.name)] \(error)")
+                notReverted.append(path)
+            }
         }
         let roots = dirs.filter { !$0.isEmpty }.joined(separator: ", ")
         let all2 = bad.modified + bad.created
@@ -316,22 +331,27 @@ extension LoopEngineRunner {
         let all = Array(Set(changed).union(result?.changedPaths ?? []).union(created))
         let bad = Self.testSetupViolations(changed: all, created: created)
         guard !bad.modified.isEmpty || !bad.created.isEmpty else { return nil }
-        let snapshot = lastGuardSnapshot
-        let preDirty = bad.modified.filter { snapshot?.dirtyPaths.contains($0) == true }
+        guard let snapshot = lastGuardSnapshot else {
+            return Self.noSnapshotMessage(stage: stage, offenders: bad.modified + bad.created)
+        }
+        let preDirty = bad.modified.filter { snapshot.dirtyPaths.contains($0) }
         let revertable = bad.modified.filter { !preDirty.contains($0) }
         var kept = Set(preDirty)
         if !preDirty.isEmpty {
             appendLog(.warn, "  [\(stage.name)] not reverting already-modified path(s), to keep their earlier uncommitted edits: \(preDirty.joined(separator: ", "))")
         }
         if !revertable.isEmpty {
-            let snap = snapshot ?? RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
-            if let error = await scopeGuard.revertUnlisted(paths: revertable, created: [], before: snap, gitRoot: gitRoot) {
+            if let error = await scopeGuard.revertUnlisted(paths: revertable, created: [], before: snapshot, gitRoot: gitRoot) {
                 appendLog(.warn, "  [\(stage.name)] \(error)")
                 kept.formUnion(revertable)
             }
         }
         for path in bad.created {
-            if (try? FileManager.default.removeItem(at: gitRoot.appendingPathComponent(path))) == nil { kept.insert(path) }
+            if let error = await scopeGuard.revertUnlisted(paths: [path], created: [path],
+                                                           before: snapshot, gitRoot: gitRoot) {
+                appendLog(.warn, "  [\(stage.name)] \(error)")
+                kept.insert(path)
+            }
         }
         let offenders = bad.modified + bad.created
         let done = offenders.filter { !kept.contains($0) }
