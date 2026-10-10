@@ -146,7 +146,8 @@ public final class CodeNoteService: ObservableObject {
             // matters here.
             _ = await Task.detached(priority: .userInitiated) {
                 CodeNoteGenerator.generate(scan: result, repoRoot: repoRoot,
-                                           changedPaths: changedPaths)
+                                           changedPaths: changedPaths,
+                                           calls: CodeNoteGenerator.fileCalls(from: graph))
             }.value
         } else {
             Self.log.info("engine reports no symbol scan — keeping existing notes rather than pruning")

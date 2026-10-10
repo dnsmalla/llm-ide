@@ -29,7 +29,8 @@ public enum CodeNoteGenerator {
     /// Write all artifacts. Returns the number of per-file notes (re)written.
     @discardableResult
     public static func generate(scan: ScanResult, repoRoot: URL,
-                                changedPaths: Set<String>? = nil) -> Int {
+                                changedPaths: Set<String>? = nil,
+                                calls: [FileCall] = []) -> Int {
         let layout = ProjectLayout(root: repoRoot)
         let notesRoot = layout.graphNotesDir
         try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
@@ -67,7 +68,7 @@ public enum CodeNoteGenerator {
 
         pruneOrphanNotes(notesRoot: notesRoot, validPaths: Set(codeFiles.map(\.path)))
         writeIndex(scan: scan, usedBy: usedBy, repoRoot: repoRoot)
-        writeGraphJSON(scan: scan, usedBy: usedBy, repoRoot: repoRoot)
+        writeGraphJSON(scan: scan, usedBy: usedBy, calls: calls, repoRoot: repoRoot)
         return written
     }
 
@@ -215,7 +216,36 @@ public enum CodeNoteGenerator {
 
     // MARK: - graph.json
 
-    static func writeGraphJSON(scan: ScanResult, usedBy: [String: [String]], repoRoot: URL) {
+    /// One file-level call edge in graph.json 1.1.
+    public struct FileCall: Encodable, Equatable, Hashable, Sendable {
+        public let from: String
+        public let to: String
+        public let symbol: String
+        public init(from: String, to: String, symbol: String) {
+            self.from = from; self.to = to; self.symbol = symbol
+        }
+    }
+
+    /// File-level calls derived from the `.calls` symbol edges of `graph`: only edges whose
+    /// caller and callee live in different files, deduplicated on (from, to, symbol), sorted.
+    /// Symbol nodes resolve to their file through `metadata["source_file"]`; nodes without it are skipped.
+    public static func fileCalls(from graph: CGData) -> [FileCall] {
+        var fileOf: [String: (path: String, name: String)] = [:]
+        for node in graph.nodes {
+            guard let path = node.metadata["source_file"] else { continue }
+            fileOf[node.id] = (path, node.title)
+        }
+        var seen = Set<FileCall>()
+        for edge in graph.edges where edge.kind == .calls {
+            guard let caller = fileOf[edge.fromId], let callee = fileOf[edge.toId],
+                  caller.path != callee.path else { continue }
+            seen.insert(FileCall(from: caller.path, to: callee.path, symbol: callee.name))
+        }
+        return seen.sorted { ($0.from, $0.to, $0.symbol) < ($1.from, $1.to, $1.symbol) }
+    }
+
+    static func writeGraphJSON(scan: ScanResult, usedBy: [String: [String]],
+                               calls: [FileCall] = [], repoRoot: URL) {
         let codeDir = ProjectLayout(root: repoRoot).graphDir
 
         struct SymEntry: Encodable {
@@ -226,8 +256,8 @@ public enum CodeNoteGenerator {
             let role: String; let imports: [String]; let usedBy: [String]
             let types: [SymEntry]; let functions: [SymEntry]
         }
-        struct Summary: Encodable { let totalFiles: Int; let totalEdges: Int }
-        struct Graph: Encodable { let version: String; let summary: Summary; let files: [FileNode] }
+        struct Summary: Encodable { let totalFiles: Int; let totalEdges: Int; let totalCalls: Int }
+        struct Graph: Encodable { let version: String; let summary: Summary; let files: [FileNode]; let calls: [FileCall] }
 
         let codeFiles = Self.codeFiles(from: scan)
         let nodes: [FileNode] = codeFiles.map { f in
@@ -244,9 +274,11 @@ public enum CodeNoteGenerator {
                             types: types, functions: funcs)
         }
         let totalEdges = scan.imports.values.reduce(0) { $0 + $1.count }
-        let graph = Graph(version: "1.0",
-                          summary: Summary(totalFiles: codeFiles.count, totalEdges: totalEdges),
-                          files: nodes)
+        let sortedCalls = calls.sorted { ($0.from, $0.to, $0.symbol) < ($1.from, $1.to, $1.symbol) }
+        let graph = Graph(version: "1.1",
+                          summary: Summary(totalFiles: codeFiles.count, totalEdges: totalEdges,
+                                           totalCalls: sortedCalls.count),
+                          files: nodes, calls: sortedCalls)
         let enc = JSONEncoder(); enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         let graphURL = codeDir.appendingPathComponent("graph.json")
         do {
