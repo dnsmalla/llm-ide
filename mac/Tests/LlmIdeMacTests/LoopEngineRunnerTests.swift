@@ -3326,8 +3326,49 @@ final class LoopEngineRunnerTests: XCTestCase {
             LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "make test", order: 1),
             LoopStage(id: "l", name: "Ledger", kind: .testMap, order: 2, testOp: .ledger),
         ]
-        XCTAssertNil(LoopEngineRunner.ledgerStage(after: "b", in: stages))
+        // Test ran this iteration: a failing Build does not feed the ledger past it.
+        XCTAssertNil(LoopEngineRunner.ledgerStage(after: "b", in: stages, ranIds: ["b", "t"]))
+        // Test never ran (Build failed first): the ledger is still reached.
+        XCTAssertEqual(LoopEngineRunner.ledgerStage(after: "b", in: stages, ranIds: ["b"])?.id, "l")
         XCTAssertEqual(LoopEngineRunner.ledgerStage(after: "t", in: stages)?.id, "l")
+    }
+
+    /// A blocking baseline that refuses repair fails the run, and its failure
+    /// still reaches the ledger: the refactor test stage between them never ran,
+    /// so it must not hide the baseline's failure.
+    func testBaselineFailureReachesTheLedgerPastAnUnrunTestStage() async throws {
+        let repo = try makeTempRepo()
+        let verifier = StubVerifier { _ in
+            VerifyOutcome(exitCode: 1, output: "/p/A.swift:7: error: -[M.C testBroken] : XCTAssertTrue failed\n"
+                          + "Test Case '-[M.C testBroken]' failed (0.001 seconds).")
+        }
+        let journal = InMemoryJournal()
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "b1", command: "swift test")
+        approvals.approveStage(repo: repo, stageId: "r1", command: "swift test --filter Refactor")
+        var baseline = LoopStage(id: "b1", name: "Test Baseline", kind: .shellCommand, command: "swift test", order: 0)
+        baseline.allowsRepair = false
+        let config = LoopEngineConfig(stages: [
+            baseline,
+            LoopStage(id: "r1", name: "Refactor Test", kind: .shellCommand, command: "swift test --filter Refactor", order: 1),
+            LoopStage(id: "l1", name: "Ledger", kind: .testMap, order: 2, testOp: .ledger),
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .error("stage Test Baseline failed and does not allow repair"))
+        XCTAssertEqual(verifier.calls, ["swift test"], "the refactor test never ran")
+        let ledgerAttempts = journal.written.last?.iterations.flatMap(\.attempts).filter { $0.kind == .testMap } ?? []
+        XCTAssertEqual(ledgerAttempts.count, 1)
+        XCTAssertEqual(ledgerAttempts.first?.newFaults?.count, 1)
+        let dir = repo.appendingPathComponent("system/faults")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        XCTAssertEqual(files.count, 1)
+        let text = files.first.flatMap { try? String(contentsOf: dir.appendingPathComponent($0)) } ?? ""
+        XCTAssertTrue(text.contains("test:\(ledgerAttempts.first?.newFaults?.first ?? "?")"), text)
     }
 
     private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
