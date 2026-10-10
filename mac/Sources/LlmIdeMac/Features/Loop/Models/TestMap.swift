@@ -64,8 +64,8 @@ public struct TestMap: Codable, Equatable {
         if bare.isEmpty { out += "- none\n" }
         for (path, v) in bare.prefix(25) { out += "- \(path) — fan-in \(v.fanIn), \(v.loc) lines\n" }
         out += "\n## How to read\n"
-        out += "- untestedFunctions: functions no test file references; testedFunctions: the rest; untestedFiles: source files none of whose functions are tested.\n"
-        out += "- A function counts as tested when a test file in the matching test root contains `f(`, `.f(` or `\"f\"` and either maps to the same source stem or mentions the file's name.\n"
+        out += "- untestedFunctions: functions no test file references; testedFunctions: the rest; untestedFiles: source files with at least one eligible function and none of them tested.\n"
+        out += "- A function `f` of file `p` is tested by a test file in the matching test root when the test's tokens (identifiers and double-quoted string contents) contain `f` exactly, and the test maps to the same source stem as `p` or contains the file's name as a token.\n"
         out += "- init, deinit, body, main, description and `_`-prefixed names are skipped.\n"
         return out
     }
