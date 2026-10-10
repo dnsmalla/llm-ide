@@ -31,5 +31,14 @@ final class TestSourceMapperTests: XCTestCase {
             XCTAssertTrue(TestSourceMapper.containsTestMarker(s), s)
         }
         XCTAssertFalse(TestSourceMapper.containsTestMarker("// placeholder"))
+        for s in ["const x = s.split(',')", "latest()", "fun testing()", "commit()"] {
+            XCTAssertFalse(TestSourceMapper.containsTestMarker(s), s)
+        }
+    }
+    func testTestDirAwareness() {
+        XCTAssertFalse(TestSourceMapper.isSourceCandidate("mac/Tests/LlmIdeMacTests/Support/TempRepo.swift"))
+        XCTAssertFalse(TestSourceMapper.isSourceCandidate("pkg/tests/conftest.py"))
+        XCTAssertNil(TestSourceMapper.sourceStem(forTestPath: "mac/Tests/LlmIdeMacTests/Support/TempRepo.swift"))
+        XCTAssertFalse(TestSourceMapper.isSourceCandidate("tests/unit/x.mjs"))
     }
 }

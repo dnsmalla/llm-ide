@@ -7,6 +7,7 @@ enum TestSourceMapper {
     static let excludedDirs: Set<String> = [".git", "node_modules", ".build", "dist", "build", "Pods", "DerivedData",
                                             "vendor", ".venv", "__pycache__", ".llmide-loop-worktrees", "monaco", "monaco-src"]
     static let codeExtensions: Set<String> = ["swift", "mjs", "cjs", "js", "jsx", "ts", "tsx", "py", "go", "kt"]
+    private static let testDirs: Set<String> = ["Tests", "tests", "test", "__tests__"]
     private static let manifests: Set<String> = ["Package.swift"]
 
     static func isSourceCandidate(_ relPath: String) -> Bool {
@@ -14,6 +15,7 @@ enum TestSourceMapper {
         guard let file = parts.last, !parts.dropLast().contains(where: { excludedDirs.contains($0) }) else { return false }
         let (_, ext) = splitExt(file)
         guard codeExtensions.contains(ext), !manifests.contains(file) else { return false }
+        if parts.dropLast().contains(where: { testDirs.contains($0) }) { return false }
         return !isTestPath(relPath)
     }
     static func isTestPath(_ relPath: String) -> Bool { sourceStem(forTestPath: relPath) != nil }
@@ -61,8 +63,12 @@ enum TestSourceMapper {
         default: return nil
         }
     }
+    private static let markerRegex: NSRegularExpression? = try? NSRegularExpression(pattern:
+        #"(^|[^A-Za-z0-9_.])(it|test|describe)\(|\bfunc test[A-Z_0-9]|@Test\b|\bdef test_|\bfunc Test[A-Z]|\bfun test[A-Z_0-9]|@org\.junit\.Test"#,
+        options: [.anchorsMatchLines])
     static func containsTestMarker(_ text: String) -> Bool {
-        ["func test", "@Test", "test(", "it(", "def test_", "func Test", "fun test", "@org.junit.Test"].contains { text.contains($0) }
+        guard let re = markerRegex else { return false }
+        return re.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)) != nil
     }
     private static func splitExt(_ file: String) -> (String, String) {
         guard let dot = file.lastIndex(of: ".") else { return (file, "") }
