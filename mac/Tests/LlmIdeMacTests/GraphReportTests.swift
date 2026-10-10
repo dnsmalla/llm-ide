@@ -43,6 +43,27 @@ final class GraphReportTests: XCTestCase {
         let count = await BoundaryWarningsProbe.count(gitRoot: dir)
         XCTAssertNil(count)
     }
+    /// Another repo can ship `mac/Scripts/feature-boundaries.sh` too; the gate
+    /// runs only in LLM-IDE's own checkout, never in a project that merely has it.
+    func testBoundaryProbeRunsOnlyInTheAppSourceRoot() async throws {
+        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("probe-app-\(UUID().uuidString)")
+        let scripts = dir.appendingPathComponent("mac/Scripts", isDirectory: true)
+        try FileManager.default.createDirectory(at: scripts, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: dir) }
+        try "echo 'total: 7  sealed violations: 0'\n".write(
+            to: scripts.appendingPathComponent("feature-boundaries.sh"), atomically: true, encoding: .utf8)
+        let saved = LoopStageDetector.appSourceRoot
+        defer { LoopStageDetector.appSourceRoot = saved }
+
+        LoopStageDetector.appSourceRoot = { FileManager.default.temporaryDirectory.appendingPathComponent("other-app") }
+        let foreign = await BoundaryWarningsProbe.count(gitRoot: dir)
+        XCTAssertNil(foreign, "a repo with the script but not the app marker must not run it")
+
+        LoopStageDetector.appSourceRoot = { dir }
+        let own = await BoundaryWarningsProbe.count(gitRoot: dir)
+        XCTAssertEqual(own, 7)
+    }
+
     // MARK: - Pinned contracts
 
     private func file(_ path: String, loc: Int = 1, imports: [String] = [], usedBy: [String] = []) -> String {

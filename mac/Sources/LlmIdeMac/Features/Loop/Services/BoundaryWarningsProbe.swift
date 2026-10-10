@@ -2,10 +2,12 @@ import Foundation
 
 /// Counts cross-feature boundary warnings by running `mac/Scripts/feature-boundaries.sh`.
 /// llm-ide only: returns nil when the script is absent, the run times out or no `total:` line is printed.
+/// Runs only in LLM-IDE's own checkout: another repo may ship a script at the same path.
 struct BoundaryWarningsProbe {
     static let timeout: TimeInterval = 120
 
     static func count(gitRoot: URL) async -> Int? {
+        guard LoopStageDetector.isAppSourceRoot(gitRoot) else { return nil }
         let script = gitRoot.appendingPathComponent("mac/Scripts/feature-boundaries.sh")
         guard FileManager.default.fileExists(atPath: script.path) else { return nil }
 
