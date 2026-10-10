@@ -23,4 +23,11 @@ final class BackendStartDecisionTests: XCTestCase {
         XCTAssertTrue(msg.contains("lsof -ti :3456"))
         XCTAssertTrue(msg.contains("in use"))
     }
+
+    func testStaleServerMessageDoesNotBlameForeignProcess() {
+        let msg = BackendManager.staleServerMessage(port: 3456)
+        XCTAssertTrue(msg.contains("did not exit within 3 s"))
+        XCTAssertTrue(msg.contains("kill $(lsof -ti :3456)"))
+        XCTAssertFalse(msg.contains("not the LLM-IDE server"))
+    }
 }

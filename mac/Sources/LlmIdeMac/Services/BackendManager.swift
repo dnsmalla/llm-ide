@@ -262,7 +262,9 @@ final class BackendManager {
                 switch Self.startDecision(healthy: false, stillHeld: stillHeld) {
                 case .refuseOccupied:
                     await MainActor.run {
-                        self.fail(Self.portOccupiedMessage(port: Self.defaultBackendPort))
+                        self.fail(signalled
+                            ? Self.staleServerMessage(port: Self.defaultBackendPort)
+                            : Self.portOccupiedMessage(port: Self.defaultBackendPort))
                     }
                 default:
                     await MainActor.run { self.spawn(nodePath: trimmedNode, workURL: workURL) }
@@ -289,6 +291,11 @@ final class BackendManager {
     nonisolated static func portOccupiedMessage(port: Int) -> String {
         "Port \(port) is in use by another process that is not the LLM-IDE server, so the backend was not started. "
             + "Find it with `lsof -ti :\(port)` and stop it (e.g. `kill $(lsof -ti :\(port))`), then click Start."
+    }
+
+    nonisolated static func staleServerMessage(port: Int) -> String {
+        "The previous LLM-IDE server on port \(port) did not exit within 3 s, so the backend was not started. "
+            + "Click Start again, or stop it with `kill $(lsof -ti :\(port))`."
     }
 
     /// Re-probe `/health` and reconcile a STALE `.running` status. An adopted
@@ -549,7 +556,10 @@ final class BackendManager {
         stop()
         startAfterExit = (nodePath, workingDirectory)
         Task { @MainActor [weak self] in
-            _ = await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
+            let signalled = await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
+            if !signalled {
+                self?.append("--- listener on port \(Self.defaultBackendPort) is not server.mjs; re-adopting it ---", stream: .info)
+            }
             // Wait for the port to actually FREE, not a fixed 500 ms: a node that is
             // still draining keeps answering /health, and `start()` would adopt the
             // dying server as `.running` — then it exits and the status goes stale.

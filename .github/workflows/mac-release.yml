@@ -49,6 +49,8 @@ jobs:
     env:
       KEYCHAIN_NAME: mac-release-ci.keychain-db
       NOTARY_PROFILE: LLM-IDE-CI-Notarize
+      # Sparkle's comparison key; monotonic per run (see mac/Scripts/build.sh).
+      LLMIDE_BUILD_NUMBER: ${{ github.run_number }}
     steps:
       # No `submodules:` here on purpose. `mac/Package.swift` resolves
       # graph-kit from its GitHub remote by pinned revision (see the
@@ -62,6 +64,8 @@ jobs:
       # this job's checkout step failed outright for days once that repo
       # stopped being reachable.
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Select latest stable Xcode
         run: sudo xcode-select -s /Applications/Xcode.app

@@ -47,7 +47,9 @@ if [ -n "${LLMIDE_BUILD_NUMBER:-}" ]; then
       exit 1 ;;
   esac
 elif BUILD_NUMBER=$(git -C "$PROJ_DIR" rev-list --count HEAD 2>/dev/null) && [ -n "$BUILD_NUMBER" ]; then
-  :
+  if [ -n "${CI:-}" ] && [ "$BUILD_NUMBER" = "1" ]; then
+    echo -e "${RED}[build] WARN: CI shallow-clone git fallback yielded CFBundleVersion=1; set LLMIDE_BUILD_NUMBER (e.g. github.run_number) so Sparkle can order builds${NC}" >&2
+  fi
 else
   echo -e "${YELLOW}[build]${NC} WARN: git rev-list failed and LLMIDE_BUILD_NUMBER unset; falling back to CFBundleVersion=1" >&2
   BUILD_NUMBER=1
