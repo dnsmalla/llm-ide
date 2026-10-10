@@ -323,11 +323,13 @@ extension LoopStage {
         "skills/refactor-apply", "skills/test-gap-writer", "skills/test-structure-setup",
     ]
 
+    /// The Test loop's Setup stage: applies code, but may only modify package
+    /// manifests and add test scaffolding (`LoopEngineRunner.testSetupViolations`).
+    var isTestSetup: Bool { kind == .skill && skillId == "skills/test-structure-setup" }
+
     /// The Test loop's writer: applies code, but may only CREATE files under the
     /// test roots (`LoopEngineRunner.testWriteViolations`), so it does not make a
     /// loop manual-only (`containsEnabledCodeApply`).
-    var isTestSetup: Bool { kind == .skill && skillId == "skills/test-structure-setup" }
-
     var testWriteOnly: Bool { kind == .skill && skillId == "skills/test-gap-writer" }
 
     /// Whether this stage applies code edits (see `codeApplySkillIds`).

@@ -28,14 +28,21 @@ enum TestSourceMapper {
         guard codeExtensions.contains(ext) else { return nil }
         switch ext {
         case "swift":
+            if name.hasSuffix("GapTests"), name.count > 8 { return String(name.dropLast(8)) }
             if name.hasSuffix("Tests") { return String(name.dropLast(5)) }
             if name.hasSuffix("Test") { return String(name.dropLast(4)) }
             return nil
         case "mjs", "cjs", "js", "jsx", "ts", "tsx":
+            // The writer's gap files: `x.gap.test.mjs`.
+            if name.hasSuffix(".gap.test") || name.hasSuffix(".gap.spec"), name.count > 9 { return String(name.dropLast(9)) }
             if name.hasSuffix(".test") || name.hasSuffix(".spec") { return String(name.dropLast(5)) }
             if dirs.contains("__tests__") || dirs.contains("tests") || dirs.contains("test") { return name }
             return nil
         case "py":
+            // The writer's gap file: `test_x_gap.py`.
+            if name.hasPrefix("test_"), name.hasSuffix("_gap"), name.count > 9 {
+                return String(name.dropFirst(5).dropLast(4))
+            }
             if name.hasPrefix("test_") { return String(name.dropFirst(5)) }
             if name.hasSuffix("_test") { return String(name.dropLast(5)) }
             return nil
