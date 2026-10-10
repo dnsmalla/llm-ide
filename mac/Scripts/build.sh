@@ -37,6 +37,22 @@ if [ -z "$VERSION" ]; then
   exit 1
 fi
 
+# CFBundleVersion = Sparkle's comparison key (must increase every release).
+# LLMIDE_BUILD_NUMBER overrides; else git commit count; else 1.
+if [ -n "${LLMIDE_BUILD_NUMBER:-}" ]; then
+  BUILD_NUMBER="$LLMIDE_BUILD_NUMBER"
+  case "$BUILD_NUMBER" in
+    *[!0-9]*|0*)
+      echo -e "${RED}[build] LLMIDE_BUILD_NUMBER must be a positive integer (got '$BUILD_NUMBER')${NC}" >&2
+      exit 1 ;;
+  esac
+elif BUILD_NUMBER=$(git -C "$PROJ_DIR" rev-list --count HEAD 2>/dev/null) && [ -n "$BUILD_NUMBER" ]; then
+  :
+else
+  echo -e "${YELLOW}[build]${NC} WARN: git rev-list failed and LLMIDE_BUILD_NUMBER unset; falling back to CFBundleVersion=1" >&2
+  BUILD_NUMBER=1
+fi
+
 # Check for --clean-all flag
 CLEAN_ALL="${1:-}"
 if [ "$CLEAN_ALL" = "--clean-all" ]; then
@@ -154,7 +170,7 @@ cat > "$APP_DIR/Contents/Info.plist" << PLIST
     <key>CFBundleShortVersionString</key>
     <string>$VERSION</string>
     <key>CFBundleVersion</key>
-    <string>1</string>$SOURCE_ROOT_KEYS
+    <string>$BUILD_NUMBER</string>$SOURCE_ROOT_KEYS
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>NSPrincipalClass</key>

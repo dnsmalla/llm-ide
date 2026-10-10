@@ -168,7 +168,7 @@ clear error. Don't ship the appcast entry until you've verified once.
 |---|---|
 | "Update Error — A connection failure occurred" | `SUFeedURL` missing in Info.plist or unreachable from the client |
 | "The update is improperly signed" | `SUPublicEDKey` in the running binary doesn't match the key used by `sign_update` |
-| Sparkle never offers an update even though the appcast has one | `<sparkle:version>` in the appcast item must be a higher integer than the running app's `CFBundleVersion` |
+| Sparkle never offers an update even though the appcast has one | `<sparkle:version>` in the appcast item must be a higher integer than the running app's `CFBundleVersion`. `build.sh` sets `CFBundleVersion` to `LLMIDE_BUILD_NUMBER`, else the git commit count, else 1; `appcast.sh` reads it from the built `.app` so the two always match |
 | "Check for Updates…" is greyed out | Sparkle's `canCheckForUpdates` flips false during an in-flight check. Wait 30s. |
 
 ## Key rotation (advanced)

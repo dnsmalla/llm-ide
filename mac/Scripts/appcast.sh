@@ -42,6 +42,16 @@ if [ ! -f "$DMG_PATH" ]; then
   exit 1
 fi
 
+# sparkle:version must equal the shipped bundle's CFBundleVersion (what
+# Sparkle compares against), so read it from the built .app, never recompute.
+APP_NAME="${LLMIDE_APP_NAME:-LlmIdeMac}"
+APP_DIR="${LLMIDE_APP_DIR:-$PROJ_DIR/$APP_NAME.app}"
+BUILD_NUMBER=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$APP_DIR/Contents/Info.plist" 2>/dev/null || true)
+if [ -z "$BUILD_NUMBER" ]; then
+  echo -e "${RED}[appcast] cannot read CFBundleVersion from $APP_DIR/Contents/Info.plist — run release.sh first (or set LLMIDE_APP_DIR)${NC}" >&2
+  exit 1
+fi
+
 BASE_URL="${LLMIDE_SU_DOWNLOAD_URL_BASE:-https://example.invalid/releases}"
 if [ "$BASE_URL" = "https://example.invalid/releases" ]; then
   echo -e "${BLUE}[appcast]${NC} WARN: LLMIDE_SU_DOWNLOAD_URL_BASE unset — using placeholder host" >&2
@@ -75,7 +85,7 @@ cat <<XML
     <item>
       <title>Version $VERSION</title>
       <link>$DOWNLOAD_URL</link>
-      <sparkle:version>$VERSION</sparkle:version>
+      <sparkle:version>$BUILD_NUMBER</sparkle:version>
       <sparkle:shortVersionString>$VERSION</sparkle:shortVersionString>
       <description>
         <![CDATA[
