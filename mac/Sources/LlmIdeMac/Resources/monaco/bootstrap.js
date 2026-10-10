@@ -22,51 +22,11 @@
     diffEditor: null,
     decorationIds: [],
 
-    // Per-file models + saved view state, keyed by the `path` Swift passes to
-    // setContent. Insertion order of `models` doubles as LRU order.
-    models: new Map(),
-    viewStates: new Map(),
+    // ONE model for the page's lifetime. The host recreates the WKWebView on
+    // every file switch (`.id(url)`), so there is no per-path cache here.
     currentPath: null,
     pendingTimer: null,
-    MAX_MODELS: 32,
     SMALL_DOC_CHARS: 128 * 1024,
-
-    modelFor: function (path, text, language) {
-      var entry = this.models.get(path);
-      if (entry && !entry.isDisposed()) {
-        this.models.delete(path); // re-insert below = mark most recently used
-        if (entry.getValue() !== text) entry.setValue(text); // external reload only
-        monaco.editor.setModelLanguage(entry, language);
-      } else {
-        entry = monaco.editor.createModel(text, language);
-      }
-      this.models.set(path, entry);
-      this.evictModels();
-      return entry;
-    },
-
-    evictModels: function () {
-      var self = this;
-      this.models.forEach(function (model, key) {
-        if (self.models.size <= self.MAX_MODELS) return;
-        if (key === self.currentPath) return;
-        model.dispose();
-        self.models.delete(key);
-        self.viewStates.delete(key);
-      });
-    },
-
-    // Swift signals a closed tab: drop that file's model and view state.
-    closeFile: function (path) {
-      var model = this.models.get(path);
-      if (model) {
-        if (this.editor && this.editor.getModel() === model) this.editor.setModel(null);
-        model.dispose();
-      }
-      this.models.delete(path);
-      this.viewStates.delete(path);
-      if (this.currentPath === path) this.currentPath = null;
-    },
 
     // Full text of the current model. Swift's save path awaits this so a
     // Cmd-S right after typing never sees text still held by the debounce.
@@ -83,8 +43,7 @@
       if (this.editor) post({ type: 'contentChanged', text: this.editor.getValue() });
     },
 
-    // `path` is optional for backward compatibility; without it all content
-    // shares one anonymous model slot.
+    // `path` is informational (dirty tracking / logging); one model only.
     setContent: function (text, language, path) {
       var key = path || '';
       var container = document.getElementById('container');
@@ -93,7 +52,7 @@
       if (this.diffEditor) { this.diffEditor.dispose(); this.diffEditor = null; }
       if (!this.editor) {
         this.editor = monaco.editor.create(container, {
-          model: this.modelFor(key, text, language),
+          model: monaco.editor.createModel(text, language),
           automaticLayout: true,
           // No minimap. It is a VS Code signature, not something an editor
           // needs: it costs a continuous render of the whole document and
@@ -137,20 +96,15 @@
         });
         return;
       }
+      // Same page, new text: only an external change touches the model
+      // (setValue only if it differs, so undo/cursor survive echoes).
       if (key !== this.currentPath) {
-        // Drop (do NOT flush) the pending post: it carries the OLD file's
-        // text and Swift has already moved on to the new file's content.
         if (this.pendingTimer !== null) { clearTimeout(this.pendingTimer); this.pendingTimer = null; }
-        this.viewStates.set(this.currentPath, this.editor.saveViewState());
-        var model = this.modelFor(key, text, language);
-        this.editor.setModel(model);
         this.currentPath = key;
-        var state = this.viewStates.get(key);
-        if (state) this.editor.restoreViewState(state);
-      } else {
-        // Same file: only an external change touches the model (keeps undo).
-        this.modelFor(key, text, language);
       }
+      var model = this.editor.getModel();
+      if (model.getValue() !== text) model.setValue(text);
+      monaco.editor.setModelLanguage(model, language);
     },
 
     setDecorations: function (decorations) {

@@ -52,9 +52,8 @@ final class MonacoContentFetcher {
 /// `Coordinator`: nothing outside this file calls them directly.
 struct MonacoHost: NSViewRepresentable {
     var content: String?
-    /// Stable identity of the file `content` belongs to (its path). Monaco
-    /// keeps one model per path so undo history and cursor/scroll survive a
-    /// file switch. nil = one anonymous slot (legacy behaviour).
+    /// Stable identity of the file `content` belongs to (its path). Informational
+    /// only: the web view is recreated per file, so there is one model per page.
     var path: String?
     /// Receives a closure that flushes Monaco's pending (debounced) edits and
     /// returns the full text; the save path awaits it. See `MonacoContentFetcher`.
@@ -135,6 +134,12 @@ struct MonacoHost: NSViewRepresentable {
     /// instance + WebContent process). Mirrors `FileDetailView`'s
     /// `QLPreviewDetailView.dismantleNSView`.
     static func dismantleNSView(_ nsView: WKWebView, coordinator: Coordinator) {
+        // The page's debounced (>128 KB) post and its blur/pagehide flush are
+        // async and would hit the handler removed below, losing the last
+        // ~150 ms of typing. Pull the text out directly first. Done here (not
+        // onDisappear) because the coordinator + WKWebView are in hand and it
+        // runs at the exact moment the handler goes away.
+        coordinator.flushOnTeardown(nsView)
         nsView.configuration.userContentController.removeScriptMessageHandler(forName: "monacoBridge")
         coordinator.webView = nil
     }
@@ -170,6 +175,24 @@ struct MonacoHost: NSViewRepresentable {
             guard let text = result as? String else { return nil }
             lastContent = text
             return text
+        }
+
+        /// Final read at teardown. The completion closure strongly holds the
+        /// web view and `self`, so the async result is delivered even though
+        /// the view is detached. Reports through the same path as a
+        /// `contentChanged` post, only when the text differs from `lastContent`.
+        @MainActor
+        fileprivate func flushOnTeardown(_ web: WKWebView) {
+            guard documentReady else { return }
+            web.callAsyncJavaScript(
+                "return window.__llmide.getContent();", arguments: [:], in: nil, in: .page
+            ) { [self, web] result in
+                _ = web
+                guard case .success(let value) = result, let text = value as? String,
+                      text != lastContent else { return }
+                lastContent = text
+                parent.onMessage?(.contentChanged(text: text))
+            }
         }
 
         /// Called from `updateNSView` on every SwiftUI re-render.
