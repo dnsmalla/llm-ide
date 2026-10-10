@@ -19,15 +19,16 @@ struct TestStructureDetector {
     }
 
     @discardableResult
-    func write(_ s: TestStructure) throws -> URL {
-        let dir = gitRoot.appendingPathComponent(LoopOutputLayout.testDir)
+    func write(_ s: TestStructure, outputRoot: URL? = nil) throws -> URL {
+        let out = outputRoot ?? gitRoot
+        let dir = out.appendingPathComponent(LoopOutputLayout.testDir)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let md = gitRoot.appendingPathComponent(LoopOutputLayout.testStructureMD)
+        let md = out.appendingPathComponent(LoopOutputLayout.testStructureMD)
         try s.render().write(to: md, atomically: true, encoding: .utf8)
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601
-        try enc.encode(s).write(to: gitRoot.appendingPathComponent(LoopOutputLayout.testStructureJSON), options: .atomic)
+        try enc.encode(s).write(to: out.appendingPathComponent(LoopOutputLayout.testStructureJSON), options: .atomic)
         return md
     }
 

@@ -46,6 +46,14 @@ final class LoopStageTestMapKindTests: XCTestCase {
         XCTAssertEqual(bad.created, ["mac/Sources/A.swift"])
         XCTAssertTrue(LoopEngineRunner.testWriteViolations(changed: ["mac/Tests/LlmIdeMacTests/N.swift"], created: ["mac/Tests/LlmIdeMacTests/N.swift"], allowedDirs: roots).modified.isEmpty)
     }
+    func testGoRootWithoutTestDirAllowsOnlyTestNamedFiles() {
+        let v = LoopEngineRunner.testWriteViolations(
+            changed: ["pkg/foo_test.go", "pkg/helper.go", "other/x_test.go"],
+            created: ["pkg/foo_test.go", "pkg/helper.go", "other/x_test.go"],
+            allowedDirs: [""], testNamedPackageDirs: ["pkg"])
+        XCTAssertEqual(v.created, ["other/x_test.go", "pkg/helper.go"])
+        XCTAssertTrue(v.modified.isEmpty)
+    }
     func testPassingIdsFromXCTestOutput() {
         let out = "Test Case '-[LlmIdeMacTests.FooTests testA]' passed (0.001 seconds).\nTest Case '-[LlmIdeMacTests.FooTests testB]' failed (0.1 seconds)."
         XCTAssertEqual(LoopEngineRunner.passingTestIds(out), ["LlmIdeMacTests.FooTests/testA"])

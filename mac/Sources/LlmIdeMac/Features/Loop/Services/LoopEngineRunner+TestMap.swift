@@ -10,12 +10,15 @@ extension LoopEngineRunner {
 
     func runTestMapStage(_ stage: LoopStage, gitRoot: URL, stages: [LoopStage]) async -> StageDecision {
         let startedAt = Date()
+        // Reads use the run's tree; outputs, ledger, faults and approvals live under
+        // the main checkout (`system/` is gitignored, so a worktree would lose them).
+        let mainRoot = currentRunContext?.mainGitRoot ?? gitRoot
         switch stage.testOp {
         case .structure:
             let structure = await Task.detached(priority: .utility) { () -> TestStructure in
                 let detector = TestStructureDetector(gitRoot: gitRoot)
                 let found = detector.detect()
-                _ = try? detector.write(found)
+                _ = try? detector.write(found, outputRoot: mainRoot)
                 return found
             }.value
             testStructure = structure
@@ -38,7 +41,7 @@ extension LoopEngineRunner {
                 built = try await Task.detached(priority: .utility) { () throws -> TestMap in
                     let builder = TestMapBuilder(gitRoot: gitRoot, structure: structure)
                     let map = try builder.build()
-                    _ = try builder.write(map)
+                    _ = try builder.write(map, outputRoot: mainRoot)
                     return map
                 }.value
             } catch {
@@ -61,7 +64,7 @@ extension LoopEngineRunner {
             return finishTestMap(stage, startedAt: startedAt, passed: true, output: "", delta: delta)
 
         case .ledger:
-            return await runLedgerOp(stage, startedAt: startedAt, gitRoot: gitRoot, stages: stages)
+            return await runLedgerOp(stage, startedAt: startedAt, gitRoot: mainRoot, stages: stages)
 
         case nil:
             stageStates[stage.id] = .failed
@@ -178,10 +181,17 @@ extension LoopEngineRunner {
     /// not create (existing tests are never edited), `created` = new files
     /// outside every test directory. Both are repo-relative.
     nonisolated static func testWriteViolations(changed: [String], created: [String],
-                                                allowedDirs: [String]) -> (modified: [String], created: [String]) {
+                                                allowedDirs: [String],
+                                                testNamedPackageDirs: [String] = []) -> (modified: [String], created: [String]) {
         let createdSet = Set(created)
         let dirs = allowedDirs.filter { !$0.isEmpty }
-        func inside(_ p: String) -> Bool { dirs.contains { p == $0 || p.hasPrefix($0 + "/") } }
+        func inside(_ p: String) -> Bool {
+            if dirs.contains(where: { p == $0 || p.hasPrefix($0 + "/") }) { return true }
+            // A root with no test directory (Go: tests sit beside sources) allows
+            // only files whose name follows the language's test-name rule.
+            return testNamedPackageDirs.contains { $0.isEmpty || p.hasPrefix($0 + "/") }
+                && TestSourceMapper.sourceStem(forTestPath: p) != nil
+        }
         let modified = Set(changed).subtracting(createdSet).sorted()
         let outside = createdSet.filter { !inside($0) }.sorted()
         return (modified, outside)
@@ -197,20 +207,41 @@ extension LoopEngineRunner {
             testStructure = structure
         }
         let dirs = structure.roots.map(\.testDir)
+        let beside = structure.roots.filter { $0.testDir.isEmpty }.map(\.packageDir)
         let created = result?.createdPaths ?? []
         let all = Array(Set(changed).union(result?.changedPaths ?? []).union(created))
-        let bad = Self.testWriteViolations(changed: all, created: created, allowedDirs: dirs)
+        let bad = Self.testWriteViolations(changed: all, created: created, allowedDirs: dirs,
+                                           testNamedPackageDirs: beside)
         guard !bad.modified.isEmpty || !bad.created.isEmpty else { return nil }
-        var reverted: [String] = []
-        if !bad.modified.isEmpty, await scopeGuard.revert(paths: bad.modified, gitRoot: gitRoot) == nil {
-            reverted += bad.modified
+        // Same rule as `handleViolation`: a path that was already dirty holds the
+        // user's earlier edits, which a checkout would destroy — leave it, say so.
+        let snapshot = lastGuardSnapshot
+        let preDirty = bad.modified.filter { snapshot?.dirtyPaths.contains($0) == true }
+        let revertable = bad.modified.filter { !preDirty.contains($0) }
+        if !preDirty.isEmpty {
+            appendLog(.warn, "  [\(stage.name)] not reverting already-modified path(s), to keep their earlier uncommitted edits: \(preDirty.joined(separator: ", "))")
+        }
+        var notReverted = preDirty
+        if !revertable.isEmpty {
+            // Restores tracked files; deletes an untracked one only when it sits under
+            // a test root (the server may report a Bash-made file as modified).
+            let deletable = Set(revertable.filter { p in dirs.filter { !$0.isEmpty }.contains { p.hasPrefix($0 + "/") } })
+            let snap = snapshot ?? RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+            if let error = await scopeGuard.revertUnlisted(paths: revertable, created: deletable,
+                                                           before: snap, gitRoot: gitRoot) {
+                appendLog(.warn, "  [\(stage.name)] \(error)")
+                notReverted += revertable
+            }
         }
         for path in bad.created {
             let url = gitRoot.appendingPathComponent(path)
-            if (try? FileManager.default.removeItem(at: url)) != nil { reverted.append(path) }
+            if (try? FileManager.default.removeItem(at: url)) == nil { notReverted.append(path) }
         }
         let roots = dirs.filter { !$0.isEmpty }.joined(separator: ", ")
-        return "Test Write may only create files under \(roots); reverted: \((bad.modified + bad.created).joined(separator: ", "))"
-            + (reverted.count == bad.modified.count + bad.created.count ? "" : " (some paths could not be reverted)")
+        let all2 = bad.modified + bad.created
+        let kept = Set(notReverted)
+        let done = all2.filter { !kept.contains($0) }
+        return "Test Write may only create files under \(roots.isEmpty ? "the test roots" : roots); reverted: \(done.joined(separator: ", "))"
+            + (kept.isEmpty ? "" : "; left in place: \(kept.sorted().joined(separator: ", "))")
     }
 }

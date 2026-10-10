@@ -3060,6 +3060,65 @@ final class LoopEngineRunnerTests: XCTestCase {
         return dir
     }
 
+    /// The flake gate re-runs a failed Test stage; when the re-run passes, the
+    /// ledger op must see the PASSING run, not the first run's failing output.
+    func testLedgerOpAfterFlakyTestStageOpensNoFaults() async throws {
+        let repo = try makeTempRepo()
+        var call = 0
+        let verifier = StubVerifier { _ in
+            defer { call += 1 }
+            return call == 0
+                ? VerifyOutcome(exitCode: 1, output: "/p/A.swift:7: error: -[M.C testFlaky] : XCTAssertTrue failed")
+                : VerifyOutcome(exitCode: 0, output: "Test Case '-[M.C testFlaky]' passed (0.001 seconds).")
+        }
+        let journal = InMemoryJournal()
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0),
+            LoopStage(id: "l1", name: "Ledger", kind: .testMap, order: 1, testOp: .ledger),
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+        let ledgerAttempt = journal.written.last?.iterations.flatMap(\.attempts).last { $0.kind == .testMap }
+        XCTAssertEqual(ledgerAttempt?.newFaults, [])
+        let faults = (try? FileManager.default.contentsOfDirectory(atPath: repo.appendingPathComponent("system/faults").path)) ?? []
+        XCTAssertTrue(faults.isEmpty)
+    }
+
+    /// The create-only guard must not revert a file that held the user's own
+    /// uncommitted edits before the writer ran — but the stage still fails.
+    func testWriteGuardLeavesPreDirtyFileAndFails() async throws {
+        let repo = try makeTempRepo()
+        func git(_ args: String) throws {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", "cd '\(repo.path)' && git \(args)"]
+            p.standardOutput = Pipe(); p.standardError = Pipe()
+            try p.run(); p.waitUntilExit()
+        }
+        try "one\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        try git("init -q && git add . && git -c user.email=a@b -c user.name=t commit -qm init")
+        try "user edit\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(), scopeGuard: GitRepairScopeGuard())
+        runner.testStructure = TestStructure(generatedAt: Date(), roots: [
+            TestRoot(packageDir: "", testDir: "Tests", runner: .xctest, command: "swift test", namingRule: "", languages: ["swift"])
+        ], status: "ok", notes: [])
+        runner.lastGuardSnapshot = RepairScopeSnapshot(dirtyPaths: ["A.swift"], usable: true, reason: nil)
+        let writer = LoopStage(name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer")
+        let message = await runner.enforceTestWriteOnly(
+            stage: writer, result: LoopAgentResult(changedPaths: ["A.swift"]), changed: ["A.swift"], gitRoot: repo)
+        XCTAssertTrue(message?.contains("left in place: A.swift") == true, message ?? "nil")
+        XCTAssertEqual(try String(contentsOf: repo.appendingPathComponent("A.swift")), "user edit\n")
+    }
+
     private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
         LoopEngineConfig(stages: [
             LoopStage(id: "g1", name: "Generate", kind: .skill, order: 0, skillId: "skills/plan-director"),

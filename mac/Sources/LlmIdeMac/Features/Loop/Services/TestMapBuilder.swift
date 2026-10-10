@@ -54,9 +54,10 @@ struct TestMapBuilder {
     }
 
     @discardableResult
-    func write(_ map: TestMap) throws -> URL {
-        let json = gitRoot.appendingPathComponent(LoopOutputLayout.testMapJSON)
-        let md = gitRoot.appendingPathComponent(LoopOutputLayout.testMapMD)
+    func write(_ map: TestMap, outputRoot: URL? = nil) throws -> URL {
+        let out = outputRoot ?? gitRoot
+        let json = out.appendingPathComponent(LoopOutputLayout.testMapJSON)
+        let md = out.appendingPathComponent(LoopOutputLayout.testMapMD)
         try FileManager.default.createDirectory(at: json.deletingLastPathComponent(), withIntermediateDirectories: true)
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601

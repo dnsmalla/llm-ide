@@ -260,6 +260,9 @@ final class LoopEngineRunner: ObservableObject {
     /// The full (uncapped by the journal's 4 KB tail) output of each blocking
     /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
     var lastVerifyOutputs: [String: String] = [:]
+    /// The protected-path snapshot taken before the latest guarded edit — what was
+    /// already dirty (the user's own edits) so `enforceTestWriteOnly` never reverts it.
+    var lastGuardSnapshot: RepairScopeSnapshot?
 
     /// The latest agent result per stage id for the current run — what each
     /// skill stage and each repair's agent said and changed. Kept (rather than
@@ -278,6 +281,8 @@ final class LoopEngineRunner: ObservableObject {
         let config: LoopEngineConfig
         let faultsRoot: URL
         let gitRoot: URL
+        /// The linked main checkout — equals `gitRoot` unless the run is in a worktree.
+        let mainGitRoot: URL
         let projectId: String?
         let startedAt: Date
         let loopId: String
@@ -605,6 +610,7 @@ final class LoopEngineRunner: ObservableObject {
         testStructure = nil
         testMapBefore = nil
         lastVerifyOutputs = [:]
+        lastGuardSnapshot = nil
         lastRepairResults = [:]
         attemptLedgers = [:]
         runMainGitRoot = mainGitRoot
@@ -624,7 +630,7 @@ final class LoopEngineRunner: ObservableObject {
         pausedSeconds = 0
         pauseStartedAt = nil
         lockRootKeyForPause = lockRootKey
-        currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+        currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot, mainGitRoot: mainGitRoot,
                                        projectId: projectId, startedAt: startedAt,
                                        loopId: loopId, loopName: loopName,
                                        runId: UUID().uuidString)
@@ -1294,6 +1300,8 @@ final class LoopEngineRunner: ObservableObject {
             do {
                 let again = try await verifier.verify(command: command, repoRoot: gitRoot,
                                                       timeout: shellTimeout(for: stage))
+                // The ledger op must see the output of the attempt it picks (the last one).
+                lastVerifyOutputs[stage.id] = again.output
                 if again.exitCode == 0 {
                     appendLog(.warn, "  [\(stage.name)] FLAKY — failed, then passed on an immediate re-run; not repairing")
                     record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
@@ -2090,6 +2098,7 @@ final class LoopEngineRunner: ObservableObject {
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
                                 scopeGlobs: [String] = [],
                                 edit: () async throws -> LoopAgentResult?) async -> GuardedEditResult {
+        lastGuardSnapshot = nil
         guard Self.effectivePolicy(for: stage, config: config) != .off else {
             do { _ = try await edit() } catch { return .failed(error, .notChecked, violations: [], changed: []) }
             return .completed(.notChecked, violations: [], changed: [])
@@ -2103,6 +2112,7 @@ final class LoopEngineRunner: ObservableObject {
         }
         let before = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
                                                scopeGlobs: scopeGlobs)
+        lastGuardSnapshot = before
         var thrown: Error?
         // What the agent says it wrote. `git status` cannot see an ignored
         // file, so the server's own list is part of the changed set too.
