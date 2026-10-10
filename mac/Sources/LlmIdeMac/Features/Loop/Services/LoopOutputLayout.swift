@@ -25,6 +25,12 @@ enum LoopOutputLayout {
     static let refactorPlan = "llm-doc/loop/refactor/REFACTOR.md"
     static let docsDir = "llm-doc/loop/docs"
     static let docsIndex = "llm-doc/loop/docs/INDEX.md"
+    static let testDir = "llm-doc/loop/test"
+    static let testStructureMD = "llm-doc/loop/test/TEST-STRUCTURE.md"
+    static let testStructureJSON = "llm-doc/loop/test/TEST-STRUCTURE.json"
+    static let testMapMD = "llm-doc/loop/test/TEST-MAP.md"
+    static let testMapJSON = "llm-doc/loop/test/TEST-MAP.json"
+    static let testLedger = "llm-doc/loop/test/ledger.json"
 
     /// The Plan loop's INPUT: plans collected from elsewhere. Unchanged.
     static let collectedPlansDir = "llm-doc/plans"
