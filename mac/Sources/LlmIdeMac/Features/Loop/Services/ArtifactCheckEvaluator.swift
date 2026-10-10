@@ -97,14 +97,19 @@ enum ArtifactCheckEvaluator {
             }
         }
         if !spec.sectionRules.isEmpty {
+            // One check per repo-relative file, repo first (as the line limits
+            // do): a stale copy under the project root is never checked when
+            // the repo has the file.
             var seen = Set<String>()
-            for glob in spec.sectionTargets {
+            for target in spec.sectionTargets {
                 for base in [roots.repo] + (spec.projectRootFallback ? [roots.project].compactMap { $0 } : []) {
-                    for rel in expand(glob: glob, under: base) {
-                        let url = base.appendingPathComponent(rel)
-                        guard seen.insert(url.path).inserted,
-                              let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
-                        failures += sectionFailures(in: text, rules: spec.sectionRules)
+                    for rel in expand(glob: target.glob, under: base) where rel.hasSuffix(".md")
+                        && !target.excludes.contains(where: { GlobMatch.matches(path: rel, pattern: $0) })
+                        && !seen.contains(rel) {
+                        seen.insert(rel)
+                        guard let text = try? String(contentsOf: base.appendingPathComponent(rel), encoding: .utf8)
+                        else { continue }
+                        failures += sectionFailures(in: text, rules: spec.sectionRules).map { "\(rel): \($0)" }
                     }
                 }
             }

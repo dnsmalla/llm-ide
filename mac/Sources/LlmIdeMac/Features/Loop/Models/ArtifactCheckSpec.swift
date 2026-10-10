@@ -77,9 +77,16 @@ public struct ArtifactCheckSpec: Codable, Equatable {
     /// Per-section line requirements, applied to every file the `outputRules`
     /// resolve to (see `resolved(against:)`).
     public var sectionRules: [SectionRule]
-    /// Globs the `sectionRules` apply to. Filled only by `resolved(against:)`
+    /// Files the `sectionRules` apply to. Filled only by `resolved(against:)`
     /// from the `outputRules`; never persisted.
-    var sectionTargets: [String] = []
+    var sectionTargets: [SectionTarget] = []
+
+    /// A glob the section rules apply to, with the sibling-stage excludes its
+    /// line cap would get.
+    struct SectionTarget: Equatable {
+        var glob: String
+        var excludes: [String]
+    }
     /// Files that must exist.
     public var requiredPaths: [String]
     /// Per-glob line caps.
@@ -154,7 +161,7 @@ public struct ArtifactCheckSpec: Codable, Equatable {
                 out.requiredPaths.append(path)
                 out.lineLimits.append(.init(glob: path, maxLines: rule.maxLines))
                 dir = (path as NSString).deletingLastPathComponent
-                out.sectionTargets.append(path)
+                out.sectionTargets.append(.init(glob: path, excludes: []))
                 if rule.citations { out.citationGlobs.append(path) }
             case .directory:
                 dir = path
@@ -166,7 +173,8 @@ public struct ArtifactCheckSpec: Codable, Equatable {
                 if rule.citations { out.citationGlobs.append(glob) }
             }
             if rule.shape == .directory {
-                out.sectionTargets.append(join(dir, rule.subGlob ?? "**/*.md"))
+                let excludes = rule.excludeStages.compactMap { outputPath(sibling($0)) }
+                out.sectionTargets.append(.init(glob: join(dir, rule.subGlob ?? "**/*.md"), excludes: excludes))
             }
         }
         return out
@@ -184,6 +192,9 @@ public struct ArtifactCheckSpec: Codable, Equatable {
         if !requiredPaths.isEmpty { parts.append("exists: " + requiredPaths.joined(separator: ", ")) }
         for limit in lineLimits { parts.append("\(limit.glob) ≤ \(limit.maxLines) lines") }
         if !citationGlobs.isEmpty { parts.append("citations resolve in " + citationGlobs.joined(separator: ", ")) }
+        for rule in sectionRules {
+            parts.append("every `\(rule.headerPrefix)` section has " + rule.requiredLinePrefixes.joined(separator: ", "))
+        }
         return parts.isEmpty ? "no checks configured" : parts.joined(separator: " · ")
     }
 }

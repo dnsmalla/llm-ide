@@ -18,8 +18,8 @@ final class ArtifactCheckSectionRulesTests: XCTestCase {
         if let root { try? FileManager.default.removeItem(at: root.deletingLastPathComponent()) }
     }
 
-    private func write(_ rel: String, _ text: String) throws {
-        let url = root.appendingPathComponent(rel)
+    private func write(_ rel: String, _ text: String, under base: URL? = nil) throws {
+        let url = (base ?? root).appendingPathComponent(rel)
         try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try text.write(to: url, atomically: true, encoding: .utf8)
     }
@@ -54,7 +54,7 @@ final class ArtifactCheckSectionRulesTests: XCTestCase {
 
         """)
         let r = eval(sectionSpec())
-        XCTAssertEqual(r.failures, ["### R2 Rename thing: missing `- Expect:`"])
+        XCTAssertEqual(r.failures, ["llm-doc/refactor.md: ### R2 Rename thing: missing `- Expect:`"])
     }
 
     func testAllRequiredLinesPresentPasses() throws {
@@ -86,7 +86,38 @@ final class ArtifactCheckSectionRulesTests: XCTestCase {
         - Tests: t
 
         """)
-        XCTAssertEqual(eval(sectionSpec()).failures, ["### R1 One: missing `- Expect:`"])
+        XCTAssertEqual(eval(sectionSpec()).failures, ["llm-doc/refactor.md: ### R1 One: missing `- Expect:`"])
+    }
+
+    func testHeaderImmediatelyFollowedByAnotherHeaderFailsEveryRequiredLine() throws {
+        try write("llm-doc/refactor.md", """
+        ### R1 Empty
+        ### R2 Full
+        - Files: a.swift
+        - Expect: ok
+        - Tests: t
+
+        """)
+        let r = eval(sectionSpec())
+        XCTAssertEqual(r.failures, [
+            "llm-doc/refactor.md: ### R1 Empty: missing `- Files:`",
+            "llm-doc/refactor.md: ### R1 Empty: missing `- Expect:`",
+            "llm-doc/refactor.md: ### R1 Empty: missing `- Tests:`",
+        ])
+    }
+
+    func testStaleProjectRootCopyIsNotSectionChecked() throws {
+        try write("llm-doc/refactor.md", """
+        ### R1 Good
+        - Files: a.swift
+        - Expect: ok
+        - Tests: t
+
+        """)
+        try write("llm-doc/refactor.md", "### R1 Stale\n- Files: x\n", under: project)
+        var spec = sectionSpec()
+        spec.projectRootFallback = true
+        XCTAssertEqual(eval(spec).failures, [])
     }
 
     func testSectionRulesDecodeAsEmptyWhenAbsent() throws {
@@ -100,6 +131,7 @@ final class ArtifactCheckSectionRulesTests: XCTestCase {
                        [.init(headerPrefix: "### R", requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:"])])
         try write("llm-doc/refactor.md", "### R1 Only\n- Files: a.swift\n")
         let r = eval(LoopStageDetector.refactorPlanCheckSpec)
-        XCTAssertEqual(r.failures, ["### R1 Only: missing `- Expect:`", "### R1 Only: missing `- Tests:`"])
+        XCTAssertEqual(r.failures, ["llm-doc/refactor.md: ### R1 Only: missing `- Expect:`",
+                                    "llm-doc/refactor.md: ### R1 Only: missing `- Tests:`"])
     }
 }
