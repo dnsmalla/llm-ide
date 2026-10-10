@@ -96,7 +96,44 @@ enum ArtifactCheckEvaluator {
                 }
             }
         }
+        if !spec.sectionRules.isEmpty {
+            var seen = Set<String>()
+            for glob in spec.sectionTargets {
+                for base in [roots.repo] + (spec.projectRootFallback ? [roots.project].compactMap { $0 } : []) {
+                    for rel in expand(glob: glob, under: base) {
+                        let url = base.appendingPathComponent(rel)
+                        guard seen.insert(url.path).inserted,
+                              let text = try? String(contentsOf: url, encoding: .utf8) else { continue }
+                        failures += sectionFailures(in: text, rules: spec.sectionRules)
+                    }
+                }
+            }
+        }
         return Result(failures: failures)
+    }
+
+    /// One failure per (section, missing prefix). A section starts at a line
+    /// beginning with `headerPrefix` and runs up to the next `### ` line; a
+    /// required prefix counts only when it starts some line in that section.
+    nonisolated static func sectionFailures(in text: String,
+                                            rules: [ArtifactCheckSpec.SectionRule]) -> [String] {
+        let all = text.split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+        var out: [String] = []
+        for rule in rules {
+            var i = 0
+            while i < all.count {
+                let header = all[i]
+                guard header.hasPrefix(rule.headerPrefix) else { i += 1; continue }
+                var end = i + 1
+                while end < all.count, !all[end].hasPrefix("### ") { end += 1 }
+                let body = all[(i + 1)..<end]
+                for prefix in rule.requiredLinePrefixes where !body.contains(where: { $0.hasPrefix(prefix) }) {
+                    out.append("\(header): missing `\(prefix)`")
+                }
+                i = end
+            }
+        }
+        return out
     }
 
     /// Backticked repo paths / `path:line` citations in `markdown` that do not

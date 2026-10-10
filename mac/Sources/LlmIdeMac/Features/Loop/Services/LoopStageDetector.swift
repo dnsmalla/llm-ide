@@ -886,6 +886,18 @@ public enum LoopStageDetector {
                   excludeStages: ["doc-index"], citations: true),
         ])
 
+    /// The Refactoring loop's blocking check: the refactor plan within 250 lines,
+    /// and every `### R` section carries its `- Files:`, `- Expect:` and `- Tests:`
+    /// lines. Plans live under the project's llm-doc/, hence the project fallback.
+    static let refactorPlanCheckSpec = ArtifactCheckSpec(
+        projectRootFallback: true,
+        outputRules: [
+            .init(stage: "refactor-plan", shape: .file, maxLines: 250),
+        ],
+        sectionRules: [
+            .init(headerPrefix: "### R", requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:"]),
+        ])
+
     // MARK: Refactoring + Doc Optimization stage prompts
     //
     // Shared by the default loops below and their `LoopTemplate` twins
