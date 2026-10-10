@@ -9,24 +9,33 @@ extension LoopEngineRunner {
 
     // MARK: - Stage
 
+    /// Rescans, loads and probes the RUN root (where the apply edits, and where a
+    /// worktree's graph lives). The before/after/GRAPH files are written to the
+    /// MAIN checkout, where the Loop's outputs live.
     func runCodeGraphStage(_ stage: LoopStage, gitRoot: URL) async -> StageDecision {
         let startedAt = Date()
-        // The graph and its snapshots live under the main checkout, like every
-        // other Loop output (`system/` is gitignored, so a worktree would lose them).
         let mainRoot = currentRunContext?.mainGitRoot ?? gitRoot
         switch stage.graphOp {
         case .snapshot:
-            return await runGraphSnapshot(stage, startedAt: startedAt, mainRoot: mainRoot)
+            return await runGraphSnapshot(stage, startedAt: startedAt, runRoot: gitRoot, mainRoot: mainRoot)
         case .verify:
-            return await runGraphVerify(stage, startedAt: startedAt, mainRoot: mainRoot)
+            return await runGraphVerify(stage, startedAt: startedAt, runRoot: gitRoot, mainRoot: mainRoot)
         case nil:
             stageStates[stage.id] = .failed
             return .terminate(.error("Stage \"\(stage.name)\" has no operation chosen"))
         }
     }
 
-    private func runGraphSnapshot(_ stage: LoopStage, startedAt: Date, mainRoot: URL) async -> StageDecision {
-        guard let loaded = await loadCodeGraph(stage, mainRoot: mainRoot) else {
+    private func runGraphSnapshot(_ stage: LoopStage, startedAt: Date, runRoot: URL, mainRoot: URL) async -> StageDecision {
+        // Every iteration re-runs this stage, and the apply stage is skipped once
+        // it has applied. The baseline is the graph BEFORE any batch, so a later
+        // pass must not replace it with a post-apply graph.
+        if graphBefore != nil {
+            appendLog(.info, "  [\(stage.name)] snapshot already taken this run")
+            return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
+        }
+        let load = await loadCodeGraph(stage, runRoot: runRoot)
+        guard let loaded = load.graph else {
             if graphRescanner == nil {
                 appendLog(.info, "  [\(stage.name)] code graph not available in this build; snapshot skipped")
                 return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
@@ -34,7 +43,10 @@ extension LoopEngineRunner {
             return finishCodeGraph(stage, startedAt: startedAt, passed: false,
                                    output: "no graph.json after rescan")
         }
-        let report = await Self.graphReport(loaded.index, mainRoot: mainRoot)
+        if let reason = load.notRegenerated {
+            appendLog(.warn, "  [\(stage.name)] using the existing graph.json (\(reason))")
+        }
+        let report = await Self.graphReport(loaded.index, runRoot: runRoot)
         do {
             try Self.writeGraphFile(loaded.data, to: LoopOutputLayout.refactorGraphBefore, root: mainRoot)
             try Self.writeGraphFile(Data(report.render().utf8), to: LoopOutputLayout.refactorGraphMD, root: mainRoot)
@@ -49,14 +61,24 @@ extension LoopEngineRunner {
         return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
     }
 
-    private func runGraphVerify(_ stage: LoopStage, startedAt: Date, mainRoot: URL) async -> StageDecision {
+    private func runGraphVerify(_ stage: LoopStage, startedAt: Date, runRoot: URL, mainRoot: URL) async -> StageDecision {
         if currentBatchSkipped {
             let id = currentBatchId ?? "unknown"
             let message = "batch \(id) was skipped; nothing to verify"
             appendLog(.info, "  [\(stage.name)] \(message)")
             return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: message)
         }
-        guard let loaded = await loadCodeGraph(stage, mainRoot: mainRoot) else {
+        let batch = currentBatchId ?? "unknown"
+        let load = await loadCodeGraph(stage, runRoot: runRoot)
+        // A stale graph must never be compared: a batch that could not be
+        // regenerated is not verified at all.
+        if let reason = load.notRegenerated {
+            let message = "graph not regenerated (\(reason)); batch \(batch) not verified"
+            appendLog(.warn, "  [\(stage.name)] \(message)")
+            return finishCodeGraph(stage, startedAt: startedAt, passed: false, output: message,
+                                   batchId: currentBatchId)
+        }
+        guard let loaded = load.graph else {
             if graphRescanner == nil {
                 appendLog(.info, "  [\(stage.name)] code graph not available in this build; verify skipped")
                 return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
@@ -64,7 +86,7 @@ extension LoopEngineRunner {
             return finishCodeGraph(stage, startedAt: startedAt, passed: false,
                                    output: "no graph.json after rescan")
         }
-        let after = await Self.graphReport(loaded.index, mainRoot: mainRoot)
+        let after = await Self.graphReport(loaded.index, runRoot: runRoot)
         do {
             try Self.writeGraphFile(loaded.data, to: LoopOutputLayout.refactorGraphAfter, root: mainRoot)
         } catch {
@@ -82,46 +104,55 @@ extension LoopEngineRunner {
         } catch {
             appendLog(.warn, "  [\(stage.name)] could not write GRAPH-DELTA.md: \(error.localizedDescription)")
         }
-        let id = currentBatchId ?? "unknown"
         if !delta.regressions.isEmpty {
             let message = "structure regressed: \(delta.regressions.joined(separator: ", "))"
             return finishCodeGraph(stage, startedAt: startedAt, passed: false, output: message,
                                    batchId: currentBatchId, delta: delta.changes)
         }
         if delta.expectedMoved == false, let expect = currentExpect {
-            let message = "batch \(id) promised \(expect) to fall; it did not"
+            let message = "batch \(batch) promised \(expect) to fall; it did not"
             return finishCodeGraph(stage, startedAt: startedAt, passed: false, output: message,
                                    batchId: currentBatchId, delta: delta.changes)
         }
-        appendLog(.info, "  [\(stage.name)] graph delta · batch \(id) · no regressions")
+        appendLog(.info, "  [\(stage.name)] graph delta · batch \(batch) · no regressions")
         return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "",
                                batchId: currentBatchId, delta: delta.changes)
     }
 
-    /// Rescans through the injected rescanner (when there is one), then loads
-    /// `graph.json`. A busy or unavailable rescan is soft: the existing file is used.
-    private func loadCodeGraph(_ stage: LoopStage, mainRoot: URL) async -> (index: GraphIndex, data: Data)? {
+    /// What a rescan left in the run root: the decoded graph (nil when there is
+    /// none) and, when the rescan did not regenerate it, why.
+    private struct GraphLoad {
+        var graph: (index: GraphIndex, data: Data)?
+        var notRegenerated: String?
+    }
+
+    /// Rescans through the injected rescanner (when there is one), then reads
+    /// `graph.json` from `runRoot` once and decodes that same data.
+    private func loadCodeGraph(_ stage: LoopStage, runRoot: URL) async -> GraphLoad {
+        var notRegenerated: String?
         if let rescanner = graphRescanner {
-            switch await rescanner.rescan(repoRoot: mainRoot) {
+            switch await rescanner.rescan(repoRoot: runRoot) {
             case .rewritten:
                 appendLog(.info, "  [\(stage.name)] code graph regenerated")
             case .busy:
-                appendLog(.warn, "  [\(stage.name)] a code-graph scan is already running — using the existing graph.json")
+                notRegenerated = "a code-graph scan is already running"
             case .unavailable(let reason):
-                appendLog(.warn, "  [\(stage.name)] code graph not regenerated (\(reason)) — using the existing graph.json")
+                notRegenerated = reason
             }
         }
-        let url = mainRoot.appendingPathComponent("system/graph/graph.json")
+        let url = runRoot.appendingPathComponent("system/graph/graph.json")
         guard let data = try? Data(contentsOf: url),
-              let index = GraphIndex.load(gitRoot: mainRoot) else { return nil }
-        return (index, data)
+              let index = try? JSONDecoder().decode(GraphIndex.self, from: data) else {
+            return GraphLoad(graph: nil, notRegenerated: notRegenerated)
+        }
+        return GraphLoad(graph: (index, data), notRegenerated: notRegenerated)
     }
 
     /// The counters for one graph, with the boundary-warning count when the
-    /// project has the gate script.
-    private static func graphReport(_ index: GraphIndex, mainRoot: URL) async -> GraphReport {
-        let warnings = await BoundaryWarningsProbe.count(gitRoot: mainRoot)
-        return GraphReport.build(from: index, commit: gitHead(mainRoot), boundaryWarnings: warnings)
+    /// project has the gate script. Probed in the run root, where the code is.
+    private static func graphReport(_ index: GraphIndex, runRoot: URL) async -> GraphReport {
+        let warnings = await BoundaryWarningsProbe.count(gitRoot: runRoot)
+        return GraphReport.build(from: index, commit: gitHead(runRoot), boundaryWarnings: warnings)
     }
 
     private static func writeGraphFile(_ data: Data, to relativePath: String, root: URL) throws {
@@ -179,8 +210,11 @@ extension LoopEngineRunner {
         }
         if applied == nil, let reply = lastSkillResults[stage.id]?.reply,
            let id = RefactorPlanDiff.appliedReplyBatchId(reply) {
-            applied = after.flatMap { RefactorPlanDiff.batch(id: id, in: $0) }
-                ?? RefactorPlanDiff.Applied(id: id, status: "done", expect: nil, files: [])
+            let planned = after.flatMap { RefactorPlanDiff.batch(id: id, in: $0) }
+            if planned?.status != "done", planned?.status != "skipped" {
+                appendLog(.warn, "  [\(stage.name)] plan status for \(id) unchanged; the next run will re-apply it")
+            }
+            applied = planned ?? RefactorPlanDiff.Applied(id: id, status: "done", expect: nil, files: [])
         }
         guard let applied else {
             appendLog(.info, "  [\(stage.name)] no refactor batch recorded as applied")
@@ -222,8 +256,14 @@ extension LoopEngineRunner {
                    exitCode: nil, passed: true, output: message, score: nil)
             return .proceed
         }
+        // The confined writer reads its Input in the run root; mirror to the main
+        // checkout too when they differ, so the Loop's own output sits beside the plan.
+        let data = Data((section + "\n").utf8)
         do {
-            try Self.writeGraphFile(Data((section + "\n").utf8), to: LoopOutputLayout.refactorNextBatch, root: mainRoot)
+            try Self.writeGraphFile(data, to: LoopOutputLayout.refactorNextBatch, root: gitRoot)
+            if gitRoot.standardizedFileURL.path != mainRoot.standardizedFileURL.path {
+                try Self.writeGraphFile(data, to: LoopOutputLayout.refactorNextBatch, root: mainRoot)
+            }
         } catch {
             let message = "could not write the next batch: \(error.localizedDescription)"
             stageStates[stage.id] = .failed

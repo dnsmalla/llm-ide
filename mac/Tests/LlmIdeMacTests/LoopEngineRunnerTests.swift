@@ -3518,4 +3518,116 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertFalse(FileManager.default.fileExists(
             atPath: repo.appendingPathComponent(LoopOutputLayout.refactorNextBatch).path))
     }
+
+    // MARK: - Refactor graph loop: snapshot once, verify against that snapshot
+
+    /// Serves graph fixtures in order: the first rescan (the snapshot) gets
+    /// `first`, every later rescan gets `later`. Writes them where the runner reads.
+    private final class FixtureRescanner: GraphRescanning {
+        let first: String
+        let later: String
+        private(set) var calls = 0
+        init(first: String, later: String) { self.first = first; self.later = later }
+        func rescan(repoRoot: URL) async -> GraphRescanOutcome {
+            calls += 1
+            let dir = repoRoot.appendingPathComponent("system/graph", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? Data((calls == 1 ? first : later).utf8).write(to: dir.appendingPathComponent("graph.json"))
+            return .rewritten
+        }
+    }
+
+    /// A one-file graph whose only counter that matters here is `filesOver500Count`
+    /// (a file is over 500 lines when `loc` is).
+    private static func graphJSON(loc: Int) -> String {
+        #"{"version":"1.1","files":[{"path":"big.swift","language":"swift","loc":\#(loc),"imports":[],"usedBy":[],"types":[],"functions":[]}],"calls":[]}"#
+    }
+
+    private static let refactorPlanText = """
+    ### R1 Split Big  (status: todo)
+    - Files: `big.swift`
+    - Expect: filesOver500Count 1 → 0
+    """
+
+    /// Writes the plan under the test repo root and returns the root (which the
+    /// caller removes). Approvals in these tests key on `repoRoot`, so the repo
+    /// must be `repoRoot`.
+    private func writeRefactorPlan() throws -> URL {
+        let planURL = repoRoot.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        try FileManager.default.createDirectory(at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Self.refactorPlanText.write(to: planURL, atomically: true, encoding: .utf8)
+        return repoRoot
+    }
+
+    private func refactorConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Graph Snapshot", kind: .codeGraph, order: 0, graphOp: .snapshot),
+            LoopStage(id: "a1", name: "Apply", kind: .skill, order: 1,
+                      skillId: "skills/refactor-apply", targetPath: LoopOutputLayout.refactorPlan),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 2),
+            LoopStage(id: "g2", name: "Graph Check", kind: .codeGraph, order: 3, graphOp: .verify),
+        ], maxIterations: 2, consecutiveFailureStop: 2)
+    }
+
+    /// Snapshot -> apply (flips R1 to `applied`) -> test fails once then passes ->
+    /// verify. The failure is repaired, so the run re-enters the pipeline from the
+    /// top: the snapshot must NOT be retaken, and verify must compare against the
+    /// FIRST snapshot, so the delta reflects the changed graph.
+    func testRefactorVerifyComparesAgainstTheFirstSnapshotAcrossAnIteration() async throws {
+        let root = try writeRefactorPlan()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planURL = root.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let rescanner = FixtureRescanner(first: Self.graphJSON(loc: 600), later: Self.graphJSON(loc: 300))
+        let skills = WritingSkillExecutor { _ in
+            try Self.refactorPlanText.replacingOccurrences(of: "(status: todo)", with: "(status: done)")
+                .write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        var testCalls = 0
+        let verifier = StubVerifier { _ in
+            testCalls += 1
+            return testCalls <= 2 ? VerifyOutcome(exitCode: 1, output: "1 failing")
+                                  : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: makeApprovals(approve: [("t1", "swift test")]),
+            graphRescanner: rescanner)
+        let result = await runner.run(config: refactorConfig(), faultsRoot: root, gitRoot: root)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(rescanner.calls, 2, "one snapshot rescan, one verify rescan")
+        XCTAssertEqual(skills.messages.count, 1, "the apply stage is not re-applied")
+        let before = try String(contentsOf: root.appendingPathComponent(LoopOutputLayout.refactorGraphBefore), encoding: .utf8)
+        XCTAssertTrue(before.contains("\"loc\":600"), "the baseline is the first snapshot")
+        let verify = try XCTUnwrap(runner.iterationRecords.flatMap(\.attempts)
+            .last(where: { $0.stageId == "g2" && $0.passed }))
+        XCTAssertEqual(verify.batchId, "R1")
+        XCTAssertEqual(verify.graphDelta?["filesOver500Count"], -1)
+    }
+
+    /// A batch the apply stage marks skipped has nothing to verify: verify passes
+    /// with that message and does not compare graphs.
+    func testRefactorBatchMarkedSkippedPassesVerifyWithNothingToVerify() async throws {
+        let root = try writeRefactorPlan()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planURL = root.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let rescanner = FixtureRescanner(first: Self.graphJSON(loc: 600), later: Self.graphJSON(loc: 600))
+        let skills = WritingSkillExecutor { _ in
+            try Self.refactorPlanText.replacingOccurrences(of: "(status: todo)", with: "(status: skipped, reason: intended)")
+                .write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: makeApprovals(approve: [("t1", "swift test")]),
+            graphRescanner: rescanner)
+        let result = await runner.run(config: refactorConfig(), faultsRoot: root, gitRoot: root)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(rescanner.calls, 1, "only the snapshot rescans; a skipped batch is not verified")
+        let verify = try XCTUnwrap(runner.iterationRecords.flatMap(\.attempts).last(where: { $0.stageId == "g2" }))
+        XCTAssertTrue(verify.passed)
+        XCTAssertEqual(verify.outputTail, "batch R1 was skipped; nothing to verify")
+    }
 }
