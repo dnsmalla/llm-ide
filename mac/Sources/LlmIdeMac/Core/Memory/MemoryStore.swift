@@ -103,9 +103,15 @@ public struct MemoryStore: Sendable {
     /// failures.
     @discardableResult
     func writeFault(at repo: URL, _ fault: FaultReport) throws -> URL {
+        try writeFault(at: repo, fault, fileName: fault.suggestedFileName())
+    }
+
+    /// As `writeFault`, with an explicit file name (callers that must avoid same-second collisions).
+    @discardableResult
+    func writeFault(at repo: URL, _ fault: FaultReport, fileName: String) throws -> URL {
         let dir = faultsDir(in: repo)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        let url = dir.appendingPathComponent(fault.suggestedFileName())
+        let url = dir.appendingPathComponent(fileName)
         let md = try fault.toMarkdown()
         try md.write(to: url, atomically: true, encoding: .utf8)
         return url

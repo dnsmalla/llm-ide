@@ -59,7 +59,7 @@ final class LoopEngineRunner: ObservableObject {
     /// the display must say so); left holding the final states after a run —
     /// available to any post-run surface (today's header hides itself when
     /// the run ends, so nothing renders them yet) until the next run resets it.
-    @Published private(set) var stageStates: [String: LiveStageState] = [:]
+    @Published var stageStates: [String: LiveStageState] = [:]
     /// Name of the stage executing (or repairing) right now, `nil` between
     /// stages and between runs.
     @Published private(set) var currentStageName: String?
@@ -182,11 +182,11 @@ final class LoopEngineRunner: ObservableObject {
         activeLoopCounts[rootKey] = loops.isEmpty ? nil : loops
     }
 
-    private let verifier: FaultVerifier
+    let verifier: FaultVerifier
     private let stageRepairer: LoopStageRepairer
     private let regressionSweep: RegressionSweepRunning
     private let skillExecutor: LoopSkillExecuting
-    private let approvals: VerifyApprovalStore
+    let approvals: VerifyApprovalStore
     /// Fallback ceiling for a stage whose own `timeoutSeconds` is nil. 0 = no
     /// limit, which is the default: a stage command is the user's build or test
     /// suite, and cutting it off reports a timeout for work that was still
@@ -205,7 +205,7 @@ final class LoopEngineRunner: ObservableObject {
     /// in progress), so a request is never made from files that mix it with a repair.
     private var shipBaseline: LoopShipBaseline?
     private let summaryWriter: LoopRunSummaryWriting
-    private let scopeGuard: RepairScopeGuarding
+    let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
     /// Whether preflight also verifies that each shell stage's executable
     /// exists. Off by default: tests drive the runner with fake commands
@@ -252,7 +252,31 @@ final class LoopEngineRunner: ObservableObject {
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
     /// to it; `@MainActor` makes that safe.
-    private var iterationRecords: [LoopIterationRecord] = []
+    var iterationRecords: [LoopIterationRecord] = []
+
+    /// Test loop run state (`LoopEngineRunner+TestMap.swift`), reset per run.
+    var testStructure: TestStructure?
+    var testMapBefore: TestMap?
+    /// The full (uncapped by the journal's 4 KB tail) output of each blocking
+    /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
+    var lastVerifyOutputs: [String: String] = [:]
+    /// A blocking shell stage's failing output the ledger stage has not yet seen
+    /// (the stage ends the run or repairs, so the ledger's own position after it
+    /// is never reached). Flushed before a repair starts or when the stage returns;
+    /// dropped when the flake re-run passes.
+    /// Test roots the writer created files under this run (keyed by package + test
+    /// dir). The Test stage also runs each root's own command when it differs
+    /// from its own, so a written test is never left unexecuted.
+    var writtenRoots: [String: TestRoot] = [:]
+    var pendingFailureLedger: (stageId: String, output: String, gitRoot: URL)?
+    /// How many times each shell stage ran its command this run, and the
+    /// "stage#attempt" keys the ledger already recorded — so the ledger's normal
+    /// position never re-processes an attempt the failure path already handled.
+    var shellAttemptSeq: [String: Int] = [:]
+    var ledgerRecordedKeys: Set<String> = []
+    /// The protected-path snapshot taken before the latest guarded edit — what was
+    /// already dirty (the user's own edits) so `enforceTestWriteOnly` never reverts it.
+    var lastGuardSnapshot: RepairScopeSnapshot?
 
     /// The latest agent result per stage id for the current run — what each
     /// skill stage and each repair's agent said and changed. Kept (rather than
@@ -267,17 +291,19 @@ final class LoopEngineRunner: ObservableObject {
     /// runs. `run`'s own parameters are locals, invisible to
     /// `handleAppTerminating()` — which fires from a notification, not from
     /// inside `run` — so this is the only way that method can find them.
-    private struct RunContext {
+    struct RunContext {
         let config: LoopEngineConfig
         let faultsRoot: URL
         let gitRoot: URL
+        /// The linked main checkout — equals `gitRoot` unless the run is in a worktree.
+        let mainGitRoot: URL
         let projectId: String?
         let startedAt: Date
         let loopId: String
         let loopName: String
         let runId: String
     }
-    private var currentRunContext: RunContext?
+    var currentRunContext: RunContext?
 
     init(verifier: FaultVerifier = ShellFaultVerifier(),
          stageRepairer: LoopStageRepairer,
@@ -435,7 +461,7 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     /// What the loop should do after one stage finished.
-    private enum StageDecision: Equatable {
+    enum StageDecision: Equatable {
         /// Move on to the next stage — the stage passed, or it failed but is
         /// `.advisory` and therefore does not gate.
         case proceed
@@ -595,6 +621,14 @@ final class LoopEngineRunner: ObservableObject {
         runWallClockBudget = config.wallClockBudgetSeconds
         stageStates = [:]
         lastSkillResults = [:]
+        testStructure = nil
+        testMapBefore = nil
+        lastVerifyOutputs = [:]
+        pendingFailureLedger = nil
+        writtenRoots = [:]
+        shellAttemptSeq = [:]
+        ledgerRecordedKeys = []
+        lastGuardSnapshot = nil
         lastRepairResults = [:]
         attemptLedgers = [:]
         runMainGitRoot = mainGitRoot
@@ -614,7 +648,7 @@ final class LoopEngineRunner: ObservableObject {
         pausedSeconds = 0
         pauseStartedAt = nil
         lockRootKeyForPause = lockRootKey
-        currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+        currentRunContext = RunContext(config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot, mainGitRoot: mainGitRoot,
                                        projectId: projectId, startedAt: startedAt,
                                        loopId: loopId, loopName: loopName,
                                        runId: UUID().uuidString)
@@ -786,6 +820,13 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
+            case .testMap:
+                guard stage.testOp != nil else {
+                    return await finish(.error("Stage \"\(stage.name)\" has no operation chosen"),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
+                }
             case .regressionSweep, .unsupported, .incidentTriage, .sdkSurfaceDiff:
                 break
             }
@@ -879,11 +920,14 @@ final class LoopEngineRunner: ObservableObject {
                     decision = await runShellStage(
                         stage, config: config, gitRoot: runGitRoot,
                         progress: &progress, repairsUsed: &repairsUsed,
-                        goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                        goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs,
+                        stages: orderedStages)
                 case .artifactCheck:
                     decision = await runArtifactCheckStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         stages: orderedStages, progress: &progress)
+                case .testMap:
+                    decision = await runTestMapStage(stage, gitRoot: runGitRoot, stages: orderedStages)
                 case .incidentTriage:
                     decision = runTriageStage(stage, gitRoot: runGitRoot)
                 case .sdkSurfaceDiff:
@@ -1080,7 +1124,22 @@ final class LoopEngineRunner: ObservableObject {
                                progress: inout ProgressWatch,
                                repairsUsed: inout [String: Int],
                                goal: String? = nil, acceptanceCriteria: String? = nil,
-                               scopeGlobs: [String] = []) async -> StageDecision {
+                               scopeGlobs: [String] = [], stages: [LoopStage] = []) async -> StageDecision {
+        let decision = await runShellStageAttempt(
+            stage, config: config, gitRoot: gitRoot, progress: &progress, repairsUsed: &repairsUsed,
+            goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs, stages: stages)
+        // Any ending that left a failing output unrecorded (give-up, terminate)
+        // still feeds the ledger.
+        if !Task.isCancelled { await flushFailureLedger(stages: stages) }
+        pendingFailureLedger = nil
+        return decision
+    }
+
+    private func runShellStageAttempt(_ stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
+                                      progress: inout ProgressWatch,
+                                      repairsUsed: inout [String: Int],
+                                      goal: String?, acceptanceCriteria: String?,
+                                      scopeGlobs: [String], stages: [LoopStage]) async -> StageDecision {
         // Preflight already validated this once per stage; if a command somehow
         // becomes invalid by the time we get here, fail closed instead of
         // force-unwrapping.
@@ -1097,13 +1156,15 @@ final class LoopEngineRunner: ObservableObject {
 
         let startedAt = Date()
         let timeout = shellTimeout(for: stage)
+        shellAttemptSeq[stage.id, default: 0] += 1
         let outcome: VerifyOutcome
         // A timed-out stage's `output` is a synthesized sentence, not the
         // runner's own output, so nothing can be concluded from the parser
         // failing to score it — see the unrecognised-runner notice below.
         var didTimeOut = false
         do {
-            outcome = try await verifier.verify(command: command, repoRoot: gitRoot, timeout: timeout)
+            outcome = try await verifyIncludingWrittenRoots(stage: stage, command: command,
+                                                            gitRoot: gitRoot, timeout: timeout)
         } catch is CancellationError {
             // Terminate paths must not leave the state stuck at `.running` —
             // the retained post-run states would then claim a stage was still
@@ -1151,6 +1212,7 @@ final class LoopEngineRunner: ObservableObject {
         // verifier's 256 KB cap, and regexes over it stalled the UI per stage.
         let analysis = await Self.analyse(outcome.output, hashing: outcome.exitCode != 0)
         settleLedger(stageId: stage.id, passed: outcome.exitCode == 0, failureSet: analysis.hash)
+        if stage.verifies { lastVerifyOutputs[stage.id] = outcome.output }
         if outcome.exitCode == 0 {
             appendLog(.info, "  [\(stage.name)] passed")
             stageStates[stage.id] = .passed
@@ -1205,6 +1267,14 @@ final class LoopEngineRunner: ObservableObject {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score)
             return .terminate(.blocked(reason: .environment(stageName: stage.name, detail: problem + worktreeNote)))
+        }
+
+        // The ledger stage sits AFTER this one, so a failure that ends the run or
+        // goes to repair would never reach it: hand it the failing output now (it
+        // is flushed before a repair starts, or when this stage returns). Not for a
+        // timeout or a missing tool — no test failed.
+        if !didTimeOut, outcome.exitCode != 127 {
+            pendingFailureLedger = (stage.id, outcome.output, gitRoot)
         }
 
         let used = repairsUsed[stage.id] ?? 0
@@ -1272,9 +1342,12 @@ final class LoopEngineRunner: ObservableObject {
             stageStates[stage.id] = .running
             let rerunStartedAt = Date()
             do {
-                let again = try await verifier.verify(command: command, repoRoot: gitRoot,
-                                                      timeout: shellTimeout(for: stage))
+                let again = try await verifyIncludingWrittenRoots(stage: stage, command: command,
+                                                                  gitRoot: gitRoot, timeout: shellTimeout(for: stage))
+                // The ledger op must see the output of the attempt it picks (the last one).
+                lastVerifyOutputs[stage.id] = again.output
                 if again.exitCode == 0 {
+                    pendingFailureLedger = nil
                     appendLog(.warn, "  [\(stage.name)] FLAKY — failed, then passed on an immediate re-run; not repairing")
                     record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                            passed: false, output: outcome.output, outputHash: failureHash, score: score)
@@ -1288,6 +1361,7 @@ final class LoopEngineRunner: ObservableObject {
                 }
                 // Failed again: journal the re-run, and show the repair what
                 // the stage says NOW if it failed differently.
+                if pendingFailureLedger != nil { pendingFailureLedger?.output = again.output }
                 let again2 = await Self.analyse(again.output, hashing: true)
                 record(stage, startedAt: rerunStartedAt, duration: Date().timeIntervalSince(rerunStartedAt),
                        exitCode: again.exitCode, passed: false, output: again.output,
@@ -1322,6 +1396,7 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.error, "  [\(stage.name)] \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))
         }
+        await flushFailureLedger(stages: stages)
         appendLog(.info, "  [\(stage.name)] repairing…")
         emit(LoopRunEvent(kind: LoopRunEvent.Kind.repairRequested, iteration: iteration,
                           stageId: stage.id, stageName: stage.name,
@@ -1898,6 +1973,24 @@ final class LoopEngineRunner: ObservableObject {
                 }
                 return .terminate(.error(failure))
             }
+            if stage.testWriteOnly, let violation = await enforceTestWriteOnly(
+                stage: stage, result: agentResult, changed: changed, gitRoot: gitRoot) {
+                stageStates[stage.id] = .failed
+                appendLog(.error, "  [\(stage.name)] \(violation)")
+                record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                       passed: false, output: violation, score: nil, changedPaths: changed,
+                       scopeVerdict: verdictScope)
+                return .terminate(.error(violation))
+            }
+            if stage.isTestSetup, let violation = await enforceTestSetupOnly(
+                stage: stage, result: agentResult, changed: changed, gitRoot: gitRoot) {
+                stageStates[stage.id] = .failed
+                appendLog(.error, "  [\(stage.name)] \(violation)")
+                record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                       passed: false, output: violation, score: nil, changedPaths: changed,
+                       scopeVerdict: verdictScope)
+                return .terminate(.error(violation))
+            }
             appendLog(.info, "  [\(stage.name)] skill completed (generate)")
             // `passed` on a generate step means "ran without error" — but a step
             // whose edits were rejected as out-of-scope did not do its job, and
@@ -2061,7 +2154,15 @@ final class LoopEngineRunner: ObservableObject {
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
                                 scopeGlobs: [String] = [],
                                 edit: () async throws -> LoopAgentResult?) async -> GuardedEditResult {
+        lastGuardSnapshot = nil
         guard Self.effectivePolicy(for: stage, config: config) != .off else {
+            // Policy `.off` skips the scope check, but the test writer/setup guards
+            // still need to know what was already dirty before the agent ran, or
+            // they would revert the user's own uncommitted edits.
+            if stage.testWriteOnly || stage.isTestSetup {
+                lastGuardSnapshot = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
+                                                              scopeGlobs: scopeGlobs)
+            }
             do { _ = try await edit() } catch { return .failed(error, .notChecked, violations: [], changed: []) }
             return .completed(.notChecked, violations: [], changed: [])
         }
@@ -2074,6 +2175,7 @@ final class LoopEngineRunner: ObservableObject {
         }
         let before = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
                                                scopeGlobs: scopeGlobs)
+        lastGuardSnapshot = before
         var thrown: Error?
         // What the agent says it wrote. `git status` cannot see an ignored
         // file, so the server's own list is part of the changed set too.
@@ -2357,7 +2459,7 @@ final class LoopEngineRunner: ObservableObject {
     /// Appends one stage attempt to the current iteration's record. A stage that
     /// runs outside any iteration (there is none today) is dropped rather than
     /// crashing on an empty array.
-    private func record(_ stage: LoopStage, startedAt: Date, duration: Double,
+    func record(_ stage: LoopStage, startedAt: Date, duration: Double,
                         exitCode: Int32?, passed: Bool, output: String,
                         outputHash: String? = nil, score: Int?,
                         repairAttempted: Bool = false,
@@ -2652,7 +2754,7 @@ final class LoopEngineRunner: ObservableObject {
     /// as long as the app stays open. Mirrors `TaskLogStore`'s own cap.
     private static let maxLogLines = 2000
 
-    private func appendLog(_ level: LoopLogLine.Level, _ text: String) {
+    func appendLog(_ level: LoopLogLine.Level, _ text: String) {
         let line = LoopLogLine(at: Date(), level: level, text: text)
         log.append(line)
         if log.count > Self.maxLogLines {

@@ -23,6 +23,10 @@ public enum LoopStageSeverity: String, Codable, CaseIterable {
     }
 }
 
+/// What a `.testMap` stage does: detect the test layout, rebuild the
+/// untested-function map, or diff the Test stage's results into the ledger.
+public enum TestMapOp: String, Codable { case structure, map, ledger }
+
 /// One step of a Loop Engineering run. `.regressionSweep` re-runs the
 /// existing `RegressionRunner` sweep (no shell command of its own);
 /// `.shellCommand` runs an arbitrary project command (e.g. "swift test")
@@ -38,6 +42,10 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         /// `check`. A build that predates this kind reads it as `.unsupported`
         /// (kept verbatim, never run).
         case artifactCheck
+        /// In-app test-structure/test-map/ledger work (no shell, no agent); the
+        /// operation is `testOp`. A build that predates this kind reads it as
+        /// `.unsupported` (kept verbatim, never run).
+        case testMap
         /// Self-Heal Phase 2: picks up to `SelfHealSettings.maxPerRun()` new,
         /// non-environmental incidents and writes `SelfHealBatch.relativePath`
         /// at the run's git root for the fix agent to answer. No shell, no
@@ -130,6 +138,8 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     public var detectedCommand: String? = nil
     /// `.artifactCheck` only — what to check.
     public var check: ArtifactCheckSpec? = nil
+    /// `.testMap` only — which operation this stage performs.
+    public var testOp: TestMapOp? = nil
     /// Revision of the detector default this stage's content was last brought
     /// to (`LoopStageDetector.upgradingDefaultRevisions`); `nil` on a stage
     /// saved before revisions existed, which reads as revision 1.
@@ -146,7 +156,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
          isDefault: Bool = false, enabled: Bool = true, defaultKey: String? = nil,
          severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil,
          detectedCommand: String? = nil, check: ArtifactCheckSpec? = nil,
-         defaultRevision: Int? = nil) {
+         defaultRevision: Int? = nil, testOp: TestMapOp? = nil) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -164,13 +174,14 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         self.detectedCommand = detectedCommand
         self.check = check
         self.defaultRevision = defaultRevision
+        self.testOp = testOp
     }
 
     // MARK: - Codable backward compatibility
 
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
-        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand, check, defaultRevision, disabledByDetection
+        case enabled, defaultKey, severity, timeoutSeconds, detectedCommand, check, defaultRevision, disabledByDetection, testOp
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -211,6 +222,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         check = try container.decodeIfPresent(ArtifactCheckSpec.self, forKey: .check)
         defaultRevision = try container.decodeIfPresent(Int.self, forKey: .defaultRevision)
         disabledByDetection = try container.decodeIfPresent(Bool.self, forKey: .disabledByDetection)
+        testOp = try container.decodeIfPresent(TestMapOp.self, forKey: .testOp)
     }
 
     /// An `.unsupported` stage writes back its original JSON untouched;
@@ -238,6 +250,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(timeoutSeconds, forKey: .timeoutSeconds)
         try c.encodeIfPresent(detectedCommand, forKey: .detectedCommand)
         try c.encodeIfPresent(check, forKey: .check)
+        try c.encodeIfPresent(testOp, forKey: .testOp)
         try c.encodeIfPresent(defaultRevision, forKey: .defaultRevision)
         try c.encodeIfPresent(disabledByDetection, forKey: .disabledByDetection)
     }
@@ -306,7 +319,18 @@ extension LoopStage {
     // a template applied to a repo with no test tooling, or a user-built loop.
 
     /// Skill ids whose stage applies code edits that must be verified.
-    static let codeApplySkillIds: Set<String> = ["skills/refactor-apply"]
+    static let codeApplySkillIds: Set<String> = [
+        "skills/refactor-apply", "skills/test-gap-writer", "skills/test-structure-setup",
+    ]
+
+    /// The Test loop's Setup stage: applies code, but may only modify package
+    /// manifests and add test scaffolding (`LoopEngineRunner.testSetupViolations`).
+    var isTestSetup: Bool { kind == .skill && skillId == "skills/test-structure-setup" }
+
+    /// The Test loop's writer: applies code, but may only CREATE files under the
+    /// test roots (`LoopEngineRunner.testWriteViolations`), so it does not make a
+    /// loop manual-only (`containsEnabledCodeApply`).
+    var testWriteOnly: Bool { kind == .skill && skillId == "skills/test-gap-writer" }
 
     /// Whether this stage applies code edits (see `codeApplySkillIds`).
     var appliesCode: Bool {
@@ -331,12 +355,19 @@ extension LoopStage {
         guard stage.appliesCode else { return false }
         let ordered = runOrder(stages)
         guard let index = ordered.firstIndex(where: { $0.id == stage.id }) else { return true }
-        return !ordered[(index + 1)...].contains { $0.enabled && $0.verifies }
+        // Test Setup's deliverable is a DETECTABLE test structure; no shell command
+        // can verify it yet (there is no runner), so an enabled, non-advisory
+        // `.testMap` structure stage after it is its verify.
+        let setupCheck = stage.isTestSetup
+        return !ordered[(index + 1)...].contains {
+            $0.enabled && ($0.verifies
+                || (setupCheck && $0.kind == .testMap && $0.testOp == .structure && $0.severity != .advisory))
+        }
     }
 
     /// Whether `stages` contains an enabled code-applying stage — what makes a
     /// loop manual-only whatever its `defaultKey` (`LoopDefinition.isManualOnly`).
     static func containsEnabledCodeApply(_ stages: [LoopStage]) -> Bool {
-        stages.contains { $0.enabled && $0.appliesCode }
+        stages.contains { $0.enabled && $0.appliesCode && !$0.testWriteOnly }
     }
 }

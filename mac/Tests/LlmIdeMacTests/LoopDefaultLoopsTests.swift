@@ -58,7 +58,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
     func testBareRepoGetsTheRegressionPlanRefactorAndDocLoops() {
         let loops = LoopStageDetector.defaultLoops(gitRoot: repo)
         XCTAssertEqual(loops.map(\.defaultKey),
-                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.plan,
+                       [LoopDefaultLoopKey.regression, LoopDefaultLoopKey.test, LoopDefaultLoopKey.plan,
                         LoopDefaultLoopKey.refactor, LoopDefaultLoopKey.docs])
         XCTAssertEqual(loops[0].name, "Regression")
         XCTAssertEqual(loops[0].config.stages.map(\.kind), [.regressionSweep])
@@ -102,13 +102,16 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(regression?.config.stages.last?.command, "swift test")
     }
 
-    func testTestLoopIsOnlyCreatedWhenToolingIsDetected() throws {
-        XCTAssertNil(LoopStageDetector.defaultLoops(gitRoot: repo)
-            .first { $0.defaultKey == LoopDefaultLoopKey.test })
+    func testTestLoopExistsWithoutToolingAndGainsItsRunStagesWithIt() throws {
+        // No runner: the loop still exists (Structure + Setup create one), without a Test stage.
+        let bare = LoopStageDetector.defaultLoops(gitRoot: repo)
+            .first { $0.defaultKey == LoopDefaultLoopKey.test }
+        XCTAssertEqual(bare?.config.stages.compactMap(\.defaultKey),
+                       ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write"])
         try write("Package.swift")
         let test = LoopStageDetector.defaultLoops(gitRoot: repo)
             .first { $0.defaultKey == LoopDefaultLoopKey.test }
-        XCTAssertEqual(test?.config.stages.map(\.command), ["swift test"])
+        XCTAssertEqual(test?.config.stages.first { $0.defaultKey == "test" }?.command, "swift test")
     }
 
     /// The markers are llm-ide's own layout, so a repo that is not llm-ide must
@@ -454,7 +457,8 @@ final class LoopDefaultLoopsTests: XCTestCase {
         let testLoop = LoopDefinition(name: "Test", defaultKey: LoopDefaultLoopKey.test,
                                       config: LoopEngineConfig(stages: []))
         let ensured = LoopStageDetector.ensureDefaultStages(in: testLoop, gitRoot: repo)
-        XCTAssertEqual(ensured.config.stages.compactMap(\.defaultKey), ["test"])
+        XCTAssertEqual(ensured.config.stages.compactMap(\.defaultKey),
+                       ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"])
     }
 
     /// Disabling a stage is the sanctioned escape hatch for a pinned default,
@@ -518,9 +522,10 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(migrated.loop(defaultKey: LoopDefaultLoopKey.regression)?
             .config.stages.compactMap(\.defaultKey), ["regression", "regression-test"])
         XCTAssertEqual(migrated.loop(defaultKey: LoopDefaultLoopKey.test)?
-            .config.stages.compactMap(\.defaultKey), ["test"])
+            .config.stages.compactMap(\.defaultKey),
+            ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"])
         XCTAssertEqual(migrated.loop(defaultKey: LoopDefaultLoopKey.test)?
-            .config.stages.first?.command, "make test")
+            .config.stages.first { $0.defaultKey == "test" }?.command, "make test")
     }
 
     /// The whole point of migrating rather than re-detecting: the numbers and

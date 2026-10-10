@@ -40,7 +40,9 @@ final class AutoTaskSkillCatalog: ObservableObject {
     /// scheduled Auto Task has no verify stage, so it must not run it. Kept as
     /// names here rather than read from the Loop feature (features never
     /// reference each other); `AutoTaskSkillCatalogTests` pins the two in sync.
-    nonisolated static let excludedSkillNames: Set<String> = ["refactor-apply"]
+    nonisolated static let excludedSkillNames: Set<String> = [
+        "refactor-apply", "test-gap-writer", "test-structure-setup",
+    ]
 
     /// The prompt line that invokes `name`.
     nonisolated static func directive(for name: String) -> String {

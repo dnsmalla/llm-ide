@@ -21,8 +21,11 @@ struct DefaultRevisionCatalog {
     /// Optimization loops under `llm-doc/loop/<key>/` (`LoopOutputLayout`).
     static let shipped = DefaultRevisionCatalog(
         currentRevisions: Dictionary(uniqueKeysWithValues:
-            LoopOutputLayout.movedStageKeys.map { ($0, LoopOutputLayout.revision) }),
+            LoopOutputLayout.movedStageKeys.map { ($0, LoopOutputLayout.revision) })
+            // Revision 2 of `test`: the Test loop grew its structure/map/write/ledger stages.
+            .merging(["test": 2]) { a, _ in a },
         history: [
+            "test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 0)],
             "plan-structure-index": [1: LoopStage(
                 name: "Structure Index", kind: .skill, order: 0,
                 skillId: "skills/plan-structure-index",
@@ -160,7 +163,9 @@ extension LoopStageDetector {
                 (stage.defaultRevision ?? 1) >= catalog.current(stage.defaultKey ?? "")
             }
             if Self.contractGateStageKey[loopKey] != nil, !coupledBlocked, movedStagesCurrent,
-               updated.config.stages.contains(where: isCoupled),
+               (loopKey == LoopDefaultLoopKey.test
+                    ? updated.config.stages.contains { $0.defaultKey == "test-write" }
+                    : updated.config.stages.contains(where: isCoupled)),
                let legacy = legacyLoopContract(loopKey), let current = defaultLoopContract(loopKey) {
                 var textChanged = false
                 if updated.goal == legacy.goal, legacy.goal != current.goal {
@@ -186,6 +191,7 @@ extension LoopStageDetector {
     private static let contractGateStageKey = [
         LoopDefaultLoopKey.plan: "plan-director",
         LoopDefaultLoopKey.docs: "doc-writer",
+        LoopDefaultLoopKey.test: "test-write",
     ]
 
     /// Whether a newer shipped revision of this default exists that was not

@@ -7,6 +7,16 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **Test loop upgrade: structure, code-graph test map, test writing and regression faults.** The Test loop is no
+  longer just the detected command. New native stage kind `testMap` (`structure` | `map` | `ledger`) detects the
+  test roots, ranks untested functions from `system/graph/graph.json` (file-level fallback), and records a
+  per-test ledger; two kit skills (`test-structure-setup`, `test-gap-writer`) set up a missing runner and write
+  tests for the top gaps, under guards that let them create only test files. A test that newly fails becomes a
+  `test:<id>` fault with a single-test verify command, and a test that passes again marks it fixed. Detection
+  now also covers `go.mod` and `Cargo.toml`; outputs are under `llm-doc/loop/test/`; the run summary shows the
+  untested-function change and new faults. Saved Test loops are upgraded in place by revision (a "Test Growth"
+  template mirrors the loop). Downgrade note: builds older than this read `.testMap` stages as unsupported and
+  leave them untouched.
 - **Decisions role + Jev provider + `decide` agent tool (server API v73).** The new `decide` tool makes
   calibrated yes/no, pick-one or score decisions about material the agent already has, returning
   probabilities and confidence (`{ engine, model, answers, fallback? }`, one answer shape whichever engine

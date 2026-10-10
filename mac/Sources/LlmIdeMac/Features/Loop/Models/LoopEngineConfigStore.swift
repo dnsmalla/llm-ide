@@ -253,6 +253,12 @@ enum LoopEngineConfigStore {
             case .reenabledRefactorApply:
                 NSLog("LoopEngineConfigStore: [%@ / %@] test tooling detected again, re-enabling the code-applying stage",
                       change.loopName, change.stageName)
+            case .testRunnerAppeared:
+                NSLog("LoopEngineConfigStore: [%@ / %@] test runner detected, Test Setup off and Test Write on",
+                      change.loopName, change.stageName)
+            case .testRunnerLost:
+                NSLog("LoopEngineConfigStore: [%@ / %@] test runner no longer detected, Test Setup on and Test Write off",
+                      change.loopName, change.stageName)
             case let .upgradedDefault(revision):
                 NSLog("LoopEngineConfigStore: [%@ / %@] default stage upgraded to revision %d",
                       change.loopName, change.stageName, revision)

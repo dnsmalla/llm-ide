@@ -160,6 +160,13 @@ extension LoopEngineView {
             return detail
         case .artifactCheck:
             return stage.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "no checks configured"
+        case .testMap:
+            switch stage.testOp {
+            case .structure: return "Test Map · detect the test layout → llm-doc/loop/test/"
+            case .map: return "Test Map · rank untested functions → llm-doc/loop/test/"
+            case .ledger: return "Test Map · diff test results into the ledger and open faults"
+            case nil: return "no operation chosen"
+            }
         case .incidentTriage:
             return "picks up to \(SelfHealSettings.maxPerRun()) new incidents → \(SelfHealBatch.relativePath)"
         case .sdkSurfaceDiff:
