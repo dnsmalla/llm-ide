@@ -211,7 +211,7 @@ A stage is one step of the run (`LoopStage`). Six kinds are described here; the 
 
 - **`artifactCheck`** — an in-app check of generated artifacts, with no shell and no agent: files that must exist, line caps and resolvable citations, configured by `check`. Refactor Plan Check is one. A build that predates this kind reads it as `.unsupported`.
 
-- **`codeGraph`** — a native step of the Refactoring loop; the model never runs it. Its `graphOp` is `snapshot` or `verify`. `snapshot` asks CodeGraph for a rescan through the `GraphRescanning` protocol in `Core/Contracts/` (optional: without a rescanner the stage reads the existing `graph.json`; it logs and passes only when no `graph.json` loads, and with an existing file but a busy or unavailable rescan it uses the existing file with a warning), rescans and loads the graph at the run root, and writes `llm-doc/loop/refactor/graph/before.json` and `GRAPH.md` under the main checkout root. It is taken once per run; later iterations pass without rewriting it. `verify` rescans again: a rescan that is busy or unavailable fails the attempt ("graph not regenerated (<reason>); batch R<n> not verified"), so a stale graph is never compared. Otherwise it writes `after.json` and `GRAPH-DELTA.md` and fails when a structural counter regressed or the batch's `Expect:` counter did not fall. A batch marked `skipped` passes with nothing to verify. Builds older than this read `.codeGraph` stages as `.unsupported` and leave them untouched.
+- **`codeGraph`** — a native step of the Refactoring loop; the model never runs it. Its `graphOp` is `snapshot` or `verify`. `snapshot` asks CodeGraph for a rescan through the `GraphRescanning` protocol in `Core/Contracts/` (optional: without a rescanner, as in a build with no code graph, snapshot still reads an existing `graph.json` and passes when none loads; with an existing file but a busy or unavailable rescan it uses the existing file with a warning), rescans and loads the graph at the run root, and writes `llm-doc/loop/refactor/graph/before.json` and `GRAPH.md` under the main checkout root. It is taken once per run; later iterations pass without rewriting it. `verify` rescans again: a rescan that is busy or unavailable fails the attempt ("graph not regenerated (<reason>); batch R<n> not verified"), so a stale graph is never compared. Without a rescanner `verify` never compares either, even against a `graph.json` an earlier build left behind: it passes with "code graph not available in this build; batch R<n> not verified", records no delta, and the run summary prints `**Graph:** not verified (no code graph in this build)`. Otherwise it writes `after.json` and `GRAPH-DELTA.md` and fails when a structural counter regressed or the batch's `Expect:` counter did not fall. A batch marked `skipped` passes with nothing to verify. Builds older than this read `.codeGraph` stages as `.unsupported` and leave them untouched.
 
 - **`regressionSweep`** — re-runs the `RegressionRunner` sweep over the project's
   fault reports. Its own score is the failing-fault count (every fault not
@@ -503,12 +503,13 @@ strict superset of 1.0, so 1.0 readers still read it.
 A stage can refuse repair. `LoopStage.allowsRepair` defaults to true; when it is
 false and a blocking shell stage fails, the run records the failure in the
 ledger, skips the flake gate and the repair, and ends with the error "stage
-<name> failed and does not allow repair". `Test Baseline` sets it to
+<name> failed and does not allow repair". The failure reaches the ledger stage after it even past a verifying stage that did not run this iteration (`Test` sits between `Test Baseline` and `Test Ledger` in the Refactoring loop); only a verifying stage that ran this iteration blocks it. `Test Baseline` sets it to
 false, so a suite that is already red stops the run before any code moves.
 
 Run journal entries record the batch on each attempt (`LoopStageAttempt.batchId`)
 and the counter change (`graphDelta`). The run summary prints `**Batch:** R<n>`
-and a `| Counter | Δ |` table.
+and a `| Counter | Δ |` table, or `**Graph:** not verified (no code graph in this build)`
+when the build has no rescanner.
 
 ## Four budgets
 
