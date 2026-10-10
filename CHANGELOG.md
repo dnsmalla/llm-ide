@@ -7,6 +7,22 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **Premium Refactoring loop, code graph 1.1, kit pin.** The Refactoring loop
+  now plans, applies and verifies against the code graph. With a runner it runs
+  thirteen stages: structure detection, a native `codeGraph` snapshot taken once
+  per run (`llm-doc/loop/refactor/GRAPH.md` and `graph/before.json`), a test map,
+  a plan checked for `Files`, `Expect` and `Tests` per batch, test writing for the
+  next batch's gaps, a baseline test run that is never repaired, the apply stage,
+  the test run, the ledger, and a `codeGraph` verify that compares structural
+  counters (files over 500 lines, file cycles, max fan-in, average and total LOC,
+  llm-ide boundary warnings) with each batch's `Expect:` counter. A failed rescan
+  fails the attempt rather than comparing a stale graph. Stages gain
+  `allowsRepair` (a blocking failure with it off ends the run). Graph `graph.json`
+  is version 1.1: it adds file-level `calls` so Swift gets dependency data, and is
+  a strict superset of 1.0. Saved Refactoring loops upgrade in place. The kit
+  `refactor-planner`, `refactor-apply` and `test-gap-writer` skills are at v1.1.0.
+  Downgrade note: builds older than this read `.codeGraph` stages as unsupported
+  and leave them untouched; graph.json 1.1 is readable by 1.0 readers.
 - **Test loop upgrade: structure, code-graph test map, test writing and regression faults.** The Test loop is no
   longer just the detected command. New native stage kind `testMap` (`structure` | `map` | `ledger`) detects the
   test roots, ranks untested functions from `system/graph/graph.json` (file-level fallback), and records a
