@@ -241,12 +241,30 @@ extension LoopEngineRunner {
     /// Writes the plan's first todo batch, verbatim, to `NEXT-BATCH.md` for the
     /// refactor test writer. Returns nil so the stage goes on to the agent; a
     /// decision when it must not: no todo batch (a passed skip, the agent is not
-    /// called) or the file could not be written (failed). Any other stage: nil.
+    /// called), the plan is missing or unreadable (failed: nothing to select a
+    /// batch from, and the apply stage would then run with no tests written), or
+    /// the file could not be written (failed). Any other stage: nil.
     func prepareNextBatchFile(stage: LoopStage, gitRoot: URL, startedAt: Date) -> StageDecision? {
         guard stage.testWriteOnly, (stage.targetPath ?? "").hasSuffix("NEXT-BATCH.md") else { return nil }
         let mainRoot = currentRunContext?.mainGitRoot ?? gitRoot
-        let planURL = mainRoot.appendingPathComponent(LoopOutputLayout.refactorPlan)
-        let plan = (try? String(contentsOf: planURL, encoding: .utf8)) ?? ""
+        let faultsRoot = currentRunContext?.faultsRoot ?? gitRoot
+        // The plan is the apply stage's Input, resolved exactly as the apply
+        // stage resolves it (repo, then project fallback), so both read one file.
+        var planStage = runOrderedStages.first(where: { $0.isRefactorApply }) ?? stage
+        if !planStage.isRefactorApply { planStage.targetPath = LoopOutputLayout.refactorPlan }
+        let planPath = LoopStagePaths.resolve(planStage, gitRoot: gitRoot, projectRoot: faultsRoot).input
+        guard let planURL = planPath else {
+            return failNextBatch(stage, startedAt: startedAt,
+                                 message: "refactor plan not found at \(LoopOutputLayout.refactorPlan); cannot select the next batch")
+        }
+        guard FileManager.default.fileExists(atPath: planURL.path) else {
+            return failNextBatch(stage, startedAt: startedAt,
+                                 message: "refactor plan not found at \(planURL.path); cannot select the next batch")
+        }
+        guard let plan = try? String(contentsOf: planURL, encoding: .utf8) else {
+            return failNextBatch(stage, startedAt: startedAt,
+                                 message: "could not read the refactor plan at \(planURL.path); cannot select the next batch")
+        }
         guard let todo = RefactorPlanDiff.firstTodo(in: plan),
               let section = RefactorPlanDiff.section(of: todo.id, in: plan) else {
             let message = "no todo batch in the refactor plan"
@@ -265,14 +283,19 @@ extension LoopEngineRunner {
                 try Self.writeGraphFile(data, to: LoopOutputLayout.refactorNextBatch, root: mainRoot)
             }
         } catch {
-            let message = "could not write the next batch: \(error.localizedDescription)"
-            stageStates[stage.id] = .failed
-            appendLog(.error, "  [\(stage.name)] \(message)")
-            record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt),
-                   exitCode: nil, passed: false, output: message, score: nil)
-            return .terminate(.error(message))
+            return failNextBatch(stage, startedAt: startedAt,
+                                 message: "could not write the next batch: \(error.localizedDescription)")
         }
         appendLog(.info, "  [\(stage.name)] batch \(todo.id) written to NEXT-BATCH.md")
         return nil
+    }
+
+    /// Fails the test-write stage before the agent runs and ends the run.
+    private func failNextBatch(_ stage: LoopStage, startedAt: Date, message: String) -> StageDecision {
+        stageStates[stage.id] = .failed
+        appendLog(.error, "  [\(stage.name)] \(message)")
+        record(stage, startedAt: startedAt, duration: Date().timeIntervalSince(startedAt),
+               exitCode: nil, passed: false, output: message, score: nil)
+        return .terminate(.error(message))
     }
 }

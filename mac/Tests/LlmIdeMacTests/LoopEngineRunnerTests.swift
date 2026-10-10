@@ -3501,6 +3501,75 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(skillExecutor.callCount, 1)
     }
 
+    /// A split layout: the project root (`system/project.json`) holds the plan,
+    /// and the git repo sits at `<project>/code/app`. Returns (project, repo).
+    private func splitProjectWithRepo(plan: String?) throws -> (URL, URL) {
+        let parent = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("split-project-\(UUID().uuidString)", isDirectory: true)
+        let project = parent
+        let staged = try TempRepo.make(files: ["a.swift": "let a = 1\n"])
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("code"), withIntermediateDirectories: true)
+        let repo = project.appendingPathComponent("code/app", isDirectory: true)
+        try FileManager.default.moveItem(at: staged, to: repo)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("system"), withIntermediateDirectories: true)
+        try "{}".write(to: project.appendingPathComponent("system/project.json"), atomically: true, encoding: .utf8)
+        if let plan {
+            let planURL = project.appendingPathComponent(LoopOutputLayout.refactorPlan)
+            try FileManager.default.createDirectory(at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try plan.write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        return (project, repo)
+    }
+
+    /// The writer reads the plan the apply stage reads: in a split layout the plan
+    /// lives under the PROJECT llm-doc, and the next batch must still be selected.
+    func testNextBatchFindsThePlanUnderTheProjectWhenTheRepoIsSplit() async throws {
+        let (project, repo) = try splitProjectWithRepo(plan: Self.refactorPlanForNextBatch)
+        defer { try? FileManager.default.removeItem(at: project) }
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        // Writer, then apply (which reads the plan), then the baseline.
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Refactor Test Write", kind: .skill, order: 0,
+                      skillId: "skills/test-gap-writer",
+                      targetPath: LoopOutputLayout.refactorNextBatch, outputPath: "."),
+            LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 1,
+                      skillId: "skills/refactor-apply", targetPath: LoopOutputLayout.refactorPlan),
+            LoopStage(id: "t1", name: "Test Baseline", kind: .shellCommand, command: "swift test", order: 2,
+                      allowsRepair: false),
+        ], maxIterations: 1, consecutiveFailureStop: 2)
+        _ = await runner.run(config: config, faultsRoot: project, gitRoot: repo)
+        let next = (try? String(contentsOf: repo.appendingPathComponent(LoopOutputLayout.refactorNextBatch),
+                                encoding: .utf8)) ?? ""
+        let log = runner.log.map(\.text).joined(separator: "\n")
+        XCTAssertTrue(next.hasPrefix("### R2 Move helpers (status: todo)"), "NEXT-BATCH.md: \(next)\n\(log)")
+        XCTAssertEqual(skillExecutor.callCount, 2, "the writer and the apply both ran")
+    }
+
+    /// No plan at either level: the writer FAILS (never skips) and names the path.
+    func testNextBatchFailsWhenThePlanIsMissing() async throws {
+        let (project, repo) = try splitProjectWithRepo(plan: nil)
+        defer { try? FileManager.default.removeItem(at: project) }
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        let result = await runner.run(config: nextBatchConfig(), faultsRoot: project, gitRoot: repo)
+        guard case .error(let message) = result else {
+            return XCTFail("expected an error, got \(result)")
+        }
+        XCTAssertTrue(message.hasPrefix("refactor plan not found at "), message)
+        XCTAssertTrue(message.hasSuffix("; cannot select the next batch"), message)
+        XCTAssertEqual(skillExecutor.callCount, 0, "the agent must not run without a batch")
+        XCTAssertFalse(runner.log.contains { $0.text.contains("no todo batch") })
+    }
+
     /// No todo batch left: the writer passes as a skip and the agent is never called.
     func testWithNoTodoBatchTheWriterSkipsWithoutCallingTheAgent() async throws {
         let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan:

@@ -265,6 +265,9 @@ final class LoopEngineRunner: ObservableObject {
     /// whether it was skipped).
     var graphBefore: GraphReport?
     var refactorPlanBefore: String?
+    /// This run's ordered, enabled stages. The refactor test writer finds the
+    /// apply stage's plan through them (see `prepareNextBatchFile`).
+    var runOrderedStages: [LoopStage] = []
     var currentBatchId: String?
     var currentExpect: String?
     var currentBatchSkipped = false
@@ -716,6 +719,7 @@ final class LoopEngineRunner: ObservableObject {
         // Preflighting them anyway would let a disabled stage's missing
         // command or approval block a run it takes no part in.
         let orderedStages = LoopStage.runOrder(config.stages.filter { $0.enabled && $0.kind != .unsupported })
+        runOrderedStages = orderedStages
         // Keyed on the stage list, not `loopId`: a duplicated Self-Heal loop
         // (new id) or a wizard-built loop that happens to include a Triage
         // stage must still suppress its own errors from feeding back in. SDK
