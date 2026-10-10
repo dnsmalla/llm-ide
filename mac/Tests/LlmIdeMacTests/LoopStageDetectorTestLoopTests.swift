@@ -7,19 +7,19 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
     func testOrderWithRunner() throws {
         let root = try TempRepo.make(files: ["Package.swift": pkg])
         let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)
-        XCTAssertEqual(stages.map(\.defaultKey), ["test-structure", "test-setup", "test-map", "test-write", "test", "test-ledger", "test-map-check"])
+        XCTAssertEqual(stages.map(\.defaultKey), ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"])
         XCTAssertEqual(stages[1].enabled, false)
-        XCTAssertEqual(stages[3].enabled, true)
-        XCTAssertEqual(stages[5].testOp, .ledger)
+        XCTAssertEqual(stages[4].enabled, true)
+        XCTAssertEqual(stages[6].testOp, .ledger)
     }
 
     func testOrderWithoutRunner() throws {
         let root = try TempRepo.make(files: ["src/a.py": "def f(): return 1\n"])
         let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)
-        XCTAssertEqual(stages.map(\.defaultKey), ["test-structure", "test-setup", "test-map", "test-write"])
+        XCTAssertEqual(stages.map(\.defaultKey), ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write"])
         XCTAssertEqual(stages[1].enabled, true)
-        XCTAssertEqual(stages[3].enabled, false)
-        XCTAssertEqual(stages[3].disabledByDetection, true)
+        XCTAssertEqual(stages[4].enabled, false)
+        XCTAssertEqual(stages[4].disabledByDetection, true)
     }
 
     func testDetectsGoAndCargo() throws {
@@ -39,7 +39,7 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
     }
 
     func testStageKeysRouteToTestLoop() {
-        for key in ["test-structure", "test-setup", "test-map", "test-write", "test", "test-ledger", "test-map-check"] {
+        for key in ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"] {
             XCTAssertEqual(LoopStageDetector.stageKeyOwner[key], LoopDefaultLoopKey.test, key)
         }
     }
@@ -78,12 +78,49 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         XCTAssertEqual(tpl.config.stages.map(\.name), keys)
     }
 
+    func testNoRunnerLoopHasNoUnverifiedCodeApply() throws {
+        let root = try TempRepo.make(files: ["src/a.py": "x = 1\n"])
+        let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)
+        for stage in stages where stage.enabled {
+            XCTAssertFalse(LoopStage.lacksVerifyAfter(stage, in: stages), stage.name)
+        }
+        var noCheck = stages
+        noCheck.removeAll { $0.defaultKey == "test-structure-check" }
+        let setup = noCheck.first { $0.isTestSetup }!
+        XCTAssertTrue(LoopStage.lacksVerifyAfter(setup, in: noCheck))
+        // Setup alone must not make the loop scheduled-capable: still manual-only.
+        let loop = try XCTUnwrap(LoopStageDetector.defaultLoops(gitRoot: root).first { $0.defaultKey == LoopDefaultLoopKey.test })
+        XCTAssertTrue(loop.isManualOnly)
+    }
+
+    func testSetupViolationClassification() {
+        let v = LoopEngineRunner.testSetupViolations(
+            changed: ["Package.swift", "Sources/App/main.swift", "tests/test_a.py", "tests/__init__.py", "pytest.ini", "src/__init__.py", "src/new.py"],
+            created: ["tests/test_a.py", "tests/__init__.py", "pytest.ini", "src/__init__.py", "src/new.py"])
+        XCTAssertEqual(v.modified, ["Sources/App/main.swift"])
+        XCTAssertEqual(v.created, ["src/__init__.py", "src/new.py"])
+    }
+
+    func testUpgradedSavedTestLoopGetsNewContract() throws {
+        let root = try TempRepo.make(files: ["Package.swift": pkg])
+        var loop = try XCTUnwrap(LoopStageDetector.defaultLoops(gitRoot: root).first { $0.defaultKey == LoopDefaultLoopKey.test })
+        loop.goal = "Keep this project's own test suite green."
+        loop.acceptanceCriteria = "The test command exits 0 with no failures."
+        let r = LoopStageDetector.upgradingDefaultRevisions(in: [loop], gitRoot: root)
+        XCTAssertTrue(r.loops[0].goal?.hasPrefix("Keep the test suite green and growing") == true)
+    }
+
     func testRevisionBumped() {
         XCTAssertEqual(DefaultRevisionCatalog.shipped.current("test"), 2)
     }
 }
 
 final class StageOutputParserCargoTests: XCTestCase {
+    func testCargoSumsEveryBinary() {
+        let out = "test result: ok. 4 passed; 0 failed; 0 ignored\ntest result: FAILED. 1 passed; 2 failed; 0 ignored"
+        XCTAssertEqual(StageOutputParser.parseFailureCount(out), 2)
+    }
+
     func testCargoFailedCount() {
         let out = "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out"
         XCTAssertEqual(StageOutputParser.parseFailureCount(out), 2)

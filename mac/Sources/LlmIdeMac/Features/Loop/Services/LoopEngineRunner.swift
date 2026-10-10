@@ -1935,6 +1935,15 @@ final class LoopEngineRunner: ObservableObject {
                        scopeVerdict: verdictScope)
                 return .terminate(.error(violation))
             }
+            if stage.isTestSetup, let violation = await enforceTestSetupOnly(
+                stage: stage, result: agentResult, changed: changed, gitRoot: gitRoot) {
+                stageStates[stage.id] = .failed
+                appendLog(.error, "  [\(stage.name)] \(violation)")
+                record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                       passed: false, output: violation, score: nil, changedPaths: changed,
+                       scopeVerdict: verdictScope)
+                return .terminate(.error(violation))
+            }
             appendLog(.info, "  [\(stage.name)] skill completed (generate)")
             // `passed` on a generate step means "ran without error" — but a step
             // whose edits were rejected as out-of-scope did not do its job, and

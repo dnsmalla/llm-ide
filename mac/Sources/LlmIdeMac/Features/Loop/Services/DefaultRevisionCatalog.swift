@@ -163,7 +163,9 @@ extension LoopStageDetector {
                 (stage.defaultRevision ?? 1) >= catalog.current(stage.defaultKey ?? "")
             }
             if Self.contractGateStageKey[loopKey] != nil, !coupledBlocked, movedStagesCurrent,
-               updated.config.stages.contains(where: isCoupled),
+               (loopKey == LoopDefaultLoopKey.test
+                    ? updated.config.stages.contains { $0.defaultKey == "test-write" }
+                    : updated.config.stages.contains(where: isCoupled)),
                let legacy = legacyLoopContract(loopKey), let current = defaultLoopContract(loopKey) {
                 var textChanged = false
                 if updated.goal == legacy.goal, legacy.goal != current.goal {
@@ -189,6 +191,7 @@ extension LoopStageDetector {
     private static let contractGateStageKey = [
         LoopDefaultLoopKey.plan: "plan-director",
         LoopDefaultLoopKey.docs: "doc-writer",
+        LoopDefaultLoopKey.test: "test-write",
     ]
 
     /// Whether a newer shipped revision of this default exists that was not

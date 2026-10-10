@@ -326,6 +326,8 @@ extension LoopStage {
     /// The Test loop's writer: applies code, but may only CREATE files under the
     /// test roots (`LoopEngineRunner.testWriteViolations`), so it does not make a
     /// loop manual-only (`containsEnabledCodeApply`).
+    var isTestSetup: Bool { kind == .skill && skillId == "skills/test-structure-setup" }
+
     var testWriteOnly: Bool { kind == .skill && skillId == "skills/test-gap-writer" }
 
     /// Whether this stage applies code edits (see `codeApplySkillIds`).
@@ -351,7 +353,14 @@ extension LoopStage {
         guard stage.appliesCode else { return false }
         let ordered = runOrder(stages)
         guard let index = ordered.firstIndex(where: { $0.id == stage.id }) else { return true }
-        return !ordered[(index + 1)...].contains { $0.enabled && $0.verifies }
+        // Test Setup's deliverable is a DETECTABLE test structure; no shell command
+        // can verify it yet (there is no runner), so an enabled, non-advisory
+        // `.testMap` structure stage after it is its verify.
+        let setupCheck = stage.isTestSetup
+        return !ordered[(index + 1)...].contains {
+            $0.enabled && ($0.verifies
+                || (setupCheck && $0.kind == .testMap && $0.testOp == .structure && $0.severity != .advisory))
+        }
     }
 
     /// Whether `stages` contains an enabled code-applying stage — what makes a

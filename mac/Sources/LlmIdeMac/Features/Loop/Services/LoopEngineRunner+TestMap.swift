@@ -28,6 +28,14 @@ extension LoopEngineRunner {
             if structure.status == "missing" {
                 appendLog(.info, "  [\(stage.name)] no test structure found — the Setup stage will create one")
             }
+            // Setup already ran this run but nothing detectable came of it: fail, so
+            // an empty Setup cannot pass as "structure created".
+            let setupRan = stages.contains { $0.isTestSetup && lastSkillResults[$0.id] != nil }
+            if setupRan, structure.status == "missing" {
+                let message = "Test Setup ran but no test runner/folder was detected — see TEST-STRUCTURE.md notes"
+                appendLog(.error, "  [\(stage.name)] \(message)")
+                return finishTestMap(stage, startedAt: startedAt, passed: false, output: message)
+            }
             return finishTestMap(stage, startedAt: startedAt, passed: true, output: "")
 
         case .map:
@@ -242,6 +250,60 @@ extension LoopEngineRunner {
         let kept = Set(notReverted)
         let done = all2.filter { !kept.contains($0) }
         return "Test Write may only create files under \(roots.isEmpty ? "the test roots" : roots); reverted: \(done.joined(separator: ", "))"
+            + (kept.isEmpty ? "" : "; left in place: \(kept.sorted().joined(separator: ", "))")
+    }
+
+    // MARK: - Test Setup guard
+
+    nonisolated static let testManifestNames: Set<String> = [
+        "Package.swift", "package.json", "pytest.ini", "pyproject.toml", "setup.cfg", "go.mod", "Cargo.toml"]
+
+    /// What Setup did that it may not. Modified files may only be package
+    /// manifests; created files only test-named files, `__init__.py`/`pytest.ini`
+    /// under a test directory, or a manifest (a bare repo has none to modify).
+    nonisolated static func testSetupViolations(changed: [String], created: [String]) -> (modified: [String], created: [String]) {
+        func name(_ p: String) -> String { (p as NSString).lastPathComponent }
+        let createdSet = Set(created)
+        func underTestDir(_ p: String) -> Bool {
+            p.split(separator: "/").dropLast().contains { ["tests", "Tests", "test"].contains(String($0)) }
+        }
+        let modified = Set(changed).subtracting(createdSet).filter { !testManifestNames.contains(name($0)) }.sorted()
+        let outside = createdSet.filter { p in
+            if TestSourceMapper.sourceStem(forTestPath: p) != nil { return false }
+            if testManifestNames.contains(name(p)) { return false }
+            if ["__init__.py", "pytest.ini"].contains(name(p)), underTestDir(p) { return false }
+            return true
+        }.sorted()
+        return (modified, outside)
+    }
+
+    func enforceTestSetupOnly(stage: LoopStage, result: LoopAgentResult?, changed: [String],
+                              gitRoot: URL) async -> String? {
+        let created = result?.createdPaths ?? []
+        let all = Array(Set(changed).union(result?.changedPaths ?? []).union(created))
+        let bad = Self.testSetupViolations(changed: all, created: created)
+        guard !bad.modified.isEmpty || !bad.created.isEmpty else { return nil }
+        let snapshot = lastGuardSnapshot
+        let preDirty = bad.modified.filter { snapshot?.dirtyPaths.contains($0) == true }
+        let revertable = bad.modified.filter { !preDirty.contains($0) }
+        var kept = Set(preDirty)
+        if !preDirty.isEmpty {
+            appendLog(.warn, "  [\(stage.name)] not reverting already-modified path(s), to keep their earlier uncommitted edits: \(preDirty.joined(separator: ", "))")
+        }
+        if !revertable.isEmpty {
+            let snap = snapshot ?? RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+            if let error = await scopeGuard.revertUnlisted(paths: revertable, created: [], before: snap, gitRoot: gitRoot) {
+                appendLog(.warn, "  [\(stage.name)] \(error)")
+                kept.formUnion(revertable)
+            }
+        }
+        for path in bad.created {
+            if (try? FileManager.default.removeItem(at: gitRoot.appendingPathComponent(path))) == nil { kept.insert(path) }
+        }
+        let offenders = bad.modified + bad.created
+        let done = offenders.filter { !kept.contains($0) }
+        return "Test Setup may only add test files and package manifests; offending path(s): \(offenders.joined(separator: ", "))"
+            + (done.isEmpty ? "" : "; reverted: \(done.joined(separator: ", "))")
             + (kept.isEmpty ? "" : "; left in place: \(kept.sorted().joined(separator: ", "))")
     }
 }

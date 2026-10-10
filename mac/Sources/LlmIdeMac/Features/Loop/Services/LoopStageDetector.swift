@@ -732,7 +732,7 @@ public enum LoopStageDetector {
     /// map back to its own loop here (`LoopStageDetectorTests` asserts this).
     ///
     /// Keys are persisted, so an entry may be added but never renamed.
-    private static let testPreRunKeys: Set<String> = ["test-structure", "test-setup", "test-map", "test-write"]
+    private static let testPreRunKeys: Set<String> = ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write"]
 
     static let stageKeyOwner: [String: String] = [
         "regression": LoopDefaultLoopKey.regression,
@@ -743,6 +743,7 @@ public enum LoopStageDetector {
         "test-map": LoopDefaultLoopKey.test,
         "test-write": LoopDefaultLoopKey.test,
         "test-ledger": LoopDefaultLoopKey.test,
+        "test-structure-check": LoopDefaultLoopKey.test,
         "test-map-check": LoopDefaultLoopKey.test,
         "skills": LoopDefaultLoopKey.systemCheck,
         "plugins": LoopDefaultLoopKey.systemCheck,
@@ -811,7 +812,7 @@ public enum LoopStageDetector {
         "plan-check", "doc-check",
         // The Test loop's runner-independent stages; `test`, `test-ledger` and
         // `test-map-check` exist only beside a detected command, which is the evidence.
-        "test-structure", "test-setup", "test-map", "test-write",
+        "test-structure", "test-setup", "test-structure-check", "test-map", "test-write",
     ]
 
     private static func planStages() -> [LoopStage] {
@@ -925,24 +926,26 @@ public enum LoopStageDetector {
                       targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
                       prompt: testSetupPrompt, isDefault: true, enabled: command == nil,
                       defaultKey: "test-setup"),
-            LoopStage(name: "Test Map", kind: .testMap, order: 2, isDefault: true,
+            LoopStage(name: "Test Structure Check", kind: .testMap, order: 2, isDefault: true,
+                      defaultKey: "test-structure-check", testOp: .structure),
+            LoopStage(name: "Test Map", kind: .testMap, order: 3, isDefault: true,
                       defaultKey: "test-map", testOp: .map),
-            LoopStage(name: "Test Write", kind: .skill, order: 3, skillId: "skills/test-gap-writer",
+            LoopStage(name: "Test Write", kind: .skill, order: 4, skillId: "skills/test-gap-writer",
                       targetPath: LoopOutputLayout.testMapMD, outputPath: ".",
                       prompt: testWritePrompt, isDefault: true, defaultKey: "test-write"),
         ]
         if let command {
             stages[1].disabledByDetection = true
-            stages.append(LoopStage(name: "Test", kind: .shellCommand, command: command, order: 4,
+            stages.append(LoopStage(name: "Test", kind: .shellCommand, command: command, order: 5,
                                     isDefault: true, defaultKey: "test", detectedCommand: command))
-            stages.append(LoopStage(name: "Test Ledger", kind: .testMap, order: 5, isDefault: true,
+            stages.append(LoopStage(name: "Test Ledger", kind: .testMap, order: 6, isDefault: true,
                                     defaultKey: "test-ledger", testOp: .ledger))
-            stages.append(LoopStage(name: "Test Map Check", kind: .testMap, order: 6, isDefault: true,
+            stages.append(LoopStage(name: "Test Map Check", kind: .testMap, order: 7, isDefault: true,
                                     defaultKey: "test-map-check", testOp: .map))
         } else {
             // No runner yet: the writer has nothing to verify against.
-            stages[3].enabled = false
-            stages[3].disabledByDetection = true
+            stages[4].enabled = false
+            stages[4].disabledByDetection = true
         }
         return stages
     }
@@ -1266,6 +1269,9 @@ public enum LoopStageDetector {
                         + "people, agents and the code graph are pointed at the right code.",
                     "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, and "
                         + "every code citation resolves to a real file or symbol.")
+        case LoopDefaultLoopKey.test:
+            return ("Keep this project's own test suite green.",
+                    "The test command exits 0 with no failures.")
         default:
             return nil
         }

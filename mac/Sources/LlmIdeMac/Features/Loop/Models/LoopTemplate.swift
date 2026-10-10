@@ -374,15 +374,16 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           skillId: "skills/test-structure-setup",
                           targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
                           prompt: LoopStageDetector.testSetupPrompt),
-                LoopStage(name: "Test Map", kind: .testMap, order: 2, testOp: .map),
-                LoopStage(name: "Test Write", kind: .skill, order: 3,
+                LoopStage(name: "Test Structure Check", kind: .testMap, order: 2, testOp: .structure),
+                LoopStage(name: "Test Map", kind: .testMap, order: 3, testOp: .map),
+                LoopStage(name: "Test Write", kind: .skill, order: 4,
                           skillId: "skills/test-gap-writer",
                           targetPath: LoopOutputLayout.testMapMD, outputPath: ".",
                           prompt: LoopStageDetector.testWritePrompt),
                 LoopStage(name: "Test", kind: .shellCommand,
-                          command: detectedTestCommand, order: 4),
-                LoopStage(name: "Test Ledger", kind: .testMap, order: 5, testOp: .ledger),
-                LoopStage(name: "Test Map Check", kind: .testMap, order: 6, testOp: .map)
+                          command: detectedTestCommand, order: 5),
+                LoopStage(name: "Test Ledger", kind: .testMap, order: 6, testOp: .ledger),
+                LoopStage(name: "Test Map Check", kind: .testMap, order: 7, testOp: .map)
             ],
             maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)

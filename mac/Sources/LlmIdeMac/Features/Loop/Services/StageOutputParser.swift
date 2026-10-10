@@ -48,8 +48,6 @@ public enum StageOutputParser {
         Pattern(regex: #"(\d+) failed"#, group: 1),
         // jest: "Tests:  3 failed, 9 passed, 12 total"
         Pattern(regex: #"Tests:\s+(\d+) failed"#, group: 1),
-        // cargo test: "test result: FAILED. 3 passed; 2 failed; 0 ignored"
-        Pattern(regex: #"test result: \w+\. \d+ passed; (\d+) failed"#, group: 1),
         // go test: "FAIL\tpkg/foo\t0.5s" — no count in the output, so each
         // failing package line counts as one.
         Pattern(regex: #"(?m)^--- FAIL: "#, group: 0)
@@ -78,6 +76,9 @@ public enum StageOutputParser {
         if xctest != nil || swiftTesting != nil {
             return (xctest ?? 0) + (swiftTesting ?? 0)
         }
+        // cargo prints one `test result:` line per test binary: the failures are their SUM.
+        let cargo = allCaptures(#"test result: \w+\. \d+ passed; (\d+) failed"#, in: output)
+        if !cargo.isEmpty { return cargo.reduce(0, +) }
         for pattern in patterns {
             if pattern.group == 0 {
                 // Counting pattern: the number of matches IS the score.
@@ -100,6 +101,14 @@ public enum StageOutputParser {
         if let count = parseFailureCount(output) { return count }
         let ids = TestFailureExtractor.extract(output).ids.count
         return ids > 0 ? ids : nil
+    }
+
+    private static func allCaptures(_ regex: String, in text: String) -> [Int] {
+        guard let re = try? NSRegularExpression(pattern: regex) else { return [] }
+        let ns = text as NSString
+        return re.matches(in: text, range: NSRange(location: 0, length: ns.length)).compactMap {
+            $0.numberOfRanges > 1 ? Int(ns.substring(with: $0.range(at: 1))) : nil
+        }
     }
 
     private static func lastCapture(_ regex: String, group: Int, in text: String) -> Int? {
