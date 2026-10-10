@@ -162,6 +162,11 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
         if let batch = attempts.compactMap(\.batchId).last {
             md += "\n**Batch:** \(batch)\n"
         }
+        if let unverified = attempts.last(where: {
+               $0.kind == .codeGraph && $0.outputTail.hasPrefix(LoopEngineRunner.codeGraphUnverifiedPrefix) }),
+           unverified.graphDelta == nil {
+            md += "\n**Graph:** not verified (no code graph in this build)\n"
+        }
         if let delta = attempts.last(where: { $0.graphDelta != nil })?.graphDelta {
             md += "\n| Counter | Δ |\n|---|---|\n"
             for key in delta.keys.sorted() {

@@ -3488,6 +3488,34 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(result, .success)
     }
 
+    /// Without a rescanner this build has no code graph, so a graph.json left on
+    /// disk by an earlier build is never compared: verify passes, names the batch
+    /// as not verified, and records no delta.
+    func testCodeGraphVerifyWithoutRescannerNeverComparesAStaleGraph() async throws {
+        let root = try writeRefactorPlan()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planURL = root.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let graphDir = root.appendingPathComponent("system/graph", isDirectory: true)
+        try FileManager.default.createDirectory(at: graphDir, withIntermediateDirectories: true)
+        try Data(Self.graphJSON(loc: 600).utf8).write(to: graphDir.appendingPathComponent("graph.json"))
+        let skills = WritingSkillExecutor { _ in
+            try Self.refactorPlanText.replacingOccurrences(of: "(status: todo)", with: "(status: done)")
+                .write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: refactorConfig(), faultsRoot: root, gitRoot: root)
+
+        XCTAssertEqual(result, .success)
+        let verify = try XCTUnwrap(runner.iterationRecords.flatMap(\.attempts).last(where: { $0.stageId == "g2" }))
+        XCTAssertTrue(verify.passed)
+        XCTAssertEqual(verify.outputTail, "code graph not available in this build; batch R1 not verified")
+        XCTAssertNil(verify.graphDelta)
+        XCTAssertEqual(verify.batchId, "R1")
+    }
+
     // MARK: - Refactor next batch (the test writer's Input)
 
     private static let refactorPlanForNextBatch = """

@@ -61,6 +61,10 @@ extension LoopEngineRunner {
         return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
     }
 
+    /// The start of a verify attempt's output when this build has no code graph.
+    /// The run summary matches on it, so keep the two in step.
+    static let codeGraphUnverifiedPrefix = "code graph not available in this build; batch"
+
     private func runGraphVerify(_ stage: LoopStage, startedAt: Date, runRoot: URL, mainRoot: URL) async -> StageDecision {
         if currentBatchSkipped {
             let id = currentBatchId ?? "unknown"
@@ -69,6 +73,15 @@ extension LoopEngineRunner {
             return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: message)
         }
         let batch = currentBatchId ?? "unknown"
+        // No rescanner means no code graph in this build. A graph.json on disk
+        // is from an earlier build, so comparing it would report a change that
+        // was never measured: the batch is recorded as not verified, and passes.
+        if graphRescanner == nil {
+            let message = "\(Self.codeGraphUnverifiedPrefix) \(batch) not verified"
+            appendLog(.info, "  [\(stage.name)] \(message)")
+            return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: message,
+                                   batchId: currentBatchId)
+        }
         let load = await loadCodeGraph(stage, runRoot: runRoot)
         // A stale graph must never be compared: a batch that could not be
         // regenerated is not verified at all.
