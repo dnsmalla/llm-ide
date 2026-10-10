@@ -201,6 +201,8 @@ final class LoopEngineRunner: ObservableObject {
     /// Opens a merge request for a successful run's edits (see `LoopShipCoordinator`).
     /// Nil in tests and wherever no repo target exists.
     private let changeShipper: LoopChangeShipping?
+    /// Asks CodeGraph for a fresh graph before planning; nil keeps the graph as it is.
+    let graphRescanner: GraphRescanning?
     /// The paths that were already modified when this run began (the user's own work
     /// in progress), so a request is never made from files that mix it with a repair.
     private var shipBaseline: LoopShipBaseline?
@@ -320,8 +322,10 @@ final class LoopEngineRunner: ObservableObject {
          defaultShellTimeout: TimeInterval = 0,
          defaultAgentTimeout: TimeInterval = 0,
          checksCommandAvailability: Bool = false,
-         changeShipper: LoopChangeShipping? = nil) {
+         changeShipper: LoopChangeShipping? = nil,
+         graphRescanner: GraphRescanning? = nil) {
         self.changeShipper = changeShipper
+        self.graphRescanner = graphRescanner
         self.checksCommandAvailability = checksCommandAvailability
         self.transportRetryDelay = transportRetryDelay
         self.repoRegistrar = repoRegistrar

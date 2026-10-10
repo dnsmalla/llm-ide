@@ -221,7 +221,8 @@ final class LoopEngineRunnerTests: XCTestCase {
                             journal: LoopRunJournaling? = nil,
                             summaryWriter: LoopRunSummaryWriting? = nil,
                             scopeGuard: RepairScopeGuarding? = nil,
-                            trigger: LoopRunTrigger = .manual) -> LoopEngineRunner {
+                            trigger: LoopRunTrigger = .manual,
+                            graphRescanner: GraphRescanning? = nil) -> LoopEngineRunner {
         LoopEngineRunner(
             verifier: verifier, stageRepairer: stageRepairer,
             regressionSweep: regressionSweep, skillExecutor: skillExecutor,
@@ -230,7 +231,30 @@ final class LoopEngineRunnerTests: XCTestCase {
             summaryWriter: summaryWriter ?? StubSummaryWriter(),
             scopeGuard: scopeGuard ?? StubScopeGuard(),
             trigger: trigger,
-            transportRetryDelay: 0)
+            transportRetryDelay: 0,
+            graphRescanner: graphRescanner)
+    }
+
+    private final class StubRescanner: GraphRescanning {
+        func rescan(repoRoot: URL) async -> GraphRescanOutcome { .rewritten }
+    }
+
+    /// The rescanner is optional: a runner built without one has none, and
+    /// one built with one keeps that exact instance for its stages to use.
+    func testGraphRescannerDefaultsToNilAndIsKeptWhenGiven() {
+        let common = (verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+                      repairer: StubRepairer(), sweep: StubRegressionSweep(alwaysPasses: true),
+                      skills: StubSkillExecutor())
+        let bare = makeRunner(verifier: common.verifier, stageRepairer: common.repairer,
+                              regressionSweep: common.sweep, skillExecutor: common.skills,
+                              approvals: makeApprovals())
+        XCTAssertNil(bare.graphRescanner)
+
+        let rescanner = StubRescanner()
+        let wired = makeRunner(verifier: common.verifier, stageRepairer: common.repairer,
+                               regressionSweep: common.sweep, skillExecutor: common.skills,
+                               approvals: makeApprovals(), graphRescanner: rescanner)
+        XCTAssertTrue(wired.graphRescanner === rescanner)
     }
 
     private func makeApprovals(approve stages: [(stageId: String, command: String)] = []) -> VerifyApprovalStore {

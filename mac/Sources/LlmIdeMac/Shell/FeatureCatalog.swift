@@ -77,6 +77,7 @@ enum FeatureCatalog {
         registry.register(module: GraphModule(
             updater: updater, isAuthenticated: isAuthenticated))
         #endif
+        wireGraphRescanner()
     }
 
     /// Inject the graph environment objects (identity when compiled out).
@@ -366,7 +367,7 @@ enum FeatureCatalog {
     private static var autoTaskSkills: AutoTaskSkillCatalog?
     private static var autoTaskLogStore: TaskLogStore?
     private static var loopRunService: LoopRunService?
-    private static var loopRunnerProvider: LoopRunnerProviding?
+    private static var loopRunnerProvider: LoopRunnerProvider?
     #endif
 
     /// Nil when Loop is compiled out. A caller that gets nil must degrade
@@ -475,6 +476,7 @@ enum FeatureCatalog {
         autoTaskLogStore = taskLog
         loopRunService = loopRuns
         loopRunnerProvider = loopProvider
+        wireGraphRescanner()
 
         // Wire the Auto Task + Loop feature bridges onto the mobile manager
         // so the phone can query scheduler state (`auto_task_list`), toggle
@@ -774,6 +776,22 @@ enum FeatureCatalog {
         }
         mobile.projectBridge?.busyReason = runGuard
         mobile.selfHealBridge?.busyReason = runGuard
+        #endif
+    }
+
+    /// Gives the Loop a `GraphRescanning` when CodeGraph is compiled in.
+    ///
+    /// Called from the tail of both `bootGraph` and `bootAutoTask`. Boot order
+    /// is Mobile → AutoTask → Graph, so whichever of the two runs second is the
+    /// one that actually wires it. Idempotent (guarded on
+    /// `loopRunService?.graphRescanner == nil`); a no-op unless both features
+    /// are compiled in, and the Loop itself never names CodeGraph.
+    private static func wireGraphRescanner() {
+        #if FEATURE_GRAPH && FEATURE_AUTOTASK
+        guard let runs = loopRunService, runs.graphRescanner == nil else { return }
+        let rescanner = LoopGraphRescanner()
+        runs.graphRescanner = rescanner
+        loopRunnerProvider?.graphRescanner = rescanner
         #endif
     }
 }

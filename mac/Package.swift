@@ -50,6 +50,7 @@ if graphIncluded {
         "KnowledgeGraphEndToEndTests.swift",
         "KnowledgeGraphServiceTests.swift",
         "GraphModuleTests.swift",
+        "LoopGraphRescannerTests.swift",
     ])
 }
 if explorerIncluded {
