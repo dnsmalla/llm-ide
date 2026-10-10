@@ -452,15 +452,29 @@ public enum LoopStageDetector {
                 // UUIDs, which reorders the array UNPREDICTABLY on the very
                 // next pass through `runOrder` (the split step, every load).
                 // Placing it at the current end always avoids the collision.
+                //
+                // Where it goes is the default list's own run order: the stage
+                // lands immediately before the first EXISTING keyed stage whose
+                // default runs later (a Test loop saved with only `test` gets its
+                // structure/map/write stages ahead of it; a three-stage Refactoring
+                // loop gets its baseline, snapshot and structure ahead of the plan
+                // and apply). Only when no existing stage runs later is it appended.
                 var appended = def
                 appended.order = stages.count
-                // A Test loop saved before the structure/map/write stages existed
-                // holds only `test`: they must run BEFORE it, so insert them ahead
-                // of it (each lands just before `test`, keeping their own order).
-                if let key = def.defaultKey, Self.testPreRunKeys.contains(key),
-                   let testIdx = stages.firstIndex(where: { $0.defaultKey == "test" }) {
-                    stages.insert(appended, at: testIdx)
-                    stages = LoopStage.renumbered(stages)
+                let defaultPosition: (String?) -> Int? = { key in
+                    key.flatMap { k in defaults.firstIndex { $0.defaultKey == k } }
+                }
+                if let myPosition = defaultPosition(def.defaultKey) {
+                    stages = LoopStage.renumbered(LoopStage.runOrder(stages))
+                    let later = stages.firstIndex { stage in
+                        (defaultPosition(stage.defaultKey) ?? -1) > myPosition
+                    }
+                    if let later {
+                        stages.insert(appended, at: later)
+                        stages = LoopStage.renumbered(stages)
+                    } else {
+                        stages.append(appended)
+                    }
                 } else {
                     stages.append(appended)
                 }
@@ -733,7 +747,6 @@ public enum LoopStageDetector {
     /// map back to its own loop here (`LoopStageDetectorTests` asserts this).
     ///
     /// Keys are persisted, so an entry may be added but never renamed.
-    private static let testPreRunKeys: Set<String> = ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write"]
 
     static let stageKeyOwner: [String: String] = [
         "regression": LoopDefaultLoopKey.regression,
@@ -1730,6 +1743,36 @@ public enum LoopStageDetector {
                     kept[writer].enabled = false
                     kept[writer].disabledByDetection = true
                     changes.append(RevalidationChange(loopName: loop.name, stageName: kept[writer].name,
+                                                       kind: .testRunnerLost))
+                    mutated = true
+                }
+            }
+            // Refactoring loop: Setup stands in for a missing runner and the test
+            // writer needs one, so they flip together with detection, as the Test
+            // loop's pair does. Each direction acts only on a stage it marked
+            // (`disabledByDetection`), except the writer, which the lost direction
+            // disables with its own mark — a writer the user enabled stays on until
+            // the runner is lost. The plan-only shape never writes tests it cannot run.
+            if let setup = kept.firstIndex(where: { $0.defaultKey == "refactor-setup" }),
+               let writer = kept.firstIndex(where: { $0.defaultKey == "refactor-test-write" }) {
+                if detected != nil, kept[setup].enabled, kept[setup].disabledByDetection == nil {
+                    kept[setup].enabled = false
+                    kept[setup].disabledByDetection = true
+                    if kept[writer].disabledByDetection == true {
+                        kept[writer].enabled = true
+                        kept[writer].disabledByDetection = nil
+                    }
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[setup].name,
+                                                       kind: .testRunnerAppeared))
+                    mutated = true
+                } else if detected == nil, kept[setup].disabledByDetection == true {
+                    kept[setup].enabled = true
+                    kept[setup].disabledByDetection = nil
+                    if kept[writer].enabled {
+                        kept[writer].enabled = false
+                        kept[writer].disabledByDetection = true
+                    }
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[setup].name,
                                                        kind: .testRunnerLost))
                     mutated = true
                 }

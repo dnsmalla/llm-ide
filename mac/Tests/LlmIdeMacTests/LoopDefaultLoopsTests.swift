@@ -387,12 +387,13 @@ final class LoopDefaultLoopsTests: XCTestCase {
     /// it). What remains is the plan side plus the ledger and graph verify,
     /// which need no shell command. With tooling it has the default loop's shape.
     func testRefactoringTemplateDropsEveryCodeEditWithoutATestCommand() throws {
-        for applied in [LoopTemplate.refactoring.applied(to: repo).stages,
-                        LoopTemplate.refactoring.applied(to: nil).stages] {
-            XCTAssertFalse(applied.contains { $0.isRefactorApply || $0.testWriteOnly })
-            XCTAssertFalse(applied.contains { $0.kind == .shellCommand })
-            XCTAssertTrue(applied.map(\.name).contains("Refactor Plan"))
-        }
+        // No tooling: the two shell placeholders drop, and with them the writer and the apply.
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.map(\.name), [
+            "Refactor Structure", "Refactor Setup", "Refactor Structure Check", "Refactor Graph",
+            "Refactor Test Map", "Refactor Plan", "Refactor Plan Check", "Test Ledger", "Refactor Graph Check",
+        ])
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: nil).stages.map(\.name),
+                       LoopTemplate.refactoring.applied(to: repo).stages.map(\.name))
         try write("Package.swift")
         XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.count, 13)
     }
