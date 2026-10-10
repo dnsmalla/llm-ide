@@ -196,6 +196,9 @@ final class CaptionOrchestrator: ObservableObject {
                 // hardcoded "en" summarised every Japanese meeting in English;
                 // use the user's preferred language, the best signal available
                 // before any caption has been read.
+                // "mic" is a placeholder: the scraper isn't picked until the
+                // first tick. finalize() overwrites it with the observed
+                // platform (zoom/teams); only a never-finalized partial keeps it.
                 platform: "mic", language: AppConfig.shared.preferredLanguage)
             self.fileHandle = h
             try? PartialRecovery(notesFolder: root)

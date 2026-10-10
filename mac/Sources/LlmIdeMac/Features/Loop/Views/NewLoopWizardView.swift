@@ -230,7 +230,8 @@ struct NewLoopWizardView: View {
                                   consecutiveFailureStop: $budgets.consecutiveFailureStop,
                                   wallClockMinutes: LoopBudgetsEditor.wallClockMinutes($budgets),
                                   maxRepairsPerStage: $budgets.maxRepairsPerStage,
-                                  repairModel: $budgets.repairModel)
+                                  repairModel: $budgets.repairModel,
+                                  pauseTimeoutMinutes: LoopBudgetsEditor.pauseTimeoutMinutes($budgets))
                     .font(Typography.caption)
                 Divider().background(t.border)
                 SectionLabel("OUTPUT")

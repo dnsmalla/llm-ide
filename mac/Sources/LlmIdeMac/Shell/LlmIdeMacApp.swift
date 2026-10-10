@@ -164,7 +164,9 @@ public struct LlmIdeMacApp: App {
         SessionScopedRegistry.shared.register(ChatEngineRegistry.shared)
         self._activityStore = State(wrappedValue: activity)
         self.api = client
-        self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg)
+        self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg,
+                                          api: client,
+                                          isAuthenticated: { store.isAuthenticated })
 
         // Register one module per feature. The registry starts nothing here;
         // the launch `.task` below calls refresh() once shells are mounted.

@@ -28,7 +28,8 @@ struct LoopNewProjectDefaultsPanel: View {
                                   consecutiveFailureStop: $defaults.consecutiveFailureStop,
                                   wallClockMinutes: LoopBudgetsEditor.wallClockMinutes($defaults),
                                   maxRepairsPerStage: $defaults.maxRepairsPerStage,
-                                  repairModel: $defaults.repairModel)
+                                  repairModel: $defaults.repairModel,
+                                  pauseTimeoutMinutes: LoopBudgetsEditor.pauseTimeoutMinutes($defaults))
 
                 Text("If a repair edits a test, build file, or system/")
                     .font(Typography.caption)

@@ -155,6 +155,9 @@ struct LoopRunConfigSnapshot: Codable, Equatable {
     var wallClockBudgetSeconds: Double?
     var maxRepairsPerStage: Int
     var protectedPathPolicy: ProtectedPathPolicy
+    /// Optional so records written before this field existed still decode.
+    /// 0 = the run could wait on a pause indefinitely.
+    var pauseTimeoutSeconds: Double?
 
     init(_ config: LoopEngineConfig) {
         stages = LoopStage.runOrder(config.stages)
@@ -168,6 +171,7 @@ struct LoopRunConfigSnapshot: Codable, Equatable {
         wallClockBudgetSeconds = config.wallClockBudgetSeconds
         maxRepairsPerStage = config.maxRepairsPerStage
         protectedPathPolicy = config.protectedPathPolicy
+        pauseTimeoutSeconds = config.pauseTimeoutSeconds
     }
 }
 

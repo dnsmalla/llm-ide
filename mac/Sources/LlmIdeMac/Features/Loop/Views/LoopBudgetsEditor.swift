@@ -21,6 +21,10 @@ struct LoopBudgetsEditor: View {
     /// The repair agent's model (`nil` = the app's default). Optional so a
     /// surface without the option can omit it.
     var repairModel: Binding<String?>? = nil
+    /// Minutes a paused run may wait before it is aborted to release the repo
+    /// lock; 0 = no limit (`LoopEngineConfig.pauseTimeoutSeconds`). Optional so a
+    /// surface without the option can omit it.
+    var pauseTimeoutMinutes: Binding<Int>? = nil
 
     var body: some View {
         Stepper("Max iterations: \(maxIterations)", value: $maxIterations, in: 1...20)
@@ -29,6 +33,10 @@ struct LoopBudgetsEditor: View {
         Stepper(wallClockMinutes == 0 ? "Time budget: none" : "Time budget: \(wallClockMinutes) min",
                 value: $wallClockMinutes, in: 0...480, step: 15)
         Stepper("Max repairs per stage: \(maxRepairsPerStage)", value: $maxRepairsPerStage, in: 1...10)
+        if let pauseTimeoutMinutes {
+            Stepper(pauseTimeoutMinutes.wrappedValue == 0 ? "Pause timeout: none" : "Pause timeout: \(pauseTimeoutMinutes.wrappedValue) min",
+                    value: pauseTimeoutMinutes, in: 0...480, step: 15)
+        }
         if let repairModel { Self.repairModelPicker(repairModel) }
     }
 
@@ -51,6 +59,14 @@ struct LoopBudgetsEditor: View {
         Binding(
             get: { minutes(fromSeconds: config.wrappedValue.wallClockBudgetSeconds) },
             set: { config.wrappedValue.wallClockBudgetSeconds = seconds(fromMinutes: $0) }
+        )
+    }
+
+    /// Minutes view over `pauseTimeoutSeconds` (0 = unlimited, same as the stored value).
+    static func pauseTimeoutMinutes(_ config: Binding<LoopEngineConfig>) -> Binding<Int> {
+        Binding(
+            get: { Int(config.wrappedValue.pauseTimeoutSeconds / 60) },
+            set: { config.wrappedValue.pauseTimeoutSeconds = Double($0) * 60 }
         )
     }
 

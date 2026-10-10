@@ -111,7 +111,7 @@ runs this same build → sign → notarize → DMG pipeline in GitHub Actions
 and attaches the DMG to a GitHub Release — see
 [`.github/workflows/mac-release.yml`](https://github.com/dnsmalla/llm-ide/blob/main/.github/workflows/mac-release.yml)
 for the required secrets. Steps 3–5 below (appcast + upload) still need
-doing by hand either way.
+doing by hand either way. CI sets `LLMIDE_BUILD_NUMBER` to `github.run_number` (and checks out full history) so `CFBundleVersion`/`sparkle:version` increases every run; `build.sh` warns in red if a CI build falls back to a shallow-clone commit count of 1.
 
 ### 3. Generate the appcast entry
 
@@ -168,7 +168,7 @@ clear error. Don't ship the appcast entry until you've verified once.
 |---|---|
 | "Update Error — A connection failure occurred" | `SUFeedURL` missing in Info.plist or unreachable from the client |
 | "The update is improperly signed" | `SUPublicEDKey` in the running binary doesn't match the key used by `sign_update` |
-| Sparkle never offers an update even though the appcast has one | `<sparkle:version>` in the appcast item must be a higher integer than the running app's `CFBundleVersion` |
+| Sparkle never offers an update even though the appcast has one | `<sparkle:version>` in the appcast item must be a higher integer than the running app's `CFBundleVersion`. `build.sh` sets `CFBundleVersion` to `LLMIDE_BUILD_NUMBER`, else the git commit count, else 1; `appcast.sh` reads it from the built `.app` so the two always match |
 | "Check for Updates…" is greyed out | Sparkle's `canCheckForUpdates` flips false during an in-flight check. Wait 30s. |
 
 ## Key rotation (advanced)

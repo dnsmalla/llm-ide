@@ -15,11 +15,35 @@ final class AutoCaptureService {
     // Bundle IDs that trigger auto-start when they become frontmost.
     private let meetingBundleIDs: Set<String>
 
+    /// Needed to ingest an auto-captured meeting. Nil (tests) means stop only.
+    private let api: LlmIdeAPIClient?
+    private let isAuthenticated: () -> Bool
+    private var isStoppingForTermination = false
+
+    /// What to do when the last meeting app quits.
+    enum TerminationAction: Equatable {
+        /// Close the partial file and leave it for next-launch recovery.
+        case stopOnly
+        /// Same path as manual Stop: finalize the file and POST /kb/ingest.
+        case stopAndIngest
+    }
+
+    /// Ingest needs an API client and a logged-in session (as manual Stop
+    /// does); otherwise the partial stays on disk for the recovery prompt.
+    /// Empty sessions are handled inside `stopAndIngest` (it discards them).
+    nonisolated static func terminationAction(hasAPI: Bool, isAuthenticated: Bool) -> TerminationAction {
+        (hasAPI && isAuthenticated) ? .stopAndIngest : .stopOnly
+    }
+
     init(capture: CaptionOrchestrator,
          config: AppConfig,
+         api: LlmIdeAPIClient? = nil,
+         isAuthenticated: @escaping () -> Bool = { false },
          scrapers: [CaptionScraper] = PlatformDetector.allScrapers) {
         self.capture = capture
         self.config = config
+        self.api = api
+        self.isAuthenticated = isAuthenticated
         self.meetingBundleIDs = Set(scrapers.map(\.bundleID))
     }
 
@@ -87,6 +111,21 @@ final class AutoCaptureService {
         }
         guard !stillRunning else { return }
         log.info("auto_capture_stop bundleID=\(bundleID, privacy: .public)")
-        capture.stop()
+        switch Self.terminationAction(hasAPI: api != nil, isAuthenticated: isAuthenticated()) {
+        case .stopOnly:
+            capture.stop()
+        case .stopAndIngest:
+            guard let api, !isStoppingForTermination else { return }
+            isStoppingForTermination = true
+            // stopAndIngest reports failure via lastIngestStatus and never
+            // deletes a non-empty partial, so recovery still works.
+            Task { @MainActor [capture, weak self] in
+                let id = await capture.stopAndIngest(api: api, meetingTitle: "")
+                if id == nil {
+                    self?.log.error("auto_capture_ingest_skipped_or_failed")
+                }
+                self?.isStoppingForTermination = false
+            }
+        }
     }
 }

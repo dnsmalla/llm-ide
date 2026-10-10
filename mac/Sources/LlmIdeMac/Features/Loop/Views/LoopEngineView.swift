@@ -84,6 +84,9 @@ struct LoopEngineView: View {
     /// purely so a hand-edited value survives a save from this page instead of
     /// being silently dropped.
     @State private var extraProtectedGlobs: [String] = []
+    /// Edited via the budgets editor (minutes, 0 = unlimited); held as seconds so
+    /// a hand-edited sub-minute value is not silently rounded by a save.
+    @State var pauseTimeoutSeconds: Double = 1800
     @State var selectedStageId: String?
     /// Log pane filter state. Per-page, deliberately not persisted: a filter
     /// left on across a relaunch would hide a later run's lines with no
@@ -1610,7 +1613,8 @@ struct LoopEngineView: View {
             useWorktreesForConcurrentRuns: useWorktreesForConcurrentRuns,
             repairModel: repairModel,
             alwaysUseWorktree: alwaysUseWorktree,
-            openMergeRequest: openMergeRequest)
+            openMergeRequest: openMergeRequest,
+            pauseTimeoutSeconds: pauseTimeoutSeconds)
     }
 
     /// The full `LoopDefinition` this page currently represents — `currentConfig`
@@ -1658,6 +1662,7 @@ struct LoopEngineView: View {
             repairModel = ensuredConfig.repairModel
             protectedPathPolicy = ensuredConfig.protectedPathPolicy
             extraProtectedGlobs = ensuredConfig.extraProtectedGlobs
+            pauseTimeoutSeconds = ensuredConfig.pauseTimeoutSeconds
             writeSummaryNote = ensuredConfig.writeSummaryNote
             useWorktreesForConcurrentRuns = ensuredConfig.useWorktreesForConcurrentRuns
             alwaysUseWorktree = ensuredConfig.alwaysUseWorktree
@@ -1716,6 +1721,7 @@ struct LoopEngineView: View {
         repairModel = seed.repairModel
         protectedPathPolicy = seed.protectedPathPolicy
         extraProtectedGlobs = seed.extraProtectedGlobs
+        pauseTimeoutSeconds = seed.pauseTimeoutSeconds
         writeSummaryNote = seed.writeSummaryNote
         useWorktreesForConcurrentRuns = seed.useWorktreesForConcurrentRuns
         alwaysUseWorktree = seed.alwaysUseWorktree
@@ -2069,6 +2075,7 @@ struct LoopEngineView: View {
         repairModel = applied.repairModel
         protectedPathPolicy = applied.protectedPathPolicy
         extraProtectedGlobs = applied.extraProtectedGlobs
+        pauseTimeoutSeconds = applied.pauseTimeoutSeconds
         writeSummaryNote = applied.writeSummaryNote
         useWorktreesForConcurrentRuns = applied.useWorktreesForConcurrentRuns
         alwaysUseWorktree = applied.alwaysUseWorktree
