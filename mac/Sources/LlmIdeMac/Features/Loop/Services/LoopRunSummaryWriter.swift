@@ -143,6 +143,20 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
             }
         }
 
+        // Test loop: the map check journals the change in each counter, and the
+        // ledger stage journals the faults it opened. Both lines render only when
+        // some attempt carries the field, so other loops read exactly as before.
+        let attempts = record.iterations.flatMap { $0.attempts }
+        let untestedDeltas = attempts.compactMap { $0.testMapDelta?["untestedFunctions"] }
+        if !untestedDeltas.isEmpty {
+            let net = Int(untestedDeltas.reduce(0, +))
+            md += "\n**Untested functions:** \(net > 0 ? "+" : "")\(net) over the run\n"
+        }
+        let newFaultIds = attempts.flatMap { $0.newFaults ?? [] }
+        if !newFaultIds.isEmpty {
+            md += "\n**New faults:** \(newFaultIds.joined(separator: ", "))\n"
+        }
+
         // Only the paths the guard could attribute to an agent edit — the answer
         // to "what did this run actually change", which is the first thing anyone
         // reading a loop summary wants to know.

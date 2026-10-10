@@ -113,6 +113,21 @@ final class LoopRunSummaryWriterTests: XCTestCase {
         XCTAssertTrue(md.contains("`Sources/Thing.swift`"))
     }
 
+    func testTestLoopFieldsRenderOnlyWhenPresent() {
+        var attempt = LoopStageAttempt(
+            stageId: "m", stageName: "Test Map Check", kind: .testMap, severity: .blocking,
+            startedAt: Date(timeIntervalSince1970: 1_760_000_000), durationSeconds: 1,
+            exitCode: 0, passed: true, outputTail: "", outputHash: nil, score: 0)
+        let plain = render(makeRecord(attempts: [attempt]))
+        XCTAssertFalse(plain.contains("**Untested functions:**"))
+        XCTAssertFalse(plain.contains("**New faults:**"))
+        attempt.testMapDelta = ["untestedFunctions": -3]
+        attempt.newFaults = ["fault-1", "fault-2"]
+        let md = render(makeRecord(attempts: [attempt]))
+        XCTAssertTrue(md.contains("**Untested functions:** -3 over the run"))
+        XCTAssertTrue(md.contains("**New faults:** fault-1, fault-2"))
+    }
+
     func testFilesChangedSectionIsOmittedWhenNothingChanged() {
         let attempt = LoopStageAttempt(
             stageId: "t1", stageName: "Test", kind: .shellCommand, severity: .blocking,
