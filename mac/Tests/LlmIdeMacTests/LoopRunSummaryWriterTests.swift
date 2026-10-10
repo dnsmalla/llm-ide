@@ -126,6 +126,12 @@ final class LoopRunSummaryWriterTests: XCTestCase {
         let md = render(makeRecord(attempts: [attempt]))
         XCTAssertTrue(md.contains("**Untested functions:** -3 over the run"))
         XCTAssertTrue(md.contains("**New faults:** fault-1, fault-2"))
+        // Deltas are cumulative per run: -3 then -3 is -3, not -6.
+        var second = attempt
+        second.testMapDelta = ["untestedFunctions": -3]
+        let two = render(makeRecord(attempts: [attempt, second]))
+        XCTAssertTrue(two.contains("**Untested functions:** -3 over the run"))
+        XCTAssertFalse(two.contains("-6"))
     }
 
     func testFilesChangedSectionIsOmittedWhenNothingChanged() {

@@ -16,7 +16,7 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   now also covers `go.mod` and `Cargo.toml`; outputs are under `llm-doc/loop/test/`; the run summary shows the
   untested-function change and new faults. Saved Test loops are upgraded in place by revision (a "Test Growth"
   template mirrors the loop). Downgrade note: builds older than this read `.testMap` stages as unsupported and
-  leave them untouched. The kit branch `feat/test-loop-skills` must be pushed before llm-ide.
+  leave them untouched.
 - **Decisions role + Jev provider + `decide` agent tool (server API v73).** The new `decide` tool makes
   calibrated yes/no, pick-one or score decisions about material the agent already has, returning
   probabilities and confidence (`{ engine, model, answers, fallback? }`, one answer shape whichever engine

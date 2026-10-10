@@ -147,9 +147,10 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
         // ledger stage journals the faults it opened. Both lines render only when
         // some attempt carries the field, so other loops read exactly as before.
         let attempts = record.iterations.flatMap { $0.attempts }
-        let untestedDeltas = attempts.compactMap { $0.testMapDelta?["untestedFunctions"] }
-        if !untestedDeltas.isEmpty {
-            let net = Int(untestedDeltas.reduce(0, +))
+        // Each delta is measured against the run's first map, so it is already
+        // cumulative: the last one is the run's net change, not a summand.
+        if let last = attempts.compactMap({ $0.testMapDelta?["untestedFunctions"] }).last {
+            let net = Int(last.rounded())
             md += "\n**Untested functions:** \(net > 0 ? "+" : "")\(net) over the run\n"
         }
         let newFaultIds = attempts.flatMap { $0.newFaults ?? [] }
