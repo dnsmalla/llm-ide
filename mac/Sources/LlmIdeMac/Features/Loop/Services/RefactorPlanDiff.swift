@@ -102,8 +102,9 @@ enum RefactorPlanDiff {
         let files = field("Files", in: section.lines).map { line in
             allGroups(#"`([^`]+)`"#, in: line).map(\.first).compactMap { $0 }
         } ?? []
-        return Applied(id: section.id, status: section.status,
-                       expect: expect?.isEmpty == false ? expect : nil, files: files)
+        // `Expect: none` promises no counter to fall: nothing to verify, not a counter named "none".
+        let counter = expect.flatMap { $0.isEmpty || $0.lowercased() == "none" ? nil : $0 }
+        return Applied(id: section.id, status: section.status, expect: counter, files: files)
     }
 
     /// The value after `- <name>:` on the first matching bullet line.

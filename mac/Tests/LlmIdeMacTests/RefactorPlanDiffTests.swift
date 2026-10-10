@@ -48,6 +48,20 @@ final class RefactorPlanDiffTests: XCTestCase {
         XCTAssertNil(RefactorPlanDiff.appliedReplyBatchId("Nothing done."))
     }
 
+    /// `Expect: none` (any case, with or without backticks) names no counter, so
+    /// there is nothing to verify; an unknown counter name is kept for verify to report.
+    func testExpectNoneMeansNoCounterToVerify() {
+        for expectLine in ["none", "None", "NONE", "`none`"] {
+            let before = plan.replacingOccurrences(of: "- Expect: filesOver500Count 3 → 2", with: "- Expect: \(expectLine)")
+            let after = before.replacingOccurrences(of: "R1 Split Big  (status: todo)", with: "R1 Split Big  (status: done)")
+            let applied = RefactorPlanDiff.appliedBatch(before: before, after: after)
+            XCTAssertEqual(applied?.id, "R1", expectLine)
+            XCTAssertNil(applied?.expect, expectLine)
+        }
+        let unknown = plan.replacingOccurrences(of: "R1 Split Big  (status: todo)", with: "R1 Split Big  (status: done)")
+        XCTAssertEqual(RefactorPlanDiff.appliedBatch(before: plan, after: unknown)?.expect, "filesOver500Count")
+    }
+
     func testSectionIsVerbatim() {
         let section = RefactorPlanDiff.section(of: "R2", in: plan)
         XCTAssertEqual(section, "### R2 Break cycle  (status: todo)\n- Files: `a.mjs`\n- Expect: cycleCount 1 → 0")
