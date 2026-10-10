@@ -158,6 +158,24 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
             md += "\n**New faults:** \(newFaultIds.joined(separator: ", "))\n"
         }
 
+        // Refactor loop: the batch the plan named, and the counter changes its last verify measured.
+        if let batch = attempts.compactMap(\.batchId).last {
+            md += "\n**Batch:** \(batch)\n"
+        }
+        if let unverified = attempts.last(where: {
+               $0.kind == .codeGraph && $0.outputTail.hasPrefix(LoopEngineRunner.codeGraphUnverifiedPrefix) }),
+           unverified.graphDelta == nil {
+            md += "\n**Graph:** not verified (no code graph in this build)\n"
+        }
+        if let delta = attempts.last(where: { $0.graphDelta != nil })?.graphDelta {
+            md += "\n| Counter | Δ |\n|---|---|\n"
+            for key in delta.keys.sorted() {
+                let value = delta[key] ?? 0
+                let text = value.rounded() == value ? String(Int(value)) : String(format: "%.1f", value)
+                md += "| \(key) | \(value > 0 ? "+" : "")\(text) |\n"
+            }
+        }
+
         // Only the paths the guard could attribute to an agent edit — the answer
         // to "what did this run actually change", which is the first thing anyone
         // reading a loop summary wants to know.

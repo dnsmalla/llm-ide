@@ -94,6 +94,11 @@ struct LoopStageAttempt: Codable, Equatable {
     var testMapDelta: [String: Double]? = nil
     /// `.testMap` ledger op: ids of the faults it created.
     var newFaults: [String]? = nil
+    /// `.codeGraph` verify op: the refactor batch (`R<n>`) this verify checked.
+    /// Set on the refactor apply stage's attempt too, from the plan diff.
+    var batchId: String? = nil
+    /// `.codeGraph` verify op: change in each graph counter since the snapshot.
+    var graphDelta: [String: Double]? = nil
 
     init(stageId: String, stageName: String, kind: LoopStage.Kind,
          severity: LoopStageSeverity, startedAt: Date, durationSeconds: Double,

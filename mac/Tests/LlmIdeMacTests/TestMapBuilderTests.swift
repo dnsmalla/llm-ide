@@ -93,4 +93,31 @@ final class TestMapBuilderTests: XCTestCase {
         XCTAssertEqual(map.entries.first { $0.path == "Sources/Core.swift" }?.testedBy, [])
         XCTAssertEqual(map.entries.first { $0.path == "Sources/UI.swift" }?.testedBy, ["Tests/UITests.swift"])
     }
+
+    func testFanInCountsCallerFilesFromCallsEdges() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try write(root, [
+            "system/graph/graph.json": """
+            {"version":"1.1","files":[
+              {"path":"Sources/Core.swift","name":"Core.swift","language":"swift","loc":10,"usedBy":[],"imports":[],"types":[],"functions":[{"name":"render","line":4}]},
+              {"path":"Sources/UI.swift","name":"UI.swift","language":"swift","loc":10,"usedBy":[],"imports":[],"types":[],"functions":[{"name":"draw","line":1}]},
+              {"path":"Sources/API.swift","name":"API.swift","language":"swift","loc":10,"usedBy":[],"imports":[],"types":[],"functions":[{"name":"serve","line":1}]}],
+             "calls":[{"from":"Sources/UI.swift","to":"Sources/Core.swift","symbol":"render"},
+                      {"from":"Sources/API.swift","to":"Sources/Core.swift","symbol":"render"}]}
+            """,
+            "Sources/Core.swift": "", "Sources/UI.swift": "", "Sources/API.swift": ""])
+        let s = TestStructure(generatedAt: Date(), roots: [TestRoot(packageDir: "", testDir: "Tests/AppTests", runner: .xctest, command: "swift test", namingRule: "", languages: ["swift"])], status: "ok", notes: [])
+        let map = try TestMapBuilder(gitRoot: root, structure: s).build()
+        XCTAssertEqual(map.entries.first { $0.function == "render" }?.fanIn, 2)
+    }
+    func testReadsGraphFromGraphRootWhenGiven() throws {
+        let worktree = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let main = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try write(main, ["system/graph/graph.json": graph([("Sources/Core.swift", "swift", ["render"])]), "Sources/Core.swift": ""])
+        try write(worktree, ["Sources/Core.swift": ""])
+        let s = TestStructure(generatedAt: Date(), roots: [], status: "missing", notes: [])
+        XCTAssertNil(GraphIndex.load(gitRoot: worktree))
+        let map = try TestMapBuilder(gitRoot: worktree, structure: s, graphRoot: main).build()
+        XCTAssertEqual(map.source, "graph")
+    }
 }

@@ -221,7 +221,8 @@ final class LoopEngineRunnerTests: XCTestCase {
                             journal: LoopRunJournaling? = nil,
                             summaryWriter: LoopRunSummaryWriting? = nil,
                             scopeGuard: RepairScopeGuarding? = nil,
-                            trigger: LoopRunTrigger = .manual) -> LoopEngineRunner {
+                            trigger: LoopRunTrigger = .manual,
+                            graphRescanner: GraphRescanning? = nil) -> LoopEngineRunner {
         LoopEngineRunner(
             verifier: verifier, stageRepairer: stageRepairer,
             regressionSweep: regressionSweep, skillExecutor: skillExecutor,
@@ -230,7 +231,30 @@ final class LoopEngineRunnerTests: XCTestCase {
             summaryWriter: summaryWriter ?? StubSummaryWriter(),
             scopeGuard: scopeGuard ?? StubScopeGuard(),
             trigger: trigger,
-            transportRetryDelay: 0)
+            transportRetryDelay: 0,
+            graphRescanner: graphRescanner)
+    }
+
+    private final class StubRescanner: GraphRescanning {
+        func rescan(repoRoot: URL) async -> GraphRescanOutcome { .rewritten }
+    }
+
+    /// The rescanner is optional: a runner built without one has none, and
+    /// one built with one keeps that exact instance for its stages to use.
+    func testGraphRescannerDefaultsToNilAndIsKeptWhenGiven() {
+        let common = (verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+                      repairer: StubRepairer(), sweep: StubRegressionSweep(alwaysPasses: true),
+                      skills: StubSkillExecutor())
+        let bare = makeRunner(verifier: common.verifier, stageRepairer: common.repairer,
+                              regressionSweep: common.sweep, skillExecutor: common.skills,
+                              approvals: makeApprovals())
+        XCTAssertNil(bare.graphRescanner)
+
+        let rescanner = StubRescanner()
+        let wired = makeRunner(verifier: common.verifier, stageRepairer: common.repairer,
+                               regressionSweep: common.sweep, skillExecutor: common.skills,
+                               approvals: makeApprovals(), graphRescanner: rescanner)
+        XCTAssertTrue(wired.graphRescanner === rescanner)
     }
 
     private func makeApprovals(approve stages: [(stageId: String, command: String)] = []) -> VerifyApprovalStore {
@@ -3302,8 +3326,49 @@ final class LoopEngineRunnerTests: XCTestCase {
             LoopStage(id: "t", name: "Test", kind: .shellCommand, command: "make test", order: 1),
             LoopStage(id: "l", name: "Ledger", kind: .testMap, order: 2, testOp: .ledger),
         ]
-        XCTAssertNil(LoopEngineRunner.ledgerStage(after: "b", in: stages))
+        // Test ran this iteration: a failing Build does not feed the ledger past it.
+        XCTAssertNil(LoopEngineRunner.ledgerStage(after: "b", in: stages, ranIds: ["b", "t"]))
+        // Test never ran (Build failed first): the ledger is still reached.
+        XCTAssertEqual(LoopEngineRunner.ledgerStage(after: "b", in: stages, ranIds: ["b"])?.id, "l")
         XCTAssertEqual(LoopEngineRunner.ledgerStage(after: "t", in: stages)?.id, "l")
+    }
+
+    /// A blocking baseline that refuses repair fails the run, and its failure
+    /// still reaches the ledger: the refactor test stage between them never ran,
+    /// so it must not hide the baseline's failure.
+    func testBaselineFailureReachesTheLedgerPastAnUnrunTestStage() async throws {
+        let repo = try makeTempRepo()
+        let verifier = StubVerifier { _ in
+            VerifyOutcome(exitCode: 1, output: "/p/A.swift:7: error: -[M.C testBroken] : XCTAssertTrue failed\n"
+                          + "Test Case '-[M.C testBroken]' failed (0.001 seconds).")
+        }
+        let journal = InMemoryJournal()
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "b1", command: "swift test")
+        approvals.approveStage(repo: repo, stageId: "r1", command: "swift test --filter Refactor")
+        var baseline = LoopStage(id: "b1", name: "Test Baseline", kind: .shellCommand, command: "swift test", order: 0)
+        baseline.allowsRepair = false
+        let config = LoopEngineConfig(stages: [
+            baseline,
+            LoopStage(id: "r1", name: "Refactor Test", kind: .shellCommand, command: "swift test --filter Refactor", order: 1),
+            LoopStage(id: "l1", name: "Ledger", kind: .testMap, order: 2, testOp: .ledger),
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .error("stage Test Baseline failed and does not allow repair"))
+        XCTAssertEqual(verifier.calls, ["swift test"], "the refactor test never ran")
+        let ledgerAttempts = journal.written.last?.iterations.flatMap(\.attempts).filter { $0.kind == .testMap } ?? []
+        XCTAssertEqual(ledgerAttempts.count, 1)
+        XCTAssertEqual(ledgerAttempts.first?.newFaults?.count, 1)
+        let dir = repo.appendingPathComponent("system/faults")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        XCTAssertEqual(files.count, 1)
+        let text = files.first.flatMap { try? String(contentsOf: dir.appendingPathComponent($0)) } ?? ""
+        XCTAssertTrue(text.contains("test:\(ledgerAttempts.first?.newFaults?.first ?? "?")"), text)
     }
 
     private func artifactConfig(severity: LoopStageSeverity = .blocking) -> LoopEngineConfig {
@@ -3374,5 +3439,333 @@ final class LoopEngineRunnerTests: XCTestCase {
             skillExecutor: WritingSkillExecutor { _ in throw SkillError() }, approvals: makeApprovals())
             .run(config: artifactConfig(severity: .advisory), faultsRoot: repo, gitRoot: repo)
         if case .error = advisory {} else { XCTFail("advisory check must not vouch for an errored skill: \(advisory)") }
+    }
+
+    /// A blocking shell stage that refuses repair fails the run at once: no flake
+    /// re-run, no repair agent call, and the message names the stage.
+    func testBlockingShellStageThatDisallowsRepairFailsWithoutRepairOrFlakeRerun() async {
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 1, output: "build broke") }
+        let repairer = StubRepairer()
+        var build = LoopStage(id: "b1", name: "Build", kind: .shellCommand, command: "swift build", order: 0)
+        build.allowsRepair = false
+        let config = LoopEngineConfig(stages: [build], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: makeApprovals(approve: [("b1", "swift build")]))
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .error("stage Build failed and does not allow repair"))
+        XCTAssertEqual(repairer.repairCount, 0)
+        XCTAssertEqual(verifier.calls.count, 1, "the flake re-run must be skipped too")
+    }
+
+    /// Without a rescanner in this build, a snapshot stage is advisory by nature:
+    /// it logs that the graph is unavailable and passes.
+    func testCodeGraphSnapshotWithoutRescannerPasses() async {
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Graph", kind: .codeGraph, order: 0, graphOp: .snapshot)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals())
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+    }
+
+    /// Verify with no snapshot to compare against logs and passes; it never
+    /// fails for want of a baseline.
+    func testCodeGraphVerifyWithoutSnapshotPasses() async {
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Graph Check", kind: .codeGraph, order: 0, graphOp: .verify)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals())
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+    }
+
+    /// Without a rescanner this build has no code graph, so a graph.json left on
+    /// disk by an earlier build is never compared: verify passes, names the batch
+    /// as not verified, and records no delta.
+    func testCodeGraphVerifyWithoutRescannerNeverComparesAStaleGraph() async throws {
+        let root = try writeRefactorPlan()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planURL = root.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let graphDir = root.appendingPathComponent("system/graph", isDirectory: true)
+        try FileManager.default.createDirectory(at: graphDir, withIntermediateDirectories: true)
+        try Data(Self.graphJSON(loc: 600).utf8).write(to: graphDir.appendingPathComponent("graph.json"))
+        let skills = WritingSkillExecutor { _ in
+            try Self.refactorPlanText.replacingOccurrences(of: "(status: todo)", with: "(status: done)")
+                .write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: makeApprovals(approve: [("t1", "swift test")]))
+        let result = await runner.run(config: refactorConfig(), faultsRoot: root, gitRoot: root)
+
+        XCTAssertEqual(result, .success)
+        let verify = try XCTUnwrap(runner.iterationRecords.flatMap(\.attempts).last(where: { $0.stageId == "g2" }))
+        XCTAssertTrue(verify.passed)
+        XCTAssertEqual(verify.outputTail, "code graph not available in this build; batch R1 not verified")
+        XCTAssertNil(verify.graphDelta)
+        XCTAssertEqual(verify.batchId, "R1")
+    }
+
+    // MARK: - Refactor next batch (the test writer's Input)
+
+    private static let refactorPlanForNextBatch = """
+    # Refactor plan
+
+    ### R1 Split the parser (status: done)
+    - Files: `a.swift`
+
+    ### R2 Move helpers (status: todo)
+    - Files: `b.swift`
+    - Expect: fileCount 10 → 9
+
+    ### R3 Rename things (status: todo)
+    - Files: `c.swift`
+
+    """
+
+    private func nextBatchConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Refactor Test Write", kind: .skill, order: 0,
+                      skillId: "skills/test-gap-writer",
+                      targetPath: LoopOutputLayout.refactorNextBatch, outputPath: "."),
+            LoopStage(id: "t1", name: "Test Baseline", kind: .shellCommand, command: "swift test", order: 1,
+                      allowsRepair: false),
+        ], maxIterations: 1, consecutiveFailureStop: 2)
+    }
+
+    /// Approvals are hashed by repo path, so the temp repo needs its own grant for the baseline command.
+    private func nextBatchApprovals(_ repo: URL) -> VerifyApprovalStore {
+        let store = VerifyApprovalStore(defaults: UserDefaults(suiteName: "next-batch-\(UUID().uuidString)")!)
+        store.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        return store
+    }
+
+    /// The writer's Input is the plan's first todo batch, verbatim, and nothing else.
+    func testNextBatchFileHoldsOnlyTheFirstTodoBatchVerbatim() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.refactorPlanForNextBatch])
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        _ = await runner.run(config: nextBatchConfig(), faultsRoot: repo, gitRoot: repo)
+        let next = (try? String(contentsOf: repo.appendingPathComponent(LoopOutputLayout.refactorNextBatch),
+                                encoding: .utf8)) ?? ""
+        let log = runner.log.map(\.text).joined(separator: "\n")
+        XCTAssertTrue(next.hasPrefix("### R2 Move helpers (status: todo)"), "NEXT-BATCH.md: \(next)\n\(log)")
+        XCTAssertTrue(next.contains("- Expect: fileCount 10 → 9"))
+        XCTAssertFalse(next.contains("### R1"))
+        XCTAssertFalse(next.contains("### R3"))
+        XCTAssertEqual(skillExecutor.callCount, 1)
+    }
+
+    /// A split layout: the project root (`system/project.json`) holds the plan,
+    /// and the git repo sits at `<project>/code/app`. Returns (project, repo).
+    private func splitProjectWithRepo(plan: String?) throws -> (URL, URL) {
+        let parent = URL(fileURLWithPath: NSTemporaryDirectory())
+            .appendingPathComponent("split-project-\(UUID().uuidString)", isDirectory: true)
+        let project = parent
+        let staged = try TempRepo.make(files: ["a.swift": "let a = 1\n"])
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("code"), withIntermediateDirectories: true)
+        let repo = project.appendingPathComponent("code/app", isDirectory: true)
+        try FileManager.default.moveItem(at: staged, to: repo)
+        try FileManager.default.createDirectory(at: project.appendingPathComponent("system"), withIntermediateDirectories: true)
+        try "{}".write(to: project.appendingPathComponent("system/project.json"), atomically: true, encoding: .utf8)
+        if let plan {
+            let planURL = project.appendingPathComponent(LoopOutputLayout.refactorPlan)
+            try FileManager.default.createDirectory(at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+            try plan.write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        return (project, repo)
+    }
+
+    /// The writer reads the plan the apply stage reads: in a split layout the plan
+    /// lives under the PROJECT llm-doc, and the next batch must still be selected.
+    func testNextBatchFindsThePlanUnderTheProjectWhenTheRepoIsSplit() async throws {
+        let (project, repo) = try splitProjectWithRepo(plan: Self.refactorPlanForNextBatch)
+        defer { try? FileManager.default.removeItem(at: project) }
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        // Writer, then apply (which reads the plan), then the baseline.
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "w1", name: "Refactor Test Write", kind: .skill, order: 0,
+                      skillId: "skills/test-gap-writer",
+                      targetPath: LoopOutputLayout.refactorNextBatch, outputPath: "."),
+            LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 1,
+                      skillId: "skills/refactor-apply", targetPath: LoopOutputLayout.refactorPlan),
+            LoopStage(id: "t1", name: "Test Baseline", kind: .shellCommand, command: "swift test", order: 2,
+                      allowsRepair: false),
+        ], maxIterations: 1, consecutiveFailureStop: 2)
+        _ = await runner.run(config: config, faultsRoot: project, gitRoot: repo)
+        let next = (try? String(contentsOf: repo.appendingPathComponent(LoopOutputLayout.refactorNextBatch),
+                                encoding: .utf8)) ?? ""
+        let log = runner.log.map(\.text).joined(separator: "\n")
+        XCTAssertTrue(next.hasPrefix("### R2 Move helpers (status: todo)"), "NEXT-BATCH.md: \(next)\n\(log)")
+        XCTAssertEqual(skillExecutor.callCount, 2, "the writer and the apply both ran")
+    }
+
+    /// No plan at either level: the writer FAILS (never skips) and names the path.
+    func testNextBatchFailsWhenThePlanIsMissing() async throws {
+        let (project, repo) = try splitProjectWithRepo(plan: nil)
+        defer { try? FileManager.default.removeItem(at: project) }
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        let result = await runner.run(config: nextBatchConfig(), faultsRoot: project, gitRoot: repo)
+        guard case .error(let message) = result else {
+            return XCTFail("expected an error, got \(result)")
+        }
+        XCTAssertTrue(message.hasPrefix("refactor plan not found at "), message)
+        XCTAssertTrue(message.hasSuffix("; cannot select the next batch"), message)
+        XCTAssertEqual(skillExecutor.callCount, 0, "the agent must not run without a batch")
+        XCTAssertFalse(runner.log.contains { $0.text.contains("no todo batch") })
+    }
+
+    /// No todo batch left: the writer passes as a skip and the agent is never called.
+    func testWithNoTodoBatchTheWriterSkipsWithoutCallingTheAgent() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan:
+            "### R1 Split the parser (status: done)\n- Files: `a.swift`\n"])
+        let skillExecutor = StubSkillExecutor()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skillExecutor, approvals: nextBatchApprovals(repo))
+        let result = await runner.run(config: nextBatchConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skillExecutor.callCount, 0)
+        XCTAssertTrue(runner.log.contains { $0.text.contains("no todo batch") })
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: repo.appendingPathComponent(LoopOutputLayout.refactorNextBatch).path))
+    }
+
+    // MARK: - Refactor graph loop: snapshot once, verify against that snapshot
+
+    /// Serves graph fixtures in order: the first rescan (the snapshot) gets
+    /// `first`, every later rescan gets `later`. Writes them where the runner reads.
+    private final class FixtureRescanner: GraphRescanning {
+        let first: String
+        let later: String
+        private(set) var calls = 0
+        init(first: String, later: String) { self.first = first; self.later = later }
+        func rescan(repoRoot: URL) async -> GraphRescanOutcome {
+            calls += 1
+            let dir = repoRoot.appendingPathComponent("system/graph", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? Data((calls == 1 ? first : later).utf8).write(to: dir.appendingPathComponent("graph.json"))
+            return .rewritten
+        }
+    }
+
+    /// A one-file graph whose only counter that matters here is `filesOver500Count`
+    /// (a file is over 500 lines when `loc` is).
+    private static func graphJSON(loc: Int) -> String {
+        #"{"version":"1.1","files":[{"path":"big.swift","language":"swift","loc":\#(loc),"imports":[],"usedBy":[],"types":[],"functions":[]}],"calls":[]}"#
+    }
+
+    private static let refactorPlanText = """
+    ### R1 Split Big  (status: todo)
+    - Files: `big.swift`
+    - Expect: filesOver500Count 1 → 0
+    """
+
+    /// Writes the plan under the test repo root and returns the root (which the
+    /// caller removes). Approvals in these tests key on `repoRoot`, so the repo
+    /// must be `repoRoot`.
+    private func writeRefactorPlan() throws -> URL {
+        let planURL = repoRoot.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        try FileManager.default.createDirectory(at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Self.refactorPlanText.write(to: planURL, atomically: true, encoding: .utf8)
+        return repoRoot
+    }
+
+    private func refactorConfig() -> LoopEngineConfig {
+        LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Graph Snapshot", kind: .codeGraph, order: 0, graphOp: .snapshot),
+            LoopStage(id: "a1", name: "Apply", kind: .skill, order: 1,
+                      skillId: "skills/refactor-apply", targetPath: LoopOutputLayout.refactorPlan),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 2),
+            LoopStage(id: "g2", name: "Graph Check", kind: .codeGraph, order: 3, graphOp: .verify),
+        ], maxIterations: 2, consecutiveFailureStop: 2)
+    }
+
+    /// Snapshot -> apply (flips R1 to `applied`) -> test fails once then passes ->
+    /// verify. The failure is repaired, so the run re-enters the pipeline from the
+    /// top: the snapshot must NOT be retaken, and verify must compare against the
+    /// FIRST snapshot, so the delta reflects the changed graph.
+    func testRefactorVerifyComparesAgainstTheFirstSnapshotAcrossAnIteration() async throws {
+        let root = try writeRefactorPlan()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planURL = root.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let rescanner = FixtureRescanner(first: Self.graphJSON(loc: 600), later: Self.graphJSON(loc: 300))
+        let skills = WritingSkillExecutor { _ in
+            try Self.refactorPlanText.replacingOccurrences(of: "(status: todo)", with: "(status: done)")
+                .write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        var testCalls = 0
+        let verifier = StubVerifier { _ in
+            testCalls += 1
+            return testCalls <= 2 ? VerifyOutcome(exitCode: 1, output: "1 failing")
+                                  : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: makeApprovals(approve: [("t1", "swift test")]),
+            graphRescanner: rescanner)
+        let result = await runner.run(config: refactorConfig(), faultsRoot: root, gitRoot: root)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(rescanner.calls, 2, "one snapshot rescan, one verify rescan")
+        XCTAssertEqual(skills.messages.count, 1, "the apply stage is not re-applied")
+        let before = try String(contentsOf: root.appendingPathComponent(LoopOutputLayout.refactorGraphBefore), encoding: .utf8)
+        XCTAssertTrue(before.contains("\"loc\":600"), "the baseline is the first snapshot")
+        let verify = try XCTUnwrap(runner.iterationRecords.flatMap(\.attempts)
+            .last(where: { $0.stageId == "g2" && $0.passed }))
+        XCTAssertEqual(verify.batchId, "R1")
+        XCTAssertEqual(verify.graphDelta?["filesOver500Count"], -1)
+    }
+
+    /// A batch the apply stage marks skipped has nothing to verify: verify passes
+    /// with that message and does not compare graphs.
+    func testRefactorBatchMarkedSkippedPassesVerifyWithNothingToVerify() async throws {
+        let root = try writeRefactorPlan()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planURL = root.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let rescanner = FixtureRescanner(first: Self.graphJSON(loc: 600), later: Self.graphJSON(loc: 600))
+        let skills = WritingSkillExecutor { _ in
+            try Self.refactorPlanText.replacingOccurrences(of: "(status: todo)", with: "(status: skipped, reason: intended)")
+                .write(to: planURL, atomically: true, encoding: .utf8)
+        }
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: makeApprovals(approve: [("t1", "swift test")]),
+            graphRescanner: rescanner)
+        let result = await runner.run(config: refactorConfig(), faultsRoot: root, gitRoot: root)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(rescanner.calls, 1, "only the snapshot rescans; a skipped batch is not verified")
+        let verify = try XCTUnwrap(runner.iterationRecords.flatMap(\.attempts).last(where: { $0.stageId == "g2" }))
+        XCTAssertTrue(verify.passed)
+        XCTAssertEqual(verify.outputTail, "batch R1 was skipped; nothing to verify")
     }
 }

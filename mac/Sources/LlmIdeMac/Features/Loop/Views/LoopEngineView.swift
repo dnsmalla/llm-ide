@@ -547,9 +547,10 @@ struct LoopEngineView: View {
                     .frame(width: 14, alignment: .trailing)
                 Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
                       : stage.kind == .shellCommand ? "terminal"
-                      : stage.kind == .testMap ? "point.3.connected.trianglepath.dotted" : "sparkles")
+                      : stage.kind == .testMap ? "point.3.connected.trianglepath.dotted"
+                      : stage.kind == .codeGraph ? "point.topleft.down.to.point.bottomright.curvepath" : "sparkles")
                     .foregroundStyle(t.textMuted)
-                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : stage.kind == .testMap ? "Test Map" : "Verify")
+                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : stage.kind == .testMap ? "Test Map" : stage.kind == .codeGraph ? "Code Graph" : "Verify")
                     .font(Typography.captionStrong)
                     .foregroundStyle(stage.kind == .skill ? t.accent2 : t.accent)
                 if stage.isDefault {
@@ -915,6 +916,14 @@ struct LoopEngineView: View {
                     Text("Map").tag(TestMapOp.map)
                     Text("Ledger").tag(TestMapOp.ledger)
                 }
+            } else if stage.wrappedValue.kind == .codeGraph {
+                Picker("Operation", selection: Binding(
+                    get: { stage.wrappedValue.graphOp ?? .verify },
+                    set: { stage.wrappedValue.graphOp = $0 }
+                )) {
+                    Text("Snapshot").tag(CodeGraphOp.snapshot)
+                    Text("Verify").tag(CodeGraphOp.verify)
+                }
             } else if stage.wrappedValue.kind == .artifactCheck {
                 Text("Checked in-app after the generate stages; a failure re-runs them with the findings.")
                     .font(Typography.caption).foregroundStyle(t.textMuted)
@@ -995,6 +1004,16 @@ struct LoopEngineView: View {
                             get: { stage.wrappedValue.timeoutSeconds ?? 0 },
                             set: { stage.wrappedValue.timeoutSeconds = $0 == 0 ? nil : $0 }
                         ), in: 0...3600, step: 30)
+
+                Toggle("Repairable", isOn: Binding(
+                    get: { stage.wrappedValue.allowsRepair },
+                    set: { stage.wrappedValue.allowsRepair = $0 }
+                ))
+                .font(Typography.caption)
+                Text(stage.wrappedValue.allowsRepair
+                     ? "A failure is sent to the repair agent (after a flake re-run)."
+                     : "A failure ends the run at once — no flake re-run, no repair.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
             }
         }
     }

@@ -180,7 +180,7 @@ public enum LoopStageDetector {
     /// Recomputed from the checkout, never read from `loop.json`.
     static func detectedDefaultCommand(forKey key: String, gitRoot: URL) -> String? {
         switch key {
-        case "test", "regression-test", "refactor-test":
+        case "test", "regression-test", "refactor-test", "refactor-test-baseline":
             return detectTestCommand(gitRoot: gitRoot)
         case "self-heal-verify":
             // Gated on the LLM-IDE checkout, not just the script's presence —
@@ -369,6 +369,7 @@ public enum LoopStageDetector {
                 // they need provenance (`revalidatingTestStages.isEligible`).
                 backfillProvenance = def.defaultKey == "test" || def.defaultKey == "regression-test"
                     || def.defaultKey == "refactor-test"
+                    || def.defaultKey == "refactor-test-baseline"
             } else if def.kind == .regressionSweep {
                 // The Regression sweep never carries a command (it is not a
                 // `.shellCommand` stage at all), so kind alone is unambiguous
@@ -451,15 +452,29 @@ public enum LoopStageDetector {
                 // UUIDs, which reorders the array UNPREDICTABLY on the very
                 // next pass through `runOrder` (the split step, every load).
                 // Placing it at the current end always avoids the collision.
+                //
+                // Where it goes is the default list's own run order: the stage
+                // lands immediately before the first EXISTING keyed stage whose
+                // default runs later (a Test loop saved with only `test` gets its
+                // structure/map/write stages ahead of it; a three-stage Refactoring
+                // loop gets its baseline, snapshot and structure ahead of the plan
+                // and apply). Only when no existing stage runs later is it appended.
                 var appended = def
                 appended.order = stages.count
-                // A Test loop saved before the structure/map/write stages existed
-                // holds only `test`: they must run BEFORE it, so insert them ahead
-                // of it (each lands just before `test`, keeping their own order).
-                if let key = def.defaultKey, Self.testPreRunKeys.contains(key),
-                   let testIdx = stages.firstIndex(where: { $0.defaultKey == "test" }) {
-                    stages.insert(appended, at: testIdx)
-                    stages = LoopStage.renumbered(stages)
+                let defaultPosition: (String?) -> Int? = { key in
+                    key.flatMap { k in defaults.firstIndex { $0.defaultKey == k } }
+                }
+                if let myPosition = defaultPosition(def.defaultKey) {
+                    stages = LoopStage.renumbered(LoopStage.runOrder(stages))
+                    let later = stages.firstIndex { stage in
+                        (defaultPosition(stage.defaultKey) ?? -1) > myPosition
+                    }
+                    if let later {
+                        stages.insert(appended, at: later)
+                        stages = LoopStage.renumbered(stages)
+                    } else {
+                        stages.append(appended)
+                    }
                 } else {
                     stages.append(appended)
                 }
@@ -732,7 +747,6 @@ public enum LoopStageDetector {
     /// map back to its own loop here (`LoopStageDetectorTests` asserts this).
     ///
     /// Keys are persisted, so an entry may be added but never renamed.
-    private static let testPreRunKeys: Set<String> = ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write"]
 
     static let stageKeyOwner: [String: String] = [
         "regression": LoopDefaultLoopKey.regression,
@@ -758,6 +772,16 @@ public enum LoopStageDetector {
         "plan-check": LoopDefaultLoopKey.plan,
         "refactor-plan": LoopDefaultLoopKey.refactor,
         "refactor-apply": LoopDefaultLoopKey.refactor,
+        "refactor-structure": LoopDefaultLoopKey.refactor,
+        "refactor-setup": LoopDefaultLoopKey.refactor,
+        "refactor-structure-check": LoopDefaultLoopKey.refactor,
+        "refactor-graph": LoopDefaultLoopKey.refactor,
+        "refactor-test-map": LoopDefaultLoopKey.refactor,
+        "refactor-plan-check": LoopDefaultLoopKey.refactor,
+        "refactor-test-write": LoopDefaultLoopKey.refactor,
+        "refactor-test-baseline": LoopDefaultLoopKey.refactor,
+        "refactor-ledger": LoopDefaultLoopKey.refactor,
+        "refactor-graph-check": LoopDefaultLoopKey.refactor,
         "refactor-test": LoopDefaultLoopKey.refactor,
         "doc-index": LoopDefaultLoopKey.docs,
         "doc-writer": LoopDefaultLoopKey.docs,
@@ -807,7 +831,8 @@ public enum LoopStageDetector {
     /// detected command and is deliberately NOT listed.
     static let unconditionalStageKeys: Set<String> = [
         "plan-structure-index", "plan-director",
-        "refactor-plan", "refactor-apply",
+        "refactor-plan", "refactor-apply", "refactor-plan-check",
+        "refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph", "refactor-test-map",
         "doc-index", "doc-writer",
         "plan-check", "doc-check",
         // The Test loop's runner-independent stages; `test`, `test-ledger` and
@@ -886,6 +911,18 @@ public enum LoopStageDetector {
                   excludeStages: ["doc-index"], citations: true),
         ])
 
+    /// The Refactoring loop's blocking check: the refactor plan within 250 lines,
+    /// and every `### R` section carries its `- Files:`, `- Expect:` and `- Tests:`
+    /// lines. Plans live under the project's llm-doc/, hence the project fallback.
+    static let refactorPlanCheckSpec = ArtifactCheckSpec(
+        projectRootFallback: true,
+        outputRules: [
+            .init(stage: "refactor-plan", shape: .file, maxLines: 250),
+        ],
+        sectionRules: [
+            .init(headerPrefix: "### R", requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:"]),
+        ])
+
     // MARK: Refactoring + Doc Optimization stage prompts
     //
     // Shared by the default loops below and their `LoopTemplate` twins
@@ -951,25 +988,28 @@ public enum LoopStageDetector {
     }
 
     static let refactorPlanPrompt = "Write or update the refactor plan at the Output path for the code "
-        + "under the Input (the repo, or a subtree of it). " + resolvePathsRule + " Survey the structure "
-        + "and write batches, each with a stable ID (R1, R2, …), a status (todo, done or skipped), the "
-        + "files it touches, its intent, and its risk. Cover: directory layout by responsibility, files "
-        + "over 500 lines to split, duplicated logic, naming consistency, dead code only when provably "
-        + "unreferenced, and an AI-friendly setup — a root CLAUDE.md/AGENTS.md describing commands, "
-        + "architecture and invariants, per-area READMEs, an index of entry points, and module-boundary "
-        + "rules. Keep each batch small (one concern, at most about 10 files) and behaviour-preserving, "
-        + "ordered safest first. When the plan already exists, update statuses and add new batches; never "
-        + "reorder or renumber existing ones. Never edit code."
+        + "under the Input, driven by the code-graph snapshot and the test map the loop wrote beside it "
+        + "(read them first). Rank batches by measured structure — cycles, files over 500 lines, high "
+        + "fan-in files mixing roles — then naming and docs. Every batch carries a stable ID, a status, "
+        + "its files, the symbols it moves, which of its files still lack tests, its intent, its risk, and "
+        + "an Expect line naming the graph counter it will reduce. Write each batch as a heading "
+        + "`### R<n> <title> (status: todo)`, and no other headings may start with `### R`. Under each "
+        + "heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack "
+        + "them), `- Intent:`, `- Risk:` and `- Expect:` lines. Keep batches small, behaviour-preserving, "
+        + "ordered by value then safety. Never edit code."
 
-    static let refactorApplyPrompt = "Apply exactly one batch of the refactor plan at the Input to the "
-        + "code under the Output path: the FIRST batch whose status is todo. " + resolvePathsRule
-        + " Apply it behaviour-preservingly: a move or rename updates every import and reference, no "
-        + "public API changes unless the batch says so, and no test is weakened, skipped or deleted "
-        + "(updating import and path references inside tests and build config is allowed when the move "
-        + "requires it). Then mark the "
-        + "batch done in the plan with a one-line note — or skipped with the reason when it cannot be done "
-        + "safely. Never touch more than that batch, and never commit. With no todo batch left, change "
-        + "nothing."
+    static let refactorApplyPrompt = "Apply exactly the FIRST todo batch of the plan at the Input to the code "
+        + "under the Output path, using the graph snapshot beside the plan to find every dependant of the "
+        + "files you move or split. Preserve every listed symbol, update every import, reference and "
+        + "build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never "
+        + "touch more than that batch, never commit. End with `Applied: R<n>`."
+
+    /// The test writer in batch mode: its Input is the next batch the runner wrote, not a test map.
+    static let refactorTestWritePrompt = "Read the next refactor batch at the Input and create new test files for "
+        + "EVERY file it lists as missing tests, pinning current behaviour. Write them under the Output path, "
+        + "at the paths the test-structure report gives, with real behaviour tests for every untested function "
+        + "listed for each file. Never edit the source, existing tests or build config. End with "
+        + "`Covered: <path>`."
 
     /// The doc loops' path rule: the repo root ONLY. A doc tree outside the
     /// git tree (the project root's `llm-doc/` in the `code/<repo>` layout) is
@@ -992,32 +1032,59 @@ public enum LoopStageDetector {
         + "lists; keep each page within 250 lines. Write only inside the Output directory — never edit "
         + "code, hand-written docs, or the index."
 
-    /// The Refactoring loop: *plan, apply, verify.* Stage 1 writes the refactor
-    /// plan; stage 2 applies ONE batch of it; stage 3 runs the project's own
-    /// test command, so a batch that broke something goes through the loop's
-    /// ordinary repair/retry. Code is never edited without that verify stage:
-    /// with no detectable test command the loop is PLAN-ONLY (stages 2 and 3
-    /// are omitted). Nothing is committed — the run's changes land in Run
-    /// Changes for review.
+    /// The Refactoring loop: *measure, plan, then tested batches.* Without a
+    /// detected test command it is PLAN-ONLY (the first seven stages): nothing
+    /// edits code, so nothing needs verifying. With one, the loop also writes
+    /// the next batch's tests and proves them green before the batch is
+    /// applied, re-runs the suite, and verifies the code graph: the batch's
+    /// declared counter must fall and no structural counter may rise. Nothing
+    /// is committed.
     private static func refactorStages(gitRoot: URL) -> [LoopStage] {
-        var stages = [
-            LoopStage(name: "Refactor Plan", kind: .skill, order: 0,
-                      skillId: "skills/refactor-planner",
-                      targetPath: ".",
-                      outputPath: LoopOutputLayout.refactorPlan,
-                      prompt: refactorPlanPrompt,
-                      isDefault: true, defaultKey: "refactor-plan"),
+        let command = detectTestCommand(gitRoot: gitRoot)
+        var stages: [LoopStage] = [
+            LoopStage(name: "Refactor Structure", kind: .testMap, order: 0, isDefault: true,
+                      defaultKey: "refactor-structure", testOp: .structure),
+            LoopStage(name: "Refactor Setup", kind: .skill, order: 1, skillId: "skills/test-structure-setup",
+                      targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
+                      prompt: testSetupPrompt, isDefault: true, enabled: command == nil,
+                      defaultKey: "refactor-setup"),
+            LoopStage(name: "Refactor Structure Check", kind: .testMap, order: 2, isDefault: true,
+                      defaultKey: "refactor-structure-check", testOp: .structure),
+            LoopStage(name: "Refactor Graph", kind: .codeGraph, order: 3, isDefault: true,
+                      defaultKey: "refactor-graph", graphOp: .snapshot),
+            LoopStage(name: "Refactor Test Map", kind: .testMap, order: 4, isDefault: true,
+                      defaultKey: "refactor-test-map", testOp: .map),
+            LoopStage(name: "Refactor Plan", kind: .skill, order: 5, skillId: "skills/refactor-planner",
+                      targetPath: ".", outputPath: LoopOutputLayout.refactorPlan,
+                      prompt: refactorPlanPrompt, isDefault: true, defaultKey: "refactor-plan"),
+            LoopStage(name: "Refactor Plan Check", kind: .artifactCheck, order: 6, isDefault: true,
+                      defaultKey: "refactor-plan-check", check: refactorPlanCheckSpec),
         ]
-        guard let testCommand = detectTestCommand(gitRoot: gitRoot) else { return stages }
-        stages.append(LoopStage(name: "Refactor Apply", kind: .skill, order: 1,
-                                skillId: "skills/refactor-apply",
-                                targetPath: LoopOutputLayout.refactorPlan,
-                                outputPath: ".",
-                                prompt: refactorApplyPrompt,
-                                isDefault: true, defaultKey: "refactor-apply"))
-        stages.append(LoopStage(name: "Test", kind: .shellCommand, command: testCommand, order: 2,
-                                isDefault: true, defaultKey: "refactor-test",
-                                detectedCommand: testCommand))
+        if let command {
+            // The runner's structure setup is redundant once a test command exists.
+            stages[1].disabledByDetection = true
+            stages.append(LoopStage(name: "Refactor Test Write", kind: .skill, order: 7,
+                                    skillId: "skills/test-gap-writer",
+                                    targetPath: LoopOutputLayout.refactorNextBatch, outputPath: ".",
+                                    prompt: refactorTestWritePrompt, isDefault: true,
+                                    defaultKey: "refactor-test-write"))
+            // Runs before the apply, so it may not repair: a red baseline ends the run.
+            stages.append(LoopStage(name: "Test Baseline", kind: .shellCommand, command: command, order: 8,
+                                    isDefault: true, defaultKey: "refactor-test-baseline",
+                                    detectedCommand: command, allowsRepair: false))
+            stages.append(LoopStage(name: "Refactor Apply", kind: .skill, order: 9,
+                                    skillId: "skills/refactor-apply",
+                                    targetPath: LoopOutputLayout.refactorPlan, outputPath: ".",
+                                    prompt: refactorApplyPrompt, isDefault: true,
+                                    defaultKey: "refactor-apply"))
+            stages.append(LoopStage(name: "Test", kind: .shellCommand, command: command, order: 10,
+                                    isDefault: true, defaultKey: "refactor-test",
+                                    detectedCommand: command))
+            stages.append(LoopStage(name: "Test Ledger", kind: .testMap, order: 11, isDefault: true,
+                                    defaultKey: "refactor-ledger", testOp: .ledger))
+            stages.append(LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: 12, isDefault: true,
+                                    defaultKey: "refactor-graph-check", graphOp: .verify))
+        }
         return stages
     }
 
@@ -1233,10 +1300,11 @@ public enum LoopStageDetector {
                         + "functions it touches, match the current folder structure, and every plan file stays "
                         + "within the 250-line limit.")
         case LoopDefaultLoopKey.refactor:
-            return ("Move the codebase toward a professional, AI-friendly structure one safe, "
+            return ("Move the codebase toward a professional, graph-verified structure one tested, "
                         + "behaviour-preserving batch at a time.",
-                    "The refactor plan exists with every batch marked todo/done/skipped, the applied batch "
-                        + "changed no behaviour, and the test command still passes.")
+                    "Every file the batch touches has tests that passed before the change, the suite passes "
+                        + "after it, and the fresh code-graph snapshot shows the batch's declared counter lower "
+                        + "with no structural counter higher.")
         case LoopDefaultLoopKey.docs:
             return ("Keep a generated, code-cited doc tree that explains what the code does and why, so "
                         + "people, agents and the code graph are pointed at the right code.",
@@ -1269,6 +1337,11 @@ public enum LoopStageDetector {
                         + "people, agents and the code graph are pointed at the right code.",
                     "llm-doc/docs/INDEX.md lists every area, every listed page exists within 250 lines, and "
                         + "every code citation resolves to a real file or symbol.")
+        case LoopDefaultLoopKey.refactor:
+            return ("Move the codebase toward a professional, AI-friendly structure one safe, "
+                        + "behaviour-preserving batch at a time.",
+                    "The refactor plan exists with every batch marked todo/done/skipped, the applied batch "
+                        + "changed no behaviour, and the test command still passes.")
         case LoopDefaultLoopKey.test:
             return ("Keep this project's own test suite green.",
                     "The test command exits 0 with no failures.")
@@ -1367,6 +1440,7 @@ public enum LoopStageDetector {
         let loadedTestStages: [LoopStage] = loadedStages.filter { (stage: LoopStage) -> Bool in
             stage.defaultKey == "test" || stage.defaultKey == "regression-test"
                 || stage.defaultKey == "refactor-test"
+                || stage.defaultKey == "refactor-test-baseline"
         }
         let loadedTestStageIDs: Set<String> = Set(loadedTestStages.map { (stage: LoopStage) -> String in stage.id })
 
@@ -1588,11 +1662,12 @@ public enum LoopStageDetector {
 
         func isEligible(_ stage: LoopStage) -> Bool {
             guard stage.isDefault, stage.kind == .shellCommand, let key = stage.defaultKey,
-                  key == "test" || key == "regression-test" || key == "refactor-test" else { return false }
+                  key == "test" || key == "regression-test" || key == "refactor-test"
+                  || key == "refactor-test-baseline" else { return false }
             // Every refactor-test stage ever written carries its provenance
             // (`refactorStages` always set it), so one without it is a stray or
             // adopted stage — never rewritten by key alone.
-            if key == "refactor-test", stage.detectedCommand == nil { return false }
+            if key == "refactor-test" || key == "refactor-test-baseline", stage.detectedCommand == nil { return false }
             return eligibleStageIDs.contains(stage.id)
         }
 
@@ -1668,6 +1743,36 @@ public enum LoopStageDetector {
                     kept[writer].enabled = false
                     kept[writer].disabledByDetection = true
                     changes.append(RevalidationChange(loopName: loop.name, stageName: kept[writer].name,
+                                                       kind: .testRunnerLost))
+                    mutated = true
+                }
+            }
+            // Refactoring loop: Setup stands in for a missing runner and the test
+            // writer needs one, so they flip together with detection, as the Test
+            // loop's pair does. Each direction acts only on a stage it marked
+            // (`disabledByDetection`), except the writer, which the lost direction
+            // disables with its own mark — a writer the user enabled stays on until
+            // the runner is lost. The plan-only shape never writes tests it cannot run.
+            if let setup = kept.firstIndex(where: { $0.defaultKey == "refactor-setup" }),
+               let writer = kept.firstIndex(where: { $0.defaultKey == "refactor-test-write" }) {
+                if detected != nil, kept[setup].enabled, kept[setup].disabledByDetection == nil {
+                    kept[setup].enabled = false
+                    kept[setup].disabledByDetection = true
+                    if kept[writer].disabledByDetection == true {
+                        kept[writer].enabled = true
+                        kept[writer].disabledByDetection = nil
+                    }
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[setup].name,
+                                                       kind: .testRunnerAppeared))
+                    mutated = true
+                } else if detected == nil, kept[setup].disabledByDetection == true {
+                    kept[setup].enabled = true
+                    kept[setup].disabledByDetection = nil
+                    if kept[writer].enabled {
+                        kept[writer].enabled = false
+                        kept[writer].disabledByDetection = true
+                    }
+                    changes.append(RevalidationChange(loopName: loop.name, stageName: kept[setup].name,
                                                        kind: .testRunnerLost))
                     mutated = true
                 }

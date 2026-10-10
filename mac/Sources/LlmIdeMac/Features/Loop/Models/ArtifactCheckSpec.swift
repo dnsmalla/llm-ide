@@ -59,8 +59,34 @@ public struct ArtifactCheckSpec: Codable, Equatable {
         }
     }
 
+    /// A section of a markdown file: starts at a line beginning with
+    /// `headerPrefix` and ends before the next line beginning with `### `. Each
+    /// `requiredLinePrefixes` entry must match the START of some line in the
+    /// section (exact start, no trimming).
+    public struct SectionRule: Codable, Equatable {
+        public var headerPrefix: String
+        public var requiredLinePrefixes: [String]
+        public init(headerPrefix: String, requiredLinePrefixes: [String]) {
+            self.headerPrefix = headerPrefix
+            self.requiredLinePrefixes = requiredLinePrefixes
+        }
+    }
+
     /// Output-following rules, resolved against the loop's stages.
     public var outputRules: [OutputRule]
+    /// Per-section line requirements, applied to every file the `outputRules`
+    /// resolve to (see `resolved(against:)`).
+    public var sectionRules: [SectionRule]
+    /// Files the `sectionRules` apply to. Filled only by `resolved(against:)`
+    /// from the `outputRules`; never persisted.
+    var sectionTargets: [SectionTarget] = []
+
+    /// A glob the section rules apply to, with the sibling-stage excludes its
+    /// line cap would get.
+    struct SectionTarget: Equatable {
+        var glob: String
+        var excludes: [String]
+    }
     /// Files that must exist.
     public var requiredPaths: [String]
     /// Per-glob line caps.
@@ -76,8 +102,9 @@ public struct ArtifactCheckSpec: Codable, Equatable {
 
     public init(requiredPaths: [String] = [], lineLimits: [LineLimit] = [],
                 citationGlobs: [String] = [], projectRootFallback: Bool = false,
-                outputRules: [OutputRule] = []) {
+                outputRules: [OutputRule] = [], sectionRules: [SectionRule] = []) {
         self.outputRules = outputRules
+        self.sectionRules = sectionRules
         self.requiredPaths = requiredPaths
         self.lineLimits = lineLimits
         self.citationGlobs = citationGlobs
@@ -85,7 +112,7 @@ public struct ArtifactCheckSpec: Codable, Equatable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case requiredPaths, lineLimits, citationGlobs, projectRootFallback, outputRules
+        case requiredPaths, lineLimits, citationGlobs, projectRootFallback, outputRules, sectionRules
     }
 
     public init(from decoder: Decoder) throws {
@@ -95,6 +122,7 @@ public struct ArtifactCheckSpec: Codable, Equatable {
         citationGlobs = try c.decodeIfPresent([String].self, forKey: .citationGlobs) ?? []
         projectRootFallback = try c.decodeIfPresent(Bool.self, forKey: .projectRootFallback) ?? false
         outputRules = try c.decodeIfPresent([OutputRule].self, forKey: .outputRules) ?? []
+        sectionRules = try c.decodeIfPresent([SectionRule].self, forKey: .sectionRules) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -104,6 +132,7 @@ public struct ArtifactCheckSpec: Codable, Equatable {
         try c.encode(citationGlobs, forKey: .citationGlobs)
         try c.encode(projectRootFallback, forKey: .projectRootFallback)
         if !outputRules.isEmpty { try c.encode(outputRules, forKey: .outputRules) }
+        if !sectionRules.isEmpty { try c.encode(sectionRules, forKey: .sectionRules) }
     }
 
     /// The concrete spec for a run: `outputRules` replaced by the paths the
@@ -112,6 +141,7 @@ public struct ArtifactCheckSpec: Codable, Equatable {
     func resolved(against stages: [LoopStage]) -> ArtifactCheckSpec {
         var out = self
         out.outputRules = []
+        out.sectionTargets = []
         func sibling(_ key: String, _ skill: String? = nil) -> LoopStage? {
             stages.first { $0.defaultKey == key } ?? skill.flatMap { id in stages.first { $0.skillId == id } }
         }
@@ -131,6 +161,7 @@ public struct ArtifactCheckSpec: Codable, Equatable {
                 out.requiredPaths.append(path)
                 out.lineLimits.append(.init(glob: path, maxLines: rule.maxLines))
                 dir = (path as NSString).deletingLastPathComponent
+                out.sectionTargets.append(.init(glob: path, excludes: []))
                 if rule.citations { out.citationGlobs.append(path) }
             case .directory:
                 dir = path
@@ -140,6 +171,10 @@ public struct ArtifactCheckSpec: Codable, Equatable {
                 let excludes = rule.excludeStages.compactMap { outputPath(sibling($0)) }
                 out.lineLimits.append(.init(glob: glob, maxLines: rule.maxLines, excludes: excludes))
                 if rule.citations { out.citationGlobs.append(glob) }
+            }
+            if rule.shape == .directory {
+                let excludes = rule.excludeStages.compactMap { outputPath(sibling($0)) }
+                out.sectionTargets.append(.init(glob: join(dir, rule.subGlob ?? "**/*.md"), excludes: excludes))
             }
         }
         return out
@@ -157,6 +192,9 @@ public struct ArtifactCheckSpec: Codable, Equatable {
         if !requiredPaths.isEmpty { parts.append("exists: " + requiredPaths.joined(separator: ", ")) }
         for limit in lineLimits { parts.append("\(limit.glob) ≤ \(limit.maxLines) lines") }
         if !citationGlobs.isEmpty { parts.append("citations resolve in " + citationGlobs.joined(separator: ", ")) }
+        for rule in sectionRules {
+            parts.append("every `\(rule.headerPrefix)` section has " + rule.requiredLinePrefixes.joined(separator: ", "))
+        }
         return parts.isEmpty ? "no checks configured" : parts.joined(separator: " · ")
     }
 }

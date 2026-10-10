@@ -71,8 +71,12 @@ private func legacyStore(_ fixture: Fixture) -> LoopEngineProjectStore {
             switch stage.defaultKey {
             case "plan-structure-index": stage.outputPath = "llm-doc/plans/INDEX.md"
             case "plan-director": stage.outputPath = "llm-doc/plans/PLAN.md"
-            case "refactor-plan": stage.outputPath = "llm-doc/refactor/REFACTOR.md"
-            case "refactor-apply": stage.targetPath = "llm-doc/refactor/REFACTOR.md"
+            case "refactor-plan":
+                stage.outputPath = "llm-doc/refactor/REFACTOR.md"
+                stage.prompt = LoopStageDetector.shippedStage(key: "refactor-plan", revision: 1)?.prompt
+            case "refactor-apply":
+                stage.targetPath = "llm-doc/refactor/REFACTOR.md"
+                stage.prompt = LoopStageDetector.shippedStage(key: "refactor-apply", revision: 1)?.prompt
             case "doc-index": stage.outputPath = "llm-doc/docs/INDEX.md"
             case "doc-writer":
                 stage.targetPath = "llm-doc/docs/INDEX.md"

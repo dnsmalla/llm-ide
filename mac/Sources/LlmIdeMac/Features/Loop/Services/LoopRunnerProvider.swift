@@ -13,6 +13,8 @@ final class LoopRunnerProvider: LoopRunnerProviding {
     private weak var activity: ActivityStore?
     /// Where lane runs are registered so the Loop page can see and stop them.
     private weak var laneRegistry: LoopRunService?
+    /// Passed to every runner this provider builds. Wired by `FeatureCatalog` when CodeGraph is compiled in.
+    var graphRescanner: GraphRescanning?
 
     init(api: LlmIdeAPIClient, config: AppConfig, activity: ActivityStore?,
          laneRegistry: LoopRunService? = nil) {
@@ -44,7 +46,8 @@ final class LoopRunnerProvider: LoopRunnerProviding {
             defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
             defaultAgentTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().agentSeconds),
             checksCommandAvailability: true,
-            changeShipper: LoopShipCoordinator(config: config)
+            changeShipper: LoopShipCoordinator(config: config),
+            graphRescanner: graphRescanner
         )
         laneRegistry?.attachLaneRunner(runner, trigger: trigger)
         return runner

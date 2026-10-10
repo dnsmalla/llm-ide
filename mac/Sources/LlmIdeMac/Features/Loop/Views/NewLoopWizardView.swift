@@ -256,6 +256,7 @@ struct NewLoopWizardView: View {
         case .skill: "New Skill Stage"
         case .artifactCheck: "Artifact Check"
         case .testMap: "Test Map"
+        case .codeGraph: "Code Graph"
         case .incidentTriage: "Triage"
         case .sdkSurfaceDiff: "SDK Diff"
         case .unsupported: "Unsupported stage"
@@ -339,6 +340,16 @@ struct NewLoopWizardView: View {
                 ))
                 .textFieldStyle(.roundedBorder)
                 .font(.system(size: 11, design: .monospaced))
+
+                Toggle("Repairable", isOn: Binding(
+                    get: { stage.wrappedValue.allowsRepair },
+                    set: { stage.wrappedValue.allowsRepair = $0 }
+                ))
+                .font(Typography.caption)
+                Text(stage.wrappedValue.allowsRepair
+                     ? "A failure is sent to the repair agent (after a flake re-run)."
+                     : "A failure ends the run at once — no flake re-run, no repair.")
+                    .font(Typography.caption).foregroundStyle(t.textMuted)
             case .regressionSweep:
                 Text("Re-runs the fault sweep (known regressions + repo checks) against this project.")
                     .font(Typography.caption)
@@ -355,6 +366,14 @@ struct NewLoopWizardView: View {
                     Text("Structure").tag(TestMapOp.structure)
                     Text("Map").tag(TestMapOp.map)
                     Text("Ledger").tag(TestMapOp.ledger)
+                }
+            case .codeGraph:
+                Picker("Operation", selection: Binding(
+                    get: { stage.wrappedValue.graphOp ?? .verify },
+                    set: { stage.wrappedValue.graphOp = $0 }
+                )) {
+                    Text("Snapshot").tag(CodeGraphOp.snapshot)
+                    Text("Verify").tag(CodeGraphOp.verify)
                 }
             case .incidentTriage:
                 Text("Self-Heal incident triage — picks up to \(SelfHealSettings.maxPerRun()) new incidents into \(SelfHealBatch.relativePath).")

@@ -167,6 +167,12 @@ extension LoopEngineView {
             case .ledger: return "Test Map · diff test results into the ledger and open faults"
             case nil: return "no operation chosen"
             }
+        case .codeGraph:
+            switch stage.graphOp {
+            case .snapshot: return "Code Graph · record the structure graph → llm-doc/loop/refactor/graph/"
+            case .verify: return "Code Graph · diff the regenerated graph against the snapshot → GRAPH-DELTA.md"
+            case nil: return "no operation chosen"
+            }
         case .incidentTriage:
             return "picks up to \(SelfHealSettings.maxPerRun()) new incidents → \(SelfHealBatch.relativePath)"
         case .sdkSurfaceDiff:

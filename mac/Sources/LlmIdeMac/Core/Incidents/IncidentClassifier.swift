@@ -8,6 +8,11 @@ public enum IncidentClassifier {
         ("auth", ["http 401", "http 403", "status 401", "status 403", "unauthorized", "forbidden", "not signed in"]),
         ("permission", ["operation not permitted", "permission denied", "eperm", "eacces"]),
         ("disk", ["no space left on device", "enospc"]),
+        // The Refactoring loop's own verdicts about the code it changed (a blocked
+        // stage, a batch that did not deliver, a graph regression, a graph that was
+        // not regenerated). They are results to act on, not a fault in the app.
+        ("refactor loop", ["failed and does not allow repair", "to fall; it did not",
+                           "structure regressed:", "graph not regenerated ("]),
         // A loop the USER configured wrongly is not an app bug: nothing in this
         // repository fixes "stage has no command".
         ("configuration", ["has no runnable command", "has no skill chosen", "has no checks configured",

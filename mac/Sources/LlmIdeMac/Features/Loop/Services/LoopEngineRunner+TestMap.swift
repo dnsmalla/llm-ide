@@ -47,7 +47,7 @@ extension LoopEngineRunner {
             let built: TestMap
             do {
                 built = try await Task.detached(priority: .utility) { () throws -> TestMap in
-                    let builder = TestMapBuilder(gitRoot: gitRoot, structure: structure)
+                    let builder = TestMapBuilder(gitRoot: gitRoot, structure: structure, graphRoot: mainRoot)
                     let map = try builder.build()
                     _ = try builder.write(map, outputRoot: mainRoot)
                     return map
@@ -137,13 +137,17 @@ extension LoopEngineRunner {
     }
 
     /// The ledger stage a failing shell stage feeds: the first enabled ledger op
-    /// after it, and only when no other enabled verifying stage sits between them
-    /// (a failing Build is not a Test run).
-    nonisolated static func ledgerStage(after failingId: String, in stages: [LoopStage]) -> LoopStage? {
+    /// after it, and only when no other enabled verifying stage that RAN this
+    /// iteration (`ranIds`) sits between them (a failing Build is not a Test run).
+    /// A verifying stage that never ran this iteration is skipped over: once the
+    /// failing stage ends the run, the later Test stage cannot run, and its
+    /// position must not hide the failure from the ledger.
+    nonisolated static func ledgerStage(after failingId: String, in stages: [LoopStage],
+                                        ranIds: Set<String> = []) -> LoopStage? {
         guard let index = stages.firstIndex(where: { $0.id == failingId }) else { return nil }
         for stage in stages[(index + 1)...] where stage.enabled {
             if stage.kind == .testMap, stage.testOp == .ledger { return stage }
-            if stage.verifies { return nil }
+            if stage.verifies, ranIds.contains(stage.id) { return nil }
         }
         return nil
     }
@@ -155,7 +159,8 @@ extension LoopEngineRunner {
     func flushFailureLedger(stages: [LoopStage]) async {
         guard let pending = pendingFailureLedger else { return }
         pendingFailureLedger = nil
-        guard let ledger = Self.ledgerStage(after: pending.stageId, in: stages) else { return }
+        let ranIds = Set(iterationRecords.last?.attempts.map(\.stageId) ?? [])
+        guard let ledger = Self.ledgerStage(after: pending.stageId, in: stages, ranIds: ranIds) else { return }
         let mainRoot = currentRunContext?.mainGitRoot ?? pending.gitRoot
         _ = await runLedgerOp(ledger, startedAt: Date(), gitRoot: mainRoot, stages: stages,
                               failing: (pending.stageId, pending.output))

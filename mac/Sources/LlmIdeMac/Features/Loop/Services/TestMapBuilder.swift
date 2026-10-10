@@ -4,6 +4,9 @@ import Foundation
 struct TestMapBuilder {
     var gitRoot: URL
     var structure: TestStructure
+    /// Directory whose `system/graph/graph.json` is read; defaults to `gitRoot`.
+    /// The Loop passes the main checkout, since `system/` is gitignored and absent in a worktree.
+    var graphRoot: URL? = nil
 
     private static let skipped: Set<String> = ["init", "deinit", "body", "main", "description"]
     private static let maxTestBytes = 2_000_000
@@ -12,11 +15,13 @@ struct TestMapBuilder {
         let tests = collectTests()
         var entries: [TestMapEntry] = []
         let source: String
-        if let graph = GraphIndex.load(gitRoot: gitRoot) {
+        if let graph = GraphIndex.load(gitRoot: graphRoot ?? gitRoot) {
             source = "graph"
             for f in graph.files where TestSourceMapper.isSourceCandidate(f.path) {
                 let stem = TestSourceMapper.sourceStem(forSourcePath: f.path)
                 let name = ((f.path as NSString).lastPathComponent as NSString).deletingPathExtension
+                // Callers: files that import this one, plus files whose calls resolve into it.
+                let fanIn = Set(f.usedBy).union(graph.callerFiles(of: f.path)).count
                 // Which tests are eligible for this file: computed once, not per function.
                 let pool = testsFor(path: f.path, in: tests).filter { t in
                     (stem != nil && TestSourceMapper.sourceStem(forTestPath: t.path) == stem) || t.tokens.contains(name)
@@ -24,7 +29,7 @@ struct TestMapBuilder {
                 for fn in f.functions where !Self.skipped.contains(fn.name) && !fn.name.hasPrefix("_") {
                     let by = pool.filter { $0.tokens.contains(fn.name) }.map(\.path).sorted()
                     entries.append(TestMapEntry(path: f.path, function: fn.name, line: fn.line,
-                                                fanIn: f.usedBy.count, loc: f.loc, testedBy: by))
+                                                fanIn: fanIn, loc: f.loc, testedBy: by))
                 }
             }
         } else {

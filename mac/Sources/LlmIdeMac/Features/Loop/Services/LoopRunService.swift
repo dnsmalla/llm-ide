@@ -51,6 +51,8 @@ final class LoopRunService: ObservableObject, SessionScoped {
     enum StopTarget: Equatable { case desktop, lane, none }
 
     private let api: LlmIdeAPIClient
+    /// Handed to every runner this service builds. Wired by `FeatureCatalog` when CodeGraph is compiled in.
+    var graphRescanner: GraphRescanning?
     private var runners: [String: LoopEngineRunner] = [:]
     private var tasks: [String: Task<Void, Never>] = [:]
     /// Bumped by `resetForSignOut`. A run (or runner log sink) captures it when it starts and goes
@@ -112,7 +114,8 @@ final class LoopRunService: ObservableObject, SessionScoped {
             defaultShellTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().shellSeconds),
             defaultAgentTimeout: TimeInterval(LoopEngineDefaults.stageTimeouts().agentSeconds),
             checksCommandAvailability: true,
-            changeShipper: LoopShipCoordinator(config: AppConfig.shared))
+            changeShipper: LoopShipCoordinator(config: AppConfig.shared),
+            graphRescanner: graphRescanner)
         // Mirror into the shared per-task log — the buffer the Auto Tasks
         // page and the phone read — so page-driven runs stay visible there.
         // Owned here (not per page appearance) so the mirror survives the

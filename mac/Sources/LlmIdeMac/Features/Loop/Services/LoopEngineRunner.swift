@@ -201,6 +201,8 @@ final class LoopEngineRunner: ObservableObject {
     /// Opens a merge request for a successful run's edits (see `LoopShipCoordinator`).
     /// Nil in tests and wherever no repo target exists.
     private let changeShipper: LoopChangeShipping?
+    /// Asks CodeGraph for a fresh graph before planning; nil keeps the graph as it is.
+    let graphRescanner: GraphRescanning?
     /// The paths that were already modified when this run began (the user's own work
     /// in progress), so a request is never made from files that mix it with a repair.
     private var shipBaseline: LoopShipBaseline?
@@ -257,6 +259,18 @@ final class LoopEngineRunner: ObservableObject {
     /// Test loop run state (`LoopEngineRunner+TestMap.swift`), reset per run.
     var testStructure: TestStructure?
     var testMapBefore: TestMap?
+    /// Refactor loop run state (`LoopEngineRunner+CodeGraph.swift`), reset per run:
+    /// the graph snapshot the run compares against, the plan text before the apply
+    /// stage, and the batch that apply changed (its id, expected counter, and
+    /// whether it was skipped).
+    var graphBefore: GraphReport?
+    var refactorPlanBefore: String?
+    /// This run's ordered, enabled stages. The refactor test writer finds the
+    /// apply stage's plan through them (see `prepareNextBatchFile`).
+    var runOrderedStages: [LoopStage] = []
+    var currentBatchId: String?
+    var currentExpect: String?
+    var currentBatchSkipped = false
     /// The full (uncapped by the journal's 4 KB tail) output of each blocking
     /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
     var lastVerifyOutputs: [String: String] = [:]
@@ -320,8 +334,10 @@ final class LoopEngineRunner: ObservableObject {
          defaultShellTimeout: TimeInterval = 0,
          defaultAgentTimeout: TimeInterval = 0,
          checksCommandAvailability: Bool = false,
-         changeShipper: LoopChangeShipping? = nil) {
+         changeShipper: LoopChangeShipping? = nil,
+         graphRescanner: GraphRescanning? = nil) {
         self.changeShipper = changeShipper
+        self.graphRescanner = graphRescanner
         self.checksCommandAvailability = checksCommandAvailability
         self.transportRetryDelay = transportRetryDelay
         self.repoRegistrar = repoRegistrar
@@ -623,6 +639,11 @@ final class LoopEngineRunner: ObservableObject {
         lastSkillResults = [:]
         testStructure = nil
         testMapBefore = nil
+        graphBefore = nil
+        refactorPlanBefore = nil
+        currentBatchId = nil
+        currentExpect = nil
+        currentBatchSkipped = false
         lastVerifyOutputs = [:]
         pendingFailureLedger = nil
         writtenRoots = [:]
@@ -698,6 +719,7 @@ final class LoopEngineRunner: ObservableObject {
         // Preflighting them anyway would let a disabled stage's missing
         // command or approval block a run it takes no part in.
         let orderedStages = LoopStage.runOrder(config.stages.filter { $0.enabled && $0.kind != .unsupported })
+        runOrderedStages = orderedStages
         // Keyed on the stage list, not `loopId`: a duplicated Self-Heal loop
         // (new id) or a wizard-built loop that happens to include a Triage
         // stage must still suppress its own errors from feeding back in. SDK
@@ -827,6 +849,13 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
+            case .codeGraph:
+                guard stage.graphOp != nil else {
+                    return await finish(.error("Stage \"\(stage.name)\" has no operation chosen"),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
+                }
             case .regressionSweep, .unsupported, .incidentTriage, .sdkSurfaceDiff:
                 break
             }
@@ -928,6 +957,8 @@ final class LoopEngineRunner: ObservableObject {
                         stages: orderedStages, progress: &progress)
                 case .testMap:
                     decision = await runTestMapStage(stage, gitRoot: runGitRoot, stages: orderedStages)
+                case .codeGraph:
+                    decision = await runCodeGraphStage(stage, gitRoot: runGitRoot)
                 case .incidentTriage:
                     decision = runTriageStage(stage, gitRoot: runGitRoot)
                 case .sdkSurfaceDiff:
@@ -943,9 +974,15 @@ final class LoopEngineRunner: ObservableObject {
                     stageStates[stage.id] = .passed
                     decision = .proceed
                 case .skill:
+                    if stage.isRefactorApply {
+                        captureRefactorPlanBefore(stage, gitRoot: runGitRoot, faultsRoot: faultsRoot)
+                    }
                     decision = await runSkillStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                    if stage.isRefactorApply {
+                        captureRefactorBatchAfter(stage, gitRoot: runGitRoot, faultsRoot: faultsRoot)
+                    }
                     // Only an apply that actually RAN counts as applied: an
                     // errored one (the agent never answered) applied nothing,
                     // so the retry must run it again, not skip it as done.
@@ -1275,6 +1312,17 @@ final class LoopEngineRunner: ObservableObject {
         // timeout or a missing tool — no test failed.
         if !didTimeOut, outcome.exitCode != 127 {
             pendingFailureLedger = (stage.id, outcome.output, gitRoot)
+        }
+
+        // A stage that refuses repair fails the run here: no flake re-run, no
+        // repair. The failure still reaches a ledger stage after it (flushed when
+        // this attempt returns).
+        if !stage.allowsRepair {
+            let message = "stage \(stage.name) failed and does not allow repair"
+            appendLog(.error, "  [\(stage.name)] \(message)")
+            record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
+                   passed: false, output: outcome.output, outputHash: failureHash, score: score)
+            return .terminate(.error(message))
         }
 
         let used = repairsUsed[stage.id] ?? 0
@@ -1906,6 +1954,9 @@ final class LoopEngineRunner: ObservableObject {
             if cancelled { return .terminate(.aborted) }
             appendLog(.error, "  [\(stage.name)] \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))
+        }
+        if let decision = prepareNextBatchFile(stage: stage, gitRoot: gitRoot, startedAt: startedAt) {
+            return decision
         }
         var agentResult: LoopAgentResult?
         let guarded = await withScopeGuard(stage: stage, config: config, gitRoot: gitRoot,
