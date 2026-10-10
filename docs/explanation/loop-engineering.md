@@ -442,7 +442,6 @@ Two deliberate limits, both recorded rather than hidden:
   agent call. A too-broad root (`/`, the home folder, `/Users`, …) is refused on
   both sides — the stage fails with "repo root … is too broad for a Loop agent".
 
-
 ## Regressions become faults
 
 The Test loop's `ledger` stage compares the failing test ids of the run's Test
