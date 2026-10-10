@@ -59,7 +59,7 @@ final class LoopEngineRunner: ObservableObject {
     /// the display must say so); left holding the final states after a run —
     /// available to any post-run surface (today's header hides itself when
     /// the run ends, so nothing renders them yet) until the next run resets it.
-    @Published private(set) var stageStates: [String: LiveStageState] = [:]
+    @Published var stageStates: [String: LiveStageState] = [:]
     /// Name of the stage executing (or repairing) right now, `nil` between
     /// stages and between runs.
     @Published private(set) var currentStageName: String?
@@ -186,7 +186,7 @@ final class LoopEngineRunner: ObservableObject {
     private let stageRepairer: LoopStageRepairer
     private let regressionSweep: RegressionSweepRunning
     private let skillExecutor: LoopSkillExecuting
-    private let approvals: VerifyApprovalStore
+    let approvals: VerifyApprovalStore
     /// Fallback ceiling for a stage whose own `timeoutSeconds` is nil. 0 = no
     /// limit, which is the default: a stage command is the user's build or test
     /// suite, and cutting it off reports a timeout for work that was still
@@ -205,7 +205,7 @@ final class LoopEngineRunner: ObservableObject {
     /// in progress), so a request is never made from files that mix it with a repair.
     private var shipBaseline: LoopShipBaseline?
     private let summaryWriter: LoopRunSummaryWriting
-    private let scopeGuard: RepairScopeGuarding
+    let scopeGuard: RepairScopeGuarding
     private let trigger: LoopRunTrigger
     /// Whether preflight also verifies that each shell stage's executable
     /// exists. Off by default: tests drive the runner with fake commands
@@ -252,7 +252,14 @@ final class LoopEngineRunner: ObservableObject {
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
     /// to it; `@MainActor` makes that safe.
-    private var iterationRecords: [LoopIterationRecord] = []
+    var iterationRecords: [LoopIterationRecord] = []
+
+    /// Test loop run state (`LoopEngineRunner+TestMap.swift`), reset per run.
+    var testStructure: TestStructure?
+    var testMapBefore: TestMap?
+    /// The full (uncapped by the journal's 4 KB tail) output of each blocking
+    /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
+    var lastVerifyOutputs: [String: String] = [:]
 
     /// The latest agent result per stage id for the current run — what each
     /// skill stage and each repair's agent said and changed. Kept (rather than
@@ -267,7 +274,7 @@ final class LoopEngineRunner: ObservableObject {
     /// runs. `run`'s own parameters are locals, invisible to
     /// `handleAppTerminating()` — which fires from a notification, not from
     /// inside `run` — so this is the only way that method can find them.
-    private struct RunContext {
+    struct RunContext {
         let config: LoopEngineConfig
         let faultsRoot: URL
         let gitRoot: URL
@@ -277,7 +284,7 @@ final class LoopEngineRunner: ObservableObject {
         let loopName: String
         let runId: String
     }
-    private var currentRunContext: RunContext?
+    var currentRunContext: RunContext?
 
     init(verifier: FaultVerifier = ShellFaultVerifier(),
          stageRepairer: LoopStageRepairer,
@@ -435,7 +442,7 @@ final class LoopEngineRunner: ObservableObject {
     }
 
     /// What the loop should do after one stage finished.
-    private enum StageDecision: Equatable {
+    enum StageDecision: Equatable {
         /// Move on to the next stage — the stage passed, or it failed but is
         /// `.advisory` and therefore does not gate.
         case proceed
@@ -595,6 +602,9 @@ final class LoopEngineRunner: ObservableObject {
         runWallClockBudget = config.wallClockBudgetSeconds
         stageStates = [:]
         lastSkillResults = [:]
+        testStructure = nil
+        testMapBefore = nil
+        lastVerifyOutputs = [:]
         lastRepairResults = [:]
         attemptLedgers = [:]
         runMainGitRoot = mainGitRoot
@@ -786,6 +796,13 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
+            case .testMap:
+                guard stage.testOp != nil else {
+                    return await finish(.error("Stage \"\(stage.name)\" has no operation chosen"),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
+                }
             case .regressionSweep, .unsupported, .incidentTriage, .sdkSurfaceDiff:
                 break
             }
@@ -884,6 +901,8 @@ final class LoopEngineRunner: ObservableObject {
                     decision = await runArtifactCheckStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         stages: orderedStages, progress: &progress)
+                case .testMap:
+                    decision = await runTestMapStage(stage, gitRoot: runGitRoot, stages: orderedStages)
                 case .incidentTriage:
                     decision = runTriageStage(stage, gitRoot: runGitRoot)
                 case .sdkSurfaceDiff:
@@ -1151,6 +1170,7 @@ final class LoopEngineRunner: ObservableObject {
         // verifier's 256 KB cap, and regexes over it stalled the UI per stage.
         let analysis = await Self.analyse(outcome.output, hashing: outcome.exitCode != 0)
         settleLedger(stageId: stage.id, passed: outcome.exitCode == 0, failureSet: analysis.hash)
+        if stage.verifies { lastVerifyOutputs[stage.id] = outcome.output }
         if outcome.exitCode == 0 {
             appendLog(.info, "  [\(stage.name)] passed")
             stageStates[stage.id] = .passed
@@ -1898,6 +1918,15 @@ final class LoopEngineRunner: ObservableObject {
                 }
                 return .terminate(.error(failure))
             }
+            if stage.testWriteOnly, let violation = await enforceTestWriteOnly(
+                stage: stage, result: agentResult, changed: changed, gitRoot: gitRoot) {
+                stageStates[stage.id] = .failed
+                appendLog(.error, "  [\(stage.name)] \(violation)")
+                record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                       passed: false, output: violation, score: nil, changedPaths: changed,
+                       scopeVerdict: verdictScope)
+                return .terminate(.error(violation))
+            }
             appendLog(.info, "  [\(stage.name)] skill completed (generate)")
             // `passed` on a generate step means "ran without error" — but a step
             // whose edits were rejected as out-of-scope did not do its job, and
@@ -2357,7 +2386,7 @@ final class LoopEngineRunner: ObservableObject {
     /// Appends one stage attempt to the current iteration's record. A stage that
     /// runs outside any iteration (there is none today) is dropped rather than
     /// crashing on an empty array.
-    private func record(_ stage: LoopStage, startedAt: Date, duration: Double,
+    func record(_ stage: LoopStage, startedAt: Date, duration: Double,
                         exitCode: Int32?, passed: Bool, output: String,
                         outputHash: String? = nil, score: Int?,
                         repairAttempted: Bool = false,
@@ -2652,7 +2681,7 @@ final class LoopEngineRunner: ObservableObject {
     /// as long as the app stays open. Mirrors `TaskLogStore`'s own cap.
     private static let maxLogLines = 2000
 
-    private func appendLog(_ level: LoopLogLine.Level, _ text: String) {
+    func appendLog(_ level: LoopLogLine.Level, _ text: String) {
         let line = LoopLogLine(at: Date(), level: level, text: text)
         log.append(line)
         if log.count > Self.maxLogLines {

@@ -90,6 +90,10 @@ struct LoopStageAttempt: Codable, Equatable {
     /// True when the stage failed and then passed on an immediate re-run (the
     /// flake gate). Optional so older records decode.
     var flaky: Bool?
+    /// `.testMap` map op: change in the map's counters since the run's first map.
+    var testMapDelta: [String: Double]? = nil
+    /// `.testMap` ledger op: ids of the faults it created.
+    var newFaults: [String]? = nil
 
     init(stageId: String, stageName: String, kind: LoopStage.Kind,
          severity: LoopStageSeverity, startedAt: Date, durationSeconds: Double,

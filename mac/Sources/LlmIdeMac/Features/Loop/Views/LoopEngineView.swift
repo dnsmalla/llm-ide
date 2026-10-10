@@ -546,9 +546,10 @@ struct LoopEngineView: View {
                     .foregroundStyle(t.textMuted)
                     .frame(width: 14, alignment: .trailing)
                 Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
-                      : stage.kind == .shellCommand ? "terminal" : "sparkles")
+                      : stage.kind == .shellCommand ? "terminal"
+                      : stage.kind == .testMap ? "point.3.connected.trianglepath.dotted" : "sparkles")
                     .foregroundStyle(t.textMuted)
-                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : "Verify")
+                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : stage.kind == .testMap ? "Test Map" : "Verify")
                     .font(Typography.captionStrong)
                     .foregroundStyle(stage.kind == .skill ? t.accent2 : t.accent)
                 if stage.isDefault {
@@ -904,6 +905,15 @@ struct LoopEngineView: View {
                 } else {
                     Text("Open a project with a cloned repo to approve or run shell-command stages.")
                         .font(Typography.caption).foregroundStyle(t.textMuted)
+                }
+            } else if stage.wrappedValue.kind == .testMap {
+                Picker("Operation", selection: Binding(
+                    get: { stage.wrappedValue.testOp ?? .map },
+                    set: { stage.wrappedValue.testOp = $0 }
+                )) {
+                    Text("Structure").tag(TestMapOp.structure)
+                    Text("Map").tag(TestMapOp.map)
+                    Text("Ledger").tag(TestMapOp.ledger)
                 }
             } else if stage.wrappedValue.kind == .artifactCheck {
                 Text("Checked in-app after the generate stages; a failure re-runs them with the findings.")

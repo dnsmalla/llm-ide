@@ -147,7 +147,7 @@ final class AutoTaskSkillCatalogTests: XCTestCase {
             .appendingPathComponent("auto-task-skills-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: root) }
         let skills = root.appendingPathComponent(".claude/skills")
-        for name in ["refactor-apply", "refactor-planner"] {
+        for name in ["refactor-apply", "test-gap-writer", "refactor-planner"] {
             let dir = skills.appendingPathComponent(name)
             try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
             try "---\nname: \(name)\ndescription: d\n---\n\nBody."
