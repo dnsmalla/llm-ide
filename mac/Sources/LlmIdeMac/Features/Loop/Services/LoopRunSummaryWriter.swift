@@ -120,6 +120,7 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
         stop after \(record.config.consecutiveFailureStop) non-improving · \
         \(record.config.wallClockBudgetSeconds.map { "\(Int($0 / 60)) min" } ?? "no time limit") · \
         \(record.config.maxRepairsPerStage) repairs/stage · \
+        pause timeout: \(record.config.pauseTimeoutSeconds.map { $0 == 0 ? "none" : "\(Int($0 / 60)) min" } ?? "unknown") · \
         protected paths: \(record.config.protectedPathPolicy.rawValue)
 
         ## Iterations

@@ -83,7 +83,8 @@ extension LoopEngineView {
         let t = theme.current
         let cfg = record.config
         let wall = cfg.wallClockBudgetSeconds.map { "\(Int($0 / 60)) min" } ?? "no limit"
-        Text("Budgets: \(cfg.maxIterations) iter · stop after \(cfg.consecutiveFailureStop) non-improving · \(wall) · \(cfg.maxRepairsPerStage) repairs/stage · protected: \(cfg.protectedPathPolicy.rawValue)")
+        let pause = cfg.pauseTimeoutSeconds.map { $0 == 0 ? "none" : "\(Int($0 / 60)) min" } ?? "unknown"
+        Text("Budgets: \(cfg.maxIterations) iter · stop after \(cfg.consecutiveFailureStop) non-improving · \(wall) · \(cfg.maxRepairsPerStage) repairs/stage · pause timeout: \(pause) · protected: \(cfg.protectedPathPolicy.rawValue)")
             .font(.system(size: 9, design: .monospaced))
             .foregroundStyle(t.textMuted)
             .fixedSize(horizontal: false, vertical: true)

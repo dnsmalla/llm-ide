@@ -58,4 +58,18 @@ final class LoopPauseTimeoutTests: XCTestCase {
         let legacy = #"{"stages":[]}"#.data(using: .utf8)!
         XCTAssertEqual(try JSONDecoder().decode(LoopEngineConfig.self, from: legacy).pauseTimeoutSeconds, 1800)
     }
+
+    func testSnapshotCarriesPauseTimeoutAndOldJSONDecodesNil() throws {
+        var cfg = LoopEngineConfig(stages: [])
+        cfg.pauseTimeoutSeconds = 600
+        let snap = LoopRunConfigSnapshot(cfg)
+        XCTAssertEqual(snap.pauseTimeoutSeconds, 600)
+        let data = try JSONEncoder().encode(snap)
+        XCTAssertEqual(try JSONDecoder().decode(LoopRunConfigSnapshot.self, from: data).pauseTimeoutSeconds, 600)
+        // An old record: strip the key and confirm it decodes to nil.
+        var obj = try XCTUnwrap(JSONSerialization.jsonObject(with: data) as? [String: Any])
+        obj.removeValue(forKey: "pauseTimeoutSeconds")
+        let old = try JSONSerialization.data(withJSONObject: obj)
+        XCTAssertNil(try JSONDecoder().decode(LoopRunConfigSnapshot.self, from: old).pauseTimeoutSeconds)
+    }
 }

@@ -857,7 +857,7 @@ final class LoopEngineRunner: ObservableObject {
                 if await holdWhilePaused(timeout: config.pauseTimeoutSeconds) == .timedOut {
                     // Unreleased pause: end the run so the queue lock frees.
                     // The `defer` clears `paused`/`pausedRootKeys` and releases.
-                    appendLog(.warn, "Pause timed out after \(Int(config.pauseTimeoutSeconds / 60)) min without a resume — aborting the run to release the repo lock")
+                    appendLog(.warn, "Pause timed out after \(Int(pausedSeconds(asOf: Date()) / 60)) min (limit \(Int(config.pauseTimeoutSeconds / 60)) min) without a resume — aborting the run to release the repo lock")
                     status = .aborted
                     break iterationLoop
                 }

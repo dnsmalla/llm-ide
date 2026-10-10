@@ -335,7 +335,10 @@ extension LoopEngineView {
                               consecutiveFailureStop: $consecutiveFailureStop,
                               wallClockMinutes: $wallClockMinutes,
                               maxRepairsPerStage: $maxRepairsPerStage,
-                              repairModel: $repairModel)
+                              repairModel: $repairModel,
+                              pauseTimeoutMinutes: Binding(
+                                  get: { Int(pauseTimeoutSeconds / 60) },
+                                  set: { pauseTimeoutSeconds = Double($0) * 60 })) 
             Toggle("Use isolated git worktrees for concurrent runs", isOn: $useWorktreesForConcurrentRuns)
                 .font(Typography.body)
             Text("When another run is already using the main checkout, start in an isolated worktree instead of waiting. Changed worktrees and their branches are retained for review. Off by default.")
