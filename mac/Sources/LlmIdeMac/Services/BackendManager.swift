@@ -246,13 +246,49 @@ final class BackendManager {
                 await MainActor.run {
                     self.append("--- Stale backend on :\(Self.defaultBackendPort) did not answer /health in 2s — killing and respawning ---", stream: .info)
                 }
-                Self.killExternalListener(port: Self.defaultBackendPort)
-                // Give the kernel a beat to release the port before we
-                // bind it. 250ms is plenty for SIGTERM-on-loopback.
-                try? await Task.sleep(nanoseconds: 250_000_000)
-                await MainActor.run { self.spawn(nodePath: trimmedNode, workURL: workURL) }
+                let signalled = Self.killExternalListener(port: Self.defaultBackendPort)
+                // killExternalListener refuses any PID whose command line lacks
+                // server.mjs (a foreign process). If it signalled nothing and the
+                // port is held, refuse at once. If it signalled our own server,
+                // poll up to 3 s for it to exit (SQLite/WAL close can be slow).
+                // A spawn onto a held port would crash-loop via auto-restart.
+                var stillHeld = true
+                let attempts = signalled ? 12 : 1
+                for _ in 0..<attempts {
+                    try? await Task.sleep(nanoseconds: 250_000_000)
+                    stillHeld = await Self.isPortInUse(port: Self.defaultBackendPort)
+                    if !stillHeld { break }
+                }
+                switch Self.startDecision(healthy: false, stillHeld: stillHeld) {
+                case .refuseOccupied:
+                    await MainActor.run {
+                        self.fail(Self.portOccupiedMessage(port: Self.defaultBackendPort))
+                    }
+                default:
+                    await MainActor.run { self.spawn(nodePath: trimmedNode, workURL: workURL) }
+                }
             }
         }
+    }
+
+    /// What `start()` should do once it has probed the port (and, if the
+    /// listener was unhealthy, attempted to kill it).
+    enum StartDecision: Equatable {
+        case adopt            // healthy listener already there
+        case spawn            // port free: start our own child
+        case refuseOccupied   // unhealthy listener we could not/would not kill
+    }
+
+    /// Pure decision: `healthy` = a listener answered /health; `stillHeld` =
+    /// the port is still bound after the kill attempt.
+    nonisolated static func startDecision(healthy: Bool, stillHeld: Bool) -> StartDecision {
+        if healthy { return .adopt }
+        return stillHeld ? .refuseOccupied : .spawn
+    }
+
+    nonisolated static func portOccupiedMessage(port: Int) -> String {
+        "Port \(port) is in use by another process that is not the LLM-IDE server, so the backend was not started. "
+            + "Find it with `lsof -ti :\(port)` and stop it (e.g. `kill $(lsof -ti :\(port))`), then click Start."
     }
 
     /// Re-probe `/health` and reconcile a STALE `.running` status. An adopted
@@ -513,7 +549,7 @@ final class BackendManager {
         stop()
         startAfterExit = (nodePath, workingDirectory)
         Task { @MainActor [weak self] in
-            await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
+            _ = await Task.detached { Self.killExternalListener(port: Self.defaultBackendPort) }.value
             // Wait for the port to actually FREE, not a fixed 500 ms: a node that is
             // still draining keeps answering /health, and `start()` would adopt the
             // dying server as `.running` — then it exits and the status goes stale.
@@ -576,11 +612,15 @@ final class BackendManager {
     /// catastrophic for users running unrelated node servers. We now use
     /// `lsof -ti :<port>` to find the listener PID(s) and kill only those.
     /// Public instance method to kill external listeners on a port (used by UI).
-    func killExternalListener(port: Int) {
+    @discardableResult
+    func killExternalListener(port: Int) -> Bool {
         Self.killExternalListener(port: port)
     }
 
-    nonisolated static func killExternalListener(port: Int) {
+    /// Returns true iff at least one PID was sent SIGTERM (false: no listener,
+    /// or every listener was skipped as foreign).
+    @discardableResult
+    nonisolated static func killExternalListener(port: Int) -> Bool {
         // 1. Find PIDs listening on the port.
         let lsof = Process()
         lsof.launchPath = "/usr/sbin/lsof"
@@ -588,18 +628,19 @@ final class BackendManager {
         let pipe = Pipe()
         lsof.standardOutput = pipe
         lsof.standardError = Pipe() // swallow stderr
-        do { try lsof.run() } catch { return }
+        do { try lsof.run() } catch { return false }
         lsof.waitUntilExit()
         guard let data = try? pipe.fileHandleForReading.readToEnd(),
-              let raw = String(data: data, encoding: .utf8) else { return }
+              let raw = String(data: data, encoding: .utf8) else { return false }
         let pids = raw
             .split(whereSeparator: { $0.isNewline })
             .compactMap { Int32($0.trimmingCharacters(in: .whitespaces)) }
-        guard !pids.isEmpty else { return }
+        guard !pids.isEmpty else { return false }
 
         // 2. For each PID, verify it is our Node/server.mjs process before
         // sending SIGTERM. This prevents friendly-fire on unrelated dev
         // servers that happen to be listening on the same port.
+        var signalled = false
         for pid in pids {
             let cmd = Process()
             cmd.launchPath = "/bin/ps"
@@ -621,7 +662,9 @@ final class BackendManager {
                 continue
             }
             kill(pid, SIGTERM)
+            signalled = true
         }
+        return signalled
     }
 
     /// Minimum server `apiVersion` this client knows how to talk to.
