@@ -27,6 +27,10 @@ public enum LoopStageSeverity: String, Codable, CaseIterable {
 /// untested-function map, or diff the Test stage's results into the ledger.
 public enum TestMapOp: String, Codable { case structure, map, ledger }
 
+/// What a `.codeGraph` stage does: `snapshot` records the code graph before a
+/// refactor batch runs, `verify` diffs the regenerated graph against it.
+public enum CodeGraphOp: String, Codable { case snapshot, verify }
+
 /// One step of a Loop Engineering run. `.regressionSweep` re-runs the
 /// existing `RegressionRunner` sweep (no shell command of its own);
 /// `.shellCommand` runs an arbitrary project command (e.g. "swift test")
@@ -51,6 +55,11 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         /// at the run's git root for the fix agent to answer. No shell, no
         /// agent call of its own.
         case incidentTriage
+        /// Refactor loop's code-graph stage: `graphOp` either snapshots the
+        /// repo's structure graph or verifies a refactor batch against it. No
+        /// shell command and no agent call. A build that predates this kind
+        /// reads it as `.unsupported`.
+        case codeGraph
         /// SDK Adoption: runs `mac/Scripts/sdk-adopt-diff.sh` (a fixed command
         /// this build generates, never read from loop.json) to write
         /// `SdkAdoption.relativePath`. Exit 3 ends the run as a success.
@@ -140,6 +149,13 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     public var check: ArtifactCheckSpec? = nil
     /// `.testMap` only — which operation this stage performs.
     public var testOp: TestMapOp? = nil
+    /// `.codeGraph` only — which operation this stage performs.
+    public var graphOp: CodeGraphOp? = nil
+    /// Whether a failure of this (blocking shell) stage may be sent to the repair
+    /// agent. `false` ends the run at the first failure: no flake re-run, no
+    /// repair. Defaults to `true`, so every stage saved before this field keeps
+    /// its behaviour.
+    public var allowsRepair: Bool = true
     /// Revision of the detector default this stage's content was last brought
     /// to (`LoopStageDetector.upgradingDefaultRevisions`); `nil` on a stage
     /// saved before revisions existed, which reads as revision 1.
@@ -156,7 +172,8 @@ public struct LoopStage: Identifiable, Codable, Equatable {
          isDefault: Bool = false, enabled: Bool = true, defaultKey: String? = nil,
          severity: LoopStageSeverity = .blocking, timeoutSeconds: Int? = nil,
          detectedCommand: String? = nil, check: ArtifactCheckSpec? = nil,
-         defaultRevision: Int? = nil, testOp: TestMapOp? = nil) {
+         defaultRevision: Int? = nil, testOp: TestMapOp? = nil,
+         graphOp: CodeGraphOp? = nil, allowsRepair: Bool = true) {
         self.id = id
         self.name = name
         self.kind = kind
@@ -175,6 +192,8 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         self.check = check
         self.defaultRevision = defaultRevision
         self.testOp = testOp
+        self.graphOp = graphOp
+        self.allowsRepair = allowsRepair
     }
 
     // MARK: - Codable backward compatibility
@@ -182,6 +201,7 @@ public struct LoopStage: Identifiable, Codable, Equatable {
     enum CodingKeys: String, CodingKey {
         case id, name, kind, command, order, skillId, targetPath, outputPath, prompt, isDefault
         case enabled, defaultKey, severity, timeoutSeconds, detectedCommand, check, defaultRevision, disabledByDetection, testOp
+        case graphOp, allowsRepair
     }
 
     /// Every field added after the first shipped version MUST be decoded with
@@ -223,6 +243,8 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         defaultRevision = try container.decodeIfPresent(Int.self, forKey: .defaultRevision)
         disabledByDetection = try container.decodeIfPresent(Bool.self, forKey: .disabledByDetection)
         testOp = try container.decodeIfPresent(TestMapOp.self, forKey: .testOp)
+        graphOp = try container.decodeIfPresent(CodeGraphOp.self, forKey: .graphOp)
+        allowsRepair = try container.decodeIfPresent(Bool.self, forKey: .allowsRepair) ?? true
     }
 
     /// An `.unsupported` stage writes back its original JSON untouched;
@@ -253,6 +275,10 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(testOp, forKey: .testOp)
         try c.encodeIfPresent(defaultRevision, forKey: .defaultRevision)
         try c.encodeIfPresent(disabledByDetection, forKey: .disabledByDetection)
+        try c.encodeIfPresent(graphOp, forKey: .graphOp)
+        // Written only when refused, so every stage that allows repair (all of
+        // them before this field) serialises exactly as it did.
+        if !allowsRepair { try c.encode(false, forKey: .allowsRepair) }
     }
 }
 

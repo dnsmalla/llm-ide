@@ -259,6 +259,13 @@ final class LoopEngineRunner: ObservableObject {
     /// Test loop run state (`LoopEngineRunner+TestMap.swift`), reset per run.
     var testStructure: TestStructure?
     var testMapBefore: TestMap?
+    /// Refactor loop run state (`LoopEngineRunner+CodeGraph.swift`), reset per run:
+    /// the graph snapshot the run compares against, and the batch the apply
+    /// stage changed (its id, expected counter, and whether it was skipped).
+    var graphBefore: GraphReport?
+    var currentBatchId: String?
+    var currentExpect: String?
+    var currentBatchSkipped = false
     /// The full (uncapped by the journal's 4 KB tail) output of each blocking
     /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
     var lastVerifyOutputs: [String: String] = [:]
@@ -627,6 +634,10 @@ final class LoopEngineRunner: ObservableObject {
         lastSkillResults = [:]
         testStructure = nil
         testMapBefore = nil
+        graphBefore = nil
+        currentBatchId = nil
+        currentExpect = nil
+        currentBatchSkipped = false
         lastVerifyOutputs = [:]
         pendingFailureLedger = nil
         writtenRoots = [:]
@@ -831,6 +842,13 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
+            case .codeGraph:
+                guard stage.graphOp != nil else {
+                    return await finish(.error("Stage \"\(stage.name)\" has no operation chosen"),
+                                        config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
+                                        projectId: projectId, startedAt: startedAt,
+                                        loopId: loopId, loopName: loopName)
+                }
             case .regressionSweep, .unsupported, .incidentTriage, .sdkSurfaceDiff:
                 break
             }
@@ -932,6 +950,8 @@ final class LoopEngineRunner: ObservableObject {
                         stages: orderedStages, progress: &progress)
                 case .testMap:
                     decision = await runTestMapStage(stage, gitRoot: runGitRoot, stages: orderedStages)
+                case .codeGraph:
+                    decision = await runCodeGraphStage(stage, gitRoot: runGitRoot)
                 case .incidentTriage:
                     decision = runTriageStage(stage, gitRoot: runGitRoot)
                 case .sdkSurfaceDiff:
@@ -1280,6 +1300,7 @@ final class LoopEngineRunner: ObservableObject {
         if !didTimeOut, outcome.exitCode != 127 {
             pendingFailureLedger = (stage.id, outcome.output, gitRoot)
         }
+
 
         let used = repairsUsed[stage.id] ?? 0
         // The same failure set back after two repairs with DIFFERENT diffs: a

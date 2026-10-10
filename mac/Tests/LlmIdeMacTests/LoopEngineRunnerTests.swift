@@ -3399,4 +3399,33 @@ final class LoopEngineRunnerTests: XCTestCase {
             .run(config: artifactConfig(severity: .advisory), faultsRoot: repo, gitRoot: repo)
         if case .error = advisory {} else { XCTFail("advisory check must not vouch for an errored skill: \(advisory)") }
     }
+
+
+    /// Without a rescanner in this build, a snapshot stage is advisory by nature:
+    /// it logs that the graph is unavailable and passes.
+    func testCodeGraphSnapshotWithoutRescannerPasses() async {
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Graph", kind: .codeGraph, order: 0, graphOp: .snapshot)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals())
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+    }
+
+    /// Verify with no snapshot to compare against logs and passes; it never
+    /// fails for want of a baseline.
+    func testCodeGraphVerifyWithoutSnapshotPasses() async {
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "g1", name: "Graph Check", kind: .codeGraph, order: 0, graphOp: .verify)
+        ], maxIterations: 5, consecutiveFailureStop: 2)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(), approvals: makeApprovals())
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+        XCTAssertEqual(result, .success)
+    }
 }

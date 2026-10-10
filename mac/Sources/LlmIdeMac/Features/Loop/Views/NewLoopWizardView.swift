@@ -256,6 +256,7 @@ struct NewLoopWizardView: View {
         case .skill: "New Skill Stage"
         case .artifactCheck: "Artifact Check"
         case .testMap: "Test Map"
+        case .codeGraph: "Code Graph"
         case .incidentTriage: "Triage"
         case .sdkSurfaceDiff: "SDK Diff"
         case .unsupported: "Unsupported stage"
@@ -355,6 +356,14 @@ struct NewLoopWizardView: View {
                     Text("Structure").tag(TestMapOp.structure)
                     Text("Map").tag(TestMapOp.map)
                     Text("Ledger").tag(TestMapOp.ledger)
+                }
+            case .codeGraph:
+                Picker("Operation", selection: Binding(
+                    get: { stage.wrappedValue.graphOp ?? .verify },
+                    set: { stage.wrappedValue.graphOp = $0 }
+                )) {
+                    Text("Snapshot").tag(CodeGraphOp.snapshot)
+                    Text("Verify").tag(CodeGraphOp.verify)
                 }
             case .incidentTriage:
                 Text("Self-Heal incident triage — picks up to \(SelfHealSettings.maxPerRun()) new incidents into \(SelfHealBatch.relativePath).")
