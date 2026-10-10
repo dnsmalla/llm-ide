@@ -260,6 +260,16 @@ final class LoopEngineRunner: ObservableObject {
     /// The full (uncapped by the journal's 4 KB tail) output of each blocking
     /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
     var lastVerifyOutputs: [String: String] = [:]
+    /// A blocking shell stage's failing output the ledger stage has not yet seen
+    /// (the stage ends the run or repairs, so the ledger's own position after it
+    /// is never reached). Flushed before a repair starts or when the stage returns;
+    /// dropped when the flake re-run passes.
+    var pendingFailureLedger: (stageId: String, output: String, gitRoot: URL)?
+    /// How many times each shell stage ran its command this run, and the
+    /// "stage#attempt" keys the ledger already recorded — so the ledger's normal
+    /// position never re-processes an attempt the failure path already handled.
+    var shellAttemptSeq: [String: Int] = [:]
+    var ledgerRecordedKeys: Set<String> = []
     /// The protected-path snapshot taken before the latest guarded edit — what was
     /// already dirty (the user's own edits) so `enforceTestWriteOnly` never reverts it.
     var lastGuardSnapshot: RepairScopeSnapshot?
@@ -610,6 +620,9 @@ final class LoopEngineRunner: ObservableObject {
         testStructure = nil
         testMapBefore = nil
         lastVerifyOutputs = [:]
+        pendingFailureLedger = nil
+        shellAttemptSeq = [:]
+        ledgerRecordedKeys = []
         lastGuardSnapshot = nil
         lastRepairResults = [:]
         attemptLedgers = [:]
@@ -902,7 +915,8 @@ final class LoopEngineRunner: ObservableObject {
                     decision = await runShellStage(
                         stage, config: config, gitRoot: runGitRoot,
                         progress: &progress, repairsUsed: &repairsUsed,
-                        goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs)
+                        goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs,
+                        stages: orderedStages)
                 case .artifactCheck:
                     decision = await runArtifactCheckStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
@@ -1105,7 +1119,22 @@ final class LoopEngineRunner: ObservableObject {
                                progress: inout ProgressWatch,
                                repairsUsed: inout [String: Int],
                                goal: String? = nil, acceptanceCriteria: String? = nil,
-                               scopeGlobs: [String] = []) async -> StageDecision {
+                               scopeGlobs: [String] = [], stages: [LoopStage] = []) async -> StageDecision {
+        let decision = await runShellStageAttempt(
+            stage, config: config, gitRoot: gitRoot, progress: &progress, repairsUsed: &repairsUsed,
+            goal: goal, acceptanceCriteria: acceptanceCriteria, scopeGlobs: scopeGlobs, stages: stages)
+        // Any ending that left a failing output unrecorded (give-up, terminate)
+        // still feeds the ledger.
+        if !Task.isCancelled { await flushFailureLedger(stages: stages) }
+        pendingFailureLedger = nil
+        return decision
+    }
+
+    private func runShellStageAttempt(_ stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
+                                      progress: inout ProgressWatch,
+                                      repairsUsed: inout [String: Int],
+                                      goal: String?, acceptanceCriteria: String?,
+                                      scopeGlobs: [String], stages: [LoopStage]) async -> StageDecision {
         // Preflight already validated this once per stage; if a command somehow
         // becomes invalid by the time we get here, fail closed instead of
         // force-unwrapping.
@@ -1122,6 +1151,7 @@ final class LoopEngineRunner: ObservableObject {
 
         let startedAt = Date()
         let timeout = shellTimeout(for: stage)
+        shellAttemptSeq[stage.id, default: 0] += 1
         let outcome: VerifyOutcome
         // A timed-out stage's `output` is a synthesized sentence, not the
         // runner's own output, so nothing can be concluded from the parser
@@ -1233,6 +1263,14 @@ final class LoopEngineRunner: ObservableObject {
             return .terminate(.blocked(reason: .environment(stageName: stage.name, detail: problem + worktreeNote)))
         }
 
+        // The ledger stage sits AFTER this one, so a failure that ends the run or
+        // goes to repair would never reach it: hand it the failing output now (it
+        // is flushed before a repair starts, or when this stage returns). Not for a
+        // timeout or a missing tool — no test failed.
+        if !didTimeOut, outcome.exitCode != 127 {
+            pendingFailureLedger = (stage.id, outcome.output, gitRoot)
+        }
+
         let used = repairsUsed[stage.id] ?? 0
         // The same failure set back after two repairs with DIFFERENT diffs: a
         // third guess at it is not worth the spend.
@@ -1303,6 +1341,7 @@ final class LoopEngineRunner: ObservableObject {
                 // The ledger op must see the output of the attempt it picks (the last one).
                 lastVerifyOutputs[stage.id] = again.output
                 if again.exitCode == 0 {
+                    pendingFailureLedger = nil
                     appendLog(.warn, "  [\(stage.name)] FLAKY — failed, then passed on an immediate re-run; not repairing")
                     record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                            passed: false, output: outcome.output, outputHash: failureHash, score: score)
@@ -1316,6 +1355,7 @@ final class LoopEngineRunner: ObservableObject {
                 }
                 // Failed again: journal the re-run, and show the repair what
                 // the stage says NOW if it failed differently.
+                if pendingFailureLedger != nil { pendingFailureLedger?.output = again.output }
                 let again2 = await Self.analyse(again.output, hashing: true)
                 record(stage, startedAt: rerunStartedAt, duration: Date().timeIntervalSince(rerunStartedAt),
                        exitCode: again.exitCode, passed: false, output: again.output,
@@ -1350,6 +1390,7 @@ final class LoopEngineRunner: ObservableObject {
             appendLog(.error, "  [\(stage.name)] \(error.localizedDescription)")
             return .terminate(.error(error.localizedDescription))
         }
+        await flushFailureLedger(stages: stages)
         appendLog(.info, "  [\(stage.name)] repairing…")
         emit(LoopRunEvent(kind: LoopRunEvent.Kind.repairRequested, iteration: iteration,
                           stageId: stage.id, stageName: stage.name,

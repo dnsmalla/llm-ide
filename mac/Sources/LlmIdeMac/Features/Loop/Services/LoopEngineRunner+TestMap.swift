@@ -98,18 +98,50 @@ extension LoopEngineRunner {
         return .terminate(.error(output))
     }
 
-    private func runLedgerOp(_ stage: LoopStage, startedAt: Date, gitRoot: URL,
-                             stages: [LoopStage]) async -> StageDecision {
-        guard let attempt = iterationRecords.last?.attempts.last(where: {
-            $0.kind == .shellCommand && $0.severity != .advisory }),
-              let output = lastVerifyOutputs[attempt.stageId] else {
-            appendLog(.info, "  [\(stage.name)] no Test stage ran this iteration — ledger unchanged")
-            return finishTestMap(stage, startedAt: startedAt, passed: true, output: "")
+    /// Hands a blocking shell stage's pending FAILING output to the enabled ledger
+    /// stage positioned after it (the normal position is never reached once the
+    /// stage fails), recording faults with `runPassed = false`. Runs at most once
+    /// per shell attempt.
+    func flushFailureLedger(stages: [LoopStage]) async {
+        guard let pending = pendingFailureLedger else { return }
+        pendingFailureLedger = nil
+        guard let index = stages.firstIndex(where: { $0.id == pending.stageId }),
+              let ledger = stages[(index + 1)...].first(where: {
+                  $0.enabled && $0.kind == .testMap && $0.testOp == .ledger }) else { return }
+        let mainRoot = currentRunContext?.mainGitRoot ?? pending.gitRoot
+        _ = await runLedgerOp(ledger, startedAt: Date(), gitRoot: mainRoot, stages: stages,
+                              failing: (pending.stageId, pending.output))
+    }
+
+    /// `failing` is a failed attempt's output handed in directly (see
+    /// `flushFailureLedger`); otherwise the nearest PRECEDING enabled blocking
+    /// shell stage in `stages` is the Test stage the ledger reads.
+    func runLedgerOp(_ stage: LoopStage, startedAt: Date, gitRoot: URL, stages: [LoopStage],
+                     failing: (stageId: String, output: String)? = nil) async -> StageDecision {
+        let source: (stageId: String, output: String, passed: Bool)
+        if let failing {
+            source = (failing.stageId, failing.output, false)
+            ledgerRecordedKeys.insert("\(failing.stageId)#\(shellAttemptSeq[failing.stageId] ?? 0)")
+        } else {
+            let position = stages.firstIndex { $0.id == stage.id } ?? stages.endIndex
+            guard let testStage = stages[..<position].last(where: { $0.enabled && $0.verifies }),
+                  let attempt = iterationRecords.last?.attempts.last(where: {
+                      $0.stageId == testStage.id && $0.kind == .shellCommand }),
+                  let output = lastVerifyOutputs[testStage.id] else {
+                appendLog(.info, "  [\(stage.name)] no Test stage ran this iteration — ledger unchanged")
+                return finishTestMap(stage, startedAt: startedAt, passed: true, output: "")
+            }
+            if ledgerRecordedKeys.contains("\(testStage.id)#\(shellAttemptSeq[testStage.id] ?? 0)") {
+                appendLog(.info, "  [\(stage.name)] this attempt's failures were already recorded — ledger unchanged")
+                return finishTestMap(stage, startedAt: startedAt, passed: true, output: "")
+            }
+            source = (testStage.id, output, attempt.passed)
         }
-        let suiteCommand = stages.first { $0.id == attempt.stageId }?.command ?? ""
+        let output = source.output
+        let suiteCommand = stages.first { $0.id == source.stageId }?.command ?? ""
         let extraction = TestFailureExtractor.extract(output)
         let passing = Self.passingTestIds(output)
-        let runPassed = attempt.passed
+        let runPassed = source.passed
         let structure = testStructure
         let runId = currentRunContext?.runId ?? UUID().uuidString
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "dev"

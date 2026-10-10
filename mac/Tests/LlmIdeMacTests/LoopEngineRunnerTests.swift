@@ -3091,6 +3091,40 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(faults.isEmpty)
     }
 
+    /// A Test stage that fails and never passes must still feed the ledger: the
+    /// ledger's own position (after Test) is never reached, so the runner hands
+    /// it the failing output before the stage gives up.
+    func testLedgerRecordsFaultsFromAFailingTestStageThatNeverPasses() async throws {
+        let repo = try makeTempRepo()
+        let verifier = StubVerifier { _ in
+            VerifyOutcome(exitCode: 1, output: "/p/A.swift:7: error: -[M.C testBroken] : XCTAssertTrue failed\n"
+                          + "Test Case '-[M.C testBroken]' failed (0.001 seconds).")
+        }
+        let journal = InMemoryJournal()
+        let approvals = makeApprovals()
+        approvals.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 0),
+            LoopStage(id: "l1", name: "Ledger", kind: .testMap, order: 1, testOp: .ledger),
+        ], maxIterations: 3, consecutiveFailureStop: 3, maxRepairsPerStage: 0)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: StubSkillExecutor(),
+            approvals: approvals, journal: journal)
+        let result = await runner.run(config: config, faultsRoot: repo, gitRoot: repo)
+        XCTAssertNotEqual(result, .success)
+        let ledgerAttempts = journal.written.last?.iterations.flatMap(\.attempts).filter { $0.kind == .testMap } ?? []
+        XCTAssertEqual(ledgerAttempts.count, 1)
+        let ids = ledgerAttempts.first?.newFaults ?? []
+        XCTAssertEqual(ids.count, 1)
+        let dir = repo.appendingPathComponent("system/faults")
+        let files = (try? FileManager.default.contentsOfDirectory(atPath: dir.path)) ?? []
+        XCTAssertEqual(files.count, 1)
+        let text = files.first.flatMap { try? String(contentsOf: dir.appendingPathComponent($0)) } ?? ""
+        XCTAssertTrue(text.contains("test:\(ids.first ?? "?")"), text)
+    }
+
     /// The create-only guard must not revert a file that held the user's own
     /// uncommitted edits before the writer ran — but the stage still fails.
     func testWriteGuardLeavesPreDirtyFileAndFails() async throws {

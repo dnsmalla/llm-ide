@@ -448,7 +448,12 @@ Two deliberate limits, both recorded rather than hidden:
 The Test loop's `ledger` stage compares the failing test ids of the run's Test
 stage against the previous `ledger.json`. It is gated on the Test stage's real
 exit status, so a run where the suite never executed cannot record a clean
-ledger. Each newly failing test becomes a `FaultReport` in `system/faults/`
+ledger. It also sees a Test stage that fails: the runner hands the failing
+output to the ledger before the stage repairs or gives up (the ledger's own
+position after Test is never reached once Test fails), so the faults are
+written even when no repair succeeds; a flaky pass on the immediate re-run
+records nothing, and the ledger reads the nearest preceding blocking shell
+stage, not just any shell stage. Each newly failing test becomes a `FaultReport` in `system/faults/`
 tagged `test:<id>`, whose `verify` command runs that single test through
 `VerifyCommandBuilder`: `swift test --filter` for XCTest, `--test-name-pattern
 '^leaf$'` for `node --test`, a node id for pytest, `-t` for jest and `-run` for
