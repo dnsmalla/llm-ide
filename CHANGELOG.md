@@ -7,6 +7,12 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **Image tier + Image generation role (Settings → Tiers & Roles).** A fourth tier, **Image**, holds an
+  image model from OpenAI (`gpt-image-*`, `dall-e-3`) or Google (`gemini-*-image-preview`) using the keys
+  Model Providers already has; the new **Image generation** role (group "Media") is the only role that can
+  pick it, and it is never Standard. Settings-only for now: no feature generates images yet, so the row
+  says so, and neither the tier nor the role is sent to the server (no API version change).
+
 - **Premium Refactoring loop, code graph 1.1, kit pin.** The Refactoring loop
   now plans, applies and verifies against the code graph. With a runner it runs
   thirteen stages: structure detection, a native `codeGraph` snapshot taken once

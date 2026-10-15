@@ -4,8 +4,9 @@ import os.log
 private let tierRoutingSectionLogger = Logger(subsystem: "com.llmide.macapp", category: "TierRouting")
 
 /// Settings card "Tiers & Roles": Standard (required, the default) plus
-/// optional Strong / Cheap, each a provider + model; then the tier each role
-/// uses, grouped Chat · Background · Server. Saving Standard writes it through
+/// optional Strong / Cheap and the Image tier (an image model, Mac-only), each
+/// a provider + model; then the tier each role uses, grouped Chat · Background
+/// · Server · Media. Saving Standard writes it through
 /// to the legacy default fields (`AppConfig.applyStandardTier`).
 struct TierRoutingSection: View {
     let api: LlmIdeAPIClient
@@ -14,7 +15,7 @@ struct TierRoutingSection: View {
     /// The composer override Standard's write-through sets for a custom Standard.
     @AppStorage(TierDefaults.composerProviderKey) var composerProviderId = ""
     /// Standard first: it is the default and the only required tier.
-    private static let tierOrder: [RoutingTier] = [.standard, .strong, .cheap]
+    private static let tierOrder: [RoutingTier] = [.standard, .strong, .cheap, .image]
     /// Read for `serverApiVersion` only — routing needs API v67+.
     @Environment(BackendManager.self) private var backend
     @State var routing = TierRoutingConfig.load()
@@ -34,7 +35,7 @@ struct TierRoutingSection: View {
     var body: some View {
         SettingsSectionCard(icon: "dial.medium", title: "Tiers & Roles") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                SettingsHint("Standard is the default: new chats and every role on this Mac left on Standard use it. Strong and Cheap are optional. Then choose the tier each role uses. A tier that can't be used is skipped silently, and its row says what runs instead.")
+                SettingsHint("Standard is the default: new chats and every role on this Mac left on Standard use it. Strong and Cheap are optional; Image holds an image model for the Image generation role only. Then choose the tier each role uses. A tier that can't be used is skipped silently, and its row says what runs instead.")
 
                 if let versionNote = serverVersionNote {
                     Text(versionNote)
@@ -135,15 +136,22 @@ struct TierRoutingSection: View {
                     if tier != .standard || shownProvider == nil {
                         Text(tier == .standard ? "Choose…" : "Not set").tag("")
                     }
-                    ForEach(TierRouting.builtInProviders, id: \.wireId) { entry in
-                        Text(entry.tool.displayName).tag(entry.wireId)
-                    }
-                    // Decision-only: never Standard, which drives the chat composer.
-                    if tier != .standard {
-                        Text(TierRouting.decisionOnlyProviderName).tag(TierRouting.decisionOnlyProvider)
-                    }
-                    ForEach(customProviders.filter(\.isEnabled)) { provider in
-                        Text(provider.name).tag(provider.wireId)
+                    if tier == .image {
+                        // Image models only: the providers with an image endpoint.
+                        ForEach(ImageTierRouting.providers, id: \.wireId) { entry in
+                            Text(entry.tool.displayName).tag(entry.wireId)
+                        }
+                    } else {
+                        ForEach(TierRouting.builtInProviders, id: \.wireId) { entry in
+                            Text(entry.tool.displayName).tag(entry.wireId)
+                        }
+                        // Decision-only: never Standard, which drives the chat composer.
+                        if tier != .standard {
+                            Text(TierRouting.decisionOnlyProviderName).tag(TierRouting.decisionOnlyProvider)
+                        }
+                        ForEach(customProviders.filter(\.isEnabled)) { provider in
+                            Text(provider.name).tag(provider.wireId)
+                        }
                     }
                     // A deleted/disabled provider still stored here keeps a tag,
                     // so the menu names what is saved instead of going blank.
@@ -159,10 +167,11 @@ struct TierRoutingSection: View {
                         // A pending provider has no saved model: a placeholder
                         // tag keeps the selection matching a row.
                         if pendingProviders[tier.rawValue] != nil {
-                            Text(models(forProvider: shownProvider).isEmpty ? "No models available" : "Choose a model")
+                            Text(models(forProvider: shownProvider, tier: tier).isEmpty ? "No models available" : "Choose a model")
                                 .tag("")
                         }
-                        ForEach(modelChoices(provider: shownProvider, saved: pendingProviders[tier.rawValue] == nil ? route?.model : nil),
+                        ForEach(modelChoices(provider: shownProvider, tier: tier,
+                                             saved: pendingProviders[tier.rawValue] == nil ? route?.model : nil),
                                 id: \.id) { model in
                             Text(model.displayName).tag(model.id)
                         }
@@ -174,6 +183,10 @@ struct TierRoutingSection: View {
             }
             if tier == .standard {
                 standardNotes(route)
+            } else if tier == .image {
+                // Mac-only, so no server status applies; the role row says
+                // whether its model can be used.
+                note(ImageTierRouting.tierNote)
             } else if let route, TierRouting.isDecisionOnlyProvider(route.provider) {
                 decisionTierNotes(tier)
             } else if let route, let reason = TierRouting.unusableReason(route, customProviders: customProviders) {
@@ -283,13 +296,17 @@ struct TierRoutingSection: View {
     // MARK: - Derived state
 
     private func isListedProvider(_ provider: String, tier: RoutingTier) -> Bool {
+        if tier == .image { return ImageTierRouting.isImageProvider(provider) }
         // The menu offers Jev on Strong / Cheap only (never Standard).
         if TierRouting.isDecisionOnlyProvider(provider) { return tier != .standard }
         return TierRouting.builtInProviders.contains { $0.wireId == provider }
             || customProviders.contains { $0.isEnabled && $0.wireId == provider }
     }
 
-    private func models(forProvider provider: String) -> [AIModel] {
+    private func models(forProvider provider: String, tier: RoutingTier) -> [AIModel] {
+        // The Image tier's list is static (TierRouting+Images.swift): the live
+        // lists filter image models out.
+        if tier == .image { return ImageTierRouting.models(forProvider: provider) }
         if let customId = TierRouting.customProviderId(provider) {
             return customProviders.first { $0.id == customId }?.models ?? []
         }
@@ -302,8 +319,8 @@ struct TierRoutingSection: View {
 
     /// The provider's models, plus the saved model when the list lacks it (a
     /// live list not fetched yet), so the menu never shows a blank selection.
-    private func modelChoices(provider: String, saved: String?) -> [AIModel] {
-        let list = models(forProvider: provider)
+    private func modelChoices(provider: String, tier: RoutingTier, saved: String?) -> [AIModel] {
+        let list = models(forProvider: provider, tier: tier)
         guard let saved, !saved.isEmpty, !list.contains(where: { $0.id == saved }) else { return list }
         return list + [AIModel(id: saved, displayName: saved)]
     }
@@ -324,7 +341,7 @@ struct TierRoutingSection: View {
                     updated.tiers[tier.rawValue] = nil
                 } else if updated.tiers[tier.rawValue]?.provider == provider {
                     pendingProviders[tier.rawValue] = nil   // back to what is saved
-                } else if let first = models(forProvider: provider).first?.id {
+                } else if let first = models(forProvider: provider, tier: tier).first?.id {
                     // A new provider starts on its first model; the old model
                     // id belongs to the previous provider.
                     pendingProviders[tier.rawValue] = nil

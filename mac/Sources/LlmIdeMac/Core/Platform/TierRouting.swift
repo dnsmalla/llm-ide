@@ -10,16 +10,11 @@ private let tierRoutingLogger = Logger(subsystem: "com.llmide.macapp", category:
 /// logic over it.
 public enum RoutingTier: String, CaseIterable, Identifiable, Sendable {
     case strong, standard, cheap
+    /// An image model (OpenAI / Google) for the Image generation role only —
+    /// never a cost tier for chat, never Standard (`TierRouting+Images.swift`).
+    case image
 
     public var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .strong:   return "Strong"
-        case .standard: return "Standard"
-        case .cheap:    return "Cheap"
-        }
-    }
 }
 
 /// Where a role runs. Decides what "unset" means and whether the server ever
@@ -33,6 +28,9 @@ public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
     case background
     /// Server-side work; unset keeps the server's built-in default.
     case server
+    /// Non-text output (images). Mac-only today: no feature generates images
+    /// yet, so unset runs nothing and nothing is sent to the server.
+    case media
 
     /// Settings heading for the group.
     public var title: String {
@@ -40,6 +38,7 @@ public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
         case .chat:       return "Chat (by mode)"
         case .background: return "Background (this Mac)"
         case .server:     return "Server"
+        case .media:      return "Media"
         }
     }
 }
@@ -50,39 +49,18 @@ public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
 public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
     case subagents, loop, autoTasks, quickChat, pipeline, `internal`, decisions
     case chatPlanning, chatCoding, chatReviewing, chatDocuments
+    case imageGeneration
 
     public var id: String { rawValue }
-
-    var displayName: String {
-        switch self {
-        case .subagents:     return "Plugin subagents"
-        case .loop:          return "Loop (agent steps, regression replay)"
-        case .autoTasks:     return "Auto Tasks"
-        case .quickChat:     return "Quick chat & phone"
-        case .pipeline:      return "Server pipeline (plan, codegen)"
-        case .internal:      return "Internal helpers (summaries, classify)"
-        case .decisions:     return "Decisions"
-        case .chatPlanning:  return "Chat · Planning"
-        case .chatCoding:    return "Chat · Coding"
-        case .chatReviewing: return "Chat · Reviewing"
-        case .chatDocuments: return "Chat · Documents"
-        }
-    }
 
     public var group: RoutedFeatureGroup {
         switch self {
         case .chatPlanning, .chatCoding, .chatReviewing, .chatDocuments: return .chat
         case .loop, .autoTasks, .quickChat:                               return .background
         case .subagents, .pipeline, .internal, .decisions:                return .server
+        case .imageGeneration:                                            return .media
         }
     }
-
-    /// What this role runs when no tier is chosen. Mac roles run Standard
-    /// (`activeCLI` / `defaultModelId`, which Standard's write-through keeps
-    /// equal to a built-in Standard; a custom Standard's route for Background
-    /// roles); server roles keep the server's own default (e.g. summaries stay
-    /// on their cheap built-in model).
-    public var unsetLabel: String { group == .server ? "Built-in default" : "Standard" }
 }
 
 
@@ -132,8 +110,15 @@ public struct TierRoutingConfig: Codable, Equatable, Sendable {
 
     public func tier(_ tier: RoutingTier) -> TierRoute? { tiers[tier.rawValue] }
 
+    /// The tier `feature` names, or nil when unset — or when the stored tier
+    /// is one the role is not offered (`isOffered`: a chat/Auto Tasks role on
+    /// the Image tier, from a hand edit or a newer build). Enforced here, not
+    /// only in the Settings menu, so an image model never reaches a chat or a
+    /// CLI run — the Jev rule lives in the resolver for the same reason.
     public func tier(for feature: RoutedFeature) -> RoutingTier? {
-        features[feature.rawValue].flatMap(RoutingTier.init(rawValue:))
+        guard let tier = features[feature.rawValue].flatMap(RoutingTier.init(rawValue:)),
+              feature.isOffered(tier) else { return nil }
+        return tier
     }
 
     /// What is stored: a table (absent = empty), or `.unreadable` when a blob

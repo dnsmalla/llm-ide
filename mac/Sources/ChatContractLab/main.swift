@@ -1623,7 +1623,7 @@ do {
     expect([RoutedFeature.subagents, .pipeline, .internal, .decisions].allSatisfy { $0.group == .server && $0.unsetLabel == "Built-in default" },
            "server roles left unset keep the server's built-in default")
     expect(RoutedFeature.chatCoding.unsetLabel == "Standard", "an unset chat role means Standard")
-    expect(RoutedFeatureGroup.allCases.map(\.title) == ["Chat (by mode)", "Background (this Mac)", "Server"],
+    expect(RoutedFeatureGroup.allCases.map(\.title) == ["Chat (by mode)", "Background (this Mac)", "Server", "Media"],
            "Settings groups the roles in this order")
     expect(TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "m")])
                .tier(.standard)?.model == "m",
@@ -1701,6 +1701,59 @@ do {
     expect(TierDefaults.isMacOnlyProvider("custom") && !TierDefaults.isMacOnlyProvider("custom:p1")
                && !TierDefaults.isMacOnlyProvider("anthropic"),
            "only the bare shared endpoint is Mac-only")
+}
+
+// The Image tier + Image generation role: Settings-only today (no feature
+// generates images yet). The tier holds an image model from OpenAI or Google;
+// only the Image generation role may pick it, it is never Standard, and
+// neither reaches the server (the resolver would refuse an image model).
+print("Tier routing images")
+do {
+    expect(RoutingTier.allCases.map(\.rawValue) == ["strong", "standard", "cheap", "image"],
+           "the Image tier exists with a stable raw value, after the three cost tiers")
+    expect(RoutedFeature.imageGeneration.rawValue == "imageGeneration" && RoutedFeature.imageGeneration.group == .media
+               && RoutedFeature.imageGeneration.unsetLabel == "Not set",
+           "the Image generation role is a Media role whose unset value runs nothing")
+    expect(RoutedFeature.allCases.allSatisfy { $0.isOffered(.image) == ($0 == .imageGeneration) },
+           "the Image tier is offered to the Image generation role and to no other")
+    expect(RoutedFeature.allCases.allSatisfy { feature in
+               RoutingTier.allCases.filter { $0 != .image }.allSatisfy { feature.isOffered($0) == (feature != .imageGeneration) }
+           },
+           "the cost tiers are offered to every role but Image generation")
+    expect(ImageTierRouting.providerIds == ["openai", "google"],
+           "the Image tier's provider menu is OpenAI and Google")
+    expect(!ImageTierRouting.modelIds(forProvider: "openai").isEmpty && !ImageTierRouting.modelIds(forProvider: "google").isEmpty
+               && ImageTierRouting.modelIds(forProvider: "anthropic").isEmpty,
+           "image models exist for OpenAI and Google only")
+    expect(ImageTierRouting.unusableReason(nil) == "the Image tier is not set"
+               && ImageTierRouting.unusableReason(TierRoute(provider: "anthropic", model: "claude-opus-5")) != nil
+               && ImageTierRouting.unusableReason(TierRoute(provider: "openai", model: "")) != nil
+               && ImageTierRouting.unusableReason(TierRoute(provider: "openai", model: "gpt-image-1")) == nil,
+           "an unset tier, a provider without image models and an empty model are each named; a set route is usable")
+    let table = TierRoutingConfig(tiers: ["image": TierRoute(provider: "openai", model: "gpt-image-1"),
+                                          "standard": TierRoute(provider: "anthropic", model: "m")],
+                                  features: ["imageGeneration": "image", "pipeline": "standard"])
+    let stripped = TierRoutingConfig(tiers: ["standard": TierRoute(provider: "anthropic", model: "m")],
+                                     features: ["pipeline": "standard"])
+    expect(TierDefaults.wireBody(table, serverApiVersion: 73) == stripped
+               && TierDefaults.wireBody(table, serverApiVersion: 99) == stripped
+               && TierDefaults.wireBody(table, serverApiVersion: nil) == stripped,
+           "the Image tier and the Image generation role are Mac-only at every server version")
+    expect(table.tier(for: .imageGeneration) == .image, "the role reads its tier back")
+    // The rule is enforced in the model, not only in the Settings menu: a
+    // stored table (hand edit, newer build) pointing a chat/Auto Tasks role at
+    // the Image tier must never put an image model on a chat or a CLI run.
+    let misrouted = TierRoutingConfig(tiers: ["image": TierRoute(provider: "openai", model: "gpt-image-1"),
+                                              "strong": TierRoute(provider: "openai", model: "gpt-5.5")],
+                                      features: ["chatCoding": "image", "autoTasks": "image", "pipeline": "image",
+                                                 "imageGeneration": "strong"])
+    expect(misrouted.tier(for: .chatCoding) == nil && misrouted.tier(for: .autoTasks) == nil
+               && misrouted.tier(for: .imageGeneration) == nil,
+           "a stored tier the role is not offered reads as unset")
+    expect(TierDefaults.effectiveTier(for: .autoTasks, routing: misrouted, composerProviderId: "") == nil,
+           "Auto Tasks on a stored Image tier resolve as unset")
+    expect(TierDefaults.wireBody(misrouted, serverApiVersion: 73).features.isEmpty,
+           "a server role stored on the Image tier is not sent (the server would report it as unknown_tier)")
 }
 
 // Which tier a role resolves through (the resolver then applies every

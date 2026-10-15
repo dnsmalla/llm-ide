@@ -12,6 +12,8 @@ extension RoutedFeature {
         case .decisions:
             return "the agent's `decide` tool and other yes/no / pick-one / score decisions — point at a Jev tier "
                 + "for calibrated answers, or any LLM tier"
+        case .imageGeneration:
+            return ImageTierRouting.roleExplanation
         default:
             return nil
         }

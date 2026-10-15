@@ -29,7 +29,8 @@ extension TierRoutingSection {
                 note(explanation)
             }
             if let reason = featureUnusableReason(feature) {
-                note("uses \(fallbackLabel(feature)) — \(reason)")
+                // A Media role has no fallback: nothing runs instead.
+                note(feature.group == .media ? "not used — \(reason)" : "uses \(fallbackLabel(feature)) — \(reason)")
             } else if feature.group == .chat {
                 chatRoleNotes(feature)
             } else if feature == .loop, let reason = agentEngineReason(for: .loop) {
@@ -45,12 +46,17 @@ extension TierRoutingSection {
     }
 
     /// The tiers `feature`'s menu offers: on this Mac unset IS Standard, so
-    /// Standard is listed for server roles only; a Jev (decision-only) tier
+    /// Standard is listed for server roles only; the Image tier only for Image
+    /// generation (and never the cost tiers for it); a Jev (decision-only) tier
     /// only for Decisions — plus whatever is stored, so the menu never loses
-    /// its selection (its row then says why it isn't used).
+    /// its selection (its row then says why it isn't used). A stored tier the
+    /// role is not offered reads as unset (`tier(for:)`), so its binding
+    /// shows the unset row, not a blank menu.
     private func tierChoices(_ feature: RoutedFeature) -> [RoutingTier] {
         let stored = routing.features[feature.rawValue]
         return RoutingTier.allCases.filter { tier in
+            // The Image tier is for the Image generation role alone.
+            guard feature.isOffered(tier) else { return false }
             guard feature.group == .server || tier != .standard else { return false }
             guard feature != .decisions, let route = routing.tier(tier),
                   TierRouting.isDecisionOnlyProvider(route.provider) else { return true }
@@ -66,6 +72,7 @@ extension TierRoutingSection {
     func fallbackLabel(_ feature: RoutedFeature) -> String {
         switch feature.group {
         case .server: return feature.unsetLabel
+        case .media:  return "nothing"
         case .chat:   return "Standard"
         case .background:
             return TierDefaults.describeCurrentDefault(activeCLI: config.activeCLI, defaultModelId: config.defaultModelId,
@@ -121,6 +128,12 @@ extension TierRoutingSection {
     /// Agent-engine constraint depends on each chat and is applied per turn
     /// instead. Server-side refusals come from the last status fetch.
     private func featureUnusableReason(_ feature: RoutedFeature) -> String? {
+        if feature == .imageGeneration {
+            // Mac-only: no server status, no fallback — only whether the
+            // Image tier holds a usable image model.
+            guard routing.tier(for: feature) != nil else { return nil }
+            return ImageTierRouting.unusableReason(routing.tier(.image))
+        }
         // A role newer than the running server is never sent (wireBody); the
         // top note covers a server too old for routing at all.
         if serverSupported, let required = feature.requiredServerApiVersion,
@@ -156,7 +169,8 @@ extension TierRoutingSection {
     func featureBinding(_ feature: RoutedFeature) -> Binding<String> {
         Binding(
             get: {
-                let stored = routing.features[feature.rawValue] ?? ""
+                // A stored tier the role is not offered reads as unset.
+                let stored = routing.tier(for: feature)?.rawValue ?? ""
                 // A Mac row has no "Standard" entry (unset is Standard): a
                 // stored "standard" shows as the unset row, never a missing tag.
                 return feature.group != .server && stored == RoutingTier.standard.rawValue ? "" : stored

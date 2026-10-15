@@ -143,8 +143,9 @@ public enum TierDefaults {
         !TierRouting.isDecisionOnlyProvider(provider)
     }
 
-    /// The table as `POST /kb/routing-tiers` receives it: chat roles removed
-    /// (Mac-only — the server would drop them as `unknown_feature`), and tiers
+    /// The table as `POST /kb/routing-tiers` receives it: chat and media roles
+    /// and the Image tier removed (Mac-only — the server would drop them as
+    /// `unknown_feature` / `unknown_tier`), and tiers
     /// on a Mac-only provider removed (the server would drop them as
     /// `invalid_provider`; a server role on that tier then finds it unset and
     /// keeps its built-in default). Below API v73 (or unknown) the
@@ -156,12 +157,17 @@ public enum TierDefaults {
     public static func wireBody(_ config: TierRoutingConfig, serverApiVersion: Int?) -> TierRoutingConfig {
         let decisions = TierRouting.serverSupportsDecisions(serverApiVersion)
         var body = config
-        body.tiers = config.tiers.filter { _, route in
-            !isMacOnlyProvider(route.provider) && (decisions || !TierRouting.isDecisionOnlyProvider(route.provider))
+        body.tiers = config.tiers.filter { name, route in
+            // The Image tier is Mac-only: no server feature generates images.
+            guard RoutingTier(rawValue: name) != .image else { return false }
+            return !isMacOnlyProvider(route.provider) && (decisions || !TierRouting.isDecisionOnlyProvider(route.provider))
         }
-        body.features = config.features.filter { key, _ in
+        body.features = config.features.filter { key, value in
+            // A role stored on the Image tier is dropped with it (the server
+            // would report it as unknown_tier).
+            guard RoutingTier(rawValue: value) != .image else { return false }
             guard let feature = RoutedFeature(rawValue: key) else { return true }
-            if feature.group == .chat { return false }
+            if feature.group == .chat || feature.group == .media { return false }
             guard let required = feature.requiredServerApiVersion else { return true }
             return (serverApiVersion ?? 0) >= required
         }
@@ -285,12 +291,13 @@ public enum TierDefaults {
         return TierMigrationResult(routing: routing, purposeModelIds: remaining)
     }
 
-    /// A tier already equal to `route`, else the first free of Strong, Cheap
-    /// (filled with `route`), else nil. Standard is never taken. A tier is
+    /// A cost tier already equal to `route`, else the first free of Strong,
+    /// Cheap (filled with `route`), else nil. Standard is never taken, nor the
+    /// Image tier (chat roles are not offered it). A tier is
     /// free only when it is unset AND no role points at it — filling an empty
     /// tier a role already names would change what that role runs.
     private static func tierHolding(_ route: TierRoute, in routing: inout TierRoutingConfig) -> RoutingTier? {
-        if let same = RoutingTier.allCases.first(where: { routing.tier($0) == route }) { return same }
+        if let same = [RoutingTier.standard, .strong, .cheap].first(where: { routing.tier($0) == route }) { return same }
         let referenced = Set(routing.features.values)
         guard let free = [RoutingTier.strong, .cheap].first(where: {
             routing.tier($0) == nil && !referenced.contains($0.rawValue)
