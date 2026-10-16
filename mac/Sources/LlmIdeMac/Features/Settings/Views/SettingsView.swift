@@ -40,6 +40,7 @@ struct SettingsView: View {
                         // nested Group like this one.
                         Group {
                             AgentSdkSettingsSection(api: api)
+                            TokenSavingSettingsSection()
                             ProvidersSettingsSection(api: api)
                             CustomProvidersSection(api: api)
                             TierRoutingSection(api: api)

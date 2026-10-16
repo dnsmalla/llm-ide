@@ -79,6 +79,11 @@ rtk gain                               # tokens saved so far
 rtk init -g --uninstall                # remove it again
 ```
 
+In the Mac app, **Settings → Token Saving → Install rtk** runs `brew install rtk`
+for you. It installs the binary only; turning on the hook is still the
+`rtk init` step above, because the hook auto-approves every command it
+rewrites (`git push --force` included) and skips Claude Code's permission prompt.
+
 Installing the binary alone does nothing: rtk only works once the hook rewrites
 commands (`git status` → `rtk git status`). The hook covers Bash calls only —
 Claude Code's own Read / Grep / Glob tools bypass it.
