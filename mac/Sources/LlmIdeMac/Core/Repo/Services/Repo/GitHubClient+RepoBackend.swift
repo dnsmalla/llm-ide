@@ -296,6 +296,33 @@ private extension GitHubLabelWire {
     }
 }
 
+/// GitHub milestone `due_on` is a CALENDAR DATE serialized as an instant
+/// (the web UI picks a day; the API answers e.g. "2026-10-16T07:00:00Z").
+/// Parsing it as an instant shifts the day west of UTC and disagrees with
+/// GitLab's date-only `due_date`, so the adapter reduces it to the UTC
+/// date component ("yyyy-MM-dd"), which every consumer then reads as a
+/// local-midnight day exactly like GitLab's.
+enum GitHubDueDate {
+    static func calendarDate(fromDueOn raw: String?) -> String? {
+        guard let raw, !raw.isEmpty else { return nil }
+        let parser = ISO8601DateFormatter()
+        parser.formatOptions = [.withInternetDateTime]
+        var instant = parser.date(from: raw)
+        if instant == nil {
+            parser.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+            instant = parser.date(from: raw)
+        }
+        // Not an instant (already date-only, or unexpected): pass through so
+        // the date-only parsers downstream still get their chance.
+        guard let instant else { return raw }
+        var utc = Calendar(identifier: .gregorian)
+        utc.timeZone = TimeZone(secondsFromGMT: 0) ?? .current
+        let parts = utc.dateComponents([.year, .month, .day], from: instant)
+        guard let year = parts.year, let month = parts.month, let day = parts.day else { return raw }
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+}
+
 private extension GitHubMilestoneWire {
     var asRepoMilestone: RepoMilestone {
         RepoMilestone(
@@ -312,7 +339,7 @@ private extension GitHubMilestoneWire {
             // Translate GitHub's "open" to GitLab's "active" so any
             // UI using the existing strings keeps working.
             state: state == "open" ? "active" : state,
-            dueDate: dueOn,
+            dueDate: GitHubDueDate.calendarDate(fromDueOn: dueOn),
             startDate: nil,                 // GitHub doesn't carry start date
             description: description
         )
@@ -340,7 +367,7 @@ private extension GitHubIssueWire {
             commentCount: comments,
             // GitHub issues don't carry a per-issue due date; the
             // milestone's due date is the closest semantic equivalent.
-            dueDate: milestone?.dueOn,
+            dueDate: GitHubDueDate.calendarDate(fromDueOn: milestone?.dueOn),
             weight: nil
         )
     }
