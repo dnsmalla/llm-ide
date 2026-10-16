@@ -17,20 +17,26 @@ if (!wantsStreamIn) {
 }
 
 const rl = createInterface({ input: process.stdin });
+let received = false;
+// A hanging child must stay alive on its own: after stdin EOF nothing else holds the loop open.
+if (mode === 'hang') setInterval(() => {}, 1_000_000);
 rl.on('line', (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
   if (msg?.type !== 'user') return;
+  received = true;
   if (mode === 'exit_after_read') process.exit(2);
   if (mode === 'hang') return;
   const text = typeof msg.message?.content === 'string'
     ? msg.message.content
     : (msg.message?.content || []).map((c) => c.text || '').join('');
   process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', model: 'fake' }) + '\n');
-  process.stdout.write(JSON.stringify(resultFor(text)) + '\n');
-  process.exit(0);
+  // exit from the write callback: process.exit() on a pipe would truncate the 5 MB `big` line
+  process.stdout.write(JSON.stringify(resultFor(text)) + '\n', () => process.exit(0));
 });
-rl.on('close', () => { if (mode === 'hang') process.exit(0); });
+// Like the real CLI: EOF after a prompt means "no more turns" (the turn still
+// runs, so a hanging one keeps hanging); EOF with no prompt just ends the child.
+rl.on('close', () => { if (mode === 'hang' && !received) process.exit(0); });
 
 function resultFor(prompt) {
   const big = mode === 'big' ? 'x'.repeat(5 * 1024 * 1024) : null;
