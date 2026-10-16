@@ -34,6 +34,7 @@ struct EmailSourceSheet: View {
     @State private var testing = false
     @State private var testStatus: String?
     @State private var testWasError = false
+    @State private var confirmingDisconnect = false
 
     /// "password" | "google" — mirrors `draft.authMethod`, kept in a
     /// separate @State because `draft` can't be read inside its own
@@ -258,7 +259,7 @@ struct EmailSourceSheet: View {
                     .keyboardShortcut(.cancelAction)
                 if isEditing || sourceLinks.hasSecret(.email) {
                     Button("Disconnect", role: .destructive) {
-                        Task { await disconnect() }
+                        confirmingDisconnect = true
                     }
                     .help("Remove this source and delete the stored credentials.")
                 }
@@ -278,6 +279,17 @@ struct EmailSourceSheet: View {
         }
         .frame(minWidth: 440, idealWidth: 480, minHeight: 560)
         .background(theme.current.body)
+        .confirmationDialog(
+            LibraryRemoval.sourceDisconnect(.email).dialogTitle,
+            isPresented: $confirmingDisconnect, titleVisibility: .visible
+        ) {
+            Button(LibraryRemoval.sourceDisconnect(.email).confirmLabel, role: .destructive) {
+                Task { await disconnect() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(LibraryRemoval.sourceDisconnect(.email).message)
+        }
         .onDisappear {
             connectTask?.cancel()
             signInTask?.cancel()

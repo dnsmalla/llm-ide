@@ -34,6 +34,40 @@ struct ProjectMemoryView: View {
     @State private var loading = true
     @State private var error: String?
     @State private var busy = false
+    /// The bulk wipe waiting for confirmation. Both wipe server-side memory
+    /// that the assistant rebuilt over many chats and cannot be undone, so a
+    /// single misclick must not run them; the per-fact trash stays one click.
+    @State private var pendingWipe: MemoryWipe?
+
+    enum MemoryWipe: Identifiable {
+        case project
+        case session
+
+        var id: Self { self }
+
+        var title: String {
+            switch self {
+            case .project: return "Clear all project memory?"
+            case .session: return "Forget this chat's memory?"
+            }
+        }
+
+        var message: String {
+            switch self {
+            case .project:
+                return "Every fact the assistant has learned about this project is deleted, and later chats will no longer recall them. This can't be undone."
+            case .session:
+                return "Everything this chat's memory holds is deleted. This can't be undone."
+            }
+        }
+
+        var confirmLabel: String {
+            switch self {
+            case .project: return "Clear all"
+            case .session: return "Forget"
+            }
+        }
+    }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -44,6 +78,25 @@ struct ProjectMemoryView: View {
         .frame(width: 460, height: 420)
         .background(theme.current.body)
         .task { await load() }
+        .confirmationDialog(
+            pendingWipe?.title ?? "",
+            isPresented: Binding(get: { pendingWipe != nil }, set: { if !$0 { pendingWipe = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingWipe
+        ) { wipe in
+            Button(wipe.confirmLabel, role: .destructive) {
+                pendingWipe = nil
+                Task {
+                    switch wipe {
+                    case .project: await clearAll()
+                    case .session: await forgetSession()
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { pendingWipe = nil }
+        } message: { wipe in
+            Text(wipe.message)
+        }
     }
 
     private var header: some View {
@@ -60,7 +113,7 @@ struct ProjectMemoryView: View {
             }
             Spacer()
             if !facts.isEmpty {
-                Button(role: .destructive) { Task { await clearAll() } } label: {
+                Button(role: .destructive) { pendingWipe = .project } label: {
                     Text("Clear all").font(.system(size: 11))
                 }
                 .buttonStyle(.bordered)
@@ -98,7 +151,7 @@ struct ProjectMemoryView: View {
                             "This chat",
                             subtitle: "Decisions and state from this conversation — forgotten with the chat",
                             trailing: {
-                                Button(role: .destructive) { Task { await forgetSession() } } label: {
+                                Button(role: .destructive) { pendingWipe = .session } label: {
                                     Text("Forget").font(.system(size: 11))
                                 }
                                 .buttonStyle(.bordered)
@@ -252,8 +305,12 @@ struct ProjectMemoryView: View {
     private func remove(_ fact: String) async {
         guard !busy, let repo = resolvedRepo else { return }
         busy = true; defer { busy = false }
-        do { facts = try await api.deleteProjectMemoryFact(repo: repo, fact: fact, workspaceRoot: workspaceRoot) }
-        catch { self.error = "Couldn't update project memory." }
+        // A success clears an earlier failure's message — `content` shows the
+        // error INSTEAD of the list, so a stale one would hide the result.
+        do {
+            facts = try await api.deleteProjectMemoryFact(repo: repo, fact: fact, workspaceRoot: workspaceRoot)
+            error = nil
+        } catch { self.error = "Couldn't update project memory." }
     }
 
     private func forgetSession() async {
@@ -262,13 +319,16 @@ struct ProjectMemoryView: View {
         do {
             _ = try await api.forgetSessionMemory(sessionId: sessionId)
             sessionFacts = []
+            error = nil
         } catch { self.error = "Couldn't forget this chat's memory." }
     }
 
     private func clearAll() async {
         guard !busy, let repo = resolvedRepo else { return }
         busy = true; defer { busy = false }
-        do { facts = try await api.clearProjectMemory(repo: repo, workspaceRoot: workspaceRoot) }
-        catch { self.error = "Couldn't clear project memory." }
+        do {
+            facts = try await api.clearProjectMemory(repo: repo, workspaceRoot: workspaceRoot)
+            error = nil
+        } catch { self.error = "Couldn't clear project memory." }
     }
 }

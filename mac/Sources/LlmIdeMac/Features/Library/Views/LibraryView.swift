@@ -1042,6 +1042,11 @@ struct LibraryView: View {
             await uninstall(name: name)
         case .mcpServer(let id, _): await removePlugin(id)
         case .connector(let id, _): await removeConnector(id)
+        case .llmSource(let id, _): await removeSource(id)
+        case .sourceDisconnect:
+            // Disconnect is confirmed inside the source sheets, which own the
+            // vault keys to delete; nothing in the Library list sets it.
+            break
         }
     }
 
@@ -1237,7 +1242,7 @@ struct LibraryView: View {
                         .contextMenu {
                             if !s.builtin {
                                 Button(role: .destructive) {
-                                    Task { await removeSource(s.id) }
+                                    pendingRemoval = .llmSource(id: s.id, name: s.name)
                                 } label: { Label("Remove", systemImage: "trash") }
                             }
                         }

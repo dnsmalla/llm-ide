@@ -39,6 +39,9 @@ struct LlmSourceDetailView: View {
     @State private var loaded = false
     @State private var loadError: String?
     @State private var busy = false
+    /// Remove deletes a git source's clone server-side, so it is confirmed
+    /// with the same dialog the sidebar row uses.
+    @State private var confirmingRemoval = false
     @State private var resultMessage: String?
     /// A Central Skills selection changed since the open project's skills
     /// were last re-linked from this view. View-local: it resets when the
@@ -86,6 +89,17 @@ struct LlmSourceDetailView: View {
         // Opening a project installs the current selection (ProjectSkillsInstaller),
         // so a pending flag from the previous project no longer applies.
         .onChange(of: projectStore.activeProject?.localPath) { _, _ in hasUnappliedSelection = false }
+        .confirmationDialog(
+            LibraryRemoval.llmSource(id: sourceId, name: source?.name ?? sourceId).dialogTitle,
+            isPresented: $confirmingRemoval, titleVisibility: .visible
+        ) {
+            Button(LibraryRemoval.llmSource(id: sourceId, name: "").confirmLabel, role: .destructive) {
+                Task { await remove() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(LibraryRemoval.llmSource(id: sourceId, name: "").message)
+        }
         .alert("LLM source", isPresented: Binding(
             get: { resultMessage != nil },
             set: { if !$0 { resultMessage = nil } }
@@ -250,7 +264,7 @@ struct LlmSourceDetailView: View {
                     .disabled(busy)
             }
                 if !s.builtin {
-                    Button("Remove", role: .destructive) { Task { await remove() } }
+                    Button("Remove", role: .destructive) { confirmingRemoval = true }
                         .disabled(busy)
                 }
                 if busy { ProgressView().controlSize(.small) }

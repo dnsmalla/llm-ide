@@ -41,6 +41,7 @@ struct SlackSourceSheet: View {
     @State private var testing = false
     @State private var testStatus: String?
     @State private var testWasError = false
+    @State private var confirmingDisconnect = false
 
     init(api: LlmIdeAPIClient) {
         self.api = api
@@ -150,7 +151,7 @@ struct SlackSourceSheet: View {
                     .keyboardShortcut(.cancelAction)
                 if isEditing || sourceLinks.hasSecret(.slack) {
                     Button("Disconnect", role: .destructive) {
-                        Task { await disconnect() }
+                        confirmingDisconnect = true
                     }
                     .help("Remove this source and delete the stored Slack credentials.")
                 }
@@ -168,6 +169,17 @@ struct SlackSourceSheet: View {
         .background(theme.current.body)
         .task {
             if sourceLinks.hasSecret(.slack) { await loadChannels() }
+        }
+        .confirmationDialog(
+            LibraryRemoval.sourceDisconnect(.slack).dialogTitle,
+            isPresented: $confirmingDisconnect, titleVisibility: .visible
+        ) {
+            Button(LibraryRemoval.sourceDisconnect(.slack).confirmLabel, role: .destructive) {
+                Task { await disconnect() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(LibraryRemoval.sourceDisconnect(.slack).message)
         }
         .onDisappear {
             connectTask?.cancel()

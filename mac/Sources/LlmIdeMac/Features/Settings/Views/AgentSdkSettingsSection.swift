@@ -22,6 +22,10 @@ struct AgentSdkSettingsSection: View {
     @State private var resultIsError = false
     @State private var resultLog: String?
     @State private var confirmingUpdate = false
+    /// A restart kills the backend process, and with it every chat turn and
+    /// Loop run in flight — unlike Update, there is no server-side refusal
+    /// while one is running, so the user confirms it first.
+    @State private var confirmingRestart = false
 
     var body: some View {
         SettingsSectionCard(icon: "shippingbox", title: "Claude Agent SDK") {
@@ -82,7 +86,7 @@ struct AgentSdkSettingsSection: View {
                     .disabled(checking || updating)
 
                     if let s = status, s.restartNeeded, !updating {
-                        Button("Restart backend") { restartBackend() }
+                        Button("Restart backend") { confirmingRestart = true }
                             .buttonStyle(.bordered)
                             .controlSize(.small)
                     }
@@ -101,6 +105,12 @@ struct AgentSdkSettingsSection: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("The backend restarts when the update is installed, which stops any chat still running. The update is refused while a chat turn is in progress.")
+        }
+        .confirmationDialog("Restart the backend?", isPresented: $confirmingRestart) {
+            Button("Restart backend", role: .destructive) { restartBackend() }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Any chat reply or Loop run still in progress is stopped and has to be started again.")
         }
     }
 

@@ -21,6 +21,7 @@ struct BoxSourceSheet: View {
     @State private var testing = false
     @State private var testStatus: String?
     @State private var testWasError = false
+    @State private var confirmingDisconnect = false
 
     init(api: LlmIdeAPIClient) {
         self.api = api
@@ -124,7 +125,7 @@ struct BoxSourceSheet: View {
                     .keyboardShortcut(.cancelAction)
                 if isEditing {
                     Button("Disconnect", role: .destructive) {
-                        Task { await disconnect() }
+                        confirmingDisconnect = true
                     }
                     .help("Remove this source and delete the stored client secret.")
                 }
@@ -140,6 +141,17 @@ struct BoxSourceSheet: View {
         }
         .frame(minWidth: 440, idealWidth: 480, minHeight: 460)
         .background(theme.current.body)
+        .confirmationDialog(
+            LibraryRemoval.sourceDisconnect(.box).dialogTitle,
+            isPresented: $confirmingDisconnect, titleVisibility: .visible
+        ) {
+            Button(LibraryRemoval.sourceDisconnect(.box).confirmLabel, role: .destructive) {
+                Task { await disconnect() }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text(LibraryRemoval.sourceDisconnect(.box).message)
+        }
     }
 
     // MARK: - Field row
