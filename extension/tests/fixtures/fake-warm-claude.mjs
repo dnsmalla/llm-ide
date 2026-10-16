@@ -7,6 +7,8 @@ import fs from 'node:fs';
 const mode = process.env.FAKE_WARM_MODE || 'ok';
 if (process.env.FAKE_WARM_PID_FILE) fs.writeFileSync(process.env.FAKE_WARM_PID_FILE, String(process.pid));
 if (mode === 'exit_before_read') process.exit(3);
+// Floods stderr before any prompt, like a chatty idle child.
+if (mode === 'flood_idle') process.stderr.write('e'.repeat(5 * 1024 * 1024));
 
 const wantsStreamIn = process.argv.includes('--input-format');
 if (!wantsStreamIn) {
@@ -19,7 +21,7 @@ if (!wantsStreamIn) {
 const rl = createInterface({ input: process.stdin });
 let received = false;
 // A hanging child must stay alive on its own: after stdin EOF nothing else holds the loop open.
-if (mode === 'hang') setInterval(() => {}, 1_000_000);
+if (mode === 'hang' || mode === 'flood_idle') setInterval(() => {}, 1_000_000);
 rl.on('line', (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }

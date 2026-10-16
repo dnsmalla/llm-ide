@@ -66,6 +66,8 @@ const MAX_IDLE      = () => Math.max(0, intEnv('LLMIDE_WARM_CLI_MAX', 1));
 const IDLE_MS       = () => intEnv('LLMIDE_WARM_CLI_IDLE_MS', 120_000);
 const MIN_FREE      = () => intEnv('LLMIDE_WARM_CLI_MIN_FREE_BYTES', 1024 * 1024 * 1024);
 
+const OUTPUT_CAP_BYTES = 4 * 1024 * 1024;
+
 /** key → WarmChild. Idle children only; a child leaves the map on acquire. */
 const idle = new Map();
 let spawning = false;
@@ -78,16 +80,38 @@ function makeChild(spec) {
   });
   // unref: an idle child must never keep the server alive at shutdown.
   child.unref();
-  const entry = { key, bin, child, startedAt: Date.now(), lastUsedAt: Date.now(), stdoutLines: [], stderr: '', exited: null, idleTimer: null, stdoutBytes: 0 };
+  const entry = { key, bin, child, startedAt: Date.now(), lastUsedAt: Date.now(), stdoutLines: [], stderr: '', exited: null, idleTimer: null, stdoutBytes: 0, stderrBytes: 0, overflowed: false };
+  // WHY: output is buffered from spawn until the answer, so a chatty idle child
+  // (or one huge line with no newline, which readline also buffers) must be
+  // capped here, not only when runWarm happens to look.
+  const overflow = (reason) => {
+    if (entry.overflowed) return;
+    entry.overflowed = true;
+    // Guarded: only remove OUR slot, never a newer entry that took the same key.
+    if (idle.get(key) === entry) idle.delete(key);
+    kill(entry, reason);
+    entry.onOverflow?.();
+  };
+  child.stdout.on('data', (chunk) => {
+    entry.stdoutBytes += chunk.length;
+    if (entry.stdoutBytes > OUTPUT_CAP_BYTES) overflow('stdout_cap');
+  });
   // Buffer lines from the start: the CLI may print rate-limit or init lines
   // before the prompt arrives; runWarm scans the buffer first.
   const rl = createInterface({ input: child.stdout });
-  rl.on('line', (line) => { entry.stdoutBytes += line.length + 1; entry.stdoutLines.push(line); entry.onLine?.(line); });
-  child.stderr.on('data', (d) => { entry.stderr += String(d); });
-  child.on('error', (err) => { entry.exited = { code: null, signal: null, error: err }; idle.delete(key); entry.onExit?.(); });
+  rl.on('line', (line) => { if (entry.overflowed) return; entry.stdoutLines.push(line); entry.onLine?.(line); });
+  child.stderr.on('data', (d) => {
+    if (entry.overflowed) return;
+    entry.stderrBytes += Buffer.byteLength(d);
+    if (entry.stderrBytes > OUTPUT_CAP_BYTES) { overflow('stderr_cap'); return; }
+    entry.stderr += String(d);
+  });
+  // Guarded for the same reason as in overflow(): a finished child that was
+  // already acquired must not unseat a replacement prewarmed for the same key.
+  child.on('error', (err) => { entry.exited = { code: null, signal: null, error: err }; if (idle.get(key) === entry) idle.delete(key); entry.onExit?.(); });
   // 'close', not 'exit': it fires after stdout is drained, so a final large line
   // is seen (and judged against maxBuffer) before the exit is reported.
-  child.on('close', (code, signal) => { entry.exited = { code, signal }; idle.delete(key); entry.onExit?.(); });
+  child.on('close', (code, signal) => { entry.exited = { code, signal }; if (idle.get(key) === entry) idle.delete(key); entry.onExit?.(); });
   return entry;
 }
 
@@ -161,7 +185,7 @@ export function acquireWarm(spec) {
   if (!entry) return null;
   idle.delete(key);
   if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
-  if (entry.exited) return null;
+  if (entry.exited || entry.overflowed) return null;
   return entry;
 }
 
@@ -182,7 +206,7 @@ export function runWarm(entry, prompt, { timeoutMs, signal, maxBuffer = 4 * 1024
       settled = true;
       if (timer) clearTimeout(timer);
       signal?.removeEventListener?.('abort', onAbort);
-      entry.onLine = null; entry.onExit = null;
+      entry.onLine = null; entry.onExit = null; entry.onOverflow = null;
       fn(value);
     };
     const onAbort = () => { kill(entry, 'abort'); finish(reject, Object.assign(execFileShaped('spawnCli: aborted', entry, {}), { name: 'AbortError' })); };
@@ -201,6 +225,7 @@ export function runWarm(entry, prompt, { timeoutMs, signal, maxBuffer = 4 * 1024
       }
       finish(resolve, { stdout: wantJson ? line : obj.result, stderr: entry.stderr, bin: entry.bin });
     };
+    entry.onOverflow = () => finish(reject, execFileShaped('stdout maxBuffer length exceeded', entry, { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }));
     entry.onLine = handleLine;
     entry.onExit = () => {
       const ex = entry.exited || { code: null, signal: null };

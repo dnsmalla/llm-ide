@@ -273,3 +273,26 @@ test('availableMemoryBytes: cached for 30 s', () => {
   pool.availableMemoryBytes({ platform: 'darwin', runVmStat: run, now: () => 31_001 });
   assert.equal(calls, 2);
 });
+
+test('an acquired child finishing does not unseat a newer idle child with the same key', async () => {
+  pool.flushWarmCliPool('t');
+  pool.prewarm(spec());
+  await waitFor(() => pool._warmPoolStateForTests().idle === 1);
+  const first = pool.acquireWarm(spec());
+  assert.equal(pool.prewarm(spec()), true, 'same key prewarmed again');
+  assert.equal(pool._warmPoolStateForTests().idle, 1);
+  await pool.runWarm(first, 'x', { timeoutMs: 5000, wantJson: true });
+  assert.ok(await waitFor(() => first.exited !== null), 'first child exited');
+  assert.equal(pool._warmPoolStateForTests().idle, 1, 'newer entry still tracked');
+  pool.flushWarmCliPool('t');
+});
+
+test('an idle child that floods stderr past the cap is killed and removed', async () => {
+  pool.flushWarmCliPool('t');
+  const pidFile = path.join(os.tmpdir(), `warm-pid-${process.pid}-${Date.now()}-fl`);
+  pool.prewarm(spec({ FAKE_WARM_MODE: 'flood_idle', FAKE_WARM_PID_FILE: pidFile }));
+  assert.ok(await pidReady(pidFile));
+  assert.ok(await waitFor(() => pool._warmPoolStateForTests().idle === 0), 'removed from the pool');
+  const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+  assert.ok(await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }), 'child is gone');
+});
