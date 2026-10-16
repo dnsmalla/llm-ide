@@ -23,12 +23,23 @@ extension AutoCodeUpdateService {
         Int64((now.timeIntervalSince1970 - Double(max(1, days)) * 86_400) * 1000)
     }
 
+    /// The environment for every git call this pipeline makes: RepoManager's
+    /// policy, so both runners share one. Without it an inherited `GIT_DIR` /
+    /// `GIT_INDEX_FILE` / `GIT_WORK_TREE` (from a hook, a terminal started in a
+    /// repo, a rebuild script) aims `add -A`, `commit` and `worktree remove
+    /// --force` at ANOTHER repository whatever `-C` says, and a credential
+    /// prompt nobody can answer wedges the run. No token: these calls are local.
+    nonisolated static func gitEnvironment() -> [String: String] {
+        RepoManager.gitEnv(token: nil, backend: .github, scope: nil)
+    }
+
     /// Run git, returning (exitCode, combinedOutput). Best-effort: a launch
     /// failure surfaces as exit code -1.
     nonisolated private static func git(_ args: [String], at localPath: String) -> (code: Int32, out: String) {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         p.arguments = ["-C", localPath] + args
+        p.environment = gitEnvironment()
         let pipe = Pipe(); p.standardOutput = pipe; p.standardError = pipe
         do { try p.run() } catch { return (-1, "") }
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
@@ -210,6 +221,98 @@ extension AutoCodeUpdateService {
         }
     }
 
+    /// One entry of `git worktree list --porcelain`.
+    struct RegisteredWorktree: Equatable {
+        var path: String
+        /// Short branch name (`fix/1-x`), nil when detached.
+        var branch: String?
+        var isLocked: Bool
+    }
+
+    /// Parse `git worktree list --porcelain`: blank-line separated blocks of
+    /// `worktree <path>`, `branch refs/heads/<name>` | `detached`, `locked …`.
+    nonisolated static func parseWorktreeList(_ output: String) -> [RegisteredWorktree] {
+        var result: [RegisteredWorktree] = []
+        var current: RegisteredWorktree?
+        for rawLine in output.components(separatedBy: "\n") {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("worktree ") {
+                if let current { result.append(current) }
+                current = RegisteredWorktree(path: String(line.dropFirst("worktree ".count)), branch: nil, isLocked: false)
+            } else if line.hasPrefix("branch refs/heads/") {
+                current?.branch = String(line.dropFirst("branch refs/heads/".count))
+            } else if line == "locked" || line.hasPrefix("locked ") {
+                current?.isLocked = true
+            }
+        }
+        if let current { result.append(current) }
+        return result
+    }
+
+    /// Whether `path` lies inside this pipeline's private worktree directory.
+    /// Compared with symlinks resolved on both sides: `$TMPDIR` is
+    /// `/var/folders/…`, which git may record as `/private/var/folders/…`.
+    nonisolated static func isTaskWorktreePath(_ path: String) -> Bool {
+        let root = URL(fileURLWithPath: taskWorktreePath(token: "x")).deletingLastPathComponent()
+        let roots = Set([root.standardizedFileURL.path, root.resolvingSymlinksInPath().standardizedFileURL.path])
+        let url = URL(fileURLWithPath: path)
+        let candidates = Set([url.standardizedFileURL.path, url.resolvingSymlinksInPath().standardizedFileURL.path])
+        return candidates.contains { candidate in roots.contains { candidate.hasPrefix($0 + "/") } }
+    }
+
+    /// Run-start hygiene for task worktrees, the counterpart of
+    /// `LoopWorktreeManager.pruneStale`. A run removes its worktree on the way
+    /// out, but a quit or crash mid-run skips that, so the checkout stays under
+    /// `$TMPDIR/llmide-autotask/` and stays REGISTERED in the repo — its branch
+    /// then cannot be checked out elsewhere, and `fix/*` work that never
+    /// finished sits in the namespace review-merge publishes.
+    ///
+    /// Only called while no task CLI of this service is running (the single
+    /// run lane: `isRunning` / `activeProcess`), so every registered worktree
+    /// under the prefix is a leftover. A leftover is removed only when clean
+    /// (plain `worktree remove`, which git itself refuses on a dirty tree) —
+    /// a dirty one is a deliberate recovery checkout or a crashed run's edits
+    /// and is kept. Its branch, when it is a pipeline branch (provably ours,
+    /// and unfinished because the run never reached its own cleanup), is
+    /// deleted if it carries nothing HEAD lacks, otherwise PARKED under
+    /// `autotask-wip/` exactly like a stopped run's commits. Never deletes a
+    /// branch that has unique commits. Returns one line per action, for the log.
+    nonisolated static func pruneStaleTaskWorktrees(at localPath: String) -> [String] {
+        _ = git(["worktree", "prune"], at: localPath)
+        let listed = git(["worktree", "list", "--porcelain"], at: localPath)
+        guard listed.code == 0 else { return [] }
+        var notes: [String] = []
+        for entry in parseWorktreeList(listed.out) where isTaskWorktreePath(entry.path) && !entry.isLocked {
+            let name = URL(fileURLWithPath: entry.path).lastPathComponent
+            guard isWorkingTreeClean(at: entry.path) else {
+                notes.append("kept leftover task worktree \(entry.path) (uncommitted changes or unreadable)")
+                continue
+            }
+            // `--force` only AFTER the clean check above: every task worktree
+            // initialises submodules, and git refuses to remove one that has
+            // them without it — the prune then did nothing in such repos and
+            // the abandoned branch stayed publishable.
+            guard git(["worktree", "remove", "--force", entry.path], at: localPath).code == 0 else {
+                notes.append("could not remove leftover task worktree \(name)")
+                continue
+            }
+            notes.append("removed leftover task worktree \(name)")
+            guard let branch = entry.branch, isPipelineBranch(branch),
+                  let tip = refSha("refs/heads/\(branch)", at: localPath) else { continue }
+            if git(["merge-base", "--is-ancestor", tip, "HEAD"], at: localPath).code == 0 {
+                // Nothing on it that the checkout lacks: the run made no commit.
+                if branchDelete(branch, at: localPath) {
+                    notes.append("deleted empty branch \(branch) of an interrupted run")
+                }
+            } else if branchRename(branch, to: "autotask-wip/\(branch)", at: localPath) {
+                notes.append("interrupted run's commits kept as autotask-wip/\(branch) (not published)")
+            } else {
+                notes.append("interrupted run left \(branch); could not park it — review before review-merge publishes it")
+            }
+        }
+        return notes
+    }
+
     /// Rename a local branch. Used to move work that must be kept but not published
     /// (a stopped or failed run's commits) out of the `fix/` namespace.
     nonisolated static func branchRename(_ old: String, to new: String, at localPath: String) -> Bool {
@@ -275,33 +378,11 @@ extension AutoCodeUpdateService {
             + "Make every change there; do not touch other copies of this repository.\n\n" + out
     }
 
-    /// Stash uncommitted changes (incl. untracked) so auto-tasks can run on a
-    /// clean tree. Returns true only when a stash entry was actually created.
-    nonisolated static func stashPush(at localPath: String) -> Bool {
-        let r = git(["stash", "push", "--include-untracked", "-m", "llm-ide-auto-task"], at: localPath)
-        // `git stash push` exits 0 even with nothing to stash ("No local
-        // changes to save") — don't claim a stash in that case.
-        return r.code == 0 && !r.out.localizedCaseInsensitiveContains("No local changes")
-    }
-
-    /// Restore a stash created by `stashPush`: return to the original branch
-    /// (so WIP lands where it belongs, not on a fix/* branch the CLI created)
-    /// then pop. Returns true if the WIP was restored. On a conflicting pop or
-    /// a failed checkout the stash is RETAINED (never dropped) so the user's
-    /// changes are never lost — the caller surfaces a recovery message.
-    nonisolated static func restoreStash(at localPath: String, originalBranch: String?) -> Bool {
-        if let b = originalBranch {
-            let co = git(["checkout", b], at: localPath)
-            if co.code != 0 { return false }   // don't pop onto the wrong branch
-        }
-        let pop = git(["stash", "pop"], at: localPath)
-        return pop.code == 0   // conflict / error → false, stash kept
-    }
-
     nonisolated static func isWorkingTreeClean(at localPath: String) -> Bool {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
         p.arguments = ["-C", localPath, "status", "--porcelain"]
+        p.environment = gitEnvironment()
         // stderr to /dev/null: an undrained Pipe can fill and block git.
         let out = Pipe(); p.standardOutput = out; p.standardError = FileHandle.nullDevice
         let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
@@ -545,6 +626,11 @@ extension AutoCodeUpdateService {
         // Probed on the cheapest possible prompt BEFORE any worktree exists, so
         // an unsupported CLI (interactive editors) skips with nothing left over.
         guard cliTool.nonInteractivePromptArgs("probe") != nil else { return .skipped }
+
+        // Leftovers of a run killed by a quit or crash (see pruneStaleTaskWorktrees).
+        for note in await Task.detached(operation: { Self.pruneStaleTaskWorktrees(at: localPath) }).value {
+            logStore.append(.implementIssues, "Cleanup: \(note).")
+        }
 
         // The isolated checkout, created AFTER every skip guard above. A fresh
         // token per run keeps the path unique; the branch is new, off HEAD.
@@ -865,6 +951,10 @@ extension AutoCodeUpdateService {
         // commit is recoverable and reviewable; `.review` is detached and its
         // worktree is dropped whole afterwards. Either way the user's checkout
         // and current branch are untouched.
+        // Leftovers of a run killed by a quit or crash (see pruneStaleTaskWorktrees).
+        for note in await Task.detached(operation: { Self.pruneStaleTaskWorktrees(at: localPath) }).value {
+            logStore.append(logStoreId, "Cleanup: \(note).")
+        }
         let token = Self.shortToken()
         let worktree = Self.taskWorktreePath(token: token)
         let implementBranch = persistChanges

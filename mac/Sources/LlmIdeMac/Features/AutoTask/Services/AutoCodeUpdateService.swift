@@ -459,6 +459,21 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
         // reverted afterwards, so the two must describe the output path
         // differently — one value drives both the prompt and the enforcement.
         let persistChanges = task.mode == .implement
+        // An `.implement` task creates a `fix/custom-…` branch and commits on it
+        // — the same two automated steps Implement Issues performs, so it obeys
+        // the same repo allow-list. Without this a user who switched Create
+        // branch / Auto-commit off still got branches and commits from a custom
+        // task (which review-merge then pushes).
+        if persistChanges {
+            let autoSteps = Self.allowedAutoSteps(config: config, provider: resolved.client.kind)
+            guard autoSteps.createBranch, autoSteps.autoCommit else {
+                log.info("auto_task_skip_custom_implement reason=allowlist provider=\(resolved.client.kind.rawValue, privacy: .public)")
+                logStore.append(task.id, "Skipped — branch/commit not allowed by repo allow-list.", level: .error)
+                taskErrors[task.id] = "\(task.name) skipped — enable Create branch + Auto-commit in allow-list."
+                statusMessage = "\(task.name) — skipped"
+                return
+            }
+        }
         let ok = await runCLI(prompt: composedPrompt(taskId: task.id, ownPrompt: task.template,
                                                      projectRoot: resolved.projectRoot,
                                                      writesFiles: persistChanges),
@@ -676,6 +691,13 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
                 await runImplementIssues(resolved: resolved, logDir: logDir)
             case .reviewMerge:
                 currentStep = "Pushing branches and opening MRs"
+                // Before review-merge lists `fix/*` branches: one an interrupted
+                // run (quit / crash) left behind is unfinished and must be
+                // parked, not published. runCLI does the same before each task.
+                let gitRoot = resolved.gitRoot
+                for note in await Task.detached(operation: { Self.pruneStaleTaskWorktrees(at: gitRoot) }).value {
+                    logStore.append(.reviewMerge, "Cleanup: \(note).")
+                }
                 await runReviewMerge(resolved: resolved)
             case .reviewCode:
                 currentStep = "Running Review Code"
@@ -884,37 +906,14 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
 
     // MARK: - Main run loop
 
-    /// Auto-stash bookkeeping (opt-in) shared between `runPipeline`, which
-    /// stashes, and `run`, which restores once the pipeline has returned.
-    private final class StashRecord {
-        var didStash = false
-        var branch: String?
-        var path: String?
-    }
-
     func run(trigger: AutoTaskRunTrigger = .pipeline) async {
         guard !isRunning else { return }
         isRunning = true
-        let stash = StashRecord()
-        await runPipeline(trigger: trigger, stash: stash)
-        // Restore the stash OFF the main actor (checkout + pop can be slow on
-        // a large repo) but AWAIT it here: `isRunning` and `runTask` must end
-        // together, otherwise a cron tick / Run Now in the gap is accepted and
-        // then silently skipped by the `!isRunning` guards. On a failed
-        // restore the stash is retained and we surface a recovery note.
-        if stash.didStash, let path = stash.path {
-            let branch = stash.branch
-            let restored = await Task.detached(priority: .userInitiated) {
-                Self.restoreStash(at: path, originalBranch: branch)
-            }.value
-            if !restored {
-                lastError = "Auto Tasks stashed your uncommitted changes but couldn't restore them cleanly — they're safe in `git stash` (the repo may be left on a fix/* branch). Run `git stash pop` to recover."
-            }
-        }
+        await runPipeline(trigger: trigger)
         isRunning = false
     }
 
-    private func runPipeline(trigger: AutoTaskRunTrigger, stash: StashRecord) async {
+    private func runPipeline(trigger: AutoTaskRunTrigger) async {
         currentStep = "Initializing"
         createdCount = 0
         implementedCount = 0
@@ -953,22 +952,13 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
             setError(reason)
         }
 
-        // Opt-in: stash uncommitted changes for the ISSUE tasks, which still
-        // work in the user's checkout and need a clean tree. Prompt tasks run
-        // in their own worktree and never needed this. Restored in the defer
-        // above.
-        if autoTaskSettings.autoStash, let gitRoot = resolved?.gitRoot {
-            let stashResult: (didStash: Bool, branch: String?) = await Task.detached {
-                guard !Self.isWorkingTreeClean(at: gitRoot) else { return (false, nil) }
-                let branch = Self.currentBranch(at: gitRoot)
-                return (Self.stashPush(at: gitRoot), branch)
-            }.value
-            if stashResult.didStash {
-                stash.didStash = true
-                stash.branch = stashResult.branch
-                stash.path = gitRoot
-            }
-        }
+        // NOTE: the opt-in `autoStash` setting is deliberately a no-op now.
+        // Every task runs in its own worktree of HEAD, so nothing needs a clean
+        // user tree — yet the stash hid the user's WIP for the WHOLE pipeline,
+        // and the restore did `git checkout <orig>` plus a bare `git stash pop`,
+        // which pops whatever is on top: the user's own stash when ours was
+        // never created or was already popped. The stored key stays so old
+        // defaults still decode.
 
         guard let logDir = logsDirectory() else {
             statusMessage = "Logs directory unavailable"

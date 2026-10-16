@@ -68,6 +68,9 @@ final class AutoTaskSettings: ObservableObject {
         return min(max(1, value), maxRegressionVerifyTimeout)
     }
 
+    /// Retired: read by nothing. Auto Tasks run in their own worktrees, so they
+    /// never stash the user's changes any more (see `runPipeline`). Kept, with
+    /// its key, so stored defaults and any binding still compile and decode.
     @Published var autoStash: Bool {
         didSet(oldValue) {
             guard oldValue != autoStash else { return }
