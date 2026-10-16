@@ -147,12 +147,74 @@ export function login(db, { email, password, userAgent }) {
   };
 }
 
-function storeRefreshToken(db, userId, token, userAgent) {
+function storeRefreshToken(db, userId, token, userAgent, id = refreshId()) {
   const expiresAt = new Date(Date.now() + config.refreshTokenTTLSec * 1000).toISOString();
   db.prepare(`
     INSERT INTO refresh_tokens (id, user_id, token_hash, expires_at, user_agent)
     VALUES (?, ?, ?, ?, ?)
-  `).run(refreshId(), String(userId), hashRefreshToken(token), expiresAt, userAgent || null);
+  `).run(id, String(userId), hashRefreshToken(token), expiresAt, userAgent || null);
+  return id;
+}
+
+// How long after a rotation the OLD token may still be presented as a retry.
+// A client whose /auth/refresh response was lost (request timeout, Mac sleep
+// mid-request, server event loop blocked) keeps the old token and presents it
+// again on its next attempt. Without this window that retry looked exactly
+// like theft and logged the user out on every device. The window is measured
+// from the ORIGINAL rotation (revoked_at is never moved forward), so a
+// stolen old token cannot keep itself alive by being replayed.
+export const REFRESH_RETRY_GRACE_SEC = 60;
+
+// Mint a fresh token in place of `row`. Runs inside the caller's transaction.
+// Returns the raw token, or null when the presentation must be treated as
+// theft.
+function rotateRefreshToken(db, row, userAgent) {
+  const freshId = refreshId();
+  const fresh = newRefreshToken();
+  // The revoke UPDATE is guarded by `revoked_at IS NULL` so it is the atomic
+  // arbiter: exactly one presentation of a live token rotates it normally.
+  const res = db.prepare(
+    `UPDATE refresh_tokens SET revoked_at = datetime('now'), replaced_by = ?
+     WHERE id = ? AND revoked_at IS NULL`,
+  ).run(freshId, row.id);
+  if (res.changes === 1) {
+    storeRefreshToken(db, row.user_id, fresh, userAgent, freshId);
+    return fresh;
+  }
+  // Already rotated. A retry is allowed only when (a) this row was revoked BY
+  // ROTATION (replaced_by set; logout/logoutAll leave it NULL), (b) within the
+  // grace window, (c) the account is active, and (d) the successor has never
+  // been used — i.e. it is still live. If the successor was used, two parties
+  // hold this token family: theft.
+  const prior = db.prepare(`
+    SELECT replaced_by,
+           revoked_at >= datetime('now', ?) AS in_window
+    FROM refresh_tokens WHERE id = ?
+  `).get(`-${REFRESH_RETRY_GRACE_SEC} seconds`, row.id);
+  if (!prior?.replaced_by || !prior.in_window || row.status !== 'active') return null;
+  const successorId = prior.replaced_by;
+  // Revoke the unused successor. Its replaced_by stays NULL on purpose: a
+  // killed successor is NOT retry-eligible, so two holders cannot ping-pong
+  // the window forever (the next presentation of it is theft → logoutAll).
+  const killed = db.prepare(
+    `UPDATE refresh_tokens SET revoked_at = datetime('now')
+     WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
+  ).run(successorId, row.user_id);
+  if (killed.changes !== 1) return null; // successor already used/revoked
+  storeRefreshToken(db, row.user_id, fresh, userAgent, freshId);
+  // Only the originally presented row is re-pointed; its window still counts
+  // from its first rotation (revoked_at is untouched).
+  db.prepare('UPDATE refresh_tokens SET replaced_by = ? WHERE id = ? AND user_id = ?')
+    .run(freshId, row.id, row.user_id);
+  // "Successor unused" cannot tell a lost response from one delivered to an
+  // attacker who refreshed first. Kill every access token minted before now —
+  // including any issued with that successor — so a stolen response yields
+  // nothing. The caller signs the new access token AFTER this, and
+  // authenticate() rejects only `iat < cutoff`, so a same-second token
+  // survives. Other devices just refresh. MAX() never moves the cutoff back.
+  db.prepare('UPDATE users SET tokens_valid_after = MAX(COALESCE(tokens_valid_after, 0), ?) WHERE id = ?')
+    .run(Math.floor(Date.now() / 1000), String(row.user_id));
+  return fresh;
 }
 
 export function refreshSession(db, { refreshToken, userAgent }) {
@@ -165,40 +227,18 @@ export function refreshSession(db, { refreshToken, userAgent }) {
   `).get(tokenHash);
 
   if (!row) throw errAuth('Invalid refresh token');
-  if (row.revoked_at) {
-    // Reuse-after-rotation is a strong theft signal — the legitimate
-    // client has already exchanged this token for a fresh one, so
-    // anyone presenting it again is either a stale tab or an
-    // attacker who captured the old value.  Best-effort: revoke
-    // every active session for that user so the attacker also loses
-    // any other token they may have grabbed.  The legitimate user
-    // gets bounced to login on their next API call.
-    try { logoutAll(db, row.user_id); } catch { /* never block the 401 */ }
-    throw errAuth('Refresh token revoked');
+  if (!row.revoked_at) {
+    if (new Date(row.expires_at) < new Date()) throw errAuth('Refresh token expired');
+    if (row.status !== 'active') throw errForbidden('Account disabled');
   }
-  if (new Date(row.expires_at) < new Date()) throw errAuth('Refresh token expired');
-  if (row.status !== 'active') throw errForbidden('Account disabled');
 
-  // Rotate: revoke the old token and mint a fresh one.  This means a
-  // refresh leak only works once, and reuse of an already-rotated
-  // token is detectable (we'd see two attempts where one is rejected).
-  //
-  // The revoke UPDATE is guarded by `revoked_at IS NULL` so it is the
-  // atomic arbiter under concurrency: if two requests race with the same
-  // token, exactly one UPDATE reports `changes === 1` and proceeds; the
-  // loser sees `changes === 0`, meaning the row was revoked out from under
-  // it. That is indistinguishable from token reuse, so we treat it as
-  // theft — revoke every session and reject.
-  const tx = db.transaction(() => {
-    const res = db.prepare(
-      `UPDATE refresh_tokens SET revoked_at = datetime('now') WHERE id = ? AND revoked_at IS NULL`
-    ).run(row.id);
-    if (res.changes !== 1) return null; // lost the race / already rotated
-    const fresh = newRefreshToken();
-    storeRefreshToken(db, row.user_id, fresh, userAgent);
-    return fresh;
-  });
-  const newToken = tx();
+  // Rotate: revoke the presented token and mint a fresh one, so a refresh
+  // leak only works once. Presenting an already-rotated token is a retry if
+  // it falls inside the grace window with an unused successor (see
+  // rotateRefreshToken); otherwise it is a strong theft signal — the
+  // legitimate client already exchanged it — so every session for the user
+  // is revoked and the request rejected.
+  const newToken = db.transaction(() => rotateRefreshToken(db, row, userAgent))();
   if (newToken === null) {
     try { logoutAll(db, row.user_id); } catch { /* never block the 401 */ }
     throw errAuth('Refresh token revoked');
@@ -209,7 +249,7 @@ export function refreshSession(db, { refreshToken, userAgent }) {
     // response with the same required-`user` shape as /auth/login. Omitting
     // it made every refresh fail decoding client-side AFTER rotation had
     // committed, so the client replayed the old token and the reuse
-    // heuristic below revoked the whole session family (silent logout).
+    // heuristic revoked the whole session family (silent logout).
     user: findUserById(db, row.user_id),
     accessToken: access,
     refreshToken: newToken,
@@ -236,12 +276,14 @@ export function logoutAll(db, userId) {
     .run(Math.floor(Date.now() / 1000), String(userId));
 }
 
-// Sweep expired and revoked refresh token rows.  Call at startup and
+// Sweep expired and revoked refresh token rows. A just-rotated row is kept
+// for the retry grace window so a lost-response retry still finds it.  Call at startup and
 // periodically (e.g. daily) to prevent unbounded table growth.
 export function purgeExpiredRefreshTokens(db) {
   const info = db.prepare(
-    `DELETE FROM refresh_tokens WHERE expires_at < datetime('now') OR revoked_at IS NOT NULL`
-  ).run();
+    `DELETE FROM refresh_tokens WHERE expires_at < datetime('now')
+       OR (revoked_at IS NOT NULL AND revoked_at < datetime('now', ?))`
+  ).run(`-${REFRESH_RETRY_GRACE_SEC} seconds`);
   return info.changes;
 }
 

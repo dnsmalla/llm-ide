@@ -80,6 +80,7 @@ _setRegistryFetchForTests(async (url) => {
 const kb = await import('../kb/db.mjs');
 const { handleAuth, isAuthRoute } = await import('../server/auth-routes.mjs');
 const { authenticate, isPublicPath } = await import('../server/auth.mjs');
+const jwtMod = await import('../server/jwt.mjs');
 
 const noopLogger = { info() {}, warn() {}, error() {}, child() { return this; } };
 
@@ -207,7 +208,15 @@ test('POST /auth/login returns a session; wrong password → 401', async () => {
   assert.equal(bad.statusCode, 401);
 });
 
-test('POST /auth/refresh rotates the refresh token (old token dies on reuse)', async () => {
+// Backdate a token's rotation past the retry grace window.
+function ageRotation(rawToken, seconds) {
+  const { hashRefreshToken } = jwtMod;
+  kb.getDb().prepare(
+    `UPDATE refresh_tokens SET revoked_at = datetime('now', ?) WHERE token_hash = ?`,
+  ).run(`-${seconds} seconds`, hashRefreshToken(rawToken));
+}
+
+test('POST /auth/refresh: replaying the old token AFTER the grace window revokes the whole family', async () => {
   const { refreshToken } = await registerAndLogin();
 
   const first = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
@@ -215,21 +224,94 @@ test('POST /auth/refresh rotates the refresh token (old token dies on reuse)', a
   const rotated = first.json().refreshToken;
   assert.ok(rotated && rotated !== refreshToken, 'refresh token rotated on use');
 
-  // Replaying the already-rotated (now revoked) token is treated as a
-  // theft signal by server/users.mjs#refreshSession: it does not just
-  // reject the replayed token, it calls logoutAll() and revokes EVERY
-  // refresh token for that user — including the sibling `rotated` token
-  // minted one line above. This is documented, intentional behavior
-  // (see the comment above the `if (row.revoked_at)` branch in
-  // refreshSession), not a bug: once a revoked token is presented again,
-  // the whole session family is nuked because we can no longer tell the
-  // legitimate client from an attacker holding a stolen copy.
+  // Outside the grace window a replay of a rotated token is a theft signal:
+  // refreshSession calls logoutAll() and revokes EVERY refresh token for the
+  // user — including the unused sibling `rotated`.
+  ageRotation(refreshToken, 120);
   const replay = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
   assert.equal(replay.statusCode, 401, 'replayed refresh token is rejected');
 
-  // As a consequence, the freshly rotated sibling token is now dead too.
   const second = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: rotated } });
   assert.equal(second.statusCode, 401, 'reuse-detection revokes the whole session family, including the just-rotated sibling');
+});
+
+test('POST /auth/refresh: a retry with the old token inside the grace window succeeds (lost response)', async () => {
+  // The client's first /auth/refresh rotated the token, but the response was
+  // lost (timeout / sleep), so it still holds the old token and retries.
+  const { refreshToken } = await registerAndLogin();
+  const lost = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(lost.statusCode, 200, lost._body);
+  const neverDelivered = lost.json().refreshToken;
+
+  const retry = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(retry.statusCode, 200, `retry within window must succeed: ${retry._body}`);
+  const recovered = retry.json().refreshToken;
+  assert.ok(recovered && recovered !== refreshToken && recovered !== neverDelivered);
+  assert.ok(retry.json().user, 'retry response keeps the session contract');
+
+  // No logoutAll: the recovered token keeps working.
+  const next = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: recovered } });
+  assert.equal(next.statusCode, 200, 'session survives the retry');
+});
+
+test('POST /auth/refresh retry: kills access tokens from the lost response, keeps the retry token valid', async () => {
+  const { authenticate } = await import('../server/auth.mjs');
+  const { refreshToken } = await registerAndLogin();
+  const lost = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  const lostAccess = lost.json().accessToken;
+  // Push the lost response's access token into an earlier second so the
+  // retry's cutoff is strictly after its iat.
+  const { signAccessToken, verifyAccessToken } = jwtMod;
+  const claims = verifyAccessToken(lostAccess);
+  const realNow = Date.now;
+  Date.now = () => realNow() - 5000;
+  const olderAccess = signAccessToken({ userId: claims.userId, role: claims.role });
+  Date.now = realNow;
+
+  const retry = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(retry.statusCode, 200, retry._body);
+  const gate = (tok) => authenticate({ method: 'GET', url: '/auth/me', headers: { authorization: `Bearer ${tok}` } });
+  assert.throws(() => gate(olderAccess), /revoked/i, 'pre-retry access token is dead');
+  assert.equal(gate(retry.json().accessToken), true, 'access token minted by the retry (same second as the cutoff) is valid');
+});
+
+test('POST /auth/refresh retry: the killed successor is NOT retry-eligible (no ping-pong)', async () => {
+  const { refreshToken } = await registerAndLogin();
+  const lost = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  const killedSuccessor = lost.json().refreshToken;
+  const retry = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(retry.statusCode, 200, retry._body);
+  const recovered = retry.json().refreshToken;
+
+  // Within 60 s, presenting the killed successor is theft → logoutAll.
+  const replay = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: killedSuccessor } });
+  assert.equal(replay.statusCode, 401);
+  const after = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: recovered } });
+  assert.equal(after.statusCode, 401, 'logoutAll revoked the recovered token too');
+});
+
+test('POST /auth/refresh: old token replayed after its successor was USED revokes the whole family', async () => {
+  const { refreshToken } = await registerAndLogin();
+  const first = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(first.statusCode, 200, first._body);
+  const rotated = first.json().refreshToken;
+  const used = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: rotated } });
+  assert.equal(used.statusCode, 200, 'successor used normally');
+  const latest = used.json().refreshToken;
+
+  // Within the window, but the successor has been used: two holders → theft.
+  const replay = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(replay.statusCode, 401, 'replay after successor use is rejected');
+  const after = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: latest } });
+  assert.equal(after.statusCode, 401, 'logoutAll revoked the live token too');
+});
+
+test('POST /auth/refresh: a token revoked by logout is never retry-eligible', async () => {
+  const { refreshToken } = await registerAndLogin();
+  const { logout } = await import('../server/users.mjs');
+  logout(kb.getDb(), refreshToken);
+  const replay = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken } });
+  assert.equal(replay.statusCode, 401);
 });
 
 test('POST /auth/refresh response carries the user object (client session contract)', async () => {
