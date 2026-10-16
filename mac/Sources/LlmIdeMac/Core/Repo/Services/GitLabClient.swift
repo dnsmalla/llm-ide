@@ -283,9 +283,22 @@ final class GitLabClient {
     /// Title of a milestone in ANY state, by id. The issues list filters by
     /// title, and the issue payload only carries the id; `listMilestones` is
     /// paged, but a direct lookup by id avoids walking every page.
+    ///
+    /// Returns nil for a milestone that no longer exists (HTTP 404): a filter
+    /// still pointing at a deleted milestone then shows an empty list, like
+    /// any other unresolvable milestone, instead of "Failed to load issues".
     func milestoneTitle(projectId: Int, id: Int) async throws -> String? {
-        let milestone: GitLabMilestone = try await get("/projects/\(projectId)/milestones/\(id)")
-        return milestone.title
+        do {
+            let milestone: GitLabMilestone = try await get("/projects/\(projectId)/milestones/\(id)")
+            return milestone.title
+        } catch let error as GitLabError where Self.isNotFound(error) {
+            return nil
+        }
+    }
+
+    nonisolated static func isNotFound(_ error: GitLabError) -> Bool {
+        if case .httpError(404, _) = error { return true }
+        return false
     }
 
     // MARK: - Members
