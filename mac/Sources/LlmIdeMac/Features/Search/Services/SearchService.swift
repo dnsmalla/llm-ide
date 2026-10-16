@@ -228,35 +228,11 @@ final class SearchService {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Write `text` as UTF-8 via a temp file + rename, so a crash, a full
-    /// disk or a concurrent reader never sees a half-written source file —
-    /// the old plain `Data.write` truncated in place first.
-    ///
-    /// A rename replaces the inode, so two things a plain in-place write kept
-    /// for free are kept explicitly: a symlink is written THROUGH (its target
-    /// is replaced, the link survives), and the file's POSIX permissions are
-    /// restored (a replaced script must stay executable).
+    /// Write `text` back to a searched file. Delegates to the shared
+    /// `TextFileWriter` so a replace and the editor's Save keep one set of
+    /// guarantees (atomic rename, symlinks written through, hard links kept,
+    /// permissions restored, read-only files refused).
     nonisolated static func writeAtomically(_ text: String, to url: URL) -> Bool {
-        guard let data = text.data(using: .utf8) else { return false }
-        let target = url.resolvingSymlinksInPath()
-        let fm = FileManager.default
-        // A file the user cannot write stays unwritten, as the in-place write
-        // left it: a rename only needs the FOLDER writable, so it silently
-        // rewrote read-only (0444) files.
-        guard fm.isWritableFile(atPath: target.path) else { return false }
-        let attrs = try? fm.attributesOfItem(atPath: target.path)
-        let permissions = attrs?[.posixPermissions]
-        // A hard-linked file is written in place: a rename would split the
-        // link, leaving the other names on the old contents.
-        let linkCount = (attrs?[.referenceCount] as? NSNumber)?.intValue ?? 1
-        do {
-            try data.write(to: target, options: linkCount > 1 ? [] : .atomic)
-        } catch {
-            return false
-        }
-        if let permissions {
-            try? fm.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path)
-        }
-        return true
+        TextFileWriter.writeAtomically(text, to: url)
     }
 }

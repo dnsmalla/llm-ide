@@ -471,6 +471,10 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     @State private var savedContent: String = ""
     @State private var revealRequest: MonacoRevealRequest?
     @State private var loadError: String?
+    /// Set (with `loadError`) when the file is over
+    /// `TextFileWriter.maxEditableBytes` and was deliberately not loaded, so
+    /// the pane offers the ways to open it elsewhere instead of a decode error.
+    @State private var oversizeBytes: Int?
     @State private var saveError: String?
     @State private var isPreview: Bool
     @State private var saving: Bool = false
@@ -491,7 +495,9 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             VStack(spacing: 0) {
                 toolbar
                 Divider()
-                if let err = loadError {
+                if let oversizeBytes {
+                    tooLargeView(oversizeBytes)
+                } else if let err = loadError {
                     ContentUnavailableView("Can't Read File", systemImage: "doc.slash",
                                            description: Text(err))
                 } else if isPreview {
@@ -534,6 +540,22 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             Button("Cancel", role: .cancel) { }
         } message: {
             Text("Your edits to \(url.lastPathComponent) will be lost. This can't be undone.")
+        }
+    }
+
+    private func tooLargeView(_ bytes: Int) -> some View {
+        let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        let limit = ByteCountFormatter.string(fromByteCount: Int64(TextFileWriter.maxEditableBytes),
+                                              countStyle: .file)
+        return ContentUnavailableView {
+            Label("File Too Large to Edit", systemImage: "doc.text.magnifyingglass")
+        } description: {
+            Text("\(url.lastPathComponent) is \(size). Files over \(limit) are not opened here, so a large log can't freeze the editor.")
+        } actions: {
+            HStack {
+                Button("Open in App") { NSWorkspace.shared.open(url) }
+                Button("Reveal in Finder") { NSWorkspace.shared.activateFileViewerSelecting([url]) }
+            }
         }
     }
 
@@ -624,8 +646,24 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     @MainActor
     private func load() async {
         loadError = nil
+        oversizeBytes = nil
         saveError = nil
         acknowledgedDiskContent = nil
+        // Checked BEFORE reading: the read alone of a multi-hundred-MB file
+        // is slow, and Monaco then hangs on the buffer. `loadError` is set
+        // too so Save, the draft mirror and the reveal all treat the pane as
+        // having no content.
+        // Resolved first: attributesOfItem does not follow a symlink, and the
+        // link's own size would wave any target through.
+        let sizePath = url.resolvingSymlinksInPath().path
+        if let bytes = (try? FileManager.default.attributesOfItem(atPath: sizePath))?[.size] as? Int,
+           bytes > TextFileWriter.maxEditableBytes {
+            oversizeBytes = bytes
+            loadError = "The file is too large to edit here."
+            content = ""
+            savedContent = ""
+            return
+        }
         do {
             // Read off the main actor so a large file doesn't stall the editor.
             let fileURL = url
@@ -686,13 +724,13 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
                 saveError = "This file changed on disk since you opened it. Save again to overwrite it, or use Revert to load the disk version."
                 return
             }
-            let attributes = try? FileManager.default.attributesOfItem(atPath: target.path)
-            try content.write(to: target, atomically: true, encoding: .utf8)
-            // An atomic write creates a new inode with default permissions;
-            // put back the original ones so a script keeps its exec bit.
-            if let permissions = attributes?[.posixPermissions] {
-                try? FileManager.default.setAttributes([.posixPermissions: permissions], ofItemAtPath: target.path)
-            }
+            // The shared writer (also Search's replace): it refuses a
+            // read-only file, keeps hard links intact and restores the exec
+            // bit — `String.write(atomically:)` did none of the first two.
+            let text = content
+            try await Task.detached(priority: .userInitiated) {
+                try TextFileWriter.write(text, to: target)
+            }.value
             acknowledgedDiskContent = nil
             savedContent = content
             EditorDraftStore.shared.discard(url)
