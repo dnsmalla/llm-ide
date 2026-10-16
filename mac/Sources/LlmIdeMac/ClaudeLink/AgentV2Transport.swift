@@ -379,7 +379,7 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                         self.fireToolProgress(
                             name,
                             detail: ClaudeToolPresentation.salientArgument(tool: name, argsJSON: args),
-                            args: args,
+                            args: Self.boundedStoredArgs(args),
                             toolUseId: useId,
                             onProgress: onProgress
                         )
@@ -395,7 +395,14 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                     // server pick it (loop.mjs toolActivityDetail); on v2 the
                     // arguments arrive whole, so the linker picks it here.
                     detail: ClaudeToolPresentation.salientArgument(tool: name, argsJSON: args),
-                    args: args,
+                    // Bounded AFTER `detail` is picked from the whole JSON:
+                    // these args become `ToolStep.args`, held in memory and
+                    // written into the session file, and a Write/Edit carries
+                    // the entire file body. Nothing downstream needs it whole —
+                    // the step row shows 8 lines, the subagent strip reads the
+                    // short `name` key — and approval cards get their own args
+                    // on the approval event, not from here.
+                    args: Self.boundedStoredArgs(args),
                     resultText: payload.text,
                     isError: payload.isError,
                     truncated: payload.truncated,
@@ -513,6 +520,52 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
             truncated: truncated,
             toolUseId: toolUseId
         ))
+    }
+
+    /// Longest any single string value in stored tool arguments may be.
+    /// Generous enough for a path, a command or a search pattern untouched;
+    /// only bulk bodies (`content`, `new_string`, …) ever cross it.
+    nonisolated static let storedArgValueLimit = 2_000
+    /// Hard ceiling on the whole stored arguments text, for shapes the
+    /// per-value cut cannot shrink (many keys, huge arrays, unparseable JSON).
+    nonisolated static let storedArgsTotalLimit = 16_000
+
+    /// Tool arguments as they are kept on a transcript step: every string
+    /// value over `storedArgValueLimit` is cut with a marker naming how much
+    /// went, while keys and short values (paths, names) stay intact so the
+    /// step still says WHAT the call touched. Nil in, nil out.
+    nonisolated static func boundedStoredArgs(_ raw: String?) -> String? {
+        guard let raw else { return nil }
+        // Common case first: small args are stored verbatim, byte-identical.
+        if raw.count <= storedArgValueLimit { return raw }
+        if let data = raw.data(using: .utf8),
+           let object = try? JSONSerialization.jsonObject(with: data),
+           object is [String: Any] || object is [Any],
+           let out = try? JSONSerialization.data(withJSONObject: truncatingStrings(object),
+                                                 options: [.sortedKeys]),
+           let text = String(data: out, encoding: .utf8),
+           text.count <= storedArgsTotalLimit {
+            return text
+        }
+        return truncatedValue(raw, limit: storedArgsTotalLimit)
+    }
+
+    private nonisolated static func truncatingStrings(_ value: Any) -> Any {
+        switch value {
+        case let text as String:
+            return truncatedValue(text, limit: storedArgValueLimit)
+        case let dict as [String: Any]:
+            return dict.mapValues { truncatingStrings($0) }
+        case let array as [Any]:
+            return array.map { truncatingStrings($0) }
+        default:
+            return value
+        }
+    }
+
+    private nonisolated static func truncatedValue(_ text: String, limit: Int) -> String {
+        guard text.count > limit else { return text }
+        return String(text.prefix(limit)) + "… [truncated \(text.count - limit) chars]"
     }
 
     /// Whether streamed tool arguments form a whole JSON object yet. The cheap
