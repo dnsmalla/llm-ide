@@ -75,6 +75,19 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Fixed
 
+- **`search-kb` no longer hides the open workspace's code.** Code hits were scoped to the workspace
+  only after fetching the top 40 rows across every indexed repo, so other repos filled the window:
+  on a real 5-repo index, 6 of 30 probe queries returned 0 code hits while matches existed. The
+  scope (`codeRoot`) is now applied in SQL before the LIMIT, and also reaches the Loop's internal
+  agent and plugin subagents granted `search-kb`. `truncated` is now true only when more hits exist.
+
+- **Code index rows of deleted or moved repos are pruned at server start.** Nothing removed them
+  before: on a real KB 97% of code rows pointed at folders that no longer existed, and planner
+  grounding cited deleted files in 49 of 50 code references (0 of 42 after). Only a definite
+  "does not exist" prunes (a permission error or an unmounted `/Volumes` drive keeps the rows); a
+  pruned project is re-indexed when it is opened again. The one-time prune of rows indexed before
+  migration 0037 took 40 s (past the Mac app's 20 s `/health` deadline); it now takes about 2 s.
+
 - **Plugin subagent tool grants now work.** A subagent's `allowed_tools` (e.g. `[search-kb]`) never
   actually reached its loop — every granted tool answered "Unknown tool". Granted tools are now callable;
   `decide` can be granted the same way (`allowed_tools: [decide]`).
