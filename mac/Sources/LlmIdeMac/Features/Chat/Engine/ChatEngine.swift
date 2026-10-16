@@ -753,8 +753,12 @@ final class ChatEngine {
             // `attachments` is the snapshot its caller took at send/enqueue
             // time (the composer clears its chips right after sending, so a
             // live read here would come up empty); a caller with none to give
-            // falls back to reading the composer as before.
-            let turnAttachments = persistsUnobserved ? [] : (attachments ?? hooks.attachmentsForTurn())
+            // falls back to reading the composer as before — but only while
+            // this engine is on screen. An explicit snapshot is always honoured,
+            // parked or not: dropping it lost the files of a queued send, the
+            // plan document of a queued "Execute plan", and that plan on every
+            // auto-continue round (which passes `currentTurnAttachments`).
+            let turnAttachments = attachments ?? (persistsUnobserved ? [] : hooks.attachmentsForTurn())
             // Published so the rest of the turn — edit resolution, the
             // auto-continue chain — can see what this turn was actually sent.
             currentTurnAttachments = turnAttachments
