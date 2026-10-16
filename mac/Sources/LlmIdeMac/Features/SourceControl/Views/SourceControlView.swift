@@ -666,7 +666,7 @@ struct SourceControlView: View {
                 if let root { Task { await scm.discardAll(root: root) } }
             }
         } message: {
-            Text("This permanently deletes all uncommitted changes AND untracked files.")
+            Text("This discards all uncommitted changes, staged and unstaged. Untracked files are moved to the Trash.")
         }
         .alert("New tag", isPresented: $showCreateTag) {
             TextField("Tag name", text: $newTagName)

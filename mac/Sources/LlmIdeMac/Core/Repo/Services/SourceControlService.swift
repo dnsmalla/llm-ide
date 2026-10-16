@@ -260,7 +260,7 @@ final class SourceControlService {
             state.opError = nil
             pendingPermanentDelete = nil
             let url = root.appendingPathComponent(file.path)
-            if Self.containsGitRepo(url) {
+            if await Self.containsGitRepoOffMain(url) {
                 state.opError = "Couldn't discard \(file.path): it is a nested git repository. Remove it manually if you really want it gone."
             } else {
                 do {
@@ -284,7 +284,7 @@ final class SourceControlService {
         guard file.status == .untracked else { return }
         state.opError = nil
         let url = root.appendingPathComponent(file.path)
-        if Self.containsGitRepo(url) {
+        if await Self.containsGitRepoOffMain(url) {
             state.opError = "Couldn't delete \(file.path): it is a nested git repository."
         } else {
             do { try FileManager.default.removeItem(at: url) }
@@ -302,7 +302,33 @@ final class SourceControlService {
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue
         else { return false }
-        return FileManager.default.fileExists(atPath: url.appendingPathComponent(".git").path)
+        // Deep, not just `url/.git`: `ls-files --directory` folds an untracked
+        // parent into one entry, so `vendor/` holding `vendor/lib/.git` would
+        // otherwise be trashed whole, nested repository included.
+        let fm = FileManager.default
+        if fm.fileExists(atPath: url.appendingPathComponent(".git").path) { return true }
+        guard let walker = fm.enumerator(at: url, includingPropertiesForKeys: [.isSymbolicLinkKey],
+                                         options: [], errorHandler: { _, _ in true }) else { return false }
+        var visited = 0
+        for case let child as URL in walker {
+            visited += 1
+            // Fail closed on a huge tree: refusing is recoverable, trashing a
+            // repository we never looked at is not obvious to undo.
+            if visited > Self.nestedRepoScanLimit { return true }
+            if child.lastPathComponent == ".git" { return true }
+            if (try? child.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true {
+                walker.skipDescendants()
+            }
+        }
+        return false
+    }
+
+    nonisolated static let nestedRepoScanLimit = 50_000
+
+    /// `containsGitRepo` walks the whole folder now; keep that off the main
+    /// actor so a large untracked tree doesn't freeze the UI.
+    nonisolated static func containsGitRepoOffMain(_ url: URL) async -> Bool {
+        await Task.detached(priority: .userInitiated) { containsGitRepo(url) }.value
     }
 
     /// Commit-all-aware (Cursor-style): if nothing is staged but there ARE
@@ -584,18 +610,64 @@ final class SourceControlService {
         return true
     }
 
-    /// Discard ALL working-tree changes: restore tracked files
-    /// (`checkout -- .`) and delete untracked files/dirs (`clean -fd`), then
-    /// refresh. DESTRUCTIVE — caller must confirm.
+    /// Discard ALL uncommitted changes — staged AND unstaged — then refresh.
+    /// DESTRUCTIVE for tracked edits — caller must confirm.
+    ///
+    /// 1. `git reset` unstages everything (works on an unborn HEAD too). The
+    ///    old `checkout -- .` restored from the INDEX, so staged edits
+    ///    survived a "Discard All". Staged NEW files become untracked here, so
+    ///    step 2 moves them to the Trash instead of deleting them.
+    /// 2. Untracked paths are moved to the Trash one by one, exactly like the
+    ///    single-file `discard` (same nested-repo refusal) — the old
+    ///    `clean -fd` deleted them permanently.
+    /// 3. Tracked files are restored from the (now HEAD-equal) index; skipped
+    ///    on an unborn HEAD, where nothing is tracked and the pathspec errors.
     func discardAll(root: URL) async {
         if refuseIfStale(root) { return }
         state.opError = nil
+        pendingPermanentDelete = nil
         isBusy = true; defer { isBusy = false }
+        // `git reset` below would silently drop MERGE_HEAD (and friends),
+        // ending a merge the user is in the middle of resolving.
+        for marker in ["MERGE_HEAD", "CHERRY_PICK_HEAD", "REVERT_HEAD"] {
+            if (try? await repo.runGit(["rev-parse", "-q", "--verify", marker], at: root)) != nil {
+                state.opError = "A merge, cherry-pick or revert is in progress — finish or abort it before discarding all changes."
+                return
+            }
+        }
+        var problems: [String] = []
         do {
-            _ = try await repo.runGit(["checkout", "--", "."], at: root)
-            _ = try await repo.runGit(["clean", "-fd"], at: root)
+            _ = try await repo.runGit(["reset", "-q"], at: root)
+            // --directory matches status's `?? dir/` granularity, so a nested
+            // repo shows up as one entry the containsGitRepo check can refuse.
+            let listing = try await repo.runGit(
+                ["ls-files", "-z", "--others", "--exclude-standard", "--directory"], at: root)
+            for path in Self.nulSeparatedPaths(listing) {
+                let url = root.appendingPathComponent(path)
+                if await Self.containsGitRepoOffMain(url) {
+                    problems.append("\(path) (nested git repository)")
+                    continue
+                }
+                do { try trash(url) } catch { problems.append("\(path) (\(error.localizedDescription))") }
+            }
+            let hasHead = (try? await repo.runGit(["rev-parse", "--verify", "-q", "HEAD"], at: root)) != nil
+            if hasHead {
+                _ = try await repo.runGit(["restore", "--worktree", "--", "."], at: root)
+            }
         } catch { state.opError = error.localizedDescription }
+        if !problems.isEmpty, state.opError == nil {
+            // Not deleted: a failed Trash move never falls back to a permanent
+            // delete here; the user can discard those entries individually.
+            state.opError = "Couldn't move to the Trash, left in place: " + problems.joined(separator: ", ")
+        }
         await refreshIfCurrent(root: root)
+    }
+
+    /// Split `git … -z` output into paths, dropping the empty tail entry.
+    nonisolated static func nulSeparatedPaths(_ output: String) -> [String] {
+        output.split(separator: "\0", omittingEmptySubsequences: true)
+            .map(String.init)
+            .filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     // MARK: - Merge / Tags
