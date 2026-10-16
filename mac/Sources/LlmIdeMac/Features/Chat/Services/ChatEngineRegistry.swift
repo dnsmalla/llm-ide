@@ -256,7 +256,10 @@ final class ChatEngineRegistry {
             return held
         }
 
-        guard current.hasPendingWork else {
+        // `isWorkOpen`, the rule `sweepBackground` keeps by: an idle engine
+        // still holding an unanswered legacy `pendingTool` card has nothing
+        // running, but `switchSession` would reset it and the card is lost.
+        guard current.isWorkOpen else {
             current.switchSession(to: sessionID)
             sweepBackground()
             return current
@@ -284,7 +287,8 @@ final class ChatEngineRegistry {
     /// Returns the engine the panel should render.
     func newDisplayedSession(scope: ChatScope, api: LlmIdeAPIClient) -> ChatEngine {
         let current = engine(for: scope, api: api)
-        guard current.hasPendingWork else {
+        // Same keep rule as a switch: see `switchDisplayedSession`.
+        guard current.isWorkOpen else {
             current.createNewSession()
             sweepBackground()
             return current
@@ -414,7 +418,9 @@ final class ChatEngineRegistry {
     /// The outgoing engine when the incoming one comes from the lot: park it
     /// if it is mid-turn, otherwise let it go after landing its writes.
     private func retire(_ engine: ChatEngine) {
-        if engine.hasPendingWork {
+        // `isWorkOpen`, matching `sweepBackground`: an unanswered card is
+        // open work even with no turn running.
+        if engine.isWorkOpen {
             park(engine)
         } else {
             engine.flushPendingPersist()
