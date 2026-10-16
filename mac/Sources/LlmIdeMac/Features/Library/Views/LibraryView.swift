@@ -1031,11 +1031,15 @@ struct LibraryView: View {
     /// Load installed plugins for the Library → Plugins section. A failure keeps
     /// the last good list and says so, rather than emptying it.
     private func loadPlugins() async {
+        let token = loadGenerations.begin(.plugins)
         do {
-            self.plugins = try await api.listPlugins().plugins
+            let fetched = try await api.listPlugins().plugins
+            guard loadGenerations.isCurrent(token, for: .plugins) else { return }
+            self.plugins = fetched
             self.pluginsError = nil
             self.pluginsLoaded = true
         } catch {
+            guard loadGenerations.isCurrent(token, for: .plugins) else { return }
             self.pluginsError = error.localizedDescription
         }
     }
@@ -1307,10 +1311,14 @@ struct LibraryView: View {
     /// `llmSourcesError` so the section shows the real error (with Retry)
     /// instead of misleadingly rendering the empty placeholder.
     private func loadLlmSources() async {
+        let token = loadGenerations.begin(.llmSources)
         do {
-            llmSources = try await api.listLlmSources()
+            let fetched = try await api.listLlmSources()
+            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
+            llmSources = fetched
             llmSourcesError = nil
         } catch {
+            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
             llmSources = []
             llmSourcesError = error.localizedDescription
         }
@@ -1328,10 +1336,16 @@ struct LibraryView: View {
     }
 
     private func refreshLlmSources() async {
+        // Same list as `loadLlmSources`, so the same generation: whichever of
+        // the two started last owns the rows.
+        let token = loadGenerations.begin(.llmSources)
         do {
-            llmSources = try await api.listLlmSources()
+            let fetched = try await api.listLlmSources()
+            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
+            llmSources = fetched
             llmSourcesError = nil
         } catch {
+            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
             llmSourcesError = error.localizedDescription
         }
     }
@@ -1508,25 +1522,6 @@ struct LibraryView: View {
             }
             .environmentObject(theme)
         }
-    }
-
-    private func loadMcpPlugins() async {
-        do {
-            mcpPlugins = try await api.listMcpPlugins()
-            mcpPluginsError = nil
-        } catch {
-            mcpPluginsError = error.localizedDescription
-        }
-        // Best-effort: a catalog fetch failure just leaves the submenu empty
-        // rather than reporting an error over the plugin list, which is the
-        // more important thing on this screen.
-        mcpCatalog = (try? await api.fetchMcpCatalog()) ?? mcpCatalog
-        // Version badges (API v62+): cached server-side, so cheap to repeat.
-        if McpUpdatePresentation.isSupported(serverApiVersion: backend.serverApiVersion),
-           mcpPlugins.contains(where: { $0.package != nil }) {
-            // Not awaited: a slow registry must not hold up the list loads.
-            mcpUpdateCenter.startListCheck(api: api)
-        }
         .confirmationDialog(
             pendingMcpConsent?.dialogTitle ?? "",
             isPresented: Binding(get: { pendingMcpConsent != nil }, set: { if !$0 { pendingMcpConsent = nil } }),
@@ -1540,6 +1535,31 @@ struct LibraryView: View {
             Button("Cancel", role: .cancel) { pendingMcpConsent = nil }
         } message: { prompt in
             Text(prompt.message)
+        }
+    }
+
+    private func loadMcpPlugins() async {
+        let token = loadGenerations.begin(.mcpPlugins)
+        do {
+            let fetched = try await api.listMcpPlugins()
+            guard loadGenerations.isCurrent(token, for: .mcpPlugins) else { return }
+            mcpPlugins = fetched
+            mcpPluginsError = nil
+        } catch {
+            guard loadGenerations.isCurrent(token, for: .mcpPlugins) else { return }
+            mcpPluginsError = error.localizedDescription
+        }
+        // Best-effort: a catalog fetch failure just leaves the submenu empty
+        // rather than reporting an error over the plugin list, which is the
+        // more important thing on this screen.
+        let catalog = try? await api.fetchMcpCatalog()
+        guard loadGenerations.isCurrent(token, for: .mcpPlugins) else { return }
+        mcpCatalog = catalog ?? mcpCatalog
+        // Version badges (API v62+): cached server-side, so cheap to repeat.
+        if McpUpdatePresentation.isSupported(serverApiVersion: backend.serverApiVersion),
+           mcpPlugins.contains(where: { $0.package != nil }) {
+            // Not awaited: a slow registry must not hold up the list loads.
+            mcpUpdateCenter.startListCheck(api: api)
         }
     }
 
@@ -1721,13 +1741,19 @@ struct LibraryView: View {
     /// empties the add sheet, and reporting it over the selection list would
     /// bury the more important state.
     private func loadConnectors() async {
+        let token = loadGenerations.begin(.connectors)
         do {
-            connectors = try await api.listConnectors()
+            let fetched = try await api.listConnectors()
+            guard loadGenerations.isCurrent(token, for: .connectors) else { return }
+            connectors = fetched
             connectorsError = nil
         } catch {
+            guard loadGenerations.isCurrent(token, for: .connectors) else { return }
             connectorsError = error.localizedDescription
         }
-        connectorCatalog = (try? await api.fetchConnectorCatalog()) ?? connectorCatalog
+        let catalog = try? await api.fetchConnectorCatalog()
+        guard loadGenerations.isCurrent(token, for: .connectors) else { return }
+        connectorCatalog = catalog ?? connectorCatalog
     }
 
     private func addConnector(_ entry: ConnectorCatalogEntry) async {
