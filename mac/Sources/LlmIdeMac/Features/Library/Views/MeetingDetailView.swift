@@ -12,6 +12,13 @@ struct MeetingDetailView: View {
     @State private var recordingPulse = false
     @State private var isLoadingVM = false
     @State private var loadError: String?
+    /// Bumped by every `reload(for:)`; only the newest reload may publish
+    /// its result or clear the loading state.
+    @State private var reloadGeneration = 0
+    /// Cached newest meeting id; `isNewest` used to list the whole index on
+    /// every render.  Refreshed in `reload(for:)`, which runs on every
+    /// selection change and every `.meetingIndexChanged`.
+    @State private var newestMeetingId: String?
 
     var body: some View {
         Group {
@@ -285,22 +292,45 @@ struct MeetingDetailView: View {
     }
 
     private func isNewest(id: String) -> Bool {
-        (try? env.index.list().first?.id) == id
+        newestMeetingId == id
     }
 
     private func reload(for id: String?) async {
-        guard let id, let row = try? env.index.get(id: id) else { vm = nil; return }
+        reloadGeneration += 1
+        let generation = reloadGeneration
+        newestMeetingId = try? env.index.list().first?.id
+        guard let id, let row = try? env.index.get(id: id) else {
+            // This load supersedes an in-flight one, whose `defer` will now
+            // skip clearing the spinner — clear it here or it spins forever.
+            vm = nil
+            isLoadingVM = false
+            loadError = nil
+            return
+        }
         loadError = nil
-        isLoadingVM = true
-        defer { isLoadingVM = false }
         let url = env.notesConfig.currentFolder.appendingPathComponent(row.path)
+        // Same meeting (index refresh, e.g. after a summarize finished):
+        // refresh the existing view model in place.  Replacing it would drop
+        // its state mid-run and briefly blank the pane.
+        if let current = vm, current.fileURL == url {
+            try? await current.load()
+            return
+        }
+        // Different meeting: drop the old view model now, so the toolbar
+        // and banners can't act on meeting A while B is loading.
+        vm = nil
+        isLoadingVM = true
+        defer {
+            if generation == reloadGeneration { isLoadingVM = false }
+        }
         let newVM = MeetingDetailViewModel(fileURL: url, api: api)
         do {
             try await newVM.load()
-            // A slower load for an EARLIER selection must not land after a
-            // newer one: it would show meeting A under B's selected row, and
-            // Re-summarize / Export would act on the wrong file.
-            guard shell.selectedMeetingId == id else { return }
+            // A slower load for an EARLIER selection (or an older reload of
+            // the same one) must not land after a newer one: it would show
+            // meeting A under B's selected row, and Re-summarize / Export
+            // would act on the wrong file.
+            guard generation == reloadGeneration, shell.selectedMeetingId == id else { return }
             vm = newVM
             // Just-mounted case for the Library list "Re-summarize" action:
             // the view model is now loaded for this id, so honor the flag.
@@ -309,7 +339,7 @@ struct MeetingDetailView: View {
                 await newVM.resummarize()
             }
         } catch {
-            guard shell.selectedMeetingId == id else { return }
+            guard generation == reloadGeneration, shell.selectedMeetingId == id else { return }
             loadError = error.localizedDescription
             vm = nil
         }
