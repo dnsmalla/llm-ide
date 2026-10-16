@@ -45,6 +45,11 @@ struct RepoIssuesView: View {
     /// issue with A's number.
     @State private var issuesLoadGeneration = 0
     @State private var issuesLoadTask: Task<Void, Never>?
+    /// The project `issues` currently belong to. The generation guard stops a
+    /// stale load from WRITING, but the previous project's cards stayed on the
+    /// board until the new list arrived — dragging one in that window updated
+    /// the new project's issue with the same number.
+    @State private var issuesProjectId: String?
 
     // ── Filter
     @State private var filter = RepoIssueFilter()
@@ -573,6 +578,8 @@ struct RepoIssuesView: View {
         guard availableBackends.contains(backend) else { return }
         projects = []
         issues = []
+        issuesProjectId = nil
+        detailIssue = nil
         selectedProject = nil
         await loadProjects()
     }
@@ -597,6 +604,13 @@ struct RepoIssuesView: View {
 
     private func reloadIssues() async {
         guard let project = selectedProject else { return }
+        if issuesProjectId != project.id {
+            issues = []
+            labels = []
+            milestones = []
+            detailIssue = nil
+            issuesProjectId = project.id
+        }
         issuesLoadGeneration += 1
         let generation = issuesLoadGeneration
         // A superseded load stops paging; its results would be dropped anyway.
