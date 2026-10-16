@@ -58,6 +58,10 @@ struct IssueScheduleEditorSheet: View {
                     dateRow(t, label: "Due date", isOn: $hasDue, date: $due)
                     estimateRow(t)
                     dependsOnRow(t)
+                    if isRangeInvalid {
+                        Text("Due date must be on or after the start date.")
+                            .font(Typography.caption).foregroundStyle(t.danger)
+                    }
                     if let e = error {
                         Text(e).font(Typography.caption).foregroundStyle(t.danger)
                     }
@@ -138,10 +142,23 @@ struct IssueScheduleEditorSheet: View {
                 if saving { ProgressView().controlSize(.small) } else { Text("Save").bold() }
             }
             .keyboardShortcut(.return, modifiers: .command)
-            .disabled(saving)
+            .disabled(saving || isRangeInvalid)
         }
         .padding(.horizontal, 16).padding(.vertical, 12)
         .background(t.surface)
+    }
+
+    private var isRangeInvalid: Bool {
+        Self.isDueBeforeStart(start: hasStart ? start : nil, due: hasDue ? due : nil)
+    }
+
+    /// True when both dates are set and the due day precedes the start day.
+    /// Compared by calendar day (not instant) because the pickers carry the
+    /// time of day they were created at; a same-day pair must stay valid.
+    /// A due-before-start row would draw a negative-width gantt bar.
+    static func isDueBeforeStart(start: Date?, due: Date?, calendar: Calendar = .current) -> Bool {
+        guard let start, let due else { return false }
+        return calendar.startOfDay(for: due) < calendar.startOfDay(for: start)
     }
 
     // Parse the comma-separated depends-on field into positive ints (silently
@@ -154,6 +171,7 @@ struct IssueScheduleEditorSheet: View {
     }
 
     private func save() async {
+        guard !isRangeInvalid else { return }
         saving = true; error = nil
         defer { saving = false }
         do {
