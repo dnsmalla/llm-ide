@@ -132,6 +132,16 @@ final class BackendManager {
     private var lastStartArgs: (nodePath: String, workingDirectory: String)?
     /// Set by `restart(...)`: start again once the spawned child has exited.
     private var startAfterExit: (nodePath: String, workingDirectory: String)?
+    /// PID of a child we terminated because it never answered `/health`.
+    /// Its exit (SIGTERM, 15) is otherwise indistinguishable from a crash:
+    /// the exit handler overwrote the timeout message with the last stderr
+    /// line and auto-restarted a server that will most likely hang again —
+    /// three more 20 s waits before the user saw anything actionable.
+    private var startTimedOutPID: Int32?
+    /// One retry after a start timeout: a cold start on a busy (swapping)
+    /// machine or a slow migration can exceed the 20 s /health window and
+    /// usually succeeds warm. Reset once a start reaches /health.
+    private var startTimeoutRetryUsed = false
 
     init() {
         // Best-effort cleanup so a spawned node child doesn't outlive
@@ -152,7 +162,11 @@ final class BackendManager {
         }
     }
 
-    /// Synchronously SIGTERM (then SIGKILL after up to 1s) the node child we
+    /// How long quit waits for the spawned server to exit on SIGTERM before
+    /// SIGKILL. See `terminateSpawnedBackend()`.
+    nonisolated static let quitGraceSeconds: TimeInterval = 5.0
+
+    /// Synchronously SIGTERM (then SIGKILL after up to `quitGraceSeconds`) the node child we
     /// spawned. Adopted external backends are left alone — they have
     /// their own lifecycle and `stop()` is the path that touches them.
     func terminateSpawnedBackend() {
@@ -165,7 +179,13 @@ final class BackendManager {
         // block never fired and a node that ignored SIGTERM was orphaned (and then
         // adopted, stale, by the next launch). `kill(pid, 0)` probes existence
         // without signalling; a zombie reads as alive and the SIGKILL is harmless.
-        let deadline = Date().addingTimeInterval(1.0)
+        // The grace is 5 s, not 1 s: server.mjs's SIGTERM handler drains
+        // in-flight requests, then saves rate-limit buckets and closes SQLite
+        // (WAL checkpoint) — SIGKILLing it after 1 s routinely skipped both.
+        // The loop returns as soon as the child exits, so a healthy shutdown
+        // still quits in well under a second; only a stuck one costs the full
+        // grace, and the server's own 10 s hard timeout is longer than we wait.
+        let deadline = Date().addingTimeInterval(Self.quitGraceSeconds)
         while Date() < deadline, kill(childPID, 0) == 0 {
             usleep(50_000)
         }
@@ -236,7 +256,13 @@ final class BackendManager {
                 atPath: URL(fileURLWithPath: dir).appendingPathComponent("server.mjs").path)
         }
         if !hasServer(config.backendWorkingDir) {
-            if let found = defaultProjectFolders().first(where: { hasServer($0.path) }) {
+            // Same layout check as the Desktop/Developer scan: the found dir
+            // is persisted and then EXECUTED, and `defaultProjectFolders()`
+            // includes `<app>/../../extension`, which for an app copied
+            // anywhere can be any folder that happens to hold a server.mjs.
+            if let found = defaultProjectFolders().first(where: {
+                hasServer($0.path) && LaunchPathResolver.looksLikeLlmIdeServer($0)
+            }) {
                 config.backendWorkingDir = found.path
             } else if let found = LaunchPathResolver.findServerDirectory() {
                 config.backendWorkingDir = found
@@ -445,6 +471,7 @@ final class BackendManager {
 
         proc.terminationHandler = { [weak self] finished in
             let exitCode = finished.terminationStatus
+            let exitedPID = finished.processIdentifier
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 // The readers are cleared below, possibly before they saw
@@ -466,11 +493,16 @@ final class BackendManager {
                 // A deliberate Stop ends the child with SIGTERM (15): that is a
                 // stop, not a crash, and must not show "exited with code 15".
                 let stoppedByUser = self.userInitiatedStop && exitCode == Int32(SIGTERM)
-                if exitCode != 0 && !stoppedByUser {
+                let killedForStartTimeout = self.startTimedOutPID == exitedPID
+                if killedForStartTimeout { self.startTimedOutPID = nil }
+                // The start-timeout path already wrote the real reason via
+                // fail(); the SIGTERM exit it caused must not replace it.
+                if exitCode != 0 && !stoppedByUser && !killedForStartTimeout {
                     self.lastError = self.recentErrorSummary()
                         ?? "Server exited with code \(exitCode). See Settings → Backend for the log."
                 }
-                self.status = (exitCode == 0 || stoppedByUser) ? .stopped : .crashed(exitCode: exitCode)
+                self.status = (exitCode == 0 || stoppedByUser || killedForStartTimeout)
+                    ? .stopped : .crashed(exitCode: exitCode)
                 if let next = self.startAfterExit {
                     // An intentional restart, not a crash: no auto-restart,
                     // no budget spent, no lingering "crashed" error.
@@ -479,6 +511,25 @@ final class BackendManager {
                     self.lastError = nil
                     self.status = .stopped
                     self.start(nodePath: next.nodePath, workingDirectory: next.workingDirectory)
+                    return
+                }
+                if killedForStartTimeout {
+                    // Retry once (see `startTimeoutRetryUsed`); a second hang
+                    // is not transient, and looping would repeat the 20 s
+                    // wait for ever. Then it is left for the user's Start.
+                    // Not after a user Stop that landed while the timed-out
+                    // server was draining: Stop means stop.
+                    if self.userInitiatedStop {
+                        self.userInitiatedStop = false
+                        return
+                    }
+                    if !self.startTimeoutRetryUsed, let args = self.lastStartArgs {
+                        self.startTimeoutRetryUsed = true
+                        self.append("--- Retrying once: a cold start can exceed the /health window ---", stream: .info)
+                        self.start(nodePath: args.nodePath, workingDirectory: args.workingDirectory)
+                        return
+                    }
+                    self.append("--- Not auto-restarting: server was stopped for not answering /health ---", stream: .info)
                     return
                 }
                 self.scheduleAutoRestartIfNeeded(exitCode: exitCode)
@@ -529,6 +580,7 @@ final class BackendManager {
                     // A server we spawned ourselves can still be too old — the
                     // configured server.mjs may live in an older checkout.
                     self.recordServerVersion(health, adopted: false)
+                    self.startTimeoutRetryUsed = false
                     self.markRunning(nodePath: nodePath, workURL: workURL, proc: proc)
                     return
                 }
@@ -537,6 +589,7 @@ final class BackendManager {
             // Timed out. A live-but-unresponsive process is wedged —
             // terminate it and report so the user isn't stuck on a spinner.
             if proc.isRunning, self.process === proc {
+                self.startTimedOutPID = proc.processIdentifier
                 proc.terminate()
                 self.fail("Server started but didn't answer /health within 20s. Check Settings → Backend for the log.")
             }
@@ -820,6 +873,17 @@ final class BackendManager {
         let versionTooOld: Bool
     }
 
+    /// One session for every `/health` probe. A session per probe was never
+    /// invalidated, and a URLSession retains its delegate queue and connection
+    /// pool until `invalidateAndCancel()` — with the probe polled every few
+    /// seconds that leaked steadily for the life of the app.
+    private nonisolated static let healthSession: URLSession = {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 2.0
+        config.timeoutIntervalForResource = 2.0
+        return URLSession(configuration: config)
+    }()
+
     /// GET `/health` with a 2 s budget. Returns the parsed apiVersion
     /// alongside reachability so callers can distinguish "not running"
     /// from "running but incompatible".
@@ -829,12 +893,8 @@ final class BackendManager {
         }
         var req = URLRequest(url: url)
         req.timeoutInterval = 2.0
-        let config = URLSessionConfiguration.ephemeral
-        config.timeoutIntervalForRequest = 2.0
-        config.timeoutIntervalForResource = 2.0
-        let session = URLSession(configuration: config)
         do {
-            let (data, response) = try await session.data(for: req)
+            let (data, response) = try await healthSession.data(for: req)
             guard let http = response as? HTTPURLResponse,
                   (200..<300).contains(http.statusCode) else {
                 return HealthProbeResult(ok: false, apiVersion: nil, versionTooOld: false)

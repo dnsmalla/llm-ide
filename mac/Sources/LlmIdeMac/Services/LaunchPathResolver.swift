@@ -47,8 +47,10 @@ enum LaunchPathResolver {
     /// The result is persisted as the backend working dir and then EXECUTED
     /// (`node server.mjs`) at launch, so a bare `server.mjs` is not enough: any
     /// unrelated project on the Desktop with one would be run unprompted. Require
-    /// this server's own layout beside it.
-    private static func looksLikeLlmIdeServer(_ dir: URL) -> Bool {
+    /// this server's own layout beside it. Also applied by
+    /// `BackendManager.resolveLaunchPaths` to its fixed candidate list, which
+    /// includes a bundle-relative guess that is just as arbitrary.
+    static func looksLikeLlmIdeServer(_ dir: URL) -> Bool {
         let fm = FileManager.default
         return fm.fileExists(atPath: dir.appendingPathComponent("kb/db.mjs").path)
             && fm.fileExists(atPath: dir.appendingPathComponent("routes/router.mjs").path)
