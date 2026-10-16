@@ -65,8 +65,44 @@ enum MobileWorkspaceSearch {
 
     // MARK: - Resolve refs → code-assist attachments
 
+    /// The plain values a ref resolution needs — `Sendable`, so they can cross
+    /// into a detached task (the wire types are not).
+    struct RefSpec: Sendable, Equatable {
+        var path: String
+        var kind: String
+    }
+
+    private struct AttachmentSpec: Sendable {
+        var path: String
+        var content: String
+    }
+
+    /// `attachments(from:workspaceRoot:)` run OFF the main actor. Up to
+    /// `maxRefs` file reads and 6-deep folder walks (1 MB in all) used to run
+    /// on the main actor straight from a phone message, so a paired phone could
+    /// stall the Mac UI for as long as a slow or huge workspace took to read.
+    /// Same containment checks — this only moves where they run.
+    static func attachmentsOffMain(
+        from refs: [ExploreWorkspaceRef],
+        workspaceRoot: URL
+    ) async -> ([LlmIdeAPIClient.CodeAttachment], [String]) {
+        let specs = refs.map { RefSpec(path: $0.path, kind: $0.kind) }
+        let (plain, errors) = await Task.detached(priority: .userInitiated) { () -> ([AttachmentSpec], [String]) in
+            let (out, errs) = attachments(fromSpecs: specs, workspaceRoot: workspaceRoot)
+            return (out.map { AttachmentSpec(path: $0.path, content: $0.content) }, errs)
+        }.value
+        return (plain.map { LlmIdeAPIClient.CodeAttachment(path: $0.path, content: $0.content) }, errors)
+    }
+
     static func attachments(
         from refs: [ExploreWorkspaceRef],
+        workspaceRoot: URL
+    ) -> ([LlmIdeAPIClient.CodeAttachment], [String]) {
+        attachments(fromSpecs: refs.map { RefSpec(path: $0.path, kind: $0.kind) }, workspaceRoot: workspaceRoot)
+    }
+
+    static func attachments(
+        fromSpecs refs: [RefSpec],
         workspaceRoot: URL
     ) -> ([LlmIdeAPIClient.CodeAttachment], [String]) {
         var out: [LlmIdeAPIClient.CodeAttachment] = []

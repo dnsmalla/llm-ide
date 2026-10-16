@@ -270,16 +270,22 @@ final class MobileLoopBridge: MobileFeatureBridge {
         // runs as the `loopEngineering` Auto Task under the hood, so its live
         // log tail is that task's buffer in the SAME store the Mac Auto Tasks
         // page observes.
-        let tail = (autoCode?.logStore.buffers[AutoTask.loopEngineering.rawValue] ?? [])
+        // Raw text only here; redaction runs in the detached task below
+        // (PhoneRedaction's regexes are too slow for the main actor on a long line).
+        let rawTail = (autoCode?.logStore.buffers[AutoTask.loopEngineering.rawValue] ?? [])
             .suffix(40)
-            .map { PhoneRedaction.logLine($0.text) }
+            .map(\.text)
         let startedHere = running && loopStartedHere
         let projectRoot = context.projectRoot
         let gitRoot = context.gitRoot
         // Config load (first-hit detection + file read) and the journal tail
-        // read are disk IO: keep them off the main actor.
-        let (primary, recent) = await Task.detached(priority: .userInitiated) {
-            Self.loadSnapshot(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot)
+        // read are disk IO, and redacting the log tail + the agent-written
+        // summary is regex work over free text: keep all of it off the main actor.
+        let (primary, recent, tail, redactedSummary) = await Task.detached(priority: .userInitiated) {
+            () -> (LoopDefinition?, LoopRunIndexEntry?, [String], String?) in
+            let snap = Self.loadSnapshot(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot)
+            return (snap.primary, snap.recent, rawTail.map { PhoneRedaction.logLine($0) },
+                    snap.recent.map { PhoneRedaction.logLine($0.statusSummary) })
         }.value
         let loopConfig = primary?.config
         return LoopState(
@@ -295,9 +301,9 @@ final class MobileLoopBridge: MobileFeatureBridge {
             // per-iteration lines the desktop shows.
             iteration: 0,
             maxIterations: loopConfig?.maxIterations ?? 0,
-            logTail: Array(tail),
-            // Agent-written free text, redacted like the log tail above.
-            lastStatusSummary: recent.map { PhoneRedaction.logLine($0.statusSummary) },
+            logTail: tail,
+            // Agent-written free text, redacted like the log tail (off main, above).
+            lastStatusSummary: redactedSummary,
             lastFinishedAt: recent.map { $0.startedAt.timeIntervalSince1970 + $0.durationSeconds },
             // Stage ids come from the one (cached) `primaryLoop` read above, so
             // they are exactly the ids a follow-up `loop_start_stage` resolves.

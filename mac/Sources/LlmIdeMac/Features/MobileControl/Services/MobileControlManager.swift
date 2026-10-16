@@ -807,7 +807,7 @@ final class MobileControlManager {
                 reply(CommandError(commandId: "explore_load", message: "Invalid session id"))
                 return
             }
-            guard let s = Self.loadExplorerSession(id: sid) else {
+            guard let s = Self.loadExplorerSession(id: sid, visibleInProject: activeExplorerProjectId) else {
                 append(.info, "Explore load: session \(sid.uuidString.prefix(8)) not found")
                 reply(CommandError(commandId: "explore_load",
                                    message: "Session not found on Mac — it may have been deleted."))
@@ -1131,7 +1131,10 @@ final class MobileControlManager {
         // run a turn against whatever session happens to be active. Surface
         // it as a CommandError so the phone can reload its explorer session
         // list.
-        guard Self.loadExplorerSession(id: sid) != nil else {
+        // Project-scoped too: a stale id from another project would otherwise
+        // keep chatting in that project's session with THIS project's
+        // workspace context (refs, agent context) attached.
+        guard Self.loadExplorerSession(id: sid, visibleInProject: activeExplorerProjectId) != nil else {
             append(.info, "explore_chat: session \(chat.sessionId.prefix(8)) not found")
             await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
@@ -1145,7 +1148,8 @@ final class MobileControlManager {
             append(.info, "explore_chat: @file refs ignored — \"\(PhoneAccess.fileBrowse.title)\" is off")
         }
         if let root = mobileWorkspaceURL(), !refs.isEmpty {
-            let (refAttachments, refErrors) = MobileWorkspaceSearch.attachments(
+            // Off main: the reads are phone-driven and can be slow (see attachmentsOffMain).
+            let (refAttachments, refErrors) = await MobileWorkspaceSearch.attachmentsOffMain(
                 from: refs, workspaceRoot: root)
             attachments.append(contentsOf: refAttachments)
             for err in refErrors { append(.info, "explore_chat: \(err)") }
@@ -1260,6 +1264,13 @@ final class MobileControlManager {
     func handleExploreDelete(_ uid: UUID) async {
         if let existing = ChatSessionStore.load(id: uid), existing.scope != .explorer {
             append(.info, "Explore delete: \(uid.uuidString.prefix(8)) is not an Explorer chat — refused")
+            return
+        }
+        // The phone only ever listed the active project's chats; an id from
+        // another project is stale and must not delete a chat it cannot see.
+        if let existing = ChatSessionStore.load(id: uid),
+           !Self.isExplorerSession(existing, visibleInProject: activeExplorerProjectId) {
+            append(.info, "Explore delete: \(uid.uuidString.prefix(8)) belongs to another project — refused")
             return
         }
         // `api` is optional only so the network forget at the tail degrades
@@ -1842,10 +1853,27 @@ final class MobileControlManager {
         return session
     }
 
+    /// `loadExplorerSession(id:)` narrowed to the chats the phone's list shows
+    /// for `projectId` — the handlers checked scope but not project, so a
+    /// session id the phone kept from project A still loaded, renamed and
+    /// chatted after the Mac switched to project B.
+    static func loadExplorerSession(id: UUID, visibleInProject projectId: String?) -> ChatSession? {
+        guard let session = loadExplorerSession(id: id),
+              isExplorerSession(session, visibleInProject: projectId) else { return nil }
+        return session
+    }
+
+    /// The exact rule of `ChatSessionStore.list(for:visibleInProject:)`: its
+    /// own project's chats plus unassigned ones; everything when no project is open.
+    nonisolated static func isExplorerSession(_ session: ChatSession, visibleInProject projectId: String?) -> Bool {
+        guard let projectId else { return true }
+        return session.projectId == nil || session.projectId == projectId
+    }
+
     private func handleExploreRenameSession(data: Data) {
         guard let m = try? decoder.decode(ExploreRenameSession.self, from: data),
               let sid = UUID(uuidString: m.sessionId),
-              var session = Self.loadExplorerSession(id: sid) else {
+              var session = Self.loadExplorerSession(id: sid, visibleInProject: activeExplorerProjectId) else {
             reply(CommandError(commandId: "explore_rename", message: "Session not found on Mac"))
             return
         }
