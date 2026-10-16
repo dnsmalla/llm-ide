@@ -837,7 +837,15 @@ extension CodeAssistantPanel {
         // Deliberately NOT the same mechanism as a plugin's own slash command
         // (that's server-side prompt-expansion, not a client-side UI action).
         if ChatSlashCommands.isClearCommand(msg) {
-            Task { await engine.clearCurrentChat() }
+            // Same path as the header's trash button: `/clear` deletes the
+            // chat, its memory and the server session, so anything with
+            // content (or a turn mid-flight) asks first. An empty chat has
+            // nothing to lose and goes straight through.
+            if engine.messages.isEmpty {
+                deleteCurrentChat()
+            } else {
+                confirmingClearCurrentChat = true
+            }
             return
         }
         if let section = ChatSlashCommands.sectionCommand(msg) {
