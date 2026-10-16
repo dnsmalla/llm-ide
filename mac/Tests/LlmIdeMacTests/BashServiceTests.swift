@@ -106,6 +106,18 @@ final class BashServiceTests: XCTestCase {
         XCTAssertLessThan(Date().timeIntervalSince(started), 5)
     }
 
+    /// A background job inherits the pipes and keeps them open after the
+    /// shell exits; waiting for EOF hung the turn for as long as it ran, and
+    /// Stop could not end it. The result now returns after the drain window.
+    func testBackgroundJobDoesNotHoldTheResult() async {
+        let started = Date()
+        let r = await service.execute("echo before; sleep 30 &")
+        XCTAssertLessThan(Date().timeIntervalSince(started), 10)
+        XCTAssertEqual(r.exitCode, 0)
+        XCTAssertTrue(r.stdout.hasPrefix("before"))
+        XCTAssertTrue(r.stdout.contains(BashService.backgroundJobNote))
+    }
+
     func testLaunchFailureIsReportedNotThrown() async {
         let r = await service.execute("true", workingDirectory: "/no/such/directory//x")
         XCTAssertEqual(r.exitCode, -1)

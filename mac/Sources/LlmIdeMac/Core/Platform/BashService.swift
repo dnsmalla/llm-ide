@@ -39,6 +39,13 @@ final class BashService: Sendable {
     /// Grace period between SIGTERM and SIGKILL for a child that ignores the
     /// polite signal.
     private static let killGrace: TimeInterval = 2
+    /// How long to wait for the pipes to close after the shell exits. A
+    /// background job (`npm run dev &`) inherits them and keeps them open for
+    /// as long as it runs, so an unbounded wait hung the turn for good — and
+    /// Stop could not end it, the shell being gone.
+    static let backgroundDrainWindow: TimeInterval = 2
+    static let backgroundJobNote =
+        "[A background process started by this command is still running and holds its output; it was left running and its further output is not captured.]"
     /// Per-stream character cap on what we hand back to the chat.
     static let maxOutputChars = 20_000
     /// Per-stream byte cap on what we retain while draining. We keep reading
@@ -227,9 +234,16 @@ final class BashService: Sendable {
                     guardToken.cancel()
                     // Wait for the readers, not just the process: the tail of
                     // the output can still be in flight when the child exits.
-                    group.wait()
+                    // Bounded: past the window a background job holds the pipes.
+                    // The readers keep draining on their own threads so that job
+                    // never blocks on (or dies of) a full or closed pipe.
+                    let leftBackgroundJob =
+                        group.wait(timeout: .now() + Self.backgroundDrainWindow) == .timedOut
 
-                    let (outText, outClipped) = out.text(maxChars: outputChars)
+                    let (capturedOut, outClipped) = out.text(maxChars: outputChars)
+                    let outText = leftBackgroundJob
+                        ? capturedOut + (capturedOut.isEmpty ? "" : "\n") + Self.backgroundJobNote
+                        : capturedOut
                     let (errText, errClipped) = err.text(maxChars: outputChars)
                     finish(ExecutionResult(
                         exitCode: process.terminationStatus,
