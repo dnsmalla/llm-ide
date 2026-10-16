@@ -14,26 +14,23 @@ import { canonicalPathCase } from '../../../core/path-case.mjs';
 export { redactFence };
 
 const PAGE = 10;
-// Fetched when scoping to a workspace, so dropping other repos' code still
-// leaves a full page. Code rows carry no project tag and one user's index
-// holds every repo they ever opened (clones of the same repo included).
-const SCOPED_FETCH = 40;
 
 export async function searchKb(args, ctx) {
   const root = typeof ctx.workspaceRoot === 'string' && ctx.workspaceRoot.trim()
     ? canonicalPathCase(expandHome(ctx.workspaceRoot.trim()))
     : null;
+  // Code rows carry no project tag and one user's index holds every repo they
+  // ever opened, so code hits are scoped to the open workspace. kb.search
+  // applies `codeRoot` before its LIMIT; filtering here, after a fixed fetch,
+  // let other repos fill the window and hid real matches. One extra row makes
+  // `truncated` true only when more hits actually exist.
   const raw = await Promise.resolve(ctx.kb.search(ctx.userId, {
     q: args.query,
     kind: null,
-    limit: root ? SCOPED_FETCH : PAGE,
+    limit: PAGE + 1,
+    ...(root ? { codeRoot: root } : {}),
   }));
-  const all = Array.isArray(raw) ? raw : [];
-  // Only CODE refs are filesystem paths; a doc's ref may be a URL (Box), and
-  // meetings have none — those are not the workspace's to filter.
-  const list = root
-    ? all.filter((h) => h.kind !== 'code' || isUnder(String(h.ref || ''), root))
-    : all;
+  const list = Array.isArray(raw) ? raw : [];
   // kb.search rows (db.mjs hydrateSearchRows) carry `entityId`/`meetingId`,
   // the chunk text in `body`, and a code chunk's location in `meta`.
   const hits = list.slice(0, PAGE).map((h) => {
@@ -75,11 +72,4 @@ export function snippetFor(body, query) {
 
 function expandHome(p) {
   return p === '~' || p.startsWith('~/') ? path.join(os.homedir(), p.slice(1)) : p;
-}
-
-// `ref` is a chunk's absolute file path; compared in on-disk letter case so a
-// workspace opened as ~/Desktop/llm still matches rows indexed as …/LLM.
-function isUnder(ref, root) {
-  const abs = canonicalPathCase(ref);
-  return abs === root || abs.startsWith(root + path.sep);
 }

@@ -106,3 +106,47 @@ test('list path: malformed source meta is excluded from a project filter, not an
   // Unfiltered listing still includes it.
   assert.equal(db.search(alice, { q: '', kind: 'ticket' }).length, 2);
 });
+
+// Code rows carry no project tag, so the agent's search-kb scopes them to the
+// open workspace by path. Measured 2026-10-16 on a real 5-repo index: filtering
+// after the LIMIT returned 0 hits for 6 of 30 queries whose matches existed in
+// the workspace, because other repos' chunks filled the fetched window.
+function codeRow(userId, ref, body) {
+  db.getDb().prepare(
+    `INSERT INTO sources (kind, ref, title, body, meta, user_id) VALUES ('code', ?, ?, ?, '{}', ?)`,
+  ).run(ref, ref, body, userId);
+}
+
+test('FTS: codeRoot keeps in-workspace code hits ranked below a deep window of other repos', () => {
+  reset();
+  const alice = provision('alice');
+  // 500 > the deepest overshoot window for a page of 10, so only a filter
+  // applied before the LIMIT can reach the workspace's rows.
+  for (let i = 0; i < 500; i++) codeRow(alice, `/other/repo/f${i}.ts`, 'graphnode graphnode graphnode graphnode');
+  for (let i = 0; i < 3; i++) codeRow(alice, `/work/proj/src/f${i}.ts`, 'graphnode among many other unrelated words');
+  const hits = db.search(alice, { q: 'graphnode', limit: 10, codeRoot: '/work/proj' });
+  assert.deepEqual(hits.map((h) => h.ref).sort(), [
+    '/work/proj/src/f0.ts', '/work/proj/src/f1.ts', '/work/proj/src/f2.ts',
+  ]);
+});
+
+test('FTS: codeRoot matches whole path segments only and leaves non-code kinds alone', () => {
+  reset();
+  const alice = provision('alice');
+  codeRow(alice, '/work/proj/a.ts', 'ledgerline');
+  codeRow(alice, '/work/proj-other/b.ts', 'ledgerline');
+  codeRow(alice, '/work/proj_x/c.ts', 'ledgerline');
+  meeting(alice, 'm1', { transcript: 'ledgerline in a meeting' });
+  const hits = db.search(alice, { q: 'ledgerline', limit: 10, codeRoot: '/work/proj' });
+  assert.deepEqual(hits.filter((h) => h.kind === 'code').map((h) => h.ref), ['/work/proj/a.ts']);
+  assert.ok(hits.some((h) => h.kind === 'meeting'), 'meeting hits are not path-scoped');
+});
+
+test('LIKE path (query shorter than a trigram): codeRoot still scopes code hits', () => {
+  reset();
+  const alice = provision('alice');
+  for (let i = 0; i < 500; i++) codeRow(alice, `/other/repo/f${i}.ts`, 'qz qz qz');
+  codeRow(alice, '/work/p%_\\x/a.ts', 'qz once');
+  const hits = db.search(alice, { q: 'qz', limit: 10, codeRoot: '/work/p%_\\x/' });
+  assert.deepEqual(hits.map((h) => h.ref), ['/work/p%_\\x/a.ts']);
+});

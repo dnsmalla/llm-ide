@@ -201,7 +201,16 @@ export {
 const PROJECT_META_FILTER = (col) =>
   `(? IS NULL OR CASE WHEN json_valid(${col}) THEN json_extract(${col}, '$.projectId') END = ?)`;
 
-export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } = {}) {
+// `codeRoot` scopes CODE rows to one directory tree (other kinds pass through).
+// Code rows carry no projectId and one user's index holds every repo they
+// opened, so this runs in SQL before the LIMIT: filtering after it let other
+// repos fill the window and returned empty pages for real matches. LIKE is
+// ASCII-case-insensitive, which matches macOS's default case-insensitive volume.
+const CODE_ROOT_FILTER =
+  `(kind <> 'code' OR CAST(entity_id AS INTEGER) IN (
+     SELECT id FROM sources WHERE user_id = ? AND kind = 'code' AND ref LIKE ? ESCAPE '\\'))`;
+
+export function search(userId, { q, kind, limit = 20, projectId, codeRoot, maxCap = 100 } = {}) {
   requireUser(userId);
   const db = getDb();
   // `maxCap` lets a caller that needs a fuller corpus (e.g. /kb/issues, which
@@ -300,6 +309,11 @@ export function search(userId, { q, kind, limit = 20, projectId, maxCap = 100 } 
   if (kind) {
     where += ' AND kind = ?';
     params.push(kind);
+  }
+  if (typeof codeRoot === 'string' && codeRoot) {
+    const root = codeRoot.replace(/\/+$/, '');
+    where += ` AND ${CODE_ROOT_FILTER}`;
+    params.push(userId, `${root.replace(/[\\%_]/g, (c) => `\\${c}`)}/%`);
   }
   // bm25() ranks more relevant rows first; lower is better.
   const sql = `

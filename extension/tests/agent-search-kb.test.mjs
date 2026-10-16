@@ -67,30 +67,34 @@ test('searchKb uses the meeting id for meeting hits and the body head when no te
 });
 
 // Code rows carry no project tag, and one user's index holds every repo they
-// ever opened (here: five roots, including three clones of the same repo), so
-// search-kb answered from all of them. With a workspace open, code hits from
-// outside it are dropped — and the fetch over-asks so the scoped list is full.
-test('searchKb scopes code hits to the open workspace and still returns a full page', async () => {
+// ever opened, so with a workspace open search-kb scopes code hits to it. The
+// scope must reach kb.search (which filters before its LIMIT): filtering here,
+// after a fixed fetch, let other repos fill the window and returned 0 hits for
+// real matches (measured 2026-10-16 on a 5-repo index: 6 of 30 queries).
+test('searchKb hands the workspace scope to kb.search', async () => {
+  let asked;
+  const ctx = { userId: 'u1', workspaceRoot: '/work/proj', kb: { search: (uid, opts) => { asked = opts; return []; } } };
+  await searchKb({ query: 'f' }, ctx);
+  assert.equal(asked.codeRoot, '/work/proj');
+  assert.equal(asked.limit, 11, 'one page plus one row to detect truncation');
+});
+
+test('searchKb maps every hit kb.search returns for a scoped query, up to one page', async () => {
   const rows = [];
-  for (let i = 0; i < 15; i += 1) {
-    rows.push({ kind: 'code', entityId: 100 + i, title: `other:${i}`, body: 'b', ref: `/clones/other/f${i}.ts`, meta: { relPath: `f${i}.ts` } });
-  }
   for (let i = 0; i < 12; i += 1) {
     rows.push({ kind: 'code', entityId: 200 + i, title: `mine:${i}`, body: 'b', ref: `/work/proj/src/f${i}.ts`, meta: { relPath: `src/f${i}.ts` } });
   }
   rows.push({ kind: 'doc', entityId: 300, title: 'Box doc', body: 'b', ref: 'box://file/1', meta: {} });
-  rows.push({ kind: 'meeting', meetingId: 'm1', title: 'Sync', body: 'b' });
-  let askedFor;
-  const ctx = { userId: 'u1', workspaceRoot: '/work/proj', kb: { search: (uid, opts) => { askedFor = opts.limit; return rows.slice(0, opts.limit); } } };
+  const ctx = { userId: 'u1', workspaceRoot: '/work/proj', kb: { search: () => rows } };
   const out = await searchKb({ query: 'f' }, ctx);
-  assert.ok(askedFor >= 30, `over-asks to fill the page after scoping (asked ${askedFor})`);
   assert.equal(out.hits.length, 10);
-  assert.ok(out.hits.filter((h) => h.kind === 'code').every((h) => h.path.startsWith('src/')),
-    'no code hit from outside the workspace');
+  assert.equal(out.truncated, true);
 });
 
 test('searchKb without a workspace is unscoped, as before', async () => {
   const rows = [{ kind: 'code', entityId: 1, title: 't', body: 'b', ref: '/anywhere/a.ts', meta: { relPath: 'a.ts' } }];
-  const out = await searchKb({ query: 'a' }, { userId: 'u1', kb: { search: () => rows } });
+  let asked;
+  const out = await searchKb({ query: 'a' }, { userId: 'u1', kb: { search: (uid, opts) => { asked = opts; return rows; } } });
   assert.equal(out.hits.length, 1);
+  assert.equal(asked.codeRoot, undefined);
 });
