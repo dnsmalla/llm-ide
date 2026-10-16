@@ -1396,20 +1396,37 @@ struct UAGraphView: View {
         // unchanged docs is instant instead of re-chunking every file. Only the
         // repo-walk case is fingerprinted; explicit file-scoped generates always
         // recompute. (Requires laidOut so we never display a raw graph.)
+        //
+        // The fingerprint stats every doc under the repo, so it is computed off
+        // the main actor (as KnowledgeGraphService does); running it inline froze
+        // the UI on large repos for the length of the walk.
         if selectedFiles == nil, let repo,
-           let entry = graphSessionStore.entry(repo: activeRepoRoot, mode: Mode.data.rawValue),
+           let entry = graphSessionStore.entry(repo: repo, mode: Mode.data.rawValue),
            entry.laidOut, !entry.graph.nodes.isEmpty,
-           let cachedFp = entry.docFingerprint,
-           cachedFp == (engine?.docSetFingerprint(roots: [repo]) ?? cachedFp) {
-            selectedNode = nil
-            memoryChunks = entry.chunks
-            memoryDocCount = entry.docCount
-            fullData = entry.graph
-            status = .loaded(nodeCount: entry.graph.nodes.count, edgeCount: entry.graph.edges.count)
-            // The third `fullData =` site. Without this, `layout` could stay
-            // empty permanently on this path, so nothing was ever labelled at
-            // fit zoom — the defect the importance gating exists to fix.
-            adoptLayout(for: entry.graph, mode: .data)
+           let cachedFp = entry.docFingerprint {
+            status = .running
+            let gen = runGeneration
+            runTask = Task { [engine] in
+                let currentFp: String
+                if let engine {
+                    currentFp = await Task.detached(priority: .userInitiated) {
+                        engine.docSetFingerprint(roots: [repo])
+                    }.value
+                } else {
+                    currentFp = cachedFp   // no engine: the cache is all we have
+                }
+                if Task.isCancelled { if gen == self.runGeneration { self.status = .idle }; return }
+                guard gen == self.runGeneration else { return }
+                // Re-read after the await: the entry may have been replaced
+                // (or evicted) while the walk ran.
+                if let fresh = self.graphSessionStore.entry(repo: repo, mode: Mode.data.rawValue),
+                   fresh.laidOut, !fresh.graph.nodes.isEmpty,
+                   fresh.docFingerprint == currentFp {
+                    self.adoptCachedDocGraph(fresh)
+                    return
+                }
+                self.startDocGeneration(selectedFiles: nil, repo: repo, fingerprintRepo: repo, gen: gen)
+            }
             return
         }
 
@@ -1417,7 +1434,26 @@ struct UAGraphView: View {
         // Fingerprint only the repo-walk case so an unchanged re-generate can be
         // skipped next time; nil for file-scoped generates.
         let fingerprintRepo = selectedFiles == nil ? repo : nil
-        let gen = runGeneration
+        startDocGeneration(selectedFiles: selectedFiles, repo: repo,
+                           fingerprintRepo: fingerprintRepo, gen: runGeneration)
+    }
+
+    /// Show a cached, laid-out InfiniteBrain graph without regenerating.
+    private func adoptCachedDocGraph(_ entry: GraphSessionStore.Entry) {
+        selectedNode = nil
+        memoryChunks = entry.chunks
+        memoryDocCount = entry.docCount
+        fullData = entry.graph
+        status = .loaded(nodeCount: entry.graph.nodes.count, edgeCount: entry.graph.edges.count)
+        // The third `fullData =` site. Without this, `layout` could stay
+        // empty permanently on this path, so nothing was ever labelled at
+        // fit zoom — the defect the importance gating exists to fix.
+        adoptLayout(for: entry.graph, mode: .data)
+    }
+
+    /// Run the InfiniteBrain doc generate off the main actor and apply it.
+    private func startDocGeneration(selectedFiles: [URL]?, repo: URL?,
+                                    fingerprintRepo: URL?, gen: Int) {
         runTask = Task.detached(priority: .userInitiated) {
             guard let engine else {
                 await MainActor.run { if gen == self.runGeneration { self.status = .error(Self.noEngineMessage) } }
@@ -1481,14 +1517,22 @@ struct UAGraphView: View {
             status = .error(Self.noEngineMessage)
             return
         }
-        let docFp = engine.docSetFingerprint(roots: [repo])
-        let cachedDoc = graphSessionStore.entry(repo: activeRepoRoot, mode: Mode.data.rawValue)
-        let reusedDoc: (graph: CGData, chunks: [MemoryChunk], docs: Int)? =
-            (cachedDoc?.docFingerprint == docFp && !(cachedDoc?.graph.nodes.isEmpty ?? true))
-            ? (cachedDoc!.graph, cachedDoc!.chunks, cachedDoc!.docCount)
-            : nil
         let gen = runGeneration
         runTask = Task {
+            // The fingerprint stats every doc in the repo — off the main actor,
+            // as KnowledgeGraphService does, so the UI doesn't freeze on it.
+            let docFp = await Task.detached(priority: .userInitiated) {
+                engine.docSetFingerprint(roots: [repo])
+            }.value
+            if Task.isCancelled { if gen == self.runGeneration { self.status = .idle }; return }
+            guard gen == self.runGeneration else { return }
+            let cachedDoc = self.graphSessionStore.entry(repo: repo, mode: Mode.data.rawValue)
+            let reusedDoc: (graph: CGData, chunks: [MemoryChunk], docs: Int)?
+            if let cachedDoc, cachedDoc.docFingerprint == docFp, !cachedDoc.graph.nodes.isEmpty {
+                reusedDoc = (cachedDoc.graph, cachedDoc.chunks, cachedDoc.docCount)
+            } else {
+                reusedDoc = nil
+            }
             // Inspect the result. Discarding it meant a contended or failed
             // scan silently produced a doc-only "All" graph that looked like a
             // legitimate result, then got cached as such for the session.
