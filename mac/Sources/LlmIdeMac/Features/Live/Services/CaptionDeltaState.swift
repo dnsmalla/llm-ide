@@ -59,6 +59,9 @@ struct CaptionDeltaState {
             return closed
         }
         emptyStreak = 0
+        // Normalize names before alignment so "Tanaka & 2 others" and
+        // "Tanaka" are one speaker (growth matching compares speakers).
+        let snapshot = snapshot.map { (speaker: CaptionSpeaker.sanitize($0.speaker), text: $0.text) }
 
         let snapshotKeys = snapshot.map { LineKey(speaker: $0.speaker, text: $0.text) }
         let aligned = Self.align(previous: previous.map { LineKey(speaker: $0.speaker, text: $0.text) },
@@ -229,5 +232,50 @@ struct CaptionDeltaState {
     /// there is legitimately mid-"word".
     private static func isLatinWordCharacter(_ char: Character) -> Bool {
         char.isASCII && (char.isLetter || char.isNumber)
+    }
+}
+
+/// Speaker-name normalization for AX-scraped captions; the Mac twin of the
+/// extension's `sanitizeSpeaker()` (extension/src/content/caption-validation.ts).
+/// Keep the two in step: a divergence splits one person into two
+/// participants depending on which client captured the meeting.
+/// One deliberate difference: an empty result becomes "Unknown" here, while
+/// the extension returns "" and `isValidCaption` drops the line — the AX
+/// readers already validated the row, so its text is kept.
+enum CaptionSpeaker {
+    /// Name used when nothing usable is left after sanitizing.
+    static let unknown = "Unknown"
+    static let maxLength = 50
+
+    // Meeting UIs label a merged caption block "Tanaka & 2 others" /
+    // "田中 他2名"; the suffix changes as people join, which would otherwise
+    // mint a new "speaker" each time.
+    private static let combinedSuffix = try? NSRegularExpression(
+        pattern: #"\s*[&＆]\s*\d+\s*(?:others?|more)\b.*$"#,
+        options: [.caseInsensitive])
+    private static let combinedSuffixJA = try? NSRegularExpression(
+        pattern: #"\s*(?:他|ほか)\s*\d+\s*(?:名|人|さん)?.*$"#)
+    private static let controlCharacters = try? NSRegularExpression(
+        pattern: #"[\u0000-\u001F\u007F]"#)
+    private static let whitespaceRun = try? NSRegularExpression(pattern: #"\s+"#)
+
+    /// Strips control characters and combined-speaker suffixes, collapses
+    /// whitespace, trims, and caps the length.  Never returns an empty
+    /// string: an unusable name becomes `unknown` so the line is kept.
+    static func sanitize(_ raw: String) -> String {
+        var name = replace(controlCharacters, in: raw, with: " ")
+        name = replace(combinedSuffix, in: name, with: "")
+        name = replace(combinedSuffixJA, in: name, with: "")
+        name = replace(whitespaceRun, in: name, with: " ")
+        name = String(name.trimmingCharacters(in: .whitespacesAndNewlines).prefix(maxLength))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return name.isEmpty ? unknown : name
+    }
+
+    private static func replace(_ regex: NSRegularExpression?, in text: String,
+                                with template: String) -> String {
+        guard let regex else { return text }
+        let range = NSRange(text.startIndex..., in: text)
+        return regex.stringByReplacingMatches(in: text, range: range, withTemplate: template)
     }
 }

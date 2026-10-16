@@ -29,12 +29,22 @@ protocol CaptionScraper {
     /// dedupes.  Empty array means "nothing new this tick" or "the
     /// captions panel isn't open."
     func snapshot() -> [(speaker: String, text: String)]
+
+    /// True when the meeting's caption UI (panel/window) is currently in
+    /// the AX tree.  `AutoCaptureService` uses it as the "a meeting is
+    /// actually happening" signal, so it must be cheap and bounded.
+    /// NOTE: called off the main actor, like `snapshot()`.
+    func isMeetingUIPresent() -> Bool
 }
 
 extension CaptionScraper {
     func isAvailable() -> Bool {
         guard AXCaptionReader.canRead else { return false }
         return AXCaptionReader.axElement(forBundleID: bundleID) != nil
+    }
+
+    func isMeetingUIPresent() -> Bool {
+        !snapshot().isEmpty
     }
 }
 
@@ -97,6 +107,9 @@ final class CaptionOrchestrator: ObservableObject {
     private let idleAfter: TimeInterval = 5.0
     private var lastNewCaptionAt: Date = .distantPast
     private var isIdlePolling: Bool = false
+    /// True while a snapshot is being read off the main actor.  Ticks that
+    /// fire meanwhile are skipped, so a slow AX read never queues up reads.
+    private var snapshotInFlight = false
 
     // Write-through to the .partial.md file for the active session.
     // Held only while a recording is in flight.
@@ -174,6 +187,7 @@ final class CaptionOrchestrator: ObservableObject {
         startedAt = now
         captions.removeAll()
         deltaState = CaptionDeltaState()
+        snapshotInFlight = false
         observedSource = nil
         cachedScraperIndex = nil
         lastAvailabilityCheck = -.infinity
@@ -257,7 +271,10 @@ final class CaptionOrchestrator: ObservableObject {
             lastIngestStatus = .failure(message: "No active session.")
             return nil
         }
-        guard !captions.isEmpty else {
+        // `fileRows` is the full meeting; `captions` is the UI list, trimmed
+        // to `maxCaptionCount`, so it cannot decide emptiness or content.
+        let allRows = fileRows.keys.sorted().compactMap { fileRows[$0] }
+        guard !allRows.isEmpty else {
             // Nothing was captured, so the partial holds only its header.
             // Close it, delete it, and drop its recovery record — left in
             // place, the next launch offered to "recover" an empty meeting.
@@ -273,8 +290,8 @@ final class CaptionOrchestrator: ObservableObject {
         lastIngestStatus = .ingesting
         let durationSec = Int(Date().timeIntervalSince(startedAt))
         let dateISO = AppDateFormatter.isoString(startedAt)
-        let participants = Array(Set(captions.map(\.speaker))).sorted()
-        let transcript = captions.map { "[\($0.speaker)] \($0.text)" }.joined(separator: "\n")
+        let participants = Array(Set(allRows.map(\.speaker))).sorted()
+        let transcript = allRows.map { "[\($0.speaker)] \($0.text)" }.joined(separator: "\n")
 
         let request = IngestRequest(
             id: id,
@@ -336,7 +353,7 @@ final class CaptionOrchestrator: ObservableObject {
         do {
             _ = try await api.ingestMeeting(request)
             lastIngestStatus = .success(meetingId: id, durationSec: durationSec)
-            log.info("ingested meeting=\(id, privacy: .public) duration=\(durationSec)s lines=\(self.captions.count)")
+            log.info("ingested meeting=\(id, privacy: .public) duration=\(durationSec)s lines=\(allRows.count)")
             return id
         } catch {
             let msg = error.localizedDescription
@@ -392,15 +409,37 @@ final class CaptionOrchestrator: ObservableObject {
             log.info("active scraper: \(scraper.source.rawValue, privacy: .public)")
         }
 
+        // The AX read is IPC into the meeting app and can stall (a hung
+        // Teams); do it off the main actor and apply the result back here.
+        // AX calls are thread-safe; all state mutation stays on main.
+        guard !snapshotInFlight else { return }
+        snapshotInFlight = true
+        let session = sessionId
+        let source = scraper.source
+        Task.detached(priority: .userInitiated) { [weak self, scraper] in
+            let lines = scraper.snapshot()
+            await self?.applySnapshot(lines, source: source, session: session)
+        }
+    }
+
+    /// Main-actor half of `tick()`: applies one snapshot read off-main.
+    /// Dropped when capture stopped or restarted while it was being read.
+    private func applySnapshot(_ lines: [(speaker: String, text: String)],
+                               source: CaptureSource, session: String?) {
+        // A read from an earlier session must not clear the current
+        // session's in-flight flag.
+        guard session == sessionId else { return }
+        snapshotInFlight = false
+        guard isRunning else { return }
         let now = Date()
         let uptime = ProcessInfo.processInfo.systemUptime
-        let deltas = deltaState.ingest(scraper.snapshot())
+        let deltas = deltaState.ingest(lines)
         let sawNew = deltas.contains { delta in
             if case .closed = delta { return false }
             return true
         }
         for delta in deltas {
-            apply(delta, source: scraper.source, now: now, uptime: uptime)
+            apply(delta, source: source, now: now, uptime: uptime)
         }
 
         if captions.count > maxCaptionCount {

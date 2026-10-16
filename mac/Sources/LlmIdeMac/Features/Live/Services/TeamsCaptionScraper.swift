@@ -19,47 +19,87 @@ final class TeamsCaptionScraper: CaptionScraper {
     private let log = Logger(subsystem: "com.llmide.macapp", category: "Teams")
 
     func snapshot() -> [(speaker: String, text: String)] {
-        guard let app = AXCaptionReader.axElement(forBundleID: bundleID) else { return [] }
-        // Teams puts the captions inside the meeting window as a
-        // group, not in a separate window.  Find it by descending
-        // from any window and matching role+description.
-        var found: AXUIElement?
-        var windowsValue: CFTypeRef?
-        let status = AXUIElementCopyAttributeValue(app, kAXWindowsAttribute as CFString, &windowsValue)
-        if status == .success, let windows = windowsValue as? [AXUIElement] {
-            for window in windows {
-                AXCaptionReader.walk(window, maxDepth: 16) { el in
-                    if found != nil { return }
-                    if let role = AXCaptionReader.string(el, attribute: kAXRoleAttribute),
-                       role == kAXGroupRole,
-                       let desc = AXCaptionReader.string(el, attribute: kAXDescriptionAttribute),
-                       desc.lowercased().contains("live caption") {
-                        found = el
-                    }
-                }
-                if found != nil { break }
-            }
+        guard let panel = captionPanel() else { return [] }
+        let groups = AXCaptionReader.staticTextGroups(of: panel)
+        let out = Self.pairCaptionRows(groups)
+        if out.isEmpty && !groups.isEmpty {
+            log.debug("teams panel found but no speaker/body rows matched")
         }
-        guard let panel = found else { return [] }
+        return out
+    }
 
-        let texts = AXCaptionReader.descendants(of: panel, matching: kAXStaticTextRole)
-        var out: [(speaker: String, text: String)] = []
-        // Heuristic: alternate speaker / body lines.  Teams emits the
-        // name as one static-text node and the body as the next.
-        var pendingSpeaker: String?
-        for el in texts {
-            guard let raw = AXCaptionReader.string(el, attribute: kAXValueAttribute) else { continue }
-            let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-            if s.isEmpty { continue }
-            if pendingSpeaker == nil {
-                pendingSpeaker = s
-            } else {
-                out.append((pendingSpeaker!, s))
-                pendingSpeaker = nil
+    func isMeetingUIPresent() -> Bool {
+        captionPanel() != nil
+    }
+
+    /// The "Live captions" group inside any Teams window, or nil.
+    private func captionPanel() -> AXUIElement? {
+        guard let app = AXCaptionReader.axElement(forBundleID: bundleID) else { return nil }
+        // Teams puts the captions inside the meeting window as a group,
+        // not in a separate window, so descend from each window.  The walk
+        // stops at the first match (each further node is an IPC round trip
+        // into Teams) and is bounded by node budget + deadline.
+        let limits = AXCaptionReader.WalkLimits.within(0.5, maxDepth: 16)
+        var found: AXUIElement?
+        for window in AXCaptionReader.windows(of: app) {
+            AXCaptionReader.walk(window, limits: limits) { el in
+                guard let role = AXCaptionReader.string(el, attribute: kAXRoleAttribute),
+                      role == kAXGroupRole,
+                      let desc = AXCaptionReader.string(el, attribute: kAXDescriptionAttribute),
+                      desc.lowercased().contains("live caption") else {
+                    return .continueWalk
+                }
+                found = el
+                return .stop
             }
+            if found != nil || limits.isExpired { break }
         }
-        if out.isEmpty && !texts.isEmpty {
-            log.debug("teams panel found but speaker/body alternation didn't match")
+        return found
+    }
+
+    /// Pairs static-text groups (one group per AX parent) into rows.
+    ///
+    /// Structural pairing — first text of a group is the speaker, the rest
+    /// is the body — is used when the panel actually has per-row parents
+    /// (more than one group, or a single 2-text row).  A one-text group is a
+    /// continuation line: Teams omits the name on consecutive lines from the
+    /// same speaker, so it is attributed to the previous speaker (dropped
+    /// when there is none).  This keeps one stray node from re-pairing every
+    /// later row, which plain alternation did.
+    ///
+    /// When everything sits under ONE parent there is no structure to use;
+    /// fall back to alternating speaker/body over the flat list.
+    static func pairCaptionRows(_ groups: [[String]]) -> [(speaker: String, text: String)] {
+        let nonEmpty = groups.filter { !$0.isEmpty }
+        guard !nonEmpty.isEmpty else { return [] }
+        let isStructured = nonEmpty.count > 1 || nonEmpty[0].count == 2
+        guard isStructured else { return alternate(nonEmpty[0]) }
+
+        var out: [(speaker: String, text: String)] = []
+        var lastSpeaker: String?
+        for group in nonEmpty {
+            if group.count == 1 {
+                if let speaker = lastSpeaker { out.append((speaker, group[0])) }
+                continue
+            }
+            let speaker = group[0]
+            out.append((speaker, group.dropFirst().joined(separator: " ")))
+            lastSpeaker = speaker
+        }
+        return out
+    }
+
+    /// Flat-list heuristic: alternate speaker / body lines.
+    private static func alternate(_ texts: [String]) -> [(speaker: String, text: String)] {
+        var out: [(speaker: String, text: String)] = []
+        var pendingSpeaker: String?
+        for text in texts {
+            if let speaker = pendingSpeaker {
+                out.append((speaker, text))
+                pendingSpeaker = nil
+            } else {
+                pendingSpeaker = text
+            }
         }
         return out
     }

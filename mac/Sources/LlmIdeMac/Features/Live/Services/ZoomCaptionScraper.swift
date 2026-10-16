@@ -23,13 +23,7 @@ final class ZoomCaptionScraper: CaptionScraper {
     private let log = Logger(subsystem: "com.llmide.macapp", category: "Zoom")
 
     func snapshot() -> [(speaker: String, text: String)] {
-        guard let app = AXCaptionReader.axElement(forBundleID: bundleID) else { return [] }
-        // Match either English or localized Japanese caption window
-        // titles.  Adding more locales is a one-line addition here.
-        guard let captionsWindow = AXCaptionReader.window(in: app, titleContains: "Caption")
-                                ?? AXCaptionReader.window(in: app, titleContains: "字幕") else {
-            return []
-        }
+        guard let captionsWindow = captionsWindow() else { return [] }
         let texts = AXCaptionReader.descendants(of: captionsWindow, matching: kAXStaticTextRole)
         var out: [(speaker: String, text: String)] = []
         for el in texts {
@@ -56,5 +50,17 @@ final class ZoomCaptionScraper: CaptionScraper {
             log.debug("zoom captions panel found but produced no rows")
         }
         return out
+    }
+
+    func isMeetingUIPresent() -> Bool {
+        captionsWindow() != nil
+    }
+
+    private func captionsWindow() -> AXUIElement? {
+        guard let app = AXCaptionReader.axElement(forBundleID: bundleID) else { return nil }
+        // Match either English or localized Japanese caption window
+        // titles.  Adding more locales is a one-line addition here.
+        return AXCaptionReader.window(in: app, titleContains: "Caption")
+            ?? AXCaptionReader.window(in: app, titleContains: "字幕")
     }
 }

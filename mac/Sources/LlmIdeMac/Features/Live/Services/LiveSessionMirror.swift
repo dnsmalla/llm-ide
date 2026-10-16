@@ -57,6 +57,12 @@ final class LiveSessionMirror: ObservableObject {
     private var sessionDiscoveryTask: Task<Void, Never>?
     private var captionPollTask: Task<Void, Never>?
     private var sinceSeq: Int = 0
+    /// Every merged caption of the active session, never trimmed.  The
+    /// finalized note is built from this, not from `captions` (the display
+    /// list, capped at `maxCaptionCount`), so a long meeting keeps its start.
+    /// NOTE: memory grows with meeting length, like the orchestrator's
+    /// `fileRows`.
+    private var sessionCaptions: [MirroredCaption] = []
     /// Tracks which session IDs have already fired `.liveSessionFinalized`
     /// so a slow-poll tick after finalize doesn't fire twice.
     private var notifiedFinalizedSessions: Set<String> = []
@@ -85,6 +91,7 @@ final class LiveSessionMirror: ObservableObject {
 
     func clear() {
         captions.removeAll()
+        sessionCaptions.removeAll()
         sinceSeq = 0
         notifiedFinalizedSessions.removeAll()
     }
@@ -132,6 +139,7 @@ final class LiveSessionMirror: ObservableObject {
                     activeSession = top
                     sinceSeq = 0
                     captions.removeAll()
+                    sessionCaptions.removeAll()
                     startCaptionPoll()
                 }
             } else if activeSession != nil {
@@ -199,7 +207,8 @@ final class LiveSessionMirror: ObservableObject {
         !source.hasPrefix("agent-")
     }
 
-    private func mergeCaptionInPlace(_ incoming: MirroredCaption) {
+    static func mergeCaptionInPlace(_ incoming: MirroredCaption,
+                                    into captions: inout [MirroredCaption]) {
         let MERGE_WINDOW = 10
         let start = max(0, captions.count - MERGE_WINDOW)
         // Walk tail backwards — the most recent same-speaker entry is
@@ -243,7 +252,8 @@ final class LiveSessionMirror: ObservableObject {
                         source: c.source,
                         meta: c.meta
                     )
-                    mergeCaptionInPlace(incoming)
+                    Self.mergeCaptionInPlace(incoming, into: &captions)
+                    Self.mergeCaptionInPlace(incoming, into: &sessionCaptions)
                 }
                 sinceSeq = r.sequence
 
@@ -258,7 +268,7 @@ final class LiveSessionMirror: ObservableObject {
             if r.finalized,
                let sid = activeSession?.sessionId,
                !notifiedFinalizedSessions.contains(sid),
-               !captions.isEmpty {
+               !sessionCaptions.isEmpty {
                 notifiedFinalizedSessions.insert(sid)
                 let sessionTitle = activeSession?.meetingTitle ?? ""
                 let startedAt: Date? = activeSession.flatMap {
@@ -271,7 +281,7 @@ final class LiveSessionMirror: ObservableObject {
                 var seenSpeakers = [String]()
                 var seenSet = Set<String>()
                 var lines = [String]()
-                let humanCaptions = captions.filter { Self.isHumanTranscriptSource($0.source) }
+                let humanCaptions = sessionCaptions.filter { Self.isHumanTranscriptSource($0.source) }
                 guard !humanCaptions.isEmpty else { return r.finalized ? finalizedSlowdownNs : captionIntervalNs }
                 for c in humanCaptions {
                     let t = c.timestamp
