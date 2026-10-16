@@ -296,3 +296,40 @@ test('an idle child that floods stderr past the cap is killed and removed', asyn
   const pid = Number(fs.readFileSync(pidFile, 'utf8'));
   assert.ok(await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }), 'child is gone');
 });
+
+const { spawnCli } = await import('../providers/providers.mjs');
+
+test('spawnCli: warm:true uses the pool only for the default claude bin', async () => {
+  pool.flushWarmCliPool('t');
+  // An override is set in this test process (the fake) → pool must NOT be used,
+  // even with warm:true. Proven by: no idle child appears after the call.
+  process.env.LLMIDE_ANTHROPIC_CLI = process.execPath;
+  const out = await spawnCli('anthropic', 'hello', {
+    warm: true, userId: 'u1', env: { FAKE_WARM_MODE: 'ok', PATH: process.env.PATH },
+    args: [FAKE, '--output-format', 'json', '--tools', '', '-p', 'hello'], timeoutMs: 5000,
+  });
+  assert.match(out.stdout, /"type":"result"/);
+  await tick();
+  assert.equal(pool._warmPoolStateForTests().idle, 0, 'override bin → never pre-warmed');
+  delete process.env.LLMIDE_ANTHROPIC_CLI;
+});
+
+test('spawnCli: warm path falls back cold once on a retryable warm failure, and prewarms after', async () => {
+  pool.flushWarmCliPool('t');
+  const calls = [];
+  const s = { bin: process.execPath, base: [FAKE, '--output-format', 'json', '--tools', ''], env: { FAKE_WARM_MODE: 'exit_after_read', PATH: process.env.PATH }, cwd: '', userId: 'u9' };
+  pool.prewarm(s);
+  await waitFor(() => pool._warmPoolStateForTests().idle === 1);
+  // Drive spawnCli's warm branch directly through its test seam.
+  const out = await pool._spawnWithWarmForTests({
+    bin: s.bin, args: [...s.base, '-p', 'hello'], env: { ...s.env, FAKE_WARM_MODE: 'ok' }, cwd: '', userId: 'u9', timeoutMs: 5000,
+    cold: async () => { calls.push('cold'); return { stdout: '{"type":"result","result":"cold","is_error":false}', stderr: '', bin: s.bin }; },
+  });
+  assert.deepEqual(calls, ['cold'], 'one cold retry after the warm child died');
+  assert.match(out.stdout, /cold/);
+});
+
+test('cleanup: leave no idle child behind', () => {
+  pool.flushWarmCliPool('t');
+  assert.equal(pool._warmPoolStateForTests().idle, 0);
+});

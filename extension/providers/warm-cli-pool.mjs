@@ -20,6 +20,8 @@ import crypto from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import os from 'node:os';
+import fs from 'node:fs';
+import path from 'node:path';
 import { logger } from '../core/logger.mjs';
 
 const STREAM_FLAGS = ['-p', '--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose'];
@@ -286,3 +288,53 @@ export function rememberBinStamp(resolvedPath, mtimeMs) {
   binStamp = next;
   return false;
 }
+
+/** Resolve `bin` on PATH (absolute paths as-is). Null when not found. */
+function resolveBin(bin, env) {
+  if (bin.includes('/')) return fs.existsSync(bin) ? bin : null;
+  for (const dir of String(env?.PATH || process.env.PATH || '').split(path.delimiter)) {
+    const candidate = path.join(dir, bin);
+    try { fs.accessSync(candidate, fs.constants.X_OK); return candidate; } catch { /* next */ }
+  }
+  return null;
+}
+
+/**
+ * The warm branch of spawnCli: use an idle child for this exact call when
+ * there is one, else run `cold()`; either way leave one idle child behind
+ * for the next identical call. `cold` is spawnCli's own execFile promise
+ * factory, so result shapes are the cold path's by construction.
+ */
+export async function spawnWithWarm({ bin, args, env, cwd, userId, timeoutMs, signal, cold }) {
+  const split = splitPromptArgs(args);
+  if (!split) return cold();
+  const resolved = resolveBin(bin, env);
+  if (resolved) {
+    try { rememberBinStamp(resolved, fs.statSync(resolved).mtimeMs); } catch { /* unreadable → treat as unchanged */ }
+  }
+  const spec = { bin, base: split.base, env, cwd, userId };
+  // Computed BEFORE acquireWarm: nothing may throw between acquiring an idle
+  // child and handing it to runWarm (which kills it on failure).
+  const wantJson = split.base.includes('--output-format') && split.base[split.base.indexOf('--output-format') + 1] === 'json';
+  const entry = acquireWarm(spec);
+  let result;
+  try {
+    if (entry) {
+      try {
+        result = await runWarm(entry, split.prompt, { timeoutMs, signal, wantJson });
+      } catch (err) {
+        if (!isWarmRetryable(err)) throw err;
+        log.info('warm_cli_retry_cold', { code: err.code ?? null });
+        result = await cold();
+      }
+    } else {
+      result = await cold();
+    }
+  } finally {
+    // Respawn after every use (the classifier runs every turn). prewarm
+    // itself refuses when disabled, full, or memory is low.
+    prewarm(spec);
+  }
+  return result;
+}
+export const _spawnWithWarmForTests = spawnWithWarm;

@@ -23,6 +23,7 @@ import { Semaphore } from '../core/semaphore.mjs';
 import { recordUsage, flagQuota, recordRateLimits, resolveModel as resolveUsageModel, noteUnmeteredModelCall } from '../kb/usage.mjs';
 import { recordActivity } from '../kb/activity.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
+import { isWarmCliEnabled, spawnWithWarm } from './warm-cli-pool.mjs';
 
 // Throttle fallback activity events to one per (user, provider, fromModel) per
 // 10 min, so a sustained quota-exhaustion loop doesn't flood the feed.
@@ -819,7 +820,7 @@ export function minimalCliEnv(extraKeys = {}) {
  * `env` defaults to a minimal allowlist; callers pass their own to add
  * provider-specific vars (an API key, ANTHROPIC_BASE_URL, …).
  */
-export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, signal, args: argsOverride, cwd, model, isolated } = {}) {
+export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, signal, args: argsOverride, cwd, model, isolated, warm = false, userId } = {}) {
   const inv = cliInvocation(provider, prompt, { cwd, model, isolated });
   if (!inv) return Promise.reject(new Error(`spawnCli: unknown provider '${provider}'`));
   // `argsOverride` lets a caller drive the SAME provider binary with a different
@@ -828,10 +829,11 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
   // dedicated, bounded web-tool subprocess. The default loop still uses
   // `--tools ''` (no tools); only the web handlers opt in.
   const args = argsOverride || inv.args;
+  const resolvedEnv = env || minimalCliEnv();
   // Gate the spawn behind the process-wide concurrency cap. `run` acquires a
   // slot, spawns, and releases when the child settles — so excess concurrent
   // callers queue here rather than forking unbounded subprocesses.
-  return cliSemaphore.run(() => {
+  const cold = () => cliSemaphore.run(() => {
     // If the caller already aborted while we were queued for a slot, fail
     // fast instead of spawning a child only to immediately kill it.
     if (signal?.aborted) {
@@ -845,7 +847,7 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
         // "review my repo" turn read the wrong tree entirely. Undefined means
         // "inherit", preserving the previous behaviour for every caller that
         // does not pass one.
-        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: env || minimalCliEnv(), signal, ...(cwd ? { cwd } : {}) },
+        { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024, env: resolvedEnv, signal, ...(cwd ? { cwd } : {}) },
         (err, stdout, stderr) => {
           if (err) {
             err.stdout = stdout;
@@ -863,6 +865,13 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
       child.stdin?.end();
     });
   });
+  // The warm pool is for the mode classifier only (`warm: true`), on the
+  // real `claude` binary only: an LLMIDE_ANTHROPIC_CLI override is a test or
+  // a wrapper, and a wrapper may not speak stream-json. A warm run holds a
+  // semaphore slot only while it is answering, like a cold spawn would.
+  const warmEligible = warm && provider === 'anthropic' && isWarmCliEnabled() && !process.env.LLMIDE_ANTHROPIC_CLI;
+  if (!warmEligible) return cold();
+  return spawnWithWarm({ bin: inv.bin, args, env: resolvedEnv, cwd, userId, timeoutMs, signal, cold: () => cold() });
 }
 
 // Per-provider NDJSON line parser: (line) => { delta?, result?, isError? }.
