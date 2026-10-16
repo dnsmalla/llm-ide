@@ -6,9 +6,14 @@ struct TokenSavingSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
 
     @State private var status: RtkProvisioner.Status?
-    @State private var installing = false
-    @State private var resultMessage: String?
-    @State private var resultIsError = false
+
+    // Install progress and outcome live in the shared, observable state, not
+    // @State: this view is rebuilt whenever the Settings section changes, and
+    // view-local flags reset mid-install.
+    private var installState: RtkProvisioner.InstallState { RtkProvisioner.installState }
+    private var installing: Bool { installState.isInstalling }
+    private var resultMessage: String? { installState.lastResult?.message }
+    private var resultIsError: Bool { installState.lastResult?.ok == false }
 
     var body: some View {
         SettingsSectionCard(icon: "leaf", title: "Token Saving") {
@@ -57,12 +62,17 @@ struct TokenSavingSettingsSection: View {
                         Button("Install rtk") { Task { await install() } }
                             .buttonStyle(.borderedProminent)
                             .controlSize(.small)
-                            .disabled(installing || RtkProvisioner.isInstalling)
+                            .disabled(installing)
                     }
                 }
             }
         }
         .task { status = await RtkProvisioner.status() }
+        // Re-check when ANY install finishes — including one started by an
+        // earlier instance of this view the user navigated away from.
+        .onChange(of: installState.completedInstalls) { _, _ in
+            Task { status = await RtkProvisioner.status() }
+        }
     }
 
     private var statusText: String {
@@ -74,12 +84,7 @@ struct TokenSavingSettingsSection: View {
     }
 
     private func install() async {
-        installing = true
-        resultMessage = nil
-        defer { installing = false }
-        let result = await RtkProvisioner.install()
-        resultIsError = !result.ok
-        resultMessage = result.message
-        status = await RtkProvisioner.status()
+        // Status is refreshed by the onChange above once the install finishes.
+        _ = await RtkProvisioner.install()
     }
 }

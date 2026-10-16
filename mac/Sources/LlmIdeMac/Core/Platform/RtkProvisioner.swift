@@ -1,4 +1,5 @@
 import Foundation
+import Observation
 import os
 
 /// Detects and (on request) installs `rtk` (https://github.com/rtk-ai/rtk),
@@ -9,16 +10,33 @@ import os
 /// (`git push --force` included), so enabling it is left to the user.
 @MainActor
 enum RtkProvisioner {
-    /// App-wide, not view state: the Settings view is rebuilt on section
-    /// switch, and a second `brew install` would fail on brew's lock.
-    private(set) static var isInstalling = false
+    /// Install progress the Settings view can OBSERVE. App-wide, not view
+    /// state: the Settings view is rebuilt on section switch, and a second
+    /// `brew install` would fail on brew's lock. This used to be a plain
+    /// static Bool, which SwiftUI cannot track — leaving Settings mid-install
+    /// and coming back showed an enabled Install button, no spinner, and a
+    /// stale "Not installed" after the install finished.
+    @MainActor
+    @Observable
+    final class InstallState {
+        fileprivate(set) var isInstalling = false
+        /// Outcome of the most recent install, so a view built after it
+        /// finished can still show the message.
+        fileprivate(set) var lastResult: InstallResult?
+        /// Bumped when an install finishes; views re-read `status()` on change.
+        fileprivate(set) var completedInstalls = 0
+    }
+
+    static let installState = InstallState()
+
+    static var isInstalling: Bool { installState.isInstalling }
 
     enum Status: Equatable {
         case installed(version: String)
         case notInstalled(canInstall: Bool)
     }
 
-    struct InstallResult {
+    struct InstallResult: Equatable {
         let ok: Bool
         let message: String
     }
@@ -31,7 +49,9 @@ enum RtkProvisioner {
     // at the standard install locations directly.
     private static var rtkCandidates: [String] {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
-        return ["\(home)/.local/bin/rtk", "/opt/homebrew/bin/rtk", "/usr/local/bin/rtk"]
+        // ~/.cargo/bin: rtk is also distributed via `cargo install`.
+        return ["\(home)/.local/bin/rtk", "\(home)/.cargo/bin/rtk",
+                "/opt/homebrew/bin/rtk", "/usr/local/bin/rtk"]
     }
     private static let brewCandidates = ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]
 
@@ -46,15 +66,27 @@ enum RtkProvisioner {
     }
 
     static func install() async -> InstallResult {
-        guard !isInstalling else {
+        guard !installState.isInstalling else {
             return InstallResult(ok: false, message: "An install is already running.")
         }
-        isInstalling = true
-        defer { isInstalling = false }
+        installState.isInstalling = true
+        installState.lastResult = nil
+        let result = await runBrewInstall()
+        installState.lastResult = result
+        installState.isInstalling = false
+        installState.completedInstalls += 1
+        return result
+    }
+
+    private static func runBrewInstall() async -> InstallResult {
         guard let brew = firstExecutable(brewCandidates) else {
             return InstallResult(ok: false, message: "Homebrew isn't installed. Install it from brew.sh, then try again.")
         }
-        let result = await bash.execute("'\(brew)' install rtk", timeout: installTimeout)
+        // HOMEBREW_NO_AUTO_UPDATE: brew's implicit `brew update` before an
+        // install can take minutes on its own and eat the whole timeout for a
+        // single-formula install the user is watching a spinner for.
+        let result = await bash.execute("HOMEBREW_NO_AUTO_UPDATE=1 '\(brew)' install rtk",
+                                        timeout: installTimeout)
         if result.isSuccess {
             log.info("rtk installed via brew")
             return InstallResult(ok: true, message: "rtk installed.")
