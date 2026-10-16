@@ -16,7 +16,7 @@ import { purgeOldAuditRows } from './server/audit.mjs';
 import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLimit } from './core/errors.mjs';
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
-import { getDb, closeDb, statsAdmin, purgeExpiredJti, backupTo } from './kb/db.mjs';
+import { getDb, closeDb, statsAdmin, purgeExpiredJti, backupTo, pruneMissingCodeRepos } from './kb/db.mjs';
 import { stopAllAgents } from './agents/meeting-agent.mjs';
 
 import { migrationStatus } from './kb/migrations.mjs';
@@ -1129,6 +1129,14 @@ server.listen(PORT, HOST, () => {
       logger.warn('rate_limit_load_failed', { error: err.message });
     }
     runAuthGc('at_boot');
+    // Code index rows of repos whose folder was deleted or moved: nothing else
+    // removes them, and retrieval kept citing files that no longer exist.
+    try {
+      const pruned = pruneMissingCodeRepos();
+      if (pruned.rows > 0) logger.info('code_index_pruned_missing_repos', pruned);
+    } catch (err) {
+      logger.warn('code_index_prune_failed', { error: err.message });
+    }
     // Start the recurring sweep. unref() so the timer doesn't keep
     // the process alive past shutdown signals.
     authGcTimer = setInterval(() => runAuthGc('periodic'), AUTH_GC_INTERVAL_MS);
