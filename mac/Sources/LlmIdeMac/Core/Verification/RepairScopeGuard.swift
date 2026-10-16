@@ -186,12 +186,7 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     /// Default protected globs, matched against repo-relative paths by
     /// `GlobMatch`. Users extend (never replace) this via
     /// `LoopEngineConfig.extraProtectedGlobs`.
-    static let defaultProtectedGlobs: [String] = [
-        // 1. Tests — the definition of "passing".
-        "**/Tests/**", "**/tests/**", "**/test/**", "**/__tests__/**",
-        "**/*Tests.swift", "**/*Test.swift", "**/*.test.mjs", "**/*.test.ts",
-        "**/*.test.js", "**/*.test.tsx", "**/*_test.go", "**/test_*.py",
-        "**/*_test.py", "**/*.spec.ts", "**/*.spec.js",
+    static let defaultProtectedGlobs: [String] = testProtectedGlobs + [
         // 2. Build + verify configuration — what the stage command resolves to.
         "Makefile", "**/Makefile", "**/Package.swift", "**/package.json",
         "pytest.ini", "**/pytest.ini", "**/pyproject.toml", "**/setup.cfg",
@@ -206,6 +201,20 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         // the failing stage or raised the budgets would be re-read by the NEXT
         // scheduled run. App writes are exempt via `AppWrittenFiles`.
         "**/system/loop.json"
+    ]
+
+    /// Group 1 of `defaultProtectedGlobs`, on its own because it is the ONLY
+    /// group a code-applying Loop stage may touch under a `.revert`/`.stop`
+    /// policy (`LoopEngineRunner.strictViolations`): moving a module rewrites
+    /// test imports, and the Test stage after it verifies those edits. Build /
+    /// verify config and the harness's state stay strict for every stage —
+    /// they decide what "verified" means.
+    static let testProtectedGlobs: [String] = [
+        // 1. Tests — the definition of "passing".
+        "**/Tests/**", "**/tests/**", "**/test/**", "**/__tests__/**",
+        "**/*Tests.swift", "**/*Test.swift", "**/*.test.mjs", "**/*.test.ts",
+        "**/*.test.js", "**/*.test.tsx", "**/*_test.go", "**/test_*.py",
+        "**/*_test.py", "**/*.spec.ts", "**/*.spec.js",
     ]
 
     private let verifier: FaultVerifier

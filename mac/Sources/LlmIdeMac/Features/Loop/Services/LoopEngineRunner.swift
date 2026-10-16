@@ -2054,6 +2054,7 @@ final class LoopEngineRunner: ObservableObject {
             let allowed = !violations.isEmpty && stage.appliesCode
                 && config.protectedPathPolicy != .warn
                 && Self.effectivePolicy(for: stage, config: config) == .warn
+                && Self.strictViolations(violations, stage: stage, config: config).isEmpty
             let clean = violations.isEmpty || allowed
             stageStates[stage.id] = clean ? .passed : .failed
             let output: String
@@ -2098,6 +2099,39 @@ final class LoopEngineRunner: ObservableObject {
         switch policy {
         case .revert, .stop: return .warn
         case .warn, .off: return policy
+        }
+    }
+
+    /// The violations the relaxation above does NOT cover, which keep the
+    /// loop's own policy even for a code-applying stage.
+    ///
+    /// The `.warn` promotion used to apply to the whole protected set, so a
+    /// Refactor Apply could rewrite `Makefile`, `package.json`, `.githooks/**`
+    /// or `system/loop.json` — the things that DEFINE the verdict — and the
+    /// Test stage after it would "verify" against the rigged definition. Only
+    /// tests (`GitRepairScopeGuard.testProtectedGlobs`) and plain out-of-scope
+    /// source paths are relaxed. Test Setup additionally may edit package
+    /// manifests: adding a test dependency is its job (`testManifestNames`,
+    /// policed separately by `enforceTestSetupOnly`). Every other stage gets
+    /// all of `paths` back, i.e. no relaxation at all.
+    nonisolated static func strictViolations(_ paths: [String], stage: LoopStage,
+                                             config: LoopEngineConfig) -> [String] {
+        guard stage.appliesCode else { return paths }
+        let testGlobs = Set(GitRepairScopeGuard.testProtectedGlobs)
+        let nonTestGlobs = config.protectedGlobs.filter { !testGlobs.contains($0) }
+        let defaultGlobs = Set(GitRepairScopeGuard.defaultProtectedGlobs)
+        let nonDefaultGlobs = config.protectedGlobs.filter { !defaultGlobs.contains($0) }
+        return paths.filter { path in
+            // `checkScope`'s fail-closed "(unverifiable: …)" entry is not a path
+            // and matches no glob; it must never read as a relaxable edit.
+            if path.hasPrefix("(") { return true }
+            // Only the DEFAULT manifest globs are waived: a glob the project or
+            // a Self-Heal-family loop added on purpose still binds Setup.
+            if stage.isTestSetup, testManifestNames.contains((path as NSString).lastPathComponent),
+               !ProtectedGlobs.isProtected(path, by: nonDefaultGlobs) {
+                return false
+            }
+            return ProtectedGlobs.isProtected(path, by: nonTestGlobs)
         }
     }
 
@@ -2393,7 +2427,12 @@ final class LoopEngineRunner: ObservableObject {
                                  unlisted: Set<String> = [],
                                  created: Set<String> = []) async -> GuardedEditResult {
         appendLog(.error, "  [\(stage.name)] repair edited protected/out-of-scope path(s): \(paths.joined(separator: ", "))")
-        guard Self.effectivePolicy(for: stage, config: config) == .revert else {
+        // Only what the stage may not touch is reverted: for a code-applying
+        // stage its relaxed edits (tests, out-of-scope source) stay in place
+        // for the Test stage to verify; every other stage reverts all of them.
+        let strict = config.protectedPathPolicy == .revert
+            ? Self.strictViolations(paths, stage: stage, config: config) : []
+        guard !strict.isEmpty else {
             return .completed(.violated, violations: paths, changed: changed)
         }
         // A path that was already dirty before the edit cannot be reverted:
@@ -2401,8 +2440,8 @@ final class LoopEngineRunner: ObservableObject {
         // away the uncommitted edits that were there first (often the user's
         // own). Those are left in place and the verdict stays `.violated` —
         // the run is still blocked — so nothing is silently discarded.
-        let preDirty = paths.filter { before.dirtyPaths.contains($0) }
-        let revertable = paths.filter { !before.dirtyPaths.contains($0) }
+        let preDirty = strict.filter { before.dirtyPaths.contains($0) }
+        let revertable = strict.filter { !before.dirtyPaths.contains($0) }
         if !preDirty.isEmpty {
             appendLog(.warn, "  [\(stage.name)] not reverting already-modified path(s), to keep their earlier uncommitted edits: \(preDirty.joined(separator: ", "))")
         }
@@ -2425,7 +2464,8 @@ final class LoopEngineRunner: ObservableObject {
             return .completed(.violated, violations: paths, changed: changed)
         }
         appendLog(.info, "  [\(stage.name)] reverted \(revertable.count) protected/out-of-scope path(s)")
-        return .completed(preDirty.isEmpty ? .violatedReverted : .violated,
+        // `.violatedReverted` only when NOTHING violating is left in the tree.
+        return .completed(preDirty.isEmpty && strict.count == paths.count ? .violatedReverted : .violated,
                           violations: paths, changed: changed)
     }
 
@@ -2439,9 +2479,13 @@ final class LoopEngineRunner: ObservableObject {
                                   verdict: RepairScopeVerdict,
                                   violations: [String]) -> LoopEngineStatus? {
         guard verdict == .violated || verdict == .violatedReverted else { return nil }
-        switch Self.effectivePolicy(for: stage, config: config) {
+        // A code-applying stage is relaxed only for its relaxable paths: one
+        // strict hit (verify config, harness state) gets the loop's own policy.
+        let strict = Self.strictViolations(violations, stage: stage, config: config)
+        let policy = strict.isEmpty ? Self.effectivePolicy(for: stage, config: config) : config.protectedPathPolicy
+        switch policy {
         case .revert, .stop:
-            return .blocked(reason: .repairOutOfScope(stageName: stage.name, paths: violations))
+            return .blocked(reason: .repairOutOfScope(stageName: stage.name, paths: strict.isEmpty ? violations : strict))
         case .warn where config.protectedPathPolicy != .warn:
             appendLog(.warn, "  [\(stage.name)] protected-path edit(s) kept for a code-applying stage "
                       + "(the test stage after it verifies them)")
