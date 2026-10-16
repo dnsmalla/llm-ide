@@ -124,6 +124,10 @@ final class LiveSessionMirror: ObservableObject {
             // recently active one — list is sorted by lastWrite desc.
             if let top = pick {
                 if activeSession?.sessionId != top.sessionId {
+                    await finishEndingSession()
+                    // Re-check after the await: polling may have stopped, or a
+                    // concurrent discovery (setPreferredSession) already switched.
+                    guard isPolling, activeSession?.sessionId != top.sessionId else { return }
                     log.info("subscribing to session: \(top.sessionId, privacy: .public)")
                     activeSession = top
                     sinceSeq = 0
@@ -134,8 +138,10 @@ final class LiveSessionMirror: ObservableObject {
                 // Active session went away (finalized or evicted).
                 // Stop polling captions; discovery loop continues.
                 log.info("no active sessions — pausing caption poll")
-                captionPollTask?.cancel()
-                captionPollTask = nil
+                let outgoing = activeSession?.sessionId
+                await finishEndingSession()
+                // A concurrent discovery may have picked a session meanwhile.
+                guard isPolling, activeSession?.sessionId == outgoing else { return }
                 activeSession = nil
             }
         } catch {
@@ -143,6 +149,19 @@ final class LiveSessionMirror: ObservableObject {
             // restart) — surface but don't stop the loop.
             lastError = error.localizedDescription
         }
+    }
+
+    /// Stop the caption poll and poll the outgoing session ONE more time.
+    /// The server drops a finalized session from the session list, so when
+    /// discovery ran before the caption poll saw `finalized` (a 1.5 s poll vs
+    /// a 5 s discovery tick), the session vanished, the poll was cancelled,
+    /// and the meeting note was never generated. The final poll sees the
+    /// flag and fires `.liveSessionFinalized`; it is deduped per session.
+    private func finishEndingSession() async {
+        guard activeSession != nil else { return }
+        captionPollTask?.cancel()
+        captionPollTask = nil
+        _ = await pollOnce()
     }
 
     private func startCaptionPoll() {
