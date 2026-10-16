@@ -466,9 +466,9 @@ struct AppShell: View {
             reloadDocTemplatesForActiveProject()
         }
         .task(id: projectStore.activeProject?.localPath) {
-            // Keyed on the PATH, not on `.activeProjectChanged`: ProjectStore
-            // also posts that notification for a repo-link change with the
-            // project unchanged, and dropping generation state there would
+            // Keyed on the PATH, not on a notification: a repo-link change
+            // leaves the project unchanged (it posts the separate
+            // `.activeProjectLinkChanged`), and dropping generation state there would
             // reproduce the very symptom this branch fixes — a run in flight,
             // then an empty model on return — through a rarer door.
             //

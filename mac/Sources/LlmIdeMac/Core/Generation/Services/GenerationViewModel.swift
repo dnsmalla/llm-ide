@@ -91,8 +91,8 @@ final class GenerationViewModel: ObservableObject {
     /// the open project, rather than offering Open/Reveal on another
     /// project's file. Derived state beats a notification here — a project
     /// can also be re-linked in place (`ProjectStore.setLinkedRepo` posts
-    /// `.activeProjectChanged` for the SAME project), which should not make
-    /// the notice vanish.
+    /// `.activeProjectLinkChanged` for the SAME project), which should not
+    /// make the notice vanish.
     @Published private(set) var lastSavedProjectRoot: URL?
 
     /// Drop the setup view's "Saved …" row. Separate from `resetToIdle()`,

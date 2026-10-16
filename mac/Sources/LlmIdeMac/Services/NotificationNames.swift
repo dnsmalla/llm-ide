@@ -104,6 +104,11 @@ extension Notification.Name {
     /// close, switch). Observers: code-assist context refresh, code
     /// graph rebuilds, etc.
     static let activeProjectChanged = Notification.Name("activeProjectChanged")
+    /// Posted by ProjectStore when the SAME active project's linked repo
+    /// changes. Kept apart from `activeProjectChanged`, which AppShell treats
+    /// as a project switch and answers by tearing the whole environment down:
+    /// saving a token in Settings (which re-links) remounted every section.
+    static let activeProjectLinkChanged = Notification.Name("activeProjectLinkChanged")
     /// An LLM source's enable state, item selection, or contents changed
     /// (Library → LLM Sources). The sidebar list and the chat "/" menu cache
     /// both refresh on it.

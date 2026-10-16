@@ -189,7 +189,7 @@ final class ProjectStore: ObservableObject {
         } catch {
             log.error("scaffold refresh after repo link failed at \(root.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
-        NotificationCenter.default.post(name: .activeProjectChanged, object: nil)
+        NotificationCenter.default.post(name: .activeProjectLinkChanged, object: nil)
     }
 
     /// Derive the active project's `linkedRepo` from whichever saved repo is
