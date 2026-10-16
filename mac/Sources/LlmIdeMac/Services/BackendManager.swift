@@ -12,6 +12,73 @@ struct BackendLogLine: Identifiable, Hashable {
     enum Stream: String { case stdout, stderr, info }
 }
 
+/// Reassembles lines from a pipe's arbitrary byte chunks.
+///
+/// A pipe read ends wherever the kernel buffer did, not at a line or even a
+/// character boundary. Decoding each chunk on its own dropped any chunk that
+/// split a multi-byte UTF-8 character (`String(data:encoding:)` returns nil),
+/// and a line split across two reads became two log lines — feeding broken
+/// fragments to `ServerStderrIncidentParser`. Splitting on the `\n` byte is
+/// safe: 0x0A never occurs inside a multi-byte UTF-8 sequence.
+struct PipeLineAccumulator: Sendable {
+    /// A line longer than this with no newline is emitted as-is, so a
+    /// runaway writer cannot grow the buffer without bound.
+    static let maxPendingBytes = 256 * 1_024
+
+    private var pending: [UInt8] = []
+
+    /// Appends `chunk` and returns every line it completed (without the
+    /// trailing `\n` / `\r\n`). Empty lines are returned too.
+    mutating func feed(_ chunk: Data) -> [String] {
+        pending.append(contentsOf: chunk)
+        var lines: [String] = []
+        var start = 0
+        while let newline = pending[start...].firstIndex(of: 0x0A) {
+            lines.append(Self.decode(pending[start..<newline]))
+            start = newline + 1
+        }
+        pending.removeFirst(start)
+        if pending.count > Self.maxPendingBytes {
+            lines.append(Self.decode(pending[...]))
+            pending.removeAll(keepingCapacity: true)
+        }
+        return lines
+    }
+
+    /// Returns the unterminated remainder (if any) and clears it — call at EOF.
+    mutating func finish() -> [String] {
+        guard !pending.isEmpty else { return [] }
+        defer { pending.removeAll() }
+        return [Self.decode(pending[...])]
+    }
+
+    /// Lossy decode: an invalid sequence becomes U+FFFD instead of
+    /// discarding the whole line.
+    private static func decode(_ bytes: ArraySlice<UInt8>) -> String {
+        var line = bytes
+        if line.last == 0x0D { line = line.dropLast() }
+        return String(decoding: line, as: UTF8.self)
+    }
+}
+
+/// Lock-guarded `PipeLineAccumulator` shared between a pipe's
+/// `readabilityHandler` (background queue) and the termination handler's
+/// final flush (main actor).
+final class PipeLineBuffer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var accumulator = PipeLineAccumulator()
+
+    func feed(_ chunk: Data) -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return accumulator.feed(chunk)
+    }
+
+    func finish() -> [String] {
+        lock.lock(); defer { lock.unlock() }
+        return accumulator.finish()
+    }
+}
+
 /// Supervises the local Node `server.mjs` process and exposes its
 /// stdout/stderr as a capped, scrollable log buffer that the Settings
 /// UI can render directly.
@@ -373,13 +440,18 @@ final class BackendManager {
         let stdErr = Pipe()
         proc.standardOutput = stdOut
         proc.standardError = stdErr
-        attachReader(stdOut.fileHandleForReading, stream: .stdout)
-        attachReader(stdErr.fileHandleForReading, stream: .stderr)
+        let stdOutLines = attachReader(stdOut.fileHandleForReading, stream: .stdout)
+        let stdErrLines = attachReader(stdErr.fileHandleForReading, stream: .stderr)
 
         proc.terminationHandler = { [weak self] finished in
             let exitCode = finished.terminationStatus
             Task { @MainActor [weak self] in
                 guard let self else { return }
+                // The readers are cleared below, possibly before they saw
+                // EOF: emit any final line that had no trailing newline (a
+                // crash message often doesn't). A no-op if EOF already flushed.
+                self.appendLines(stdOutLines.finish(), stream: .stdout)
+                self.appendLines(stdErrLines.finish(), stream: .stderr)
                 self.append("--- Server exited (code \(exitCode)) ---", stream: .info)
                 self.pid = nil
                 self.process = nil
@@ -977,23 +1049,30 @@ final class BackendManager {
         log.removeAll(keepingCapacity: true)
     }
 
-    private func attachReader(_ handle: FileHandle, stream: BackendLogLine.Stream) {
+    /// Returns the line buffer so the termination handler can flush a final
+    /// unterminated line if it clears the handler before EOF is read.
+    private func attachReader(_ handle: FileHandle, stream: BackendLogLine.Stream) -> PipeLineBuffer {
+        let buffer = PipeLineBuffer()
         handle.readabilityHandler = { [weak self] fh in
             let data = fh.availableData
+            let lines: [String]
             if data.isEmpty {
                 fh.readabilityHandler = nil
-                return
+                lines = buffer.finish()
+            } else {
+                lines = buffer.feed(data)
             }
-            guard let text = String(data: data, encoding: .utf8) else { return }
+            guard !lines.isEmpty else { return }
             Task { @MainActor [weak self] in
-                guard let self else { return }
-                for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
-                    let str = String(line)
-                    if !str.isEmpty {
-                        self.append(str, stream: stream)
-                    }
-                }
+                self?.appendLines(lines, stream: stream)
             }
+        }
+        return buffer
+    }
+
+    private func appendLines(_ lines: [String], stream: BackendLogLine.Stream) {
+        for line in lines where !line.isEmpty {
+            append(line, stream: stream)
         }
     }
 
