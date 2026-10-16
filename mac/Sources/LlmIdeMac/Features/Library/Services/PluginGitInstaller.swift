@@ -16,6 +16,7 @@ enum PluginGitInstaller {
     enum InstallError: LocalizedError {
         case invalidURL
         case unsupportedScheme(String)
+        case localHost
         case cloneFailed(String)
         case zipFailed(String)
         case noGitCLI
@@ -25,6 +26,8 @@ enum PluginGitInstaller {
             case .invalidURL: return "That doesn't look like a valid Git URL."
             case .unsupportedScheme(let s):
                 return "URL scheme '\(s)' not supported. Use https:// or git@."
+            case .localHost:
+                return "Local, private-network and link-local hosts are not supported."
             case .cloneFailed(let msg): return "Clone failed: \(msg)"
             case .zipFailed(let msg):   return "Could not package the cloned repo: \(msg)"
             case .noGitCLI:             return "Git is not installed or not on PATH."
@@ -50,22 +53,33 @@ enum PluginGitInstaller {
     ///   - https://github.com/owner/repo.git
     ///   - https://gitlab.com/owner/repo
     ///   - git@github.com:owner/repo.git
-    /// Anything else (file://, ssh:// to a random host, javascript:,
-    /// etc.) gets rejected before we touch the shell.
+    /// Anything else (http://, file://, ssh:// to a random host, javascript:,
+    /// etc.) gets rejected before we touch the shell. Plain http:// is refused
+    /// because the clone becomes installed, executable plugin code: anyone on
+    /// the path could swap it, and the recorded commit would not catch that.
     static func normalize(_ raw: String) throws -> String {
         let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { throw InstallError.invalidURL }
 
-        // Allow git@host:owner/repo shorthand verbatim.
+        // Allow git@host:owner/repo shorthand verbatim — but its host gets the
+        // same local/private check as an https URL.
         if trimmed.hasPrefix("git@") {
-            guard trimmed.contains(":") else { throw InstallError.invalidURL }
+            let afterAt = trimmed.dropFirst("git@".count)
+            // git's scp-style parser accepts a bracketed host (`git@[::1]:o/r`),
+            // which the first-colon split below would read as "[" and pass.
+            // No real plugin host needs an IP-literal SSH remote; refuse it.
+            guard !afterAt.hasPrefix("[") else { throw InstallError.localHost }
+            guard let colon = afterAt.firstIndex(of: ":") else { throw InstallError.invalidURL }
+            let host = String(afterAt[..<colon]).lowercased()
+            guard !host.isEmpty else { throw InstallError.invalidURL }
+            if isDisallowedHost(host) { throw InstallError.localHost }
             return trimmed
         }
 
         guard let url = URL(string: trimmed), let scheme = url.scheme?.lowercased() else {
             throw InstallError.invalidURL
         }
-        guard scheme == "https" || scheme == "http" else {
+        guard scheme == "https" else {
             throw InstallError.unsupportedScheme(scheme)
         }
         guard let host = url.host?.lowercased(), !host.isEmpty else {
@@ -75,11 +89,88 @@ enum PluginGitInstaller {
         // logged and shown in the install alert, and the server refuses such a URL
         // as provenance anyway (so the install could never be update-checked).
         guard url.user == nil, url.password == nil else { throw InstallError.invalidURL }
-        // Block obviously local hosts to keep things sane.
-        if host == "localhost" || host == "127.0.0.1" || host.hasSuffix(".local") {
-            throw InstallError.unsupportedScheme("local hosts not supported")
-        }
+        // The clone runs on THIS Mac, so a URL naming a loopback or private
+        // address would let a pasted link probe services on the user's machine
+        // or LAN. Checked by literal only — a public name that resolves to a
+        // private address (DNS rebinding) is not caught here.
+        if isDisallowedHost(host) { throw InstallError.localHost }
         return trimmed
+    }
+
+    /// True for a host that names this machine or a non-public network:
+    /// `localhost` / `*.localhost` / `*.local`, and IP literals in loopback,
+    /// unspecified, private, CGNAT, link-local, multicast or broadcast ranges.
+    /// A numeric host that is not a plain dotted quad (`2130706433`,
+    /// `0x7f.1`, `127.1`) is refused outright: git/curl would accept those
+    /// shorthand forms of 127.0.0.1, so they cannot be range-checked as text.
+    static func isDisallowedHost(_ rawHost: String) -> Bool {
+        var host = rawHost.lowercased()
+        if host.hasPrefix("[") && host.hasSuffix("]") { host = String(host.dropFirst().dropLast()) }
+        // A trailing dot is the same name to the resolver ("localhost.").
+        while host.hasSuffix(".") { host.removeLast() }
+        if host.isEmpty { return true }
+        if host == "localhost" || host.hasSuffix(".localhost") || host.hasSuffix(".local") {
+            return true
+        }
+        if host.contains(":") { return isDisallowedIPv6(host) }
+        let labels = host.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard let last = labels.last else { return true }
+        // A real TLD is never all digits and never 0x-prefixed, so a host
+        // ending in such a label is an IP literal of some form.
+        let lastIsNumeric = !last.isEmpty && (last.allSatisfy(\.isNumber) || last.hasPrefix("0x"))
+        guard lastIsNumeric else { return false }
+        guard let octets = dottedQuad(labels) else { return true }
+        return isDisallowedIPv4(octets)
+    }
+
+    /// Strict a.b.c.d with each part 0–255 in plain decimal (no leading zeros,
+    /// which some parsers read as octal); nil for any other numeric form.
+    private static func dottedQuad(_ labels: [String]) -> [Int]? {
+        guard labels.count == 4 else { return nil }
+        var octets: [Int] = []
+        for label in labels {
+            guard !label.isEmpty, label.count <= 3, label.allSatisfy({ $0.isASCII && $0.isNumber }),
+                  label == "0" || !label.hasPrefix("0"),
+                  let value = Int(label), value <= 255 else { return nil }
+            octets.append(value)
+        }
+        return octets
+    }
+
+    private static func isDisallowedIPv4(_ octet: [Int]) -> Bool {
+        switch (octet[0], octet[1]) {
+        case (0, _), (10, _), (127, _): return true          // this-network, private, loopback
+        case (169, 254): return true                          // link-local
+        case (172, 16...31): return true                      // private
+        case (192, 168): return true                          // private
+        case (100, 64...127): return true                     // carrier-grade NAT
+        case (224...255, _): return true                      // multicast, reserved, broadcast
+        default: return false
+        }
+    }
+
+    /// Parses with `inet_pton` so every spelling of an address (`::1`,
+    /// `0:0:0:0:0:0:0:1`, `::ffff:127.0.0.1`) is judged by its bytes. Anything
+    /// that does not parse is refused — a host with a colon is not a name.
+    private static func isDisallowedIPv6(_ host: String) -> Bool {
+        // Drop a zone id ("fe80::1%en0"); zoned addresses are link-local anyway.
+        let address = host.split(separator: "%", maxSplits: 1).first.map(String.init) ?? host
+        var storage = in6_addr()
+        guard inet_pton(AF_INET6, address, &storage) == 1 else { return true }
+        let bytes = withUnsafeBytes(of: &storage) { Array($0) }
+        if bytes.allSatisfy({ $0 == 0 }) { return true }                          // ::
+        if bytes[0..<15].allSatisfy({ $0 == 0 }) && bytes[15] == 1 { return true } // ::1
+        if bytes[0] == 0xfe && (bytes[1] & 0xc0) == 0x80 { return true }           // fe80::/10
+        if (bytes[0] & 0xfe) == 0xfc { return true }                               // fc00::/7
+        if bytes[0] == 0xff { return true }                                        // multicast
+        // IPv4-mapped (::ffff:a.b.c.d) and IPv4-compatible (::a.b.c.d) carry
+        // an IPv4 address in the last four bytes — judge that address.
+        let isMapped = bytes[0..<10].allSatisfy({ $0 == 0 }) && bytes[10] == 0xff && bytes[11] == 0xff
+        let isCompatible = bytes[0..<12].allSatisfy({ $0 == 0 })
+        if isMapped || isCompatible {
+            return isDisallowedIPv4(bytes[12..<16].map { Int($0) })
+        }
+        return false
     }
 
     /// Clone shallowly, zip, return the zip URL. `ref` optional —
