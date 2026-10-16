@@ -440,9 +440,16 @@ struct RepoIssueDetailSheet: View {
                 if metaBusy { ProgressView().controlSize(.small).scaleEffect(0.6) }
                 if hasEdit {
                     Menu { menu() } label: {
-                        Text("Edit").font(.system(size: 11, weight: .semibold)).foregroundStyle(t.accent)
+                        Text("Edit").font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(metaBusy ? t.textMuted : t.accent)
                     }
                     .menuStyle(.borderlessButton).fixedSize()
+                    // Each label/assignee toggle sends the FULL set computed
+                    // from `current`; a second toggle fired before the first
+                    // returns would be built from the stale set and silently
+                    // drop the first change. Locking the menus until the
+                    // server answers keeps every edit based on the latest state.
+                    .disabled(metaBusy)
                 }
             }
             content()
@@ -737,6 +744,9 @@ struct RepoIssueDetailSheet: View {
     }
 
     private func applyMetaUpdate(_ payload: RepoIssuePayload) async {
+        // Belt-and-braces for the disabled menus: a payload built while
+        // another update is in flight was computed from stale `current`.
+        guard !metaBusy else { return }
         metaBusy = true; topError = nil
         defer { metaBusy = false }
         do {
