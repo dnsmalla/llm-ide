@@ -58,7 +58,11 @@ extension AutoCodeUpdateService {
     /// user's own `fix/typo` WIP branch matches neither and must never be
     /// pushed on their behalf.
     nonisolated static func isPipelineBranch(_ branch: String) -> Bool {
-        if branch.hasPrefix("fix/custom-") { return true }
+        // `fix/custom-<slug>-<token>` where `<token>` is `shortToken()`'s 8 hex
+        // chars — a bare prefix match also claimed a user's `fix/custom-login`.
+        if branch.hasPrefix("fix/custom-") {
+            return branch.range(of: #"^fix/custom-.*-[0-9a-f]{8}$"#, options: .regularExpression) != nil
+        }
         guard issueNumber(fromFixBranch: branch) != nil else { return false }
         let afterDigits = branch.dropFirst(4).drop(while: { $0.isNumber })
         return afterDigits.first == "-"
@@ -970,6 +974,9 @@ extension AutoCodeUpdateService {
         activeProcess = nil
         var emptyImplementBranch: String?
         var keepWorktreeForRecovery = false
+        // Set when the branch ends up with commits from a run that did not
+        // finish cleanly (stopped, or the CLI exited non-zero).
+        var hasUnfinishedCommits = false
         // Commits the CLI made itself, judged by the tip moving in the worktree.
         let tip = implementBranch == nil ? nil : await Task.detached { Self.headSha(at: worktree) }.value
         let cliCommitted = baseSha.map { Self.cliMadeCommits(tip: tip, base: $0) } ?? false
@@ -977,6 +984,7 @@ extension AutoCodeUpdateService {
             // Stopped mid-run (the CLI did not finish cleanly): the edits are half-done — drop the worktree
             // instead of committing them as if the task finished. Commits the CLI already made stay on the branch.
             if cliCommitted {
+                hasUnfinishedCommits = true
                 logStore.append(logStoreId, "Stopped; the commits already made are kept on \(implementBranch), unfinished edits discarded.")
             } else {
                 logStore.append(logStoreId, "Stopped; discarded the unfinished checkout.")
@@ -988,6 +996,9 @@ extension AutoCodeUpdateService {
             // "Nothing to commit" (the CLI made no edits) exits non-zero; then
             // the empty branch is deleted rather than left behind.
             let committed = await Task.detached { Self.commitAll(at: worktree, message: "Auto task: \(logSuffix)") }.value
+            // A failed CLI run's edits are still committed so nothing is lost,
+            // but they are parked below rather than left pushable.
+            hasUnfinishedCommits = !result && (committed || cliCommitted)
             if committed {
                 logStore.append(logStoreId, "Committed on branch \(implementBranch) (your checkout is unchanged).")
             } else {
@@ -1022,6 +1033,15 @@ extension AutoCodeUpdateService {
         // has checked out, so the delete must follow the removal.
         if let empty = emptyImplementBranch {
             _ = await Task.detached { Self.branchDelete(empty, at: localPath) }.value
+        }
+        // Same parking as the issue path: `fix/custom-…` branches are pushed
+        // and opened as merge requests by review-merge, so half-done work from
+        // a stopped or failed run moves under `autotask-wip/` instead.
+        if let implementBranch, hasUnfinishedCommits, !keepWorktreeForRecovery {
+            let parked = "autotask-wip/\(implementBranch)"
+            if await Task.detached(operation: { Self.branchRename(implementBranch, to: parked, at: localPath) }).value {
+                logStore.append(logStoreId, "Run did not finish cleanly; kept as \(parked) (not published).")
+            }
         }
         await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)", tool: cliTool)
         return result

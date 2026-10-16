@@ -36,7 +36,12 @@ struct ReviewMergeCandidatesTests {
 
     @Test func pipelineBranchRecognition() {
         #expect(AutoCodeUpdateService.isPipelineBranch("fix/12-null-crash"))
-        #expect(AutoCodeUpdateService.isPipelineBranch("fix/custom-lint-ab12"))
+        #expect(AutoCodeUpdateService.isPipelineBranch("fix/custom-lint-ab12cd34"))
+        // A task name made only of symbols slugs to "".
+        #expect(AutoCodeUpdateService.isPipelineBranch("fix/custom--ab12cd34"))
+        // A user's own branch that merely starts with `fix/custom-` is not ours.
+        #expect(!AutoCodeUpdateService.isPipelineBranch("fix/custom-login"))
+        #expect(!AutoCodeUpdateService.isPipelineBranch("fix/custom-lint-ab12"))
         #expect(!AutoCodeUpdateService.isPipelineBranch("fix/typo"))
         #expect(!AutoCodeUpdateService.isPipelineBranch("fix/12"))
         #expect(!AutoCodeUpdateService.isPipelineBranch("fix/12typo"))
