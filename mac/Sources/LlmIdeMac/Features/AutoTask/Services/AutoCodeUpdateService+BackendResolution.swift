@@ -133,17 +133,41 @@ extension AutoCodeUpdateService {
     /// threshold so a GitHub page that's shortened by PR filtering
     /// doesn't false-stop pagination — we only stop when the page is
     /// clearly the last (< 10 items) or empty.
-    func fetchAllIssues(client: RepoBackend, projectId: String) async throws -> [RepoIssue] {
+    ///
+    /// `isComplete` is false when the ceiling cut the walk short: the list
+    /// is then missing the OLDEST issues, so a title de-dup against it can
+    /// re-file an issue that already exists. Callers that create issues must
+    /// fail closed on an incomplete list.
+    func fetchAllIssues(client: RepoBackend, projectId: String) async throws -> IssueFetchResult {
         let filter = RepoIssueFilter(state: .all)
-        let maxPages = 20
-        var out: [RepoIssue] = []
-        for page in 1...maxPages {
-            let result = try await client.listIssuePage(projectId: projectId, filter: filter, page: page)
-            out.append(contentsOf: result.issues)
-            // Stop when upstream has no more. An EMPTY page is not the end on
-            // GitHub: a full page of pull requests filters down to nothing.
-            if !result.hasMore { break }
+        return try await Self.paginateIssues(maxPages: Self.issueFetchMaxPages) { page in
+            try await client.listIssuePage(projectId: projectId, filter: filter, page: page)
         }
-        return out
+    }
+
+    /// 100 pages × 100/page = 10 000 issues. The old ceiling (20 pages) was
+    /// low enough that a busy repo silently lost its older issues from the
+    /// de-dup set; this one stays bounded so a misbehaving `hasMore` cannot
+    /// page forever, and a repo past it fails closed instead of guessing.
+    static let issueFetchMaxPages = 100
+
+    struct IssueFetchResult {
+        var issues: [RepoIssue]
+        /// True when upstream reported no further pages before the ceiling.
+        var isComplete: Bool
+    }
+
+    /// The pagination walk, split out from the backend so it can be tested
+    /// with a closure. Stops on `hasMore == false` — an EMPTY page is not the
+    /// end on GitHub, where a full page of pull requests filters down to nothing.
+    static func paginateIssues(maxPages: Int,
+                               fetchPage: (Int) async throws -> RepoIssuePage) async throws -> IssueFetchResult {
+        var out: [RepoIssue] = []
+        for page in 1...max(1, maxPages) {
+            let result = try await fetchPage(page)
+            out.append(contentsOf: result.issues)
+            if !result.hasMore { return IssueFetchResult(issues: out, isComplete: true) }
+        }
+        return IssueFetchResult(issues: out, isComplete: false)
     }
 }

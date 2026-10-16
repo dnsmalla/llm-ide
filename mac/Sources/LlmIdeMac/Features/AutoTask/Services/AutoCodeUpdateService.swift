@@ -36,6 +36,17 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// "no linked repo".
     @Published var lastResolveDiagnosis: String? = nil
     @Published var taskErrors: [String: String] = [:]
+    /// "Your selected template is not approved, so the task ran its own prompt"
+    /// — kept apart from `taskErrors` because every successful task body clears
+    /// `taskErrors`, which wiped this warning the moment the run it describes
+    /// finished. Set/cleared only by `noteUnapprovedTemplate`; read through
+    /// `visibleTemplateWarning(for:)`, which also hides it once approved.
+    @Published var templateWarnings: [String: String] = [:]
+    /// `<repoKey>#<issue number>` for issues Implement Issues has already said
+    /// are "waiting for approval" in this session — every run re-visits every
+    /// unlabeled entry, and repeating the line each time buried the real log.
+    /// In-memory on purpose: one reminder per launch is enough.
+    var approvalWaitAnnounced: Set<String> = []
     /// Which task is running right now (drives the per-task ▶ spinner). nil when idle.
     @Published var currentTask: AutoTask? = nil
     /// Parallel to `currentTask` for the open, user-created task set —
@@ -366,10 +377,26 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
         guard let templates = autoTaskTemplates else { return }
         templates.reload()
         guard let template = templates.template(id: taskConfigs.config(for: taskId).templateId),
-              !templates.isApproved(template) else { return }
+              !templates.isApproved(template) else {
+            templateWarnings.removeValue(forKey: taskId)
+            return
+        }
         let message = "Template \"\(template.name)\" changed outside the app and is not approved — using the task's own prompt. Review it under Auto Tasks → Template and choose Approve."
         logStore.append(taskId, message, level: .error)
-        taskErrors[taskId] = message
+        // Not `taskErrors`: the run itself can succeed on the own prompt, and its
+        // success path clears `taskErrors` — the user never saw this warning.
+        templateWarnings[taskId] = message
+    }
+
+    /// The warning recorded by the last run, but only while the task's selected
+    /// template is STILL unapproved in the store's cached state — approving it
+    /// (or picking another template) hides the banner at once instead of at
+    /// the next run. Pure read, no `reload()`: this is called from view bodies.
+    func visibleTemplateWarning(for taskId: String) -> String? {
+        guard let warning = templateWarnings[taskId], let templates = autoTaskTemplates,
+              let template = templates.template(id: taskConfigs.config(for: taskId).templateId),
+              !templates.isApproved(template) else { return nil }
+        return warning
     }
 
     /// The prompt a task actually runs: its selected `AutoTaskTemplate` when it

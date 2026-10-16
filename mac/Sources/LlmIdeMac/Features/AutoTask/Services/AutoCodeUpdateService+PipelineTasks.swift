@@ -345,7 +345,19 @@ extension AutoCodeUpdateService {
 
         let existingIssues: [RepoIssue]
         do {
-            existingIssues = try await fetchAllIssues(client: client, projectId: resolved.projectId)
+            let fetched = try await fetchAllIssues(client: client, projectId: resolved.projectId)
+            // Fail closed: an incomplete list lacks the OLDEST issues, so the
+            // title de-dup below would re-file every action whose issue sits
+            // past the ceiling — a duplicate in someone's tracker on every run.
+            // Nothing is registered either, so the actions are retried once the
+            // list fits again.
+            guard fetched.isComplete else {
+                taskErrors[key] = "Not filing issues — the repo has more than \(Self.issueFetchMaxPages) pages of issues, so duplicates could not be ruled out."
+                logStore.append(.sourcesToIssue, taskErrors[key]!, level: .error)
+                log.warning("auto_code_sources_to_issue_truncated pages=\(Self.issueFetchMaxPages, privacy: .public) fetched=\(fetched.issues.count, privacy: .public)")
+                return
+            }
+            existingIssues = fetched.issues
         } catch {
             taskErrors[key] = "\(client.kind.displayName) error: \(error.localizedDescription)"
             logStore.append(.sourcesToIssue, taskErrors[key]!, level: .error)
@@ -429,7 +441,9 @@ extension AutoCodeUpdateService {
 
         let existingIssues: [RepoIssue]
         do {
-            existingIssues = try await fetchAllIssues(client: client, projectId: resolved.projectId)
+            // A truncated list is fine here: it is only a cache, and an issue
+            // missing from it is fetched individually below.
+            existingIssues = try await fetchAllIssues(client: client, projectId: resolved.projectId).issues
         } catch {
             taskErrors[key] = "Could not fetch issues: \(error.localizedDescription)"
             logStore.append(.implementIssues, taskErrors[key]!, level: .error)
@@ -458,11 +472,18 @@ extension AutoCodeUpdateService {
 
             // Left pending, not failed: it is picked up on the first run after
             // a human adds the label.
+            let waitKey = "\(Self.registryRepoKey(resolved))#\(number)"
             guard Self.isApprovedForImplementation(issue) else {
-                logStore.append(.implementIssues,
-                                "Issue #\(number): waiting for approval — add the `\(Self.implementApprovalLabel)` label to implement it.")
+                // Once per issue per launch: every run re-visits every unlabeled
+                // entry, and the identical line each time drowned the real output.
+                if approvalWaitAnnounced.insert(waitKey).inserted {
+                    logStore.append(.implementIssues,
+                                    "Issue #\(number): waiting for approval — add the `\(Self.implementApprovalLabel)` label to implement it.")
+                }
                 continue
             }
+            // Approved now: a later un-label (or retry) announces again.
+            approvalWaitAnnounced.remove(waitKey)
 
             registry.markImplementing(id: entry.actionId, repoKey: entry.repoKey)
             logStore.append(.implementIssues, "Implementing issue #\(number)…")

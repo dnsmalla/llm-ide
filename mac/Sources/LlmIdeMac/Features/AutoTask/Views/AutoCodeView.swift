@@ -670,6 +670,13 @@ struct AutoCodeView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
             }
+            // No dismiss: it goes away when the template is approved, which is
+            // the only thing that makes the warning stop being true.
+            if let warning = autoCode.visibleTemplateWarning(for: task.rawValue) {
+                StatusBanner(severity: .warning, message: warning)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+            }
 
             // Live, scrollable per-task log (accumulates across runs).
             logSection(task)
@@ -773,6 +780,11 @@ struct AutoCodeView: View {
 
             if let error = autoCode.taskErrors[task.id] {
                 StatusBanner(severity: .error, message: error, onDismiss: { autoCode.dismissTaskError(forId: task.id) })
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 4)
+            }
+            if let warning = autoCode.visibleTemplateWarning(for: task.id) {
+                StatusBanner(severity: .warning, message: warning)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 4)
             }

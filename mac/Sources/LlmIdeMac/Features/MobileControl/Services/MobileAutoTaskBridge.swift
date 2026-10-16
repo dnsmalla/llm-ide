@@ -477,14 +477,16 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// Task stack isn't wired (previews / tests).
     private func buildAutoTaskState() -> AutoTaskState? {
         guard let ac = autoCode, let s = settings else { return nil }
+        // The template warning rides in `lastError` when there is no real error,
+        // so the phone also learns its edited template is being ignored.
         let allInfos = AutoTask.allCases.map { t in
             AutoTaskInfo(id: t.rawValue, label: t.label,
                          enabled: s.isEnabled(task: t),
-                         lastError: ac.taskErrors[t.rawValue])
+                         lastError: ac.taskErrors[t.rawValue] ?? ac.visibleTemplateWarning(for: t.rawValue))
         }
         let customInfos = CustomAutoTask.loadAll().map { t in
             AutoTaskInfo(id: t.id, label: t.name, enabled: t.isEnabled,
-                         lastError: ac.taskErrors[t.id])
+                         lastError: ac.taskErrors[t.id] ?? ac.visibleTemplateWarning(for: t.id))
         }
         // Mirror the Mac "Show only enabled" filter: when on, the phone sees
         // only the active task set (re-enabling a hidden task is done on Mac).
