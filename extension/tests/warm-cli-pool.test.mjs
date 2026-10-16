@@ -368,3 +368,14 @@ test('cleanup: leave no idle child behind', () => {
   pool.flushWarmCliPool('t');
   assert.equal(pool._warmPoolStateForTests().idle, 0);
 });
+
+test('classifyCodeAssistMode asks runClaude for a warm call', async () => {
+  const { classifyCodeAssistMode } = await import('../llm_agent/runtime/mode-classify.mjs');
+  const seen = [];
+  const _runClaude = async (_prompt, opts) => { seen.push(opts); return '{"mode":"review"}'; };
+  const out = await classifyCodeAssistMode('please review the diff in PR 42 carefully', { _runClaude, userId: 'u1' });
+  assert.equal(out.mode, 'review');
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].warm, true);
+  assert.equal(seen[0].userId, 'u1');
+});

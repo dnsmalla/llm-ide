@@ -219,7 +219,9 @@ export async function classifyCodeAssistMode(message, opts = {}) {
   const quick = quickMode(message);
   if (quick) return { mode: quick };
   try {
-    const raw = await _runClaude(buildPrompt(message), { userId, model: model || MODEL, maxTokens: 128 });
+    // `warm: true`: this is the one serial pre-turn CLI call, so it is the
+    // one the warm pool pre-spawns (providers/warm-cli-pool.mjs).
+    const raw = await _runClaude(buildPrompt(message), { userId, model: model || MODEL, maxTokens: 128, warm: true });
     const parsed = tryParseJSON(raw);
     const mode = parsed && CLASSIFIABLE_MODES.has(parsed.mode) ? parsed.mode : 'execute';
     return { mode };

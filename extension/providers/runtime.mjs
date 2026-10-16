@@ -270,7 +270,7 @@ function ranOn({ model, provider: explicitProvider }) {
   return { provider, model: (provider === 'anthropic' ? resolveModel(model) : model) ?? null };
 }
 
-async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig, cwd } = {}) {
+async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig, cwd, warm = false } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -626,6 +626,10 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
         // agent hops — used to land in the ledger as runs with no tokens at
         // all). parseCliJsonResult falls back to the raw text for anything
         // that isn't the JSON result object.
+        // Warm pool (classifier only): same argv, same env, same user → an
+        // idle `claude` already running answers; see providers/warm-cli-pool.mjs.
+        warm,
+        userId,
         args: ['--output-format', 'json', ...buildAnthropicCliArgs(prompt, mcpConfig, resolvedModel)],
       });
       const parsed = parseCliJsonResult(stdout);
