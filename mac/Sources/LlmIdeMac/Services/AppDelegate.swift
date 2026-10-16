@@ -100,4 +100,17 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Self.confirmDiscardUnsavedDrafts() ? .terminateNow : .terminateCancel
         }
     }
+
+    /// Stores that debounce their writes lose the last change on quit unless
+    /// flushed here. The delegate, not a view's `onReceive`, because the app
+    /// keeps running with every window closed — no view would be around to
+    /// observe the notification.
+    func applicationWillTerminate(_ notification: Notification) {
+        MainActor.assumeIsolated {
+            IncidentStore.shared.flushPendingSave()
+            // Chat writes are debounced too; without this a quit mid-stream
+            // lost up to a second of the reply, and parked chats' tails.
+            ChatEngineRegistry.shared.flushAll()
+        }
+    }
 }

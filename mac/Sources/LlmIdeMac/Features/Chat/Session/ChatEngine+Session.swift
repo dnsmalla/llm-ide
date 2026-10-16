@@ -161,6 +161,17 @@ extension ChatEngine {
         persistCurrentChat()
     }
 
+    /// Synchronous last write before the process exits (see
+    /// `ChatEngineRegistry.flushAll`). Publishes buffered chunks first so the
+    /// streamed tail is in `messages`, then writes if anything is unwritten:
+    /// a pending debounce, or a turn still in flight (whose `.streaming`
+    /// message `ChatSession`'s decoder repairs to `.stopped` on next load).
+    func flushForQuit() {
+        flushPendingChunks()
+        guard persistDebounceTask != nil || hasPendingWork else { return }
+        persistCurrentChat()
+    }
+
     /// Reload `sessions` for this scope from disk, newest first.
     func refreshSessions() {
         sessions = scope == .explorer

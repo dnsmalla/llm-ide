@@ -307,6 +307,22 @@ final class ChatEngineRegistry {
         return fresh
     }
 
+    /// App quit: land every live engine's unwritten transcript on disk NOW,
+    /// synchronously — displayed, parked, and the external holder's.
+    ///
+    /// Streaming writes are debounced (`ChatEngine.schedulePersist`) and
+    /// chunks are batched (`flushPendingChunks`); both run on Tasks that never
+    /// get to fire once the process is terminating, so without this the tail
+    /// of a reply — or a whole background turn's last window — was lost on
+    /// quit. Call from `applicationWillTerminate` on the main thread.
+    func flushAll() {
+        var engines = Array(displayed.values) + Array(background.values)
+        for held in externalHolder?.heldEngines ?? [] where !engines.contains(where: { $0 === held }) {
+            engines.append(held)
+        }
+        for engine in engines { engine.flushForQuit() }
+    }
+
     /// Sign-out: every engine this registry (and its external holder) keeps
     /// forgets the signed-out user's chats without writing them back. Must
     /// run BEFORE `ChatSessionStore.clear()` — see

@@ -63,6 +63,15 @@ public final class IncidentStore {
         save()
     }
 
+    /// Writes now only if a debounced save is waiting. Called at app quit:
+    /// the debounce Task dies with the process, so a change made in the last
+    /// second (an incident just marked `.proposed` with its proposal) would
+    /// otherwise be lost and the incident triaged again next launch.
+    public func flushPendingSave() {
+        guard pendingSave != nil else { return }
+        flush()
+    }
+
     private func evictIfNeeded() {
         while incidents.count > Self.cap {
             guard let victim = incidents.enumerated()

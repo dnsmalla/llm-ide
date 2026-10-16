@@ -119,7 +119,8 @@ struct ChatSession: Identifiable, Codable, Equatable {
             self.storeVersion = (try? c.decode(Int.self, forKey: .storeVersion)) ?? 2
             // Repair interrupted turns: a message can only reach disk as
             // `.streaming` if the app died mid-turn (streaming persists are
-            // debounced, and quit has no flush). By load time no stream is
+            // debounced, and a quit mid-turn flushes the partial as-is via
+            // `ChatEngineRegistry.flushAll`). By load time no stream is
             // live for it, so leaving the status would render a truncated
             // partial as a FINISHED reply — and `wireTurn()` would replay it
             // to the model as complete. `.stopped` is the honest state: the
