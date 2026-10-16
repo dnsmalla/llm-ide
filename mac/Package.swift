@@ -51,6 +51,7 @@ if graphIncluded {
         "KnowledgeGraphServiceTests.swift",
         "GraphModuleTests.swift",
         "LoopGraphRescannerTests.swift",
+        "IssuesGanttGraphFixesTests.swift",
     ])
 }
 if explorerIncluded {
@@ -66,6 +67,10 @@ if ganttIncluded {
 } else {
     libExcludes.append(contentsOf: ["Features/Gantt", "Features/Issues"])
     testExcludes.append("GanttViewModelProviderParityTests.swift")
+    // Also listed under graph — SwiftPM rejects duplicate exclude entries.
+    if !testExcludes.contains("IssuesGanttGraphFixesTests.swift") {
+        testExcludes.append("IssuesGanttGraphFixesTests.swift")
+    }
 }
 if docGenIncluded {
     featureDefines.append(.define("FEATURE_DOCGEN"))
@@ -96,6 +101,8 @@ if autoTasksIncluded {
         "AutoCodeUpdateServiceCustomTaskTests.swift",
         "AutoCodeUpdateServiceLoopEngineeringTests.swift",
         "AutoCodeUpdateServicePipelineTasksTests.swift",
+        "AutoTaskLoopHardeningTests.swift",
+        "AutoTaskIncidentScopeTests.swift",
         "AutoTaskCatalogTests.swift",
         "AutoTaskConfigStoreTests.swift",
         "AutoTaskLoopEngineeringTests.swift",
