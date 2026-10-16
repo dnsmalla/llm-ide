@@ -43,6 +43,46 @@ struct TextFileWriterTests {
         #expect(try String(contentsOf: second, encoding: .utf8) == "new\n")
     }
 
+    @Test("a hard-linked file shrinks and grows to exactly the new content, with no temp file left")
+    func hardLinkResizesCleanly() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = dir.appendingPathComponent("a.txt")
+        let second = dir.appendingPathComponent("b.txt")
+        try "a much longer original line\n".write(to: first, atomically: true, encoding: .utf8)
+        try FileManager.default.linkItem(at: first, to: second)
+
+        // Shorter: the in-place path writes then truncates, so no stale tail.
+        try TextFileWriter.write("short\n", to: first)
+        #expect(try String(contentsOf: second, encoding: .utf8) == "short\n")
+
+        try TextFileWriter.write("now longer than before\n", to: second)
+        #expect(try String(contentsOf: first, encoding: .utf8) == "now longer than before\n")
+
+        let leftovers = try FileManager.default.contentsOfDirectory(atPath: dir.path)
+        #expect(Set(leftovers) == ["a.txt", "b.txt"])
+    }
+
+    @Test("a hard-linked file is left untouched when the staging write cannot happen")
+    func hardLinkUntouchedWhenStagingFails() throws {
+        let dir = try tempDir()
+        defer { try? FileManager.default.removeItem(at: dir) }
+        let first = dir.appendingPathComponent("a.txt")
+        let second = dir.appendingPathComponent("b.txt")
+        try "old\n".write(to: first, atomically: true, encoding: .utf8)
+        try FileManager.default.linkItem(at: first, to: second)
+        // A read-only folder blocks the temp file beside the target — the
+        // stand-in here for a disk too full to hold the new content.
+        try FileManager.default.setAttributes([.posixPermissions: 0o555], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir.path) }
+
+        #expect(throws: (any Error).self) {
+            try TextFileWriter.write("new content\n", to: first)
+        }
+        #expect(try String(contentsOf: first, encoding: .utf8) == "old\n")
+        #expect(try String(contentsOf: second, encoding: .utf8) == "old\n")
+    }
+
     @Test("the exec bit survives the atomic rename")
     func keepsPermissions() throws {
         let dir = try tempDir()
