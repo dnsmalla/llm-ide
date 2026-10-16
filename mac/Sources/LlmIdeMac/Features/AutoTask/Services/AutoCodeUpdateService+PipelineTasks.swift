@@ -49,6 +49,18 @@ extension AutoCodeUpdateService {
     /// (`runSourcesToIssue`). `meetingTitle` is blank for a source-connector
     /// note that carries no title (see `ProjectNoteRef`) — falls back to a
     /// generic phrase rather than an empty, quote-dangling sentence.
+    /// The upstream label a human adds to let Implement Issues work an issue.
+    /// Source → Issue files issues from ingested text (meeting notes, email,
+    /// Slack), and Implement Issues hands each to an unattended coding agent
+    /// with a shell; without a human in between, an outside sender's
+    /// "Action: …" line became code run on this machine overnight.
+    nonisolated static let implementApprovalLabel = "llmide:approved"
+
+    /// Whether a human has approved `issue` for unattended implementation.
+    nonisolated static func isApprovedForImplementation(_ issue: RepoIssue) -> Bool {
+        issue.labels.contains { $0.caseInsensitiveCompare(implementApprovalLabel) == .orderedSame }
+    }
+
     static func sourceIssueBody(actionText: String, meetingTitle: String) -> String {
         let origin = meetingTitle.isEmpty ? "a recent note" : "**\"\(meetingTitle)\"**"
         return """
@@ -59,6 +71,8 @@ extension AutoCodeUpdateService {
         > \(actionText)
 
         Could someone take a look and confirm the next step? Happy to add more context if it would help.
+
+        To let LLM-IDE Auto Tasks implement this automatically, add the `\(implementApprovalLabel)` label.
 
         —
         _Filed automatically by LLM-IDE Auto Tasks (Source → Issue)._
@@ -440,6 +454,14 @@ extension AutoCodeUpdateService {
                     logStore.append(.implementIssues, "Issue #\(number): fetch failed.", level: .error)
                     continue
                 }
+            }
+
+            // Left pending, not failed: it is picked up on the first run after
+            // a human adds the label.
+            guard Self.isApprovedForImplementation(issue) else {
+                logStore.append(.implementIssues,
+                                "Issue #\(number): waiting for approval — add the `\(Self.implementApprovalLabel)` label to implement it.")
+                continue
             }
 
             registry.markImplementing(id: entry.actionId, repoKey: entry.repoKey)

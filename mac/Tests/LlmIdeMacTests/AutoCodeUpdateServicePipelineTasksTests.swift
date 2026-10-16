@@ -119,4 +119,30 @@ final class AutoCodeUpdateServicePipelineTasksTests: XCTestCase {
         XCTAssertNil(service.taskErrors[key],
                      "no-repo path must clear a stale taskErrors entry, not leave it red")
     }
+
+    // MARK: - Implement approval gate
+
+    private func issue(labels: [String]) -> RepoIssue {
+        RepoIssue(id: "1", number: 1, title: "Issue 1", body: nil, state: "opened", labels: labels,
+                  milestone: nil, assignees: [],
+                  author: RepoUser(id: "u1", username: "alice", displayName: "Alice", avatarUrl: nil),
+                  createdAt: "2026-10-16T00:00:00Z",
+                  updatedAt: "2026-10-16T00:00:00Z", closedAt: nil, webUrl: "https://example.test/i/1",
+                  commentCount: 0, dueDate: nil, weight: nil)
+    }
+
+    /// Issues filed from ingested text (email, Slack, notes) reach an
+    /// unattended agent with a shell only after a human labels them.
+    func testImplementRequiresTheApprovalLabel() {
+        XCTAssertFalse(AutoCodeUpdateService.isApprovedForImplementation(issue(labels: [])))
+        XCTAssertFalse(AutoCodeUpdateService.isApprovedForImplementation(issue(labels: ["bug", "approved"])))
+        XCTAssertTrue(AutoCodeUpdateService.isApprovedForImplementation(issue(labels: ["bug", "llmide:approved"])))
+        XCTAssertTrue(AutoCodeUpdateService.isApprovedForImplementation(issue(labels: ["LLMIDE:Approved"])))
+    }
+
+    @MainActor
+    func testSourceIssueBodyTellsTheReaderHowToApprove() {
+        let body = AutoCodeUpdateService.sourceIssueBody(actionText: "Fix login", meetingTitle: "Standup")
+        XCTAssertTrue(body.contains(AutoCodeUpdateService.implementApprovalLabel))
+    }
 }
