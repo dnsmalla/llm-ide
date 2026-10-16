@@ -88,6 +88,9 @@ const ENTRIES = [
     name: 'ask-subagent',
     kind: 'read',
     execute: (args, ctx) => askSubagent(args, {
+      // Read only for workspaceRoot (a granted search-kb's scope); the
+      // subagent's own prompt context stays isolated.
+      agentContext: ctx.agentContext,
       runClaude: ctx.runClaude,
       kb: ctx.kb,
       userId: ctx.userId,

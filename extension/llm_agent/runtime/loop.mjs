@@ -480,6 +480,9 @@ export async function runAgentLoop({
   // per-call deadline. Absent for callers that have no cancellation (tests).
   signal,
 }) {
+  // search-kb scopes code hits to the open workspace; without it the internal
+  // sub-loop searched every repo the user ever indexed.
+  const workspaceRoot = agentContext?.workspaceRoot;
   // replyMode decides what `reply` means on a clean finish:
   //  - 'accumulated' (default): every iteration's text concatenated — the
   //    contract ask-internal / ask-subagent depend on, where the reply is
@@ -773,7 +776,7 @@ export async function runAgentLoop({
       // run at. The +1 happens HERE — the single enforcement point — so
       // handler authors forward ctx.depth verbatim and can't forget the
       // increment (forgetting it would silently disable the nesting cap).
-      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1, emit, signal });
+      result = await runReadHandler(skill.name, validation.value, { userId, kb, handlers, depth: depth + 1, emit, signal, workspaceRoot });
       if (!result.error) {
         if (readCache.size >= MAX_CACHE_SIZE) {
           readCache.delete(readCache.keys().next().value);

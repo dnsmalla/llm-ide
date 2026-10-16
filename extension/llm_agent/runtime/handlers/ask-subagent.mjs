@@ -158,6 +158,9 @@ export async function askSubagent(args, ctx) {
       // includeSystemContext intentionally omitted — subagents don't
       // get the app-state block. If a subagent needs project info,
       // pass it inside `question`.
+      // The workspace root is not app state: a granted search-kb scopes code
+      // hits by it, and without it searched every repo the user indexed.
+      workspaceRoot: ctx.agentContext?.workspaceRoot,
     },
     runClaude,
     kb: ctx.kb,

@@ -162,6 +162,46 @@ test('allowed_tools=[search-kb] → search-kb is wired into the loop', async () 
   assert.match(out.answer, /Final/);
 });
 
+// A subagent granted search-kb must search the turn's workspace, not every
+// repo the user ever indexed: its isolated agentContext still carries the root.
+test('allowed_tools=[search-kb] → search-kb is scoped to the turn\'s workspace', async () => {
+  const subagents = new Map([
+    ['searcher', { systemPrompt: 's', allowedTools: ['search-kb'], maxIterations: 2, pluginName: 't' }],
+  ]);
+  const tool = `<<<TOOL_CALL>>>\n{"name":"search-kb","arguments":{"query":"graph"}}\n<<<END_TOOL_CALL>>>`;
+  let asked;
+  await askSubagent({ name: 'searcher', question: 'where?' },
+    makeCtx({
+      subagents,
+      runClaude: makeStubClaude([tool, 'done']),
+      kb: { search: (uid, opts) => { asked = opts; return []; } },
+      agentContext: { workspaceRoot: '/work/proj', sessionId: 'not-forwarded' },
+    }));
+  assert.ok(asked, 'search-kb ran');
+  assert.equal(asked.codeRoot, '/work/proj');
+});
+
+// Production wiring: the registry's ask-subagent entry builds askSubagent's
+// ctx by hand, so the workspace must be forwarded there too — the direct-ctx
+// test above cannot see a missing hop.
+test('buildDispatch ask-subagent: a granted search-kb is scoped to the turn\'s workspace', async () => {
+  const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
+  const tool = `<<<TOOL_CALL>>>\n{"name":"search-kb","arguments":{"query":"graph"}}\n<<<END_TOOL_CALL>>>`;
+  let asked;
+  const dispatch = buildDispatch({
+    agentContext: { workspaceRoot: '/work/proj' },
+    runClaude: makeStubClaude([tool, 'done']),
+    kb: { search: (uid, opts) => { asked = opts; return []; } },
+    userId: 'test-user',
+    userSubagents: new Map([
+      ['searcher', { systemPrompt: 's', allowedTools: ['search-kb'], maxIterations: 2, pluginName: 't' }],
+    ]),
+  });
+  await dispatch['ask-subagent']({ name: 'searcher', question: 'where?' }, { depth: 1 });
+  assert.ok(asked, 'search-kb ran');
+  assert.equal(asked.codeRoot, '/work/proj');
+});
+
 test('allowed_tools containing only unknown tools collapses to empty handler set', async () => {
   const subagents = new Map([
     ['ghost', {
