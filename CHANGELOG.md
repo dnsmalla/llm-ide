@@ -7,6 +7,16 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **Warm CLI pool for the chat mode classifier.** On subscription (CLI) installs the auto-mode classifier
+  no longer pays a cold `claude` start on every turn: one idle `claude -p --input-format stream-json`
+  child is kept for the classifier's exact argv, user and env, answers one prompt, and is replaced
+  after use. It dies after 2 min idle, is never started when free memory is under 1 GiB (on macOS,
+  free + inactive + speculative + purgeable pages from `vm_stat`), and is flushed on shutdown, logout,
+  SDK/plugin update and MCP consent revoke. Measured 2026-10-16: the same classifier call went from
+  7.0 s to 2.6 s warm (about 4 s saved per turn); the idle child holds about 210 MB. Env:
+  `LLMIDE_WARM_CLI=0` disables it; `LLMIDE_WARM_CLI_MAX`, `LLMIDE_WARM_CLI_IDLE_MS`,
+  `LLMIDE_WARM_CLI_MIN_FREE_BYTES`.
+
 - **Image tier + Image generation role (Settings → Tiers & Roles).** A fourth tier, **Image**, holds an
   image model from OpenAI (`gpt-image-*`, `dall-e-3`) or Google (`gemini-*-image-preview`) using the keys
   Model Providers already has; the new **Image generation** role (group "Media") is the only role that can
