@@ -39,6 +39,11 @@ struct SearchView: View {
     // Search lifecycle
     @State private var debounce: Task<Void, Never>?
     @State private var searching = false
+    /// True from a replace's first write until the re-search after it has
+    /// finished. `results` still describes the PRE-replace text in that
+    /// window, so a second Replace (All) would re-apply to text that already
+    /// changed — "foo" → "fooBar" twice becomes "fooBarBar".
+    @State private var replacing = false
 
     /// The folder Search walks — the same one the Explorer shows
     /// (`WorkspaceRoot.browsingRoot`), so a project's notes and sources never
@@ -206,7 +211,13 @@ struct SearchView: View {
     /// every file past the cap untouched while claiming to have replaced all
     /// matches. Refuse instead and ask for a narrower search.
     private var replaceAllDisabled: Bool {
-        replaceText.isEmpty || results.files.isEmpty || searching || results.truncated
+        replaceText.isEmpty || results.files.isEmpty || searching || replacing || results.truncated
+    }
+
+    /// The per-file and per-line replace buttons follow the same in-flight
+    /// rule as Replace All.
+    private var canReplaceInline: Bool {
+        showReplace && !replaceText.isEmpty && !replacing
     }
 
     private var replaceRow: some View {
@@ -324,7 +335,7 @@ struct SearchView: View {
         FileHeaderRow(
             fm: fm,
             badge: fileBadgeCount(fm),
-            canReplace: showReplace && !replaceText.isEmpty,
+            canReplace: canReplaceInline,
             text: theme.current.text,
             muted: theme.current.textMuted,
             surface: theme.current.surface2,
@@ -349,7 +360,7 @@ struct SearchView: View {
         .contentShape(Rectangle())
         .onTapGesture { open(fm.url, line: lm.line) }
         .modifier(RowHoverActions(
-            canReplace: showReplace && !replaceText.isEmpty,
+            canReplace: canReplaceInline,
             onReplace: { if let m = lm.matches.first { replaceOneAction(fm, line: lm.line, rangeInLine: lm.rangeInLine(m)) } },
             onDismiss: { dismiss(fm, lm) }
         ))
@@ -486,35 +497,50 @@ struct SearchView: View {
                     for m in live { targets.append((fm.url, lm.line, lm.rangeInLine(m))) }
                 }
             }
-            Task {
+            runReplace {
                 for target in targets {
                     _ = await searchService.replaceOne(file: target.url, line: target.line, rangeInLine: target.range,
                                                        query: q, options: opts, replacement: repl, preserveCase: pc)
                 }
                 dismissed.removeAll()
-                scheduleSearch(resetExpanded: false)
             }
             return
         }
-        Task {
+        runReplace {
             _ = await searchService.replaceAll(in: files, query: q, options: opts, replacement: repl, preserveCase: pc)
-            scheduleSearch(resetExpanded: false)
         }
     }
 
     private func replaceInFileAction(_ fm: FileMatch) {
         let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
-        Task {
+        runReplace {
             _ = await searchService.replaceInFile(file: url, query: q, options: opts, replacement: repl, preserveCase: pc)
-            scheduleSearch(resetExpanded: false)
         }
     }
 
     private func replaceOneAction(_ fm: FileMatch, line: Int, rangeInLine: NSRange) {
         let url = fm.url, q = query, opts = options, repl = replaceText, pc = preserveCase
-        Task {
+        runReplace {
             _ = await searchService.replaceOne(file: url, line: line, rangeInLine: rangeInLine, query: q, options: opts, replacement: repl, preserveCase: pc)
+        }
+    }
+
+    /// Run one replace, then re-search, holding `replacing` until the
+    /// re-search has finished so no replace can act on stale match positions.
+    /// A replace started while another is in flight is dropped, not queued:
+    /// the button it came from was already disabled, so this only catches a
+    /// click that raced the state update.
+    private func runReplace(_ work: @escaping () async -> Void) {
+        guard !replacing else { return }
+        replacing = true
+        Task {
+            await work()
             scheduleSearch(resetExpanded: false)
+            // A superseded (cancelled) re-search returns at once; the newer
+            // run that replaced it then owns `searching`, which also gates
+            // Replace All.
+            await debounce?.value
+            replacing = false
         }
     }
 
