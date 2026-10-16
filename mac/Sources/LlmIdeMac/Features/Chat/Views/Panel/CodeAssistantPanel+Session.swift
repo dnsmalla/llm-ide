@@ -149,6 +149,10 @@ extension CodeAssistantPanel {
     @MainActor
     func confirmCreateIssue(_ args: CreateIssueSheet.Args,
                                     target: IssueTarget) async -> CreateIssueSheet.ConfirmResult {
+        // Pinned before the await, as in `runBashCommand`: the result belongs
+        // to the chat that proposed the action, not whichever one is shown now.
+        let engine = self.engine
+        let sessionID = engine.currentSessionIDString
         let client = RepoBackendFactory.backend(for: target.kind, config: config)
         do {
             let payload = RepoIssuePayload(
@@ -157,6 +161,7 @@ extension CodeAssistantPanel {
                 labels: args.labels.isEmpty ? nil : args.labels
             )
             let issue = try await client.createIssue(projectId: target.projectId, payload: payload)
+            guard engine.currentSessionIDString == sessionID else { return .success(issue.number) }
             // Clear the pending tool so the card disappears.
             engine.agent.pendingTool = nil
             // Synthetic acknowledgement — agent sees the result in history.

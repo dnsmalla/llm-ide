@@ -6,6 +6,9 @@ extension CodeAssistantPanel {
     // MARK: - Branch creation
 
     func confirmBranchCreation(_ args: BranchCreationSheet.Args) async -> BranchCreationSheet.ConfirmResult {
+        // Pinned before the await, as in `runBashCommand`.
+        let engine = self.engine
+        let sessionID = engine.currentSessionIDString
         guard let repoURL = config.activeRepoLocalURL, WorkspaceRoot.isGitRepo(repoURL) else {
             return .failure("Not in a git repository")
         }
@@ -20,6 +23,7 @@ extension CodeAssistantPanel {
             }
 
             _ = try await repoManager.runGit(gitArgs, at: repoURL)
+            guard engine.currentSessionIDString == sessionID else { return .success(args.branch) }
 
             engine.agent.pendingTool = nil
             let payload = ChatMessage.ToolResultPayload(
@@ -64,6 +68,10 @@ extension CodeAssistantPanel {
     /// Read-tier ops are auto-run from runTurn; write/destructive run after sheet confirm.
     @MainActor
     func runGitOpFlow(_ args: GitOpArgs) async {
+        // Pinned before any await, as in `runBashCommand`: the result belongs
+        // to the chat that proposed the op, not whichever one is shown now.
+        let engine = self.engine
+        let sessionID = engine.currentSessionIDString
         engine.agent.pendingTool = nil
         sheets.showingGitOpSheet = false
         // Resolve the active repo URL — GitLab first, then GitHub (mirrors config.activeRepoLocalURL).
@@ -99,6 +107,7 @@ extension CodeAssistantPanel {
         }
         do {
             let out = try await manager.runGitOp(args, at: repoURL, token: token, backend: backend)
+            guard engine.currentSessionIDString == sessionID else { return }
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, summary: "(git \(args.op.rawValue) result)",
                 exitCode: nil, command: nil, output: String(out.prefix(4000)), url: nil, isFailure: false)
@@ -108,6 +117,7 @@ extension CodeAssistantPanel {
             // already false, so that's a benign no-op there.
             await engine.acknowledge(payload, followUp: .forceUnblock)
         } catch {
+            guard engine.currentSessionIDString == sessionID else { return }
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, // Redacted: a failed push/fetch can echo the remote URL with its
                 // embedded credential, and this text is persisted AND replayed

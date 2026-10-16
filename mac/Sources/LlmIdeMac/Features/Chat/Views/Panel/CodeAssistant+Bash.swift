@@ -14,6 +14,12 @@ extension CodeAssistantPanel {
     @MainActor
     func runBashCommand(_ args: BashArgs?) async {
         guard let args = args else { return }
+        // Pin the chat this command belongs to. `self.engine` is the panel's
+        // CURRENT engine: switching chats while the command ran made the
+        // result (and its forced follow-up turn) land in the other chat, and
+        // the proposing agent never got its answer.
+        let engine = self.engine
+        let sessionID = engine.currentSessionIDString
 
         let bashService = BashService()
         // Drop the card as soon as we commit to running: it's no longer
@@ -57,6 +63,8 @@ extension CodeAssistantPanel {
         }
 
         let result = await bashService.execute(args.command, workingDirectory: directory.path)
+        // The engine itself may have been re-pointed at another session.
+        guard engine.currentSessionIDString == sessionID else { return }
 
         // The header line always carries the exit code so success and failure
         // render consistently; `command` is collapsed to a single line for

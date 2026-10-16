@@ -10,6 +10,10 @@ extension CodeAssistantPanel {
     // fixed in place to avoid the "two copies, only one reachable" trap.
 
     func confirmCommentIssue(_ args: CommentIssueSheet.Args, target: IssueTarget) async -> CommentIssueSheet.ConfirmResult {
+        // Pinned before the await, as in `runBashCommand`: the result belongs
+        // to the chat that proposed the action, not whichever one is shown now.
+        let engine = self.engine
+        let sessionID = engine.currentSessionIDString
         let client = RepoBackendFactory.backend(for: target.kind, config: config)
 
         do {
@@ -18,6 +22,7 @@ extension CodeAssistantPanel {
                 number: args.iid,
                 body: args.body
             )
+            guard engine.currentSessionIDString == sessionID else { return .success(args.iid) }
             engine.agent.pendingTool = nil
             sheets.showingCommentSheet = false
             let ackPayload = ChatMessage.ToolResultPayload(
@@ -38,6 +43,10 @@ extension CodeAssistantPanel {
     }
 
     func confirmUpdateIssue(_ args: UpdateIssueSheet.Args, target: IssueTarget) async -> UpdateIssueSheet.ConfirmResult {
+        // Pinned before the await, as in `runBashCommand`: the result belongs
+        // to the chat that proposed the action, not whichever one is shown now.
+        let engine = self.engine
+        let sessionID = engine.currentSessionIDString
         let client = RepoBackendFactory.backend(for: target.kind, config: config)
 
         do {
@@ -55,6 +64,7 @@ extension CodeAssistantPanel {
                 number: args.iid,
                 payload: payload
             )
+            guard engine.currentSessionIDString == sessionID else { return .success(args.iid) }
             engine.agent.pendingTool = nil
             sheets.showingUpdateIssueSheet = false
             let ackPayload = ChatMessage.ToolResultPayload(

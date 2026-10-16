@@ -6,6 +6,10 @@ extension CodeAssistantPanel {
     /// Confirm a PR/MR creation. Executes via createMergeRequest API and
     /// appends a synthetic turn so the agent can acknowledge.
     func confirmPRCreation(_ args: PRCreationSheet.Args, target: IssueTarget) async -> PRCreationSheet.ConfirmResult {
+        // Pinned before the await, as in `runBashCommand`: the result belongs
+        // to the chat that proposed the action, not whichever one is shown now.
+        let engine = self.engine
+        let sessionID = engine.currentSessionIDString
         let client = RepoBackendFactory.backend(for: target.kind, config: config)
 
         do {
@@ -17,6 +21,9 @@ extension CodeAssistantPanel {
                 draft: false
             )
             let result = try await client.createMergeRequest(projectId: target.projectId, payload: payload)
+            guard engine.currentSessionIDString == sessionID else {
+                return .success(iid: result.number, webUrl: result.webUrl)
+            }
 
             engine.agent.pendingTool = nil
             sheets.showingCreatePRSheet = false
