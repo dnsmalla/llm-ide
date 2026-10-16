@@ -53,4 +53,25 @@ struct ReviewMergeCandidatesTests {
         let result = AutoCodeUpdateService.reviewMergeCandidates(defaultBranch: "main", at: repo.path)
         #expect(result == ["fix/7-real"])
     }
+
+    /// A branch whose MR was opened at its current tip is skipped once that MR
+    /// is no longer open (closed or squash-merged); a new commit re-arms it.
+    @Test func recordedMergeRequestTipIsNotReopened() throws {
+        let repo = try makeRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        branchWithCommit("fix/7-real", in: repo)
+        let tip = try #require(AutoCodeUpdateService.refSha("refs/heads/fix/7-real", at: repo.path))
+
+        #expect(AutoCodeUpdateService.mergeRequestOpenedSha(for: "fix/7-real", at: repo.path) == nil)
+        AutoCodeUpdateService.recordMergeRequestOpened(for: "fix/7-real", sha: tip, at: repo.path)
+        let recorded = AutoCodeUpdateService.mergeRequestOpenedSha(for: "fix/7-real", at: repo.path)
+        #expect(recorded == tip)
+        #expect(AutoCodeUpdateService.mergeRequestAlreadyHandled(tip: tip, recordedSha: recorded))
+
+        git(["switch", "-q", "fix/7-real"], in: repo)
+        git(["commit", "-q", "--allow-empty", "-m", "follow-up"], in: repo)
+        let newTip = AutoCodeUpdateService.refSha("refs/heads/fix/7-real", at: repo.path)
+        #expect(!AutoCodeUpdateService.mergeRequestAlreadyHandled(tip: newTip, recordedSha: recorded))
+        #expect(!AutoCodeUpdateService.mergeRequestAlreadyHandled(tip: tip, recordedSha: nil))
+    }
 }

@@ -212,6 +212,29 @@ extension AutoCodeUpdateService {
         git(["branch", "-m", old, new], at: localPath).code == 0
     }
 
+    /// The branch tip review-merge last opened a merge request for, or nil.
+    /// Kept in the repo's own git config (`branch.<name>.llmideMrSha`) so it
+    /// survives relaunches and follows the branch through `git branch -m`.
+    nonisolated static func mergeRequestOpenedSha(for branch: String, at localPath: String) -> String? {
+        let r = git(["config", "--get", "branch.\(branch).llmideMrSha"], at: localPath)
+        let s = r.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (r.code == 0 && !s.isEmpty) ? s : nil
+    }
+
+    /// Record that a merge request was opened for `branch` at `sha`.
+    nonisolated static func recordMergeRequestOpened(for branch: String, sha: String, at localPath: String) {
+        _ = git(["config", "branch.\(branch).llmideMrSha", sha], at: localPath)
+    }
+
+    /// Whether review-merge should leave `branch` alone: an MR was already
+    /// opened for exactly this tip and none is open now, so it was closed or
+    /// merged (a squash merge leaves the branch "ahead" of main for ever).
+    /// New commits on the branch move the tip and make it publishable again.
+    nonisolated static func mergeRequestAlreadyHandled(tip: String?, recordedSha: String?) -> Bool {
+        guard let tip, let recordedSha else { return false }
+        return tip == recordedSha
+    }
+
     /// Delete a local branch (an implement run that produced no commit leaves
     /// an empty one behind otherwise).
     nonisolated static func branchDelete(_ branch: String, at localPath: String) -> Bool {

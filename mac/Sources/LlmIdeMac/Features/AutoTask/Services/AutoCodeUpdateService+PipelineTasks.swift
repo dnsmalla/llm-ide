@@ -578,6 +578,15 @@ extension AutoCodeUpdateService {
                 logStore.append(.reviewMerge, "Skip \(branch) — MR already open.")
                 continue
             }
+            // Only OPEN merge requests come back from the server, so a branch
+            // whose MR was closed or squash-merged looked brand new and was
+            // pushed with a fresh MR on every run.
+            let tip = await Task.detached { Self.refSha("refs/heads/\(branch)", at: gitRoot) }.value
+            let recorded = await Task.detached { Self.mergeRequestOpenedSha(for: branch, at: gitRoot) }.value
+            if Self.mergeRequestAlreadyHandled(tip: tip, recordedSha: recorded) {
+                logStore.append(.reviewMerge, "Skip \(branch) — its MR was already opened and is now closed or merged.")
+                continue
+            }
 
             do {
                 try await repoManager.push(at: repoURL, branch: branch, token: token,
@@ -608,6 +617,9 @@ extension AutoCodeUpdateService {
                 let mr = try await client.createMergeRequest(projectId: resolved.projectId, payload: payload)
                 opened += 1
                 logStore.append(.reviewMerge, "Opened MR !\(mr.number): \(mr.webUrl)")
+                if let tip {
+                    await Task.detached { Self.recordMergeRequestOpened(for: branch, sha: tip, at: gitRoot) }.value
+                }
 
                 if let num = Self.issueNumber(fromFixBranch: branch),
                    config.isAllowed(.commentIssue, provider: client.kind) {
