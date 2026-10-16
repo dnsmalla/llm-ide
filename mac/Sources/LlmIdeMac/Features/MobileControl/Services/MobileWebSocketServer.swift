@@ -308,6 +308,8 @@ final class MobileWebSocketServer: @unchecked Sendable {
             onLog("Mobile WS send: encode failed for \(type)")
             return
         }
+        // Computed before the hop so the queue closure captures only a String.
+        let logLabel = MobileLogPolicy.outboundLabel(message, byteCount: data.count)
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             queue.async { [weak self] in
                 guard let self, let client = self.client, self.paired else {
@@ -317,8 +319,9 @@ final class MobileWebSocketServer: @unchecked Sendable {
                 let context = NWConnection.ContentContext(identifier: "msg", metadata: [metadata])
                 client.send(content: string.data(using: .utf8), contentContext: context,
                             isComplete: true, completion: .contentProcessed { _ in })
-                let preview = String(string.prefix(80))
-                self.onLog("📤 Sent \(string.count) bytes: \(preview)")
+                // Type + size only: an 80-char prefix leaked the start of every
+                // chat reply and file the phone was sent (see MobileLogPolicy).
+                self.onLog("📤 Sent \(logLabel)")
                 cont.resume()
             }
         }
@@ -446,11 +449,19 @@ final class MobileWebSocketServer: @unchecked Sendable {
             // Only the PAIRED connection's frames reach the app; everyone else
             // is still in the pairing handshake. The preview is emitted INSIDE
             // each branch, because only one of them is safe to print.
-            if conn === self.client, self.paired {
-                let preview = String(data: data, encoding: .utf8)?.prefix(60) ?? "<binary>"
-                self.onLog("📥 Received \(data.count) bytes: \(preview)")
+            switch Self.frameRoute(isClient: conn === self.client, isPaired: self.paired,
+                                   isChallenger: self.challengers.contains { $0 === conn }) {
+            case .drop:
+                // A retired connection: ignore the frame and stop reading. Its
+                // deferred cancel tears the socket down.
+                self.onLog("📥 Dropped \(data.count) bytes from a disconnected device")
+                return
+            case .app:
+                // Size only; the manager logs the type once it has decoded the
+                // envelope. Content never reaches the log (MobileLogPolicy).
+                self.onLog("📥 Received \(data.count) bytes")
                 self.routeInbound(data: data)
-            } else {
+            case .pairing:
                 // NEVER preview an unpaired peer's frame. Its first frame is a
                 // `Pairing`, encoded in CodingKeys order as
                 // {"type":…,"pin":…,"token":…,…} — so a 60-character preview
@@ -619,11 +630,33 @@ final class MobileWebSocketServer: @unchecked Sendable {
                   Self.disconnectMatches(clientDeviceId: self.clientDeviceId, target: target) else { return }
             self.onLog("Disconnecting paired client (\(code.rawValue))")
             self.sendDirect(Disconnected(code: code, message: message), to: conn)
-            // The state handler stays installed: its `.cancelled` branch clears
-            // `client`/`paired` and fires onClientDisconnected as for any drop.
+            // Unpair NOW, not when the deferred cancel lands: for those 0.2 s a
+            // revoked phone's in-flight frames were still routed to the app
+            // and still received replies. `receive` drops frames from a
+            // connection that is neither the client nor a challenger, and
+            // `send` refuses once `paired` is false.
+            // The state handler is cleared so the later `.cancelled` can't run
+            // this bookkeeping a second time.
+            conn.stateUpdateHandler = nil
+            self.client = nil
+            self.paired = false
+            self.clientDeviceId = nil
+            self.onClientDisconnected()
             self.queue.asyncAfter(deadline: .now() + 0.2) { conn.cancel() }
         }
     }
+
+    /// Whether a frame from `conn` may be acted on at all: only the paired
+    /// client's frames reach the app, and only a waiting challenger's reach
+    /// the pairing handshake. Anything else is a connection already being
+    /// torn down (revoked, replaced, stopped) whose frames were in flight.
+    static func frameRoute(isClient: Bool, isPaired: Bool, isChallenger: Bool) -> FrameRoute {
+        if isClient && isPaired { return .app }
+        if isChallenger { return .pairing }
+        return .drop
+    }
+
+    enum FrameRoute: Equatable { case app, pairing, drop }
 
     /// A usable device id: trimmed, non-empty, bounded. Phones send a UUID;
     /// anything wildly longer is not a device id and is treated as absent.
@@ -672,8 +705,6 @@ final class MobileWebSocketServer: @unchecked Sendable {
             Task { await self.send(HeartbeatAck(ts: Date().timeIntervalSince1970)) }
             return
         }
-        let preview = String(data: data, encoding: .utf8)?.prefix(80) ?? "<binary>"
-        onLog("📨 routeInbound: forwarding message (\(data.count) bytes): \(preview)")
         onInbound(data)
     }
 }

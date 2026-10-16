@@ -296,7 +296,8 @@ final class MobileLoopBridge: MobileFeatureBridge {
             iteration: 0,
             maxIterations: loopConfig?.maxIterations ?? 0,
             logTail: Array(tail),
-            lastStatusSummary: recent?.statusSummary,
+            // Agent-written free text, redacted like the log tail above.
+            lastStatusSummary: recent.map { PhoneRedaction.logLine($0.statusSummary) },
             lastFinishedAt: recent.map { $0.startedAt.timeIntervalSince1970 + $0.durationSeconds },
             // Stage ids come from the one (cached) `primaryLoop` read above, so
             // they are exactly the ids a follow-up `loop_start_stage` resolves.
@@ -370,20 +371,22 @@ final class MobileLoopBridge: MobileFeatureBridge {
         let projectId = project.bundle.id
         let root = context.projectRoot
         let gitRoot = context.gitRoot
-        let entries = await Task.detached(priority: .userInitiated) { () -> [LoopRunIndexEntry] in
+        let entries = await Task.detached(priority: .userInitiated) { () -> [LoopRunSummary] in
             let primaryId = LoopEngineConfigStore.primaryLoop(projectRoot: root, projectId: projectId,
                                                               gitRoot: gitRoot)?.id
-            return Self.scopedHistory(root: root, primaryId: primaryId, limit: limit)
+            // Redacted here, still off the main actor: a run's summary is
+            // agent-written free text and can quote a secret it saw.
+            return Self.scopedHistory(root: root, primaryId: primaryId, limit: limit).map {
+                LoopRunSummary(id: $0.id,
+                               startedAt: $0.startedAt.timeIntervalSince1970,
+                               durationSeconds: $0.durationSeconds,
+                               iterationsUsed: $0.iterationsUsed,
+                               statusCode: $0.statusCode,
+                               statusSummary: PhoneRedaction.logLine($0.statusSummary),
+                               trigger: $0.trigger.rawValue)
+            }
         }.value
-        return entries.map {
-            LoopRunSummary(id: $0.id,
-                           startedAt: $0.startedAt.timeIntervalSince1970,
-                           durationSeconds: $0.durationSeconds,
-                           iterationsUsed: $0.iterationsUsed,
-                           statusCode: $0.statusCode,
-                           statusSummary: $0.statusSummary,
-                           trigger: $0.trigger.rawValue)
-        }
+        return entries
     }
 
     /// Tail-read journal index entries scoped to the Primary loop (or

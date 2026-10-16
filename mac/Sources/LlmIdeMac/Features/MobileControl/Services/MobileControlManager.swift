@@ -239,6 +239,21 @@ final class MobileControlManager {
     /// Device id of the phone currently connected; nil when none is, or when a
     /// legacy phone paired with a bare PIN and has no id.
     private(set) var connectedDeviceId: String?
+    /// Bumped on every successful pairing (including a replacement and a
+    /// token reconnect). State that must belong to ONE phone session — the
+    /// Self-Heal reviewed-patch cache — binds to `phoneSessionIdentity`, so
+    /// two PIN-only phones (both `connectedDeviceId == nil`) never share it.
+    private(set) var phoneSessionGeneration = 0
+
+    /// The current phone session's identity, or nil when no phone is paired.
+    var phoneSessionIdentity: String? {
+        guard mobileClientPaired else { return nil }
+        return Self.makePhoneSessionIdentity(generation: phoneSessionGeneration, deviceId: connectedDeviceId)
+    }
+
+    nonisolated static func makePhoneSessionIdentity(generation: Int, deviceId: String?) -> String {
+        "\(generation):\(deviceId ?? "pin-only")"
+    }
     /// Bumped each time the pairing PIN rotates so Settings re-reads the PIN
     /// and redraws the QR.
     private(set) var pinGeneration = 0
@@ -299,6 +314,18 @@ final class MobileControlManager {
     }
 
     // MARK: - Start / stop
+
+    /// The switch that lets the phone DELETE Mac chats (`explore_delete_session`,
+    /// `llmide_chat_history_clear`). There is no dedicated chat-deletion
+    /// switch; `exploreEdit` is the existing default-OFF switch that already
+    /// decides whether the phone may change Mac-side state through chat, and
+    /// a deleted chat is as irreversible as an edited file. Read-only phone
+    /// chat keeps working with it off.
+    nonisolated static let chatDeletionSwitch: PhoneAccess = .exploreEdit
+
+    nonisolated static func chatDeletionAllowed(_ isAllowed: (PhoneAccess) -> Bool) -> Bool {
+        isAllowed(chatDeletionSwitch)
+    }
 
     /// The pairing-PIN check behind `validatePin`.
     ///
@@ -573,26 +600,24 @@ final class MobileControlManager {
     private func handleInbound(_ data: Data) {
         struct Envelope: Decodable { let type: String }
         guard let env = try? decoder.decode(Envelope.self, from: data) else {
-            let preview = String(data: data, encoding: .utf8) ?? "<\(data.count) bytes>"
-            append(.info, "Unhandled inbound (no type): \(preview)")
+            // Never the frame itself: it is phone-controlled and up to 8 MiB.
+            append(.info, "Unhandled inbound (\(MobileLogPolicy.frameLabel(data)))")
             return
         }
 
-        // Debug: Log all received message types
-        let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
-        append(.info, "📨 Received type='\(env.type)' data: \(preview)")
+        // Type and size only — see MobileLogPolicy for why never content.
+        append(.info, "📨 Received type='\(MobileLogPolicy.typeLabel(env.type))', \(data.count) bytes")
 
         switch env.type {
         case MobileProtocol.Tag.llmIdeChat:
             // Phase 3/4 chat proxy — must keep working alongside explorer ops.
             if let chat = try? decoder.decode(LlmIdeChat.self, from: data) {
-                append(.info, "Chat: \(chat.text.prefix(40))")
+                append(.info, "Chat: \(chat.text.count) chars")
                 registerMobileInflightTask(commandId: chat.commandId) {
                     await self.handleChat(chat)
                 }
             } else {
-                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
-                append(.stderr, "llmide_chat decode failed: \(preview)")
+                append(.stderr, "llmide_chat decode failed (\(MobileLogPolicy.frameLabel(data)))")
                 replyDecodeFailure(data, what: "chat request")
             }
         case MobileProtocol.Tag.llmIdeCancel:
@@ -622,7 +647,7 @@ final class MobileControlManager {
         case let t where routeToFeatureBridge(type: t, data: data):
             break
         default:
-            append(.info, "Unhandled inbound type: \(env.type)")
+            append(.info, "Unhandled inbound type: \(MobileLogPolicy.typeLabel(env.type))")
         }
     }
 
@@ -799,6 +824,15 @@ final class MobileControlManager {
             append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
             reply(ExploreSessionCreated(sessionId: s.id.uuidString))
         case MobileProtocol.Tag.exploreDeleteSession:
+            // Refused synchronously, before the phone's follow-up re-list is
+            // handled, so the list it gets back still shows the kept session.
+            // `explore_`-prefixed so the phone's Explorer store surfaces it.
+            guard Self.chatDeletionAllowed({ phoneAccess.isAllowed($0) }) else {
+                append(.info, "Explore delete refused — \"\(Self.chatDeletionSwitch.title)\" is off")
+                reply(CommandError(commandId: "explore_delete",
+                                   message: Self.chatDeletionSwitch.deniedMessage))
+                return
+            }
             if let m = try? decoder.decode(ExploreDeleteSession.self, from: data),
                let uid = UUID(uuidString: m.sessionId) {
                 // Async (the session-memory forget is a network call); this
@@ -815,8 +849,7 @@ final class MobileControlManager {
                     await self.handleExploreChat(chat)
                 }
             } else {
-                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
-                append(.stderr, "explore_chat decode failed: \(preview)")
+                append(.stderr, "explore_chat decode failed (\(MobileLogPolicy.frameLabel(data)))")
                 replyDecodeFailure(data, what: "explorer chat request")
             }
         case MobileProtocol.Tag.exploreCancel:
@@ -827,8 +860,7 @@ final class MobileControlManager {
             if let req = try? decoder.decode(ExploreSearchFiles.self, from: data) {
                 handleExploreSearch(req)
             } else {
-                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
-                append(.stderr, "explore_search_files decode failed: \(preview)")
+                append(.stderr, "explore_search_files decode failed (\(MobileLogPolicy.frameLabel(data)))")
                 // Reply with an error so the phone clears its search spinner —
                 // it only resets isSearchingWorkspace on a search reply.
                 reply(ExploreSearchReply(workspaceRoot: nil, matches: [],
@@ -838,13 +870,12 @@ final class MobileControlManager {
             if let req = try? decoder.decode(ExploreSearchSkills.self, from: data) {
                 Task { await handleExploreSearchSkills(req) }
             } else {
-                let preview = String(data: data, encoding: .utf8)?.prefix(100) ?? "<binary>"
-                append(.stderr, "explore_search_skills decode failed: \(preview)")
+                append(.stderr, "explore_search_skills decode failed (\(MobileLogPolicy.frameLabel(data)))")
                 reply(ExploreSkillListReply(matches: [],
                                             error: "Invalid skill-search request from phone."))
             }
         default:
-            append(.info, "Unhandled explore type: \(type)")
+            append(.info, "Unhandled explore type: \(MobileLogPolicy.typeLabel(type))")
         }
     }
 
@@ -865,7 +896,7 @@ final class MobileControlManager {
             let matches = await exploreIndex.searchWorkspace(
                 query: req.query, workspaceRoot: root, limit: limit)
             let rootLabel = MobileExploreBridge.homeRelativePathForDisplay(root.path)
-            append(.info, "Explore search \"\(req.query.prefix(40))\" → \(matches.count) hit(s) [index]")
+            append(.info, "Explore search (\(req.query.count) chars) → \(matches.count) hit(s) [index]")
             reply(ExploreSearchReply(workspaceRoot: rootLabel, matches: matches, error: nil))
         }
     }
@@ -879,7 +910,7 @@ final class MobileControlManager {
         }
         let limit = min(max(req.limit ?? MobileSkillCatalog.defaultLimit, 1), 80)
         let matches = await exploreIndex.searchSkills(query: req.query, api: api, limit: limit)
-        append(.info, "Explore skill search \"\(req.query.prefix(40))\" → \(matches.count) hit(s) [index]")
+        append(.info, "Explore skill search (\(req.query.count) chars) → \(matches.count) hit(s) [index]")
         reply(ExploreSkillListReply(matches: matches, error: nil))
     }
 
@@ -1280,7 +1311,10 @@ final class MobileControlManager {
 
     // internal: shared with the Mobile*Bridge classes (feature folders)
     func append(_ stream: MobileLogLine.Stream, _ text: String) {
-        logLines.append(.init(text: text, stream: stream))
+        // Capped here so no caller — bridge, server callback, error text — can
+        // make one line arbitrarily large; the 5 000-line cap alone bounds the
+        // COUNT of lines, not their size.
+        logLines.append(.init(text: MobileLogPolicy.capLine(text), stream: stream))
         if logLines.count > maxLogLines {
             logLines.removeFirst(logLines.count - maxLogLines)
         }
@@ -1361,6 +1395,7 @@ final class MobileControlManager {
     }
 
     private func onMobileClientPaired() {
+        phoneSessionGeneration += 1
         mobileClientPaired = true
         // An immediate full snapshot for a client that just paired, rather
         // than waiting for the next Combine-debounced change — reusing the
@@ -1383,6 +1418,9 @@ final class MobileControlManager {
     private func onMobileClientDisconnected() {
         mobileClientPaired = false
         connectedDeviceId = nil
+        // A reviewed patch belongs to the session that saw it; nothing may
+        // apply it once that phone is gone.
+        selfHealBridge?.forgetReviewedPatches()
         // The phone is gone, so these turns end for it, not "on the Mac":
         // mark them cancelled so their catch paths send nothing
         // (`notifyStoppedOnMac`) to a phone that reconnects quickly.
@@ -1583,6 +1621,23 @@ final class MobileControlManager {
         server?.disconnectCurrentClient(code: .revoked,
                                         message: "The Mac signed out of the account this phone was paired with")
         if !ids.isEmpty { append(.info, "Revoked \(ids.count) paired device(s) after an account change") }
+        // Revoking tokens alone left the PIN on screen (or in a photo of the
+        // QR) valid: an unused PIN would still pair a phone into the NEW
+        // account. Retire it the same way a successful pairing does.
+        rotatePairingPin()
+    }
+
+    /// Retire the current PIN now: the in-memory half is immediate (the very
+    /// next `validatePin` sees the new one), the Keychain write runs off the
+    /// main actor, and `pinDidRotate` refreshes Settings — the same split as
+    /// `onPinConsumed` in `start()`. Safe while the server is stopped too: the
+    /// rotated PIN is simply what the next start serves.
+    private func rotatePairingPin() {
+        let fresh = MobilePin.rotateInMemory()
+        Task.detached(priority: .utility) { [weak self] in
+            let persisted = (try? MobilePin.persist(fresh)) != nil
+            await MainActor.run { [weak self] in self?.pinDidRotate(persisted: persisted) }
+        }
     }
 
     /// Explicit "push now" for the Auto Tasks page's Refresh button, and for
@@ -1743,6 +1798,14 @@ final class MobileControlManager {
     /// forgets the chat's server-side session memory. The retired
     /// `clearAgentAskHistory()` wiped the wrong (unread) table.
     private func handleLlmIdeChatHistoryClear() async {
+        // Clearing wipes the Mac's quick chat (shared with the menu bar), so it
+        // sits behind the same default-OFF switch as every other phone action
+        // that changes Mac-side chat state — see `Self.chatDeletionAllowed`.
+        guard Self.chatDeletionAllowed({ phoneAccess.isAllowed($0) }) else {
+            reply(CommandError(commandId: "llmide_chat_history_clear",
+                               message: Self.chatDeletionSwitch.deniedMessage))
+            return
+        }
         guard let api else {
             reply(CommandError(commandId: "llmide_chat_history_clear", message: "Backend not configured"))
             return
@@ -1789,7 +1852,7 @@ final class MobileControlManager {
         let trimmed = m.title.trimmingCharacters(in: .whitespacesAndNewlines)
         session.title = trimmed.isEmpty ? "Untitled" : trimmed
         ChatSessionStore.save(session)
-        append(.info, "Explore rename: \(sid.uuidString.prefix(8)) → \(session.title.prefix(30))")
+        append(.info, "Explore rename: \(sid.uuidString.prefix(8)) (\(session.title.count) chars)")
         reply(ExploreSessionRenamed(sessionId: sid.uuidString, title: session.title))
         pushExploreSessionListIfPaired()
     }

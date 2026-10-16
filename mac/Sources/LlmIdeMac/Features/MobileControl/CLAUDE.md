@@ -65,6 +65,8 @@ cd ~/llm-ide/ios_app && open MyApp.xcodeproj
 - **Redact through `PhoneRedaction`, never `IncidentRedactor` directly.** Its regexes backtrack
   quadratically on one huge unbroken token (a 200 000-character line took ~7 minutes); `PhoneRedaction`
   cuts each line first. Run it off the main actor.
+- **Log frames through `MobileLogPolicy`** (type + byte size), never a preview of frame content: the
+  log pane is on screen and frames carry chat text, file content and tokens.
 - Pure decision/shaping functions are `nonisolated static` so tests can pin them (see the `Mobile*BridgeTests`).
   Test files that name mobile-only types must be added to `mobileTestExcludes` in `mac/Package.swift`.
 

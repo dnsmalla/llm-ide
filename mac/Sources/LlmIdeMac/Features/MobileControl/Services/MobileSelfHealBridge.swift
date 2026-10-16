@@ -62,6 +62,12 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
     func removePushObservers() {
         observing = false
         // A stopped server means the phone is gone; a later pairing must review afresh.
+        forgetReviewedPatches()
+    }
+
+    /// Drop every held review. Called when the phone disconnects, so a patch
+    /// reviewed in one session can never be applied from another.
+    func forgetReviewedPatches() {
         reviewed = ReviewedPatchCache()
     }
 
@@ -125,8 +131,16 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
         var reviewedPatch: SelfHealProposalService.ReviewedPatch?
         if req.action == .apply, let proposal = incident.proposal {
             // Only a patch the phone was shown may be applied; a restart or expiry loses it.
-            switch reviewed.lookup(for: incident.id, proposal: proposal,
-                                   deviceId: manager.connectedDeviceId, now: Date()) {
+            // Bound to the pairing SESSION, not the device id: a PIN-only
+            // phone has no id, and nil == nil let one PIN-only phone apply a
+            // patch another had reviewed. No paired session → nothing held.
+            let lookup: ReviewedPatchCache.Lookup
+            if let identity = manager.phoneSessionIdentity {
+                lookup = reviewed.lookup(for: incident.id, proposal: proposal, deviceId: identity, now: Date())
+            } else {
+                lookup = .missing
+            }
+            switch lookup {
             case .held(let held):
                 reviewedPatch = held
             case .truncated:
@@ -199,6 +213,9 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
             manager?.reply(SelfHealDiffResult(incidentId: incidentId, diff: nil, error: "No proposal for that incident."))
             return
         }
+        // Captured NOW: the diff is built asynchronously, and a different phone
+        // could pair before it is stored — it must not inherit this review.
+        let identity = manager?.phoneSessionIdentity
         Task { @MainActor [weak self] in
             do {
                 // git AND the redaction both run off the main actor.
@@ -207,8 +224,10 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
                     let shaped = Self.shapeDiff(patch.text)
                     return (patch, shaped.0, shaped.1)
                 }.value
-                self?.reviewed.store(patch, for: incidentId, proposal: proposal, truncated: truncated,
-                                     deviceId: self?.manager?.connectedDeviceId, now: Date())
+                if let identity {
+                    self?.reviewed.store(patch, for: incidentId, proposal: proposal, truncated: truncated,
+                                         deviceId: identity, now: Date())
+                }
                 self?.manager?.reply(SelfHealDiffResult(incidentId: incidentId,
                                                         diff: text.isEmpty ? "(no changes)" : text,
                                                         truncated: truncated))

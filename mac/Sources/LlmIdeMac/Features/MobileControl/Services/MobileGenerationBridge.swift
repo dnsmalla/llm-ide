@@ -61,6 +61,13 @@ final class MobileGenerationBridge: MobileFeatureBridge {
                                              error: "The Mac could not read this request."))
                 return true
             }
+            // Same switch as the Files browser: llm-doc/ holds project notes and
+            // generated documents, which are project content like any other file.
+            guard manager?.phoneAccess.isAllowed(.fileBrowse) == true else {
+                manager?.reply(LlmDocListing(path: req.path, entries: [],
+                                             error: PhoneAccess.fileBrowse.deniedMessage))
+                return true
+            }
             guard let root = notesDir else {
                 manager?.reply(LlmDocListing(path: req.path, entries: [], error: "Open a project on the Mac first."))
                 return true
@@ -75,6 +82,11 @@ final class MobileGenerationBridge: MobileFeatureBridge {
             guard let req = try? manager?.decoder.decode(LlmDocRead.self, from: data ?? Data()) else {
                 manager?.reply(LlmDocFile(path: Self.envelopeValue("path", in: data) ?? "", text: nil,
                                           error: "The Mac could not read this request."))
+                return true
+            }
+            guard manager?.phoneAccess.isAllowed(.fileBrowse) == true else {
+                manager?.reply(LlmDocFile(path: req.path, text: nil,
+                                          error: PhoneAccess.fileBrowse.deniedMessage))
                 return true
             }
             guard let root = notesDir else {

@@ -92,8 +92,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                 }
                 replyAutoTaskStateOrAck()
             } else {
-                let preview = String(data: data ?? Data(), encoding: .utf8)?.prefix(100) ?? "<binary>"
-                manager?.append(.stderr, "auto_task_toggle decode failed: \(preview)")
+                manager?.append(.stderr, "auto_task_toggle decode failed (\(MobileLogPolicy.frameLabel(data)))")
                 manager?.reply(CommandError(commandId: "auto_task_toggle",
                                             message: "Invalid auto-task toggle request from phone."))
             }
@@ -152,8 +151,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                                                message: "Auto Tasks is already running on your Mac. Tap Stop first."))
                 }
             } else {
-                let preview = String(data: data ?? Data(), encoding: .utf8)?.prefix(100) ?? "<binary>"
-                manager?.append(.stderr, "auto_task_run decode failed: \(preview)")
+                manager?.append(.stderr, "auto_task_run decode failed (\(MobileLogPolicy.frameLabel(data)))")
                 manager?.reply(CommandError(commandId: "auto_task_run",
                                             message: "Invalid auto-task run request from phone."))
             }
@@ -172,13 +170,24 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             // Snapshot the processed-actions registry. `allEntries` is
             // @Published on AutoCodeUpdateService (a cached copy of
             // Registry.allEntries()), so the read is cheap and main-isolated.
-            let entries = (autoCode?.allEntries ?? []).map {
-                AutoTaskHistoryEntry(actionText: $0.actionText,
-                                     status: $0.status.rawValue,
-                                     lastUpdated: $0.lastUpdated.timeIntervalSince1970)
+            // `actionText` is free text lifted from meeting notes / tickets and
+            // can carry pasted tokens, so it is redacted like the log tail —
+            // off the main actor, as PhoneRedaction requires.
+            let raw = (autoCode?.allEntries ?? []).map {
+                (text: $0.actionText, status: $0.status.rawValue,
+                 lastUpdated: $0.lastUpdated.timeIntervalSince1970)
             }
-            manager?.append(.info, "Auto-task history: \(entries.count) entries")
-            manager?.reply(AutoTaskHistoryReply(entries: entries))
+            Task { [weak self] in
+                let entries = await Task.detached(priority: .userInitiated) {
+                    raw.map {
+                        AutoTaskHistoryEntry(actionText: PhoneRedaction.logLine($0.text),
+                                             status: $0.status,
+                                             lastUpdated: $0.lastUpdated)
+                    }
+                }.value
+                self?.manager?.append(.info, "Auto-task history: \(entries.count) entries")
+                self?.manager?.reply(AutoTaskHistoryReply(entries: entries))
+            }
             return true
 
         case MobileProtocol.Tag.autoTaskLogsList:
@@ -415,8 +424,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     }
 
     private func replyAutoTaskSetupDecodeFailure(type: String, data: Data?) {
-        let preview = String(data: data ?? Data(), encoding: .utf8)?.prefix(100) ?? "<binary>"
-        manager?.append(.stderr, "\(type) decode failed: \(preview)")
+        manager?.append(.stderr, "\(MobileLogPolicy.typeLabel(type)) decode failed (\(MobileLogPolicy.frameLabel(data)))")
         manager?.reply(CommandError(commandId: type,
                                     message: "Invalid auto-task setup request from phone."))
     }

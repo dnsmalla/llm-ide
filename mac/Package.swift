@@ -155,6 +155,7 @@ if mobileIncluded {
         "MobileProjectBridgeTests.swift",
         "MobileSelfHealBridgeTests.swift",
         "MobileToolApprovalTests.swift",
+        "MobileHardeningTests.swift",
         "PhoneGitTests.swift",
         "PhoneFilesTests.swift",
         "PhoneIssuesTests.swift",
