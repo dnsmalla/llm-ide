@@ -197,11 +197,14 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         "pytest.ini", "**/pytest.ini", "**/pyproject.toml", "**/setup.cfg",
         ".githooks/**", "**/jest.config.js", "**/vitest.config.ts",
         // 3. The harness's own state — editing this rigs the verdict directly.
-        "system/faults.csv", "system/faults/**", "system/loop-runs/**",
+        // `**/` on every harness path, not just the root: a project folder
+        // inside a larger git root keeps its faults under `<project>/system/`,
+        // and a root-anchored glob let a repair delete those and pass the
+        // regression stage as `.clean`.
+        "**/system/faults.csv", "**/system/faults/**", "**/system/loop-runs/**",
         // The loop's own contract: a repair that turned the guard off, disabled
         // the failing stage or raised the budgets would be re-read by the NEXT
-        // scheduled run. `**/` so a project folder inside a larger git root
-        // matches too. App writes are exempt via `AppWrittenFiles`.
+        // scheduled run. App writes are exempt via `AppWrittenFiles`.
         "**/system/loop.json"
     ]
 

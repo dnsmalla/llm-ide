@@ -180,7 +180,8 @@ final class RepairScopeGuardTests: XCTestCase {
     /// The harness's own state is protected: editing `faults.csv` makes a
     /// regression sweep pass without fixing anything.
     func testHarnessStateIsProtected() async {
-        for path in ["system/faults.csv", "system/faults/fault-1.md", "system/loop-runs/index.jsonl", "system/loop.json", "app/system/loop.json"] {
+        for path in ["system/faults.csv", "system/faults/fault-1.md", "system/loop-runs/index.jsonl", "system/loop.json", "app/system/loop.json",
+                     "app/system/faults.csv", "app/system/faults/fault-1.md", "app/system/loop-runs/index.jsonl"] {
             let verifier = ScriptedVerifier(statusOutputs: [status([]), status([" M \(path)"])])
             let guardUnderTest = GitRepairScopeGuard(verifier: verifier)
             let before = await guardUnderTest.snapshot(gitRoot: gitRoot)
