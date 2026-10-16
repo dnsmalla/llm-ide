@@ -1492,9 +1492,12 @@ struct UAGraphView: View {
             // Inspect the result. Discarding it meant a contended or failed
             // scan silently produced a doc-only "All" graph that looked like a
             // legitimate result, then got cached as such for the session.
+            var scanWasBusy = false
             switch await codeNoteService.generate(repoRoot: repo) {
-            case .success, .failure(.busy):
-                break   // `.busy` falls back to the cached code graph below
+            case .success:
+                break
+            case .failure(.busy):
+                scanWasBusy = true   // falls back to the cached code graph below
             case .failure(.cancelled):
                 if gen == self.runGeneration { self.status = .idle }
                 return
@@ -1504,7 +1507,10 @@ struct UAGraphView: View {
             }
             if Task.isCancelled { await MainActor.run { if gen == self.runGeneration { self.status = .idle } }; return }
             // "md is doc": strip code-track markdown so it isn't merged twice.
-            var code = FileClassifier.strippingDocNodes(from: codeNoteService.graph)
+            // On `.busy` the service's graph is whatever it scanned LAST — after
+            // a project switch, the previous repo's. Only the per-repo cache is
+            // safe to fall back to.
+            var code = scanWasBusy ? CGData.empty : FileClassifier.strippingDocNodes(from: codeNoteService.graph)
             var codeFromCache = false
             // The live scan returns an empty graph if it lost the cross-instance
             // scan lock (CodeNoteService.inFlightPaths — e.g. the background
@@ -1513,6 +1519,12 @@ struct UAGraphView: View {
             if code.nodes.isEmpty, let cachedCode = cachedGraph(.code), !cachedCode.nodes.isEmpty {
                 code = cachedCode   // already markdown-free (stripped when cached)
                 codeFromCache = true
+            }
+            // Busy with nothing cached for THIS repo: a doc-only "All" graph
+            // would be cached for the session as if it were the real one.
+            if scanWasBusy && code.nodes.isEmpty {
+                if gen == self.runGeneration { self.status = .error("The code scan is busy in the background — try again in a moment.") }
+                return
             }
             let result: (data: CGData, chunks: [MemoryChunk], docs: Int)
             do {

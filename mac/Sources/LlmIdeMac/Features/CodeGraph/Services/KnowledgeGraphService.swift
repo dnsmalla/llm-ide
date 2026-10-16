@@ -30,6 +30,9 @@ final class KnowledgeGraphService: ObservableObject {
     /// `FileClassifier.citationOverlay`). Deliberately NOT part of `codeGraph`,
     /// which every graph view renders — only `codeGraphForUpload` merges it.
     @Published private(set) var codeCitationOverlay: CGData = .empty
+    /// The repo `codeGraph` was scanned from. A busy scan lock reuses the
+    /// retained graph only when it belongs to the repo being refreshed.
+    private(set) var codeGraphRoot: URL?
     /// What the backend upload receives: `codeGraph` plus the citation
     /// overlay, so find-code can label doc→code edges "documented by". Also
     /// what the upload fingerprints, so a doc-only change re-uploads.
@@ -155,6 +158,15 @@ final class KnowledgeGraphService: ObservableObject {
                 // is not double-counted when merged below.
                 codeGraph = FileClassifier.strippingDocNodes(from: codeNotes.graph)
                 codeCitationOverlay = codeNotes.citationOverlay
+                codeGraphRoot = codeRepoRoot.standardizedFileURL
+            case .failure(.busy) where codeGraphRoot != codeRepoRoot.standardizedFileURL:
+                // The retained graph is another repo's (a project switch, then
+                // the new repo's lock was held by a manual generate or a Loop
+                // rescan). Reusing it merged project A's code into project B's
+                // graph, upload and graph-notes. Skip; the next tick retries.
+                Self.log.info("code track busy and the retained code graph is another repo's — skipping this run")
+                phase = .failed("Code scan busy — will retry")
+                return
             case .failure(.busy):
                 // Expected, not a failure: the background updater and a manual
                 // generate both run on timers and contend for the same repo's

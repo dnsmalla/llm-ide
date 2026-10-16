@@ -217,7 +217,15 @@ final class GraphAutoUpdater: ObservableObject {
             // common case for a periodic tick.
             // `codeGraphForUpload` = the rendered code graph plus the doc→code
             // citation overlay (server-only; the views never see doc nodes).
-            await self.uploader.upload(graph: self.graph.codeGraphForUpload, repoRoot: heldRoot)
+            // Keyed on the code graph's OWN repo, not the run's phase: a doc
+            // track failure still leaves a fresh code graph worth uploading,
+            // while a graph scanned from another repo must never go up under
+            // `heldRoot`.
+            if self.graph.codeGraphRoot == heldRoot.standardizedFileURL {
+                await self.uploader.upload(graph: self.graph.codeGraphForUpload, repoRoot: heldRoot)
+            } else {
+                Self.log.info("skipping upload — the held code graph is not this repo's")
+            }
             self.objectWillChange.send()
             if includeOtherRepos {
                 await self.refreshOtherRepos(projectRoot: projectRoot, primary: heldRoot)
