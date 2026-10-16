@@ -55,6 +55,10 @@ final class GanttViewModel: ObservableObject {
 
     /// Provider + project the current rows belong to; see `load`.
     private var loadedKey: String?
+    /// Bumped by every `load`; only the newest may write. Refresh/Retry start
+    /// loads nobody cancels, so a slow one for project A used to land after
+    /// project B's and put A's rows under B.
+    private var loadGeneration = 0
 
     // MARK: - Date parsing
 
@@ -82,9 +86,12 @@ final class GanttViewModel: ObservableObject {
             members = []
             loadedKey = loadKey
         }
+        loadGeneration += 1
+        let generation = loadGeneration
+        func isCurrent() -> Bool { generation == loadGeneration && loadedKey == loadKey }
         isLoading = true
         errorMessage = nil
-        defer { isLoading = false }
+        defer { if generation == loadGeneration { isLoading = false } }
         do {
             async let milestonesTask = client.listMilestones(projectId: project.id)
             // Members feed the assignee filter only — a token without the
@@ -94,19 +101,22 @@ final class GanttViewModel: ObservableObject {
                 projectId: project.id, filter: RepoIssueFilter(state: .all), page: 1)
 
             let (ms, mem, firstPage) = try await (milestonesTask, membersTask, firstPageTask)
-            self.milestones = ms
-            self.members    = mem
-            self.issues     = try await drainIssues(client: client, projectId: project.id,
-                                                    firstPage: firstPage)
-
+            let fetchedIssues = try await drainIssues(client: client, projectId: project.id,
+                                                      firstPage: firstPage)
+            var fetchedSchedules: [Int: LlmIdeAPIClient.IssueSchedule] = [:]
             if client.usesScheduleOverlay, let api {
                 // Best-effort: an unreachable local server must not break the
                 // chart, it just loses the start/estimate/dependency detail.
-                self.schedules = (try? await api.listIssueSchedules(
+                fetchedSchedules = (try? await api.listIssueSchedules(
                     provider: client.kind.rawValue, repo: project.fullName)) ?? [:]
-            } else {
-                self.schedules = [:]
             }
+            // Write everything at once, and only if no newer load started
+            // while this one was awaiting.
+            guard isCurrent() else { return }
+            self.milestones = ms
+            self.members    = mem
+            self.issues     = fetchedIssues
+            self.schedules  = fetchedSchedules
         } catch is CancellationError {
             // Superseded by a newer load (project switch → `.task(id:)`
             // restart). Writing the error here used to land AFTER the new load
@@ -114,7 +124,7 @@ final class GanttViewModel: ObservableObject {
         } catch let error as URLError where error.code == .cancelled {
             // Same, surfaced by URLSession instead of Swift concurrency.
         } catch {
-            errorMessage = error.localizedDescription
+            if isCurrent() { errorMessage = error.localizedDescription }
         }
     }
 
