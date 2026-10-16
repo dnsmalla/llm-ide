@@ -25,8 +25,17 @@ fileprivate let crashesDirectory: URL = {
 // formally async-signal-safe by the POSIX standard, but this codebase
 // already accepted that tradeoff for crashLog.critical(); this matches
 // it rather than introducing new risk.
-fileprivate func writeCrashReportFile(_ text: String) {
-    let name = "crash-\(Int(Date().timeIntervalSince1970)).log"
+//
+// `kind` keeps the two writers apart: an uncaught NSException is followed by
+// abort(), so the SIGABRT handler fires within the same second — with one
+// shared name it would replace the exception's stack trace with a bare
+// "Fatal signal 6". That SIGABRT is the same crash, so it writes no second
+// report (CrashReportStore would show two, and the importer file two
+// incidents) once the exception handler has written one.
+nonisolated(unsafe) fileprivate var crashExceptionReported: sig_atomic_t = 0
+
+fileprivate func writeCrashReportFile(_ text: String, kind: String) {
+    let name = "crash-\(Int(Date().timeIntervalSince1970))-\(kind).log"
     try? text.write(to: crashesDirectory.appendingPathComponent(name),
                      atomically: true, encoding: .utf8)
 }
@@ -37,16 +46,23 @@ fileprivate func installCrashHandlers() {
             "Uncaught \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "<no reason>", privacy: .public)\nstack: \(exception.callStackSymbols.joined(separator: "\n"), privacy: .public)"
         )
         writeCrashReportFile(
-            "Uncaught \(exception.name.rawValue): \(exception.reason ?? "<no reason>")\nstack:\n\(exception.callStackSymbols.joined(separator: "\n"))"
+            "Uncaught \(exception.name.rawValue): \(exception.reason ?? "<no reason>")\nstack:\n\(exception.callStackSymbols.joined(separator: "\n"))",
+            kind: "exception"
         )
+        crashExceptionReported = 1
     }
-    // POSIX signals — SIGSEGV/SIGABRT/SIGILL/SIGBUS. Re-raise the
+    // POSIX signals — SIGSEGV/SIGABRT/SIGILL/SIGBUS/SIGFPE, plus SIGTRAP:
+    // on Apple Silicon a Swift runtime trap (force-unwrap of nil, array
+    // out of bounds, fatalError) arrives as SIGTRAP, so without it the
+    // most common Swift crash never reaches the banner. Re-raise the
     // default after logging so the OS still produces the crash log
     // and exits the process cleanly.
-    for sig: Int32 in [SIGSEGV, SIGABRT, SIGILL, SIGBUS, SIGFPE] {
+    for sig: Int32 in [SIGSEGV, SIGABRT, SIGILL, SIGBUS, SIGFPE, SIGTRAP] {
         signal(sig) { sig in
             crashLog.critical("Fatal signal \(sig)")
-            writeCrashReportFile("Fatal signal \(sig)")
+            if !(sig == SIGABRT && crashExceptionReported != 0) {
+                writeCrashReportFile("Fatal signal \(sig)", kind: "signal")
+            }
             signal(sig, SIG_DFL)
             raise(sig)
         }
