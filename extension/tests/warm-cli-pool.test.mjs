@@ -241,3 +241,35 @@ test('rememberBinStamp flushes when the binary identity changes', async () => {
   assert.equal(pool.rememberBinStamp('/a/claude', 2), true);
   assert.equal(pool._warmPoolStateForTests().idle, 0);
 });
+
+const VM_STAT = `Mach Virtual Memory Statistics: (page size of 16384 bytes)
+Pages free:                                3618.
+Pages inactive:                          205707.
+Pages speculative:                         9203.
+Pages purgeable:                              .
+`;
+
+test('availableMemoryBytes: darwin sums free+inactive+speculative+purgeable pages', () => {
+  pool._resetMemCacheForTests();
+  const got = pool.availableMemoryBytes({ platform: 'darwin', runVmStat: () => VM_STAT, now: () => 1 });
+  assert.equal(got, (3618 + 205707 + 9203 + 0) * 16384);
+});
+
+test('availableMemoryBytes: non-darwin and a failing vm_stat fall back to os.freemem()', () => {
+  pool._resetMemCacheForTests();
+  const near = (v) => Math.abs(v - os.freemem()) < 512 * 1024 * 1024;
+  assert.ok(near(pool.availableMemoryBytes({ platform: 'linux', runVmStat: () => VM_STAT })));
+  assert.ok(near(pool.availableMemoryBytes({ platform: 'darwin', runVmStat: () => { throw new Error('boom'); } })));
+  assert.ok(near(pool.availableMemoryBytes({ platform: 'darwin', runVmStat: () => 'garbage' })));
+});
+
+test('availableMemoryBytes: cached for 30 s', () => {
+  pool._resetMemCacheForTests();
+  let calls = 0;
+  const run = () => { calls++; return VM_STAT; };
+  pool.availableMemoryBytes({ platform: 'darwin', runVmStat: run, now: () => 1000 });
+  pool.availableMemoryBytes({ platform: 'darwin', runVmStat: run, now: () => 29_000 });
+  assert.equal(calls, 1);
+  pool.availableMemoryBytes({ platform: 'darwin', runVmStat: run, now: () => 31_001 });
+  assert.equal(calls, 2);
+});

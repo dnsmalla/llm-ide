@@ -17,7 +17,7 @@
  * imports a route.
  */
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import os from 'node:os';
 import { logger } from '../core/logger.mjs';
@@ -104,8 +104,35 @@ function evictLru() {
   if (oldest) { idle.delete(oldest.key); kill(oldest, 'evict_lru'); }
 }
 
+let memCache = { at: 0, value: 0 };
+const MEM_CACHE_MS = 30_000;
+
+/** Bytes of memory the OS could hand out without swapping.
+ *  WHY: macOS keeps reclaimable file cache in "inactive"/"speculative"/"purgeable",
+ *  so os.freemem() reads near zero on a healthy machine and would block every
+ *  prewarm. Cached 30 s because vm_stat is a process spawn. Any failure, or a
+ *  non-darwin platform, falls back to os.freemem(). */
+export function availableMemoryBytes({ platform = process.platform, runVmStat, now = Date.now } = {}) {
+  if (platform !== 'darwin') return os.freemem();
+  const t = now();
+  if (memCache.at && t - memCache.at < MEM_CACHE_MS) return memCache.value;
+  try {
+    const text = runVmStat ? runVmStat() : execFileSync('vm_stat', { timeout: 2000, encoding: 'utf8' });
+    const pageSize = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+    if (!Number.isFinite(pageSize) || pageSize <= 0) throw new Error('no page size');
+    let pages = 0;
+    for (const label of ['free', 'inactive', 'speculative', 'purgeable']) {
+      pages += Number(new RegExp(`Pages ${label}:\\s+(\\d+)\\.`).exec(text)?.[1] || 0);
+    }
+    memCache = { at: t, value: pages * pageSize };
+    return memCache.value;
+  } catch {
+    return os.freemem();
+  }
+}
+
 /** Spawn one idle child for `spec` when allowed. Never throws. */
-export function prewarm(spec, { now = Date.now, freemem = os.freemem } = {}) {
+export function prewarm(spec, { now = Date.now, freemem = availableMemoryBytes } = {}) {
   if (!isWarmCliEnabled()) return false;
   if (spawning) return false;
   if (MAX_IDLE() === 0) return false;
@@ -218,6 +245,7 @@ export function flushWarmCliPool(reason) {
 
 process.on('exit', () => flushWarmCliPool('process_exit'));
 
+export function _resetMemCacheForTests() { memCache = { at: 0, value: 0 }; }
 export function _warmPoolStateForTests() { return { idle: idle.size, spawning }; }
 export function _sweepIdleForTests({ now = Date.now } = {}) {
   for (const [key, entry] of idle) {
