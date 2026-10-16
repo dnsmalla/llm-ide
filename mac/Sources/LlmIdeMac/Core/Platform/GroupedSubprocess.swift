@@ -125,7 +125,8 @@ final class GroupedSubprocess: @unchecked Sendable {
     /// stdout+stderr into one capped buffer.
     ///
     /// `environment` entries are added to (and override) the inherited
-    /// environment.
+    /// environment, which is first passed through
+    /// `BashService.sanitizedEnvironment` to drop credential-like variables.
     static func launch(shellCommand command: String, directory: URL,
                        output: CappedOutputBuffer = CappedOutputBuffer(),
                        environment: [String: String] = [:]) throws -> GroupedSubprocess {
@@ -167,7 +168,11 @@ final class GroupedSubprocess: @unchecked Sendable {
 
         let argv: [UnsafeMutablePointer<CChar>?] = [strdup("/bin/sh"), strdup("-c"), strdup(command), nil]
         defer { argv.forEach { free($0) } }
-        var merged = ProcessInfo.processInfo.environment
+        // Callers run repo scripts (Loop verify, Self-Heal, environment
+        // probes) — code this app did not write. Strip credential-looking
+        // variables the app inherited from its launcher, as BashService does;
+        // PATH/HOME and friends survive, and explicit overrides still win.
+        var merged = BashService.sanitizedEnvironment(ProcessInfo.processInfo.environment)
         for (key, value) in environment { merged[key] = value }
         let envp: [UnsafeMutablePointer<CChar>?] = merged.map { strdup("\($0.key)=\($0.value)") } + [nil]
         defer { envp.forEach { free($0) } }
