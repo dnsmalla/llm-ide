@@ -16,12 +16,17 @@ import os
 /// incremental, so extra ticks are cheap.
 ///
 /// Thread-safety: FSEvents delivers on `queue`; all mutable state is touched
-/// only on `queue` (callback) or via `queue.sync` (stop), so the
+/// only on `queue` (callback) or via `queue.sync` / directly-on-`queue` (stop), so the
 /// `@unchecked Sendable` promise holds.
 final class RepoFileWatcher: @unchecked Sendable {
     private var stream: FSEventStreamRef?
     private var pending: DispatchWorkItem?
     private let queue = DispatchQueue(label: "com.llmide.repo-watcher", qos: .utility)
+    /// Marks `queue` so `stop()` can tell it is already running on it. The
+    /// debounce work item holds `self` weakly, so the LAST release can happen
+    /// on `queue` (the item's strong temporary dies there) — `deinit` → `stop()`
+    /// → `queue.sync` onto the current queue is a guaranteed deadlock trap.
+    private let queueKey = DispatchSpecificKey<Bool>()
     private let debounce: TimeInterval
     private let maxWait: TimeInterval?
     private let ignoredFragments: [String]
@@ -63,6 +68,7 @@ final class RepoFileWatcher: @unchecked Sendable {
         self.ignoredFragments = Self.ignored
             + additionalIgnoredDirectories.map { "/\($0)/" }
         self.onChange = onChange
+        queue.setSpecific(key: queueKey, value: true)
 
         let root = repoRoot.standardizedFileURL.path
         var context = FSEventStreamContext(version: 0, info: nil, retain: nil, release: nil, copyDescription: nil)
@@ -136,16 +142,23 @@ final class RepoFileWatcher: @unchecked Sendable {
     }
 
     func stop() {
-        queue.sync {
-            pending?.cancel()
-            pending = nil
-            burstStart = nil
-            guard let stream else { return }
-            FSEventStreamStop(stream)
-            FSEventStreamInvalidate(stream)
-            FSEventStreamRelease(stream)
-            self.stream = nil
+        if DispatchQueue.getSpecific(key: queueKey) == true {
+            stopOnQueue()
+        } else {
+            queue.sync { stopOnQueue() }
         }
+    }
+
+    // Must run on `queue`.
+    private func stopOnQueue() {
+        pending?.cancel()
+        pending = nil
+        burstStart = nil
+        guard let stream else { return }
+        FSEventStreamStop(stream)
+        FSEventStreamInvalidate(stream)
+        FSEventStreamRelease(stream)
+        self.stream = nil
     }
 
     deinit { stop() }
