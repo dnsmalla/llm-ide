@@ -31,6 +31,16 @@ struct SourceIngestService {
     /// behavior (no spurious full re-index + refresh when nothing was imported).
     func importSource(id: String) async -> SourceIngestResult {
         guard let source = SourceRegistry.source(id: id) else { return .noSource }
+        // Settings "Import now" and the AutoTask scheduler each build their own
+        // service, so the guard lives in a shared registry, not on `self`. Two
+        // overlapping runs of one source both fetch the same not-yet-marked
+        // items and write duplicate notes (Slack's createPartial then mints
+        // `-untitled-2`). The second caller gets a failure it can show rather
+        // than a silent `.none` that would read as "nothing new".
+        guard SourceIngestInFlight.begin(id) else {
+            return .failure(SourceIngestInFlight.alreadyRunningMessage, imported: 0)
+        }
+        defer { SourceIngestInFlight.end(id) }
         let result = await source.fetchAndIngest(context)
         if Self.needsRescan(result) { await rescanAndNotify() }
         return result
@@ -57,5 +67,27 @@ struct SourceIngestService {
         let indexer = self.indexer
         await Task.detached(priority: .background) { try? indexer.fullScan() }.value
         NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
+    }
+}
+
+/// Per-source in-flight set shared by every `SourceIngestService` instance.
+/// `@MainActor` like the service, so check-and-insert is atomic without a lock:
+/// nothing can interleave between `contains` and `insert` on one actor.
+@MainActor
+enum SourceIngestInFlight {
+    static let alreadyRunningMessage = "An import for this source is already running."
+    private static var running: Set<String> = []
+
+    /// Claims `id`; false when another run already holds it.
+    static func begin(_ id: String) -> Bool {
+        running.insert(id).inserted
+    }
+
+    static func end(_ id: String) {
+        running.remove(id)
+    }
+
+    static func isRunning(_ id: String) -> Bool {
+        running.contains(id)
     }
 }

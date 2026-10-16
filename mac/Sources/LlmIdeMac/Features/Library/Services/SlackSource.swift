@@ -1,4 +1,5 @@
 import Foundation
+import os.log
 
 /// Ingested Slack. A fetch source: for each configured channel it pulls NEW
 /// messages (server owns the forward-only per-channel high-water + seen-ledger)
@@ -12,6 +13,7 @@ struct SlackSource: InputSource {
     let emptyText = "No Slack messages yet"
     let platforms = ["slack"]
     let mode = SourceMode.fetch
+    private static let log = Logger(subsystem: "com.llmide.macapp", category: "SlackSource")
 
     @MainActor
     func fetchAndIngest(_ ctx: SourceContext) async -> SourceIngestResult {
@@ -68,7 +70,16 @@ struct SlackSource: InputSource {
             let tsList = msgs.map(\.ts)
             let drained = result.skipped.overCap == 0
             let lastTs = drained ? tsList.max(by: { (Double($0) ?? 0) < (Double($1) ?? 0) }) : nil
-            try? await markSeen(channelId, tsList, lastTs)
+            // A failed mark leaves the server's seen-ledger behind the note we
+            // just wrote, so the next run imports the same messages again. The
+            // note DID land (counted above), but the run is not a clean success.
+            do {
+                try await markSeen(channelId, tsList, lastTs)
+            } catch {
+                log.error("Slack markSeen failed for #\(channelId, privacy: .public): \(error.localizedDescription, privacy: .public)")
+                failures.append("#\(channelId): imported, but could not record them as seen "
+                    + "(they may be imported again next run): \(error.localizedDescription)")
+            }
         }
 
         if !failures.isEmpty {
