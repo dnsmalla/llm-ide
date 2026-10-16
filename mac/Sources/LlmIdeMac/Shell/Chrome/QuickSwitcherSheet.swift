@@ -10,10 +10,19 @@ struct QuickSwitcherSheet: View {
     @State private var filter: String = ""
     @State private var errorMessage: String?
 
+    /// Recents minus the project already open, same as `ProjectSwitcher`.
+    /// recents[0] IS the active project, so with it listed ⌘P → Enter
+    /// "switched" to the current project — a full environment teardown and
+    /// rebuild (index, watchers, generation state) for no change.
+    private var switchable: [ProjectStore.RecentEntry] {
+        let activeId = projectStore.activeProject?.bundle.id
+        return projectStore.recents.filter { $0.id != activeId }
+    }
+
     var filtered: [ProjectStore.RecentEntry] {
-        guard !filter.isEmpty else { return projectStore.recents }
+        guard !filter.isEmpty else { return switchable }
         let needle = filter.lowercased()
-        return projectStore.recents.filter {
+        return switchable.filter {
             $0.displayName.lowercased().contains(needle) ||
             $0.path.lowercased().contains(needle)
         }
@@ -31,8 +40,8 @@ struct QuickSwitcherSheet: View {
                 // dead-end for keyboard-first users.
                 .onSubmit { activateFirstMatch() }
             Divider()
-            if projectStore.recents.isEmpty {
-                Text("No recent projects yet. Open one via the sidebar chip.")
+            if switchable.isEmpty {
+                Text("No other recent projects yet. Open one via the sidebar chip.")
                     .font(Typography.caption)
                     .foregroundStyle(theme.current.textMuted)
                     .frame(maxWidth: .infinity, alignment: .leading)

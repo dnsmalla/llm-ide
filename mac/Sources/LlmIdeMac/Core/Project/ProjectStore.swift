@@ -117,7 +117,12 @@ final class ProjectStore: ObservableObject {
 
         activeProject = ActiveProject(bundle: project, localPath: url.path)
         bumpRecent(id: project.id, path: url.path, displayName: project.displayName)
-        try persistState()
+        // `activeProject` is already published, so the notifications MUST
+        // follow even if persisting fails: a throw here used to skip them,
+        // leaving the env/Library bound to the previous project while the UI
+        // showed the new one. A failed write only costs the recents/active
+        // record on the next launch, so log it rather than fail the open.
+        persistStateLogging(context: "open")
         NotificationCenter.default.post(name: .activeProjectChanged, object: nil)
         // Rebuild AppEnvironment (FolderIndexer + MeetingIndex SQLite)
         // so the rest of the app immediately uses the project's folder.
@@ -263,7 +268,9 @@ final class ProjectStore: ObservableObject {
     /// the caller has already exported (or doesn't need to).
     func closeActive() throws {
         activeProject = nil
-        try persistState()
+        // Same reasoning as openFolder: the change is already published, so
+        // the notifications below must not be skipped by a failed write.
+        persistStateLogging(context: "close")
         NotificationCenter.default.post(name: .activeProjectChanged, object: nil)
         // Revert NotesFolderConfig to the app-wide default so the next
         // project open (or a manual folder pick in Settings → Paths) starts
@@ -460,6 +467,14 @@ final class ProjectStore: ObservableObject {
             corruptStateArchivedAt = dst
         } catch {
             log.error("Failed to archive corrupt state file from \(self.stateFile.path, privacy: .public) to \(dst.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
+        }
+    }
+
+    private func persistStateLogging(context: String) {
+        do {
+            try persistState()
+        } catch {
+            log.error("Failed to persist project state on \(context, privacy: .public) at \(self.stateFile.path, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
     }
 

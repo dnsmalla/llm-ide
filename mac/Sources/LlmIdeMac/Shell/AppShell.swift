@@ -1,6 +1,9 @@
 import SwiftUI
+import os
 
 private struct RecoveryTimeoutError: Error {}
+
+private let appShellLog = Logger(subsystem: "com.llmide.macapp", category: "AppShell")
 
 struct AppShell: View {
     let api: LlmIdeAPIClient
@@ -31,6 +34,9 @@ struct AppShell: View {
     @State private var pendingOrphan: PartialRecovery.Orphan?
     @State private var recoveryError: String?
     @State private var showLegacyPrompt = false
+    /// The legacy-meeting count is server-wide, not per project: ask once per
+    /// shell lifetime (after an env exists), not on every project switch.
+    @State private var legacyPromptChecked = false
     /// Library list visibility — toggled from the inline SectionChromeBar so
     /// the Library header matches every other section (no title-bar toggle).
     @State private var libraryTreeVisible = true
@@ -428,8 +434,13 @@ struct AppShell: View {
         }
         .onChange(of: config.localCodeFolders)        { _, _ in seedLocalCodeFolders() }
         .onChange(of: config.hiddenSidebarSections)   { _, _ in redirectIfSectionHidden() }
-        .task { await checkRecovery() }
-        .task { await checkLegacyPrompt() }
+        // Keyed on the env's identity, not one-shot: on first appear `appEnv`
+        // is usually still nil (initEnv runs from the ProgressView), so a
+        // plain `.task` returned early and never ran again — and a project
+        // switch builds a new env whose notes folder (with its own orphaned
+        // .partial.md files) was never scanned.
+        .task(id: appEnv.map { ObjectIdentifier($0) }) { await checkRecovery() }
+        .task(id: appEnv.map { ObjectIdentifier($0) }) { await checkLegacyPrompt() }
         .task {
             // Phase D — arm the regression-run button when the app
             // version changes between launches. We record the new
@@ -854,6 +865,13 @@ struct AppShell: View {
         FeatureCatalog.setAutoCodeProjectNotes(nil)
         appEnv = nil
         envInitError = nil
+        // Close posts .notesFolderChanged too, and this observer is still
+        // mounted for that pass. Rebuilding then created a project-less env
+        // (a live folder watcher + SQLite handle on the default notes folder)
+        // and handed it to Auto Tasks behind the Welcome screen. With no
+        // project there is nothing to build; the next open's ProgressView
+        // runs initEnv() itself.
+        guard projectStore.activeProject != nil else { return }
         initEnv()
         NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
     }
@@ -897,7 +915,8 @@ struct AppShell: View {
     }
 
     private func checkLegacyPrompt() async {
-        guard !legacyPromptSuppressed, appEnv != nil else { return }
+        guard !legacyPromptSuppressed, !legacyPromptChecked, appEnv != nil else { return }
+        legacyPromptChecked = true
         let count = await api.legacyMeetingCount()
         if count > 0 {
             await MainActor.run { showLegacyPrompt = true }
@@ -1183,7 +1202,13 @@ struct AppShell: View {
         let projectRoot = appEnv?.projectRoot
 
         Task.detached(priority: .background) { [api] in
-            guard let projectRoot = projectRoot else { return }
+            // No project open: still save the raw transcript — into `root`,
+            // which is the default notes folder once a project is closed —
+            // instead of silently dropping the whole meeting. Only the
+            // summary step needs a project (its note lives under llm-doc/).
+            if projectRoot == nil {
+                appShellLog.notice("live session \(payload.sessionId, privacy: .public) finalized with no project open; saving transcript to the default notes folder without a summary")
+            }
 
             do {
                 // 1. Create the partial .md file.
@@ -1223,20 +1248,22 @@ struct AppShell: View {
                 //    fullScan() is thread-safe (serialised via scanLock).
                 try? indexer?.fullScan()
 
-                await MeetingSummarizationService.run(
-                    api: api,
-                    transcript: payload.transcript,
-                    title: title,
-                    language: "",
-                    startedAt: startedAt,
-                    durationSeconds: nil,
-                    participants: payload.participants,
-                    transcriptFileURL: url,
-                    projectRoot: projectRoot,
-                    rawFile: rawFile,
-                    root: root)
+                if let projectRoot {
+                    await MeetingSummarizationService.run(
+                        api: api,
+                        transcript: payload.transcript,
+                        title: title,
+                        language: "",
+                        startedAt: startedAt,
+                        durationSeconds: nil,
+                        participants: payload.participants,
+                        transcriptFileURL: url,
+                        projectRoot: projectRoot,
+                        rawFile: rawFile,
+                        root: root)
 
-                try? indexer?.fullScan()
+                    try? indexer?.fullScan()
+                }
 
                 // Keep the raw .md transcript in meetings/ so it
                 // appears in the MEETINGS section of the Library.
