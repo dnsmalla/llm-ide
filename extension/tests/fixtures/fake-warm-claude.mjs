@@ -21,7 +21,7 @@ if (!wantsStreamIn) {
 const rl = createInterface({ input: process.stdin });
 let received = false;
 // A hanging child must stay alive on its own: after stdin EOF nothing else holds the loop open.
-if (mode === 'hang' || mode === 'flood_idle') setInterval(() => {}, 1_000_000);
+if (mode === 'hang' || mode === 'flood_idle' || mode === 'answer_then_hang') setInterval(() => {}, 1_000_000);
 rl.on('line', (line) => {
   let msg;
   try { msg = JSON.parse(line); } catch { return; }
@@ -34,7 +34,8 @@ rl.on('line', (line) => {
     : (msg.message?.content || []).map((c) => c.text || '').join('');
   process.stdout.write(JSON.stringify({ type: 'system', subtype: 'init', model: 'fake' }) + '\n');
   // exit from the write callback: process.exit() on a pipe would truncate the 5 MB `big` line
-  process.stdout.write(JSON.stringify(resultFor(text)) + '\n', () => process.exit(0));
+  // answer_then_hang answers but never exits, like a CLI stuck in teardown.
+  process.stdout.write(JSON.stringify(resultFor(text)) + '\n', () => { if (mode !== 'answer_then_hang') process.exit(0); });
 });
 // Like the real CLI: EOF after a prompt means "no more turns" (the turn still
 // runs, so a hanging one keeps hanging); EOF with no prompt just ends the child.

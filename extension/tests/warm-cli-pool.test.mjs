@@ -190,6 +190,7 @@ test('limits: max 1 idle (LRU evicted), 2-min idle kill with a fake clock, no sp
   const clock = { now: () => now };
   assert.equal(pool.prewarm(spec({}, 'a'), clock), true);
   await waitFor(() => pool._warmPoolStateForTests().idle === 1);
+  now += 120_001;   // a recently used slot is protected (see the no-thrash test)
   assert.equal(pool.prewarm(spec({}, 'b'), clock), true, 'second key evicts the first (max 1)');
   await waitFor(() => pool._warmPoolStateForTests().idle === 1);
   assert.equal(pool.acquireWarm(spec({}, 'a')), null, 'a was evicted');
@@ -247,12 +248,35 @@ Pages free:                                3618.
 Pages inactive:                          205707.
 Pages speculative:                         9203.
 Pages purgeable:                              .
+File-backed pages:                        50000.
 `;
 
-test('availableMemoryBytes: darwin sums free+inactive+speculative+purgeable pages', () => {
+test('availableMemoryBytes: darwin counts free+speculative+purgeable+min(inactive, file-backed)', () => {
   pool._resetMemCacheForTests();
   const got = pool.availableMemoryBytes({ platform: 'darwin', runVmStat: () => VM_STAT, now: () => 1 });
-  assert.equal(got, (3618 + 205707 + 9203 + 0) * 16384);
+  assert.equal(got, (3618 + 9203 + 0 + 50000) * 16384, 'anonymous inactive pages are not free');
+  pool._resetMemCacheForTests();
+  const noFile = VM_STAT.replace(/File-backed pages:.*\n/, '');
+  assert.equal(pool.availableMemoryBytes({ platform: 'darwin', runVmStat: () => noFile, now: () => 1 }),
+    (3618 + 205707 + 9203 + 0) * 16384, 'no file-backed line: inactive as before');
+});
+
+test('refreshMemoryProbe: async, caches successes and failures for 30 s', async () => {
+  pool._resetMemCacheForTests();
+  let calls = 0;
+  const ok = async () => { calls++; return VM_STAT; };
+  await pool.refreshMemoryProbe({ platform: 'darwin', runVmStatAsync: ok, now: () => 1000 });
+  await pool.refreshMemoryProbe({ platform: 'darwin', runVmStatAsync: ok, now: () => 20_000 });
+  assert.equal(calls, 1);
+  assert.equal(pool.availableMemoryBytes({ platform: 'darwin', now: () => 20_000 }), (3618 + 9203 + 50000) * 16384, 'sync read uses the cache, never spawns');
+  pool._resetMemCacheForTests();
+  calls = 0;
+  const bad = async () => { calls++; throw new Error('boom'); };
+  await pool.refreshMemoryProbe({ platform: 'darwin', runVmStatAsync: bad, now: () => 1000 });
+  await pool.refreshMemoryProbe({ platform: 'darwin', runVmStatAsync: bad, now: () => 20_000 });
+  assert.equal(calls, 1, 'a failure is cached too');
+  await pool.refreshMemoryProbe({ platform: 'darwin', runVmStatAsync: bad, now: () => 31_001 });
+  assert.equal(calls, 2);
 });
 
 test('availableMemoryBytes: non-darwin and a failing vm_stat fall back to os.freemem()', () => {
@@ -330,6 +354,7 @@ test('spawnWithWarm: a second identical call is served by the prewarmed child, s
   assert.equal(pool._warmPoolStateForTests().idle, 1);
   let slots = 0;
   let colds = 0;
+  process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS = '0';
   const out = await pool._spawnWithWarmForTests({
     bin: s.bin, args: [...s.base, '-p', 'hi'], env, cwd: '', userId: 'u7', timeoutMs: 5000,
     cold: async () => { colds++; return { stdout: '', stderr: '', bin: s.bin }; },
@@ -338,9 +363,13 @@ test('spawnWithWarm: a second identical call is served by the prewarmed child, s
   assert.match(out.stdout, /"type":"result"/);
   assert.equal(colds, 0, 'served warm, no cold spawn');
   assert.equal(slots, 1, 'slot taken exactly once around the warm run');
-  // The respawned idle child (prewarm in finally) writes a NEW pid.
-  assert.ok(await waitFor(() => fs.readFileSync(pidFile, 'utf8') !== warmPid), 'a fresh child replaced the used one');
-  pool.flushWarmCliPool('t');
+  // The respawned idle child (scheduled in finally) writes a NEW pid.
+  try {
+    assert.ok(await waitFor(() => fs.readFileSync(pidFile, 'utf8') !== warmPid), 'a fresh child replaced the used one');
+  } finally {
+    delete process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS;
+    pool.flushWarmCliPool('t');
+  }
 });
 
 test('spawnWithWarm: retryable warm failure falls back cold once, outside the slot wrapper', async () => {
@@ -362,6 +391,118 @@ test('spawnWithWarm: retryable warm failure falls back cold once, outside the sl
   assert.equal(slots, 1, 'the warm child WAS acquired and run (slot taken once)');
   assert.deepEqual(calls, ['cold'], 'one cold retry after the warm child died, outside the slot');
   assert.match(out.stdout, /cold/);
+});
+
+test('no thrash: a recently used slot of another key is not evicted; an idle one is', async () => {
+  pool.flushWarmCliPool('t');
+  let now = 5_000_000;
+  const clock = { now: () => now };
+  assert.equal(pool.prewarm(spec({}, 'a'), clock), true);
+  assert.equal(pool.prewarm(spec({}, 'b'), clock), false, 'A was used moments ago');
+  const survivor = pool.acquireWarm(spec({}, 'a'));
+  assert.ok(survivor, 'A survived');
+  discard(survivor);
+  pool.flushWarmCliPool('t');
+  assert.equal(pool.prewarm(spec({}, 'a'), clock), true);
+  now += 120_001;
+  assert.equal(pool.prewarm(spec({}, 'b'), clock), true, 'A is stale → evicted');
+  assert.equal(pool.acquireWarm(spec({}, 'a')), null);
+  pool.flushWarmCliPool('t');
+});
+
+const warmCall = (s, extra = {}) => pool._spawnWithWarmForTests({
+  bin: s.bin, args: [...s.base, '-p', 'hi'], env: s.env, cwd: '', userId: s.userId, timeoutMs: 5000,
+  cold: async () => ({ stdout: '{"type":"result","result":"cold","is_error":false}', stderr: '', bin: s.bin }),
+  ...extra,
+});
+
+test('respawn is delayed: none right after the call, one after the delay', async () => {
+  pool.flushWarmCliPool('t');
+  pool.rememberBinStamp(process.execPath, fs.statSync(process.execPath).mtimeMs);
+  process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS = '400';
+  try {
+    await warmCall(spec({ PATH: process.env.PATH }, 'u20'));
+    assert.equal(pool._warmPoolStateForTests().idle, 0, 'nothing spawned while the main turn starts its own CLI');
+    await new Promise((r) => setTimeout(r, 150));
+    assert.equal(pool._warmPoolStateForTests().idle, 0, 'still inside the delay');
+    assert.ok(await waitFor(() => pool._warmPoolStateForTests().idle === 1, 3000), 'respawned after the delay');
+  } finally {
+    delete process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS;
+    pool.flushWarmCliPool('t');
+  }
+});
+
+test('a flush during the respawn delay cancels the respawn', async () => {
+  pool.flushWarmCliPool('t');
+  pool.rememberBinStamp(process.execPath, fs.statSync(process.execPath).mtimeMs);
+  process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS = '300';
+  try {
+    await warmCall(spec({ PATH: process.env.PATH }, 'u21'));
+    pool.flushWarmCliPool('logout');
+    await new Promise((r) => setTimeout(r, 900));
+    assert.equal(pool._warmPoolStateForTests().idle, 0, 'no child lands after the flush');
+  } finally {
+    delete process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS;
+    pool.flushWarmCliPool('t');
+  }
+});
+
+test('a newer respawn replaces an older pending one (at most one timer)', async () => {
+  pool.flushWarmCliPool('t');
+  pool.rememberBinStamp(process.execPath, fs.statSync(process.execPath).mtimeMs);
+  process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS = '300';
+  try {
+    await warmCall(spec({ PATH: process.env.PATH }, 'u22'));
+    await warmCall(spec({ PATH: process.env.PATH }, 'u23'));
+    assert.ok(await waitFor(() => pool._warmPoolStateForTests().idle === 1, 3000));
+    assert.equal(pool.acquireWarm(spec({ PATH: process.env.PATH }, 'u22')), null, 'only the newer spec was respawned');
+    const mine = pool.acquireWarm(spec({ PATH: process.env.PATH }, 'u23'));
+    assert.ok(mine);
+    discard(mine);
+  } finally {
+    delete process.env.LLMIDE_WARM_CLI_RESPAWN_DELAY_MS;
+    pool.flushWarmCliPool('t');
+  }
+});
+
+test('safety kill: a child that answered but never exits is SIGTERMed after the grace period', async () => {
+  pool.flushWarmCliPool('t');
+  process.env.LLMIDE_WARM_CLI_EXIT_GRACE_MS = '500';
+  const pidFile = path.join(os.tmpdir(), `warm-pid-${process.pid}-${Date.now()}-g`);
+  const s = spec({ FAKE_WARM_MODE: 'answer_then_hang', FAKE_WARM_PID_FILE: pidFile });
+  try {
+    pool.prewarm(s);
+    await waitFor(() => pool._warmPoolStateForTests().idle === 1);
+    const child = pool.acquireWarm(s);
+    const out = await pool.runWarm(child, 'x', { timeoutMs: 5000, wantJson: true });
+    assert.equal(JSON.parse(out.stdout).type, 'result');
+    const pid = Number(fs.readFileSync(pidFile, 'utf8'));
+    assert.doesNotThrow(() => process.kill(pid, 0), 'still alive right after answering');
+    assert.ok(await waitFor(() => { try { process.kill(pid, 0); return false; } catch { return true; } }, 3000), 'killed after the grace period');
+  } finally {
+    delete process.env.LLMIDE_WARM_CLI_EXIT_GRACE_MS;
+  }
+});
+
+test('an idle child does not keep a one-shot script alive', async () => {
+  const { spawn } = await import('node:child_process');
+  const poolUrl = new URL('../providers/warm-cli-pool.mjs', import.meta.url).href;
+  const script = `
+    const pool = await import(${JSON.stringify(poolUrl)});
+    pool.prewarm({ bin: process.execPath, base: [${JSON.stringify(FAKE)}, '--output-format', 'json', '--tools', ''],
+      env: { FAKE_WARM_MODE: 'hang' }, cwd: '', userId: 'u1' });
+  `;
+  const started = Date.now();
+  const code = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, LLMIDE_WARM_CLI: '1', LLMIDE_WARM_CLI_MIN_FREE_BYTES: '0' }, stdio: 'ignore',
+    });
+    const guard = setTimeout(() => { child.kill('SIGKILL'); reject(new Error('script hung with an idle warm child')); }, 6000);
+    child.on('error', reject);
+    child.on('close', (c) => { clearTimeout(guard); resolve(c); });
+  });
+  assert.equal(code, 0);
+  assert.ok(Date.now() - started < 6000);
 });
 
 test('cleanup: leave no idle child behind', () => {

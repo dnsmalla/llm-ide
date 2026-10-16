@@ -17,7 +17,7 @@
  * imports a route.
  */
 import crypto from 'node:crypto';
-import { spawn, execFileSync } from 'node:child_process';
+import { spawn, execFile } from 'node:child_process';
 import { createInterface } from 'node:readline';
 import os from 'node:os';
 import fs from 'node:fs';
@@ -67,6 +67,8 @@ const intEnv = (name, dflt) => { const v = Number(process.env[name]); return Num
 const MAX_IDLE      = () => Math.max(0, intEnv('LLMIDE_WARM_CLI_MAX', 1));
 const IDLE_MS       = () => intEnv('LLMIDE_WARM_CLI_IDLE_MS', 120_000);
 const MIN_FREE      = () => intEnv('LLMIDE_WARM_CLI_MIN_FREE_BYTES', 1024 * 1024 * 1024);
+const RESPAWN_DELAY = () => intEnv('LLMIDE_WARM_CLI_RESPAWN_DELAY_MS', 15_000);
+const EXIT_GRACE    = () => intEnv('LLMIDE_WARM_CLI_EXIT_GRACE_MS', 10_000);
 
 const OUTPUT_CAP_BYTES = 4 * 1024 * 1024;
 
@@ -82,7 +84,10 @@ function makeChild(spec) {
   });
   // unref: an idle child must never keep the server alive at shutdown.
   child.unref();
-  const entry = { key, bin, child, startedAt: Date.now(), lastUsedAt: Date.now(), stdoutLines: [], stderr: '', exited: null, idleTimer: null, stdoutBytes: 0, stderrBytes: 0, overflowed: false };
+  // WHY: unref'd pipes too — a one-shot script that imports providers must be
+  // able to exit with an idle child around (acquireWarm re-refs on hand-out).
+  for (const pipe of [child.stdin, child.stdout, child.stderr]) pipe?.unref?.();
+  const entry = { key, bin, child, startedAt: Date.now(), lastUsedAt: Date.now(), stdoutLines: [], stderr: '', exited: null, idleTimer: null, graceTimer: null, stdoutBytes: 0, stderrBytes: 0, overflowed: false };
   // WHY: output is buffered from spawn until the answer, so a chatty idle child
   // (or one huge line with no newline, which readline also buffers) must be
   // capped here, not only when runWarm happens to look.
@@ -113,7 +118,7 @@ function makeChild(spec) {
   child.on('error', (err) => { entry.exited = { code: null, signal: null, error: err }; if (idle.get(key) === entry) idle.delete(key); entry.onExit?.(); });
   // 'close', not 'exit': it fires after stdout is drained, so a final large line
   // is seen (and judged against maxBuffer) before the exit is reported.
-  child.on('close', (code, signal) => { entry.exited = { code, signal }; if (idle.get(key) === entry) idle.delete(key); entry.onExit?.(); });
+  child.on('close', (code, signal) => { if (entry.graceTimer) { clearTimeout(entry.graceTimer); entry.graceTimer = null; } entry.exited = { code, signal }; if (idle.get(key) === entry) idle.delete(key); entry.onExit?.(); });
   return entry;
 }
 
@@ -130,30 +135,56 @@ function evictLru() {
   if (oldest) { idle.delete(oldest.key); kill(oldest, 'evict_lru'); }
 }
 
-let memCache = { at: 0, value: 0 };
+/** value null = the last probe failed (cached too, so a broken vm_stat is not
+ *  retried on every call); readers then fall back to os.freemem(). */
+let memCache = { at: 0, value: null };
 const MEM_CACHE_MS = 30_000;
+
+/** Reclaimable bytes from `vm_stat` text. Throws when it cannot be parsed.
+ *  Only FILE-backed inactive pages are counted: anonymous inactive pages need
+ *  compression or swap before they can be reused, so they are not free. */
+function parseVmStat(text) {
+  const pageSize = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
+  if (!Number.isFinite(pageSize) || pageSize <= 0) throw new Error('no page size');
+  const pages = (label) => Number(new RegExp(`${label}:\\s+(\\d+)\\.`).exec(text)?.[1] || 0);
+  const inactive = pages('Pages inactive');
+  const fileLine = /File-backed pages:\s+(\d+)\./.exec(text);
+  const reclaimableInactive = fileLine ? Math.min(inactive, Number(fileLine[1])) : inactive;
+  return (pages('Pages free') + pages('Pages speculative') + pages('Pages purgeable') + reclaimableInactive) * pageSize;
+}
+
+const vmStatAsync = () => new Promise((resolve, reject) => {
+  execFile('vm_stat', { timeout: 2000, encoding: 'utf8' }, (err, stdout) => (err ? reject(err) : resolve(stdout)));
+});
 
 /** Bytes of memory the OS could hand out without swapping.
  *  WHY: macOS keeps reclaimable file cache in "inactive"/"speculative"/"purgeable",
  *  so os.freemem() reads near zero on a healthy machine and would block every
- *  prewarm. Cached 30 s because vm_stat is a process spawn. Any failure, or a
- *  non-darwin platform, falls back to os.freemem(). */
+ *  prewarm. Never spawns vm_stat itself unless `runVmStat` is injected: it reads
+ *  the cache that `refreshMemoryProbe` fills off the event loop. Any failure, a
+ *  missing cache, or a non-darwin platform falls back to os.freemem(). */
 export function availableMemoryBytes({ platform = process.platform, runVmStat, now = Date.now } = {}) {
   if (platform !== 'darwin') return os.freemem();
   const t = now();
-  if (memCache.at && t - memCache.at < MEM_CACHE_MS) return memCache.value;
+  const fresh = memCache.at && t - memCache.at < MEM_CACHE_MS;
+  if (fresh || !runVmStat) return memCache.value ?? os.freemem();
   try {
-    const text = runVmStat ? runVmStat() : execFileSync('vm_stat', { timeout: 2000, encoding: 'utf8' });
-    const pageSize = Number(/page size of (\d+) bytes/.exec(text)?.[1]);
-    if (!Number.isFinite(pageSize) || pageSize <= 0) throw new Error('no page size');
-    let pages = 0;
-    for (const label of ['free', 'inactive', 'speculative', 'purgeable']) {
-      pages += Number(new RegExp(`Pages ${label}:\\s+(\\d+)\\.`).exec(text)?.[1] || 0);
-    }
-    memCache = { at: t, value: pages * pageSize };
-    return memCache.value;
+    memCache = { at: t, value: parseVmStat(runVmStat()) };
   } catch {
-    return os.freemem();
+    memCache = { at: t, value: null };
+  }
+  return memCache.value ?? os.freemem();
+}
+
+/** Fill the memory cache without blocking the event loop (30 s, failures too). */
+export async function refreshMemoryProbe({ platform = process.platform, runVmStatAsync = vmStatAsync, now = Date.now } = {}) {
+  if (platform !== 'darwin') return;
+  const t = now();
+  if (memCache.at && t - memCache.at < MEM_CACHE_MS) return;
+  try {
+    memCache = { at: t, value: parseVmStat(await runVmStatAsync()) };
+  } catch {
+    memCache = { at: t, value: null };
   }
 }
 
@@ -167,6 +198,13 @@ export function prewarm(spec, { now = Date.now, freemem = availableMemoryBytes }
   // WHY: the point is to make chat faster, never to push a swapping machine
   // over the edge. Below the floor the cold path runs — same result, slower.
   if (freemem() < MIN_FREE()) { log.info('warm_cli_skipped_low_memory'); return false; }
+  // WHY: with one slot, two users would otherwise evict each other every turn
+  // and spawn a child nobody uses. A slot used within IDLE_MS is not ours to take.
+  if (idle.size >= MAX_IDLE()) {
+    let oldest = null;
+    for (const e of idle.values()) if (!oldest || e.lastUsedAt < oldest.lastUsedAt) oldest = e;
+    if (oldest && now() - oldest.lastUsedAt < IDLE_MS()) return false;
+  }
   while (idle.size >= MAX_IDLE()) evictLru();
   spawning = true;
   let entry;
@@ -188,7 +226,17 @@ export function acquireWarm(spec) {
   idle.delete(key);
   if (entry.idleTimer) { clearTimeout(entry.idleTimer); entry.idleTimer = null; }
   if (entry.exited || entry.overflowed) return null;
+  entry.child.ref();
+  for (const pipe of [entry.child.stdin, entry.child.stdout, entry.child.stderr]) pipe?.ref?.();
   return entry;
+}
+
+/** After an answer the CLI should exit by itself; if teardown hangs, reap it so
+ *  a stuck process never lingers (~220 MB each). */
+function armExitGrace(entry) {
+  if (entry.exited || entry.graceTimer) return;
+  entry.graceTimer = setTimeout(() => { entry.graceTimer = null; if (!entry.exited) kill(entry, 'exit_grace'); }, EXIT_GRACE());
+  entry.graceTimer.unref?.();
 }
 
 function execFileShaped(message, entry, fields) {
@@ -223,9 +271,11 @@ export function runWarm(entry, prompt, { timeoutMs, signal, maxBuffer = 4 * 1024
         // Same as a cold `claude -p` exiting 1 with the message on stdout:
         // formatCliSpawnError / isCliOverloaded read it from there.
         finish(reject, execFileShaped(`Command failed: ${entry.bin}`, entry, { code: 1, stdout: wantJson ? line : obj.result }));
+        armExitGrace(entry);
         return;
       }
       finish(resolve, { stdout: wantJson ? line : obj.result, stderr: entry.stderr, bin: entry.bin });
+      armExitGrace(entry);
     };
     entry.onOverflow = () => finish(reject, execFileShaped('stdout maxBuffer length exceeded', entry, { code: 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER' }));
     entry.onLine = handleLine;
@@ -263,16 +313,40 @@ export function isWarmRetryable(err) {
   return /not logged in|\/login\b|\b401\b|unauthori[sz]ed/i.test(text);
 }
 
+let respawnTimer = null;
+let flushGeneration = 0;
+
+/** Respawn the idle child after use, but not right away: the classifier call
+ *  ends just as the main chat turn starts its own `claude`, and a second CLI
+ *  start at that moment slows the turn the user is waiting on. One pending
+ *  timer at most; `generation` voids it if a flush happened since the call began. */
+function scheduleRespawn(spec, generation) {
+  if (respawnTimer) clearTimeout(respawnTimer);
+  respawnTimer = setTimeout(async () => {
+    respawnTimer = null;
+    try {
+      await refreshMemoryProbe();
+      if (generation === flushGeneration) prewarm(spec);
+    } catch (err) {
+      log.warn('warm_cli_respawn_failed', { error: err?.message });
+    }
+  }, RESPAWN_DELAY());
+  respawnTimer.unref?.();
+}
+
 /** Kill every idle child. Called on shutdown, logout, SDK/plugin update and
  *  MCP consent revoke (routes), and when the binary changes. */
 export function flushWarmCliPool(reason) {
+  // WHY: a respawn landing right after a logout/SDK-update flush would undo it.
+  flushGeneration++;
+  if (respawnTimer) { clearTimeout(respawnTimer); respawnTimer = null; }
   for (const entry of idle.values()) kill(entry, reason);
   idle.clear();
 }
 
 process.on('exit', () => flushWarmCliPool('process_exit'));
 
-export function _resetMemCacheForTests() { memCache = { at: 0, value: 0 }; }
+export function _resetMemCacheForTests() { memCache = { at: 0, value: null }; }
 export function _warmPoolStateForTests() { return { idle: idle.size, spawning }; }
 export function _sweepIdleForTests({ now = Date.now } = {}) {
   for (const [key, entry] of idle) {
@@ -312,6 +386,7 @@ export async function spawnWithWarm({ bin, args, env, cwd, userId, timeoutMs, si
   if (resolved) {
     try { rememberBinStamp(resolved, fs.statSync(resolved).mtimeMs); } catch { /* unreadable → treat as unchanged */ }
   }
+  const generation = flushGeneration;
   const spec = { bin, base: split.base, env, cwd, userId };
   // Computed BEFORE acquireWarm: nothing may throw between acquiring an idle
   // child and handing it to runWarm (which kills it on failure).
@@ -332,9 +407,9 @@ export async function spawnWithWarm({ bin, args, env, cwd, userId, timeoutMs, si
       result = await cold();
     }
   } finally {
-    // Respawn after every use (the classifier runs every turn). prewarm
-    // itself refuses when disabled, full, or memory is low.
-    prewarm(spec);
+    // Respawn after every use (the classifier runs every turn), delayed.
+    // prewarm itself refuses when disabled, full, or memory is low.
+    if (isWarmCliEnabled()) scheduleRespawn(spec, generation);
   }
   return result;
 }
