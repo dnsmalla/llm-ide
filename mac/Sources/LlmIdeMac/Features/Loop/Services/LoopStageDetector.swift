@@ -60,8 +60,15 @@ public enum LoopStageDetector {
 
     /// Whether `stages` make an SDK Adoption run — the one marker the scope,
     /// protection and test exemption all key on.
+    ///
+    /// ENABLED stages only, like `LoopEngineConfig.isSelfHealRun`: the two
+    /// used to disagree, so a loop holding a disabled SDK stage got the SDK
+    /// test-dir exemption and scope without being a Self-Heal-family run (no
+    /// forced worktree, no forced `.revert`). What runs is what is enabled —
+    /// "Run this stage only" force-enables the soloed stage — so this never
+    /// drops the guarantees from a stage that actually executes.
     public static func isSdkAdoption(_ stages: [LoopStage]) -> Bool {
-        stages.contains { $0.kind == .sdkSurfaceDiff || $0.defaultKey?.hasPrefix("sdk-adopt-") == true }
+        stages.contains { $0.enabled && ($0.kind == .sdkSurfaceDiff || $0.defaultKey?.hasPrefix("sdk-adopt-") == true) }
     }
 
     /// The scope allowlist a run actually enforces. A run holding any SDK
