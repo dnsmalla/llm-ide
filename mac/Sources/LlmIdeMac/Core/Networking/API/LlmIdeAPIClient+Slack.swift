@@ -29,9 +29,12 @@ extension LlmIdeAPIClient {
         let skipped: SlackSkipped
     }
 
-    func testSlack() async throws -> SlackTestResult {
-        struct Req: Encodable {}
-        return try await post("/kb/slack/test", body: Req(), authenticated: true)
+    /// `token`, when given, is tested as-is and NOT saved — so testing a
+    /// typed token can never replace (or, on failure, lose) the stored one.
+    /// Nil tests the saved connection.
+    func testSlack(token: String? = nil) async throws -> SlackTestResult {
+        struct Req: Encodable { let token: String? }
+        return try await post("/kb/slack/test", body: Req(token: token), authenticated: true)
     }
 
     func fetchSlack(channelId: String, lookbackDays: Int) async throws -> SlackFetchResult {

@@ -538,7 +538,8 @@ export async function handleKB(req, res) {
 
     // Email input source — thin IMAP fetcher. The app password lives in the
     // encrypted vault (key 'email.imapPassword'); it is read here and passed
-    // to the fetcher so it never travels on the request body. Connect/fetch
+    // to the fetcher, so /fetch never takes it on the request body (/test may,
+    // to probe a typed password before it is saved). Connect/fetch
     // failures map to a 502 since they're upstream (IMAP server) problems.
     if (req.method === 'POST' && (url === '/kb/email/test' || url === '/kb/email/fetch')) {
       const body = parseJSON(await readBody(req)) || {};
@@ -565,7 +566,12 @@ export async function handleKB(req, res) {
           return true;
         }
       } else {
-        password = getSecret(kb.getDb(), userId, 'email.imapPassword');
+        // /test may probe a typed password without saving it — testing used
+        // to require a vault write first, so a mistyped test replaced the
+        // working password. /fetch only ever uses the saved one.
+        const typedPassword = url === '/kb/email/test' && typeof body.password === 'string' && body.password
+          ? body.password : null;
+        password = typedPassword || getSecret(kb.getDb(), userId, 'email.imapPassword');
         if (!password) {
           sendJSON(res, 400, { error: { code: 'EMAIL_NO_PASSWORD', message: 'No app password saved for email. Save one first.' } });
           return true;
@@ -660,7 +666,10 @@ export async function handleKB(req, res) {
     // Slack input (twin of /kb/email/*) ---
     if (req.method === 'POST' && (url === '/kb/slack/test' || url === '/kb/slack/fetch')) {
       const body = parseJSON(await readBody(req)) || {};
-      const token = resolveSlackToken(userId);
+      // Same as email: /test may probe a typed token without saving it.
+      const typedToken = url === '/kb/slack/test' && typeof body.token === 'string' && body.token.trim()
+        ? body.token.trim() : null;
+      const token = typedToken || resolveSlackToken(userId);
       if (!token) {
         sendJSON(res, 400, { error: { code: 'SLACK_NO_TOKEN', message: 'No Slack connection saved. Connect Slack first.' } });
         return true;

@@ -43,7 +43,8 @@ extension LlmIdeAPIClient {
 
     /// Probe an IMAP source without importing anything — confirms the
     /// vault password + connection settings work and reports counts.
-    func testEmail(_ s: SavedEmailSource) async throws -> EmailTestResult {
+    /// `password`, when given, is tested as-is and NOT saved (see `testSlack`).
+    func testEmail(_ s: SavedEmailSource, password: String? = nil) async throws -> EmailTestResult {
         struct Req: Encodable {
             let host: String
             let port: Int
@@ -53,11 +54,12 @@ extension LlmIdeAPIClient {
             // Tells the server which credential path to use: "google" reads the
             // stored OAuth refresh token (XOAUTH2), otherwise the vault password.
             let authMethod: String
+            let password: String?
         }
         return try await post("/kb/email/test",
                               body: Req(host: s.host, port: s.port, secure: s.secure,
                                         user: s.user, mailbox: s.mailbox,
-                                        authMethod: s.authMethod),
+                                        authMethod: s.authMethod, password: password),
                               authenticated: true)
     }
 

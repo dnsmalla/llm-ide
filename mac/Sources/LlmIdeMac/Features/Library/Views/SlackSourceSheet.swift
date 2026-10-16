@@ -321,20 +321,19 @@ struct SlackSourceSheet: View {
         }
     }
 
-    /// Write the token to the vault FIRST (so the server can read it), then
-    /// run the connectivity probe. Advanced/manual fallback path only.
+    /// Probe the typed token without saving it. Advanced/manual fallback
+    /// path only. Test used to write the token to the vault first, so a
+    /// mistyped test replaced the working credential and Cancel kept it.
     private func test() async {
         testing = true
         testStatus = nil
         defer { testing = false }
         do {
-            try await api.setSecret(key: "slack.botToken", value: token)
-            let r = try await api.testSlack()
+            let r = try await api.testSlack(token: token)
             testWasError = !r.ok
             testStatus = r.ok
                 ? "Connected to \(r.team)"
                 : "Test failed."
-            if r.ok { await sourceLinks.refresh(api: api) }
         } catch {
             testWasError = true
             testStatus = error.localizedDescription

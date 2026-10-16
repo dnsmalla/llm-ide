@@ -18,7 +18,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 const db = await import('../kb/db.mjs');
 const { handleKB } = await import('../routes/router.mjs');
 const users = await import('../server/users.mjs');
-const { setSecret } = await import('../server/vault.mjs');
+const { setSecret, getSecret } = await import('../server/vault.mjs');
 
 function resetDb() {
   db.closeDb();
@@ -94,6 +94,27 @@ test('GET /kb/slack/conversations falls back to slack.botToken when no user toke
     assert.equal(res.statusCode, 200, res._body);
     assert.deepEqual(JSON.parse(res._body).channels, [{ id: 'C9', name: 'legacy' }]);
     assert.ok(seenTokens.some((h) => h.includes('xoxb-only')));
+  } finally { global.fetch = orig; }
+});
+
+test('POST /kb/slack/test probes a typed token without saving it', async () => {
+  resetDb();
+  const u = users.registerUser(db.getDb(), { email: `st-${Date.now()}@e.com`, password: 'CorrectHorseBattery', displayName: 'v' });
+  setSecret(db.getDb(), u.id, 'slack.botToken', 'xoxb-saved');
+
+  const orig = global.fetch;
+  const seenTokens = [];
+  global.fetch = async (urlStr, init) => {
+    seenTokens.push(init?.headers?.Authorization || '');
+    return { ok: true, json: async () => ({ ok: false, error: 'invalid_auth' }) };
+  };
+  try {
+    const res = makeRes();
+    await handleKB(makeReq({ method: 'POST', url: '/kb/slack/test', body: { token: 'xoxb-typed' }, userId: u.id }), res);
+    assert.ok(seenTokens.some((h) => h.includes('xoxb-typed')), 'must test the typed token');
+    assert.ok(!seenTokens.some((h) => h.includes('xoxb-saved')));
+    // A failed test of a typed token leaves the saved one untouched.
+    assert.equal(getSecret(db.getDb(), u.id, 'slack.botToken'), 'xoxb-saved');
   } finally { global.fetch = orig; }
 });
 

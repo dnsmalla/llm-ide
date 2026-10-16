@@ -355,26 +355,21 @@ struct EmailSourceSheet: View {
         }
     }
 
-    /// Write the password to the vault FIRST (so the server can read it),
-    /// then run the connectivity probe.
+    /// Probe the connection with the typed password WITHOUT saving it.
+    /// Test used to write it to the vault first, so a mistyped test replaced
+    /// the working password and Cancel kept the broken one. Only Save
+    /// persists; an empty field tests the saved password.
     private func test() async {
         testing = true
         testStatus = nil
         defer { testing = false }
         do {
-            // An empty value means DELETE on the secrets endpoint. Only write
-            // when something was typed: testing with an empty field (Google
-            // OAuth mode, or a password already stored) must not wipe the
-            // saved password. `save()` has the same guard.
-            if !password.isEmpty {
-                try await api.setSecret(key: "email.imapPassword", value: password)
-            }
-            let r = try await api.testEmail(draft)
+            let typed = (authMethod == "password" && !password.isEmpty) ? password : nil
+            let r = try await api.testEmail(draft, password: typed)
             testWasError = !r.ok
             testStatus = r.ok
                 ? "Connected · \(r.total) messages in \(r.mailbox)"
                 : "Test failed."
-            if r.ok { await sourceLinks.refresh(api: api) }
         } catch {
             testWasError = true
             testStatus = error.localizedDescription
