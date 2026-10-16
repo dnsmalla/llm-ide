@@ -9,6 +9,9 @@ struct McpPluginRow: View {
     let plugin: LlmIdeAPIClient.McpPluginInfo
     /// Registry check result for this server (API v62+); nil when none.
     var versionUpdate: LlmIdeAPIClient.McpServerUpdate?
+    /// `true` = the user asked to GRANT consent. The owner must confirm that
+    /// (showing the full command, args and env names) before calling the
+    /// server; `false` (revoke) may be applied directly.
     let onToggleConsent: (Bool) -> Void
     let onToggleEnabled: (Bool) -> Void
 
@@ -55,7 +58,7 @@ struct McpPluginRow: View {
                 }
             }
             .buttonStyle(.plain)
-            .help(plugin.consented ? "Consented — click to revoke" : "Not consented — click to consent. Until you do, this server is never offered to the agent.")
+            .help(plugin.consented ? "Consented — click to revoke" : "Not consented — click to review what it runs and consent. Until you do, this server is never offered to the agent.")
             Toggle("", isOn: Binding(get: { plugin.enabled }, set: onToggleEnabled))
                 .toggleStyle(.switch)
                 .labelsHidden()

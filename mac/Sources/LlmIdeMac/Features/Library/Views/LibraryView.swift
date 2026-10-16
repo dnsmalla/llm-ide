@@ -58,6 +58,11 @@ struct LibraryView: View {
     @State private var pluginsLoaded = false
     /// The destructive action waiting for the user's yes.
     @State private var pendingRemoval: LibraryRemoval?
+    /// An MCP consent waiting for the user's yes — the row's Consent button
+    /// shows what would run before granting it.
+    @State private var pendingMcpConsent: McpConsentPrompt?
+    /// Request tokens so an older list response cannot overwrite a newer one.
+    @State private var loadGenerations = LibraryLoadGenerations()
     @State private var showingGitInstallSheet = false
     @State private var showingClaudeImportSheet = false
     @State private var showingMarketplaceSheet = false
@@ -1389,7 +1394,16 @@ struct LibraryView: View {
                         McpPluginRow(
                             plugin: p,
                             versionUpdate: mcpUpdateCenter.update(for: p.id),
-                            onToggleConsent: { consented in Task { await consentPlugin(p.id, consented: consented) } },
+                            onToggleConsent: { consented in
+                                // Granting runs a process (or reaches a URL) with
+                                // this user's session: confirm with the full
+                                // command first. Revoking only removes power.
+                                if consented {
+                                    pendingMcpConsent = McpConsentPrompt(plugin: p)
+                                } else {
+                                    Task { await consentPlugin(p.id, consented: false) }
+                                }
+                            },
                             onToggleEnabled: { enabled in Task { await togglePlugin(p.id, enabled: enabled) } }
                         )
                         .tag(ShellState.LibrarySelection.mcpPlugin(p.id))
@@ -1512,6 +1526,20 @@ struct LibraryView: View {
            mcpPlugins.contains(where: { $0.package != nil }) {
             // Not awaited: a slow registry must not hold up the list loads.
             mcpUpdateCenter.startListCheck(api: api)
+        }
+        .confirmationDialog(
+            pendingMcpConsent?.dialogTitle ?? "",
+            isPresented: Binding(get: { pendingMcpConsent != nil }, set: { if !$0 { pendingMcpConsent = nil } }),
+            titleVisibility: .visible,
+            presenting: pendingMcpConsent
+        ) { prompt in
+            Button(prompt.confirmLabel) {
+                pendingMcpConsent = nil
+                Task { await consentPlugin(prompt.pluginId, consented: true) }
+            }
+            Button("Cancel", role: .cancel) { pendingMcpConsent = nil }
+        } message: { prompt in
+            Text(prompt.message)
         }
     }
 
