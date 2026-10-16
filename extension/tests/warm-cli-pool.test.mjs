@@ -379,3 +379,52 @@ test('classifyCodeAssistMode asks runClaude for a warm call', async () => {
   assert.equal(seen[0].warm, true);
   assert.equal(seen[0].userId, 'u1');
 });
+
+test('flush call sites: shutdown, logout, SDK update, plugin update, MCP consent', () => {
+  const read = (rel) => fs.readFileSync(path.join(here, '..', rel), 'utf8');
+  const server = read('server.mjs');
+  assert.match(server, /flushWarmCliPool\('shutdown'\)/);
+  const auth = read('server/auth-routes.mjs');
+  assert.match(auth, /flushWarmCliPool\('logout'\)/);
+  assert.match(auth, /flushWarmCliPool\('plugin_update'\)/);
+  assert.match(auth, /flushWarmCliPool\('mcp_consent'\)/);
+  const router = read('routes/router.mjs');
+  assert.match(router, /flushWarmCliPool\('sdk_update'\)/);
+});
+
+test('flushWarmCliPool(shutdown) kills an idle child before the process exits', async () => {
+  const { spawn } = await import('node:child_process');
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'warm-flush-'));
+  const pidFile = path.join(dir, 'pid');
+  const poolUrl = new URL('../providers/warm-cli-pool.mjs', import.meta.url).href;
+  // The pool also flushes on process 'exit', so the script checks liveness
+  // itself after the explicit flush, while it is still running.
+  const script = `
+    import fs from 'node:fs';
+    const pool = await import(${JSON.stringify(poolUrl)});
+    const ok = pool.prewarm({ bin: process.execPath, base: [${JSON.stringify(FAKE)}, '--output-format', 'json', '--tools', ''],
+      env: { FAKE_WARM_MODE: 'hang', FAKE_WARM_PID_FILE: ${JSON.stringify(pidFile)} }, cwd: '', userId: 'u1' });
+    const until = Date.now() + 3000;
+    while (Date.now() < until && !(fs.existsSync(${JSON.stringify(pidFile)}) && fs.readFileSync(${JSON.stringify(pidFile)}, 'utf8'))) await new Promise((r) => setTimeout(r, 50));
+    const pid = Number(fs.readFileSync(${JSON.stringify(pidFile)}, 'utf8'));
+    const aliveBefore = (() => { try { process.kill(pid, 0); return true; } catch { return false; } })();
+    pool.flushWarmCliPool('shutdown');
+    await new Promise((r) => setTimeout(r, 500));
+    const aliveAfter = (() => { try { process.kill(pid, 0); return true; } catch { return false; } })();
+    console.log(JSON.stringify({ ok, aliveBefore, aliveAfter }));
+    process.exit(0);
+  `;
+  const out = await new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, LLMIDE_WARM_CLI: '1', LLMIDE_WARM_CLI_MIN_FREE_BYTES: '0' },
+    });
+    let stdout = ''; let stderr = '';
+    child.stdout.on('data', (d) => { stdout += d; });
+    child.stderr.on('data', (d) => { stderr += d; });
+    child.on('error', reject);
+    child.on('close', () => resolve({ stdout, stderr }));
+  });
+  const last = out.stdout.trim().split('\n').pop();
+  assert.ok(last, `no output; stderr: ${out.stderr}`);
+  assert.deepEqual(JSON.parse(last), { ok: true, aliveBefore: true, aliveAfter: false });
+});

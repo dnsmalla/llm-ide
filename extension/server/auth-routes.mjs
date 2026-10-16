@@ -61,6 +61,7 @@ function oauthCallbackHtml(res, msg, status = 200) {
   res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`);
 }
 import { recordAudit } from './audit.mjs';
+import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
 import { getUserPrefs, setUserPrefs, revokeJti } from '../kb/db.mjs';
 
 function send(res, status, body) {
@@ -604,6 +605,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       const expiresAt = new Date(req.user.tokenExp * 1000).toISOString();
       revokeJti(req.user.jti, req.user.id, expiresAt);
     }
+    flushWarmCliPool('logout');   // an idle child answers as the account that was logged in when it started
     // Refresh-token revocation. We have no session-id linkage between an
     // access token and its refresh token, so a bearer-only logout cannot
     // target a single session. Fail safe: if the client supplies its
@@ -1315,6 +1317,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         deps: { reload: reloadPlugins, isTurnActive: () => activeTurnCount() > 0, clearMcpConsents: clearPluginMcpConsents },
       });
       if (status === 200 && out.ok) {
+        flushWarmCliPool('plugin_update');
         safeAudit(db, { ...auditBase, outcome: 'success', detail: { from: out.from, to: out.to, trustReset: out.trustReset, claudeUpdated: out.claudeUpdated } });
       } else {
         safeAudit(db, { ...auditBase, outcome: 'failure', detail: { code: out.code || String(status) } });
@@ -1787,6 +1790,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     }
     const { setConsented } = await import('../mcp/state.mjs');
     setConsented(req.user.id, body.id, body.consented);
+    if (!body.consented) flushWarmCliPool('mcp_consent');
     safeAudit(db, { userId: req.user.id, requestId, ip, userAgent: ua,
       action: body.consented ? 'mcp-plugin.consent' : 'mcp-plugin.revoke-consent', resource: body.id, outcome: 'success' });
     send(res, 200, { ok: true, consented: body.consented });

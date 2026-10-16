@@ -26,6 +26,7 @@ import { routeTimeoutMs, withRouteTimeout } from './server/route-timeout.mjs';
 import { buildHealthPayload, buildNotFoundDetails } from './server/control-plane.mjs';
 import { startBackgroundOutcomePoller, stopBackgroundOutcomePoller } from './agents/outcome-watcher.mjs';
 import { sweepStaleCliTempDirs } from './providers/providers.mjs';
+import { flushWarmCliPool } from './providers/warm-cli-pool.mjs';
 
 const PORT = config.port;
 const HOST = config.host;
@@ -936,6 +937,8 @@ function shutdown(signal) {
   if (shuttingDown) return;
   shuttingDown = true;
   logger.info('shutdown_initiated', { signal });
+  // Idle classifier children hold the user's login; never outlive the server.
+  flushWarmCliPool('shutdown');
   if (authGcTimer)  { clearInterval(authGcTimer);  authGcTimer  = null; }
   if (backupTimer)  { clearInterval(backupTimer);  backupTimer  = null; }
   stopBackgroundOutcomePoller();

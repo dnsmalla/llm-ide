@@ -30,6 +30,7 @@ import { handleChatRoutes } from './chat.mjs';
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { classifyEmail } from '../agents/email-classify.mjs';
 import { runClaude } from '../providers/runtime.mjs';
+import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
 import { handleTierRoutingSync } from '../server/tier-routing.mjs';
@@ -151,6 +152,9 @@ export async function handleKB(req, res) {
       // decision, server/auth.mjs).
       // 200 either way: a failed or rolled-back update is a normal answer the
       // client shows (with its log), not a transport error.
+      // The SDK update swaps the CLI's own package; an idle child would keep
+      // the old one alive.
+      flushWarmCliPool('sdk_update');
       sendJSON(res, 200, await updateSdk({ activeTurns: activeTurnCount }));
       return true;
     }
