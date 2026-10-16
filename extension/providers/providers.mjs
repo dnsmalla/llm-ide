@@ -871,7 +871,8 @@ export function spawnCli(provider, prompt, { env, timeoutMs = CLI_TIMEOUT_MS, si
   // semaphore slot only while it is answering, like a cold spawn would.
   const warmEligible = warm && provider === 'anthropic' && isWarmCliEnabled() && !process.env.LLMIDE_ANTHROPIC_CLI;
   if (!warmEligible) return cold();
-  return spawnWithWarm({ bin: inv.bin, args, env: resolvedEnv, cwd, userId, timeoutMs, signal, cold: () => cold() });
+  return spawnWithWarm({ bin: inv.bin, args, env: resolvedEnv, cwd, userId, timeoutMs, signal, cold: () => cold(),
+                         withSlot: (fn) => cliSemaphore.run(fn) });
 }
 
 // Per-provider NDJSON line parser: (line) => { delta?, result?, isError? }.

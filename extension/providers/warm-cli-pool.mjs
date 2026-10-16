@@ -305,7 +305,7 @@ function resolveBin(bin, env) {
  * for the next identical call. `cold` is spawnCli's own execFile promise
  * factory, so result shapes are the cold path's by construction.
  */
-export async function spawnWithWarm({ bin, args, env, cwd, userId, timeoutMs, signal, cold }) {
+export async function spawnWithWarm({ bin, args, env, cwd, userId, timeoutMs, signal, cold, withSlot = (fn) => fn() }) {
   const split = splitPromptArgs(args);
   if (!split) return cold();
   const resolved = resolveBin(bin, env);
@@ -321,7 +321,8 @@ export async function spawnWithWarm({ bin, args, env, cwd, userId, timeoutMs, si
   try {
     if (entry) {
       try {
-        result = await runWarm(entry, split.prompt, { timeoutMs, signal, wantJson });
+        // withSlot wraps ONLY the warm answer; cold() below takes its own slot.
+        result = await withSlot(() => runWarm(entry, split.prompt, { timeoutMs, signal, wantJson }));
       } catch (err) {
         if (!isWarmRetryable(err)) throw err;
         log.info('warm_cli_retry_cold', { code: err.code ?? null });

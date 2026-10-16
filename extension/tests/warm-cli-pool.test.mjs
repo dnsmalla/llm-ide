@@ -304,28 +304,63 @@ test('spawnCli: warm:true uses the pool only for the default claude bin', async 
   // An override is set in this test process (the fake) → pool must NOT be used,
   // even with warm:true. Proven by: no idle child appears after the call.
   process.env.LLMIDE_ANTHROPIC_CLI = process.execPath;
-  const out = await spawnCli('anthropic', 'hello', {
-    warm: true, userId: 'u1', env: { FAKE_WARM_MODE: 'ok', PATH: process.env.PATH },
-    args: [FAKE, '--output-format', 'json', '--tools', '', '-p', 'hello'], timeoutMs: 5000,
-  });
-  assert.match(out.stdout, /"type":"result"/);
-  await tick();
-  assert.equal(pool._warmPoolStateForTests().idle, 0, 'override bin → never pre-warmed');
-  delete process.env.LLMIDE_ANTHROPIC_CLI;
+  try {
+    const out = await spawnCli('anthropic', 'hello', {
+      warm: true, userId: 'u1', env: { FAKE_WARM_MODE: 'ok', PATH: process.env.PATH },
+      args: [FAKE, '--output-format', 'json', '--tools', '', '-p', 'hello'], timeoutMs: 5000,
+    });
+    assert.match(out.stdout, /"type":"result"/);
+    await tick();
+    assert.equal(pool._warmPoolStateForTests().idle, 0, 'override bin → never pre-warmed');
+  } finally {
+    delete process.env.LLMIDE_ANTHROPIC_CLI;
+  }
 });
 
-test('spawnCli: warm path falls back cold once on a retryable warm failure, and prewarms after', async () => {
+test('spawnWithWarm: a second identical call is served by the prewarmed child, slot held once', async () => {
   pool.flushWarmCliPool('t');
+  // Align the remembered bin stamp with the real one first, or spawnWithWarm's own stamp check flushes the prewarmed child.
+  pool.rememberBinStamp(process.execPath, fs.statSync(process.execPath).mtimeMs);
+  const pidFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'warm-pid-')), 'pid');
+  const env = { FAKE_WARM_MODE: 'ok', FAKE_WARM_PID_FILE: pidFile, PATH: process.env.PATH };
+  const s = { bin: process.execPath, base: [FAKE, '--output-format', 'json', '--tools', ''], env, cwd: '', userId: 'u7' };
+  pool.prewarm(s);
+  assert.ok(await pidReady(pidFile));
+  const warmPid = fs.readFileSync(pidFile, 'utf8');
+  assert.equal(pool._warmPoolStateForTests().idle, 1);
+  let slots = 0;
+  let colds = 0;
+  const out = await pool._spawnWithWarmForTests({
+    bin: s.bin, args: [...s.base, '-p', 'hi'], env, cwd: '', userId: 'u7', timeoutMs: 5000,
+    cold: async () => { colds++; return { stdout: '', stderr: '', bin: s.bin }; },
+    withSlot: (fn) => { slots++; return fn(); },
+  });
+  assert.match(out.stdout, /"type":"result"/);
+  assert.equal(colds, 0, 'served warm, no cold spawn');
+  assert.equal(slots, 1, 'slot taken exactly once around the warm run');
+  // The respawned idle child (prewarm in finally) writes a NEW pid.
+  assert.ok(await waitFor(() => fs.readFileSync(pidFile, 'utf8') !== warmPid), 'a fresh child replaced the used one');
+  pool.flushWarmCliPool('t');
+});
+
+test('spawnWithWarm: retryable warm failure falls back cold once, outside the slot wrapper', async () => {
+  pool.flushWarmCliPool('t');
+  // Align the remembered bin stamp with the real one first, or spawnWithWarm's own stamp check flushes the prewarmed child.
+  pool.rememberBinStamp(process.execPath, fs.statSync(process.execPath).mtimeMs);
   const calls = [];
-  const s = { bin: process.execPath, base: [FAKE, '--output-format', 'json', '--tools', ''], env: { FAKE_WARM_MODE: 'exit_after_read', PATH: process.env.PATH }, cwd: '', userId: 'u9' };
+  const env = { FAKE_WARM_MODE: 'exit_after_read', PATH: process.env.PATH };
+  const s = { bin: process.execPath, base: [FAKE, '--output-format', 'json', '--tools', ''], env, cwd: '', userId: 'u9' };
   pool.prewarm(s);
   await waitFor(() => pool._warmPoolStateForTests().idle === 1);
-  // Drive spawnCli's warm branch directly through its test seam.
+  let slots = 0;
+  let inSlot = false;
   const out = await pool._spawnWithWarmForTests({
-    bin: s.bin, args: [...s.base, '-p', 'hello'], env: { ...s.env, FAKE_WARM_MODE: 'ok' }, cwd: '', userId: 'u9', timeoutMs: 5000,
-    cold: async () => { calls.push('cold'); return { stdout: '{"type":"result","result":"cold","is_error":false}', stderr: '', bin: s.bin }; },
+    bin: s.bin, args: [...s.base, '-p', 'hello'], env, cwd: '', userId: 'u9', timeoutMs: 5000,
+    cold: async () => { calls.push(inSlot ? 'cold-in-slot' : 'cold'); return { stdout: '{"type":"result","result":"cold","is_error":false}', stderr: '', bin: s.bin }; },
+    withSlot: async (fn) => { slots++; inSlot = true; try { return await fn(); } finally { inSlot = false; } },
   });
-  assert.deepEqual(calls, ['cold'], 'one cold retry after the warm child died');
+  assert.equal(slots, 1, 'the warm child WAS acquired and run (slot taken once)');
+  assert.deepEqual(calls, ['cold'], 'one cold retry after the warm child died, outside the slot');
   assert.match(out.stdout, /cold/);
 });
 
