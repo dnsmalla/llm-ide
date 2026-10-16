@@ -19,11 +19,41 @@ public enum SdkAdoption {
 
     /// Whether a version's record means this run has nothing to do: it already
     /// produced a proposal, waits on a human, or was settled. Without this gate
-    /// every scheduled tick re-ran the agent over the same version.
+    /// every scheduled tick re-ran the agent over the same version. A
+    /// `.fixing` record is held by another run — `claim` refuses it.
     public static func shouldSkip(status: IncidentStatus?) -> Bool {
         switch status {
         case .proposed?, .needsHuman?, .ignored?, .fixed?: return true
         case .new?, .fixing?, nil: return false
+        }
+    }
+
+    /// Marks a version's record `.fixing` for this run — the same claim
+    /// Self-Heal triage puts on the incidents it picks. A manual run and a
+    /// scheduled one (or two loops sharing the SDK stages) used to both pass
+    /// `shouldSkip` while the 10-minute diff ran, adopt the same version in two
+    /// worktrees, and the later `applyOutcome` overwrote the earlier proposal.
+    /// Returns false when the version is not free (another run holds it, or it
+    /// was settled meanwhile). A claim orphaned by a quit or crash is released
+    /// by `IncidentStore`'s load, which resets every `.fixing` to `.new`.
+    @MainActor
+    @discardableResult
+    public static func claim(version: String, store: IncidentStore) -> Bool {
+        let id = incidentId(version: version)
+        let status = store.incidents.first(where: { $0.id == id })?.status
+        guard status != .fixing, !shouldSkip(status: status) else { return false }
+        recordPending(version: version, store: store)
+        store.update(id: id) { $0.status = .fixing }
+        return true
+    }
+
+    /// Gives back a claim that ended without an outcome (diff failed, Stop,
+    /// unreadable batch): `.fixing` → `.new`, so the next run may take it.
+    /// Leaves any other status alone — an outcome already written wins.
+    @MainActor
+    public static func release(version: String, store: IncidentStore) {
+        store.update(id: incidentId(version: version)) { item in
+            if item.status == .fixing { item.status = .new }
         }
     }
 

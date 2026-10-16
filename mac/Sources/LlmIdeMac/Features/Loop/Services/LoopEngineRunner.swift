@@ -250,6 +250,9 @@ final class LoopEngineRunner: ObservableObject {
     /// nothing still owes its worktree a discard. Reset per run.
     private var sdkAdoptVersion: String?
     private var sdkAdoptDiffRan = false
+    /// The version whose record this run marked `.fixing` (`SdkAdoption.claim`),
+    /// released at write-back unless an outcome replaced the claim.
+    private var sdkAdoptClaimedVersion: String?
 
     /// Accumulated journal state for the in-flight run. Instance state rather
     /// than a `run`-local `var` only because the per-stage helpers below append
@@ -661,6 +664,7 @@ final class LoopEngineRunner: ObservableObject {
         selfHealBatch = nil
         sdkAdoptVersion = nil
         sdkAdoptDiffRan = false
+        sdkAdoptClaimedVersion = nil
         // Must be reset per run, not only in the defer: a run that ended while
         // paused would otherwise leave `paused == true`, and the NEXT run
         // would hold at its first stage boundary forever with no visible
@@ -1838,13 +1842,18 @@ final class LoopEngineRunner: ObservableObject {
         if let installed {
             let status = IncidentStore.shared.incidents
                 .first { $0.id == SdkAdoption.incidentId(version: installed) }?.status
-            if SdkAdoption.shouldSkip(status: status) {
-                let why = "SDK \(installed) is already \(status.map(\.rawValue) ?? "settled") — nothing to run"
+            // Claimed BEFORE the diff, which can take minutes: that is the
+            // window in which a second run would pass the same check.
+            if !SdkAdoption.claim(version: installed, store: .shared) {
+                let why = status == .fixing
+                    ? "SDK \(installed) is being adopted by another run — nothing to run"
+                    : "SDK \(installed) is already \(status.map(\.rawValue) ?? "settled") — nothing to run"
                 stageStates[stage.id] = .passed
                 appendLog(.info, "  [\(stage.name)] \(why)")
                 record(stage, startedAt: startedAt, duration: 0, exitCode: nil, passed: true, output: why, score: nil)
                 return .terminate(.success)
             }
+            sdkAdoptClaimedVersion = installed
         }
         let outcome: VerifyOutcome
         do {
@@ -1895,6 +1904,21 @@ final class LoopEngineRunner: ObservableObject {
                 record(stage, startedAt: startedAt, duration: duration, exitCode: 0, passed: false,
                        output: outcome.output, score: nil)
                 return .terminate(.error("SDK diff wrote no readable \(SdkAdoption.relativePath)"))
+            }
+            // The batch names the version actually diffed; when it is not the
+            // one claimed above (installed unreadable, or it moved), claim it
+            // now — another run may already hold it.
+            if version != sdkAdoptClaimedVersion {
+                guard SdkAdoption.claim(version: version, store: .shared) else {
+                    let why = "SDK \(version) is already handled by another run — nothing to run"
+                    stageStates[stage.id] = .passed
+                    appendLog(.info, "  [\(stage.name)] \(why)")
+                    record(stage, startedAt: startedAt, duration: duration, exitCode: 0, passed: true,
+                           output: why, score: nil)
+                    return .terminate(.success)
+                }
+                if let previous = sdkAdoptClaimedVersion { SdkAdoption.release(version: previous, store: .shared) }
+                sdkAdoptClaimedVersion = version
             }
             sdkAdoptVersion = version
             stageStates[stage.id] = .passed
@@ -2612,6 +2636,13 @@ final class LoopEngineRunner: ObservableObject {
             let version = sdkAdoptVersion
             sdkAdoptVersion = nil
             await writeBackSdkAdoption(version: version, terminal: terminal, gitRoot: gitRoot)
+            // After the outcome: `applyOutcome` / `settle` already replaced the
+            // claim, so this only frees one that ended with none (diff error,
+            // Stop, unreadable batch).
+            if let claimed = sdkAdoptClaimedVersion {
+                sdkAdoptClaimedVersion = nil
+                SdkAdoption.release(version: claimed, store: .shared)
+            }
         }
         status = terminal
         appendLog(logLevel(for: terminal), "Loop finished · \(terminal.summary)")
