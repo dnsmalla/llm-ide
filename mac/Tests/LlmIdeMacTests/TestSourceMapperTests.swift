@@ -44,4 +44,15 @@ final class TestSourceMapperTests: XCTestCase {
         XCTAssertNil(TestSourceMapper.sourceStem(forTestPath: "mac/Tests/LlmIdeMacTests/Support/TempRepo.swift"))
         XCTAssertFalse(TestSourceMapper.isSourceCandidate("tests/unit/x.mjs"))
     }
+    func testMirroredUnitPath() {
+        let root = TestRoot(packageDir: "", testDir: "tests", runner: .pytest, command: "pytest",
+                            namingRule: "", languages: ["py"], layout: .layered)
+        XCTAssertEqual(TestSourceMapper.newTestPath(forSourcePath: "logic/domain/time_range.py", root: root),
+                       "tests/unit/domain/test_time_range.py")
+        XCTAssertEqual(TestSourceMapper.newTestPath(forSourcePath: "logic/a.py", root: root), "tests/unit/test_a.py")
+    }
+    func testAnalysisIsNotASourceCandidate() {
+        XCTAssertFalse(TestSourceMapper.isSourceCandidate("analysis/visualize/plot.py"))
+        XCTAssertTrue(TestSourceMapper.isSourceCandidate("logic/plot.py"))
+    }
 }

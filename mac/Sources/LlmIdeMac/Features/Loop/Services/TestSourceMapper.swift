@@ -3,16 +3,18 @@ import Foundation
 /// Every language rule for "which test file is FOR which source file" and
 /// "where a new test goes", so the structure stage, the map stage and the
 /// test-gap-writer skill's contract cannot disagree.
-enum TestSourceMapper {
+public enum TestSourceMapper {
     static let excludedDirs: Set<String> = [".git", "node_modules", ".build", "dist", "build", "Pods", "DerivedData",
                                             "vendor", ".venv", "__pycache__", ".llmide-loop-worktrees", "monaco", "monaco-src"]
     static let codeExtensions: Set<String> = ["swift", "mjs", "cjs", "js", "jsx", "ts", "tsx", "py", "go", "kt"]
     private static let testDirs: Set<String> = ["Tests", "tests", "test", "__tests__"]
     private static let manifests: Set<String> = ["Package.swift"]
 
-    static func isSourceCandidate(_ relPath: String) -> Bool {
+    public static func isSourceCandidate(_ relPath: String) -> Bool {
         let parts = relPath.split(separator: "/").map(String.init)
         guard let file = parts.last, !parts.dropLast().contains(where: { excludedDirs.contains($0) }) else { return false }
+        // Guideline: `analysis/` holds assert-less scripts that never get tests.
+        if parts.dropLast().contains("analysis") { return false }
         let (_, ext) = splitExt(file)
         guard codeExtensions.contains(ext), !manifests.contains(file) else { return false }
         if parts.dropLast().contains(where: { testDirs.contains($0) }) { return false }
@@ -70,6 +72,22 @@ enum TestSourceMapper {
         default: return nil
         }
     }
+    /// Repo-relative path a NEW test for `rel` goes at. Flat roots keep the
+    /// `<testDir>/<testFileName>` rule; a layered `.py` root mirrors the source tree
+    /// under `<testDir>/unit/` (drops `packageDir` and the top source package).
+    public static func newTestPath(forSourcePath rel: String, root: TestRoot) -> String? {
+        guard let name = testFileName(forSourcePath: rel) else { return nil }
+        let dest = root.testDir.isEmpty ? "" : root.testDir + "/"
+        guard root.layout == .layered, rel.hasSuffix(".py") else { return dest + name }
+        var parts = rel.split(separator: "/").map(String.init)
+        if !root.packageDir.isEmpty, rel.hasPrefix(root.packageDir + "/") {
+            parts.removeFirst(root.packageDir.split(separator: "/").count)
+        }
+        parts.removeLast()
+        if !parts.isEmpty { parts.removeFirst() }
+        return dest + (["unit"] + parts + [name]).joined(separator: "/")
+    }
+
     private static let markerRegex: NSRegularExpression? = try? NSRegularExpression(pattern:
         #"(^|[^A-Za-z0-9_.])(it|test|describe)\(|\bfunc test[A-Z_0-9]|@Test\b|\bdef test_|\bfunc Test[A-Z]|\bfun test[A-Z_0-9]|@org\.junit\.Test"#,
         options: [.anchorsMatchLines])

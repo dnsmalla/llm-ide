@@ -2,6 +2,10 @@ import Foundation
 
 public enum TestRunner: String, Codable { case xctest, nodeTest, npm, jest, pytest, goTest, cargo, make }
 
+/// How a pytest root is organised: `flat` (today's single directory) or
+/// `layered` (guideline: `unit/` mirrors production, `integration/`, `performance/`).
+public enum TestLayout: String, Codable { case flat, layered }
+
 public struct TestRoot: Codable, Equatable {
     public var packageDir: String      // "" for repo root, "mac" for mac/Package.swift
     public var testDir: String
@@ -9,11 +13,14 @@ public struct TestRoot: Codable, Equatable {
     public var command: String         // runnable from the repo root
     public var namingRule: String
     public var languages: [String]
+    /// nil = flat. Optional so a TEST-STRUCTURE.json written before this field still decodes.
+    public var layout: TestLayout?
 
     public init(packageDir: String, testDir: String, runner: TestRunner, command: String,
-                namingRule: String, languages: [String]) {
+                namingRule: String, languages: [String], layout: TestLayout? = nil) {
         self.packageDir = packageDir; self.testDir = testDir; self.runner = runner
         self.command = command; self.namingRule = namingRule; self.languages = languages
+        self.layout = layout
     }
 }
 
@@ -47,6 +54,13 @@ public struct TestStructure: Codable, Equatable {
             let base = r.packageDir.isEmpty ? "." : r.packageDir
             let dest = r.testDir.isEmpty ? "." : r.testDir
             for ext in r.languages {
+                if r.layout == .layered, ext == "py" {
+                    let sample = r.packageDir.isEmpty ? "logic/domain/X.py" : "\(r.packageDir)/logic/domain/X.py"
+                    if let path = TestSourceMapper.newTestPath(forSourcePath: sample, root: r) {
+                        out += "- `\(r.packageDir.isEmpty ? "" : r.packageDir + "/")logic/domain/X.py` → `\(path)` (mirror the source tree under `unit/`; `analysis/` never gets tests)\n"
+                    }
+                    continue
+                }
                 guard let name = TestSourceMapper.testFileName(forSourcePath: "X.\(ext)") else { continue }
                 out += "- `\(base)/**/X.\(ext)` → `\(dest)/\(name)`\n"
             }

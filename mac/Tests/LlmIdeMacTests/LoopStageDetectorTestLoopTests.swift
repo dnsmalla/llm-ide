@@ -128,4 +128,11 @@ final class StageOutputParserCargoTests: XCTestCase {
         let out = "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out"
         XCTAssertEqual(StageOutputParser.parseFailureCount(out), 2)
     }
+
+    func testDetectTestCommandExcludesPerformance() throws {
+        let root = try TempRepo.make(files: ["pytest.ini": "[pytest]", "tests/unit/test_a.py": "def test_a(): pass",
+                                             "tests/integration/test_p.py": "def test_p(): pass",
+                                             "tests/performance/test_perf.py": "def test_perf(): pass"])
+        XCTAssertEqual(LoopStageDetector.detectTestCommand(gitRoot: root), "pytest tests/unit tests/integration")
+    }
 }

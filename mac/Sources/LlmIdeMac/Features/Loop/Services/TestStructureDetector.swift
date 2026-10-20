@@ -2,10 +2,12 @@ import Foundation
 
 /// Finds where the repo's tests live (depth <= 2 below the git root) and
 /// writes TEST-STRUCTURE.md/.json. Never creates test directories.
-struct TestStructureDetector {
+public struct TestStructureDetector {
     var gitRoot: URL
 
-    func detect() -> TestStructure {
+    public init(gitRoot: URL) { self.gitRoot = gitRoot }
+
+    public func detect() -> TestStructure {
         var roots: [TestRoot] = []
         var notes: [String] = []
         for pkg in packageDirs() {
@@ -108,7 +110,26 @@ struct TestStructureDetector {
         guard let dir = firstExisting(pkg, ["tests", "test"]) else {
             notes.append("\(label(pkg)): no test directory found for pytest"); return
         }
-        roots.append(root(pkg, dir, .pytest, cd(pkg, "pytest"), ["py"]))
+        let isLayered = exists(join(dir, "unit"))
+        var detected = root(pkg, dir, .pytest,
+                            cd(pkg, Self.pytestCommand(testDir: dir, gitRoot: gitRoot, packageDir: pkg)), ["py"])
+        if isLayered { detected.layout = .layered }
+        roots.append(detected)
+    }
+
+    /// `pytest` for a flat layout. For a layered one (`<testDir>/unit` exists) the
+    /// unit directory plus `integration` when present, so the Test stage never
+    /// collects `performance/` (nightly only). Paths are relative to `packageDir`
+    /// and the result carries no `cd`.
+    public static func pytestCommand(testDir: String, gitRoot: URL, packageDir: String) -> String {
+        let fm = FileManager.default
+        func exists(_ rel: String) -> Bool { fm.fileExists(atPath: gitRoot.appendingPathComponent(rel).path) }
+        guard exists("\(testDir)/unit") else { return "pytest" }
+        let rel = packageDir.isEmpty || !testDir.hasPrefix(packageDir + "/")
+            ? testDir : String(testDir.dropFirst(packageDir.count + 1))
+        var command = "pytest \(VerifyCommandBuilder.shellWord("\(rel)/unit"))"
+        if exists("\(testDir)/integration") { command += " \(VerifyCommandBuilder.shellWord("\(rel)/integration"))" }
+        return command
     }
 
     private func detectGo(_ pkg: String, _ roots: inout [TestRoot]) {

@@ -69,4 +69,24 @@ final class TestStructureDetectorTests: XCTestCase {
         let root = try make(["a/b/c/go.mod": "module x", "node_modules/p/Package.swift": ".testTarget(name: \"T\")"])
         XCTAssertTrue(TestStructureDetector(gitRoot: root).detect().roots.isEmpty)
     }
+    func testLayeredPythonLayoutDetected() throws {
+        let root = try make(["pytest.ini": "[pytest]", "tests/unit/domain/test_a.py": "def test_a(): pass",
+                             "tests/integration/test_p.py": "def test_p(): pass",
+                             "tests/performance/test_perf.py": "def test_perf(): pass"])
+        let r = TestStructureDetector(gitRoot: root).detect().roots.first
+        XCTAssertEqual(r?.layout, .layered)
+        XCTAssertEqual(r?.testDir, "tests")
+        XCTAssertEqual(r?.command, "pytest tests/unit tests/integration")
+    }
+    func testFlatPythonLayoutUnchanged() throws {
+        let root = try make(["pytest.ini": "[pytest]", "tests/test_a.py": "def test_a(): pass"])
+        let r = TestStructureDetector(gitRoot: root).detect().roots.first
+        XCTAssertNil(r?.layout)
+        XCTAssertEqual(r?.command, "pytest")
+    }
+    func testRenderShowsMirroredRule() throws {
+        let root = try make(["pytest.ini": "[pytest]", "tests/unit/test_a.py": "def test_a(): pass"])
+        let md = TestStructureDetector(gitRoot: root).detect().render()
+        XCTAssertTrue(md.contains("tests/unit/"))
+    }
 }

@@ -26,6 +26,47 @@ func runTestStandardChecks() {
            "complex file with many collaborators is over-complex")
     expect(CodeQuadrantClassifier.classify(loc: 500, functionCount: 1, collaborators: 0, role: nil) == .overComplex,
            "500-line file is over-complex")
+
+    runLayeredLayoutChecks()
+}
+
+private func makeLayoutFixture(_ files: [String]) -> URL {
+    let root = FileManager.default.temporaryDirectory.appendingPathComponent("layout-\(UUID().uuidString)")
+    for rel in files {
+        let url = root.appendingPathComponent(rel)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        FileManager.default.createFile(atPath: url.path, contents: Data("x".utf8))
+    }
+    return root
+}
+
+private func runLayeredLayoutChecks() {
+    let layered = makeLayoutFixture(["pytest.ini", "tests/unit/domain/test_a.py",
+                                     "tests/integration/test_p.py", "tests/performance/test_perf.py"])
+    defer { try? FileManager.default.removeItem(at: layered) }
+    let layeredRoot = TestStructureDetector(gitRoot: layered).detect().roots.first
+    expect(layeredRoot?.layout == .layered, "tests/unit marks the pytest root layered")
+    expect(layeredRoot?.testDir == "tests", "layered root keeps testDir tests")
+    expect(layeredRoot?.command == "pytest tests/unit tests/integration", "layered command skips performance")
+
+    let flat = makeLayoutFixture(["pytest.ini", "tests/test_a.py"])
+    defer { try? FileManager.default.removeItem(at: flat) }
+    let flatRoot = TestStructureDetector(gitRoot: flat).detect().roots.first
+    expect(flatRoot?.layout == nil, "flat pytest layout has nil layout")
+    expect(flatRoot?.command == "pytest", "flat pytest command unchanged")
+
+    if let root = layeredRoot {
+        var rooted = root
+        rooted.packageDir = ""
+        expect(TestSourceMapper.newTestPath(forSourcePath: "logic/domain/time_range.py", root: rooted)
+               == "tests/unit/domain/test_time_range.py", "layered placement mirrors the source tree")
+        expect(TestSourceMapper.newTestPath(forSourcePath: "logic/a.py", root: rooted)
+               == "tests/unit/test_a.py", "layered placement for a top-level module")
+    }
+    expect(!TestSourceMapper.isSourceCandidate("analysis/visualize/plot.py"), "analysis/ is not a source candidate")
+    expect(TestSourceMapper.isSourceCandidate("logic/plot.py"), "logic/ stays a source candidate")
+    expect(LoopStageDetector.detectTestCommand(gitRoot: layered) == "pytest tests/unit tests/integration",
+           "detectTestCommand excludes performance")
 }
 
 #endif

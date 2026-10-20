@@ -501,7 +501,7 @@ public enum LoopStageDetector {
     /// Internal (not private) because `LoopTemplate.applied(to:)` needs the same
     /// answer to resolve its `detectedTestCommand` placeholder — a built-in
     /// template must not hardcode `swift test`.
-    static func detectTestCommand(gitRoot: URL) -> String? {
+    public static func detectTestCommand(gitRoot: URL) -> String? {
         // Inside `withDetectionMemo` (one store load) the answer is computed
         // once: a load asks for it ~7 times and each ask reads the Makefile.
         let dict = Thread.current.threadDictionary
@@ -569,10 +569,14 @@ public enum LoopStageDetector {
         for marker in pytestMarkers {
             let path = gitRoot.appendingPathComponent(marker)
             if fm.fileExists(atPath: path.path) {
-                if marker == "pytest.ini" { return "pytest" }
-                if let contents = try? String(contentsOf: path, encoding: .utf8),
-                   contents.contains("pytest") {
-                    return "pytest"
+                var mentionsPytest = marker == "pytest.ini"
+                if !mentionsPytest, let contents = try? String(contentsOf: path, encoding: .utf8) {
+                    mentionsPytest = contents.contains("pytest")
+                }
+                if mentionsPytest {
+                    // Same layered command the structure detector writes.
+                    let dir = ["tests", "test"].first { fm.fileExists(atPath: gitRoot.appendingPathComponent($0).path) }
+                    return dir.map { TestStructureDetector.pytestCommand(testDir: $0, gitRoot: gitRoot, packageDir: "") } ?? "pytest"
                 }
             }
         }
