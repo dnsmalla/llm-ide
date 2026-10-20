@@ -58,4 +58,14 @@ final class LoopStageTestMapKindTests: XCTestCase {
         let out = "Test Case '-[LlmIdeMacTests.FooTests testA]' passed (0.001 seconds).\nTest Case '-[LlmIdeMacTests.FooTests testB]' failed (0.1 seconds)."
         XCTAssertEqual(LoopEngineRunner.passingTestIds(out), ["LlmIdeMacTests.FooTests/testA"])
     }
+    func testMapCheckPassesWhenCountDidNotFall() {
+        let outcome = TestMapCheck.mapCheckOutcome(delta: ["untestedFunctions": 0], writerChanged: true)
+        XCTAssertTrue(outcome.passed)
+        XCTAssertEqual(outcome.note?.contains("advisory"), true)
+    }
+    func testMapCheckPassesWhenWriterCoveredNone() {
+        let outcome = TestMapCheck.mapCheckOutcome(delta: [:], writerChanged: false)
+        XCTAssertTrue(outcome.passed)
+        XCTAssertNil(outcome.note)
+    }
 }

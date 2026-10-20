@@ -64,12 +64,9 @@ extension LoopEngineRunner {
             let delta = TestMap.delta(before: before, after: built)
             let writer = stages.first { $0.enabled && $0.testWriteOnly }
             let wrote = writer.flatMap { lastSkillResults[$0.id] }.map { !($0.changedPaths + $0.createdPaths).isEmpty } ?? false
-            if wrote, (delta["untestedFunctions"] ?? 0) >= 0 {
-                let message = "Test Write changed files but untestedFunctions did not fall"
-                appendLog(.warn, "  [\(stage.name)] \(message)")
-                return finishTestMap(stage, startedAt: startedAt, passed: false, output: message, delta: delta)
-            }
-            return finishTestMap(stage, startedAt: startedAt, passed: true, output: "", delta: delta)
+            let outcome = TestMapCheck.mapCheckOutcome(delta: delta, writerChanged: wrote)
+            if let note = outcome.note { appendLog(.info, "  [\(stage.name)] \(note)") }
+            return finishTestMap(stage, startedAt: startedAt, passed: outcome.passed, output: "", delta: delta)
 
         case .ledger:
             return await runLedgerOp(stage, startedAt: startedAt, gitRoot: mainRoot, stages: stages)

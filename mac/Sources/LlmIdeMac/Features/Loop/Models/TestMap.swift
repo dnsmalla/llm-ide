@@ -67,6 +67,20 @@ public struct TestMap: Codable, Equatable {
         out += "- untestedFunctions: functions no test file references; testedFunctions: the rest; untestedFiles: source files with at least one eligible function and none of them tested.\n"
         out += "- A function `f` of file `p` is tested by a test file in the matching test root when the test's tokens (identifiers and double-quoted string contents) contain `f` exactly, and the test maps to the same source stem as `p` or contains the file's name as a token.\n"
         out += "- init, deinit, body, main, description and `_`-prefixed names are skipped.\n"
+        out += "- Counters are information, not a goal: the loop never fails because a count did not move.\n"
         return out
+    }
+}
+
+/// The Test Map Check's verdict. The check is informational: a counter that did
+/// not move is never a reason to fail the loop.
+public enum TestMapCheck {
+    /// Always passes. `note` is set (advisory) when the writer changed files but
+    /// the untested-function count did not fall.
+    public static func mapCheckOutcome(delta: [String: Double], writerChanged: Bool) -> (passed: Bool, note: String?) {
+        if writerChanged, (delta["untestedFunctions"] ?? 0) >= 0 {
+            return (true, "Test Write changed files but untestedFunctions did not fall (advisory)")
+        }
+        return (true, nil)
     }
 }

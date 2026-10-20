@@ -525,6 +525,7 @@ runProjectEnvironmentAssessorChecks()
 await runProjectEnvironmentInspectorChecks()
 runLoopOutputLayoutChecks()
 runLoopOutputMigrationChecks()
+runTestStandardChecks()
 #endif
 
 if failures.isEmpty {
