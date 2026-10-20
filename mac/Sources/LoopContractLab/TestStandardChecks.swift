@@ -108,13 +108,30 @@ private func runLayeredLayoutChecks() {
     let layeredRoot = TestStructureDetector(gitRoot: layered).detect().roots.first
     expect(layeredRoot?.layout == .layered, "tests/unit marks the pytest root layered")
     expect(layeredRoot?.testDir == "tests", "layered root keeps testDir tests")
-    expect(layeredRoot?.command == "pytest tests/unit tests/integration", "layered command skips performance")
+    expect(layeredRoot?.command == "pytest --ignore=tests/performance", "layered command skips performance")
 
     let flat = makeLayoutFixture(["pytest.ini", "tests/test_a.py"])
     defer { try? FileManager.default.removeItem(at: flat) }
     let flatRoot = TestStructureDetector(gitRoot: flat).detect().roots.first
     expect(flatRoot?.layout == nil, "flat pytest layout has nil layout")
     expect(flatRoot?.command == "pytest", "flat pytest command unchanged")
+
+    // Excluding, not whitelisting: top-level tests/test_*.py and tests/e2e still run.
+    let mixed = makeLayoutFixture(["pytest.ini", "tests/unit/test_a.py", "tests/test_top.py",
+                                   "tests/e2e/test_flow.py", "tests/performance/test_perf.py"])
+    defer { try? FileManager.default.removeItem(at: mixed) }
+    expect(TestStructureDetector.pytestCommand(testDir: "tests", gitRoot: mixed, packageDir: "")
+               == "pytest --ignore=tests/performance",
+           "pytest command only ignores performance, so other test folders still run")
+    let noPerf = makeLayoutFixture(["pytest.ini", "tests/unit/test_a.py", "tests/e2e/test_flow.py"])
+    defer { try? FileManager.default.removeItem(at: noPerf) }
+    expect(TestStructureDetector.pytestCommand(testDir: "tests", gitRoot: noPerf, packageDir: "") == "pytest",
+           "layered layout without performance runs plain pytest")
+    let spaced = makeLayoutFixture(["my pkg/pytest.ini", "my pkg/my tests/performance/test_perf.py"])
+    defer { try? FileManager.default.removeItem(at: spaced) }
+    expect(TestStructureDetector.pytestCommand(testDir: "my pkg/my tests", gitRoot: spaced, packageDir: "my pkg")
+               == "pytest --ignore='my tests/performance'",
+           "the ignored path is shell-quoted and relative to the package")
 
     if let root = layeredRoot {
         var rooted = root
@@ -126,7 +143,7 @@ private func runLayeredLayoutChecks() {
     }
     expect(!TestSourceMapper.isSourceCandidate("analysis/visualize/plot.py"), "analysis/ is not a source candidate")
     expect(TestSourceMapper.isSourceCandidate("logic/plot.py"), "logic/ stays a source candidate")
-    expect(LoopStageDetector.detectTestCommand(gitRoot: layered) == "pytest tests/unit tests/integration",
+    expect(LoopStageDetector.detectTestCommand(gitRoot: layered) == "pytest --ignore=tests/performance",
            "detectTestCommand excludes performance")
 }
 

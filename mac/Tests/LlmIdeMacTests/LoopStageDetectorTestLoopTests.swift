@@ -241,6 +241,6 @@ final class StageOutputParserCargoTests: XCTestCase {
         let root = try TempRepo.make(files: ["pytest.ini": "[pytest]", "tests/unit/test_a.py": "def test_a(): pass",
                                              "tests/integration/test_p.py": "def test_p(): pass",
                                              "tests/performance/test_perf.py": "def test_perf(): pass"])
-        XCTAssertEqual(LoopStageDetector.detectTestCommand(gitRoot: root), "pytest tests/unit tests/integration")
+        XCTAssertEqual(LoopStageDetector.detectTestCommand(gitRoot: root), "pytest --ignore=tests/performance")
     }
 }

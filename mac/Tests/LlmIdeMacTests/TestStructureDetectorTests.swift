@@ -76,7 +76,17 @@ final class TestStructureDetectorTests: XCTestCase {
         let r = TestStructureDetector(gitRoot: root).detect().roots.first
         XCTAssertEqual(r?.layout, .layered)
         XCTAssertEqual(r?.testDir, "tests")
-        XCTAssertEqual(r?.command, "pytest tests/unit tests/integration")
+        XCTAssertEqual(r?.command, "pytest --ignore=tests/performance")
+    }
+    /// Excluding, not whitelisting: top-level `tests/test_*.py` and `tests/e2e` still run.
+    func testPytestCommandOnlyIgnoresPerformance() throws {
+        let root = try make(["pytest.ini": "[pytest]", "tests/unit/test_a.py": "def test_a(): pass",
+                             "tests/test_top.py": "def test_top(): pass",
+                             "tests/e2e/test_flow.py": "def test_flow(): pass",
+                             "tests/performance/test_perf.py": "def test_perf(): pass"])
+        XCTAssertEqual(TestStructureDetector(gitRoot: root).detect().roots.first?.command, "pytest --ignore=tests/performance")
+        try FileManager.default.removeItem(at: root.appendingPathComponent("tests/performance"))
+        XCTAssertEqual(TestStructureDetector(gitRoot: root).detect().roots.first?.command, "pytest")
     }
     func testFlatPythonLayoutUnchanged() throws {
         let root = try make(["pytest.ini": "[pytest]", "tests/test_a.py": "def test_a(): pass"])

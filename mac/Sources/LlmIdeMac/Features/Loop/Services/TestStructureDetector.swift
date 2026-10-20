@@ -117,19 +117,18 @@ public struct TestStructureDetector {
         roots.append(detected)
     }
 
-    /// `pytest` for a flat layout. For a layered one (`<testDir>/unit` exists) the
-    /// unit directory plus `integration` when present, so the Test stage never
-    /// collects `performance/` (nightly only). Paths are relative to `packageDir`
-    /// and the result carries no `cd`.
+    /// `pytest`, plus `--ignore=<testDir>/performance` when that folder exists, so
+    /// the Test stage never collects performance tests (nightly only). It excludes
+    /// rather than whitelists: `tests/test_*.py`, `tests/e2e` and any other folder
+    /// still run. Paths are relative to `packageDir` and the result carries no `cd`.
     public static func pytestCommand(testDir: String, gitRoot: URL, packageDir: String) -> String {
-        let fm = FileManager.default
-        func exists(_ rel: String) -> Bool { fm.fileExists(atPath: gitRoot.appendingPathComponent(rel).path) }
-        guard exists("\(testDir)/unit") else { return "pytest" }
+        let performance = "\(testDir)/performance"
+        guard FileManager.default.fileExists(atPath: gitRoot.appendingPathComponent(performance).path) else {
+            return "pytest"
+        }
         let rel = packageDir.isEmpty || !testDir.hasPrefix(packageDir + "/")
             ? testDir : String(testDir.dropFirst(packageDir.count + 1))
-        var command = "pytest \(VerifyCommandBuilder.shellWord("\(rel)/unit"))"
-        if exists("\(testDir)/integration") { command += " \(VerifyCommandBuilder.shellWord("\(rel)/integration"))" }
-        return command
+        return "pytest --ignore=\(VerifyCommandBuilder.shellWord("\(rel)/performance"))"
     }
 
     private func detectGo(_ pkg: String, _ roots: inout [TestRoot]) {
