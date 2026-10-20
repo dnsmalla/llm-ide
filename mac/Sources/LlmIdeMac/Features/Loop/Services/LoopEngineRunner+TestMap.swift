@@ -87,13 +87,21 @@ extension LoopEngineRunner {
             structure = await Task.detached(priority: .utility) { TestStructureDetector(gitRoot: gitRoot).detect() }.value
             testStructure = structure
         }
-        let count = await Task.detached(priority: .utility) { () -> Int in
+        let (count, writeError) = await Task.detached(priority: .utility) { () -> (Int, String?) in
             let scanner = TestPruneScanner(gitRoot: gitRoot, structure: structure)
             let found = scanner.scan()
-            _ = try? scanner.write(found, outputRoot: mainRoot)
-            return found.count
+            do {
+                _ = try scanner.write(found, outputRoot: mainRoot)
+                return (found.count, nil)
+            } catch {
+                return (found.count, error.localizedDescription)
+            }
         }.value
-        appendLog(.info, "  [\(stage.name)] \(count) prune candidate(s) — see TEST-PRUNE.md")
+        if let writeError {
+            appendLog(.warn, "  [\(stage.name)] \(count) prune candidate(s), but TEST-PRUNE.md could not be written: \(writeError)")
+        } else {
+            appendLog(.info, "  [\(stage.name)] \(count) prune candidate(s) — see TEST-PRUNE.md")
+        }
         return finishTestMap(stage, startedAt: startedAt, passed: true, output: "")
     }
 
