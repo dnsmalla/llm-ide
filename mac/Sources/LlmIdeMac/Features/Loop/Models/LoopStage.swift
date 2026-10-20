@@ -251,6 +251,11 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         disabledByDetection = try container.decodeIfPresent(Bool.self, forKey: .disabledByDetection)
         // Lenient: an op from a newer build reads as nil ("no operation chosen").
         testOp = (try? container.decodeIfPresent(TestMapOp.self, forKey: .testOp)) ?? nil
+        // A pre-release build saved Test Prune as a `testMap` "prune" op; left as
+        // is, it would read as a testMap with no operation and end every run.
+        if kind == .testMap, (try? container.decodeIfPresent(String.self, forKey: .testOp)) == "prune" {
+            kind = .testPrune
+        }
         graphOp = try container.decodeIfPresent(CodeGraphOp.self, forKey: .graphOp)
         allowsRepair = try container.decodeIfPresent(Bool.self, forKey: .allowsRepair) ?? true
     }

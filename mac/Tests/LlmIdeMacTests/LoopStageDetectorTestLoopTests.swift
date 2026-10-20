@@ -105,6 +105,13 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         XCTAssertEqual(decoded.kind, .testPrune)
     }
 
+    func testPreReleaseTestMapPruneOpReadsAsTestPruneKind() throws {
+        let json = #"{"id":"p","name":"Test Prune","kind":"testMap","order":8,"testOp":"prune","defaultKey":"test-prune"}"#
+        let stage = try JSONDecoder().decode(LoopStage.self, from: Data(json.utf8))
+        XCTAssertEqual(stage.kind, .testPrune)
+        XCTAssertNil(stage.testOp)
+    }
+
     func testNoRunnerLoopHasNoUnverifiedCodeApply() throws {
         let root = try TempRepo.make(files: ["src/a.py": "x = 1\n"])
         let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)

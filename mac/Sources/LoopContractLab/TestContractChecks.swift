@@ -50,6 +50,10 @@ func runTestContractChecks() {
     expect(pruneJSON.contains("\"kind\":\"testPrune\"") && !pruneJSON.contains("testOp"),
            "Test Prune encodes as kind testPrune with no testOp key")
     expect(TestMapOp(rawValue: "prune") == nil, "TestMapOp has no prune op")
+    let preRelease = #"{"id":"p","name":"Test Prune","kind":"testMap","order":8,"testOp":"prune","defaultKey":"test-prune"}"#
+    let migrated = try? JSONDecoder().decode(LoopStage.self, from: Data(preRelease.utf8))
+    expect(migrated?.kind == .testPrune && migrated?.testOp == nil,
+           "a Test Prune saved as a testMap prune op reads as the testPrune kind")
     let bare = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: noRunner)
     expect(!bare.contains { $0.defaultKey == "test-prune" }, "no Test Prune without a runner")
 
