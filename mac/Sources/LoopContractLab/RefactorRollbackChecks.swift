@@ -87,24 +87,23 @@ func runRefactorRollbackChecks() async {
         return
     }
 
-    // The "batch": edits a.txt, creates n.txt, deletes b.txt, edits u.txt again.
-    try? "a2\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    // The "batch": stages a NON-head, non-base value for a.txt (one of the
+    // paths actually passed to restore), then dirties the worktree AGAIN on
+    // top of that — index and worktree now diverge from each other and from
+    // both HEAD and `base`. This is the one shape that can tell `--worktree`
+    // apart from `--staged`: a.txt's base-tree content equals HEAD's blob, so
+    // staging IT with base's own content (or leaving it alone) would read as
+    // index-untouched either way. Only a THIRD, distinct staged value exposes
+    // a `restore` that wrongly touches the index.
+    try? "aX\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    git(["add", "a.txt"], root)
+    try? "aY\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
     try? "n1\n".write(to: root.appendingPathComponent("n.txt"), atomically: true, encoding: .utf8)
     try? FileManager.default.removeItem(at: root.appendingPathComponent("b.txt"))
     try? "u1\n".write(to: root.appendingPathComponent("u.txt"), atomically: true, encoding: .utf8)
 
-    // An unrelated staged change, present when restore runs. `a.txt`/`b.txt`'s
-    // base-tree content equals HEAD's committed blob, so "git diff --cached is
-    // empty" alone can't tell `--worktree` apart from `--staged` (or any
-    // wider-than-given-paths command): both would leave those two paths
-    // looking clean in the index. Staging something ELSE first, and checking
-    // it is untouched afterward, is what actually proves the index was left
-    // alone — not just coincidentally identical for the restored paths.
-    try? "staged1\n".write(to: root.appendingPathComponent("s.txt"), atomically: true, encoding: .utf8)
-    git(["add", "s.txt"], root)
-    let stagedBefore = gitOutput(["diff", "--cached"], root)
-    expect(!stagedBefore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           "the unrelated staged change registers in git diff --cached before restore runs")
+    let indexBefore = gitOutput(["show", ":a.txt"], root)
+    expect(indexBefore == "aX\n", "a.txt's staged (index) content is X before restore runs")
 
     let restoreError = await guardUnderTest.restore(
         paths: ["a.txt", "n.txt", "b.txt"], fromTree: base, gitRoot: root)
@@ -114,16 +113,17 @@ func runRefactorRollbackChecks() async {
     let b = try? String(contentsOf: root.appendingPathComponent("b.txt"), encoding: .utf8)
     let n = FileManager.default.fileExists(atPath: root.appendingPathComponent("n.txt").path)
     let u = try? String(contentsOf: root.appendingPathComponent("u.txt"), encoding: .utf8)
-    expect(a == "a1\n", "restore puts a.txt back to its base-tree content")
+    expect(a == "a1\n", "restore puts a.txt's WORKTREE back to its base-tree content")
     expect(b == "b1\n", "restore recreates b.txt, deleted since the base, from the base tree")
     expect(!n, "restore deletes n.txt, which the base tree never had")
     expect(u == "u1\n", "restore leaves u.txt (not in the restore list) at its second edit")
 
-    // Index-safety: the unrelated staged change is exactly as it was —
-    // `--worktree`-only restore never touched the index at all.
-    let stagedAfter = gitOutput(["diff", "--cached"], root)
-    expect(stagedAfter == stagedBefore,
-           "restore leaves an unrelated staged change exactly as it was")
+    // Index-safety: a.txt's STAGED content is still X, not base's "a1" — a
+    // `--staged` (or `--staged --worktree`) restore would have overwritten
+    // the index entry to match `base`, and this assertion would catch it.
+    let indexAfter = gitOutput(["show", ":a.txt"], root)
+    expect(indexAfter == indexBefore,
+           "restore leaves a.txt's staged (index) content untouched — --worktree only, never --staged")
 
     // Empty path list is a no-op (mirrors `revert`'s contract).
     let noop = await guardUnderTest.restore(paths: [], fromTree: base, gitRoot: root)

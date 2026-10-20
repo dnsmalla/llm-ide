@@ -588,23 +588,24 @@ final class RepairScopeGuardTests: XCTestCase {
             return XCTFail("snapshotTree should produce a base tree id")
         }
 
-        // The "batch": edits a.txt, creates n.txt, deletes b.txt, edits u.txt again.
-        try "a2\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        // The "batch": stages a NON-head, non-base value for a.txt (one of the
+        // paths actually passed to restore), then dirties the worktree AGAIN
+        // on top of that — index and worktree now diverge from each other and
+        // from both HEAD and `base`. This is the one shape that can tell
+        // `--worktree` apart from `--staged`: a.txt's base-tree content equals
+        // HEAD's blob, so staging IT with base's own content (or leaving it
+        // alone) would read as index-untouched either way. Only a THIRD,
+        // distinct staged value exposes a `restore` that wrongly touches the
+        // index.
+        try "aX\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try git(root, "add", "a.txt")
+        try "aY\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
         try "n1\n".write(to: root.appendingPathComponent("n.txt"), atomically: true, encoding: .utf8)
         try FileManager.default.removeItem(at: root.appendingPathComponent("b.txt"))
         try "u1\n".write(to: root.appendingPathComponent("u.txt"), atomically: true, encoding: .utf8)
 
-        // An unrelated staged change, present when restore runs. `a.txt`/`b.txt`'s
-        // base-tree content equals HEAD's committed blob, so "git diff --cached is
-        // empty" alone cannot tell `--worktree` apart from `--staged` (or any
-        // command scoped wider than the given paths) — both would leave those
-        // two paths looking clean in the index regardless. Staging something
-        // else first, and asserting it is untouched afterward, is what actually
-        // proves the index was left alone.
-        try "staged1\n".write(to: root.appendingPathComponent("s.txt"), atomically: true, encoding: .utf8)
-        try git(root, "add", "s.txt")
-        let stagedBefore = try gitOutput(root, "diff", "--cached")
-        XCTAssertFalse(stagedBefore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        let indexBefore = try gitOutput(root, "show", ":a.txt")
+        XCTAssertEqual(indexBefore, "aX\n")
 
         let restoreError = await guardUnderTest.restore(
             paths: ["a.txt", "n.txt", "b.txt"], fromTree: base, gitRoot: root)
@@ -616,9 +617,11 @@ final class RepairScopeGuardTests: XCTestCase {
         // Not in the restore list: keeps its SECOND edit, not the base snapshot's.
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("u.txt"), encoding: .utf8), "u1\n")
 
-        // Index-safety: the unrelated staged change is exactly as it was.
-        let stagedAfter = try gitOutput(root, "diff", "--cached")
-        XCTAssertEqual(stagedAfter, stagedBefore)
+        // Index-safety: a.txt's STAGED content is still X, not base's "a1" —
+        // a `--staged` (or `--staged --worktree`) restore would have
+        // overwritten the index entry to match `base`, and this would catch it.
+        let indexAfter = try gitOutput(root, "show", ":a.txt")
+        XCTAssertEqual(indexAfter, indexBefore)
     }
 
     /// A truncated `git cat-file -e` presence probe must never be read as
