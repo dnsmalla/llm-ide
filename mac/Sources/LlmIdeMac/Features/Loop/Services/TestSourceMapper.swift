@@ -13,9 +13,10 @@ public enum TestSourceMapper {
     public static func isSourceCandidate(_ relPath: String) -> Bool {
         let parts = relPath.split(separator: "/").map(String.init)
         guard let file = parts.last, !parts.dropLast().contains(where: { excludedDirs.contains($0) }) else { return false }
-        // Guideline: `analysis/` holds assert-less scripts that never get tests.
-        if parts.dropLast().contains("analysis") { return false }
         let (_, ext) = splitExt(file)
+        // Guideline: a Python repo's `analysis/` holds assert-less scripts that never get tests.
+        // Only the first two components count, so `src/analysis/x.ts` stays a candidate.
+        if ext == "py", parts.dropLast().prefix(2).contains("analysis") { return false }
         guard codeExtensions.contains(ext), !manifests.contains(file) else { return false }
         if parts.dropLast().contains(where: { testDirs.contains($0) }) { return false }
         return !isTestPath(relPath)

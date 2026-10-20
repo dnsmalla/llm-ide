@@ -142,6 +142,9 @@ private func runLayeredLayoutChecks() {
                == "tests/unit/test_a.py", "layered placement for a top-level module")
     }
     expect(!TestSourceMapper.isSourceCandidate("analysis/visualize/plot.py"), "analysis/ is not a source candidate")
+    expect(!TestSourceMapper.isSourceCandidate("pkg/analysis/plot.py"), "analysis/ one level down is excluded for Python")
+    expect(TestSourceMapper.isSourceCandidate("src/analysis/x.ts"), "analysis/ only excludes Python files")
+    expect(TestSourceMapper.isSourceCandidate("a/b/analysis/x.py"), "a deeply nested analysis/ is not excluded")
     expect(TestSourceMapper.isSourceCandidate("logic/plot.py"), "logic/ stays a source candidate")
     expect(LoopStageDetector.detectTestCommand(gitRoot: layered) == "pytest --ignore=tests/performance",
            "detectTestCommand excludes performance")

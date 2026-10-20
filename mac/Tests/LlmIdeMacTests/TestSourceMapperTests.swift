@@ -53,6 +53,9 @@ final class TestSourceMapperTests: XCTestCase {
     }
     func testAnalysisIsNotASourceCandidate() {
         XCTAssertFalse(TestSourceMapper.isSourceCandidate("analysis/visualize/plot.py"))
+        XCTAssertFalse(TestSourceMapper.isSourceCandidate("pkg/analysis/plot.py"))
+        XCTAssertTrue(TestSourceMapper.isSourceCandidate("src/analysis/x.ts"))
+        XCTAssertTrue(TestSourceMapper.isSourceCandidate("a/b/analysis/x.py"))
         XCTAssertTrue(TestSourceMapper.isSourceCandidate("logic/plot.py"))
     }
 }
