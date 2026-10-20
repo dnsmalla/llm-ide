@@ -38,7 +38,7 @@ enum LoopOutputLayout {
     static let testStructureJSON = "llm-doc/loop/test/TEST-STRUCTURE.json"
     static let testMapMD = "llm-doc/loop/test/TEST-MAP.md"
     static let testMapJSON = "llm-doc/loop/test/TEST-MAP.json"
-    public static let testPruneMD = "llm-doc/loop/test/TEST-PRUNE.md"
+    static let testPruneMD = "llm-doc/loop/test/TEST-PRUNE.md"
     static let testLedger = "llm-doc/loop/test/ledger.json"
 
     /// The Plan loop's INPUT: plans collected from elsewhere. Unchanged.
