@@ -221,8 +221,38 @@ struct LoopRunRecord: Codable, Equatable {
     /// or opening requests was off — and for every record written before this
     /// existed. Optional, so older records decode.
     var shipment: LoopShipment? = nil
+    /// The refactor batch this run rolled back (design doc §3.5). `nil` for
+    /// every run that rolled nothing back and for every record written before
+    /// this existed. Optional, so older records decode.
+    var batchRollback: LoopBatchRollback? = nil
 
     var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
+}
+
+/// A refactor batch a failed run took back out of the tree (Mikado rollback,
+/// design doc §3.5): which batch, what ended the run, and whether the tree is
+/// really back to its pre-batch state. The plan marks the batch `blocked`
+/// either way; `treeRestored == false` says the edits are still in the tree.
+struct LoopBatchRollback: Codable, Equatable {
+    var batchId: String
+    /// The stage whose ending triggered the rollback.
+    var stageName: String
+    /// The `- Blocked:` reason written into the plan.
+    var reason: String
+    /// Repo-relative paths put back from the batch base (or that would have
+    /// been, when the restore could not run), sorted.
+    var restoredPaths: [String]
+    var treeRestored: Bool
+    /// Why the tree was not restored, or the plan not marked; nil when both worked.
+    var problem: String?
+
+    /// One line for the summary note and the finish notification.
+    var summary: String {
+        guard treeRestored else {
+            return "\(batchId) NOT rolled back — tree left as the batch made it (\(problem ?? "unknown")); blocked: \(reason)"
+        }
+        return "\(batchId) rolled back (blocked: \(reason))" + (problem.map { " — \($0)" } ?? "")
+    }
 }
 
 /// One line of `system/loop-runs/index.jsonl` — enough to render a run list

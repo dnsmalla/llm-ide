@@ -42,11 +42,14 @@ enum LoopRunNotifier {
     /// Convenience for a single loop's terminal status.
     @MainActor
     static func notifyRunFinished(loopName: String, status: LoopEngineStatus,
-                                  duration: TimeInterval, flakyStages: [String] = []) {
+                                  duration: TimeInterval, flakyStages: [String] = [],
+                                  rollback: String? = nil) {
         let flaky = flakyStages.isEmpty ? "" : " · passed after a re-run — possibly flaky (\(flakyStages.joined(separator: ", ")))"
+        // A refactor batch taken back out of the tree (`LoopBatchRollback.summary`).
+        let rolledBack = rollback.map { " · \($0)" } ?? ""
         let ok = status.code == LoopEngineStatus.success.code
         notify(title: ok ? "Loop finished — \(loopName)" : "Loop needs attention — \(loopName)",
-               body: "\(status.summary) · \(formatDuration(duration))\(flaky)")
+               body: "\(status.summary) · \(formatDuration(duration))\(flaky)\(rolledBack)")
     }
 
     /// Posts if (and only if) permission was already granted — authorization

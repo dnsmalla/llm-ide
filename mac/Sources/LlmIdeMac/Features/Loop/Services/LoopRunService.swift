@@ -186,7 +186,8 @@ final class LoopRunService: ObservableObject, SessionScoped {
                 self.reportFinished(loopName: loopName, status: result,
                                     iterations: runner.iteration,
                                     duration: Date().timeIntervalSince(startedAt),
-                                    flakyStages: runner.flakyStages)
+                                    flakyStages: runner.flakyStages,
+                                    rollback: runner.batchRollback?.summary)
             }
             onFinish(result)
         }
@@ -260,7 +261,8 @@ final class LoopRunService: ObservableObject, SessionScoped {
     /// only the Auto Task path reported there) and, when the app is in the
     /// background, a user notification.
     private func reportFinished(loopName: String, status: LoopEngineStatus,
-                                iterations: Int, duration: TimeInterval, flakyStages: [String] = []) {
+                                iterations: Int, duration: TimeInterval, flakyStages: [String] = [],
+                                rollback: String? = nil) {
         // `.aborted` is the user's own Stop (or app quit) — announcing an
         // action back to the person who just took it is noise, in the feed
         // and doubly so as a "needs attention" banner.
@@ -272,6 +274,7 @@ final class LoopRunService: ObservableObject, SessionScoped {
                      "iterations": iterations,
                      "durationSeconds": Int(duration)])
         LoopRunNotifier.notifyRunFinished(loopName: loopName, status: status,
-                                          duration: duration, flakyStages: flakyStages)
+                                          duration: duration, flakyStages: flakyStages,
+                                          rollback: rollback)
     }
 }

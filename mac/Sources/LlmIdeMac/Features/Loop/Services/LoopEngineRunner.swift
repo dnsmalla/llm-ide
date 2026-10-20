@@ -274,6 +274,26 @@ final class LoopEngineRunner: ObservableObject {
     var currentBatchId: String?
     var currentExpect: String?
     var currentBatchSkipped = false
+    /// Mikado rollback state for the refactor batch in flight (design doc
+    /// §3.5, §5), reset per run (`resetBatchRollbackState`). `batchBaseTree` is
+    /// the working tree as a `snapshotTree` id taken when the batch's first
+    /// stage started; nil when no batch has started or git could not snapshot.
+    var batchBaseTree: String?
+    /// Repo-relative paths the batch's OWN guarded edits changed (test write,
+    /// apply, conform, every repair), unioned tree-diff by tree-diff — never
+    /// the whole base-to-now diff, so a concurrent edit of the user's to some
+    /// other file is never rolled back with the batch (§5.2).
+    var batchChangedPaths: Set<String> = []
+    /// Whether this run's batch has started (its base was attempted, even if
+    /// the snapshot failed). Decides the "passed after repair" restart target.
+    var batchStarted = false
+    /// Why `batchChangedPaths` may be incomplete — a guarded edit's tree
+    /// snapshot failed during the batch — or nil. A rollback then restores
+    /// nothing rather than half the batch.
+    var batchTrackingGap: String?
+    /// The batch this run rolled back (or tried to), for the journal record,
+    /// the summary note and the finish notification. Reset per run.
+    var batchRollback: LoopBatchRollback?
     /// The full (uncapped by the journal's 4 KB tail) output of each blocking
     /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
     var lastVerifyOutputs: [String: String] = [:]
@@ -647,6 +667,8 @@ final class LoopEngineRunner: ObservableObject {
         currentBatchId = nil
         currentExpect = nil
         currentBatchSkipped = false
+        resetBatchRollbackState()
+        batchRollback = nil
         lastVerifyOutputs = [:]
         pendingFailureLedger = nil
         writtenRoots = [:]
@@ -878,6 +900,9 @@ final class LoopEngineRunner: ObservableObject {
         // re-running the apply stage would stack the NEXT batch onto a tree
         // the tests have not yet proven, so it runs at most once per run.
         var codeAppliedStageIDs = Set<String>()
+        // The stage whose decision ended the run, for a rollback's `- Blocked:`
+        // line. Nil when the run ended between stages (budget, iterations).
+        var terminatingStageName: String?
         iterationLoop: while iteration < config.maxIterations {
             // `RegressionSweepRunning.sweep` is fail-closed and
             // returns `false` on cancellation rather than throwing, so a
@@ -980,6 +1005,9 @@ final class LoopEngineRunner: ObservableObject {
                     stageStates[stage.id] = .passed
                     decision = .proceed
                 case .skill:
+                    if stage.isRefactorTestWrite || stage.isRefactorApply {
+                        await beginRefactorBatchIfNeeded(stage, gitRoot: runGitRoot)
+                    }
                     if stage.isRefactorApply {
                         captureRefactorPlanBefore(stage, gitRoot: runGitRoot, faultsRoot: faultsRoot)
                     }
@@ -1002,11 +1030,26 @@ final class LoopEngineRunner: ObservableObject {
                     if retriedStageID == stage.id {
                         // The repaired stage passes: confirm the whole pipeline.
                         // Same iteration — the re-verify already paid for it.
-                        appendLog(.info, "  [\(stage.name)] passes after repair — re-running the full pipeline")
+                        // Mid-batch the pipeline restarts at the batch's first
+                        // stage, not stage 0: the planner must not re-plan under
+                        // a half-applied batch (design doc §5.7).
+                        // Never forward: a repaired stage that precedes the batch
+                        // (a hand-built loop) still restarts from the top.
+                        let batchStart = batchStarted
+                            ? (RefactorBatchRollback.firstBatchStageIndex(in: orderedStages) ?? 0) : 0
+                        let restart = batchStart <= stageIndex ? batchStart : 0
+                        if restart == 0 {
+                            appendLog(.info, "  [\(stage.name)] passes after repair — re-running the full pipeline")
+                        } else {
+                            appendLog(.info, "  [\(stage.name)] passes after repair — re-running the batch from \(orderedStages[restart].name)")
+                        }
                         retriedStageID = nil
-                        stageStates = Dictionary(uniqueKeysWithValues:
-                            orderedStages.map { ($0.id, LiveStageState.pending) })
-                        stageIndex = 0
+                        // Stages before the restart point keep the verdict they
+                        // already showed; they are not re-run.
+                        for later in orderedStages[restart...] {
+                            stageStates[later.id] = .pending
+                        }
+                        stageIndex = restart
                     } else {
                         stageIndex += 1
                     }
@@ -1017,6 +1060,7 @@ final class LoopEngineRunner: ObservableObject {
                        workingElapsed(since: startedAt, asOf: Date()) > budget {
                         appendLog(.warn, "Time budget of \(Int(budget))s exceeded after \(iteration) iteration(s)")
                         status = .givenUp(reason: .wallClockExceeded)
+                        terminatingStageName = stage.name
                         break iterationLoop
                     }
                     retriedStageID = stage.id
@@ -1028,6 +1072,7 @@ final class LoopEngineRunner: ObservableObject {
                     continue iterationLoop
                 case .terminate(let terminal):
                     status = terminal
+                    terminatingStageName = stage.name
                     break iterationLoop
                 }
             }
@@ -1048,8 +1093,16 @@ final class LoopEngineRunner: ObservableObject {
         if Task.isCancelled, status != .success {
             status = .aborted
         }
-        let verdict = Self.honestVerdict(status ?? .givenUp(reason: .maxIterations),
-                                         iterations: iterationRecords)
+        let pipelineStatus = status ?? .givenUp(reason: .maxIterations)
+        let verdict = Self.honestVerdict(pipelineStatus, iterations: iterationRecords)
+        // The one funnel every in-loop ending reaches (preflight exits come
+        // before any batch can start). Decided on the PIPELINE's status, not
+        // the honest verdict: a pipeline that passed end to end verified the
+        // batch, and a stage that errored elsewhere does not unverify it.
+        if Self.rollsBackBatch(pipelineStatus) {
+            await rollBackCurrentBatch(reason: verdict.summary,
+                                       stage: terminatingStageName ?? currentStageName ?? "Loop")
+        }
         return await finish(verdict,
                             config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                             projectId: projectId, startedAt: startedAt,
@@ -2283,9 +2336,41 @@ final class LoopEngineRunner: ObservableObject {
         return .error("\(quoted) errored and never ran cleanly this run\(givenUp): \(first.outputTail.prefix(200))")
     }
 
+    /// Whether a run that ended with `status` rolls back the refactor batch in
+    /// flight (design doc §5.1). Every unsuccessful ending does, EXCEPT those
+    /// where a human is deliberately in the loop and wants to look at the tree
+    /// as it is: a Stop or pause timeout (`.aborted`) and a command waiting for
+    /// approval. Exhaustive on purpose — a new status must be classified here.
+    nonisolated static func rollsBackBatch(_ status: LoopEngineStatus) -> Bool {
+        switch status {
+        case .success, .aborted, .needsApproval:
+            return false
+        case .givenUp, .blocked, .error:
+            return true
+        }
+    }
+
+    /// Runs an agent edit inside the protected-path guard and, while a refactor
+    /// batch is in flight, adds the paths the edit changed to the batch's
+    /// rollback set. Every agent edit goes through here — skill stages and
+    /// every repair — so no batch-scope edit escapes the set (design doc §5.2).
     private func withScopeGuard(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
                                 scopeGlobs: [String] = [],
                                 edit: () async throws -> LoopAgentResult?) async -> GuardedEditResult {
+        let batchTreeBefore = await batchTreeBeforeEdit(stage, gitRoot: gitRoot)
+        let result = await guardedEdit(stage: stage, config: config, gitRoot: gitRoot,
+                                       scopeGlobs: scopeGlobs, edit: edit)
+        if let batchTreeBefore {
+            await recordBatchEdit(stage, since: batchTreeBefore, gitRoot: gitRoot)
+        }
+        return result
+    }
+
+    /// The protected-path guard around one agent edit (see `withScopeGuard`,
+    /// its only caller).
+    private func guardedEdit(stage: LoopStage, config: LoopEngineConfig, gitRoot: URL,
+                             scopeGlobs: [String],
+                             edit: () async throws -> LoopAgentResult?) async -> GuardedEditResult {
         lastGuardSnapshot = nil
         guard Self.effectivePolicy(for: stage, config: config) != .off else {
             // Policy `.off` skips the scope check, but the test writer/setup guards
@@ -2678,6 +2763,7 @@ final class LoopEngineRunner: ObservableObject {
             iterationsUsed: iteration, config: LoopRunConfigSnapshot(config),
             iterations: iterationRecords, statusCode: terminal.code,
             statusSummary: terminal.summary, loopId: loopId, loopName: loopName)
+        record.batchRollback = batchRollback
         // A successful run that changed files: branch, commit, push, open a merge
         // request. Before the journal write so the record says where the fix went.
         // Fail-open like the journal: a failed shipment is reported, never a failed run.

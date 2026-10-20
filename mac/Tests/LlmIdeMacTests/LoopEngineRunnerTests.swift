@@ -3805,4 +3805,275 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(verify.passed)
         XCTAssertEqual(verify.outputTail, "batch R1 was skipped; nothing to verify")
     }
+
+    // MARK: - Refactor batch rollback (Mikado, design doc §3.5, §5)
+
+    /// A scripted working tree: an edit appends paths to `pending`, and the next
+    /// `snapshotTree` turns them into a new tree id (`t<n>`), so
+    /// `treeDiff(from:to:)` reports exactly what changed between two snapshots —
+    /// including a "user" edit made between stages, which no agent window owns.
+    /// Records every `restore` instead of touching a disk.
+    private final class TreeScriptGuard: RepairScopeGuarding {
+        var pending: [String] = []
+        /// steps[k] = the paths that turned tree `t<k>` into `t<k+1>`.
+        private var steps: [[String]] = []
+        private(set) var restores: [(paths: [String], tree: String)] = []
+        func snapshotTree(gitRoot: URL) async -> String? {
+            if !pending.isEmpty {
+                steps.append(pending)
+                pending = []
+            }
+            return "t\(steps.count)"
+        }
+        func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
+                      isQuotable: (String) -> Bool) async -> RepairDiffSummary? {
+            guard let a = Int(from.dropFirst()), let b = Int(to.dropFirst()), a <= b, b <= steps.count else {
+                return nil
+            }
+            return RepairDiffSummary(changedPaths: Array(Set(steps[a..<b].flatMap { $0 })).sorted())
+        }
+        func snapshot(gitRoot: URL, protectedGlobs: [String], scopeGlobs: [String]) async -> RepairScopeSnapshot {
+            RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil)
+        }
+        func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
+                   protectedGlobs: [String]) async -> RepairScopeCheck {
+            .clean(changedPaths: [])
+        }
+        func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String? {
+            restores.append((paths, tree))
+            return nil
+        }
+        func revert(paths: [String], gitRoot: URL) async -> String? { nil }
+    }
+
+    /// Plays each refactor skill against `TreeScriptGuard`: the test writer adds
+    /// a test; the apply marks R1 done in the real plan file and edits two
+    /// sources (and the plan — which a rollback must never restore).
+    private final class BatchSkillExecutor: LoopSkillExecuting {
+        let tree: TreeScriptGuard
+        let planURL: URL
+        private(set) var skillIds: [String] = []
+        init(tree: TreeScriptGuard, planURL: URL) {
+            self.tree = tree
+            self.planURL = planURL
+        }
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
+            skillIds.append(skillId)
+            switch skillId {
+            case "skills/test-gap-writer":
+                tree.pending.append("Tests/R1Tests.swift")
+            case "skills/refactor-apply":
+                let plan = try String(contentsOf: planURL, encoding: .utf8)
+                try plan.replacingOccurrences(of: "(status: todo)", with: "(status: done)")
+                    .write(to: planURL, atomically: true, encoding: .utf8)
+                tree.pending.append(contentsOf: ["Sources/A.swift", "Sources/B.swift", LoopOutputLayout.refactorPlan])
+            default:
+                break
+            }
+            return LoopAgentResult()
+        }
+    }
+
+    /// Each repair edits its own source file (`Sources/C<n>.swift`).
+    private final class BatchRepairer: LoopStageRepairer {
+        let tree: TreeScriptGuard
+        private(set) var repairCount = 0
+        init(tree: TreeScriptGuard) { self.tree = tree }
+        func repair(stageName: String, command: String?, failureOutput: String,
+                    evidence: RepairEvidence?, repoRoot: URL, timeout: TimeInterval?) async throws -> LoopAgentResult {
+            repairCount += 1
+            tree.pending.append("Sources/C\(repairCount).swift")
+            return LoopAgentResult()
+        }
+    }
+
+    private static let rollbackPlan = """
+    ### R1 Split Big  (status: todo)
+    - Files: `Sources/A.swift`, `Sources/B.swift`
+
+    """
+
+    /// Test Write → Test Baseline → Apply → Test, as the default refactor loop
+    /// orders them (`plan` puts a planner stage first).
+    private func rollbackConfig(plan: Bool = false) -> LoopEngineConfig {
+        var stages = [
+            LoopStage(id: "w1", name: "Refactor Test Write", kind: .skill, order: 1,
+                      skillId: "skills/test-gap-writer",
+                      targetPath: LoopOutputLayout.refactorNextBatch, outputPath: "."),
+            LoopStage(id: "b1", name: "Test Baseline", kind: .shellCommand, command: "swift build", order: 2,
+                      allowsRepair: false),
+            LoopStage(id: "a1", name: "Refactor Apply", kind: .skill, order: 3,
+                      skillId: "skills/refactor-apply", targetPath: LoopOutputLayout.refactorPlan, outputPath: "."),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 4),
+        ]
+        if plan {
+            stages.insert(LoopStage(id: "p1", name: "Refactor Plan", kind: .skill, order: 0,
+                                    skillId: "skills/refactor-planner", targetPath: ".",
+                                    outputPath: LoopOutputLayout.refactorPlan), at: 0)
+        }
+        return LoopEngineConfig(stages: stages, maxIterations: 10, consecutiveFailureStop: 10,
+                                maxRepairsPerStage: 5)
+    }
+
+    private func rollbackApprovals(_ repo: URL) -> VerifyApprovalStore {
+        let store = VerifyApprovalStore(defaults: UserDefaults(suiteName: "rollback-\(UUID().uuidString)")!)
+        store.approveStage(repo: repo, stageId: "b1", command: "swift build")
+        store.approveStage(repo: repo, stageId: "t1", command: "swift test")
+        return store
+    }
+
+    /// The batch's Test keeps failing after repairs, so the run gives up: the
+    /// rollback restores EXACTLY the union of what the batch's own stages changed
+    /// (test write, apply, every repair) from the base taken before the test
+    /// writer — never the plan, and never a path the user edited between stages
+    /// — and marks the batch blocked in the plan, the journal and the summary.
+    func testGivingUpAfterRepairsRestoresExactlyTheBatchsOwnEditsAndMarksItBlocked() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.rollbackPlan])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        // Every shell run "coincides" with a user edit outside any agent window.
+        let verifier = StubVerifier { command in
+            tree.pending.append("notes/user.txt")
+            return command == "swift test" ? VerifyOutcome(exitCode: 1, output: "1 failing")
+                                           : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let repairer = BatchRepairer(tree: tree)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer,
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: BatchSkillExecutor(tree: tree, planURL: planURL),
+            approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+
+        guard case .givenUp = result else { return XCTFail("expected a give-up, got \(String(describing: result))") }
+        XCTAssertGreaterThanOrEqual(repairer.repairCount, 2)
+        XCTAssertEqual(tree.restores.count, 1)
+        let expected = ["Sources/A.swift", "Sources/B.swift"]
+            + (1...repairer.repairCount).map { "Sources/C\($0).swift" } + ["Tests/R1Tests.swift"]
+        XCTAssertEqual(tree.restores.first?.paths, expected.sorted())
+        XCTAssertEqual(tree.restores.first?.tree, "t0", "restored to the base taken before the test writer")
+
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("### R1 Split Big  (status: blocked)"), plan)
+        XCTAssertTrue(plan.contains("- Blocked: Test — given up"), plan)
+        let log = runner.log.map(\.text)
+        XCTAssertTrue(log.contains("R1 rolled back; tree restored to before the batch"), log.joined(separator: "\n"))
+        let rollback = try XCTUnwrap(journal.written.last?.batchRollback)
+        XCTAssertEqual(rollback.batchId, "R1")
+        XCTAssertEqual(rollback.stageName, "Test")
+        XCTAssertTrue(rollback.treeRestored)
+        XCTAssertNil(rollback.problem)
+        XCTAssertEqual(rollback.restoredPaths, expected.sorted())
+        XCTAssertEqual(runner.batchRollback, rollback)
+        XCTAssertTrue(rollback.summary.hasPrefix("R1 rolled back (blocked: Test — given up"), rollback.summary)
+        let note = NoteLoopRunSummaryWriter.render(try XCTUnwrap(journal.written.last), title: "t")
+        XCTAssertTrue(note.contains("**Rollback:** R1 rolled back (blocked: Test — given up"), note)
+    }
+
+    /// A Stop (`.aborted`) is the user stepping in to look: the applied batch
+    /// stays exactly as it is — no restore, and the plan is not marked blocked.
+    func testAnAbortedRunNeverRollsTheBatchBack() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.rollbackPlan])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let verifier = StubVerifier { command in
+            if command == "swift test" { throw CancellationError() }
+            return VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: BatchSkillExecutor(tree: tree, planURL: planURL),
+            approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+
+        XCTAssertEqual(result, .aborted)
+        XCTAssertEqual(runner.currentBatchId, "R1", "the batch was applied before the Stop")
+        XCTAssertTrue(tree.restores.isEmpty, "a Stop never restores the tree")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("(status: done)"), plan)
+        XCTAssertFalse(plan.contains("blocked"), plan)
+        XCTAssertNil(journal.written.last?.batchRollback)
+    }
+
+    /// A failed Graph Check ends the run through the same funnel and rolls the
+    /// batch back. With no test writer in the run, the base is taken before Apply.
+    func testAFailedGraphCheckRollsTheBatchBack() async throws {
+        let root = try writeRefactorPlan()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let planURL = root.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        // The graph does not change, so R1's promised `filesOver500Count` fall never happens.
+        let rescanner = FixtureRescanner(first: Self.graphJSON(loc: 600), later: Self.graphJSON(loc: 600))
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: BatchRepairer(tree: tree), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: BatchSkillExecutor(tree: tree, planURL: planURL),
+            approvals: makeApprovals(approve: [("t1", "swift test")]), scopeGuard: tree,
+            graphRescanner: rescanner)
+        let result = await runner.run(config: refactorConfig(), faultsRoot: root, gitRoot: root)
+
+        guard case .error(let message) = result else { return XCTFail("expected an error, got \(String(describing: result))") }
+        XCTAssertTrue(message.contains("promised"), message)
+        XCTAssertEqual(tree.restores.first?.paths, ["Sources/A.swift", "Sources/B.swift"])
+        XCTAssertEqual(tree.restores.first?.tree, "t0")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("(status: blocked)"), plan)
+        XCTAssertTrue(plan.contains("- Blocked: Graph Check — error: batch R1 promised"), plan)
+    }
+
+    /// A stage that passes after its repair restarts the pipeline at the batch's
+    /// first stage, not stage 0: the planner never re-plans mid-batch (§5.7).
+    func testPassingAfterARepairRestartsAtTheBatchNotThePlanner() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.rollbackPlan])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        var testRuns = 0
+        let verifier = StubVerifier { command in
+            guard command == "swift test" else { return VerifyOutcome(exitCode: 0, output: "") }
+            testRuns += 1
+            // Fails, fails the flake re-run, then passes after the repair.
+            return testRuns <= 2 ? VerifyOutcome(exitCode: 1, output: "1 failing") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let skills = BatchSkillExecutor(tree: tree, planURL: planURL)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), scopeGuard: tree)
+        let result = await runner.run(config: rollbackConfig(plan: true), faultsRoot: repo, gitRoot: repo)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skills.skillIds.filter { $0 == "skills/refactor-planner" }.count, 1,
+                       "the planner ran once, before the batch")
+        XCTAssertEqual(skills.skillIds.filter { $0 == "skills/refactor-apply" }.count, 1)
+        XCTAssertTrue(runner.log.contains { $0.text.contains("re-running the batch from Refactor Test Write") })
+        XCTAssertTrue(tree.restores.isEmpty, "a verified batch is never rolled back")
+        XCTAssertNil(runner.batchRollback)
+    }
+
+    /// Resolution 1's trigger set: every unsuccessful ending rolls back, except
+    /// those where a human is deliberately in the loop.
+    func testRollbackTriggerClassification() {
+        let rollsBack: [LoopEngineStatus] = [
+            .givenUp(reason: .maxIterations), .givenUp(reason: .repeatedFailure),
+            .givenUp(reason: .noProgress(stageName: "Test")), .givenUp(reason: .wallClockExceeded),
+            .givenUp(reason: .repairBudgetExhausted(stageName: "Test")),
+            .givenUp(reason: .stoppedReporting(stageName: "Test")), .givenUp(reason: .regressionStalled),
+            .blocked(reason: .repairOutOfScope(stageName: "Test", paths: ["Tests/a"])),
+            .blocked(reason: .environment(stageName: "Test", detail: "no node")),
+            .error("structure regressed"),
+        ]
+        for status in rollsBack {
+            XCTAssertTrue(LoopEngineRunner.rollsBackBatch(status), status.summary)
+        }
+        for status: LoopEngineStatus in [.success, .aborted, .needsApproval(stageName: "Test")] {
+            XCTAssertFalse(LoopEngineRunner.rollsBackBatch(status), status.summary)
+        }
+    }
 }

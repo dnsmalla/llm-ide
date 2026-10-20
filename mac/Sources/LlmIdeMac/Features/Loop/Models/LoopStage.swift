@@ -388,6 +388,14 @@ extension LoopStage {
     /// loop manual-only (`containsEnabledCodeApply`).
     var testWriteOnly: Bool { kind == .skill && skillId == "skills/test-gap-writer" }
 
+    /// The Refactoring loop's test writer: the test-gap writer pointed at the
+    /// runner-written `NEXT-BATCH.md` rather than a test map. It is a batch's
+    /// FIRST stage, so the Mikado rollback base is taken before it runs and a
+    /// rollback also removes the tests it wrote (design doc §5.5).
+    public var isRefactorTestWrite: Bool {
+        testWriteOnly && (targetPath ?? "").hasSuffix("NEXT-BATCH.md")
+    }
+
     /// Whether this stage applies code edits (see `codeApplySkillIds`).
     public var appliesCode: Bool {
         kind == .skill && skillId.map(Self.codeApplySkillIds.contains) == true
