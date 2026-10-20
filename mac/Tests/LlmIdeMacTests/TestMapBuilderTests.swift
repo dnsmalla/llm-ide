@@ -75,6 +75,26 @@ final class TestMapBuilderTests: XCTestCase {
         XCTAssertTrue(policy.contains("Sources/Small.swift"))
     }
 
+    /// graph.json lists raw module names; stdlib and third-party imports are not
+    /// collaborators, so a Python domain file is not pushed into "over-complex".
+    func testExternalImportsAreNotCollaborators() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let fns = (1...5).map { "{\"name\":\"rule\($0)\",\"line\":\($0)}" }.joined(separator: ",")
+        let imports = ["typing", "dataclasses", "logging", "numpy", "pandas", "datetime", "math", "os"]
+            .map { "\"\($0)\"" }.joined(separator: ",")
+        let graph = """
+        {"version":"1.1","files":[
+          {"path":"logic/pricing.py","language":"python","loc":120,"imports":[\(imports)],"functions":[\(fns)]}]}
+        """
+        try write(root, ["system/graph/graph.json": graph, "logic/pricing.py": "",
+                         "tests/test_other.py": "def test_other():\n    assert True\n"])
+        let s = TestStructure(generatedAt: Date(), roots: [TestRoot(packageDir: "", testDir: "tests", runner: .pytest, command: "pytest", namingRule: "", languages: ["py"])], status: "ok", notes: [])
+        let map = try TestMapBuilder(gitRoot: root, structure: s).build()
+        XCTAssertEqual(map.entries.first { $0.path == "logic/pricing.py" }?.quadrant, .domainLogic)
+        let unit = map.render().components(separatedBy: "## Unit-test candidates")[1].components(separatedBy: "\n## ")[0]
+        XCTAssertTrue(unit.contains("logic/pricing.py"))
+    }
+
     func testFilesFallbackClassifiesByLocOnly() throws {
         let (root, s) = try fixture()
         try FileManager.default.removeItem(at: root.appendingPathComponent("system/graph/graph.json"))

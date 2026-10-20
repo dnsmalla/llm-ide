@@ -29,7 +29,49 @@ func runTestStandardChecks() {
 
     runLayeredLayoutChecks()
     runPruneChecks()
+    runCollaboratorChecks()
     runTestContractChecks()
+}
+
+/// The "## Unit-test candidates" section of a rendered TEST-MAP.md.
+private func unitSection(_ md: String) -> String {
+    let parts = md.components(separatedBy: "## Unit-test candidates")
+    return parts.count > 1 ? parts[1].components(separatedBy: "\n## ")[0] : ""
+}
+
+private func runCollaboratorChecks() {
+    let fns = (1...5).map { "{\"name\":\"rule\($0)\",\"line\":\($0)}" }.joined(separator: ",")
+    let external = ["typing", "dataclasses", "logging", "numpy", "pandas", "datetime", "math", "os"]
+    let internalFiles = (1...9).map { "logic/dep\($0).py" }
+    let deps = internalFiles.map {
+        "{\"path\":\"\($0)\",\"language\":\"python\",\"loc\":5,\"functions\":[]}"
+    }.joined(separator: ",")
+    func quoted(_ list: [String]) -> String { list.map { "\"\($0)\"" }.joined(separator: ",") }
+    let graph = """
+    {"version":"1.1","files":[
+      {"path":"logic/pricing.py","language":"python","loc":120,"imports":[\(quoted(external))],"functions":[\(fns)]},
+      {"path":"logic/hub.py","language":"python","loc":120,"imports":[\(quoted(internalFiles))],"functions":[\(fns)]},
+      \(deps)]}
+    """
+    let root = makeLayoutFixture(["pytest.ini", "logic/pricing.py", "logic/hub.py", "tests/test_other.py"] + internalFiles)
+    defer { try? FileManager.default.removeItem(at: root) }
+    try? FileManager.default.createDirectory(at: root.appendingPathComponent("system/graph"), withIntermediateDirectories: true)
+    try? graph.write(to: root.appendingPathComponent("system/graph/graph.json"), atomically: true, encoding: .utf8)
+    let structure = TestStructure(
+        generatedAt: Date(),
+        roots: [TestRoot(packageDir: "", testDir: "tests", runner: .pytest, command: "pytest",
+                         namingRule: "test_x.py", languages: ["py"])],
+        status: "ok", notes: [])
+    guard let map = try? TestMapBuilder(gitRoot: root, structure: structure).build() else {
+        expect(false, "the test map builds from a graph with external imports")
+        return
+    }
+    expect(map.entries.first { $0.path == "logic/pricing.py" }?.quadrant == .domainLogic,
+           "external imports (stdlib, third-party) are not collaborators")
+    expect(unitSection(map.render()).contains("logic/pricing.py"),
+           "a file with only external imports is a unit-test candidate")
+    expect(map.entries.first { $0.path == "logic/hub.py" }?.quadrant == .overComplex,
+           "imports that resolve to graph files still count as collaborators")
 }
 
 private func makeLayoutFixture(_ files: [String]) -> URL {

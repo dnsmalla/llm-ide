@@ -1,22 +1,29 @@
 import Foundation
 
 /// Builds a TestMap: every function from the code graph index, ranked untested-first.
-struct TestMapBuilder {
+public struct TestMapBuilder {
     var gitRoot: URL
     var structure: TestStructure
     /// Directory whose `system/graph/graph.json` is read; defaults to `gitRoot`.
     /// The Loop passes the main checkout, since `system/` is gitignored and absent in a worktree.
     var graphRoot: URL? = nil
 
+    public init(gitRoot: URL, structure: TestStructure, graphRoot: URL? = nil) {
+        self.gitRoot = gitRoot; self.structure = structure; self.graphRoot = graphRoot
+    }
+
     private static let skipped: Set<String> = ["init", "deinit", "body", "main", "description"]
     private static let maxTestBytes = 2_000_000
 
-    func build() throws -> TestMap {
+    public func build() throws -> TestMap {
         let tests = collectTests()
         var entries: [TestMapEntry] = []
         let source: String
         if let graph = GraphIndex.load(gitRoot: graphRoot ?? gitRoot) {
             source = "graph"
+            // graph.json lists raw module names (typing, numpy, ...); only imports
+            // that resolve to a project file are collaborators.
+            let graphPaths = Set(graph.files.map(\.path))
             for f in graph.files where TestSourceMapper.isSourceCandidate(f.path) {
                 let stem = TestSourceMapper.sourceStem(forSourcePath: f.path)
                 let name = ((f.path as NSString).lastPathComponent as NSString).deletingPathExtension
@@ -27,7 +34,7 @@ struct TestMapBuilder {
                     (stem != nil && TestSourceMapper.sourceStem(forTestPath: t.path) == stem) || t.tokens.contains(name)
                 }
                 let eligible = f.functions.filter { !Self.skipped.contains($0.name) && !$0.name.hasPrefix("_") }
-                let collaborators = Set(f.imports).union(graph.calleeFiles(of: f.path)).count
+                let collaborators = Set(f.imports).intersection(graphPaths).union(graph.calleeFiles(of: f.path)).count
                 let quadrant = CodeQuadrantClassifier.classify(
                     loc: f.loc, functionCount: eligible.count, collaborators: collaborators, role: f.role)
                 for fn in eligible {
