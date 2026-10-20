@@ -530,6 +530,7 @@ runRefactorRulesChecks()
 runRefactorCheckCommandChecks()
 runRefactorConformChecks()
 runRefactorPlanRevisionChecks()
+await runRefactorRollbackChecks()
 #endif
 
 if failures.isEmpty {

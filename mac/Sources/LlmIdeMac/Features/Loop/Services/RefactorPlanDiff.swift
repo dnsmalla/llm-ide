@@ -13,7 +13,7 @@ import Foundation
 /// - Risk: …
 /// - Expect: <counter> <before> → <after>
 /// ```
-enum RefactorPlanDiff {
+public enum RefactorPlanDiff {
     /// One batch the plan names, as the runner needs it.
     struct Applied: Equatable {
         var id: String
@@ -60,8 +60,50 @@ enum RefactorPlanDiff {
     }
 
     /// The batch's section, verbatim (header through its last line, no trailing blank lines).
-    static func section(of id: String, in text: String) -> String? {
+    public static func section(of id: String, in text: String) -> String? {
         sections(in: text).first { $0.id == id }.map { $0.lines.joined(separator: "\n") }
+    }
+
+    /// Marks batch `id` `blocked` after a rollback (spec §3.5): rewrites its
+    /// header to `(status: blocked)` and inserts (or replaces) a
+    /// `- Blocked: <reason>` line directly under it — the planner rule reads
+    /// this to never retry a blocked batch as-is. Every other section, and the
+    /// text around the batch, is byte-identical. `id` not found → `plan` unchanged.
+    public static func markingBlocked(_ plan: String, id: String, reason: String) -> String {
+        let lines = plan.components(separatedBy: "\n")
+        var out: [String] = []
+        var index = 0
+        var found = false
+        while index < lines.count {
+            let line = lines[index]
+            if line.hasPrefix("### "), let groups = firstGroups(headerPattern, in: line),
+               groups.count == 2, groups[0] == id {
+                found = true
+                out.append(blockedHeader(line))
+                index += 1
+                // An existing `- Blocked:` line directly under the header is replaced,
+                // not duplicated, so marking an already-blocked batch again stays idempotent.
+                if index < lines.count,
+                   lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("- Blocked:") {
+                    index += 1
+                }
+                out.append("- Blocked: \(reason)")
+                continue
+            }
+            out.append(line)
+            index += 1
+        }
+        return found ? out.joined(separator: "\n") : plan
+    }
+
+    /// Replaces the `(status: …)` parenthetical on a header line with
+    /// `(status: blocked)`, dropping any free text the old status carried
+    /// (e.g. `, reason: …`) — `blocked` always states its own reason on the
+    /// line below, via `- Blocked:`.
+    private static func blockedHeader(_ line: String) -> String {
+        guard let range = line.range(of: #"\(status:\s*[A-Za-z]+[^)]*\)"#, options: .regularExpression)
+        else { return line }
+        return line.replacingCharacters(in: range, with: "(status: blocked)")
     }
 
     // MARK: - Parsing

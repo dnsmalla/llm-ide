@@ -562,5 +562,85 @@ final class RepairScopeGuardTests: XCTestCase {
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("tests/test_a.py"), encoding: .utf8),
                        "assert true\n")
     }
+
+    // MARK: - Tree restore (Mikado rollback, spec §3.5)
+
+    /// `restore` must put the tree back to a `snapshotTree` point WITHOUT ever
+    /// touching the index, including a path the user had already changed
+    /// before the batch began (it belongs to the snapshot, so it must survive).
+    /// Against a real repo, since the index-safety claim is exactly what a
+    /// scripted/fake verifier cannot prove.
+    func testRestoreToASnapshotTreeNeverTouchesTheIndex() async throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("scope-guard-restore-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        try git(root, "init", "-q")
+        try "a1\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try "b1\n".write(to: root.appendingPathComponent("b.txt"), atomically: true, encoding: .utf8)
+        try git(root, "add", ".")
+        try git(root, "-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "init")
+        // The user's own uncommitted edit, present before the batch base is taken.
+        try "u0\n".write(to: root.appendingPathComponent("u.txt"), atomically: true, encoding: .utf8)
+
+        let guardUnderTest = GitRepairScopeGuard()
+        guard let base = await guardUnderTest.snapshotTree(gitRoot: root) else {
+            return XCTFail("snapshotTree should produce a base tree id")
+        }
+
+        // The "batch": edits a.txt, creates n.txt, deletes b.txt, edits u.txt again.
+        try "a2\n".write(to: root.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        try "n1\n".write(to: root.appendingPathComponent("n.txt"), atomically: true, encoding: .utf8)
+        try FileManager.default.removeItem(at: root.appendingPathComponent("b.txt"))
+        try "u1\n".write(to: root.appendingPathComponent("u.txt"), atomically: true, encoding: .utf8)
+
+        let restoreError = await guardUnderTest.restore(
+            paths: ["a.txt", "n.txt", "b.txt"], fromTree: base, gitRoot: root)
+        XCTAssertNil(restoreError)
+
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("a.txt"), encoding: .utf8), "a1\n")
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("b.txt"), encoding: .utf8), "b1\n")
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.appendingPathComponent("n.txt").path))
+        // Not in the restore list: keeps its SECOND edit, not the base snapshot's.
+        XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("u.txt"), encoding: .utf8), "u1\n")
+
+        // `--worktree` never stages anything: the index still matches HEAD.
+        let staged = try gitOutput(root, "diff", "--cached")
+        XCTAssertTrue(staged.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+    }
+
+    func testRestoreWithNoPathsIsANoop() async {
+        let noop = await GitRepairScopeGuard().restore(paths: [], fromTree: "deadbeef", gitRoot: gitRoot)
+        XCTAssertNil(noop)
+    }
+
+    /// The protocol default (a guard that cannot restore from a tree) fails
+    /// closed rather than silently leaving the tree in its post-batch state.
+    func testDefaultRestoreFailsClosed() async {
+        final class NoRestoreGuard: RepairScopeGuarding {
+            func snapshot(gitRoot: URL, protectedGlobs: [String], scopeGlobs: [String]) async -> RepairScopeSnapshot {
+                .unusable("no git")
+            }
+            func check(since snapshot: RepairScopeSnapshot, gitRoot: URL,
+                      protectedGlobs: [String]) async -> RepairScopeCheck {
+                .indeterminate(reason: "no git")
+            }
+            func revert(paths: [String], gitRoot: URL) async -> String? { "no git" }
+        }
+        let result = await NoRestoreGuard().restore(paths: ["x"], fromTree: "deadbeef", gitRoot: gitRoot)
+        XCTAssertEqual(result, "restore unavailable")
+    }
+
+    private func gitOutput(_ root: URL, _ args: String...) throws -> String {
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+        p.arguments = ["-C", root.path] + args
+        let out = Pipe()
+        p.standardOutput = out
+        p.standardError = FileHandle.nullDevice
+        try p.run()
+        p.waitUntilExit()
+        return String(data: out.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+    }
 }
 

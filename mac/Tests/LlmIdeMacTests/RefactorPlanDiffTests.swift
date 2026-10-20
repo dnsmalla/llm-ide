@@ -66,4 +66,32 @@ final class RefactorPlanDiffTests: XCTestCase {
         let section = RefactorPlanDiff.section(of: "R2", in: plan)
         XCTAssertEqual(section, "### R2 Break cycle  (status: todo)\n- Files: `a.mjs`\n- Expect: cycleCount 1 → 0")
     }
+
+    // MARK: - markingBlocked (Mikado rollback, spec §3.5)
+
+    func testMarkingBlockedRewritesHeaderAndInsertsReason() {
+        let marked = RefactorPlanDiff.markingBlocked(plan, id: "R2", reason: "Refactor Test — test_cycle failed")
+        XCTAssertTrue(marked.contains("### R2 Break cycle  (status: blocked)"))
+        XCTAssertEqual(RefactorPlanDiff.section(of: "R2", in: marked),
+                       "### R2 Break cycle  (status: blocked)\n- Blocked: Refactor Test — test_cycle failed"
+                       + "\n- Files: `a.mjs`\n- Expect: cycleCount 1 → 0")
+    }
+
+    func testMarkingBlockedLeavesOtherSectionsByteIdentical() {
+        let marked = RefactorPlanDiff.markingBlocked(plan, id: "R2", reason: "x")
+        XCTAssertEqual(RefactorPlanDiff.section(of: "R1", in: marked), RefactorPlanDiff.section(of: "R1", in: plan))
+    }
+
+    func testMarkingBlockedTwiceReplacesTheReasonInsteadOfDuplicatingTheLine() {
+        let once = RefactorPlanDiff.markingBlocked(plan, id: "R2", reason: "first reason")
+        let twice = RefactorPlanDiff.markingBlocked(once, id: "R2", reason: "second reason")
+        let occurrences = twice.components(separatedBy: "- Blocked:").count - 1
+        XCTAssertEqual(occurrences, 1)
+        XCTAssertTrue(twice.contains("- Blocked: second reason"))
+        XCTAssertFalse(twice.contains("first reason"))
+    }
+
+    func testMarkingBlockedWithUnknownIdLeavesThePlanUnchanged() {
+        XCTAssertEqual(RefactorPlanDiff.markingBlocked(plan, id: "R9", reason: "x"), plan)
+    }
 }

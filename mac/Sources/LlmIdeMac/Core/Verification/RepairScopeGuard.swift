@@ -78,6 +78,15 @@ protocol RepairScopeGuarding: AnyObject {
     func snapshot(gitRoot: URL, protectedGlobs: [String], scopeGlobs: [String]) async -> RepairScopeSnapshot
     /// What changed since `snapshot`, and whether any of it is protected.
     func check(since snapshot: RepairScopeSnapshot, gitRoot: URL, protectedGlobs: [String]) async -> RepairScopeCheck
+    /// Restores `paths` to their state in a `snapshotTree` tree, WITHOUT touching
+    /// the index (unlike `revert`, which restores from HEAD and goes through
+    /// `git checkout`/`git rm`): a path present in `tree` is restored with
+    /// `git restore --source=<tree> --worktree -- <path>`, a path absent from
+    /// `tree` is deleted. Used by Mikado rollback (spec §3.5) to put the tree
+    /// back exactly as it was before a batch, including a path the user had
+    /// already changed before the batch began — that state IS `tree`. Returns
+    /// `nil` on success, else a diagnostic.
+    func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String?
     /// Restores `paths` to their committed state. Returns `nil` on success, or a
     /// diagnostic.
     func revert(paths: [String], gitRoot: URL) async -> String?
@@ -108,6 +117,13 @@ extension RepairScopeGuarding {
     func snapshotTree(gitRoot: URL) async -> String? { nil }
     func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
                   isQuotable: (String) -> Bool) async -> RepairDiffSummary? { nil }
+
+    /// Fail-closed default: a guard that cannot restore from a tree says so,
+    /// which keeps the rollback (and the run) blocked rather than silently
+    /// leaving the tree in its post-batch state.
+    func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String? {
+        paths.isEmpty ? nil : "restore unavailable"
+    }
 
     /// Fail-closed default: a guard that cannot restore unlisted paths says
     /// so, which keeps the violation (and the run) blocked.
@@ -182,7 +198,7 @@ public enum ProtectedGlobs {
 /// Production guard, driving `git` through `FaultVerifier` — the codebase's
 /// single sanctioned subprocess path (see `ShellFaultVerifier`), so no new code
 /// reaches `/bin/sh` directly.
-final class GitRepairScopeGuard: RepairScopeGuarding {
+public final class GitRepairScopeGuard: RepairScopeGuarding {
     /// Default protected globs, matched against repo-relative paths by
     /// `GlobMatch`. Users extend (never replace) this via
     /// `LoopEngineConfig.extraProtectedGlobs`.
@@ -225,6 +241,16 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
     init(verifier: FaultVerifier = ShellFaultVerifier.uncapped(), timeout: TimeInterval = 60) {
         self.verifier = verifier
         self.timeout = timeout
+    }
+
+    /// Parameterless `public` entry point: `FaultVerifier` is an internal
+    /// type, so the designated initializer above cannot itself be `public`
+    /// (its parameter type would not be visible outside this module). This
+    /// is what `LoopContractLab` — a separate target that sees only `public`
+    /// API of this library — constructs to drive the restore primitive
+    /// against a real git repository.
+    public convenience init() {
+        self.init(verifier: ShellFaultVerifier.uncapped(), timeout: 60)
     }
 
     /// Snapshot with the default protected set and no scope allowlist.
@@ -484,7 +510,7 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
         return failures.isEmpty ? nil : failures.joined(separator: "; ")
     }
 
-    func snapshotTree(gitRoot: URL) async -> String? {
+    public func snapshotTree(gitRoot: URL) async -> String? {
         // A throwaway index in its own temp dir: the user's real index is never
         // written. It is seeded from a COPY of the real index when there is one —
         // its stat cache lets `add -A` hash only files that changed, instead of
@@ -528,6 +554,54 @@ final class GitRepairScopeGuard: RepairScopeGuarding {
             out.diff = String(diff.prefix(maxChars))
         }
         return out
+    }
+
+    public func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String? {
+        guard !paths.isEmpty else { return nil }
+        // Classify by presence in `tree` rather than in the CURRENT working tree:
+        // a path the batch deleted is absent now but present in `tree`, and must
+        // be restored, not skipped as "already gone".
+        var present: [String] = []
+        var absent: [String] = []
+        for path in paths {
+            switch await run("git cat-file -e \(Self.shellQuoted(["\(tree):\(path)"]))", gitRoot: gitRoot) {
+            case .success:
+                present.append(path)
+            default:
+                absent.append(path)
+            }
+        }
+
+        var failures: [String] = []
+        // `--worktree` only (no `--staged`): the index is never touched, so a
+        // rollback cannot disturb whatever the user had staged for their own,
+        // unrelated commit.
+        if !present.isEmpty,
+           case .failure(let reason) = await run(
+               "git restore --source=\(tree) --worktree -- \(Self.shellQuoted(present))", gitRoot: gitRoot) {
+            failures.append(reason)
+        }
+        for path in absent {
+            // `tree` has no entry for this path (the batch created it): delete it.
+            // Resolve and contain the path first — `path` came from a `treeDiff`
+            // this guard itself produced, but a `..` or absolute entry must still
+            // never be able to delete outside the repository.
+            let url = gitRoot.appendingPathComponent(path).standardizedFileURL
+            let rootPrefix = gitRoot.standardizedFileURL.path.hasSuffix("/")
+                ? gitRoot.standardizedFileURL.path : gitRoot.standardizedFileURL.path + "/"
+            guard !path.hasPrefix("/"), url.path.hasPrefix(rootPrefix) else {
+                failures.append("refusing to delete \(path): it is outside the repository")
+                continue
+            }
+            if FileManager.default.fileExists(atPath: url.path) {
+                do {
+                    try FileManager.default.removeItem(at: url)
+                } catch {
+                    failures.append("could not delete \(path): \(error.localizedDescription)")
+                }
+            }
+        }
+        return failures.isEmpty ? nil : failures.joined(separator: "; ")
     }
 
     private static func shellQuoted(_ paths: [String]) -> String {
