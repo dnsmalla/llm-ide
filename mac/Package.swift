@@ -142,6 +142,13 @@ if autoTasksIncluded {
         "StageOutputParserTests.swift",
         "TaskLogStoreTests.swift",
         "TestPruneScannerTests.swift",
+        "TestMapBuilderTests.swift",
+        "TestStructureDetectorTests.swift",
+        "TestSourceMapperTests.swift",
+        "LoopStageTestMapKindTests.swift",
+        "LoopStageDetectorTestLoopTests.swift",
+        "LoopStageDetectorRefactorLoopTests.swift",
+        "TestLedgerTests.swift",
     ])
 }
 if mobileIncluded {
