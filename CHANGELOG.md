@@ -110,7 +110,7 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   line) instead of a falling untested-function count; unedited saved texts are brought forward. The
   Refactoring loop's Refactor Test Write prompt (revision 2) secures one end-to-end before/after test
   first, then pins each listed file's outputs through public calls. The kit's `test-gap-writer` and
-  `test-structure-setup` skills carry the same contract (agent-kit branch `feature/test-guideline-skills`).
+  `test-structure-setup` skills were updated to the same contract.
 
 - **Settings: tiers replace the default provider (Mac).** Model Providers now only connects providers
   (keys, Check CLI, readiness); the ◉ default, the Default model and the Planning / Coding / Reviewing /

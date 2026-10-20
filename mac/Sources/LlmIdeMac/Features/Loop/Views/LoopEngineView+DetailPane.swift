@@ -163,7 +163,7 @@ extension LoopEngineView {
         case .testMap:
             switch stage.testOp {
             case .structure: return "Test Map · detect the test layout → llm-doc/loop/test/"
-            case .map: return "Test Map · rank untested functions → llm-doc/loop/test/"
+            case .map: return "Test Map · classify files into the matrix and list unit-test candidates → llm-doc/loop/test/"
             case .ledger: return "Test Map · diff test results into the ledger and open faults"
             case nil: return "no operation chosen"
             }
