@@ -21,8 +21,8 @@ public struct TestMapBuilder {
         let source: String
         if let graph = GraphIndex.load(gitRoot: graphRoot ?? gitRoot) {
             source = "graph"
-            // graph.json lists raw module names (typing, numpy, ...); only imports
-            // that resolve to a project file are collaborators.
+            // graph.json `imports` already hold resolved repo paths (the scanner drops externals);
+            // the intersection is a guard against stale paths for files no longer in the graph.
             let graphPaths = Set(graph.files.map(\.path))
             for f in graph.files where TestSourceMapper.isSourceCandidate(f.path) {
                 let stem = TestSourceMapper.sourceStem(forSourcePath: f.path)
@@ -51,9 +51,9 @@ public struct TestMapBuilder {
                 let by = testsFor(path: path, in: tests)
                     .filter { TestSourceMapper.sourceStem(forTestPath: $0.path) == stem }.map(\.path).sorted()
                 // No graph: size is the only signal, so a big-enough file counts as complex.
+                let functionCount = loc >= CodeQuadrantClassifier.complexLoc ? CodeQuadrantClassifier.complexFunctions : 0
                 let quadrant = CodeQuadrantClassifier.classify(
-                    loc: loc, functionCount: loc >= CodeQuadrantClassifier.complexLoc ? CodeQuadrantClassifier.complexFunctions : 0,
-                    collaborators: 0, role: nil)
+                    loc: loc, functionCount: functionCount, collaborators: 0, role: nil)
                 entries.append(TestMapEntry(path: path, function: "*", line: 1, fanIn: 0, loc: loc, testedBy: by,
                                             quadrant: quadrant))
             }

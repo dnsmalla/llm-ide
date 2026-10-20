@@ -70,6 +70,11 @@ final class LoopStageTestMapKindTests: XCTestCase {
         XCTAssertTrue(outcome.passed)
         XCTAssertEqual(outcome.note?.contains("advisory"), true)
     }
+    func testMapCheckPassesQuietlyWhenCountFell() {
+        let outcome = TestMapCheck.mapCheckOutcome(delta: ["untestedFunctions": -3], writerChanged: true)
+        XCTAssertTrue(outcome.passed)
+        XCTAssertNil(outcome.note)
+    }
     func testMapCheckPassesWhenWriterCoveredNone() {
         let outcome = TestMapCheck.mapCheckOutcome(delta: [:], writerChanged: false)
         XCTAssertTrue(outcome.passed)

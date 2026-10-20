@@ -47,14 +47,14 @@ final class TestMapBuilderTests: XCTestCase {
         try "final class UITests: XCTestCase { func testDraw() { UI().draw() } }".write(to: root.appendingPathComponent("Tests/AppTests/UITests.swift"), atomically: true, encoding: .utf8)
         let after = try b.build()
         XCTAssertEqual(TestMap.delta(before: before, after: after)["untestedFunctions"], -1)
-        XCTAssertEqual(map(after, "untestedDomainFunctions"), 2)  // draw is a view: a controller, not domain logic
+        XCTAssertEqual(counter(after, "untestedDomainFunctions"), 2)  // draw is a view: a controller, not domain logic
         let md = after.render()
         XCTAssertTrue(md.contains("untestedFunctions")); XCTAssertTrue(md.contains("Sources/Core.swift:40 render"))
         try b.write(after)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(LoopOutputLayout.testMapJSON).path))
     }
 
-    private func map(_ m: TestMap, _ key: String) -> Int { Int(m.counters[key] ?? 0) }
+    private func counter(_ m: TestMap, _ key: String) -> Int { Int(m.counters[key] ?? 0) }
 
     func testWriterCandidatesAreDomainLogicOnly() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

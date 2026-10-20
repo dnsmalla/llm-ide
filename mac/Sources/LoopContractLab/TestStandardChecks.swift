@@ -12,6 +12,9 @@ func runTestStandardChecks() {
     expect(stalled.passed, "map check passes when the untested count did not fall")
     expect(stalled.note?.contains("advisory") == true, "map check notes the stall as advisory")
 
+    let improved = TestMapCheck.mapCheckOutcome(delta: ["untestedFunctions": -3], writerChanged: true)
+    expect(improved.passed && improved.note == nil, "map check is silent when the untested count fell")
+
     let idle = TestMapCheck.mapCheckOutcome(delta: [:], writerChanged: false)
     expect(idle.passed, "map check passes when the writer covered nothing")
     expect(idle.note == nil, "map check has no note when the writer changed nothing")
@@ -132,6 +135,16 @@ private func runLayeredLayoutChecks() {
     expect(TestStructureDetector.pytestCommand(testDir: "my pkg/my tests", gitRoot: spaced, packageDir: "my pkg")
                == "pytest --ignore='my tests/performance'",
            "the ignored path is shell-quoted and relative to the package")
+
+    let nested = makeLayoutFixture(["svc/pytest.ini", "svc/tests/unit/a/test_x.py", "svc/tests/performance/test_p.py"])
+    defer { try? FileManager.default.removeItem(at: nested) }
+    let nestedRoot = TestStructureDetector(gitRoot: nested).detect().roots.first
+    expect(nestedRoot?.command == "cd svc && pytest --ignore=tests/performance",
+           "a layered root under a package dir runs from the package and ignores its performance tests")
+    if let root = nestedRoot {
+        expect(TestSourceMapper.newTestPath(forSourcePath: "svc/logic/a/x.py", root: root) == "svc/tests/unit/a/test_x.py",
+               "layered placement under a package dir keeps the package prefix")
+    }
 
     if let root = layeredRoot {
         var rooted = root
