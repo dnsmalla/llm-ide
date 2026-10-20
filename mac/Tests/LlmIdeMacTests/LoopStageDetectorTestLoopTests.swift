@@ -242,9 +242,10 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
     func testLayeredRootNestedUnderPackageDir() throws {
         let root = try TempRepo.make(files: ["svc/pytest.ini": "[pytest]", "svc/tests/unit/a/test_x.py": "def test_x(): pass",
                                              "svc/tests/performance/test_p.py": "def test_p(): pass"])
-        XCTAssertEqual(LoopStageDetector.detectTestCommand(gitRoot: root), "cd svc && pytest --ignore=tests/performance")
+        // detectTestCommand only looks at the repo root; per-package commands come from the structure.
         let structure = TestStructureDetector(gitRoot: root).detect()
         let layered = try XCTUnwrap(structure.roots.first)
+        XCTAssertEqual(layered.command, "cd svc && pytest --ignore=tests/performance")
         XCTAssertEqual(TestSourceMapper.newTestPath(forSourcePath: "svc/logic/a/x.py", root: layered),
                        "svc/tests/unit/a/test_x.py")
     }
@@ -260,5 +261,4 @@ final class StageOutputParserCargoTests: XCTestCase {
         let out = "test result: FAILED. 3 passed; 2 failed; 0 ignored; 0 measured; 0 filtered out"
         XCTAssertEqual(StageOutputParser.parseFailureCount(out), 2)
     }
-}
 }

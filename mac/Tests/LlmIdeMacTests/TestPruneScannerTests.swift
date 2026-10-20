@@ -86,7 +86,7 @@ final class TestPruneScannerTests: XCTestCase {
     func testBuildProductDirsAreIgnored() throws {
         try put("Sources/Foo.swift", "struct Foo {}\n")
         try put("Tests/FooTests.swift", asserting)
-        try put(".build-lite/Tests/BarTests.swift", asserting)
+        try put("Tests/.build-lite/OrphanTests.swift", asserting)
         XCTAssertEqual(scanner().scan(), [])
     }
 

@@ -172,6 +172,8 @@ private func runPruneChecks() {
     ])
     defer { try? FileManager.default.removeItem(at: root) }
     func put(_ rel: String, _ text: String) {
+        let url = root.appendingPathComponent(rel)
+        try? FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
         try? text.write(to: root.appendingPathComponent(rel), atomically: true, encoding: .utf8)
     }
     put("Tests/FooTests.swift", "func testA() {\n    // placeholder\n    // func testOld() {}\n}\n")
@@ -194,12 +196,12 @@ private func runPruneChecks() {
     put("Tests/HelperOnly.swift", "struct Fixture {}\n")
     put("Tests/ReqTests.swift", "@Test func a() throws { _ = try #require(Optional(1)) }\n// it(s fine)\n")
     put("Sources/Req.swift", "struct Req {}\n")
-    put(".build-lite/Tests/GhostTests.swift", "func testG() { XCTAssertTrue(true) }\n")
+    put("Tests/.build-lite/GhostTests.swift", "func testG() { XCTAssertTrue(true) }\n")
     let rescanned = scanner.scan()
     expect(!rescanned.contains { $0.path == "Tests/HelperOnly.swift" }, "prune skips a helper file with no test marker")
     expect(!rescanned.contains { $0.path == "Tests/ReqTests.swift" },
            "prune: #require counts as an assertion and `// it(s fine)` is not a commented-out test")
-    expect(!rescanned.contains { $0.path.hasPrefix(".build-lite") }, "prune ignores .build-* directories")
+    expect(!rescanned.contains { $0.path.contains(".build-lite") }, "prune ignores .build-* directories")
     _ = try? scanner.write(found, outputRoot: root)
     expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Tests/FooTests.swift").path),
            "prune never deletes a test file")
