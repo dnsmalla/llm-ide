@@ -7,7 +7,7 @@ final class TestMapBuilderTests: XCTestCase {
         let graph = """
         {"version":"1.0","summary":{"totalFiles":2,"totalEdges":1},"files":[
           {"path":"Sources/Core.swift","name":"Core.swift","language":"swift","loc":300,"role":"service","imports":[],"usedBy":["Sources/UI.swift","Sources/API.swift"],
-           "types":[],"functions":[{"name":"parse","line":10,"declaration":"func parse()"},{"name":"render","line":40,"declaration":"func render()"},{"name":"init","line":1,"declaration":"init()"}]},
+           "types":[],"functions":[{"name":"parse","line":10,"declaration":"func parse()"},{"name":"render","line":40,"declaration":"func render()"},{"name":"validate","line":70,"declaration":"func validate()"},{"name":"init","line":1,"declaration":"init()"}]},
           {"path":"Sources/UI.swift","name":"UI.swift","language":"swift","loc":50,"role":"view","imports":["Sources/Core.swift"],"usedBy":[],
            "types":[],"functions":[{"name":"draw","line":5,"declaration":"func draw()"}]}]}
         """
@@ -26,7 +26,7 @@ final class TestMapBuilderTests: XCTestCase {
         let (root, s) = try fixture()
         let map = try TestMapBuilder(gitRoot: root, structure: s).build()
         XCTAssertEqual(map.source, "graph")
-        XCTAssertEqual(map.untestedFunctions, 2)      // render, draw
+        XCTAssertEqual(map.untestedFunctions, 3)      // render, validate, draw
         XCTAssertEqual(map.testedFunctions, 1)        // parse
         XCTAssertEqual(map.entries.first?.function, "render"); XCTAssertEqual(map.entries.first?.fanIn, 2)
         XCTAssertEqual(map.entries.first { $0.function == "parse" }?.testedBy, ["Tests/AppTests/CoreTests.swift"])
@@ -47,10 +47,42 @@ final class TestMapBuilderTests: XCTestCase {
         try "final class UITests: XCTestCase { func testDraw() { UI().draw() } }".write(to: root.appendingPathComponent("Tests/AppTests/UITests.swift"), atomically: true, encoding: .utf8)
         let after = try b.build()
         XCTAssertEqual(TestMap.delta(before: before, after: after)["untestedFunctions"], -1)
+        XCTAssertEqual(map(after, "untestedDomainFunctions"), 2)  // draw is a view: a controller, not domain logic
         let md = after.render()
         XCTAssertTrue(md.contains("untestedFunctions")); XCTAssertTrue(md.contains("Sources/Core.swift:40 render"))
         try b.write(after)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(LoopOutputLayout.testMapJSON).path))
+    }
+
+    private func map(_ m: TestMap, _ key: String) -> Int { Int(m.counters[key] ?? 0) }
+
+    func testWriterCandidatesAreDomainLogicOnly() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let fns = (1...4).map { "{\"name\":\"svc\($0)\",\"line\":\($0)}" }.joined(separator: ",")
+        let graph = """
+        {"version":"1.0","files":[
+          {"path":"Sources/Big.swift","name":"Big.swift","language":"swift","loc":300,"role":"service","functions":[\(fns)]},
+          {"path":"Sources/Small.swift","name":"Small.swift","language":"swift","loc":20,"functions":[{"name":"tiny","line":1}]}]}
+        """
+        try write(root, ["system/graph/graph.json": graph, "Sources/Big.swift": "", "Sources/Small.swift": "",
+                         "Tests/AppTests/OtherTests.swift": "import XCTest\nfinal class OtherTests: XCTestCase {}\n"])
+        let structure = TestStructure(generatedAt: Date(), roots: [TestRoot(packageDir: "", testDir: "Tests/AppTests", runner: .xctest, command: "swift test", namingRule: "Foo.swift → FooTests.swift", languages: ["swift"])], status: "ok", notes: [])
+        let md = try TestMapBuilder(gitRoot: root, structure: structure).build().render()
+        let unit = md.components(separatedBy: "## Unit-test candidates")[1].components(separatedBy: "\n## ")[0]
+        XCTAssertTrue(unit.contains("Sources/Big.swift:1 svc1"))
+        XCTAssertFalse(unit.contains("tiny"))
+        let policy = md.components(separatedBy: "## Not tested by policy")[1]
+        XCTAssertTrue(policy.contains("Sources/Small.swift"))
+    }
+
+    func testFilesFallbackClassifiesByLocOnly() throws {
+        let (root, s) = try fixture()
+        try FileManager.default.removeItem(at: root.appendingPathComponent("system/graph/graph.json"))
+        try write(root, ["Sources/Mid.swift": String(repeating: "x\n", count: 200),
+                         "Sources/Tiny.swift": String(repeating: "x\n", count: 10)])
+        let map = try TestMapBuilder(gitRoot: root, structure: s).build()
+        XCTAssertEqual(map.entries.first { $0.path == "Sources/Mid.swift" }?.quadrant, .domainLogic)
+        XCTAssertEqual(map.entries.first { $0.path == "Sources/Tiny.swift" }?.quadrant, .trivial)
     }
 
     private func write(_ root: URL, _ files: [String: String]) throws {

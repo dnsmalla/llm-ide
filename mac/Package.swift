@@ -115,6 +115,7 @@ if autoTasksIncluded {
         "AutoTaskSettingsTests.swift",
         "AutoTaskTemplateStoreTests.swift",
         "AutoTaskTemplateTests.swift",
+        "CodeQuadrantClassifierTests.swift",
         "CustomAutoTaskTests.swift",
         "LoopDefaultLoopsTests.swift",
         "LoopDefinitionTests.swift",

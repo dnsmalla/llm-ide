@@ -26,10 +26,15 @@ struct TestMapBuilder {
                 let pool = testsFor(path: f.path, in: tests).filter { t in
                     (stem != nil && TestSourceMapper.sourceStem(forTestPath: t.path) == stem) || t.tokens.contains(name)
                 }
-                for fn in f.functions where !Self.skipped.contains(fn.name) && !fn.name.hasPrefix("_") {
+                let eligible = f.functions.filter { !Self.skipped.contains($0.name) && !$0.name.hasPrefix("_") }
+                let collaborators = Set(f.imports).union(graph.calleeFiles(of: f.path)).count
+                let quadrant = CodeQuadrantClassifier.classify(
+                    loc: f.loc, functionCount: eligible.count, collaborators: collaborators, role: f.role)
+                for fn in eligible {
                     let by = pool.filter { $0.tokens.contains(fn.name) }.map(\.path).sorted()
                     entries.append(TestMapEntry(path: f.path, function: fn.name, line: fn.line,
-                                                fanIn: fanIn, loc: f.loc, testedBy: by))
+                                                fanIn: fanIn, loc: f.loc, testedBy: by,
+                                                quadrant: quadrant))
                 }
             }
         } else {
@@ -38,12 +43,21 @@ struct TestMapBuilder {
                 guard let stem = TestSourceMapper.sourceStem(forSourcePath: path) else { continue }
                 let by = testsFor(path: path, in: tests)
                     .filter { TestSourceMapper.sourceStem(forTestPath: $0.path) == stem }.map(\.path).sorted()
-                entries.append(TestMapEntry(path: path, function: "*", line: 1, fanIn: 0, loc: loc, testedBy: by))
+                // No graph: size is the only signal, so a big-enough file counts as complex.
+                let quadrant = CodeQuadrantClassifier.classify(
+                    loc: loc, functionCount: loc >= CodeQuadrantClassifier.complexLoc ? CodeQuadrantClassifier.complexFunctions : 0,
+                    collaborators: 0, role: nil)
+                entries.append(TestMapEntry(path: path, function: "*", line: 1, fanIn: 0, loc: loc, testedBy: by,
+                                            quadrant: quadrant))
             }
         }
         entries.sort { a, b in
             let ua = a.testedBy.isEmpty, ub = b.testedBy.isEmpty
             if ua != ub { return ua }
+            if ua {
+                let da = a.effectiveQuadrant == .domainLogic, db = b.effectiveQuadrant == .domainLogic
+                if da != db { return da }
+            }
             if a.fanIn != b.fanIn { return a.fanIn > b.fanIn }
             if a.loc != b.loc { return a.loc > b.loc }
             if a.path != b.path { return a.path < b.path }

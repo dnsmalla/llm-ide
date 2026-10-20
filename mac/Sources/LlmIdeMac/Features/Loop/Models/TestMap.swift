@@ -7,11 +7,17 @@ public struct TestMapEntry: Codable, Equatable {
     public var fanIn: Int
     public var loc: Int
     public var testedBy: [String]
+    /// nil (an old TEST-MAP.json) reads as `.domainLogic`.
+    public var quadrant: CodeQuadrant?
 
-    public init(path: String, function: String, line: Int, fanIn: Int, loc: Int, testedBy: [String]) {
+    public init(path: String, function: String, line: Int, fanIn: Int, loc: Int, testedBy: [String],
+                quadrant: CodeQuadrant? = nil) {
         self.path = path; self.function = function; self.line = line
         self.fanIn = fanIn; self.loc = loc; self.testedBy = testedBy
+        self.quadrant = quadrant
     }
+
+    public var effectiveQuadrant: CodeQuadrant { quadrant ?? .domainLogic }
 }
 
 public struct TestMap: Codable, Equatable {
@@ -30,7 +36,9 @@ public struct TestMap: Codable, Equatable {
         self.untestedFiles = untestedFiles
         self.counters = ["untestedFunctions": Double(untestedFunctions),
                          "testedFunctions": Double(testedFunctions),
-                         "untestedFiles": Double(untestedFiles)]
+                         "untestedFiles": Double(untestedFiles),
+                         "untestedDomainFunctions": Double(entries.filter {
+                             $0.testedBy.isEmpty && $0.effectiveQuadrant == .domainLogic }.count)]
     }
 
     /// after - before, per counter.
@@ -42,30 +50,46 @@ public struct TestMap: Codable, Equatable {
         return out
     }
 
+    private func functionLines(_ list: [TestMapEntry], limit: Int) -> String {
+        if list.isEmpty { return "- none\n" }
+        return list.prefix(limit).map {
+            "- \($0.path):\($0.line) \($0.function) — fan-in \($0.fanIn), file \($0.loc) lines\n"
+        }.joined()
+    }
+
+    /// One line per file, ranked by fan-in then size, then path.
+    private func fileLines(_ list: [TestMapEntry], limit: Int) -> String {
+        var byFile: [String: TestMapEntry] = [:]
+        for e in list where byFile[e.path] == nil { byFile[e.path] = e }
+        if byFile.isEmpty { return "- none\n" }
+        let ranked = byFile.values.sorted { ($1.fanIn, $1.loc, $0.path) < ($0.fanIn, $0.loc, $1.path) }
+        return ranked.prefix(limit).map { "- \($0.path) — fan-in \($0.fanIn), \($0.loc) lines\n" }.joined()
+    }
+
+    private func pathLines(_ list: [TestMapEntry], limit: Int) -> String {
+        let paths = Set(list.map(\.path)).sorted()
+        if paths.isEmpty { return "- none\n" }
+        return paths.prefix(limit).map { "- \($0)\n" }.joined()
+    }
+
     /// TEST-MAP.md
     public func render(limit: Int = 40) -> String {
         var out = "# Test map (\(source), \(ISO8601DateFormatter().string(from: generatedAt)))\n\n"
         out += "| counter | value |\n|---|---|\n"
         for k in counters.keys.sorted() { out += "| \(k) | \(Int(counters[k] ?? 0)) |\n" }
-        out += "\n## Untested functions (top \(limit) by fan-in)\n"
         let untested = entries.filter { $0.testedBy.isEmpty }
-        if untested.isEmpty { out += "- none\n" }
-        for e in untested.prefix(limit) {
-            out += "- \(e.path):\(e.line) \(e.function) — fan-in \(e.fanIn), file \(e.loc) lines\n"
-        }
-        out += "\n## Files with no test at all\n"
-        var byFile: [String: (tested: Bool, loc: Int, fanIn: Int)] = [:]
-        for e in entries {
-            let cur = byFile[e.path] ?? (false, e.loc, e.fanIn)
-            byFile[e.path] = (cur.tested || !e.testedBy.isEmpty, e.loc, e.fanIn)
-        }
-        let bare = byFile.filter { !$0.value.tested }
-            .sorted { ($1.value.fanIn, $1.value.loc, $0.key) < ($0.value.fanIn, $0.value.loc, $1.key) }
-        if bare.isEmpty { out += "- none\n" }
-        for (path, v) in bare.prefix(25) { out += "- \(path) — fan-in \(v.fanIn), \(v.loc) lines\n" }
+        out += "\n## Unit-test candidates (domain logic / algorithms)\n"
+        out += functionLines(untested.filter { $0.effectiveQuadrant == .domainLogic }, limit: limit)
+        out += "\n## Integration-test candidates (controllers / pipelines)\n"
+        out += functionLines(untested.filter { $0.effectiveQuadrant == .controller }, limit: limit)
+        out += "\n## Refactor first (over-complex — no tests until split)\n"
+        out += fileLines(untested.filter { $0.effectiveQuadrant == .overComplex }, limit: 25)
+        out += "\n## Not tested by policy (trivial)\n"
+        out += pathLines(untested.filter { $0.effectiveQuadrant == .trivial }, limit: 25)
         out += "\n## How to read\n"
         out += "- untestedFunctions: functions no test file references; testedFunctions: the rest; untestedFiles: source files with at least one eligible function and none of them tested.\n"
         out += "- A function `f` of file `p` is tested by a test file in the matching test root when the test's tokens (identifiers and double-quoted string contents) contain `f` exactly, and the test maps to the same source stem as `p` or contains the file's name as a token.\n"
+        out += "- Each file is classified by the test guideline matrix: domain logic gets unit tests, controllers/pipelines get integration tests, over-complex files are refactored before testing, trivial files are not tested.\n"
         out += "- init, deinit, body, main, description and `_`-prefixed names are skipped.\n"
         out += "- Counters are information, not a goal: the loop never fails because a count did not move.\n"
         return out
