@@ -359,12 +359,17 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           skillId: "skills/refactor-apply",
                           targetPath: LoopOutputLayout.refactorPlan, outputPath: ".",
                           prompt: LoopStageDetector.refactorApplyPrompt),
+                // Optional: skipped with a warning when the skill is not installed.
+                LoopStage(name: "Refactor Conform", kind: .skill, order: 11,
+                          skillId: "skills/refactor-conform",
+                          targetPath: LoopOutputLayout.refactorNextBatch, outputPath: ".",
+                          prompt: LoopStageDetector.refactorConformPrompt),
                 LoopStage(name: "Check", kind: .shellCommand,
-                          command: detectedCheckCommand, order: 11),
+                          command: detectedCheckCommand, order: 12),
                 LoopStage(name: "Test", kind: .shellCommand,
-                          command: detectedTestCommand, order: 12),
-                LoopStage(name: "Test Ledger", kind: .testMap, order: 13, testOp: .ledger),
-                LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: 14, graphOp: .verify)
+                          command: detectedTestCommand, order: 13),
+                LoopStage(name: "Test Ledger", kind: .testMap, order: 14, testOp: .ledger),
+                LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: 15, graphOp: .verify)
             ],
             maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)

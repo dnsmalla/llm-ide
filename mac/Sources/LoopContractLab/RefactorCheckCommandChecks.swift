@@ -85,8 +85,8 @@ func runRefactorCheckCommandChecks() {
     expect(stagesI.map(\.defaultKey) == [
         "refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph",
         "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write",
-        "refactor-test-baseline", "refactor-check-baseline", "refactor-apply", "refactor-check",
-        "refactor-test", "refactor-ledger", "refactor-graph-check",
+        "refactor-test-baseline", "refactor-check-baseline", "refactor-apply", "refactor-conform",
+        "refactor-check", "refactor-test", "refactor-ledger", "refactor-graph-check",
     ], "a repo with both test and check tooling runs Check Baseline after Test Baseline "
         + "and Check right before the post-apply Test")
     let checkBaseline = stagesI.first { $0.defaultKey == "refactor-check-baseline" }

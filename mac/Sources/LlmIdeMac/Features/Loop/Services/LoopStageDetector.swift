@@ -809,7 +809,7 @@ public enum LoopStageDetector {
     ///
     /// Keys are persisted, so an entry may be added but never renamed.
 
-    static let stageKeyOwner: [String: String] = [
+    public static let stageKeyOwner: [String: String] = [
         "regression": LoopDefaultLoopKey.regression,
         "regression-test": LoopDefaultLoopKey.regression,
         "test": LoopDefaultLoopKey.test,
@@ -834,6 +834,7 @@ public enum LoopStageDetector {
         "plan-check": LoopDefaultLoopKey.plan,
         "refactor-plan": LoopDefaultLoopKey.refactor,
         "refactor-apply": LoopDefaultLoopKey.refactor,
+        "refactor-conform": LoopDefaultLoopKey.refactor,
         "refactor-structure": LoopDefaultLoopKey.refactor,
         "refactor-setup": LoopDefaultLoopKey.refactor,
         "refactor-structure-check": LoopDefaultLoopKey.refactor,
@@ -1082,6 +1083,18 @@ public enum LoopStageDetector {
         + "build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never "
         + "touch more than that batch, never commit. End with `Applied: R<n>`."
 
+    /// The conform pass: a second look at the batch the apply stage just applied,
+    /// fixing any RULES.md violation it introduced before Check/Test/Graph Check
+    /// verify the batch. Optional (`LoopStage.skillIsOptional`) — a repo whose
+    /// central skills do not include it still finishes the batch; the runner
+    /// skips the stage with a warning instead of failing the run.
+    public static let refactorConformPrompt = "Read the refactor rules (RULES.md) and the batch just applied, "
+        + "both beside the Input, then look at the code it touched under the Output path. For every file the "
+        + "batch lists, and any file it created, fix violations of those rules behaviour-preservingly — never "
+        + "widen the change to any other file, and never edit tests or build config. Write each fix as one "
+        + "line, `file:line — rule source — what`, to the rule-review file (RULE-REVIEW.md) beside the Input. "
+        + "End with `Conformed: R<n> — <k> fixes`."
+
     /// The test writer in batch mode: its Input is the next batch the runner wrote, not a test map.
     public static let refactorTestWritePrompt = "Read the next refactor batch at the Input. First make sure the "
         + "integration tests (tests/integration/ in a layered layout, else the test root) hold one "
@@ -1169,6 +1182,14 @@ public enum LoopStageDetector {
                                     targetPath: LoopOutputLayout.refactorPlan, outputPath: ".",
                                     prompt: refactorApplyPrompt, isDefault: true,
                                     defaultKey: "refactor-apply"))
+            order += 1
+            // Optional: skipped with a warning when the central skill is not
+            // installed (`LoopStage.skillIsOptional`), never failing the run.
+            stages.append(LoopStage(name: "Refactor Conform", kind: .skill, order: order,
+                                    skillId: "skills/refactor-conform",
+                                    targetPath: LoopOutputLayout.refactorNextBatch, outputPath: ".",
+                                    prompt: refactorConformPrompt, isDefault: true,
+                                    defaultKey: "refactor-conform"))
             order += 1
             if let checkCommand {
                 stages.append(LoopStage(name: "Check", kind: .shellCommand, command: checkCommand,

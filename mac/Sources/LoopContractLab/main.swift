@@ -528,6 +528,7 @@ runLoopOutputMigrationChecks()
 runTestStandardChecks()
 runRefactorRulesChecks()
 runRefactorCheckCommandChecks()
+runRefactorConformChecks()
 #endif
 
 if failures.isEmpty {

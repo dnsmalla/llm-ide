@@ -364,7 +364,20 @@ extension LoopStage {
     /// Skill ids whose stage applies code edits that must be verified.
     static let codeApplySkillIds: Set<String> = [
         "skills/refactor-apply", "skills/test-gap-writer", "skills/test-structure-setup",
+        "skills/refactor-conform",
     ]
+
+    /// Whether this stage's skill may be missing from the project's installed
+    /// central skills WITHOUT ending the run — true only for
+    /// `skills/refactor-conform`. Every other code-applying or generating
+    /// skill stage is load-bearing: the server not resolving it means the
+    /// stage never ran, so the runner fails the run (`skillNotInstalledMessage`).
+    /// Conform is an improvement pass over a batch the apply stage already
+    /// applied and the Test/Check stages will verify either way, so a repo
+    /// without the skill installed should still finish the batch — the runner
+    /// skips the stage with a warning instead (see `LoopEngineRunner`'s
+    /// `unresolvedSkills` branch).
+    public var skillIsOptional: Bool { kind == .skill && skillId == "skills/refactor-conform" }
 
     /// The Test loop's Setup stage: applies code, but may only modify package
     /// manifests and add test scaffolding (`LoopEngineRunner.testSetupViolations`).
@@ -376,7 +389,7 @@ extension LoopStage {
     var testWriteOnly: Bool { kind == .skill && skillId == "skills/test-gap-writer" }
 
     /// Whether this stage applies code edits (see `codeApplySkillIds`).
-    var appliesCode: Bool {
+    public var appliesCode: Bool {
         kind == .skill && skillId.map(Self.codeApplySkillIds.contains) == true
     }
 

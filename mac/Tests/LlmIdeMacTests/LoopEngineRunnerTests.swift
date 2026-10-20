@@ -2556,6 +2556,43 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(stageRecord?.outputTail, message)
     }
 
+    /// An OPTIONAL skill stage (`LoopStage.skillIsOptional`, today only
+    /// Refactor Conform) whose skill is not installed SKIPS instead of
+    /// failing the run: the batch Apply already applied still finishes, and
+    /// the Test stage after it still runs and passes.
+    func testOptionalSkillStageWithUnresolvedSkillSkipsAndProceeds() async {
+        let agent = RecordingLoopAgent()
+        agent.result = { skills in
+            LoopAgentResult(unresolvedSkills: skills, ran: false, resultSubtype: nil)
+        }
+        let verifier = StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") }
+        let journal = InMemoryJournal()
+        let config = LoopEngineConfig(stages: [
+            LoopStage(id: "s1", name: "Refactor Conform", kind: .skill, order: 0,
+                      skillId: "skills/refactor-conform"),
+            LoopStage(id: "t1", name: "Test", kind: .shellCommand, command: "swift test", order: 1),
+        ], maxIterations: 3, consecutiveFailureStop: 3)
+        let runner = makeRunner(
+            verifier: verifier,
+            stageRepairer: StubRepairer(),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: AgentLoopSkillExecutor(agent: agent),
+            approvals: makeApprovals(approve: [("t1", "swift test")]),
+            journal: journal)
+
+        let result = await runner.run(config: config, faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        let message = LoopEngineRunner.optionalSkillSkippedMessage(
+            ["skills/refactor-conform"], stageName: "Refactor Conform")
+        XCTAssertEqual(result, .success, "the run finishes instead of failing over the missing optional skill")
+        XCTAssertEqual(runner.stageStates["s1"], .passed)
+        XCTAssertFalse(verifier.calls.isEmpty, "the Test stage after it still runs")
+        let stageRecord = journal.written.last?.iterations.first?.attempts.first
+        XCTAssertEqual(stageRecord?.passed, true)
+        XCTAssertEqual(stageRecord?.outputTail, message)
+        XCTAssertTrue(message.contains("Apply Central Skills to the project to enable Refactor Conform"))
+    }
+
     // MARK: - Honest verdicts (errored stages, transport retry)
 
     private func skillOnlyConfig() -> LoopEngineConfig {

@@ -1710,6 +1710,13 @@ final class LoopEngineRunner: ObservableObject {
             : "skills \(skillIds.joined(separator: ", ")) are not installed"
     }
 
+    /// Why an OPTIONAL skill stage (`LoopStage.skillIsOptional`) is skipped
+    /// instead of failing the run when the server could not resolve its skill.
+    nonisolated static func optionalSkillSkippedMessage(_ skillIds: [String], stageName: String) -> String {
+        "skill \(skillIds.joined(separator: ", ")) is not installed — Apply Central Skills to the "
+            + "project to enable \(stageName)"
+    }
+
     private func refuseUnverifiedCodeApply(_ stage: LoopStage) -> StageDecision {
         let message = Self.unverifiedCodeApplyMessage(stage)
         appendLog(.error, "  [\(stage.name)] \(message)")
@@ -1998,9 +2005,23 @@ final class LoopEngineRunner: ObservableObject {
         lastSkillResults[stage.id] = agentResult
 
         // The server does not run the agent when a requested skill is missing,
-        // so "completed" would claim work that never happened. Fail the stage
-        // and end the run: no retry can install the skill.
+        // so "completed" would claim work that never happened. An OPTIONAL
+        // skill stage (`LoopStage.skillIsOptional`, today only Refactor
+        // Conform) is an improvement pass the batch does not depend on — the
+        // Apply stage already applied it and Check/Test/Graph Check still
+        // verify it either way — so skip the stage with a warning and let the
+        // batch finish instead of failing the whole run over it. Every other
+        // skill stage is load-bearing: fail the stage and end the run, since
+        // no retry can install the skill.
         if case .completed = guarded, let missing = agentResult?.unresolvedSkills, !missing.isEmpty {
+            if stage.skillIsOptional {
+                let message = Self.optionalSkillSkippedMessage(missing, stageName: stage.name)
+                stageStates[stage.id] = .passed
+                appendLog(.warn, "  [\(stage.name)] \(message)")
+                record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
+                       passed: true, output: message, score: nil)
+                return .proceed
+            }
             let message = Self.skillNotInstalledMessage(missing)
             stageStates[stage.id] = .failed
             appendLog(.error, "  [\(stage.name)] \(message)")

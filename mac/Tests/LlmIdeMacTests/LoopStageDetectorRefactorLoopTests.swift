@@ -7,10 +7,11 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
     func testOrderWithRunner() throws {
         let root = try TempRepo.make(files: ["Package.swift": pkg])
         let s = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.refactor, gitRoot: root)
-        XCTAssertEqual(s.map(\.defaultKey), ["refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph", "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write", "refactor-test-baseline", "refactor-apply", "refactor-test", "refactor-ledger", "refactor-graph-check"])
-        XCTAssertEqual(s[1].enabled, false); XCTAssertEqual(s[3].graphOp, .snapshot); XCTAssertEqual(s[12].graphOp, .verify)
-        XCTAssertEqual(s[8].allowsRepair, false); XCTAssertTrue(s[10].allowsRepair)
+        XCTAssertEqual(s.map(\.defaultKey), ["refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph", "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write", "refactor-test-baseline", "refactor-apply", "refactor-conform", "refactor-test", "refactor-ledger", "refactor-graph-check"])
+        XCTAssertEqual(s[1].enabled, false); XCTAssertEqual(s[3].graphOp, .snapshot); XCTAssertEqual(s[13].graphOp, .verify)
+        XCTAssertEqual(s[8].allowsRepair, false); XCTAssertTrue(s[11].allowsRepair)
         XCTAssertTrue(s[7].testWriteOnly)
+        XCTAssertTrue(s[9].appliesCode); XCTAssertTrue(s[10].appliesCode); XCTAssertTrue(s[10].skillIsOptional)
         XCTAssertFalse(s.filter(\.enabled).contains { LoopStage.lacksVerifyAfter($0, in: s) })
     }
     func testPlanOnlyWithoutRunner() throws {
@@ -28,8 +29,8 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
         XCTAssertEqual(s.map(\.defaultKey), [
             "refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph",
             "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write",
-            "refactor-test-baseline", "refactor-check-baseline", "refactor-apply", "refactor-check",
-            "refactor-test", "refactor-ledger", "refactor-graph-check",
+            "refactor-test-baseline", "refactor-check-baseline", "refactor-apply", "refactor-conform",
+            "refactor-check", "refactor-test", "refactor-ledger", "refactor-graph-check",
         ])
         let byKey = Dictionary(uniqueKeysWithValues: s.map { ($0.defaultKey ?? "", $0) })
         XCTAssertEqual(byKey["refactor-check-baseline"]?.allowsRepair, false)
@@ -132,7 +133,7 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
     func testPlannerPromptPinsTheBatchHeadingAndEveryRefactorPromptIsPathAgnostic() {
         XCTAssertTrue(LoopStageDetector.refactorPlanPrompt.contains("no other headings may start with `### R`"))
         for prompt in [LoopStageDetector.refactorPlanPrompt, LoopStageDetector.refactorApplyPrompt,
-                       LoopStageDetector.refactorTestWritePrompt] {
+                       LoopStageDetector.refactorTestWritePrompt, LoopStageDetector.refactorConformPrompt] {
             XCTAssertFalse(prompt.contains("llm-doc"))
             XCTAssertTrue(prompt.contains("the Input") && prompt.contains("the Output"))
         }
@@ -142,7 +143,8 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
 
     private static let refactorKeysInRunOrder = ["refactor-structure", "refactor-setup", "refactor-structure-check",
         "refactor-graph", "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write",
-        "refactor-test-baseline", "refactor-apply", "refactor-test", "refactor-ledger", "refactor-graph-check"]
+        "refactor-test-baseline", "refactor-apply", "refactor-conform", "refactor-test", "refactor-ledger",
+        "refactor-graph-check"]
 
     /// A project saved with the three-stage Refactoring loop (revision 2, the user's
     /// `make test` on the test stage) upgrades into the full pipeline IN RUN ORDER:
@@ -167,7 +169,7 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
         let stages = LoopStage.runOrder(try XCTUnwrap(ensured.loops.first {
             $0.defaultKey == LoopDefaultLoopKey.refactor }).config.stages)
         XCTAssertEqual(stages.compactMap(\.defaultKey), Self.refactorKeysInRunOrder)
-        XCTAssertEqual(stages.map(\.order), Array(0..<13))
+        XCTAssertEqual(stages.map(\.order), Array(0..<14))
         let byKey = Dictionary(uniqueKeysWithValues: stages.map { ($0.defaultKey ?? "", $0) })
         XCTAssertEqual(byKey["refactor-test"]?.command, "make test")
         XCTAssertEqual(byKey["refactor-test-baseline"]?.command, "swift test")
