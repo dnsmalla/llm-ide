@@ -526,6 +526,7 @@ await runProjectEnvironmentInspectorChecks()
 runLoopOutputLayoutChecks()
 runLoopOutputMigrationChecks()
 runTestStandardChecks()
+runRefactorRulesChecks()
 #endif
 
 if failures.isEmpty {

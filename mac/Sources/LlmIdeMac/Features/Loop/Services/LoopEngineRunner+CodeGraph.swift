@@ -34,6 +34,8 @@ extension LoopEngineRunner {
             appendLog(.info, "  [\(stage.name)] snapshot already taken this run")
             return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
         }
+        // Written first so RULES.md exists even when the graph is unavailable.
+        writeRulesDigest(stage, runRoot: runRoot, mainRoot: mainRoot)
         let load = await loadCodeGraph(stage, runRoot: runRoot)
         guard let loaded = load.graph else {
             if graphRescanner == nil {
@@ -59,6 +61,22 @@ extension LoopEngineRunner {
                   + "\(Int(report.counters["cycleCount"] ?? 0)) cycle(s), "
                   + "\(Int(report.counters["filesOver500Count"] ?? 0)) over 500 lines")
         return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
+    }
+
+    /// Writes `RULES.md` beside GRAPH.md. A failure only warns: the rules digest
+    /// helps the agent but must never stop the graph snapshot.
+    private func writeRulesDigest(_ stage: LoopStage, runRoot: URL, mainRoot: URL) {
+        let planStage = runOrderedStages.first { $0.defaultKey == "refactor-plan" }
+        let checkStage = runOrderedStages.first { $0.defaultKey == "refactor-check" }
+        let testStage = runOrderedStages.first { $0.defaultKey == "refactor-test" }
+        let digest = RefactorRulesCollector.digest(
+            gitRoot: runRoot, inputPath: planStage?.targetPath ?? ".",
+            checkCommand: checkStage?.command, testCommand: testStage?.command)
+        do {
+            try Self.writeGraphFile(Data(digest.utf8), to: LoopOutputLayout.refactorRules, root: mainRoot)
+        } catch {
+            appendLog(.warn, "  [\(stage.name)] could not write RULES.md: \(error.localizedDescription)")
+        }
     }
 
     /// The start of a verify attempt's output when this build has no code graph.

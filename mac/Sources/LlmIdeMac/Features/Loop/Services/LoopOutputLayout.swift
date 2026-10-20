@@ -28,6 +28,8 @@ enum LoopOutputLayout {
     static let refactorGraphBefore = "llm-doc/loop/refactor/graph/before.json"
     static let refactorGraphAfter = "llm-doc/loop/refactor/graph/after.json"
     static let refactorGraphMD = "llm-doc/loop/refactor/GRAPH.md"
+    /// The target project's own rules, digested by `RefactorRulesCollector` for the plan/apply stages.
+    public static let refactorRules = "llm-doc/loop/refactor/RULES.md"
     static let refactorGraphDelta = "llm-doc/loop/refactor/GRAPH-DELTA.md"
     /// The next refactor batch, written by the runner for the test writer (`refactor-test-write`).
     static let refactorNextBatch = "llm-doc/loop/refactor/NEXT-BATCH.md"
