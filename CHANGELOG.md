@@ -94,6 +94,20 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Changed
 
+- **Test loop follows the company test guideline (Mac).** TEST-MAP.md sorts untested files by the code
+  classification matrix (Unit-test candidates, Integration-test candidates, Refactor first, Not tested by
+  policy), and Test Write takes the first unit-test candidate and writes business-behaviour tests through
+  public calls only (not one test per function, no private members or internal state, inputs built in
+  memory, only external boundaries mocked). Test Setup creates the layered Python layout (`tests/unit/`
+  mirroring the source, `testpaths = tests/unit tests/integration`) and never creates empty folders or
+  files; a layered root's suite command skips `tests/performance`, and `analysis/` is never a test target.
+  Test Map Check is advisory: coverage counters are reported, not enforced. A new advisory **Test Prune**
+  stage lists tests worth deleting in `llm-doc/loop/test/TEST-PRUNE.md` and never deletes anything; the
+  Test Map stage editor offers **Prune** for custom loops. Saved Test loops gain Test Prune on load, and the
+  Test Setup, Test Write and Refactor Setup prompts move to revision 2 only where the user never edited
+  them (an edited prompt shows "update available"). The kit's `test-gap-writer` and
+  `test-structure-setup` skills carry the same contract (agent-kit branch `feature/test-guideline-skills`).
+
 - **Settings: tiers replace the default provider (Mac).** Model Providers now only connects providers
   (keys, Check CLI, readiness); the ◉ default, the Default model and the Planning / Coding / Reviewing /
   Documents model pickers are gone, and so is Custom Providers' "Code Assistant provider" picker. Tier

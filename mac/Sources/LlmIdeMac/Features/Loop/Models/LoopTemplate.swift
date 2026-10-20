@@ -378,8 +378,9 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
 
     /// The Test default loop's recipe (`LoopDefaultLoopKey.test`): check the test
     /// structure, set one up when missing, rank untested functions from the code
-    /// graph, write tests for one file, run the suite, record failures, re-map.
-    /// Prompts are shared with the default loop so the two cannot drift.
+    /// graph, write tests for one file, run the suite, record failures, re-map,
+    /// and list tests worth deleting (advisory, never deletes). Prompts are
+    /// shared with the default loop so the two cannot drift.
     static let testGrowth = LoopTemplate(
         id: UUID(uuidString: "1E7B0A00-0000-4000-8000-0000000000AC")!,
         name: "Test Growth",
@@ -401,7 +402,8 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 LoopStage(name: "Test", kind: .shellCommand,
                           command: detectedTestCommand, order: 5),
                 LoopStage(name: "Test Ledger", kind: .testMap, order: 6, testOp: .ledger),
-                LoopStage(name: "Test Map Check", kind: .testMap, order: 7, testOp: .map)
+                LoopStage(name: "Test Map Check", kind: .testMap, order: 7, testOp: .map),
+                LoopStage(name: "Test Prune", kind: .testMap, order: 8, severity: .advisory, testOp: .prune)
             ],
             maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)

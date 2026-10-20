@@ -366,6 +366,7 @@ struct NewLoopWizardView: View {
                     Text("Structure").tag(TestMapOp.structure)
                     Text("Map").tag(TestMapOp.map)
                     Text("Ledger").tag(TestMapOp.ledger)
+                    Text("Prune").tag(TestMapOp.prune)
                 }
             case .codeGraph:
                 Picker("Operation", selection: Binding(

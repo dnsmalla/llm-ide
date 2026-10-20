@@ -770,6 +770,7 @@ public enum LoopStageDetector {
         "test-ledger": LoopDefaultLoopKey.test,
         "test-structure-check": LoopDefaultLoopKey.test,
         "test-map-check": LoopDefaultLoopKey.test,
+        "test-prune": LoopDefaultLoopKey.test,
         "skills": LoopDefaultLoopKey.systemCheck,
         "plugins": LoopDefaultLoopKey.systemCheck,
         "plugins-mcp": LoopDefaultLoopKey.systemCheck,
@@ -954,16 +955,27 @@ public enum LoopStageDetector {
         + "backticked bare symbol name (`searchCodeIndex`); every citation must exist in the code (verify "
         + "with the check-citations / find-code tools when available, else by reading the file)."
 
-    static let testSetupPrompt = "Read the test-structure report at the Input. If it says the structure is "
-        + "missing, create the smallest working test folder and runner for ONE package under the Output "
-        + "path, following the repo's language conventions, with one real test; never edit application "
-        + "source and never add dependencies. If it says ok, change nothing."
+    // The Test Setup / Test Write prompts follow the company test guideline: tests
+    // pin business behaviour through the public interface, so they survive
+    // refactors. A change here is a new shipped revision of `test-setup` /
+    // `test-write` (and `refactor-setup`) in `DefaultRevisionCatalog`.
 
-    static let testWritePrompt = "Read the test map at the Input and the test-structure report next to it. "
-        + "Pick the first untested file that is a plain code module, read it, and create ONE new test file "
-        + "at the path the structure report gives, with real behaviour tests for every untested function "
-        + "listed for that file. Create files only under the test root; never edit the source, existing "
-        + "tests or build config. End with `Covered: <path>`."
+    public static let testSetupPrompt = "Read the test-structure report at the Input. If it says the structure is "
+        + "missing, create the smallest working test layout for ONE package under the Output path, following "
+        + "the repo's language conventions; for Python use tests/unit/ mirroring the source package, with "
+        + "pytest.ini `testpaths = tests/unit tests/integration`, and never create empty folders or files. Add "
+        + "one real test of an existing public behaviour; never edit application source and never add "
+        + "dependencies. If it says ok, change nothing."
+
+    public static let testWritePrompt = "Read the test map at the Input and the test-structure report next to it. "
+        + "Take the first file under \"Unit-test candidates\", read it, and choose the business behaviours its "
+        + "public interface offers — not one test per function; skip it if every function is trivial. Create ONE "
+        + "new test file at the path the structure report gives. Assert observable outputs through public calls "
+        + "only: never call private or underscore members, never check internal state, variable names or call "
+        + "order. Build inputs in memory inside the test (no reading input files); mock only external boundaries "
+        + "such as a solver, network or clock, never the unit itself. Create files only under the test root; "
+        + "never edit the source, existing tests or build config. End with `Covered: <path> — <behaviours>` or "
+        + "`Covered: none — <reason>`."
 
     private static func testStages(gitRoot: URL) -> [LoopStage] {
         let command = detectTestCommand(gitRoot: gitRoot)
@@ -990,6 +1002,9 @@ public enum LoopStageDetector {
                                     defaultKey: "test-ledger", testOp: .ledger))
             stages.append(LoopStage(name: "Test Map Check", kind: .testMap, order: 7, isDefault: true,
                                     defaultKey: "test-map-check", testOp: .map))
+            // Advisory: lists tests worth deleting (TEST-PRUNE.md); never deletes anything.
+            stages.append(LoopStage(name: "Test Prune", kind: .testMap, order: 8, isDefault: true,
+                                    defaultKey: "test-prune", severity: .advisory, testOp: .prune))
         } else {
             // No runner yet: the writer has nothing to verify against.
             stages[4].enabled = false

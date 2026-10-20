@@ -478,7 +478,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
                                       config: LoopEngineConfig(stages: []))
         let ensured = LoopStageDetector.ensureDefaultStages(in: testLoop, gitRoot: repo)
         XCTAssertEqual(ensured.config.stages.compactMap(\.defaultKey),
-                       ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"])
+                       ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check", "test-prune"])
     }
 
     /// Disabling a stage is the sanctioned escape hatch for a pinned default,
@@ -543,7 +543,7 @@ final class LoopDefaultLoopsTests: XCTestCase {
             .config.stages.compactMap(\.defaultKey), ["regression", "regression-test"])
         XCTAssertEqual(migrated.loop(defaultKey: LoopDefaultLoopKey.test)?
             .config.stages.compactMap(\.defaultKey),
-            ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"])
+            ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check", "test-prune"])
         XCTAssertEqual(migrated.loop(defaultKey: LoopDefaultLoopKey.test)?
             .config.stages.first { $0.defaultKey == "test" }?.command, "make test")
     }

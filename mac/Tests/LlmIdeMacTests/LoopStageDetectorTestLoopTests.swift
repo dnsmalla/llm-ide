@@ -7,7 +7,10 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
     func testOrderWithRunner() throws {
         let root = try TempRepo.make(files: ["Package.swift": pkg])
         let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)
-        XCTAssertEqual(stages.map(\.defaultKey), ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"])
+        XCTAssertEqual(stages.map(\.defaultKey), ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check", "test-prune"])
+        XCTAssertEqual(stages.suffix(2).map(\.name), ["Test Map Check", "Test Prune"])
+        XCTAssertEqual(stages.last?.testOp, .prune)
+        XCTAssertEqual(stages.last?.severity, .advisory)
         XCTAssertEqual(stages[1].enabled, false)
         XCTAssertEqual(stages[4].enabled, true)
         XCTAssertEqual(stages[6].testOp, .ledger)
@@ -20,6 +23,7 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         XCTAssertEqual(stages[1].enabled, true)
         XCTAssertEqual(stages[4].enabled, false)
         XCTAssertEqual(stages[4].disabledByDetection, true)
+        XCTAssertFalse(stages.contains { $0.name == "Test Prune" })
     }
 
     func testDetectsGoAndCargo() throws {
@@ -39,7 +43,7 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
     }
 
     func testStageKeysRouteToTestLoop() {
-        for key in ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check"] {
+        for key in ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check", "test-prune"] {
             XCTAssertEqual(LoopStageDetector.stageKeyOwner[key], LoopDefaultLoopKey.test, key)
         }
     }
@@ -76,6 +80,8 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         let keys = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root).map(\.name)
         let tpl = try XCTUnwrap(LoopTemplate.builtIns.first { $0.id == LoopTemplate.testGrowth.id })
         XCTAssertEqual(tpl.config.stages.map(\.name), keys)
+        XCTAssertEqual(tpl.config.stages.last?.testOp, .prune)
+        XCTAssertEqual(tpl.config.stages.last?.severity, .advisory)
     }
 
     func testNoRunnerLoopHasNoUnverifiedCodeApply() throws {
@@ -113,8 +119,63 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         XCTAssertTrue(r.loops[0].goal?.hasPrefix("Keep the test suite green and growing") == true)
     }
 
+    func testUpgradedSavedTestLoopGainsGuidelinePromptsAndPrune() throws {
+        let root = try TempRepo.make(files: ["Package.swift": pkg])
+        let saved = try revisionOneTestLoop(root: root)
+        let store = LoopStageDetector.ensureDefaultLoops(in: LoopEngineProjectStore(loops: [saved]), gitRoot: root).store
+        let stages = try XCTUnwrap(store.loop(defaultKey: LoopDefaultLoopKey.test)).config.stages
+        let writer = try XCTUnwrap(stages.first { $0.defaultKey == "test-write" })
+        XCTAssertEqual(writer.prompt, LoopStageDetector.testWritePrompt)
+        XCTAssertEqual(writer.defaultRevision, 2)
+        XCTAssertEqual(stages.first { $0.defaultKey == "test-setup" }?.prompt, LoopStageDetector.testSetupPrompt)
+        XCTAssertEqual(stages.sorted { $0.order < $1.order }.suffix(2).map(\.name), ["Test Map Check", "Test Prune"])
+    }
+
+    func testEditedWritePromptIsNotUpgraded() throws {
+        let root = try TempRepo.make(files: ["Package.swift": pkg])
+        var saved = try revisionOneTestLoop(root: root)
+        let index = try XCTUnwrap(saved.config.stages.firstIndex { $0.defaultKey == "test-write" })
+        saved.config.stages[index].prompt = "Write tests my way."
+        let result = LoopStageDetector.upgradingDefaultRevisions(in: [saved], gitRoot: root)
+        let writer = try XCTUnwrap(result.loops[0].config.stages.first { $0.defaultKey == "test-write" })
+        XCTAssertEqual(writer.prompt, "Write tests my way.")
+        XCTAssertEqual(writer.defaultRevision, 1)
+        XCTAssertTrue(LoopStageDetector.updateAvailable(for: writer))
+    }
+
+    func testWritePromptFollowsGuideline() {
+        let prompt = LoopStageDetector.testWritePrompt
+        XCTAssertTrue(prompt.contains("Unit-test candidates"))
+        XCTAssertTrue(prompt.contains("public calls"))
+        XCTAssertTrue(prompt.contains("not one test per function"))
+        XCTAssertFalse(prompt.contains("every untested function"))
+        XCTAssertTrue(LoopStageDetector.testSetupPrompt.contains("never create empty folders or files"))
+    }
+
+    /// The Test loop's revision lives on its per-stage keys: the upgrade reads
+    /// `current(stage.defaultKey)`, so `test` (the shell Test stage) stays at 2.
     func testRevisionBumped() {
         XCTAssertEqual(DefaultRevisionCatalog.shipped.current("test"), 2)
+        XCTAssertEqual(DefaultRevisionCatalog.shipped.current("test-write"), 2)
+        XCTAssertEqual(DefaultRevisionCatalog.shipped.current("test-setup"), 2)
+        XCTAssertEqual(DefaultRevisionCatalog.shipped.current("refactor-setup"), 2)
+        XCTAssertEqual(DefaultRevisionCatalog.shipped.history["test-write"]?[1]?.prompt?.contains("every untested function"), true)
+        XCTAssertNotEqual(DefaultRevisionCatalog.shipped.history["test-setup"]?[1]?.prompt, LoopStageDetector.testSetupPrompt)
+    }
+
+    /// A Test loop as the previous build saved it: no Test Prune and the
+    /// revision-1 Setup/Write content.
+    private func revisionOneTestLoop(root: URL) throws -> LoopDefinition {
+        var loop = try XCTUnwrap(LoopStageDetector.defaultLoops(gitRoot: root).first { $0.defaultKey == LoopDefaultLoopKey.test })
+        loop.config.stages = loop.config.stages.filter { $0.defaultKey != "test-prune" }.map { stage in
+            var copy = stage
+            if let key = stage.defaultKey, key == "test-write" || key == "test-setup" {
+                copy.prompt = DefaultRevisionCatalog.shipped.history[key]?[1]?.prompt
+                copy.defaultRevision = 1
+            }
+            return copy
+        }
+        return loop
     }
 }
 

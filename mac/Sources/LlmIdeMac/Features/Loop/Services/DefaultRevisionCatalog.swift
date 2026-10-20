@@ -26,7 +26,12 @@ struct DefaultRevisionCatalog {
             .merging(["test": 2]) { a, _ in a }
             // Revision 3 of the Refactoring plan and apply stages: the premium loop's prompts.
             // Revision 2 of its test stage: it records its detected command as provenance.
-            .merging(["refactor-plan": 3, "refactor-apply": 3, "refactor-test": 2]) { _, new in new },
+            .merging(["refactor-plan": 3, "refactor-apply": 3, "refactor-test": 2]) { _, new in new }
+            // Revision 2 of the Test Setup / Test Write prompts: the company test guideline
+            // (behaviours through public calls, layered Python layout). Refactor Setup shares
+            // the setup prompt. The loop's new Test Prune stage needs no revision: pinning
+            // appends any missing default stage on load.
+            .merging(["test-write": 2, "test-setup": 2, "refactor-setup": 2]) { _, new in new },
         history: [
             "test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 0)],
             "plan-structure-index": [1: LoopStage(
@@ -72,6 +77,18 @@ struct DefaultRevisionCatalog {
             // Revision 2 of the test stage: it records its detected command as provenance
             // (`detectedCommand`); its content is unchanged from revision 1.
             "refactor-test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 2)],
+            "test-setup": [1: LoopStage(
+                name: "Test Setup", kind: .skill, order: 1, skillId: "skills/test-structure-setup",
+                targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
+                prompt: testSetupPromptRevision1)],
+            "test-write": [1: LoopStage(
+                name: "Test Write", kind: .skill, order: 4, skillId: "skills/test-gap-writer",
+                targetPath: LoopOutputLayout.testMapMD, outputPath: ".",
+                prompt: testWritePromptRevision1)],
+            "refactor-setup": [1: LoopStage(
+                name: "Refactor Setup", kind: .skill, order: 1, skillId: "skills/test-structure-setup",
+                targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
+                prompt: testSetupPromptRevision1)],
             "doc-index": [1: LoopStage(
                 name: "Doc Index", kind: .skill, order: 0,
                 skillId: "skills/doc-structure-index",
@@ -112,6 +129,19 @@ struct DefaultRevisionCatalog {
         + "batch done in the plan with a one-line note — or skipped with the reason when it cannot be done "
         + "safely. Never touch more than that batch, and never commit. With no todo batch left, change "
         + "nothing."
+
+    /// Frozen revision-1 Test Setup / Test Write texts (shipped with the Test loop).
+    private static let testSetupPromptRevision1 = "Read the test-structure report at the Input. If it says the "
+        + "structure is missing, create the smallest working test folder and runner for ONE package under the "
+        + "Output path, following the repo's language conventions, with one real test; never edit application "
+        + "source and never add dependencies. If it says ok, change nothing."
+
+    private static let testWritePromptRevision1 = "Read the test map at the Input and the test-structure report "
+        + "next to it. Pick the first untested file that is a plain code module, read it, and create ONE new test "
+        + "file at the path the structure report gives, with real behaviour tests for every untested function "
+        + "listed for that file. Create files only under the test root; never edit the source, existing tests or "
+        + "build config. End with `Covered: <path>`."
+
     func current(_ key: String) -> Int { currentRevisions[key] ?? 1 }
 }
 

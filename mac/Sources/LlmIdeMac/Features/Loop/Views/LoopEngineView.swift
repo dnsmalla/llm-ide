@@ -915,6 +915,7 @@ struct LoopEngineView: View {
                     Text("Structure").tag(TestMapOp.structure)
                     Text("Map").tag(TestMapOp.map)
                     Text("Ledger").tag(TestMapOp.ledger)
+                    Text("Prune").tag(TestMapOp.prune)
                 }
             } else if stage.wrappedValue.kind == .codeGraph {
                 Picker("Operation", selection: Binding(

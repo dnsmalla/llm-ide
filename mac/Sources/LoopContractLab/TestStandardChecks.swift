@@ -29,6 +29,7 @@ func runTestStandardChecks() {
 
     runLayeredLayoutChecks()
     runPruneChecks()
+    runTestContractChecks()
 }
 
 private func makeLayoutFixture(_ files: [String]) -> URL {
