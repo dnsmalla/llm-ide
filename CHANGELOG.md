@@ -105,7 +105,11 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   stage lists tests worth deleting in `llm-doc/loop/test/TEST-PRUNE.md` and never deletes anything; the
   Test Map stage editor offers **Prune** for custom loops. Saved Test loops gain Test Prune on load, and the
   Test Setup, Test Write and Refactor Setup prompts move to revision 2 only where the user never edited
-  them (an edited prompt shows "update available"). The kit's `test-gap-writer` and
+  them (an edited prompt shows "update available"). The loop's goal and acceptance criteria, which the
+  repair agent reads, now name behaviour (green suite, outputs asserted through public calls, a `Covered:`
+  line) instead of a falling untested-function count; unedited saved texts are brought forward. The
+  Refactoring loop's Refactor Test Write prompt (revision 2) secures one end-to-end before/after test
+  first, then pins each listed file's outputs through public calls. The kit's `test-gap-writer` and
   `test-structure-setup` skills carry the same contract (agent-kit branch `feature/test-guideline-skills`).
 
 - **Settings: tiers replace the default provider (Mac).** Model Providers now only connects providers

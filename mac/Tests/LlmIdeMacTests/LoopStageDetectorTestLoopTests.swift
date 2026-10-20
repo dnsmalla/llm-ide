@@ -71,8 +71,13 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
 
     func testContractMentionsLedgerAndMap() throws {
         let c = try XCTUnwrap(LoopStageDetector.defaultLoopContract(LoopDefaultLoopKey.test))
-        XCTAssertTrue(c.goal.hasPrefix("Keep the test suite green and growing"))
-        XCTAssertTrue(c.acceptance.contains("untestedFunctions in TEST-MAP.md"))
+        XCTAssertTrue(c.goal.contains("Unit-test candidates"))
+        XCTAssertTrue(c.acceptance.contains("public calls") && c.acceptance.contains("Covered:"))
+        XCTAssertTrue(c.acceptance.contains("fault"))
+        for text in [c.goal, c.acceptance] {
+            XCTAssertFalse(text.contains("untestedFunctions"))
+            XCTAssertFalse(text.lowercased().contains("untested functions"))
+        }
     }
 
     func testTemplateMatchesLoop() throws {
@@ -116,7 +121,33 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         loop.goal = "Keep this project's own test suite green."
         loop.acceptanceCriteria = "The test command exits 0 with no failures."
         let r = LoopStageDetector.upgradingDefaultRevisions(in: [loop], gitRoot: root)
-        XCTAssertTrue(r.loops[0].goal?.hasPrefix("Keep the test suite green and growing") == true)
+        XCTAssertEqual(r.loops[0].goal, LoopStageDetector.defaultLoopContract(LoopDefaultLoopKey.test)?.goal)
+    }
+
+    /// The coverage-goal text the previous build created Test loops with.
+    private let coverageGoal = "Keep the test suite green and growing: every run adds real tests for the most-used untested functions and records every new failure as a fault."
+    private let coverageAcceptance = "The test command exits 0, untestedFunctions in TEST-MAP.md is lower than at the start of the run when Test Write ran, and every new failure has a fault with a runnable verify command."
+
+    func testUneditedCoverageGoalTextIsUpgraded() throws {
+        let root = try TempRepo.make(files: ["Package.swift": pkg])
+        var loop = try XCTUnwrap(LoopStageDetector.defaultLoops(gitRoot: root).first { $0.defaultKey == LoopDefaultLoopKey.test })
+        loop.goal = coverageGoal
+        loop.acceptanceCriteria = coverageAcceptance
+        let r = LoopStageDetector.upgradingDefaultRevisions(in: [loop], gitRoot: root)
+        let current = try XCTUnwrap(LoopStageDetector.defaultLoopContract(LoopDefaultLoopKey.test))
+        XCTAssertEqual(r.loops[0].goal, current.goal)
+        XCTAssertEqual(r.loops[0].acceptanceCriteria, current.acceptance)
+        XCTAssertTrue(r.changes.contains { $0.stageName == "Goal and acceptance criteria" })
+    }
+
+    func testEditedCoverageGoalTextIsKept() throws {
+        let root = try TempRepo.make(files: ["Package.swift": pkg])
+        var loop = try XCTUnwrap(LoopStageDetector.defaultLoops(gitRoot: root).first { $0.defaultKey == LoopDefaultLoopKey.test })
+        loop.goal = "My own goal."
+        loop.acceptanceCriteria = coverageAcceptance + " Plus a human review."
+        let r = LoopStageDetector.upgradingDefaultRevisions(in: [loop], gitRoot: root)
+        XCTAssertEqual(r.loops[0].goal, "My own goal.")
+        XCTAssertEqual(r.loops[0].acceptanceCriteria, coverageAcceptance + " Plus a human review.")
     }
 
     func testUpgradedSavedTestLoopGainsGuidelinePromptsAndPrune() throws {

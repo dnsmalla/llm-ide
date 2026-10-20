@@ -33,6 +33,15 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
         XCTAssertNotNil(catalog.history["refactor-plan"]?[2])
         XCTAssertNotNil(catalog.history["refactor-apply"]?[2])
         XCTAssertNotNil(catalog.history["refactor-test"]?[1])
+        XCTAssertEqual(catalog.current("refactor-test-write"), 2)
+        XCTAssertEqual(catalog.history["refactor-test-write"]?[1]?.prompt?.contains("every untested function"), true)
+    }
+
+    func testBatchWritePromptFollowsTheSkillsBatchMode() {
+        let prompt = LoopStageDetector.refactorTestWritePrompt
+        XCTAssertFalse(prompt.contains("every untested function"))
+        XCTAssertTrue(prompt.contains("before/after-equality"))
+        XCTAssertTrue(prompt.contains("public calls"))
     }
 
     /// An unedited revision-2 plan stage upgrades; an edited one is left alone.

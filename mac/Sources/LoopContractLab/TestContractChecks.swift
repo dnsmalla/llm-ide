@@ -47,6 +47,47 @@ func runTestContractChecks() {
     expect(!bare.contains { $0.defaultKey == "test-prune" }, "no Test Prune without a runner")
 
     runSavedTestLoopUpgradeChecks(root: root)
+    runTestLoopContractTextChecks(root: root)
+
+    let batch = LoopStageDetector.refactorTestWritePrompt
+    expect(!batch.contains("every untested function"), "Refactor Test Write no longer pins every untested function")
+    expect(batch.contains("before/after-equality") && batch.contains("public calls"),
+           "Refactor Test Write follows the skill's Batch mode")
+    expect(LoopStageDetector.shippedRevision(key: "refactor-test-write") == 2, "refactor-test-write is shipped at revision 2")
+    expect(LoopStageDetector.shippedStage(key: "refactor-test-write", revision: 1)?.prompt?
+               .contains("every untested function") == true,
+           "revision 1 of Refactor Test Write keeps the exact text users were shipped")
+}
+
+/// The Test loop goal / acceptance text the previous build created loops with.
+private let shippedTestGoalRevision2 = "Keep the test suite green and growing: every run adds real tests for the "
+    + "most-used untested functions and records every new failure as a fault."
+private let shippedTestAcceptanceRevision2 = "The test command exits 0, untestedFunctions in TEST-MAP.md is lower "
+    + "than at the start of the run when Test Write ran, and every new failure has a fault with a runnable verify command."
+
+private func runTestLoopContractTextChecks(root: URL) {
+    guard let fresh = LoopStageDetector.defaultLoops(gitRoot: root)
+        .first(where: { $0.defaultKey == LoopDefaultLoopKey.test }) else {
+        expect(false, "a Test loop exists for a Swift package")
+        return
+    }
+    let text = (fresh.goal ?? "") + " " + (fresh.acceptanceCriteria ?? "")
+    expect(!text.contains("untestedFunctions") && !text.lowercased().contains("untested functions"),
+           "the Test loop's goal and acceptance set no coverage counter as the goal")
+
+    var saved = fresh
+    saved.goal = shippedTestGoalRevision2
+    saved.acceptanceCriteria = shippedTestAcceptanceRevision2
+    let upgraded = LoopStageDetector.ensureDefaultLoops(in: LoopEngineProjectStore(loops: [saved]), gitRoot: root)
+        .store.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }
+    expect(upgraded?.goal == fresh.goal && upgraded?.acceptanceCriteria == fresh.acceptanceCriteria,
+           "an unedited coverage-goal Test loop text is brought to the guideline text")
+
+    var edited = saved
+    edited.acceptanceCriteria = "My own acceptance."
+    let kept = LoopStageDetector.ensureDefaultLoops(in: LoopEngineProjectStore(loops: [edited]), gitRoot: root)
+        .store.loops.first { $0.defaultKey == LoopDefaultLoopKey.test }
+    expect(kept?.acceptanceCriteria == "My own acceptance.", "an edited Test loop acceptance text is kept")
 }
 
 /// A Test loop as the previous build saved it: no Test Prune, and the

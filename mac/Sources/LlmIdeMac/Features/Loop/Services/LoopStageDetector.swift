@@ -1031,11 +1031,14 @@ public enum LoopStageDetector {
         + "touch more than that batch, never commit. End with `Applied: R<n>`."
 
     /// The test writer in batch mode: its Input is the next batch the runner wrote, not a test map.
-    static let refactorTestWritePrompt = "Read the next refactor batch at the Input and create new test files for "
-        + "EVERY file it lists as missing tests, pinning current behaviour. Write them under the Output path, "
-        + "at the paths the test-structure report gives, with real behaviour tests for every untested function "
-        + "listed for each file. Never edit the source, existing tests or build config. End with "
-        + "`Covered: <path>`."
+    public static let refactorTestWritePrompt = "Read the next refactor batch at the Input. First make sure the "
+        + "integration tests (tests/integration/ in a layered layout, else the test root) hold one "
+        + "before/after-equality test that runs the pipeline end to end on the smallest input that reaches the "
+        + "final output; create it if missing. Then, for EVERY file the batch lists as missing tests, create a new "
+        + "test file under the Output path, at the path the test-structure report gives, that pins the file's "
+        + "current observable outputs through public calls only — never pin private helpers or internal state. "
+        + "Never edit the source, existing tests or build config. End with one `Covered: <path> — <behaviours>` "
+        + "line per file."
 
     /// The doc loops' path rule: the repo root ONLY. A doc tree outside the
     /// git tree (the project root's `llm-doc/` in the `code/<repo>` layout) is
@@ -1314,8 +1317,9 @@ public enum LoopStageDetector {
             return ("Find the code behind each known fault and fix it for real, without weakening any test.",
                     "The fault sweep reports no failing faults and the test suite still passes.")
         case LoopDefaultLoopKey.test:
-            return ("Keep the test suite green and growing: every run adds real tests for the most-used untested functions and records every new failure as a fault.",
-                    "The test command exits 0, untestedFunctions in TEST-MAP.md is lower than at the start of the run when Test Write ran, and every new failure has a fault with a runnable verify command.")
+            // Handed to the repair agent, so it names behaviour, never a coverage counter.
+            return ("Keep the test suite green and add behaviour tests for the domain-logic files listed under \"Unit-test candidates\", recording every new failure as a fault.",
+                    "The test command exits 0, every new test asserts observable outputs through public calls, Test Write ended with a `Covered:` line, and every new failure has a fault with a runnable verify command.")
         case LoopDefaultLoopKey.systemCheck:
             return ("Keep every subsystem of this project passing its own checks.",
                     "Every enabled subsystem check exits 0.")
@@ -1345,6 +1349,19 @@ public enum LoopStageDetector {
         default:
             return nil
         }
+    }
+
+    /// Every earlier goal / acceptance text a default loop was created with. Only
+    /// a loop whose text still EQUALS one of these is brought forward — the user
+    /// owns an edited text and nothing rewrites it.
+    static func legacyLoopContracts(_ loopKey: String) -> [(goal: String, acceptance: String)] {
+        var contracts = legacyLoopContract(loopKey).map { [$0] } ?? []
+        if loopKey == LoopDefaultLoopKey.test {
+            // The Test loop's coverage-goal text (before the test-guideline alignment).
+            contracts.append(("Keep the test suite green and growing: every run adds real tests for the most-used untested functions and records every new failure as a fault.",
+                              "The test command exits 0, untestedFunctions in TEST-MAP.md is lower than at the start of the run when Test Write ran, and every new failure has a fault with a runnable verify command."))
+        }
+        return contracts
     }
 
     /// The goal / acceptance text a default loop was created with before stage

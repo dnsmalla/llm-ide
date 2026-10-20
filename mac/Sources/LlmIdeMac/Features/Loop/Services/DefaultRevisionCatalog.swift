@@ -29,9 +29,10 @@ struct DefaultRevisionCatalog {
             .merging(["refactor-plan": 3, "refactor-apply": 3, "refactor-test": 2]) { _, new in new }
             // Revision 2 of the Test Setup / Test Write prompts: the company test guideline
             // (behaviours through public calls, layered Python layout). Refactor Setup shares
-            // the setup prompt. The loop's new Test Prune stage needs no revision: pinning
-            // appends any missing default stage on load.
-            .merging(["test-write": 2, "test-setup": 2, "refactor-setup": 2]) { _, new in new },
+            // the setup prompt; Refactor Test Write follows the skill's Batch mode. The Test
+            // loop's new Test Prune stage needs no revision: pinning appends any missing
+            // default stage on load.
+            .merging(["test-write": 2, "test-setup": 2, "refactor-setup": 2, "refactor-test-write": 2]) { _, new in new },
         history: [
             "test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 0)],
             "plan-structure-index": [1: LoopStage(
@@ -89,6 +90,10 @@ struct DefaultRevisionCatalog {
                 name: "Refactor Setup", kind: .skill, order: 1, skillId: "skills/test-structure-setup",
                 targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
                 prompt: testSetupPromptRevision1)],
+            "refactor-test-write": [1: LoopStage(
+                name: "Refactor Test Write", kind: .skill, order: 7, skillId: "skills/test-gap-writer",
+                targetPath: LoopOutputLayout.refactorNextBatch, outputPath: ".",
+                prompt: refactorTestWritePromptRevision1)],
             "doc-index": [1: LoopStage(
                 name: "Doc Index", kind: .skill, order: 0,
                 skillId: "skills/doc-structure-index",
@@ -141,6 +146,13 @@ struct DefaultRevisionCatalog {
         + "file at the path the structure report gives, with real behaviour tests for every untested function "
         + "listed for that file. Create files only under the test root; never edit the source, existing tests or "
         + "build config. End with `Covered: <path>`."
+
+    /// Frozen revision-1 Refactor Test Write text (shipped with the premium Refactoring loop).
+    private static let refactorTestWritePromptRevision1 = "Read the next refactor batch at the Input and create new "
+        + "test files for EVERY file it lists as missing tests, pinning current behaviour. Write them under the "
+        + "Output path, at the paths the test-structure report gives, with real behaviour tests for every untested "
+        + "function listed for each file. Never edit the source, existing tests or build config. End with "
+        + "`Covered: <path>`."
 
     func current(_ key: String) -> Int { currentRevisions[key] ?? 1 }
 }
@@ -244,13 +256,15 @@ extension LoopStageDetector {
                (loopKey == LoopDefaultLoopKey.test
                     ? updated.config.stages.contains { $0.defaultKey == "test-write" }
                     : updated.config.stages.contains(where: isCoupled)),
-               let legacy = legacyLoopContract(loopKey), let current = defaultLoopContract(loopKey) {
+               let current = defaultLoopContract(loopKey) {
+                let legacy = legacyLoopContracts(loopKey)
                 var textChanged = false
-                if updated.goal == legacy.goal, legacy.goal != current.goal {
+                if let goal = updated.goal, goal != current.goal, legacy.contains(where: { $0.goal == goal }) {
                     updated.goal = current.goal
                     textChanged = true
                 }
-                if updated.acceptanceCriteria == legacy.acceptance, legacy.acceptance != current.acceptance {
+                if let acceptance = updated.acceptanceCriteria, acceptance != current.acceptance,
+                   legacy.contains(where: { $0.acceptance == acceptance }) {
                     updated.acceptanceCriteria = current.acceptance
                     textChanged = true
                 }
