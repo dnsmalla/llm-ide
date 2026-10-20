@@ -21,6 +21,12 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
     /// built-in useless in the common case, since the test stage is the point.
     static let detectedTestCommand = "<detected-test-command>"
 
+    /// Sentinel command for the Refactoring template's Check Baseline / Check
+    /// stages, replaced at apply time by `LoopStageDetector.detectCheckCommand`
+    /// — or dropped, with every stage that needs a verify after it, when the
+    /// target repo has no detectable test AND check tooling (§3.3).
+    static let detectedCheckCommand = "<detected-check-command>"
+
     var id: UUID = UUID()
     var name: String
     /// One line describing what a run of this loop does. Shown in the picker and
@@ -39,6 +45,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
     /// `LoopStageDetector` owns that flag — it re-pins the real defaults on load.
     func applied(to gitRoot: URL?) -> LoopEngineConfig {
         let detected = gitRoot.flatMap { LoopStageDetector.detectTestCommand(gitRoot: $0) }
+        let detectedCheck = gitRoot.flatMap { LoopStageDetector.detectCheckCommand(gitRoot: $0) }
         var result = config
         result.stages = config.stages.compactMap { stage -> LoopStage? in
             var copy = stage
@@ -49,6 +56,12 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 // stage whose command is a placeholder that could never run.
                 guard let detected else { return nil }
                 copy.command = detected
+            } else if copy.command == Self.detectedCheckCommand {
+                // Check Baseline / Check exist only when BOTH a test command
+                // AND a check command are detected (§3.3) — the same rule
+                // `LoopStageDetector.refactorStages` applies.
+                guard let detected, let detectedCheck else { return nil }
+                copy.command = detectedCheck
             }
             return copy
         }
@@ -337,14 +350,21 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           prompt: LoopStageDetector.refactorTestWritePrompt),
                 LoopStage(name: "Test Baseline", kind: .shellCommand,
                           command: detectedTestCommand, order: 8, allowsRepair: false),
-                LoopStage(name: "Refactor Apply", kind: .skill, order: 9,
+                // Red here means the lint/type rules were already broken before
+                // this batch — repairing them would chase unrelated code, so
+                // this stage may not repair either (same rule as Test Baseline).
+                LoopStage(name: "Check Baseline", kind: .shellCommand,
+                          command: detectedCheckCommand, order: 9, allowsRepair: false),
+                LoopStage(name: "Refactor Apply", kind: .skill, order: 10,
                           skillId: "skills/refactor-apply",
                           targetPath: LoopOutputLayout.refactorPlan, outputPath: ".",
                           prompt: LoopStageDetector.refactorApplyPrompt),
+                LoopStage(name: "Check", kind: .shellCommand,
+                          command: detectedCheckCommand, order: 11),
                 LoopStage(name: "Test", kind: .shellCommand,
-                          command: detectedTestCommand, order: 10),
-                LoopStage(name: "Test Ledger", kind: .testMap, order: 11, testOp: .ledger),
-                LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: 12, graphOp: .verify)
+                          command: detectedTestCommand, order: 12),
+                LoopStage(name: "Test Ledger", kind: .testMap, order: 13, testOp: .ledger),
+                LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: 14, graphOp: .verify)
             ],
             maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)

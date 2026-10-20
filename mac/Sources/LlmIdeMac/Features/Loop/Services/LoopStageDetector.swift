@@ -189,6 +189,8 @@ public enum LoopStageDetector {
         switch key {
         case "test", "regression-test", "refactor-test", "refactor-test-baseline":
             return detectTestCommand(gitRoot: gitRoot)
+        case "refactor-check", "refactor-check-baseline":
+            return detectCheckCommand(gitRoot: gitRoot)
         case "self-heal-verify":
             // Gated on the LLM-IDE checkout, not just the script's presence —
             // otherwise any repo shipping this script name would auto-approve
@@ -377,6 +379,8 @@ public enum LoopStageDetector {
                 backfillProvenance = def.defaultKey == "test" || def.defaultKey == "regression-test"
                     || def.defaultKey == "refactor-test"
                     || def.defaultKey == "refactor-test-baseline"
+                    || def.defaultKey == "refactor-check"
+                    || def.defaultKey == "refactor-check-baseline"
             } else if def.kind == .regressionSweep {
                 // The Regression sweep never carries a command (it is not a
                 // `.shellCommand` stage at all), so kind alone is unambiguous
@@ -587,6 +591,52 @@ public enum LoopStageDetector {
         return nil
     }
 
+    /// The project's mechanical-check command — lint / type-check, never the
+    /// test suite — or `nil` when nothing is recognised. Backs the Refactoring
+    /// loop's Check Baseline and Check stages (design doc §3.3): a batch that
+    /// compiles and passes its tests can still violate the project's own lint
+    /// or type rules, and only this command catches that.
+    ///
+    /// First matching family wins (never combined across families); within a
+    /// family every match found joins with `&&` so, e.g., a Makefile with both
+    /// `lint` and `typecheck` targets runs both every iteration. Swift/Rust are
+    /// deliberately absent: `detectTestCommand` already compiles everything
+    /// those toolchains have to offer, so a separate check stage would add
+    /// nothing.
+    public static func detectCheckCommand(gitRoot: URL) -> String? {
+        let fm = FileManager.default
+
+        if let makefile = try? String(contentsOf: gitRoot.appendingPathComponent("Makefile"), encoding: .utf8) {
+            let scannable = strippingDefineBlocks(makefile)
+            let targets = ["check", "lint", "typecheck", "type-check"].filter { target in
+                scannable.range(of: "(?m)^\(target):", options: .regularExpression) != nil
+            }
+            if !targets.isEmpty {
+                return targets.map { "make \($0)" }.joined(separator: " && ")
+            }
+        }
+
+        if let data = try? Data(contentsOf: gitRoot.appendingPathComponent("package.json")),
+           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+           let scripts = obj["scripts"] as? [String: Any] {
+            let names = ["lint", "typecheck", "type-check"].filter { scripts[$0] != nil }
+            if !names.isEmpty {
+                return names.map { "npm run \($0)" }.joined(separator: " && ")
+            }
+        }
+
+        let pyproject = try? String(contentsOf: gitRoot.appendingPathComponent("pyproject.toml"), encoding: .utf8)
+        var pythonChecks: [String] = []
+        if pyproject?.contains("[tool.ruff]") == true { pythonChecks.append("ruff check .") }
+        let hasMypyIni = fm.fileExists(atPath: gitRoot.appendingPathComponent("mypy.ini").path)
+        if hasMypyIni || pyproject?.contains("[tool.mypy]") == true { pythonChecks.append("mypy .") }
+        if !pythonChecks.isEmpty { return pythonChecks.joined(separator: " && ") }
+
+        if fm.fileExists(atPath: gitRoot.appendingPathComponent("go.mod").path) { return "go vet ./..." }
+
+        return nil
+    }
+
     /// One suggested command for the stage editor's "Suggestions" picker,
     /// with a short label naming where it came from.
     ///
@@ -792,6 +842,8 @@ public enum LoopStageDetector {
         "refactor-plan-check": LoopDefaultLoopKey.refactor,
         "refactor-test-write": LoopDefaultLoopKey.refactor,
         "refactor-test-baseline": LoopDefaultLoopKey.refactor,
+        "refactor-check-baseline": LoopDefaultLoopKey.refactor,
+        "refactor-check": LoopDefaultLoopKey.refactor,
         "refactor-ledger": LoopDefaultLoopKey.refactor,
         "refactor-graph-check": LoopDefaultLoopKey.refactor,
         "refactor-test": LoopDefaultLoopKey.refactor,
@@ -1092,6 +1144,7 @@ public enum LoopStageDetector {
         if let command {
             // The runner's structure setup is redundant once a test command exists.
             stages[1].disabledByDetection = true
+            let checkCommand = detectCheckCommand(gitRoot: gitRoot)
             stages.append(LoopStage(name: "Refactor Test Write", kind: .skill, order: 7,
                                     skillId: "skills/test-gap-writer",
                                     targetPath: LoopOutputLayout.refactorNextBatch, outputPath: ".",
@@ -1101,17 +1154,36 @@ public enum LoopStageDetector {
             stages.append(LoopStage(name: "Test Baseline", kind: .shellCommand, command: command, order: 8,
                                     isDefault: true, defaultKey: "refactor-test-baseline",
                                     detectedCommand: command, allowsRepair: false))
-            stages.append(LoopStage(name: "Refactor Apply", kind: .skill, order: 9,
+            var order = 9
+            if let checkCommand {
+                // Red here means the repo's lint/type rules were already broken
+                // before this batch — repairing them would make the loop chase
+                // unrelated code (anti-goal), so this stage may not repair either.
+                stages.append(LoopStage(name: "Check Baseline", kind: .shellCommand, command: checkCommand,
+                                        order: order, isDefault: true, defaultKey: "refactor-check-baseline",
+                                        detectedCommand: checkCommand, allowsRepair: false))
+                order += 1
+            }
+            stages.append(LoopStage(name: "Refactor Apply", kind: .skill, order: order,
                                     skillId: "skills/refactor-apply",
                                     targetPath: LoopOutputLayout.refactorPlan, outputPath: ".",
                                     prompt: refactorApplyPrompt, isDefault: true,
                                     defaultKey: "refactor-apply"))
-            stages.append(LoopStage(name: "Test", kind: .shellCommand, command: command, order: 10,
+            order += 1
+            if let checkCommand {
+                stages.append(LoopStage(name: "Check", kind: .shellCommand, command: checkCommand,
+                                        order: order, isDefault: true, defaultKey: "refactor-check",
+                                        detectedCommand: checkCommand))
+                order += 1
+            }
+            stages.append(LoopStage(name: "Test", kind: .shellCommand, command: command, order: order,
                                     isDefault: true, defaultKey: "refactor-test",
                                     detectedCommand: command))
-            stages.append(LoopStage(name: "Test Ledger", kind: .testMap, order: 11, isDefault: true,
+            order += 1
+            stages.append(LoopStage(name: "Test Ledger", kind: .testMap, order: order, isDefault: true,
                                     defaultKey: "refactor-ledger", testOp: .ledger))
-            stages.append(LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: 12, isDefault: true,
+            order += 1
+            stages.append(LoopStage(name: "Refactor Graph Check", kind: .codeGraph, order: order, isDefault: true,
                                     defaultKey: "refactor-graph-check", graphOp: .verify))
         }
         return stages
@@ -1484,6 +1556,8 @@ public enum LoopStageDetector {
             stage.defaultKey == "test" || stage.defaultKey == "regression-test"
                 || stage.defaultKey == "refactor-test"
                 || stage.defaultKey == "refactor-test-baseline"
+                || stage.defaultKey == "refactor-check"
+                || stage.defaultKey == "refactor-check-baseline"
         }
         let loadedTestStageIDs: Set<String> = Set(loadedTestStages.map { (stage: LoopStage) -> String in stage.id })
 
@@ -1702,16 +1776,28 @@ public enum LoopStageDetector {
     ) -> (loops: [LoopDefinition], changes: [RevalidationChange]) {
         guard let gitRoot else { return (loops, []) }
         let detected = detectTestCommand(gitRoot: gitRoot)
+        // Check Baseline / Check are revalidated against a DIFFERENT detector
+        // (lint/type-check, never the test suite) — see `detectCheckCommand`.
+        let detectedCheck = detectCheckCommand(gitRoot: gitRoot)
 
         func isEligible(_ stage: LoopStage) -> Bool {
             guard stage.isDefault, stage.kind == .shellCommand, let key = stage.defaultKey,
                   key == "test" || key == "regression-test" || key == "refactor-test"
-                  || key == "refactor-test-baseline" else { return false }
-            // Every refactor-test stage ever written carries its provenance
-            // (`refactorStages` always set it), so one without it is a stray or
-            // adopted stage — never rewritten by key alone.
-            if key == "refactor-test" || key == "refactor-test-baseline", stage.detectedCommand == nil { return false }
+                  || key == "refactor-test-baseline" || key == "refactor-check"
+                  || key == "refactor-check-baseline" else { return false }
+            // Every refactor-test / refactor-check stage ever written carries
+            // its provenance (`refactorStages` always set it), so one without
+            // it is a stray or adopted stage — never rewritten by key alone.
+            if key == "refactor-test" || key == "refactor-test-baseline"
+                || key == "refactor-check" || key == "refactor-check-baseline", stage.detectedCommand == nil {
+                return false
+            }
             return eligibleStageIDs.contains(stage.id)
+        }
+
+        // Which detector's answer a given key is revalidated against.
+        func detectedValue(forKey key: String?) -> String? {
+            key == "refactor-check" || key == "refactor-check-baseline" ? detectedCheck : detected
         }
 
         var changes: [RevalidationChange] = []
@@ -1732,12 +1818,13 @@ public enum LoopStageDetector {
                 guard let command = stage.command else { kept.append(stage); continue }
                 // Nil detection is never a reason to drop or change a stage —
                 // see the doc comment. Only a DIFFERENT detected command acts.
-                guard let detected, detected != command else { kept.append(stage); continue }
+                guard let relevantDetected = detectedValue(forKey: stage.defaultKey),
+                      relevantDetected != command else { kept.append(stage); continue }
                 var updatedStage = stage
-                updatedStage.command = detected
-                updatedStage.detectedCommand = detected
+                updatedStage.command = relevantDetected
+                updatedStage.detectedCommand = relevantDetected
                 changes.append(RevalidationChange(loopName: loop.name, stageName: stage.name,
-                                                   kind: .updated(from: command, to: detected)))
+                                                   kind: .updated(from: command, to: relevantDetected)))
                 mutated = true
                 kept.append(updatedStage)
             }

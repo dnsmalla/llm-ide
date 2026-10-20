@@ -20,6 +20,58 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
         XCTAssertEqual(s[1].enabled, true)
         XCTAssertFalse(s.filter(\.enabled).contains { LoopStage.lacksVerifyAfter($0, in: s) })
     }
+    /// A repo with both a test and a check command inserts Check Baseline
+    /// after Test Baseline and Check right before the post-apply Test.
+    func testOrderWithRunnerAndCheckCommand() throws {
+        let root = try TempRepo.make(files: ["Makefile": "test:\n\trun-tests\nlint:\n\tlint-it\n"])
+        let s = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.refactor, gitRoot: root)
+        XCTAssertEqual(s.map(\.defaultKey), [
+            "refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph",
+            "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write",
+            "refactor-test-baseline", "refactor-check-baseline", "refactor-apply", "refactor-check",
+            "refactor-test", "refactor-ledger", "refactor-graph-check",
+        ])
+        let byKey = Dictionary(uniqueKeysWithValues: s.map { ($0.defaultKey ?? "", $0) })
+        XCTAssertEqual(byKey["refactor-check-baseline"]?.allowsRepair, false)
+        XCTAssertEqual(byKey["refactor-check-baseline"]?.detectedCommand, "make lint")
+        XCTAssertTrue(byKey["refactor-check"]?.allowsRepair == true)
+        XCTAssertEqual(byKey["refactor-check"]?.detectedCommand, "make lint")
+        XCTAssertFalse(s.filter(\.enabled).contains { LoopStage.lacksVerifyAfter($0, in: s) })
+    }
+
+    /// A test command with no detectable check command gets neither new stage.
+    func testOrderWithRunnerAndNoCheckCommand() throws {
+        let root = try TempRepo.make(files: ["Makefile": "test:\n\trun-tests\n"])
+        let s = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.refactor, gitRoot: root)
+        XCTAssertFalse(s.map(\.defaultKey).contains("refactor-check-baseline"))
+        XCTAssertFalse(s.map(\.defaultKey).contains("refactor-check"))
+    }
+
+    func testDetectCheckCommandFamilies() throws {
+        let makefileBoth = try TempRepo.make(files: ["Makefile": "check:\n\tverify\nlint:\n\tlint-it\n"])
+        XCTAssertEqual(LoopStageDetector.detectCheckCommand(gitRoot: makefileBoth), "make check && make lint")
+
+        let npmRoot = try TempRepo.make(files: ["package.json": #"{"scripts": {"lint": "eslint .", "type-check": "tsc"}}"#])
+        XCTAssertEqual(LoopStageDetector.detectCheckCommand(gitRoot: npmRoot), "npm run lint && npm run type-check")
+
+        let pythonRoot = try TempRepo.make(files: [
+            "pyproject.toml": "[tool.ruff]\nline-length = 100\n",
+            "mypy.ini": "[mypy]\nstrict = True\n",
+        ])
+        XCTAssertEqual(LoopStageDetector.detectCheckCommand(gitRoot: pythonRoot), "ruff check . && mypy .")
+
+        let goRoot = try TempRepo.make(files: ["go.mod": "module example.com/x\n"])
+        XCTAssertEqual(LoopStageDetector.detectCheckCommand(gitRoot: goRoot), "go vet ./...")
+
+        let swiftOnly = try TempRepo.make(files: ["Package.swift": pkg])
+        XCTAssertNil(LoopStageDetector.detectCheckCommand(gitRoot: swiftOnly))
+
+        let definedAway = try TempRepo.make(files: [
+            "Makefile": "define HELP\ncheck:\n\tnot a real target\nendef\nbuild:\n\tbuild-it\n",
+        ])
+        XCTAssertNil(LoopStageDetector.detectCheckCommand(gitRoot: definedAway))
+    }
+
     func testStillManualOnly() throws {
         let root = try TempRepo.make(files: ["Package.swift": "let p = Package(targets: [.testTarget(name: \"XTests\")])"])
         XCTAssertTrue(LoopStageDetector.defaultLoops(gitRoot: root).first { $0.defaultKey == LoopDefaultLoopKey.refactor }!.isManualOnly)

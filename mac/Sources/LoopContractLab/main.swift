@@ -527,6 +527,7 @@ runLoopOutputLayoutChecks()
 runLoopOutputMigrationChecks()
 runTestStandardChecks()
 runRefactorRulesChecks()
+runRefactorCheckCommandChecks()
 #endif
 
 if failures.isEmpty {
