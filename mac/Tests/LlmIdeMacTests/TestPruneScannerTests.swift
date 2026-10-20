@@ -63,6 +63,33 @@ final class TestPruneScannerTests: XCTestCase {
         XCTAssertEqual(scanner().scan(), [])
     }
 
+    func testHelperFileWithoutMarkerIsNotReported() throws {
+        try put("Sources/Foo.swift", "struct Foo {}\n")
+        try put("Tests/FooTests.swift", asserting)
+        try put("Tests/TestHelpers.swift", "struct Fixture {}\n")
+        try put("Tests/OrphanHelperTests.swift", "struct Orphan {}\n")
+        XCTAssertEqual(scanner().scan(), [])
+    }
+
+    func testRequireCountsAsAssertion() throws {
+        try put("Sources/Foo.swift", "struct Foo {}\n")
+        try put("Tests/FooTests.swift", "@Test func a() throws { _ = try #require(Optional(1)) }\n")
+        XCTAssertEqual(scanner().scan(), [])
+    }
+
+    func testProseIsNotACommentedOutTest() throws {
+        try put("Sources/Foo.swift", "struct Foo {}\n")
+        try put("Tests/FooTests.swift", "func testA() { XCTAssertTrue(true) }\n// it(s fine)\n")
+        XCTAssertEqual(scanner().scan(), [])
+    }
+
+    func testBuildProductDirsAreIgnored() throws {
+        try put("Sources/Foo.swift", "struct Foo {}\n")
+        try put("Tests/FooTests.swift", asserting)
+        try put(".build-lite/Tests/BarTests.swift", asserting)
+        XCTAssertEqual(scanner().scan(), [])
+    }
+
     func testScanNeverDeletes() throws {
         try put("Tests/BarTests.swift", "func testA() {}\n")
         let target = scanner()

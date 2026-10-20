@@ -175,6 +175,15 @@ private func runPruneChecks() {
            "prune flags a test whose source is gone")
     expect(!found.contains { $0.path == "Tests/BarTests.swift" && $0.reason == .noAssertion },
            "prune leaves an asserting test alone")
+    put("Tests/HelperOnly.swift", "struct Fixture {}\n")
+    put("Tests/ReqTests.swift", "@Test func a() throws { _ = try #require(Optional(1)) }\n// it(s fine)\n")
+    put("Sources/Req.swift", "struct Req {}\n")
+    put(".build-lite/Tests/GhostTests.swift", "func testG() { XCTAssertTrue(true) }\n")
+    let rescanned = scanner.scan()
+    expect(!rescanned.contains { $0.path == "Tests/HelperOnly.swift" }, "prune skips a helper file with no test marker")
+    expect(!rescanned.contains { $0.path == "Tests/ReqTests.swift" },
+           "prune: #require counts as an assertion and `// it(s fine)` is not a commented-out test")
+    expect(!rescanned.contains { $0.path.hasPrefix(".build-lite") }, "prune ignores .build-* directories")
     _ = try? scanner.write(found, outputRoot: root)
     expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Tests/FooTests.swift").path),
            "prune never deletes a test file")

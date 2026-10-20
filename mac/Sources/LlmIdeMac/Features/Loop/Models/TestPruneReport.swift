@@ -6,7 +6,7 @@ public enum TestPruneReason: String, Codable {
 
     var title: String {
         switch self {
-        case .sourceGone: return "Source gone"
+        case .sourceGone: return "No matching source name (check by hand)"
         case .noAssertion: return "No assertion"
         case .commentedOutTest: return "Commented-out test"
         case .gapDuplicate: return "Gap duplicate"

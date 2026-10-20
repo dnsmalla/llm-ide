@@ -11,12 +11,12 @@ public struct TestPruneScanner {
     }
 
     private static let assertionTokens = ["assert", "XCTAssert", "#expect", "expect(", "pytest.raises",
-                                          "t.Error", "t.Fatal", "assert."]
+                                          "t.Error", "t.Fatal", "#require"]
     private static let maxBytes = 2_000_000
     // integration/ and performance/ tests do not mirror a source file.
     private static let unmirroredDirs: Set<String> = ["integration", "performance"]
     private static let commentedTest: NSRegularExpression? = try? NSRegularExpression(
-        pattern: #"^\s*(#|//)\s*(def test_|func test|it\(|test\()"#)
+        pattern: #"^\s*(#|//)\s*(def test_|func test|it\(\s*['"]|test\(\s*['"])"#)
 
     public func scan() -> [TestPruneFinding] {
         let files = allFiles()
@@ -51,6 +51,11 @@ public struct TestPruneScanner {
 
     private func scanFile(_ rel: String, stems: Set<String>, fileSet: Set<String>) -> [TestPruneFinding] {
         var out: [TestPruneFinding] = []
+        let url = gitRoot.appendingPathComponent(rel)
+        guard (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) ?? 0 <= Self.maxBytes,
+              let text = try? String(contentsOf: url, encoding: .utf8),
+              // Helper files carry no tests, so none of the findings apply to them.
+              TestSourceMapper.containsTestMarker(text) else { return out }
         let dirs = rel.split(separator: "/").dropLast().map(String.init)
         if !dirs.contains(where: { Self.unmirroredDirs.contains($0) }),
            let stem = TestSourceMapper.sourceStem(forTestPath: rel), !stems.contains(stem) {
@@ -59,10 +64,7 @@ public struct TestPruneScanner {
         if let sibling = nonGapSibling(of: rel), fileSet.contains(sibling) {
             out.append(TestPruneFinding(path: rel, reason: .gapDuplicate))
         }
-        let url = gitRoot.appendingPathComponent(rel)
-        guard (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize ?? 0) ?? 0 <= Self.maxBytes,
-              let text = try? String(contentsOf: url, encoding: .utf8) else { return out }
-        if TestSourceMapper.containsTestMarker(text), !Self.assertionTokens.contains(where: text.contains) {
+        if !Self.assertionTokens.contains(where: text.contains) {
             out.append(TestPruneFinding(path: rel, reason: .noAssertion))
         }
         if let rx = Self.commentedTest {
@@ -103,7 +105,11 @@ public struct TestPruneScanner {
         guard let en = FileManager.default.enumerator(at: gitRoot, includingPropertiesForKeys: [.isRegularFileKey]) else { return out }
         let base = gitRoot.resolvingSymlinksInPath().path
         for case let url as URL in en {
-            if TestSourceMapper.excludedDirs.contains(url.lastPathComponent) { en.skipDescendants(); continue }
+            let name = url.lastPathComponent
+            // Build products (.build, .build-lite, ...) are ~1 GB each and never hold sources or tests.
+            if TestSourceMapper.excludedDirs.contains(name) || name.hasPrefix(".build") {
+                en.skipDescendants(); continue
+            }
             guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
             let path = url.resolvingSymlinksInPath().path
             out.append(path.hasPrefix(base + "/") ? String(path.dropFirst(base.count + 1)) : path)
