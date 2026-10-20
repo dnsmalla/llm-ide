@@ -30,6 +30,7 @@ func runTestStandardChecks() {
     runLayeredLayoutChecks()
     runPruneChecks()
     runCollaboratorChecks()
+    runCandidateChecks()
     runTestContractChecks()
 }
 
@@ -72,6 +73,22 @@ private func runCollaboratorChecks() {
            "a file with only external imports is a unit-test candidate")
     expect(map.entries.first { $0.path == "logic/hub.py" }?.quadrant == .overComplex,
            "imports that resolve to graph files still count as collaborators")
+}
+
+private func runCandidateChecks() {
+    let entries = [
+        TestMapEntry(path: "logic/covered.py", function: "public_rule", line: 1, fanIn: 9, loc: 120,
+                     testedBy: ["tests/test_covered.py"], quadrant: .domainLogic),
+        TestMapEntry(path: "logic/covered.py", function: "helper", line: 20, fanIn: 9, loc: 120,
+                     testedBy: [], quadrant: .domainLogic),
+        TestMapEntry(path: "logic/fresh.py", function: "rule", line: 1, fanIn: 1, loc: 120,
+                     testedBy: [], quadrant: .domainLogic),
+    ]
+    let map = TestMap(generatedAt: Date(), source: "graph", entries: entries,
+                      untestedFunctions: 2, testedFunctions: 1, untestedFiles: 1)
+    let unit = unitSection(map.render())
+    expect(!unit.contains("logic/covered.py"), "a file with a mapped test is not a unit-test candidate")
+    expect(unit.contains("logic/fresh.py"), "a file with no mapped test stays a unit-test candidate")
 }
 
 private func makeLayoutFixture(_ files: [String]) -> URL {

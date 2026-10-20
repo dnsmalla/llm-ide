@@ -211,7 +211,7 @@ A stage is one step of the run (`LoopStage`). Seven kinds are described here; th
 
   | Section in TEST-MAP.md | Quadrant | What the loop does |
   | --- | --- | --- |
-  | `Unit-test candidates (domain logic / algorithms)` | complex, few collaborators | Test Write picks from here |
+  | `Unit-test candidates (domain logic / algorithms)` | complex, few collaborators, and no mapped test yet | Test Write picks from here; it skips a candidate whose test file already exists |
   | `Integration-test candidates (controllers / pipelines)` | glue: view / view-model / router role, or many collaborators | covered by an end-to-end test, not unit tests |
   | `Refactor first (over-complex — no tests until split)` | complex with many collaborators, or 500+ lines | split first, with a regression test as the safety net |
   | `Not tested by policy (trivial)` | small and simple | no tests |

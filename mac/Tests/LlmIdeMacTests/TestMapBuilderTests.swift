@@ -95,6 +95,29 @@ final class TestMapBuilderTests: XCTestCase {
         XCTAssertTrue(unit.contains("logic/pricing.py"))
     }
 
+    /// Tests go through public calls, so a covered file's private helpers never
+    /// read as tested; the file must not stay first in the writer's list forever.
+    func testFileWithAMappedTestIsNotAUnitTestCandidate() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        let rules = ["apply", "helperA", "helperB", "helperC"].enumerated()
+            .map { "{\"name\":\"\($1)\",\"line\":\($0 + 1)}" }.joined(separator: ",")
+        let fresh = (1...4).map { "{\"name\":\"fresh\($0)\",\"line\":\($0)}" }.joined(separator: ",")
+        let graph = """
+        {"version":"1.0","files":[
+          {"path":"Sources/Rules.swift","name":"Rules.swift","language":"swift","loc":120,"role":"service","functions":[\(rules)]},
+          {"path":"Sources/Fresh.swift","name":"Fresh.swift","language":"swift","loc":120,"role":"service","functions":[\(fresh)]}]}
+        """
+        try write(root, ["system/graph/graph.json": graph, "Sources/Rules.swift": "", "Sources/Fresh.swift": "",
+                         "Tests/AppTests/RulesTests.swift": "import XCTest\nfinal class RulesTests: XCTestCase { func testApply() { XCTAssertTrue(Rules().apply()) } }\n"])
+        let structure = TestStructure(generatedAt: Date(), roots: [TestRoot(packageDir: "", testDir: "Tests/AppTests", runner: .xctest, command: "swift test", namingRule: "Foo.swift → FooTests.swift", languages: ["swift"])], status: "ok", notes: [])
+        let map = try TestMapBuilder(gitRoot: root, structure: structure).build()
+        XCTAssertEqual(map.entries.first { $0.function == "apply" }?.testedBy, ["Tests/AppTests/RulesTests.swift"])
+        XCTAssertEqual(map.entries.first { $0.function == "helperA" }?.effectiveQuadrant, .domainLogic)
+        let unit = map.render().components(separatedBy: "## Unit-test candidates")[1].components(separatedBy: "\n## ")[0]
+        XCTAssertFalse(unit.contains("Sources/Rules.swift"))
+        XCTAssertTrue(unit.contains("Sources/Fresh.swift"))
+    }
+
     func testFilesFallbackClassifiesByLocOnly() throws {
         let (root, s) = try fixture()
         try FileManager.default.removeItem(at: root.appendingPathComponent("system/graph/graph.json"))

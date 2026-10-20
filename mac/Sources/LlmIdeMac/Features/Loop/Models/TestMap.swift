@@ -78,8 +78,12 @@ public struct TestMap: Codable, Equatable {
         out += "| counter | value |\n|---|---|\n"
         for k in counters.keys.sorted() { out += "| \(k) | \(Int(counters[k] ?? 0)) |\n" }
         let untested = entries.filter { $0.testedBy.isEmpty }
+        // Tests go through public calls, so a covered file's private helpers never
+        // read as tested; listing them would make Test Write re-pick it forever.
+        let testedFiles = Set(entries.filter { !$0.testedBy.isEmpty }.map(\.path))
         out += "\n## Unit-test candidates (domain logic / algorithms)\n"
-        out += functionLines(untested.filter { $0.effectiveQuadrant == .domainLogic }, limit: limit)
+        out += functionLines(untested.filter { $0.effectiveQuadrant == .domainLogic && !testedFiles.contains($0.path) },
+                             limit: limit)
         out += "\n## Integration-test candidates (controllers / pipelines)\n"
         out += functionLines(untested.filter { $0.effectiveQuadrant == .controller }, limit: limit)
         out += "\n## Refactor first (over-complex — no tests until split)\n"
@@ -90,6 +94,7 @@ public struct TestMap: Codable, Equatable {
         out += "- untestedFunctions: functions no test file references; testedFunctions: the rest; untestedFiles: source files with at least one eligible function and none of them tested.\n"
         out += "- A function `f` of file `p` is tested by a test file in the matching test root when the test's tokens (identifiers and double-quoted string contents) contain `f` exactly, and the test maps to the same source stem as `p` or contains the file's name as a token.\n"
         out += "- Each file is classified by the test guideline matrix: domain logic gets unit tests, controllers/pipelines get integration tests, over-complex files are refactored before testing, trivial files are not tested.\n"
+        out += "- Unit-test candidates leave out any file that already has a mapped test: tests go through public calls, so its private helpers never read as tested.\n"
         out += "- init, deinit, body, main, description and `_`-prefixed names are skipped.\n"
         out += "- Counters are information, not a goal: the loop never fails because a count did not move.\n"
         return out
