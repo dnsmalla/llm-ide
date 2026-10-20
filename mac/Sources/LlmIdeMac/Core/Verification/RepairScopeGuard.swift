@@ -574,7 +574,10 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         var present: [String] = []
         var absent: [String] = []
         for path in paths {
-            let probe = "git -c core.quotepath=off ls-tree --name-only \(tree) -- \(Self.shellQuoted([path]))"
+            // `--literal-pathspecs`: a name like `:x.txt` or `a*.txt` is that
+            // file, never pathspec magic or a glob. `-z`: names come back raw
+            // and NUL-terminated — no quoting, nothing to trim.
+            let probe = "git --literal-pathspecs ls-tree -z --name-only \(tree) -- \(Self.shellQuoted([path]))"
             switch await run(probe, gitRoot: gitRoot) {
             case .success(let listing):
                 switch Self.treePresence(of: path, listing: listing) {
@@ -598,7 +601,8 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         // unrelated commit.
         if !present.isEmpty,
            case .failure(let reason) = await run(
-               "git restore --source=\(tree) --worktree -- \(Self.shellQuoted(present))", gitRoot: gitRoot) {
+               "git --literal-pathspecs restore --source=\(tree) --worktree -- \(Self.shellQuoted(present))",
+               gitRoot: gitRoot) {
             failures.append(reason)
         }
         for path in absent {
@@ -624,14 +628,15 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         return failures.isEmpty ? nil : failures.joined(separator: "; ")
     }
 
-    /// Reads a `git ls-tree --name-only <tree> -- <path>` listing: true when it
-    /// names `path` exactly, false when it is empty (the positive "not in the
-    /// tree" signal), nil for anything else — which `restore` treats as
-    /// unknown and refuses to act on.
+    /// Reads a `git --literal-pathspecs ls-tree -z --name-only <tree> -- <path>`
+    /// listing (NUL-terminated names, compared whole and never trimmed):
+    /// true when an entry is exactly `path`, false only when the listing is
+    /// EMPTY (the positive "not in the tree" signal), nil for anything else —
+    /// which `restore` treats as unknown and refuses to act on.
     static func treePresence(of path: String, listing: String) -> Bool? {
-        let lines = listing.split(whereSeparator: \.isNewline).map(String.init)
-        if lines.allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) { return false }
-        return lines.contains(path) ? true : nil
+        if listing.isEmpty { return false }
+        let entries = listing.split(separator: "\u{0}", omittingEmptySubsequences: true).map(String.init)
+        return entries.contains(path) ? true : nil
     }
 
     private static func shellQuoted(_ paths: [String]) -> String {

@@ -675,14 +675,18 @@ final class RepairScopeGuardTests: XCTestCase {
         }
     }
 
-    /// Only an exact name is "present", only an empty listing is "absent";
-    /// anything else is unknown (nil), which `restore` refuses to act on.
+    /// Only an exact NUL-terminated name is "present", only an EMPTY listing is
+    /// "absent"; anything else is unknown (nil), which `restore` refuses to act
+    /// on. Names are never trimmed, so a whitespace-only name is still a name.
     func testTreePresenceNeedsAPositiveSignal() {
-        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "dir/a.txt\n"), true)
+        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "dir/a.txt\u{0}"), true)
+        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: ":x.txt", listing: ":x.txt\u{0}"), true)
+        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: " ", listing: " \u{0}"), true)
         XCTAssertEqual(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: ""), false)
-        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "\n"), false)
-        XCTAssertNil(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "dir\n"))
-        XCTAssertNil(GitRepairScopeGuard.treePresence(of: "é.txt", listing: "\"\\303\\251.txt\"\n"))
+        XCTAssertNil(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "\n"))
+        XCTAssertNil(GitRepairScopeGuard.treePresence(of: " ", listing: "\u{0}"))
+        XCTAssertNil(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "dir\u{0}"))
+        XCTAssertNil(GitRepairScopeGuard.treePresence(of: "x.txt", listing: "warning: x\nx.txt\u{0}"))
     }
 
     func testRestoreWithNoPathsIsANoop() async {

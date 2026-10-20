@@ -152,6 +152,33 @@ func runRefactorRollbackChecks() async {
     let k = try? String(contentsOf: root.appendingPathComponent("k.txt"), encoding: .utf8)
     expect(k == "keep\n", "a failed presence probe never deletes the file")
 
+    // Names git would otherwise read as pathspec magic (`:x.txt`), a glob
+    // (`a*.txt`, which also matches `ab.txt`) or trim away (` `): each is the
+    // file of that exact name, found in the base tree and put back — never
+    // misread as absent and deleted, never widened to a neighbour.
+    func url(_ name: String) -> URL { root.appendingPathComponent(name) }
+    for (name, text) in [(":x.txt", "colon\n"), (" ", "space\n"), ("a*.txt", "star\n"), ("ab.txt", "ab\n")] {
+        try? text.write(to: url(name), atomically: true, encoding: .utf8)
+    }
+    if let oddBase = await guardUnderTest.snapshotTree(gitRoot: root) {
+        try? "edited\n".write(to: url(":x.txt"), atomically: true, encoding: .utf8)
+        try? FileManager.default.removeItem(at: url(" "))
+        try? "edited\n".write(to: url("a*.txt"), atomically: true, encoding: .utf8)
+        try? "user\n".write(to: url("ab.txt"), atomically: true, encoding: .utf8)
+        let oddError = await guardUnderTest.restore(paths: [":x.txt", " ", "a*.txt"], fromTree: oddBase, gitRoot: root)
+        expect(oddError == nil, "restore of odd names reports no error, got \(oddError ?? "nil")")
+        expect((try? String(contentsOf: url(":x.txt"), encoding: .utf8)) == "colon\n",
+               "a leading-colon name is restored, not read as pathspec magic")
+        expect((try? String(contentsOf: url(" "), encoding: .utf8)) == "space\n",
+               "a whitespace-only name is found in the base tree and recreated")
+        expect((try? String(contentsOf: url("a*.txt"), encoding: .utf8)) == "star\n",
+               "a name with a glob character is restored")
+        expect((try? String(contentsOf: url("ab.txt"), encoding: .utf8)) == "user\n",
+               "the glob-looking name never widens the restore to ab.txt")
+    } else {
+        expect(false, "snapshotTree produced a base for the odd-name check")
+    }
+
     // The `RepairScopeGuarding` default (a guard that cannot run git) and
     // index-safety of the default protocol extension are internal-only
     // concerns (the protocol itself is not `public`) and are asserted by
