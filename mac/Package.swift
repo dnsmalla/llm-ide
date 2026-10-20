@@ -141,6 +141,7 @@ if autoTasksIncluded {
         "RepairScopeGuardTests.swift",
         "StageOutputParserTests.swift",
         "TaskLogStoreTests.swift",
+        "TestPruneScannerTests.swift",
     ])
 }
 if mobileIncluded {

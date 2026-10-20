@@ -28,6 +28,7 @@ func runTestStandardChecks() {
            "500-line file is over-complex")
 
     runLayeredLayoutChecks()
+    runPruneChecks()
 }
 
 private func makeLayoutFixture(_ files: [String]) -> URL {
@@ -67,6 +68,41 @@ private func runLayeredLayoutChecks() {
     expect(TestSourceMapper.isSourceCandidate("logic/plot.py"), "logic/ stays a source candidate")
     expect(LoopStageDetector.detectTestCommand(gitRoot: layered) == "pytest tests/unit tests/integration",
            "detectTestCommand excludes performance")
+}
+
+private func runPruneChecks() {
+    let root = makeLayoutFixture([
+        "Package.swift",
+        "Sources/Foo.swift",
+        "Tests/FooTests.swift",
+        "Tests/BarTests.swift",
+    ])
+    defer { try? FileManager.default.removeItem(at: root) }
+    func put(_ rel: String, _ text: String) {
+        try? text.write(to: root.appendingPathComponent(rel), atomically: true, encoding: .utf8)
+    }
+    put("Tests/FooTests.swift", "func testA() {\n    // placeholder\n    // func testOld() {}\n}\n")
+    put("Tests/BarTests.swift", "func testB() { XCTAssertTrue(true) }\n")
+    let structure = TestStructure(
+        generatedAt: Date(),
+        roots: [TestRoot(packageDir: "", testDir: "Tests", runner: .xctest, command: "swift test",
+                         namingRule: "XTests.swift", languages: ["swift"])],
+        status: "ok", notes: [])
+    let scanner = TestPruneScanner(gitRoot: root, structure: structure)
+    let found = scanner.scan()
+    expect(found.contains(TestPruneFinding(path: "Tests/FooTests.swift", reason: .noAssertion)),
+           "prune flags a test file with no assertion")
+    expect(found.contains(TestPruneFinding(path: "Tests/FooTests.swift", reason: .commentedOutTest, line: 3)),
+           "prune reports a commented-out test with its line")
+    expect(found.contains(TestPruneFinding(path: "Tests/BarTests.swift", reason: .sourceGone)),
+           "prune flags a test whose source is gone")
+    expect(!found.contains { $0.path == "Tests/BarTests.swift" && $0.reason == .noAssertion },
+           "prune leaves an asserting test alone")
+    _ = try? scanner.write(found, outputRoot: root)
+    expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("Tests/FooTests.swift").path),
+           "prune never deletes a test file")
+    let report = (try? String(contentsOf: root.appendingPathComponent("llm-doc/loop/test/TEST-PRUNE.md"), encoding: .utf8)) ?? ""
+    expect(report.contains("the loop never deletes tests"), "prune report states it never deletes")
 }
 
 #endif

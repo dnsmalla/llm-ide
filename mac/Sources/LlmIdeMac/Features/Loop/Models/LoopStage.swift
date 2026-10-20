@@ -25,7 +25,7 @@ public enum LoopStageSeverity: String, Codable, CaseIterable {
 
 /// What a `.testMap` stage does: detect the test layout, rebuild the
 /// untested-function map, or diff the Test stage's results into the ledger.
-public enum TestMapOp: String, Codable { case structure, map, ledger }
+public enum TestMapOp: String, Codable { case structure, map, ledger, prune }
 
 /// What a `.codeGraph` stage does: `snapshot` records the code graph before a
 /// refactor batch runs, `verify` diffs the regenerated graph against it.
@@ -242,7 +242,8 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         check = try container.decodeIfPresent(ArtifactCheckSpec.self, forKey: .check)
         defaultRevision = try container.decodeIfPresent(Int.self, forKey: .defaultRevision)
         disabledByDetection = try container.decodeIfPresent(Bool.self, forKey: .disabledByDetection)
-        testOp = try container.decodeIfPresent(TestMapOp.self, forKey: .testOp)
+        // Lenient: an op from a newer build reads as nil ("no operation chosen").
+        testOp = (try? container.decodeIfPresent(TestMapOp.self, forKey: .testOp)) ?? nil
         graphOp = try container.decodeIfPresent(CodeGraphOp.self, forKey: .graphOp)
         allowsRepair = try container.decodeIfPresent(Bool.self, forKey: .allowsRepair) ?? true
     }

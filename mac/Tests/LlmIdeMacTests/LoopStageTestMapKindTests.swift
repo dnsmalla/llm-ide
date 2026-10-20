@@ -13,6 +13,13 @@ final class LoopStageTestMapKindTests: XCTestCase {
         XCTAssertFalse(String(decoding: data, as: UTF8.self).contains("testOp"))
         XCTAssertNil(try JSONDecoder().decode(LoopStage.self, from: data).testOp)
     }
+    func testUnknownTestOpDecodesAsNil() throws {
+        let s = LoopStage(name: "x", kind: .testMap, order: 0, testOp: .map)
+        var json = try XCTUnwrap(JSONSerialization.jsonObject(with: JSONEncoder().encode(s)) as? [String: Any])
+        json["testOp"] = "future"
+        let data = try JSONSerialization.data(withJSONObject: json)
+        XCTAssertNil(try JSONDecoder().decode(LoopStage.self, from: data).testOp)
+    }
     func testWriterIsCodeApplyButNotManualOnly() {
         let writer = LoopStage(name: "Test Write", kind: .skill, order: 1, skillId: "skills/test-gap-writer", targetPath: "x", outputPath: "y", isDefault: true, defaultKey: "test-write")
         XCTAssertTrue(writer.appliesCode); XCTAssertTrue(writer.testWriteOnly)
