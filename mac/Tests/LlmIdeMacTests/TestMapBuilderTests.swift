@@ -47,9 +47,14 @@ final class TestMapBuilderTests: XCTestCase {
         try "final class UITests: XCTestCase { func testDraw() { UI().draw() } }".write(to: root.appendingPathComponent("Tests/AppTests/UITests.swift"), atomically: true, encoding: .utf8)
         let after = try b.build()
         XCTAssertEqual(TestMap.delta(before: before, after: after)["untestedFunctions"], -1)
-        XCTAssertEqual(counter(after, "untestedDomainFunctions"), 2)  // draw is a view: a controller, not domain logic
+        XCTAssertEqual(counter(after, "untestedDomainFunctions"), 2)  // render, validate; draw is now tested
         let md = after.render()
-        XCTAssertTrue(md.contains("untestedFunctions")); XCTAssertTrue(md.contains("Sources/Core.swift:40 render"))
+        XCTAssertTrue(md.contains("untestedFunctions"))
+        XCTAssertTrue(md.contains("| untestedDomainFunctions | 2 |"))
+        // Core.swift has a mapped test (parse), so its untested render/validate stay out of the unit list.
+        let unit = md.components(separatedBy: "## Unit-test candidates")[1].components(separatedBy: "\n## ")[0]
+        XCTAssertFalse(unit.contains("Sources/Core.swift"))
+        XCTAssertTrue(unit.contains("- none"))
         try b.write(after)
         XCTAssertTrue(FileManager.default.fileExists(atPath: root.appendingPathComponent(LoopOutputLayout.testMapJSON).path))
     }
