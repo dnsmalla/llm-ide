@@ -80,14 +80,35 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
 
     func testShippedRevisionsOfTheRefactorStages() {
         let catalog = DefaultRevisionCatalog.shipped
-        XCTAssertEqual(catalog.current("refactor-plan"), 3)
-        XCTAssertEqual(catalog.current("refactor-apply"), 3)
+        XCTAssertEqual(catalog.current("refactor-plan"), 4)
+        XCTAssertEqual(catalog.current("refactor-apply"), 4)
+        XCTAssertEqual(catalog.current("refactor-plan-check"), 2)
         XCTAssertEqual(catalog.current("refactor-test"), 2)
         XCTAssertNotNil(catalog.history["refactor-plan"]?[2])
+        XCTAssertNotNil(catalog.history["refactor-plan"]?[3])
         XCTAssertNotNil(catalog.history["refactor-apply"]?[2])
+        XCTAssertNotNil(catalog.history["refactor-apply"]?[3])
+        XCTAssertNotNil(catalog.history["refactor-plan-check"]?[1])
         XCTAssertNotNil(catalog.history["refactor-test"]?[1])
         XCTAssertEqual(catalog.current("refactor-test-write"), 2)
         XCTAssertEqual(catalog.history["refactor-test-write"]?[1]?.prompt?.contains("every untested function"), true)
+        // The frozen revision-3 texts predate RULES.md; the live (revision 4) prompts read it.
+        XCTAssertFalse(catalog.history["refactor-plan"]?[3]?.prompt?.contains("RULES.md") ?? true)
+        XCTAssertFalse(catalog.history["refactor-apply"]?[3]?.prompt?.contains("RULES.md") ?? true)
+        XCTAssertTrue(LoopStageDetector.refactorPlanPrompt.contains("RULES.md"))
+        XCTAssertTrue(LoopStageDetector.refactorApplyPrompt.contains("RULES.md"))
+    }
+
+    /// Plan/apply revision 4 (design doc §3.2, §3.5, §3.7): RULES.md, the
+    /// Mikado blocked/Replaces rule, and the scale rules (Area / REFACTOR-DONE.md).
+    func testPlanPromptCoversRulesMikadoAndScale() {
+        let prompt = LoopStageDetector.refactorPlanPrompt
+        for needle in ["RULES.md", "- Rules:", "blocked", "- Replaces:", "- Area:", "REFACTOR-DONE.md"] {
+            XCTAssertTrue(prompt.contains(needle), "refactor-plan prompt is missing \"\(needle)\"")
+        }
+        XCTAssertTrue(LoopStageDetector.refactorApplyPrompt.contains("RULES.md"))
+        XCTAssertEqual(LoopStageDetector.refactorPlanCheckSpec.sectionRules.first?.requiredLinePrefixes,
+                       ["- Files:", "- Expect:", "- Tests:", "- Rules:"])
     }
 
     func testBatchWritePromptFollowsTheSkillsBatchMode() {
@@ -114,7 +135,7 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
         let root = try TempRepo.make(files: ["Package.swift": pkg])
         let unedited = LoopStageDetector.upgradingDefaultRevisions(
             in: [loop(prompt: v2.prompt ?? "")], gitRoot: root).loops[0].config.stages[0]
-        XCTAssertEqual(unedited.defaultRevision, 3)
+        XCTAssertEqual(unedited.defaultRevision, 4)
         XCTAssertEqual(unedited.prompt, LoopStageDetector.refactorPlanPrompt)
         let edited = LoopStageDetector.upgradingDefaultRevisions(
             in: [loop(prompt: "mine")], gitRoot: root).loops[0].config.stages[0]
@@ -221,5 +242,54 @@ final class LoopStageDetectorRefactorLoopTests: XCTestCase {
         let back = try XCTUnwrap(result.first { $0.defaultKey == "refactor-test-write" })
         XCTAssertTrue(back.enabled)
         XCTAssertNil(back.disabledByDetection)
+    }
+
+    /// A saved loop at revision 2 with an EDITED plan prompt: `refactor-plan` and
+    /// `refactor-apply` moved together (`LoopOutputLayout.movedStageKeys`), so they
+    /// upgrade all-or-nothing (see `LoopOutputLayoutChecks` point 4/5) — editing only
+    /// the plan leaves BOTH at revision 2, exactly as stored, never silently
+    /// overwritten or half-upgraded. The stages this upgrade otherwise introduces
+    /// (Check, Conform, Test Baseline, …) are still pinned in, in run order, because
+    /// pinning adds a loop's missing default stages independently of whether an
+    /// existing stage's content could be brought forward.
+    func testSavedLoopWithAnEditedPlanPromptLeavesPlanAndApplyAtTheirOldRevision() throws {
+        let root = try TempRepo.make(files: ["Package.swift": pkg])
+        var plan = try XCTUnwrap(LoopStageDetector.shippedStage(key: "refactor-plan", revision: 2))
+        plan.id = "refactor/refactor-plan"; plan.isDefault = true; plan.defaultKey = "refactor-plan"
+        plan.defaultRevision = 2; plan.order = 0
+        let editedPrompt = (plan.prompt ?? "") + " Also note our team's naming quirks."
+        plan.prompt = editedPrompt
+        var apply = try XCTUnwrap(LoopStageDetector.shippedStage(key: "refactor-apply", revision: 2))
+        apply.id = "refactor/refactor-apply"; apply.isDefault = true; apply.defaultKey = "refactor-apply"
+        apply.defaultRevision = 2; apply.order = 1
+        let originalApplyPrompt = apply.prompt
+        var test = LoopStage(id: "refactor/refactor-test", name: "Test", kind: .shellCommand,
+                             command: "swift test", order: 2, isDefault: true, defaultKey: "refactor-test",
+                             detectedCommand: "swift test")
+        test.defaultRevision = 2
+        let saved = LoopEngineProjectStore(loops: [
+            LoopDefinition(id: "default-refactor", name: "Refactoring", defaultKey: LoopDefaultLoopKey.refactor,
+                           config: LoopEngineConfig(stages: [plan, apply, test])),
+        ])
+        let ensured = LoopStageDetector.ensureDefaultLoops(in: saved, gitRoot: root).store
+        let stages = LoopStage.runOrder(try XCTUnwrap(ensured.loops.first {
+            $0.defaultKey == LoopDefaultLoopKey.refactor }).config.stages)
+        let byKey = Dictionary(uniqueKeysWithValues: stages.map { ($0.defaultKey ?? "", $0) })
+
+        // The edited plan is left exactly as the user wrote it.
+        XCTAssertEqual(byKey["refactor-plan"]?.prompt, editedPrompt)
+        XCTAssertEqual(byKey["refactor-plan"]?.defaultRevision, 2)
+        // Its unedited partner is held back WITH it — coupled stages upgrade
+        // all-or-nothing, so a plan edit alone must not silently swap in the
+        // revision-4 apply prompt underneath it.
+        XCTAssertEqual(byKey["refactor-apply"]?.prompt, originalApplyPrompt)
+        XCTAssertNotEqual(byKey["refactor-apply"]?.prompt, LoopStageDetector.refactorApplyPrompt)
+        XCTAssertEqual(byKey["refactor-apply"]?.defaultRevision, 2)
+        // Pinning still adds every stage this build's pipeline introduced since the
+        // saved 3-stage loop, in run order — independent of the blocked upgrade above.
+        XCTAssertEqual(stages.compactMap(\.defaultKey), Self.refactorKeysInRunOrder)
+        XCTAssertNotNil(byKey["refactor-conform"])
+        XCTAssertNotNil(byKey["refactor-plan-check"])
+        XCTAssertNotNil(byKey["refactor-graph"])
     }
 }

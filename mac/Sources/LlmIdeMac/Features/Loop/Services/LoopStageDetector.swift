@@ -977,15 +977,18 @@ public enum LoopStageDetector {
         ])
 
     /// The Refactoring loop's blocking check: the refactor plan within 250 lines,
-    /// and every `### R` section carries its `- Files:`, `- Expect:` and `- Tests:`
-    /// lines. Plans live under the project's llm-doc/, hence the project fallback.
-    static let refactorPlanCheckSpec = ArtifactCheckSpec(
+    /// and every `### R` section carries its `- Files:`, `- Expect:`, `- Tests:`
+    /// and `- Rules:` lines. Plans live under the project's llm-doc/, hence the
+    /// project fallback. Revision 2 (`DefaultRevisionCatalog`): the `- Rules:`
+    /// requirement follows the planner's revision-4 `- Rules:` line (§3.2).
+    public static let refactorPlanCheckSpec = ArtifactCheckSpec(
         projectRootFallback: true,
         outputRules: [
             .init(stage: "refactor-plan", shape: .file, maxLines: 250),
         ],
         sectionRules: [
-            .init(headerPrefix: "### R", requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:"]),
+            .init(headerPrefix: "### R",
+                  requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:", "- Rules:"]),
         ])
 
     // MARK: Refactoring + Doc Optimization stage prompts
@@ -1066,22 +1069,42 @@ public enum LoopStageDetector {
         return stages
     }
 
-    static let refactorPlanPrompt = "Write or update the refactor plan at the Output path for the code "
-        + "under the Input, driven by the code-graph snapshot and the test map the loop wrote beside it "
-        + "(read them first). Rank batches by measured structure — cycles, files over 500 lines, high "
-        + "fan-in files mixing roles — then naming and docs. Every batch carries a stable ID, a status, "
-        + "its files, the symbols it moves, which of its files still lack tests, its intent, its risk, and "
-        + "an Expect line naming the graph counter it will reduce. Write each batch as a heading "
-        + "`### R<n> <title> (status: todo)`, and no other headings may start with `### R`. Under each "
-        + "heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack "
-        + "them), `- Intent:`, `- Risk:` and `- Expect:` lines. Keep batches small, behaviour-preserving, "
-        + "ordered by value then safety. Never edit code."
+    /// Revision 4 (`DefaultRevisionCatalog`): reads RULES.md first (a violation
+    /// found in the Input is itself a batch candidate, and every batch carries
+    /// a `- Rules:` line); classifies the Input so a multi-area folder/repo
+    /// gets `- Area:` lines, ordered within equal value by fewest dependants
+    /// first (§3.7); and knows the Mikado `blocked` status — a batch the
+    /// runner rolled back is never retried as-is, only replaced by smaller
+    /// batches that remove the blocker first (§3.5).
+    public static let refactorPlanPrompt = "Write or update the refactor plan at the Output path for the code "
+        + "under the Input, driven by the code-graph snapshot, the test map and the rules digest (RULES.md) "
+        + "the loop wrote beside it (read all three first). Classify the Input as a file, a folder or a "
+        + "repo; for a folder or repo with more than one top-level area, give each batch an `- Area:` line. "
+        + "Rank batches by measured structure — cycles, files over 500 lines, high fan-in files mixing "
+        + "roles — then naming and docs; a RULES.md violation found in the Input is itself a batch "
+        + "candidate. Every batch carries a stable ID, a status, its files, the symbols it moves, which of "
+        + "its files still lack tests, its intent, its risk, an Expect line naming the graph counter it "
+        + "will reduce, and a `- Rules:` line naming the rule sources it touches or fixes (or `none "
+        + "found`). Write each batch as a heading `### R<n> <title> (status: todo)`, and no other headings "
+        + "may start with `### R`; mark a batch the runner could not finish safely `(status: blocked)` "
+        + "with a `- Blocked:` line under it — never retry a blocked batch as-is, instead append smaller "
+        + "batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading "
+        + "give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), "
+        + "`- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. "
+        + "Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first "
+        + "(GRAPH.md `usedBy`) — safest first. When the plan nears 250 lines, move its done, skipped and "
+        + "blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit "
+        + "code."
 
-    static let refactorApplyPrompt = "Apply exactly the FIRST todo batch of the plan at the Input to the code "
-        + "under the Output path, using the graph snapshot beside the plan to find every dependant of the "
-        + "files you move or split. Preserve every listed symbol, update every import, reference and "
-        + "build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never "
-        + "touch more than that batch, never commit. End with `Applied: R<n>`."
+    /// Revision 4 (`DefaultRevisionCatalog`): reads RULES.md before editing —
+    /// the result must satisfy it for every file the batch touches (§3.2).
+    public static let refactorApplyPrompt = "Apply exactly the FIRST todo batch of the plan at the Input to the "
+        + "code under the Output path, using the graph snapshot beside the plan to find every dependant of "
+        + "the files you move or split. Read the rules digest (RULES.md) beside the plan before editing: "
+        + "the result must satisfy it for every file the batch touches. Preserve every listed symbol, "
+        + "update every import, reference and build-config path, weaken no test, and mark the batch done "
+        + "(or skipped with the reason). Never touch more than that batch, never commit. End with "
+        + "`Applied: R<n>`."
 
     /// The conform pass: a second look at the batch the apply stage just applied,
     /// fixing any RULES.md violation it introduced before Check/Test/Graph Check

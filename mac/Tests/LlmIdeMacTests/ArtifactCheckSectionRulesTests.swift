@@ -128,10 +128,12 @@ final class ArtifactCheckSectionRulesTests: XCTestCase {
 
     func testRefactorPlanCheckSpecRequiresTheThreeLinesPerRSection() throws {
         XCTAssertEqual(LoopStageDetector.refactorPlanCheckSpec.sectionRules,
-                       [.init(headerPrefix: "### R", requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:"])])
+                       [.init(headerPrefix: "### R",
+                              requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:", "- Rules:"])])
         try write("llm-doc/refactor.md", "### R1 Only\n- Files: a.swift\n")
         let r = eval(LoopStageDetector.refactorPlanCheckSpec)
         XCTAssertEqual(r.failures, ["llm-doc/refactor.md: ### R1 Only: missing `- Expect:`",
-                                    "llm-doc/refactor.md: ### R1 Only: missing `- Tests:`"])
+                                    "llm-doc/refactor.md: ### R1 Only: missing `- Tests:`",
+                                    "llm-doc/refactor.md: ### R1 Only: missing `- Rules:`"])
     }
 }

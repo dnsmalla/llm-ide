@@ -32,7 +32,12 @@ struct DefaultRevisionCatalog {
             // the setup prompt; Refactor Test Write follows the skill's Batch mode. The Test
             // loop's new Test Prune stage needs no revision: pinning appends any missing
             // default stage on load.
-            .merging(["test-write": 2, "test-setup": 2, "refactor-setup": 2, "refactor-test-write": 2]) { _, new in new },
+            .merging(["test-write": 2, "test-setup": 2, "refactor-setup": 2, "refactor-test-write": 2]) { _, new in new }
+            // Revision 4 of the Refactoring plan/apply prompts: both read RULES.md first; the
+            // planner adds `- Rules:`, the Mikado `blocked`/`- Replaces:` rule, and the scale
+            // rules (`- Area:`, REFACTOR-DONE.md). Revision 2 of its plan-check: the per-batch
+            // section rule also requires `- Rules:` (never revisioned before revision 1).
+            .merging(["refactor-plan": 4, "refactor-apply": 4, "refactor-plan-check": 2]) { _, new in new },
         history: [
             "test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 0)],
             "plan-structure-index": [1: LoopStage(
@@ -60,6 +65,12 @@ struct DefaultRevisionCatalog {
                     targetPath: ".",
                     outputPath: LoopOutputLayout.refactorPlan,
                     prompt: refactorPlanPromptRevision2),
+                3: LoopStage(
+                    name: "Refactor Plan", kind: .skill, order: 0,
+                    skillId: "skills/refactor-planner",
+                    targetPath: ".",
+                    outputPath: LoopOutputLayout.refactorPlan,
+                    prompt: refactorPlanPromptRevision3),
             ],
             "refactor-apply": [
                 1: LoopStage(
@@ -74,10 +85,21 @@ struct DefaultRevisionCatalog {
                     targetPath: LoopOutputLayout.refactorPlan,
                     outputPath: ".",
                     prompt: refactorApplyPromptRevision2),
+                3: LoopStage(
+                    name: "Refactor Apply", kind: .skill, order: 1,
+                    skillId: "skills/refactor-apply",
+                    targetPath: LoopOutputLayout.refactorPlan,
+                    outputPath: ".",
+                    prompt: refactorApplyPromptRevision3),
             ],
             // Revision 2 of the test stage: it records its detected command as provenance
             // (`detectedCommand`); its content is unchanged from revision 1.
             "refactor-test": [1: LoopStage(name: "Test", kind: .shellCommand, order: 2)],
+            // `refactor-plan-check` was never revisioned before now, so revision 1 is the
+            // check spec as it shipped with the Refactoring loop (no `- Rules:` requirement).
+            "refactor-plan-check": [1: LoopStage(
+                name: "Refactor Plan Check", kind: .artifactCheck, order: 6,
+                check: refactorPlanCheckSpecRevision1)],
             "test-setup": [1: LoopStage(
                 name: "Test Setup", kind: .skill, order: 1, skillId: "skills/test-structure-setup",
                 targetPath: LoopOutputLayout.testStructureMD, outputPath: ".",
@@ -134,6 +156,37 @@ struct DefaultRevisionCatalog {
         + "batch done in the plan with a one-line note — or skipped with the reason when it cannot be done "
         + "safely. Never touch more than that batch, and never commit. With no todo batch left, change "
         + "nothing."
+
+    /// Frozen revision-3 texts (what refactor-plan/refactor-apply shipped before the
+    /// RULES.md + scale-rules + Mikado revision). History must keep the exact strings
+    /// users were shipped, so these never follow the live prompts.
+    private static let refactorPlanPromptRevision3 = "Write or update the refactor plan at the Output path for the code "
+        + "under the Input, driven by the code-graph snapshot and the test map the loop wrote beside it "
+        + "(read them first). Rank batches by measured structure — cycles, files over 500 lines, high "
+        + "fan-in files mixing roles — then naming and docs. Every batch carries a stable ID, a status, "
+        + "its files, the symbols it moves, which of its files still lack tests, its intent, its risk, and "
+        + "an Expect line naming the graph counter it will reduce. Write each batch as a heading "
+        + "`### R<n> <title> (status: todo)`, and no other headings may start with `### R`. Under each "
+        + "heading give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack "
+        + "them), `- Intent:`, `- Risk:` and `- Expect:` lines. Keep batches small, behaviour-preserving, "
+        + "ordered by value then safety. Never edit code."
+
+    private static let refactorApplyPromptRevision3 = "Apply exactly the FIRST todo batch of the plan at the Input to the code "
+        + "under the Output path, using the graph snapshot beside the plan to find every dependant of the "
+        + "files you move or split. Preserve every listed symbol, update every import, reference and "
+        + "build-config path, weaken no test, and mark the batch done (or skipped with the reason). Never "
+        + "touch more than that batch, never commit. End with `Applied: R<n>`."
+
+    /// Frozen revision-1 refactor-plan-check spec (shipped with the Refactoring loop,
+    /// before the `- Rules:` requirement).
+    private static let refactorPlanCheckSpecRevision1 = ArtifactCheckSpec(
+        projectRootFallback: true,
+        outputRules: [
+            .init(stage: "refactor-plan", shape: .file, maxLines: 250),
+        ],
+        sectionRules: [
+            .init(headerPrefix: "### R", requiredLinePrefixes: ["- Files:", "- Expect:", "- Tests:"]),
+        ])
 
     /// Frozen revision-1 Test Setup / Test Write texts (shipped with the Test loop).
     private static let testSetupPromptRevision1 = "Read the test-structure report at the Input. If it says the "

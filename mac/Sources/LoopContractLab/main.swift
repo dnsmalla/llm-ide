@@ -529,6 +529,7 @@ runTestStandardChecks()
 runRefactorRulesChecks()
 runRefactorCheckCommandChecks()
 runRefactorConformChecks()
+runRefactorPlanRevisionChecks()
 #endif
 
 if failures.isEmpty {
