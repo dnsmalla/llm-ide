@@ -84,8 +84,10 @@ protocol RepairScopeGuarding: AnyObject {
     /// `git restore --source=<tree> --worktree -- <path>`, a path absent from
     /// `tree` is deleted. Used by Mikado rollback (spec §3.5) to put the tree
     /// back exactly as it was before a batch, including a path the user had
-    /// already changed before the batch began — that state IS `tree`. Returns
-    /// `nil` on success, else a diagnostic.
+    /// already changed before the batch began — that state IS `tree`. A path
+    /// counts as absent only on a positive "not in `tree`" answer; any probe
+    /// that fails (including one cancelled by a Stop) aborts the whole call
+    /// before anything is touched. Returns `nil` on success, else a diagnostic.
     func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String?
     /// Restores `paths` to their committed state. Returns `nil` on success, or a
     /// diagnostic.
@@ -561,23 +563,31 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         // Classify by presence in `tree` rather than in the CURRENT working tree:
         // a path the batch deleted is absent now but present in `tree`, and must
         // be restored, not skipped as "already gone".
+        //
+        // "Absent" needs a POSITIVE answer: `git ls-tree` exits 0 and lists
+        // nothing for the path. Every other outcome — a non-zero exit (bad tree
+        // id, git missing), a probe thrown out by cancellation (a Stop surfaces
+        // here as a `.failure`, not an exception), cut-short output, or a
+        // listing that does not name the path exactly — aborts the whole call
+        // before anything is touched. Reading "the probe failed" as "absent"
+        // would DELETE the file, user's own earlier edits included.
         var present: [String] = []
         var absent: [String] = []
         for path in paths {
-            switch await run("git cat-file -e \(Self.shellQuoted(["\(tree):\(path)"]))", gitRoot: gitRoot) {
-            case .success:
-                present.append(path)
-            case .failure:
-                // `cat-file -e` exits non-zero when the path has no entry in
-                // `tree` — that is the expected shape of "absent", not a real
-                // command failure.
-                absent.append(path)
+            let probe = "git -c core.quotepath=off ls-tree --name-only \(tree) -- \(Self.shellQuoted([path]))"
+            switch await run(probe, gitRoot: gitRoot) {
+            case .success(let listing):
+                switch Self.treePresence(of: path, listing: listing) {
+                case true?: present.append(path)
+                case false?: absent.append(path)
+                case nil:
+                    return "could not confirm whether \(path) exists in \(tree): unexpected listing "
+                        + "\(listing.prefix(200)); nothing was restored"
+                }
+            case .failure(let reason):
+                return "could not confirm whether \(path) exists in \(tree): \(reason); nothing was restored"
             case .truncated:
-                // Mirrors `check`'s `.elided` → `.unverifiable`: a presence
-                // probe whose output was cut short cannot be trusted either
-                // way, and guessing "absent" here would delete a file the
-                // base tree actually had. Fail the whole call closed instead
-                // of silently restoring some paths and not others.
+                // Mirrors `check`'s `.elided` → `.unverifiable`.
                 return "could not confirm whether \(path) exists in \(tree): \(Self.truncatedReason)"
             }
         }
@@ -612,6 +622,16 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
             }
         }
         return failures.isEmpty ? nil : failures.joined(separator: "; ")
+    }
+
+    /// Reads a `git ls-tree --name-only <tree> -- <path>` listing: true when it
+    /// names `path` exactly, false when it is empty (the positive "not in the
+    /// tree" signal), nil for anything else — which `restore` treats as
+    /// unknown and refuses to act on.
+    static func treePresence(of path: String, listing: String) -> Bool? {
+        let lines = listing.split(whereSeparator: \.isNewline).map(String.init)
+        if lines.allSatisfy({ $0.trimmingCharacters(in: .whitespaces).isEmpty }) { return false }
+        return lines.contains(path) ? true : nil
     }
 
     private static func shellQuoted(_ paths: [String]) -> String {

@@ -577,9 +577,11 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(verifier.calls, ["swift test"])
     }
 
-    /// A failed Test + repair re-runs every stage from the top. The apply
-    /// stage must NOT run again — that would stack the next batch onto a tree
-    /// the tests have not yet proven — while the diff-first plan stage may.
+    /// A failed Test + repair, once it passes, re-runs the pipeline from the
+    /// batch's first stage (here Apply, as there is no test writer) — not from
+    /// the top, so the plan stage is never re-run under a half-applied batch
+    /// (design doc §5.7). The apply stage must NOT run again either — that would
+    /// stack the next batch onto a tree the tests have not yet proven.
     func testRetryIterationDoesNotReapplyTheCodeApplyStage() async {
         let skillExecutor = StubSkillExecutor()
         var callIndex = 0
@@ -609,7 +611,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         let applyCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Apply\"") }
         let planCalls = skillExecutor.receivedMessages.filter { $0.contains("\"Refactor Plan\"") }
         XCTAssertEqual(applyCalls.count, 1, "the apply stage applies one batch per run")
-        XCTAssertEqual(planCalls.count, 2, "the diff-first plan stage may re-run")
+        XCTAssertEqual(planCalls.count, 1, "the restart begins at the batch, after the plan stage")
         XCTAssertTrue(runner.log.contains {
             $0.text.contains("Refactor Apply already applied its batch this run; skipped")
         })
@@ -3818,7 +3820,10 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// steps[k] = the paths that turned tree `t<k>` into `t<k+1>`.
         private var steps: [[String]] = []
         private(set) var restores: [(paths: [String], tree: String)] = []
+        /// When set, every `snapshotTree` fails (no git), so no batch base exists.
+        var failSnapshots = false
         func snapshotTree(gitRoot: URL) async -> String? {
+            if failSnapshots { return nil }
             if !pending.isEmpty {
                 steps.append(pending)
                 pending = []
@@ -4055,6 +4060,72 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(runner.log.contains { $0.text.contains("re-running the batch from Refactor Test Write") })
         XCTAssertTrue(tree.restores.isEmpty, "a verified batch is never rolled back")
         XCTAssertNil(runner.batchRollback)
+    }
+
+    /// A run that ends between the test writer and Apply (here a red Test
+    /// Baseline, which may not repair) still rolls back: the writer's new tests
+    /// leave the tree, or every later run's baseline would be red too. With no
+    /// batch applied yet, the batch is the plan's first todo one (§5.1, §5.5).
+    func testARedBaselineAfterTheWriterRollsTheWritersTestsBack() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.rollbackPlan])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let verifier = StubVerifier { command in
+            command == "swift build" ? VerifyOutcome(exitCode: 1, output: "1 failing")
+                                     : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let skills = BatchSkillExecutor(tree: tree, planURL: planURL)
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+
+        guard case .error = result else { return XCTFail("expected an error, got \(String(describing: result))") }
+        XCTAssertFalse(skills.skillIds.contains("skills/refactor-apply"), "Apply never ran")
+        XCTAssertNil(runner.currentBatchId)
+        XCTAssertEqual(tree.restores.first?.paths, ["Tests/R1Tests.swift"])
+        XCTAssertEqual(tree.restores.first?.tree, "t0")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("### R1 Split Big  (status: blocked)"), plan)
+        XCTAssertTrue(plan.contains("- Blocked: Test Baseline — error: stage Test Baseline failed"), plan)
+        XCTAssertEqual(journal.written.last?.batchRollback?.batchId, "R1")
+        XCTAssertEqual(journal.written.last?.batchRollback?.treeRestored, true)
+    }
+
+    /// No base (git could not snapshot the tree): nothing can be restored, but
+    /// the failed batch is still marked blocked — left `done`, the next run
+    /// would stack another batch onto it — and the record says the tree was
+    /// NOT restored.
+    func testWithNoBaseTheFailedBatchIsStillMarkedBlocked() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.rollbackPlan])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        tree.failSnapshots = true
+        let verifier = StubVerifier { command in
+            command == "swift test" ? VerifyOutcome(exitCode: 1, output: "1 failing")
+                                    : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: BatchSkillExecutor(tree: tree, planURL: planURL),
+            approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+
+        guard case .givenUp = result else { return XCTFail("expected a give-up, got \(String(describing: result))") }
+        XCTAssertTrue(tree.restores.isEmpty, "there is no base to restore from")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("(status: blocked)"), plan)
+        let rollback = try XCTUnwrap(journal.written.last?.batchRollback)
+        XCTAssertEqual(rollback.batchId, "R1")
+        XCTAssertFalse(rollback.treeRestored)
+        XCTAssertTrue(rollback.problem?.contains("no snapshot of the tree") == true, rollback.problem ?? "nil")
+        XCTAssertFalse(runner.log.contains { $0.text == "R1 rolled back; tree restored to before the batch" })
     }
 
     /// Resolution 1's trigger set: every unsuccessful ending rolls back, except

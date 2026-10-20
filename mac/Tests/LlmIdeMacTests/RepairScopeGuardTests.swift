@@ -624,13 +624,13 @@ final class RepairScopeGuardTests: XCTestCase {
         XCTAssertEqual(indexAfter, indexBefore)
     }
 
-    /// A truncated `git cat-file -e` presence probe must never be read as
+    /// A truncated `git ls-tree` presence probe must never be read as
     /// "absent" — that would delete a file the base tree actually had.
     /// Mirrors `check`'s `.elided` → `.unverifiable` fail-closed contract.
     func testRestoreFailsClosedWhenThePresenceProbeIsTruncated() async {
         final class TruncatingVerifier: FaultVerifier, @unchecked Sendable {
             func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
-                guard command.hasPrefix("git cat-file -e") else {
+                guard command.contains(" ls-tree ") else {
                     return VerifyOutcome(exitCode: 0, output: "")
                 }
                 return VerifyOutcome(exitCode: 0, output: "", elided: true)
@@ -641,6 +641,48 @@ final class RepairScopeGuardTests: XCTestCase {
         XCTAssertNotNil(result, "a truncated presence probe must not silently succeed")
         XCTAssertTrue(result?.contains(GitRepairScopeGuard.truncatedReason) == true,
                       "the diagnostic names why: \(result ?? "nil")")
+    }
+
+    /// A presence probe that FAILS — a Stop cancelling it mid-flight, a bad
+    /// tree id, git missing — is not "absent": the restore aborts before it
+    /// touches anything, so no file the batch touched is deleted.
+    func testRestoreFailsClosedWhenThePresenceProbeFailsOrIsCancelled() async throws {
+        final class FailingProbeVerifier: FaultVerifier, @unchecked Sendable {
+            let probeError: Error?
+            private(set) var commands: [String] = []
+            init(probeError: Error?) { self.probeError = probeError }
+            func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+                commands.append(command)
+                guard command.contains(" ls-tree ") else { return VerifyOutcome(exitCode: 0, output: "") }
+                if let probeError { throw probeError }
+                return VerifyOutcome(exitCode: 128, output: "fatal: Not a valid object name deadbeef")
+            }
+        }
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("restore-probe-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent("a.txt")
+        for probeError in [CancellationError() as Error?, nil] {
+            try "user edit\n".write(to: file, atomically: true, encoding: .utf8)
+            let verifier = FailingProbeVerifier(probeError: probeError)
+            let result = await GitRepairScopeGuard(verifier: verifier)
+                .restore(paths: ["a.txt"], fromTree: "deadbeef", gitRoot: root)
+            XCTAssertNotNil(result, "a failed probe must not read as success")
+            XCTAssertTrue(result?.contains("nothing was restored") == true, result ?? "nil")
+            XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "a failed probe never deletes")
+            XCTAssertFalse(verifier.commands.contains { $0.contains("git restore") }, "nothing is restored either")
+        }
+    }
+
+    /// Only an exact name is "present", only an empty listing is "absent";
+    /// anything else is unknown (nil), which `restore` refuses to act on.
+    func testTreePresenceNeedsAPositiveSignal() {
+        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "dir/a.txt\n"), true)
+        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: ""), false)
+        XCTAssertEqual(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "\n"), false)
+        XCTAssertNil(GitRepairScopeGuard.treePresence(of: "dir/a.txt", listing: "dir\n"))
+        XCTAssertNil(GitRepairScopeGuard.treePresence(of: "é.txt", listing: "\"\\303\\251.txt\"\n"))
     }
 
     func testRestoreWithNoPathsIsANoop() async {

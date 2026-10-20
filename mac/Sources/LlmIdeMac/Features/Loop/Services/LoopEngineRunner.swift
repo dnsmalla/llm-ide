@@ -287,6 +287,10 @@ final class LoopEngineRunner: ObservableObject {
     /// Whether this run's batch has started (its base was attempted, even if
     /// the snapshot failed). Decides the "passed after repair" restart target.
     var batchStarted = false
+    /// The plan's first `todo` batch when the base was taken — the batch the
+    /// test writer writes tests for. Names the batch in a rollback that ends
+    /// the run before Apply has recorded `currentBatchId` (design doc §5.1, §5.5).
+    var batchTargetId: String?
     /// Why `batchChangedPaths` may be incomplete — a guarded edit's tree
     /// snapshot failed during the batch — or nil. A rollback then restores
     /// nothing rather than half the batch.
@@ -1099,9 +1103,15 @@ final class LoopEngineRunner: ObservableObject {
         // before any batch can start). Decided on the PIPELINE's status, not
         // the honest verdict: a pipeline that passed end to end verified the
         // batch, and a stage that errored elsewhere does not unverify it.
+        // In an unstructured task: it does NOT inherit this task's cancellation,
+        // so a Stop pressed while the rollback runs cannot cancel its git probes
+        // half way (`ShellFaultVerifier` throws on a cancelled task).
         if Self.rollsBackBatch(pipelineStatus) {
-            await rollBackCurrentBatch(reason: verdict.summary,
-                                       stage: terminatingStageName ?? currentStageName ?? "Loop")
+            let reason = verdict.summary
+            let stageName = terminatingStageName ?? currentStageName ?? "Loop"
+            _ = await Task { @MainActor in
+                await self.rollBackCurrentBatch(reason: reason, stage: stageName)
+            }.value
         }
         return await finish(verdict,
                             config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,

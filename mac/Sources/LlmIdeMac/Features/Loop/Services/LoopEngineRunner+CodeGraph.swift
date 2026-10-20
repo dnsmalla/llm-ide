@@ -229,6 +229,7 @@ extension LoopEngineRunner {
         batchBaseTree = nil
         batchChangedPaths = []
         batchStarted = false
+        batchTargetId = nil
         batchTrackingGap = nil
     }
 
@@ -240,10 +241,16 @@ extension LoopEngineRunner {
     func beginRefactorBatchIfNeeded(_ stage: LoopStage, gitRoot: URL) async {
         guard !batchStarted else { return }
         batchStarted = true
+        // The batch a rollback names until Apply records which one it applied:
+        // the same first `todo` batch `prepareNextBatchFile` hands the writer.
+        let faultsRoot = currentRunContext?.faultsRoot ?? gitRoot
+        batchTargetId = refactorPlanURL(gitRoot: gitRoot, faultsRoot: faultsRoot)
+            .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
+            .flatMap { RefactorPlanDiff.firstTodo(in: $0)?.id }
         batchBaseTree = await scopeGuard.snapshotTree(gitRoot: gitRoot)
         if batchBaseTree == nil {
-            appendLog(.warn, "  [\(stage.name)] could not snapshot the working tree; "
-                      + "a failed batch will not be rolled back")
+            appendLog(.warn, "  [\(stage.name)] could not snapshot the working tree; a failed batch "
+                      + "will be marked blocked but its edits will stay in the tree")
         }
     }
 
@@ -286,24 +293,36 @@ extension LoopEngineRunner {
     /// never the index; then rewrites the batch header to `(status: blocked)`
     /// with `- Blocked: <stage> — <first line of reason>` under it.
     ///
-    /// Does nothing (returns false) when no batch was applied this run, the
-    /// batch was skipped, or there is no base. Returns whether the tree was
-    /// restored; the plan is marked blocked even when it was not, because the
-    /// batch failed either way.
+    /// Rolls back whenever the batch has STARTED (design doc §5.1, §5.5), not
+    /// only once Apply ran: a run that ends between the writer and Apply must
+    /// still take the writer's new tests back out, or every later run's
+    /// baseline is red. The batch is `currentBatchId` once Apply recorded one,
+    /// else `batchTargetId` (the first todo batch when the base was taken).
+    /// Does nothing (returns false) when no batch started, the batch was
+    /// skipped, or no batch can be named. Returns whether the tree was
+    /// restored; the plan is marked blocked even when it was not (no base, a
+    /// tracking gap, a failed restore), because the batch failed either way and
+    /// leaving it `done` would let the next run stack another batch on top.
     @discardableResult
     func rollBackCurrentBatch(reason: String, stage: String) async -> Bool {
-        guard let batchId = currentBatchId, !currentBatchSkipped, let ctx = currentRunContext else { return false }
-        guard let base = batchBaseTree else {
-            appendLog(.warn, "\(batchId) not rolled back: there is no snapshot of the tree from before the batch")
+        guard batchStarted, !currentBatchSkipped, let ctx = currentRunContext else { return false }
+        guard let batchId = currentBatchId ?? batchTargetId else {
+            appendLog(.warn, "Refactor batch not rolled back: no plan batch could be named for it")
             return false
         }
         let planURL = refactorPlanURL(gitRoot: ctx.gitRoot, faultsRoot: ctx.faultsRoot)
         let planPath = planURL.flatMap { Self.repoRelativePath($0, in: ctx.gitRoot) }
         let paths = RefactorBatchRollback.restorePaths(batchChangedPaths, planPath: planPath)
         let blockedReason = RefactorBatchRollback.blockedReason(stageName: stage, summary: reason)
-        var restoreProblem = batchTrackingGap.map { "\($0), so the batch's edits are not all known" }
-        if restoreProblem == nil {
-            restoreProblem = await scopeGuard.restore(paths: paths, fromTree: base, gitRoot: ctx.gitRoot)
+        let restoreProblem: String?
+        if let base = batchBaseTree {
+            if let gap = batchTrackingGap {
+                restoreProblem = "\(gap), so the batch's edits are not all known"
+            } else {
+                restoreProblem = await scopeGuard.restore(paths: paths, fromTree: base, gitRoot: ctx.gitRoot)
+            }
+        } else {
+            restoreProblem = "there is no snapshot of the tree from before the batch"
         }
         if let restoreProblem {
             appendLog(.error, "\(batchId) NOT rolled back: \(restoreProblem) — the batch's edits are still in the working tree")
@@ -327,10 +346,13 @@ extension LoopEngineRunner {
         return restoreProblem == nil
     }
 
-    /// The plan the apply stage edits — resolved exactly as it resolves it, so
+    /// The plan the apply stage edits — resolved exactly as it resolves it
+    /// (and as `prepareNextBatchFile` does when there is no apply stage), so
     /// the rollback marks the same file the batch was read from.
     private func refactorPlanURL(gitRoot: URL, faultsRoot: URL) -> URL? {
-        guard let apply = runOrderedStages.first(where: { $0.isRefactorApply }) else { return nil }
+        let apply = runOrderedStages.first(where: { $0.isRefactorApply })
+            ?? LoopStage(name: "Refactor Apply", kind: .skill, order: 0, skillId: "skills/refactor-apply",
+                         targetPath: LoopOutputLayout.refactorPlan)
         return LoopStagePaths.resolve(apply, gitRoot: gitRoot, projectRoot: faultsRoot).input
     }
 

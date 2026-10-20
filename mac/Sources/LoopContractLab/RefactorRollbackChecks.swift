@@ -129,6 +129,29 @@ func runRefactorRollbackChecks() async {
     let noop = await guardUnderTest.restore(paths: [], fromTree: base, gitRoot: root)
     expect(noop == nil, "restore with no paths is a no-op")
 
+    // A nested path is found in the base tree (not misread as absent).
+    try? FileManager.default.createDirectory(at: root.appendingPathComponent("dir"), withIntermediateDirectories: true)
+    try? "c1\n".write(to: root.appendingPathComponent("dir/c.txt"), atomically: true, encoding: .utf8)
+    if let nestedBase = await guardUnderTest.snapshotTree(gitRoot: root) {
+        try? "c2\n".write(to: root.appendingPathComponent("dir/c.txt"), atomically: true, encoding: .utf8)
+        let nestedError = await guardUnderTest.restore(paths: ["dir/c.txt"], fromTree: nestedBase, gitRoot: root)
+        let c = try? String(contentsOf: root.appendingPathComponent("dir/c.txt"), encoding: .utf8)
+        expect(nestedError == nil && c == "c1\n", "restore puts a nested path back from the base tree")
+    } else {
+        expect(false, "snapshotTree produced a second base tree id")
+    }
+
+    // A presence probe that FAILS (here: a tree id git does not know; a Stop
+    // cancelling the probe fails the same way) is never read as "absent":
+    // the restore aborts before touching anything, so nothing is deleted.
+    try? "keep\n".write(to: root.appendingPathComponent("k.txt"), atomically: true, encoding: .utf8)
+    let bogus = await guardUnderTest.restore(
+        paths: ["k.txt", "a.txt"], fromTree: "0000000000000000000000000000000000000000", gitRoot: root)
+    expect(bogus?.contains("nothing was restored") == true,
+           "restore from an unreadable tree fails closed, got \(bogus ?? "nil")")
+    let k = try? String(contentsOf: root.appendingPathComponent("k.txt"), encoding: .utf8)
+    expect(k == "keep\n", "a failed presence probe never deletes the file")
+
     // The `RepairScopeGuarding` default (a guard that cannot run git) and
     // index-safety of the default protocol extension are internal-only
     // concerns (the protocol itself is not `public`) and are asserted by
