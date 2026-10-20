@@ -165,9 +165,10 @@ extension LoopEngineView {
             case .structure: return "Test Map · detect the test layout → llm-doc/loop/test/"
             case .map: return "Test Map · rank untested functions → llm-doc/loop/test/"
             case .ledger: return "Test Map · diff test results into the ledger and open faults"
-            case .prune: return "Test Map · report delete-candidate tests → TEST-PRUNE.md (never deletes)"
             case nil: return "no operation chosen"
             }
+        case .testPrune:
+            return "Test Prune · report delete-candidate tests → TEST-PRUNE.md (never deletes)"
         case .codeGraph:
             switch stage.graphOp {
             case .snapshot: return "Code Graph · record the structure graph → llm-doc/loop/refactor/graph/"

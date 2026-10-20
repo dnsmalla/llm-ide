@@ -256,6 +256,7 @@ struct NewLoopWizardView: View {
         case .skill: "New Skill Stage"
         case .artifactCheck: "Artifact Check"
         case .testMap: "Test Map"
+        case .testPrune: "Test Prune"
         case .codeGraph: "Code Graph"
         case .incidentTriage: "Triage"
         case .sdkSurfaceDiff: "SDK Diff"
@@ -366,8 +367,11 @@ struct NewLoopWizardView: View {
                     Text("Structure").tag(TestMapOp.structure)
                     Text("Map").tag(TestMapOp.map)
                     Text("Ledger").tag(TestMapOp.ledger)
-                    Text("Prune").tag(TestMapOp.prune)
                 }
+            case .testPrune:
+                Text("Lists delete-candidate tests in TEST-PRUNE.md; never deletes anything.")
+                    .font(Typography.caption)
+                    .foregroundStyle(t.textMuted)
             case .codeGraph:
                 Picker("Operation", selection: Binding(
                     get: { stage.wrappedValue.graphOp ?? .verify },

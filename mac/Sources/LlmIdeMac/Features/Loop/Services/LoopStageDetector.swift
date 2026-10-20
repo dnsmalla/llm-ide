@@ -1003,8 +1003,8 @@ public enum LoopStageDetector {
             stages.append(LoopStage(name: "Test Map Check", kind: .testMap, order: 7, isDefault: true,
                                     defaultKey: "test-map-check", testOp: .map))
             // Advisory: lists tests worth deleting (TEST-PRUNE.md); never deletes anything.
-            stages.append(LoopStage(name: "Test Prune", kind: .testMap, order: 8, isDefault: true,
-                                    defaultKey: "test-prune", severity: .advisory, testOp: .prune))
+            stages.append(LoopStage(name: "Test Prune", kind: .testPrune, order: 8, isDefault: true,
+                                    defaultKey: "test-prune", severity: .advisory))
         } else {
             // No runner yet: the writer has nothing to verify against.
             stages[4].enabled = false

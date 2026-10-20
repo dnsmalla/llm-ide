@@ -547,10 +547,10 @@ struct LoopEngineView: View {
                     .frame(width: 14, alignment: .trailing)
                 Image(systemName: stage.kind == .regressionSweep ? "arrow.uturn.backward.circle"
                       : stage.kind == .shellCommand ? "terminal"
-                      : stage.kind == .testMap ? "point.3.connected.trianglepath.dotted"
+                      : stage.kind == .testMap || stage.kind == .testPrune ? "point.3.connected.trianglepath.dotted"
                       : stage.kind == .codeGraph ? "point.topleft.down.to.point.bottomright.curvepath" : "sparkles")
                     .foregroundStyle(t.textMuted)
-                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : stage.kind == .testMap ? "Test Map" : stage.kind == .codeGraph ? "Code Graph" : "Verify")
+                Text(stage.kind == .skill ? "Generate" : stage.kind == .artifactCheck ? "Check" : stage.kind == .testMap ? "Test Map" : stage.kind == .testPrune ? "Test Prune" : stage.kind == .codeGraph ? "Code Graph" : "Verify")
                     .font(Typography.captionStrong)
                     .foregroundStyle(stage.kind == .skill ? t.accent2 : t.accent)
                 if stage.isDefault {
@@ -915,7 +915,6 @@ struct LoopEngineView: View {
                     Text("Structure").tag(TestMapOp.structure)
                     Text("Map").tag(TestMapOp.map)
                     Text("Ledger").tag(TestMapOp.ledger)
-                    Text("Prune").tag(TestMapOp.prune)
                 }
             } else if stage.wrappedValue.kind == .codeGraph {
                 Picker("Operation", selection: Binding(

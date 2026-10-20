@@ -9,7 +9,8 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)
         XCTAssertEqual(stages.map(\.defaultKey), ["test-structure", "test-setup", "test-structure-check", "test-map", "test-write", "test", "test-ledger", "test-map-check", "test-prune"])
         XCTAssertEqual(stages.suffix(2).map(\.name), ["Test Map Check", "Test Prune"])
-        XCTAssertEqual(stages.last?.testOp, .prune)
+        XCTAssertEqual(stages.last?.kind, .testPrune)
+        XCTAssertNil(stages.last?.testOp)
         XCTAssertEqual(stages.last?.severity, .advisory)
         XCTAssertEqual(stages[1].enabled, false)
         XCTAssertEqual(stages[4].enabled, true)
@@ -85,8 +86,23 @@ final class LoopStageDetectorTestLoopTests: XCTestCase {
         let keys = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root).map(\.name)
         let tpl = try XCTUnwrap(LoopTemplate.builtIns.first { $0.id == LoopTemplate.testGrowth.id })
         XCTAssertEqual(tpl.config.stages.map(\.name), keys)
-        XCTAssertEqual(tpl.config.stages.last?.testOp, .prune)
+        XCTAssertEqual(tpl.config.stages.last?.kind, .testPrune)
+        XCTAssertNil(tpl.config.stages.last?.testOp)
         XCTAssertEqual(tpl.config.stages.last?.severity, .advisory)
+    }
+
+    /// An older build decodes `testOp` strictly, so a new op value would make it
+    /// quarantine the whole loop.json; an unknown kind it reads as `.unsupported`.
+    func testTestPruneEncodesAsItsOwnKindWithoutTestOp() throws {
+        let root = try TempRepo.make(files: ["Package.swift": pkg])
+        let prune = try XCTUnwrap(LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)
+            .first { $0.defaultKey == "test-prune" })
+        let json = String(decoding: try JSONEncoder().encode(prune), as: UTF8.self)
+        XCTAssertTrue(json.contains("\"kind\":\"testPrune\""), json)
+        XCTAssertFalse(json.contains("testOp"), json)
+        XCTAssertNil(TestMapOp(rawValue: "prune"))
+        let decoded = try JSONDecoder().decode(LoopStage.self, from: Data(json.utf8))
+        XCTAssertEqual(decoded.kind, .testPrune)
     }
 
     func testNoRunnerLoopHasNoUnverifiedCodeApply() throws {

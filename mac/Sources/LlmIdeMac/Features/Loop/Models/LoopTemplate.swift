@@ -403,7 +403,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                           command: detectedTestCommand, order: 5),
                 LoopStage(name: "Test Ledger", kind: .testMap, order: 6, testOp: .ledger),
                 LoopStage(name: "Test Map Check", kind: .testMap, order: 7, testOp: .map),
-                LoopStage(name: "Test Prune", kind: .testMap, order: 8, severity: .advisory, testOp: .prune)
+                LoopStage(name: "Test Prune", kind: .testPrune, order: 8, severity: .advisory)
             ],
             maxIterations: 4, consecutiveFailureStop: 3),
         isBuiltIn: true)

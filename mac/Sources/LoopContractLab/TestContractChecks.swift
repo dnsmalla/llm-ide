@@ -41,8 +41,15 @@ func runTestContractChecks() {
     let stages = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: root)
     expect(stages.suffix(2).map(\.name) == ["Test Map Check", "Test Prune"], "the Test loop ends with Test Prune")
     let prune = stages.last
-    expect(prune?.testOp == .prune && prune?.severity == .advisory && prune?.defaultKey == "test-prune",
-           "Test Prune is an advisory prune report")
+    expect(prune?.kind == .testPrune && prune?.testOp == nil && prune?.severity == .advisory
+               && prune?.defaultKey == "test-prune",
+           "Test Prune is its own advisory stage kind")
+    // An older build decodes `testOp` strictly, so a new op value would make it
+    // quarantine the whole loop.json; an unknown KIND it reads as `.unsupported`.
+    let pruneJSON = prune.flatMap { try? JSONEncoder().encode($0) }.map { String(decoding: $0, as: UTF8.self) } ?? ""
+    expect(pruneJSON.contains("\"kind\":\"testPrune\"") && !pruneJSON.contains("testOp"),
+           "Test Prune encodes as kind testPrune with no testOp key")
+    expect(TestMapOp(rawValue: "prune") == nil, "TestMapOp has no prune op")
     let bare = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.test, gitRoot: noRunner)
     expect(!bare.contains { $0.defaultKey == "test-prune" }, "no Test Prune without a runner")
 

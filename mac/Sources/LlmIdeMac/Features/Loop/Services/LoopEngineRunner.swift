@@ -860,7 +860,7 @@ final class LoopEngineRunner: ObservableObject {
                                         projectId: projectId, startedAt: startedAt,
                                         loopId: loopId, loopName: loopName)
                 }
-            case .regressionSweep, .unsupported, .incidentTriage, .sdkSurfaceDiff:
+            case .regressionSweep, .unsupported, .incidentTriage, .sdkSurfaceDiff, .testPrune:
                 break
             }
         }
@@ -961,6 +961,8 @@ final class LoopEngineRunner: ObservableObject {
                         stages: orderedStages, progress: &progress)
                 case .testMap:
                     decision = await runTestMapStage(stage, gitRoot: runGitRoot, stages: orderedStages)
+                case .testPrune:
+                    decision = await runTestPruneStage(stage, gitRoot: runGitRoot)
                 case .codeGraph:
                     decision = await runCodeGraphStage(stage, gitRoot: runGitRoot)
                 case .incidentTriage:

@@ -71,25 +71,30 @@ extension LoopEngineRunner {
         case .ledger:
             return await runLedgerOp(stage, startedAt: startedAt, gitRoot: mainRoot, stages: stages)
 
-        case .prune:
-            let structure: TestStructure
-            if let known = testStructure { structure = known } else {
-                structure = await Task.detached(priority: .utility) { TestStructureDetector(gitRoot: gitRoot).detect() }.value
-                testStructure = structure
-            }
-            let count = await Task.detached(priority: .utility) { () -> Int in
-                let scanner = TestPruneScanner(gitRoot: gitRoot, structure: structure)
-                let found = scanner.scan()
-                _ = try? scanner.write(found, outputRoot: mainRoot)
-                return found.count
-            }.value
-            appendLog(.info, "  [\(stage.name)] \(count) prune candidate(s) — see TEST-PRUNE.md")
-            return finishTestMap(stage, startedAt: startedAt, passed: true, output: "")
-
         case nil:
             stageStates[stage.id] = .failed
             return .terminate(.error("Stage \"\(stage.name)\" has no operation chosen"))
         }
+    }
+
+    /// The `.testPrune` stage: lists delete-candidate tests in TEST-PRUNE.md and
+    /// never deletes. Always passes; it is advisory by default.
+    func runTestPruneStage(_ stage: LoopStage, gitRoot: URL) async -> StageDecision {
+        let startedAt = Date()
+        let mainRoot = currentRunContext?.mainGitRoot ?? gitRoot
+        let structure: TestStructure
+        if let known = testStructure { structure = known } else {
+            structure = await Task.detached(priority: .utility) { TestStructureDetector(gitRoot: gitRoot).detect() }.value
+            testStructure = structure
+        }
+        let count = await Task.detached(priority: .utility) { () -> Int in
+            let scanner = TestPruneScanner(gitRoot: gitRoot, structure: structure)
+            let found = scanner.scan()
+            _ = try? scanner.write(found, outputRoot: mainRoot)
+            return found.count
+        }.value
+        appendLog(.info, "  [\(stage.name)] \(count) prune candidate(s) — see TEST-PRUNE.md")
+        return finishTestMap(stage, startedAt: startedAt, passed: true, output: "")
     }
 
     /// Records the attempt and settles the stage state. A failed `.testMap`

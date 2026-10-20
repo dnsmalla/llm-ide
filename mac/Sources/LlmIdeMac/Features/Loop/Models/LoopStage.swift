@@ -25,7 +25,9 @@ public enum LoopStageSeverity: String, Codable, CaseIterable {
 
 /// What a `.testMap` stage does: detect the test layout, rebuild the
 /// untested-function map, or diff the Test stage's results into the ledger.
-public enum TestMapOp: String, Codable { case structure, map, ledger, prune }
+/// Never add a case: a build that predates it decodes `testOp` strictly and
+/// would quarantine the whole loop.json. A new operation is a new `Kind`.
+public enum TestMapOp: String, Codable { case structure, map, ledger }
 
 /// What a `.codeGraph` stage does: `snapshot` records the code graph before a
 /// refactor batch runs, `verify` diffs the regenerated graph against it.
@@ -50,6 +52,11 @@ public struct LoopStage: Identifiable, Codable, Equatable {
         /// operation is `testOp`. A build that predates this kind reads it as
         /// `.unsupported` (kept verbatim, never run).
         case testMap
+        /// The Test loop's advisory prune report: lists delete-candidate tests
+        /// in `LoopOutputLayout.testPruneMD`, never deletes. No shell, no agent.
+        /// A build that predates this kind reads it as `.unsupported` (kept
+        /// verbatim, never run).
+        case testPrune
         /// Self-Heal Phase 2: picks up to `SelfHealSettings.maxPerRun()` new,
         /// non-environmental incidents and writes `SelfHealBatch.relativePath`
         /// at the run's git root for the fix agent to answer. No shell, no
