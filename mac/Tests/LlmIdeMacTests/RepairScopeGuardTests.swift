@@ -594,6 +594,18 @@ final class RepairScopeGuardTests: XCTestCase {
         try FileManager.default.removeItem(at: root.appendingPathComponent("b.txt"))
         try "u1\n".write(to: root.appendingPathComponent("u.txt"), atomically: true, encoding: .utf8)
 
+        // An unrelated staged change, present when restore runs. `a.txt`/`b.txt`'s
+        // base-tree content equals HEAD's committed blob, so "git diff --cached is
+        // empty" alone cannot tell `--worktree` apart from `--staged` (or any
+        // command scoped wider than the given paths) — both would leave those
+        // two paths looking clean in the index regardless. Staging something
+        // else first, and asserting it is untouched afterward, is what actually
+        // proves the index was left alone.
+        try "staged1\n".write(to: root.appendingPathComponent("s.txt"), atomically: true, encoding: .utf8)
+        try git(root, "add", "s.txt")
+        let stagedBefore = try gitOutput(root, "diff", "--cached")
+        XCTAssertFalse(stagedBefore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+
         let restoreError = await guardUnderTest.restore(
             paths: ["a.txt", "n.txt", "b.txt"], fromTree: base, gitRoot: root)
         XCTAssertNil(restoreError)
@@ -604,9 +616,28 @@ final class RepairScopeGuardTests: XCTestCase {
         // Not in the restore list: keeps its SECOND edit, not the base snapshot's.
         XCTAssertEqual(try String(contentsOf: root.appendingPathComponent("u.txt"), encoding: .utf8), "u1\n")
 
-        // `--worktree` never stages anything: the index still matches HEAD.
-        let staged = try gitOutput(root, "diff", "--cached")
-        XCTAssertTrue(staged.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+        // Index-safety: the unrelated staged change is exactly as it was.
+        let stagedAfter = try gitOutput(root, "diff", "--cached")
+        XCTAssertEqual(stagedAfter, stagedBefore)
+    }
+
+    /// A truncated `git cat-file -e` presence probe must never be read as
+    /// "absent" — that would delete a file the base tree actually had.
+    /// Mirrors `check`'s `.elided` → `.unverifiable` fail-closed contract.
+    func testRestoreFailsClosedWhenThePresenceProbeIsTruncated() async {
+        final class TruncatingVerifier: FaultVerifier, @unchecked Sendable {
+            func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+                guard command.hasPrefix("git cat-file -e") else {
+                    return VerifyOutcome(exitCode: 0, output: "")
+                }
+                return VerifyOutcome(exitCode: 0, output: "", elided: true)
+            }
+        }
+        let guardUnderTest = GitRepairScopeGuard(verifier: TruncatingVerifier())
+        let result = await guardUnderTest.restore(paths: ["a.txt"], fromTree: "deadbeef", gitRoot: gitRoot)
+        XCTAssertNotNil(result, "a truncated presence probe must not silently succeed")
+        XCTAssertTrue(result?.contains(GitRepairScopeGuard.truncatedReason) == true,
+                      "the diagnostic names why: \(result ?? "nil")")
     }
 
     func testRestoreWithNoPathsIsANoop() async {

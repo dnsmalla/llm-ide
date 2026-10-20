@@ -567,8 +567,18 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
             switch await run("git cat-file -e \(Self.shellQuoted(["\(tree):\(path)"]))", gitRoot: gitRoot) {
             case .success:
                 present.append(path)
-            default:
+            case .failure:
+                // `cat-file -e` exits non-zero when the path has no entry in
+                // `tree` — that is the expected shape of "absent", not a real
+                // command failure.
                 absent.append(path)
+            case .truncated:
+                // Mirrors `check`'s `.elided` → `.unverifiable`: a presence
+                // probe whose output was cut short cannot be trusted either
+                // way, and guessing "absent" here would delete a file the
+                // base tree actually had. Fail the whole call closed instead
+                // of silently restoring some paths and not others.
+                return "could not confirm whether \(path) exists in \(tree): \(Self.truncatedReason)"
             }
         }
 

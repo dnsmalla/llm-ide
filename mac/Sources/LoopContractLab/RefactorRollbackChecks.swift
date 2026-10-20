@@ -93,6 +93,19 @@ func runRefactorRollbackChecks() async {
     try? FileManager.default.removeItem(at: root.appendingPathComponent("b.txt"))
     try? "u1\n".write(to: root.appendingPathComponent("u.txt"), atomically: true, encoding: .utf8)
 
+    // An unrelated staged change, present when restore runs. `a.txt`/`b.txt`'s
+    // base-tree content equals HEAD's committed blob, so "git diff --cached is
+    // empty" alone can't tell `--worktree` apart from `--staged` (or any
+    // wider-than-given-paths command): both would leave those two paths
+    // looking clean in the index. Staging something ELSE first, and checking
+    // it is untouched afterward, is what actually proves the index was left
+    // alone — not just coincidentally identical for the restored paths.
+    try? "staged1\n".write(to: root.appendingPathComponent("s.txt"), atomically: true, encoding: .utf8)
+    git(["add", "s.txt"], root)
+    let stagedBefore = gitOutput(["diff", "--cached"], root)
+    expect(!stagedBefore.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+           "the unrelated staged change registers in git diff --cached before restore runs")
+
     let restoreError = await guardUnderTest.restore(
         paths: ["a.txt", "n.txt", "b.txt"], fromTree: base, gitRoot: root)
     expect(restoreError == nil, "restore reports no error, got \(restoreError ?? "nil")")
@@ -106,11 +119,11 @@ func runRefactorRollbackChecks() async {
     expect(!n, "restore deletes n.txt, which the base tree never had")
     expect(u == "u1\n", "restore leaves u.txt (not in the restore list) at its second edit")
 
-    // Index-safety: `--worktree` never staged anything, so the index still
-    // matches HEAD exactly — `git diff --cached` is empty.
-    let staged = gitOutput(["diff", "--cached"], root)
-    expect(staged.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
-           "restore never touches the index — git diff --cached is empty")
+    // Index-safety: the unrelated staged change is exactly as it was —
+    // `--worktree`-only restore never touched the index at all.
+    let stagedAfter = gitOutput(["diff", "--cached"], root)
+    expect(stagedAfter == stagedBefore,
+           "restore leaves an unrelated staged change exactly as it was")
 
     // Empty path list is a no-op (mirrors `revert`'s contract).
     let noop = await guardUnderTest.restore(paths: [], fromTree: base, gitRoot: root)
