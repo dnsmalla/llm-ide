@@ -22,20 +22,24 @@ public enum RefactorBatchSequence {
         return next
     }
 
-    /// One batch the run rolled back, as the batch summary lists it.
+    /// One batch the run rolled back, as the batch summary lists it. A batch
+    /// put back to `todo` (`backToTodo`) says so instead of `blocked`; one whose
+    /// tree could not be restored is always blocked.
     public static func rolledBackEntry(batchId: String, reason: String, treeRestored: Bool,
-                                       problem: String?) -> String {
+                                       problem: String?, backToTodo: Bool = false) -> String {
         guard treeRestored else {
             return "Not rolled back: \(batchId) — tree left as the batch made it "
                 + "(\(problem ?? "unknown")); blocked: \(reason)"
         }
-        return "Rolled back: \(batchId) (blocked: \(reason))" + (problem.map { " — \($0)" } ?? "")
+        let label = backToTodo ? "back to todo" : "blocked"
+        return "Rolled back: \(batchId) (\(label): \(reason))" + (problem.map { " — \($0)" } ?? "")
     }
 
     /// `Applied: R1, R2 · Skipped: R4 · Rolled back: R3 (blocked: …)` for the
     /// summary note and the finish notification. Nil when the run kept no batch
-    /// (none applied or skipped): a lone rollback already has its own line
-    /// (`LoopBatchRollback.summary`), and a run that touched no batch has none.
+    /// (none applied or skipped): a lone rollback then gets its own line
+    /// (`LoopBatchRollback.summary`) — and ONLY then, since this list already
+    /// names it — and a run that touched no batch has none.
     public static func batchesSummary(applied: [String], skipped: [String], rolledBack: String?) -> String? {
         guard !applied.isEmpty || !skipped.isEmpty else { return nil }
         var parts: [String] = []

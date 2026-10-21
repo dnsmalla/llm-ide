@@ -78,6 +78,13 @@ func runRefactorMultiBatchChecks() {
            == "Applied: R1 · Skipped: R2", "a skipped batch is listed as skipped")
     expect(RefactorBatchSequence.batchesSummary(applied: [], skipped: [], rolledBack: rolledBack) == nil,
            "with no batch kept the rollback's own line stands alone (nil here)")
+    expect(RefactorBatchSequence.rolledBackEntry(batchId: "R3", reason: "Check Baseline — error: red", treeRestored: true,
+                                                 problem: nil, backToTodo: true)
+           == "Rolled back: R3 (back to todo: Check Baseline — error: red)",
+           "a batch put back to todo says so instead of `blocked`")
+    expect(RefactorBatchSequence.rolledBackEntry(batchId: "R3", reason: "x", treeRestored: false,
+                                                 problem: "no base", backToTodo: true).contains("blocked: x"),
+           "a batch whose tree was not restored always reads blocked")
     let notRestored = RefactorBatchSequence.rolledBackEntry(
         batchId: "R3", reason: "Test — x", treeRestored: false, problem: "no base")
     expect(notRestored.hasPrefix("Not rolled back: R3") && notRestored.contains("no base"),

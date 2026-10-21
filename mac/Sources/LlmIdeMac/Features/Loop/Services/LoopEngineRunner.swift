@@ -303,6 +303,11 @@ final class LoopEngineRunner: ObservableObject {
     /// snapshot failed during the batch — or nil. A rollback then restores
     /// nothing rather than half the batch.
     var batchTrackingGap: String?
+    /// Set when a batch-scope stage ended the run with a write-scope violation
+    /// reported as a plain `.error` (the test writer or setup writing outside
+    /// what it may create). The batch's own content is then implicated, so a
+    /// rollback keeps it `blocked` (`RefactorBatchRollback.planOutcome`).
+    var batchContentViolation = false
     /// The batch this run rolled back (or tried to), for the journal record,
     /// the summary note and the finish notification. Reset per run.
     var batchRollback: LoopBatchRollback?
@@ -927,8 +932,9 @@ final class LoopEngineRunner: ObservableObject {
         // (the set is cleared for the batch stages when the next batch starts).
         var codeAppliedStageIDs = Set<String>()
         // The stage whose decision ended the run, for a rollback's `- Blocked:`
-        // line. Nil when the run ended between stages (budget, iterations).
-        var terminatingStageName: String?
+        // line and its blocked-or-todo call. Nil when the run ended between
+        // stages (budget, iterations).
+        var terminatingStage: LoopStage?
         // Where each iteration starts: stage 0, or — once the run moved on to a
         // later refactor batch — that batch's first stage, so the planner and
         // the stages before the batch are not re-run (design doc §3.6).
@@ -1009,6 +1015,15 @@ final class LoopEngineRunner: ObservableObject {
                     decision = await runRegressionStage(
                         stage, config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                         progress: &progress, scopeGlobs: scopeGlobs)
+                case .shellCommand where RefactorBatchRollback.skipsBaselineOnRestart(
+                    stage, in: orderedStages, appliedStageIDs: codeAppliedStageIDs):
+                    // A mid-batch restart: this baseline measured the tree
+                    // before Apply and passed there. Re-run now it would measure
+                    // the half-applied batch and, unable to repair, end the run
+                    // before the stage that can repair it is reached.
+                    appendLog(.info, "  [\(stage.name)] already passed before this batch was applied; not re-run mid-batch")
+                    stageStates[stage.id] = .passed
+                    decision = .proceed
                 case .shellCommand:
                     decision = await runShellStage(
                         stage, config: config, gitRoot: runGitRoot,
@@ -1095,7 +1110,7 @@ final class LoopEngineRunner: ObservableObject {
                        workingElapsed(since: startedAt, asOf: Date()) > budget {
                         appendLog(.warn, "Time budget of \(Int(budget))s exceeded after \(iteration) iteration(s)")
                         status = .givenUp(reason: .wallClockExceeded)
-                        terminatingStageName = stage.name
+                        terminatingStage = stage
                         break iterationLoop
                     }
                     retriedStageID = stage.id
@@ -1107,7 +1122,7 @@ final class LoopEngineRunner: ObservableObject {
                     continue iterationLoop
                 case .terminate(let terminal):
                     status = terminal
-                    terminatingStageName = stage.name
+                    terminatingStage = stage
                     break iterationLoop
                 }
             }
@@ -1152,9 +1167,16 @@ final class LoopEngineRunner: ObservableObject {
         // half way (`ShellFaultVerifier` throws on a cancelled task).
         if Self.rollsBackBatch(pipelineStatus) {
             let reason = verdict.summary
-            let stageName = terminatingStageName ?? currentStageName ?? "Loop"
+            let stageName = terminatingStage?.name ?? currentStageName ?? "Loop"
+            // Classified on the PIPELINE's status, like the trigger itself: a
+            // plain `.error` that ended the pipeline (a red baseline, a failed
+            // agent call) — never a give-up or a scope block.
+            let endedWithError: Bool
+            if case .error = pipelineStatus { endedWithError = true } else { endedWithError = false }
+            let stage = terminatingStage
             _ = await Task { @MainActor in
-                await self.rollBackCurrentBatch(reason: reason, stage: stageName)
+                await self.rollBackCurrentBatch(reason: reason, stage: stageName,
+                                                endedWithError: endedWithError, terminatingStage: stage)
             }.value
         }
         verdict = keepingVerifiedBatches(verdict, pipelineStatus: pipelineStatus)
@@ -2222,6 +2244,7 @@ final class LoopEngineRunner: ObservableObject {
             }
             if stage.testWriteOnly, let violation = await enforceTestWriteOnly(
                 stage: stage, result: agentResult, changed: changed, gitRoot: gitRoot) {
+                batchContentViolation = true
                 stageStates[stage.id] = .failed
                 appendLog(.error, "  [\(stage.name)] \(violation)")
                 record(stage, startedAt: startedAt, duration: duration, exitCode: nil,
@@ -2231,6 +2254,7 @@ final class LoopEngineRunner: ObservableObject {
             }
             if stage.isTestSetup, let violation = await enforceTestSetupOnly(
                 stage: stage, result: agentResult, changed: changed, gitRoot: gitRoot) {
+                batchContentViolation = true
                 stageStates[stage.id] = .failed
                 appendLog(.error, "  [\(stage.name)] \(violation)")
                 record(stage, startedAt: startedAt, duration: duration, exitCode: nil,

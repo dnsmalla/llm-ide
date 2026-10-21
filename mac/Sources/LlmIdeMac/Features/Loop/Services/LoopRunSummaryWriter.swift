@@ -162,11 +162,12 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
         if let batch = attempts.compactMap(\.batchId).last {
             md += "\n**Batch:** \(batch)\n"
         }
-        if let rollback = record.batchRollback {
-            md += "\n**Rollback:** \(rollback.summary)\n"
-        }
+        // The batch list already names the rollback when the run kept a batch;
+        // the standalone line is only for a run whose one batch rolled back.
         if let batches = record.batchesSummary {
             md += "\n**Batches:** \(batches)\n"
+        } else if let rollback = record.batchRollback {
+            md += "\n**Rollback:** \(rollback.summary)\n"
         }
         if let unverified = attempts.last(where: {
                $0.kind == .codeGraph && $0.outputTail.hasPrefix(LoopEngineRunner.codeGraphUnverifiedPrefix) }),

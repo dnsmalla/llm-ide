@@ -96,14 +96,48 @@ public enum RefactorPlanDiff {
         return found ? out.joined(separator: "\n") : plan
     }
 
+    /// Puts batch `id` back to `todo` after a rollback whose cause was not the
+    /// batch (`RefactorBatchRollback.planOutcome`): rewrites its header to
+    /// `(status: todo)` — undoing the apply stage's `done` — and drops a
+    /// `- Blocked:` line directly under it, so the next run retries the batch
+    /// as written. Every other line is byte-identical. `id` not found → `plan`
+    /// unchanged.
+    public static func markingTodo(_ plan: String, id: String) -> String {
+        let lines = plan.components(separatedBy: "\n")
+        var out: [String] = []
+        var index = 0
+        var found = false
+        while index < lines.count {
+            let line = lines[index]
+            if line.hasPrefix("### "), let groups = firstGroups(headerPattern, in: line),
+               groups.count == 2, groups[0] == id {
+                found = true
+                out.append(header(line, status: "todo"))
+                index += 1
+                if index < lines.count,
+                   lines[index].trimmingCharacters(in: .whitespaces).hasPrefix("- Blocked:") {
+                    index += 1
+                }
+                continue
+            }
+            out.append(line)
+            index += 1
+        }
+        return found ? out.joined(separator: "\n") : plan
+    }
+
     /// Replaces the `(status: …)` parenthetical on a header line with
     /// `(status: blocked)`, dropping any free text the old status carried
     /// (e.g. `, reason: …`) — `blocked` always states its own reason on the
     /// line below, via `- Blocked:`.
     private static func blockedHeader(_ line: String) -> String {
+        header(line, status: "blocked")
+    }
+
+    private static func header(_ line: String, status: String) -> String {
         guard let range = line.range(of: #"\(status:\s*[A-Za-z]+[^)]*\)"#, options: .regularExpression)
         else { return line }
-        return line.replacingCharacters(in: range, with: "(status: blocked)")
+        return line.replacingCharacters(in: range, with: "(status: \(status))")
     }
 
     // MARK: - Parsing

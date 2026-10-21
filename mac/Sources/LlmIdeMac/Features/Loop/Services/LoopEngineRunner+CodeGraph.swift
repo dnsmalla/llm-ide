@@ -234,6 +234,7 @@ extension LoopEngineRunner {
         batchStarted = false
         batchTargetId = nil
         batchTrackingGap = nil
+        batchContentViolation = false
     }
 
     /// At the batch's first stage (§5.5): snapshot the working tree as the base
@@ -306,8 +307,15 @@ extension LoopEngineRunner {
     /// restored; the plan is marked blocked even when it was not (no base, a
     /// tracking gap, a failed restore), because the batch failed either way and
     /// leaving it `done` would let the next run stack another batch on top.
+    ///
+    /// An ending that does not implicate the batch — a red baseline, an agent
+    /// or transport error (`endedWithError`, `terminatingStage`; see
+    /// `RefactorBatchRollback.planOutcome`) — puts a RESTORED batch back to
+    /// `todo` instead, so the planner does not route around a blocker that
+    /// was never in it.
     @discardableResult
-    func rollBackCurrentBatch(reason: String, stage: String) async -> Bool {
+    func rollBackCurrentBatch(reason: String, stage: String, endedWithError: Bool = false,
+                              terminatingStage: LoopStage? = nil) async -> Bool {
         guard batchStarted, !currentBatchSkipped, let ctx = currentRunContext else { return false }
         guard let batchId = currentBatchId ?? batchTargetId else {
             appendLog(.warn, "Refactor batch not rolled back: no plan batch could be named for it")
@@ -335,18 +343,49 @@ extension LoopEngineRunner {
                 appendLog(.info, "  restored \(paths.count) path(s): \(paths.joined(separator: ", "))")
             }
         }
-        let planProblem = markPlanBlocked(planURL, batchId: batchId, reason: blockedReason)
-        if let planProblem {
-            appendLog(.warn, planProblem)
-        } else {
-            appendLog(.info, "\(batchId) marked blocked in the refactor plan: \(blockedReason)")
+        let outcome = RefactorBatchRollback.planOutcome(
+            endedWithError: endedWithError, terminatingStage: terminatingStage,
+            contentViolation: batchContentViolation, treeRestored: restoreProblem == nil)
+        let planProblem: String?
+        switch outcome {
+        case .blocked:
+            planProblem = markPlanBlocked(planURL, batchId: batchId, reason: blockedReason)
+            if planProblem == nil {
+                appendLog(.info, "\(batchId) marked blocked in the refactor plan: \(blockedReason)")
+            }
+        case .todo:
+            planProblem = markPlanTodo(planURL, batchId: batchId)
+            if planProblem == nil {
+                appendLog(.info, "\(batchId) back to todo in the refactor plan — the run ended for a reason "
+                          + "outside the batch (\(blockedReason)); the next run retries it as-is")
+            }
         }
+        if let planProblem { appendLog(.warn, planProblem) }
         let problems = [restoreProblem, planProblem].compactMap { $0 }
         batchRollback = LoopBatchRollback(
             batchId: batchId, stageName: stage, reason: blockedReason, restoredPaths: paths,
             treeRestored: restoreProblem == nil,
-            problem: problems.isEmpty ? nil : problems.joined(separator: "; "))
+            problem: problems.isEmpty ? nil : problems.joined(separator: "; "),
+            backToTodo: outcome == .todo ? true : nil)
         return restoreProblem == nil
+    }
+
+    /// Writes `(status: todo)` back over the batch's header; nil on success,
+    /// else why not. Like `markPlanBlocked`, never fails the run.
+    private func markPlanTodo(_ planURL: URL?, batchId: String) -> String? {
+        guard let planURL, let plan = try? String(contentsOf: planURL, encoding: .utf8) else {
+            return "could not read the refactor plan to put \(batchId) back to todo"
+        }
+        guard RefactorPlanDiff.batch(id: batchId, in: plan) != nil else {
+            return "\(batchId) is not in the refactor plan; its status was not changed"
+        }
+        do {
+            try RefactorPlanDiff.markingTodo(plan, id: batchId)
+                .write(to: planURL, atomically: true, encoding: .utf8)
+        } catch {
+            return "could not put \(batchId) back to todo in the refactor plan: \(error.localizedDescription)"
+        }
+        return nil
     }
 
     /// The plan the apply stage edits — resolved exactly as it resolves it

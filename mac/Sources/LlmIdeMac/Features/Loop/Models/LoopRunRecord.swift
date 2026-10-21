@@ -244,13 +244,16 @@ struct LoopRunRecord: Codable, Equatable {
 
 /// A refactor batch a failed run took back out of the tree (Mikado rollback,
 /// design doc §3.5): which batch, what ended the run, and whether the tree is
-/// really back to its pre-batch state. The plan marks the batch `blocked`
-/// either way; `treeRestored == false` says the edits are still in the tree.
+/// really back to its pre-batch state. The plan marks the batch `blocked` —
+/// or, when the ending did not implicate the batch, puts it back to `todo`
+/// (`backToTodo`, `RefactorBatchRollback.planOutcome`); `treeRestored == false`
+/// says the edits are still in the tree (and is always `blocked`).
 struct LoopBatchRollback: Codable, Equatable {
     var batchId: String
     /// The stage whose ending triggered the rollback.
     var stageName: String
-    /// The `- Blocked:` reason written into the plan.
+    /// Why the run ended: the `- Blocked:` reason written into the plan, or,
+    /// for a batch put back to `todo`, the same words, kept for the record only.
     var reason: String
     /// Repo-relative paths put back from the batch base (or that would have
     /// been, when the restore could not run), sorted.
@@ -258,19 +261,25 @@ struct LoopBatchRollback: Codable, Equatable {
     var treeRestored: Bool
     /// Why the tree was not restored, or the plan not marked; nil when both worked.
     var problem: String?
+    /// True when the batch went back to `todo` (retried as-is next run) rather
+    /// than `blocked`. Nil — never false — otherwise, so records written
+    /// before this field existed read the same as a blocked batch.
+    var backToTodo: Bool? = nil
 
     /// One line for the summary note and the finish notification.
     var summary: String {
         guard treeRestored else {
             return "\(batchId) NOT rolled back — tree left as the batch made it (\(problem ?? "unknown")); blocked: \(reason)"
         }
-        return "\(batchId) rolled back (blocked: \(reason))" + (problem.map { " — \($0)" } ?? "")
+        let label = backToTodo == true ? "back to todo" : "blocked"
+        return "\(batchId) rolled back (\(label): \(reason))" + (problem.map { " — \($0)" } ?? "")
     }
 
     /// This rollback as one entry of the run's batch list (`RefactorBatchSequence.batchesSummary`).
     var listEntry: String {
         RefactorBatchSequence.rolledBackEntry(batchId: batchId, reason: reason,
-                                              treeRestored: treeRestored, problem: problem)
+                                              treeRestored: treeRestored, problem: problem,
+                                              backToTodo: backToTodo == true)
     }
 }
 

@@ -54,9 +54,10 @@ extension LoopEngineRunner {
     /// The run's final verdict once a LATER batch failed (§5.3): with at least
     /// one batch verified this run and the failed one rolled back out of the
     /// tree, the run succeeds, so the verified batches can ship. The failed
-    /// batch is still listed (`batchesSummary`) and stays `blocked` in the
-    /// plan, and a blocked batch has already ended the run — no further batch
-    /// is attempted. Any other case keeps `verdict`.
+    /// batch is still listed (`batchesSummary`) and is `blocked` in the plan
+    /// (or back to `todo` when the ending did not implicate it,
+    /// `RefactorBatchRollback.planOutcome`), and its failure has already ended
+    /// the run — no further batch is attempted. Any other case keeps `verdict`.
     ///
     /// An errored stage in a verified batch — or in a stage before the batch —
     /// never reaches here as an error: the run does not move past a batch while

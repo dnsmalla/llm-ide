@@ -41,6 +41,60 @@ func runRefactorBatchRollbackChecks() {
     expect(RefactorBatchRollback.firstBatchStageIndex(in: planOnly) == nil,
            "a plan-only refactor loop (no test command) has no batch stage")
 
+    // MARK: - Baselines on a mid-batch restart (§5.7)
+
+    // The default loop with a check command too: Test Write → Test Baseline →
+    // Check Baseline → Apply → Conform → Check → Test → Ledger → Graph Check.
+    let checked = makeTempDir()
+    defer { try? fm.removeItem(at: checked) }
+    try? "test:\n\trun-tests\nlint:\n\trun-lint\n".write(to: checked.appendingPathComponent("Makefile"),
+                                                         atomically: true, encoding: .utf8)
+    let full = LoopStageDetector.defaultStages(forLoop: LoopDefaultLoopKey.refactor, gitRoot: checked)
+        .filter(\.enabled)
+    func stage(_ key: String) -> LoopStage? { full.first { $0.defaultKey == key } }
+    if let testBase = stage("refactor-test-baseline"), let checkBase = stage("refactor-check-baseline"),
+       let apply = stage("refactor-apply"), let check = stage("refactor-check"), let test = stage("refactor-test") {
+        let applied: Set<String> = [apply.id]
+        expect(RefactorBatchRollback.skipsBaselineOnRestart(testBase, in: full, appliedStageIDs: applied)
+               && RefactorBatchRollback.skipsBaselineOnRestart(checkBase, in: full, appliedStageIDs: applied),
+               "once Apply applied the batch, a restart skips Test Baseline and Check Baseline")
+        expect(!RefactorBatchRollback.skipsBaselineOnRestart(testBase, in: full, appliedStageIDs: [])
+               && !RefactorBatchRollback.skipsBaselineOnRestart(checkBase, in: full, appliedStageIDs: []),
+               "before Apply has applied (the batch's first pass), the baselines run")
+        expect(!RefactorBatchRollback.skipsBaselineOnRestart(check, in: full, appliedStageIDs: applied)
+               && !RefactorBatchRollback.skipsBaselineOnRestart(test, in: full, appliedStageIDs: applied),
+               "the repairable Check and Test after Apply always run")
+        var lateBaseline = checkBase
+        lateBaseline.id = "late"
+        let reordered = full + [lateBaseline]
+        expect(!RefactorBatchRollback.skipsBaselineOnRestart(lateBaseline, in: reordered, appliedStageIDs: applied),
+               "a non-repairable stage AFTER Apply is never skipped")
+    } else {
+        expect(false, "the default refactor loop with a check command has both baselines, Apply, Check and Test")
+    }
+
+    // MARK: - Blocked or back to todo (I3)
+
+    let shellBaseline = LoopStage(name: "Check Baseline", kind: .shellCommand, command: "make lint", order: 0,
+                                  allowsRepair: false)
+    let shellTest = LoopStage(name: "Test", kind: .shellCommand, command: "make test", order: 1)
+    let graphCheck = LoopStage(name: "Graph Check", kind: .codeGraph, order: 2, graphOp: .verify)
+    let applyStage = LoopStage(name: "Refactor Apply", kind: .skill, order: 3, skillId: "skills/refactor-apply")
+    typealias Outcome = RefactorBatchRollback.PlanOutcome
+    func outcome(_ error: Bool, _ stage: LoopStage?, violation: Bool = false, restored: Bool = true) -> Outcome {
+        RefactorBatchRollback.planOutcome(endedWithError: error, terminatingStage: stage,
+                                          contentViolation: violation, treeRestored: restored)
+    }
+    expect(outcome(true, shellBaseline) == .todo, "a red non-repairable baseline puts the batch back to todo")
+    expect(outcome(true, applyStage) == .todo, "an agent/transport error in the batch puts it back to todo")
+    expect(outcome(true, shellTest) == .todo, "a command that could not run (plain .error) puts it back to todo")
+    expect(outcome(true, graphCheck) == .blocked, "a Graph Check failure keeps the batch blocked")
+    expect(outcome(false, shellTest) == .blocked, "a give-up (or a scope block) keeps the batch blocked")
+    expect(outcome(true, applyStage, violation: true) == .blocked,
+           "a write-scope violation reported as .error keeps the batch blocked")
+    expect(outcome(true, shellBaseline, restored: false) == .blocked,
+           "a batch whose tree was not restored is always blocked, never retried on top of itself")
+
     // MARK: - Restore list (§5.2)
 
     let changed: Set<String> = [

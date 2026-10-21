@@ -50,6 +50,17 @@ func runRefactorRollbackChecks() async {
     expect(RefactorPlanDiff.markingBlocked(plan, id: "R9", reason: "x") == plan,
            "marking an unknown batch id leaves the plan unchanged")
 
+    // MARK: - markingTodo (a rollback that does not implicate the batch)
+
+    let applied = plan.replacingOccurrences(of: "### R2 Break cycle  (status: todo)",
+                                            with: "### R2 Break cycle  (status: done, applied by the loop)")
+    let backToTodo = RefactorPlanDiff.markingTodo(applied, id: "R2")
+    expect(backToTodo == plan, "markingTodo puts an applied (done) batch back to exactly its todo header")
+    let fromBlocked = RefactorPlanDiff.markingTodo(blocked, id: "R2")
+    expect(fromBlocked == plan, "markingTodo also drops the `- Blocked:` line under the header")
+    expect(RefactorPlanDiff.markingTodo(plan, id: "R2") == plan, "a todo batch stays as it is")
+    expect(RefactorPlanDiff.markingTodo(plan, id: "R9") == plan, "an unknown batch id leaves the plan unchanged")
+
     // MARK: - restore (real git repo)
 
     func git(_ args: [String], _ dir: URL) {
