@@ -94,6 +94,7 @@ if autoTasksIncluded {
     libExcludes.append(contentsOf: ["Features/AutoTask", "Features/Loop"])
     testExcludes.append(contentsOf: [
         "AgentLoopStageRepairerTests.swift",
+        "ArtifactCheckSectionRulesTests.swift",
         "AutoCodeCustomSchedulingTests.swift",
         "AutoCodeUpdateServiceCLITests.swift",
         "AutoCodeUpdateServiceComposedPromptTests.swift",
