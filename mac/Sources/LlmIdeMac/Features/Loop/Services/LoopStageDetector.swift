@@ -1091,6 +1091,8 @@ public enum LoopStageDetector {
         + "batch(es) that first remove the blocker, each carrying `- Replaces: R<n>`. Under each heading "
         + "give `- Files:`, `- Symbols:`, `- Tests:` (present, or missing with the files that lack them), "
         + "`- Intent:`, `- Risk:`, `- Expect:` and `- Rules:` lines, plus `- Area:` when classified above. "
+        + "If an existing `done`, `skipped` or `blocked` batch lacks `- Rules:`, add `- Rules: none found` "
+        + "to it — this is the only edit ever allowed to a non-todo batch's content. "
         + "Keep batches small and behaviour-preserving, ordered by value then by fewest dependants first "
         + "(GRAPH.md `usedBy`) — safest first. When the plan nears 250 lines, move its done, skipped and "
         + "blocked batches to REFACTOR-DONE.md beside it, keeping IDs unique across both files. Never edit "

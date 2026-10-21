@@ -54,6 +54,13 @@ func runRefactorPlanRevisionChecks() {
     expect(!plan.contains("llm-doc"), "the live refactor-plan prompt names no concrete path")
     expect(plan.contains("no other headings may start with `### R`"),
            "the live refactor-plan prompt still pins the batch heading")
+    // The plan check requires `- Rules:` on EVERY batch, including done /
+    // skipped / blocked ones written before the line existed — and the
+    // planner may not otherwise edit those, so it is told the one backfill
+    // it may make. Without it a pre-existing plan fails Plan Check forever.
+    expect(plan.contains("lacks `- Rules:`, add `- Rules: none found`")
+           && plan.contains("only edit ever allowed to a non-todo batch"),
+           "the live refactor-plan prompt allows backfilling `- Rules: none found` on a non-todo batch")
 
     // (d) the live apply prompt reads RULES.md before editing.
     let apply = LoopStageDetector.refactorApplyPrompt
