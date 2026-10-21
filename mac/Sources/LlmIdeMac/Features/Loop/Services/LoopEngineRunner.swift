@@ -238,8 +238,9 @@ final class LoopEngineRunner: ObservableObject {
     /// the notice is per stage, not per iteration, or a 10-iteration run
     /// would repeat it ten times.
     private var unrecognisedRunnerStages: Set<String> = []
-    /// Shell stages already flake-checked this run (the check happens once per
-    /// stage per run, before its first repair).
+    /// Shell stages already flake-checked this batch (the check happens once
+    /// per stage per refactor batch — once per run for any other loop — before
+    /// its first repair; `startNextBatch` clears the batch stages).
     private var flakeCheckedStages: Set<String> = []
     /// Names of stages that failed then passed on the flake gate's re-run this
     /// run — surfaced in the summary note and the finish notification.
@@ -915,13 +916,15 @@ final class LoopEngineRunner: ObservableObject {
         // cannot contaminate stage B's streak just because B later fails with a
         // coincidentally similar failure.
         var progress = ProgressWatch()
-        /// Repairs spent per stage this run — `maxRepairsPerStage`'s counter.
+        /// Repairs spent per stage this run (this batch, once a refactor run
+        /// moves on to another one) — `maxRepairsPerStage`'s counter.
         var repairsUsed: [String: Int] = [:]
 
-        // Code-applying stages that already applied their batch this run. A
+        // Code-applying stages that already applied the current batch. A
         // failed verify's `.retryIteration` re-runs every stage from the top;
         // re-running the apply stage would stack the NEXT batch onto a tree
-        // the tests have not yet proven, so it runs at most once per run.
+        // the tests have not yet proven, so it runs at most once per batch
+        // (the set is cleared for the batch stages when the next batch starts).
         var codeAppliedStageIDs = Set<String>()
         // The stage whose decision ended the run, for a rollback's `- Blocked:`
         // line. Nil when the run ended between stages (budget, iterations).
@@ -1186,6 +1189,10 @@ final class LoopEngineRunner: ObservableObject {
             lastSkillResults[stage.id] = nil
             lastRepairResults[stage.id] = nil
             attemptLedgers[stage.id] = nil
+            // The flake gate runs before a stage's first repair, and repair
+            // counts are per batch: a flaky Test in the next batch gets its own
+            // re-run instead of going straight to a repair agent.
+            flakeCheckedStages.remove(stage.id)
         }
         runMaxIterations = iteration + config.maxIterations
         let started = appliedBatchIds.count + skippedBatchIds.count + 1
@@ -1525,7 +1532,8 @@ final class LoopEngineRunner: ObservableObject {
         // The output the repair is shown: the failure itself, or the flake
         // gate's re-run when that failed differently.
         var repairOutput = outcome.output
-        // Flake gate: before the FIRST repair of this stage in this run, run it
+        // Flake gate: before the FIRST repair of this stage in this run (this
+        // batch, in a refactor run that moved on to another batch), run it
         // once more. A pass means the failure was not real — no repair.
         if used == 0, !didTimeOut, outcome.exitCode != 127, !flakeCheckedStages.contains(stage.id) {
             flakeCheckedStages.insert(stage.id)

@@ -13,9 +13,8 @@ extension LoopEngineRunner {
     /// refactor run, or Apply applied nothing), the run's limit is reached, a
     /// Stop is pending (the verified batch ends the run as a success, as it
     /// always did, instead of the next batch turning it into an abort), a
-    /// stage's agent call errored (another batch would only spend more on a
-    /// backend that is failing), the time budget is used up, or
-    /// `RefactorBatchSequence.nextBatch` finds no batch to start.
+    /// stage's agent call errored (see the check below), the time budget is
+    /// used up, or `RefactorBatchSequence.nextBatch` finds no batch to start.
     func finishVerifiedBatch(config: LoopEngineConfig, budgetLeft: Bool) -> String? {
         guard let finished = currentBatchId else { return nil }
         if currentBatchSkipped {
@@ -30,8 +29,16 @@ extension LoopEngineRunner {
             return nil
         }
         if Task.isCancelled { return nil }
+        // LOAD-BEARING, not only a cost guard. A stage before the batch (Setup,
+        // Plan, …) never re-runs once the run moves on to a later batch, so an
+        // error there could never be cleared. If a later batch then failed and
+        // was rolled back, `keepingVerifiedBatches` would turn the run's
+        // `.error` (the honest verdict) into `.success` and hide that error.
+        // Ending the run here keeps the only errored stages a promotion can
+        // ever see inside the batch that was just taken back out. (It also
+        // stops spending on a backend that is failing.)
         if stageStates.values.contains(.errored) {
-            appendLog(.warn, "Not starting another batch: a stage's agent call errored this batch")
+            appendLog(.warn, "Not starting another batch: a stage's agent call errored this run")
             return nil
         }
         guard budgetLeft else {
@@ -51,10 +58,12 @@ extension LoopEngineRunner {
     /// plan, and a blocked batch has already ended the run — no further batch
     /// is attempted. Any other case keeps `verdict`.
     ///
-    /// An errored stage in a verified batch never reaches here as an error:
-    /// the run does not move past a batch with an errored stage
-    /// (`finishVerifiedBatch`), so an honest-verdict downgrade at this point
-    /// came from the batch that was just taken back out.
+    /// An errored stage in a verified batch — or in a stage before the batch —
+    /// never reaches here as an error: the run does not move past a batch while
+    /// any stage is errored (`finishVerifiedBatch`), so an honest-verdict
+    /// downgrade at this point came from the batch that was just taken back
+    /// out. That check is what makes this override safe; do not remove one
+    /// without the other (docs/explanation/invariants.md, "errored stage").
     func keepingVerifiedBatches(_ verdict: LoopEngineStatus,
                                 pipelineStatus: LoopEngineStatus) -> LoopEngineStatus {
         let endingRollsBack = Self.rollsBackBatch(pipelineStatus)

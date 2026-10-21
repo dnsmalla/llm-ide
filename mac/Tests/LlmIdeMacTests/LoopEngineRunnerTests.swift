@@ -4156,6 +4156,8 @@ final class LoopEngineRunnerTests: XCTestCase {
     private final class MultiBatchSkillExecutor: LoopSkillExecuting {
         let planURL: URL
         let tree: TreeScriptGuard?
+        /// Skills whose agent call fails with a refused connection (the stage errors).
+        var refusing: Set<String> = []
         private(set) var skillIds: [String] = []
         private(set) var appliedIds: [String] = []
         init(planURL: URL, tree: TreeScriptGuard? = nil) {
@@ -4165,6 +4167,7 @@ final class LoopEngineRunnerTests: XCTestCase {
         func execute(skillId: String, targetPath: String?, message: String,
                      repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
             skillIds.append(skillId)
+            if refusing.contains(skillId) { throw APIError.network(URLError(.cannotConnectToHost)) }
             let plan = try String(contentsOf: planURL, encoding: .utf8)
             guard let id = RefactorPlanDiff.firstTodo(in: plan)?.id else { return LoopAgentResult() }
             switch skillId {
@@ -4270,9 +4273,9 @@ final class LoopEngineRunnerTests: XCTestCase {
         let tree = TreeScriptGuard()
         let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
         let repairer = BatchRepairer(tree: tree)
-        // Each apply breaks the tests until the next repair fixes them. Batch 1:
-        // fail, fail the flake re-run, repair, pass. Batch 2 (the flake check is
-        // once per run): fail, repair, pass.
+        // Each apply breaks the tests until the next repair fixes them. In each
+        // batch: fail, fail the flake re-run (the gate is per batch, like the
+        // repair count), repair, pass. The re-run costs no iteration.
         let verifier = StubVerifier { command in
             guard command == "swift test", skills.appliedIds.count > repairer.repairCount else {
                 return VerifyOutcome(exitCode: 0, output: "")
@@ -4400,6 +4403,47 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(tree.restores.isEmpty)
         XCTAssertTrue(runner.batchesSummary?.hasPrefix("Applied: R1 · Not rolled back: R2") == true,
                       runner.batchesSummary ?? "nil")
+    }
+
+    /// The planner's agent call errors in batch 1 (it proceeds, recorded
+    /// `errored`), and R1 is verified. No batch 2 may start: the planner never
+    /// re-runs after batch 1, so the error could never clear, and R2 failing
+    /// and being rolled back would otherwise let `keepingVerifiedBatches` turn
+    /// the run's honest `.error` into `.success` — hiding the planner's error.
+    /// Here R2's tests would fail, so without the guard this run would succeed.
+    func testAnErroredStageBeforeTheBatchStopsTheRunAndKeepsItsError() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.multiBatchPlan(3)])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
+        skills.refusing = ["skills/refactor-planner"]
+        let verifier = StubVerifier { command in
+            command == "swift test" && skills.appliedIds.last == "R2"
+                ? VerifyOutcome(exitCode: 1, output: "1 failing") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: multiBatchConfig(batchesPerRun: nil), faultsRoot: repo, gitRoot: repo)
+
+        guard case .error(let message) = result else {
+            return XCTFail("expected an error, got \(String(describing: result))")
+        }
+        XCTAssertTrue(message.contains("Refactor Plan"), message)
+        XCTAssertEqual(skills.appliedIds, ["R1"], "no batch 2 after an errored stage")
+        XCTAssertEqual(runner.stageStates["p1"], .errored)
+        XCTAssertTrue(runner.log.contains { $0.text.hasPrefix("Not starting another batch: a stage's agent call errored") })
+        XCTAssertTrue(tree.restores.isEmpty, "R1 was verified; nothing failed to roll back")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("### R1 Batch 1  (status: done)"), plan)
+        XCTAssertTrue(plan.contains("### R2 Batch 2  (status: todo)"), plan)
+        let record = try XCTUnwrap(journal.written.last)
+        XCTAssertEqual(record.appliedBatches, ["R1"])
+        XCTAssertNil(record.batchRollback)
+        XCTAssertNotEqual(record.statusCode, LoopEngineStatus.success.code)
     }
 
     /// Serves `graphs` in rescan order (the last one repeats), where the runner reads them.
