@@ -711,6 +711,80 @@ final class RepairScopeGuardTests: XCTestCase {
         XCTAssertEqual(result, "restore unavailable")
     }
 
+    // MARK: - Tree ids, tree diffs, .gitignore (final-review fixes)
+
+    /// Answers every command with `output` (exit 0), recording what ran.
+    private final class EchoVerifier: FaultVerifier, @unchecked Sendable {
+        let output: String
+        private(set) var commands: [String] = []
+        init(output: String) { self.output = output }
+        func verify(command: String, repoRoot: URL, timeout: TimeInterval) async throws -> VerifyOutcome {
+            commands.append(command)
+            return VerifyOutcome(exitCode: 0, output: output)
+        }
+    }
+
+    /// The verifier folds stderr into the output, so `git add` warnings can
+    /// precede `write-tree`'s id. Only a full hex id on the LAST line is an
+    /// id; anything else is no snapshot, never text spliced into later
+    /// commands.
+    func testSnapshotTreeTakesTheIdFromTheLastLineOnly() async {
+        let sha = String(repeating: "ab", count: 20)
+        let warned = EchoVerifier(output: "warning: in the working copy of 'a.txt', LF will be replaced by CRLF\n\(sha)\n")
+        let id = await GitRepairScopeGuard(verifier: warned).snapshotTree(gitRoot: gitRoot)
+        XCTAssertEqual(id, sha)
+        for garbage in ["not a tree\n", "\(sha) && rm -rf ~\n", "", "$(touch pwned)", "\(sha)\nwarning: after\n"] {
+            let parsed = await GitRepairScopeGuard(verifier: EchoVerifier(output: garbage)).snapshotTree(gitRoot: gitRoot)
+            XCTAssertNil(parsed, "rejected: \(garbage.debugDescription)")
+        }
+    }
+
+    /// A move must be listed under BOTH names (`--no-renames`) — with rename
+    /// detection only the new name appears and a rollback loses the file —
+    /// and names are read NUL-separated (`-z`), so a tab or quote survives.
+    func testChangedPathsAreReadWithoutRenameDetectionAndNulSeparated() async {
+        let verifier = EchoVerifier(output: "old/mod.txt\u{0}new/mod.txt\u{0}tab\there.txt\u{0}")
+        let paths = await GitRepairScopeGuard(verifier: verifier).changedPaths(from: "t1", to: "t2", gitRoot: gitRoot)
+        XCTAssertEqual(paths, ["old/mod.txt", "new/mod.txt", "tab\there.txt"])
+        XCTAssertEqual(verifier.commands, ["git -c core.quotepath=off diff --no-renames --name-only -z 't1' 't2'"])
+    }
+
+    func testEveryTreeDiffQueryDisablesRenamesAndQuotesTheTreeIds() async {
+        let verifier = EchoVerifier(output: "a.txt\u{0}")
+        let summary = await GitRepairScopeGuard(verifier: verifier).treeDiff(
+            from: "t1", to: "t2", gitRoot: gitRoot, maxChars: 100, isQuotable: { _ in true })
+        XCTAssertEqual(summary?.changedPaths, ["a.txt"])
+        XCTAssertEqual(verifier.commands.count, 3, "names, stat, diff")
+        XCTAssertTrue(verifier.commands.allSatisfy { $0.contains(" diff --no-renames ") && $0.contains("'t1' 't2'") },
+                      "\(verifier.commands)")
+    }
+
+    /// The tree id reaches a shell: it is quoted in the presence probe and in
+    /// the restore itself, whatever it holds.
+    func testRestoreQuotesTheTreeIdInEveryCommand() async {
+        let verifier = EchoVerifier(output: "a.txt\u{0}")
+        let result = await GitRepairScopeGuard(verifier: verifier)
+            .restore(paths: ["a.txt"], fromTree: "$(touch pwned)", gitRoot: gitRoot)
+        XCTAssertNil(result)
+        XCTAssertEqual(verifier.commands.count, 2, "one presence probe, one restore")
+        XCTAssertTrue(verifier.commands.allSatisfy { $0.contains("'$(touch pwned)'") }, "\(verifier.commands)")
+    }
+
+    /// A changed `.gitignore` (root or nested) fails the whole restore closed
+    /// before any probe: a file it un-ignored would read as new since the base
+    /// and be deleted, and it was never in any git object.
+    func testRestoreTouchesNothingWhenAGitignoreChanged() async {
+        for ignoreFile in [".gitignore", "sub/dir/.gitignore"] {
+            let verifier = EchoVerifier(output: "")
+            let result = await GitRepairScopeGuard(verifier: verifier)
+                .restore(paths: [".env", ignoreFile], fromTree: "t", gitRoot: gitRoot)
+            XCTAssertTrue(result?.contains("nothing was restored") == true, result ?? "nil")
+            XCTAssertTrue(verifier.commands.isEmpty, "not even a probe runs: \(verifier.commands)")
+        }
+        XCTAssertFalse(GitRepairScopeGuard.isGitignore("not.gitignore"))
+        XCTAssertFalse(GitRepairScopeGuard.isGitignore(".gitignore.bak"))
+    }
+
     private func gitOutput(_ root: URL, _ args: String...) throws -> String {
         let p = Process()
         p.executableURL = URL(fileURLWithPath: "/usr/bin/git")

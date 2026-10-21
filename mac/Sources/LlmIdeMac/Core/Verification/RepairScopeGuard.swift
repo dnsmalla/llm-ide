@@ -67,7 +67,8 @@ protocol RepairScopeGuarding: AnyObject {
     /// into a git tree object WITHOUT touching the real index; returns its id,
     /// or `nil` when that is not possible.
     func snapshotTree(gitRoot: URL) async -> String?
-    /// What changed between two `snapshotTree` ids: every changed path, the
+    /// What changed between two `snapshotTree` ids: every changed path (a move
+    /// listed as BOTH its old and its new name — no rename detection), the
     /// stat, and the diff limited to paths `isQuotable` accepts. `nil` on failure.
     func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
                   isQuotable: (String) -> Bool) async -> RepairDiffSummary?
@@ -87,7 +88,9 @@ protocol RepairScopeGuarding: AnyObject {
     /// already changed before the batch began — that state IS `tree`. A path
     /// counts as absent only on a positive "not in `tree`" answer; any probe
     /// that fails (including one cancelled by a Stop) aborts the whole call
-    /// before anything is touched. Returns `nil` on success, else a diagnostic.
+    /// before anything is touched, and so does a `.gitignore` among `paths`
+    /// (a file it un-ignored would read as new and be deleted for good).
+    /// Returns `nil` on success, else a diagnostic.
     func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String?
     /// Restores `paths` to their committed state. Returns `nil` on success, or a
     /// diagnostic.
@@ -488,23 +491,10 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
                     failures.append(reason)
                 }
             } else if created.contains(path) {
-                do {
-                    // `created` paths come from the server's report. A `..` or
-                    // absolute entry must never turn this into a delete outside
-                    // the repo, so contain the resolved path first.
-                    let url = gitRoot.appendingPathComponent(path).standardizedFileURL
-                    let rootPrefix = gitRoot.standardizedFileURL.path.hasSuffix("/")
-                        ? gitRoot.standardizedFileURL.path : gitRoot.standardizedFileURL.path + "/"
-                    guard !path.hasPrefix("/"), url.path.hasPrefix(rootPrefix) else {
-                        failures.append("refusing to delete \(path): it is outside the repository")
-                        continue
-                    }
-                    if FileManager.default.fileExists(atPath: url.path) {
-                        try FileManager.default.removeItem(at: url)
-                    }
-                } catch {
-                    failures.append("could not delete \(path): \(error.localizedDescription)")
-                }
+                // `created` paths come from the server's report. A `..` or
+                // absolute entry, or a symlinked directory on the way, must
+                // never turn this into a delete outside the repo.
+                if let failure = Self.deleteContained(path, gitRoot: gitRoot) { failures.append(failure) }
             } else {
                 failures.append("\(path) existed before the edit and is not in HEAD, so it was left in place")
             }
@@ -535,31 +525,91 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
             + "else git read-tree HEAD 2>/dev/null || git read-tree --empty; fi; "
             + "git add -A && git write-tree"
         guard case .success(let out) = await run(command, gitRoot: gitRoot) else { return nil }
-        let id = out.trimmingCharacters(in: .whitespacesAndNewlines)
-        return id.isEmpty ? nil : id
+        return Self.treeId(fromWriteTreeOutput: out)
+    }
+
+    /// The tree id in `git add -A && git write-tree`'s output, or nil.
+    ///
+    /// The verifier combines stdout and stderr, so the output can carry git's
+    /// own warnings (CRLF conversion, an embedded repository, …) BEFORE the id
+    /// — taking the whole trimmed output as the id would hand that text on to
+    /// every later command that names the tree. Only the LAST line counts, and
+    /// only when it is a full object id: 40 hex digits (SHA-1) or 64 (SHA-256).
+    /// Anything else is no id at all, which callers treat as "no snapshot".
+    public static func treeId(fromWriteTreeOutput output: String) -> String? {
+        guard let last = output.split(whereSeparator: \.isNewline).last else { return nil }
+        let id = last.trimmingCharacters(in: .whitespaces)
+        return isObjectId(id) ? id : nil
+    }
+
+    /// Whether `text` is a full lowercase hex git object id (SHA-1 or SHA-256).
+    static func isObjectId(_ text: String) -> Bool {
+        (text.count == 40 || text.count == 64) && text.allSatisfy { ("0"..."9").contains($0) || ("a"..."f").contains($0) }
+    }
+
+    /// Every path that differs between two `snapshotTree` trees, or nil when git
+    /// could not say.
+    ///
+    /// `--no-renames`: with git's default rename detection, a moved file with a
+    /// small edit is listed ONLY under its new name. A Mikado rollback restores
+    /// exactly these paths — the old name never appeared, so it was never put
+    /// back, while the new name (absent from the base) was deleted: the file was
+    /// gone. Without rename detection a move is its two halves, a deletion and
+    /// an addition, and both are restored.
+    ///
+    /// `-z`: names come back raw and NUL-terminated. Without it, a name with a
+    /// quote, a backslash, a tab or a newline is C-quoted (`core.quotepath=off`
+    /// only covers non-ASCII), and the quoted form names no file.
+    public func changedPaths(from: String, to: String, gitRoot: URL) async -> [String]? {
+        guard case .success(let names) = await run(
+            "git -c core.quotepath=off diff --no-renames --name-only -z "
+                + "\(Self.shellQuoted([from, to]))", gitRoot: gitRoot) else { return nil }
+        return names.split(separator: "\u{0}", omittingEmptySubsequences: true).map(String.init)
     }
 
     func treeDiff(from: String, to: String, gitRoot: URL, maxChars: Int,
                   isQuotable: (String) -> Bool) async -> RepairDiffSummary? {
-        guard case .success(let names) = await run(
-            "git -c core.quotepath=off diff --name-only \(from) \(to)", gitRoot: gitRoot) else { return nil }
-        let paths = names.split(whereSeparator: \.isNewline).map(String.init)
+        guard let paths = await changedPaths(from: from, to: to, gitRoot: gitRoot) else { return nil }
         var out = RepairDiffSummary(changedPaths: paths)
         guard !paths.isEmpty else { return out }
-        if case .success(let stat) = await run("git -c core.quotepath=off diff --stat \(from) \(to)", gitRoot: gitRoot) {
+        let trees = Self.shellQuoted([from, to])
+        // `--no-renames` here too, so the stat and the diff describe the same
+        // set of paths `changedPaths` lists.
+        if case .success(let stat) = await run(
+            "git -c core.quotepath=off diff --no-renames --stat \(trees)", gitRoot: gitRoot) {
             out.stat = stat.trimmingCharacters(in: .whitespacesAndNewlines)
         }
         let quotable = paths.filter(isQuotable)
         if !quotable.isEmpty,
            case .success(let diff) = await run(
-               "git -c core.quotepath=off diff \(from) \(to) -- \(Self.shellQuoted(quotable))", gitRoot: gitRoot) {
+               "git -c core.quotepath=off diff --no-renames \(trees) -- \(Self.shellQuoted(quotable))",
+               gitRoot: gitRoot) {
             out.diff = String(diff.prefix(maxChars))
         }
         return out
     }
 
+    /// Whether `path` is a `.gitignore` file (at the root or in any directory).
+    static func isGitignore(_ path: String) -> Bool {
+        path == ".gitignore" || path.hasSuffix("/.gitignore")
+    }
+
     public func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String? {
         guard !paths.isEmpty else { return nil }
+        // A changed `.gitignore` fails the whole restore closed. `snapshotTree`
+        // records the tree through `git add -A`, which honours the CURRENT
+        // ignore rules: a batch that un-ignores a file (drops `.env` from
+        // `.gitignore`) makes that file show up as "added since the base" —
+        // the base never recorded it because it was ignored then — and it
+        // would be deleted as absent from the base. It was never in any git
+        // object, so that delete could not be undone. Nothing is touched; the
+        // tree is left for a human to sort out.
+        let ignoreFiles = paths.filter(Self.isGitignore)
+        if !ignoreFiles.isEmpty {
+            return "the batch changed \(ignoreFiles.joined(separator: ", ")), so a file it un-ignored "
+                + "would look new and be deleted for good; nothing was restored — review the tree by hand"
+        }
+        let quotedTree = Self.shellQuoted([tree])
         // Classify by presence in `tree` rather than in the CURRENT working tree:
         // a path the batch deleted is absent now but present in `tree`, and must
         // be restored, not skipped as "already gone".
@@ -577,7 +627,7 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
             // `--literal-pathspecs`: a name like `:x.txt` or `a*.txt` is that
             // file, never pathspec magic or a glob. `-z`: names come back raw
             // and NUL-terminated — no quoting, nothing to trim.
-            let probe = "git --literal-pathspecs ls-tree -z --name-only \(tree) -- \(Self.shellQuoted([path]))"
+            let probe = "git --literal-pathspecs ls-tree -z --name-only \(quotedTree) -- \(Self.shellQuoted([path]))"
             switch await run(probe, gitRoot: gitRoot) {
             case .success(let listing):
                 switch Self.treePresence(of: path, listing: listing) {
@@ -605,34 +655,58 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         // tree's content win on every file system.
         for path in absent {
             // `tree` has no entry for this path (the batch created it): delete it.
-            // Resolve and contain the path first — `path` came from a `treeDiff`
-            // this guard itself produced, but a `..` or absolute entry must still
-            // never be able to delete outside the repository.
-            let url = gitRoot.appendingPathComponent(path).standardizedFileURL
-            let rootPrefix = gitRoot.standardizedFileURL.path.hasSuffix("/")
-                ? gitRoot.standardizedFileURL.path : gitRoot.standardizedFileURL.path + "/"
-            guard !path.hasPrefix("/"), url.path.hasPrefix(rootPrefix) else {
-                failures.append("refusing to delete \(path): it is outside the repository")
-                continue
-            }
-            if FileManager.default.fileExists(atPath: url.path) {
-                do {
-                    try FileManager.default.removeItem(at: url)
-                } catch {
-                    failures.append("could not delete \(path): \(error.localizedDescription)")
-                }
-            }
+            // Contained first — `path` came from a `treeDiff` this guard itself
+            // produced, but neither a `..`/absolute entry nor a directory the
+            // batch swapped for a symlink may reach outside the repository.
+            if let failure = Self.deleteContained(path, gitRoot: gitRoot) { failures.append(failure) }
         }
         // `--worktree` only (no `--staged`): the index is never touched, so a
         // rollback cannot disturb whatever the user had staged for their own,
         // unrelated commit.
         if !present.isEmpty,
            case .failure(let reason) = await run(
-               "git --literal-pathspecs restore --source=\(tree) --worktree -- \(Self.shellQuoted(present))",
+               "git --literal-pathspecs restore --source=\(quotedTree) --worktree -- \(Self.shellQuoted(present))",
                gitRoot: gitRoot) {
             failures.append(reason)
         }
         return failures.isEmpty ? nil : failures.joined(separator: "; ")
+    }
+
+    /// Deletes repo-relative `path` only when it really lives inside `gitRoot`;
+    /// nil on success (or when there is nothing there), else why not.
+    ///
+    /// Two containment checks. Lexical: no absolute path, and no `..` that
+    /// climbs out once standardized. Physical: every DIRECTORY on the way is
+    /// resolved through its symlinks and must still be inside the resolved
+    /// root — `standardizedFileURL` resolves nothing, so a batch that replaced
+    /// `dir/` with a symlink to `/elsewhere` would otherwise have `dir/x`
+    /// deleted out of `/elsewhere`. The last component is never followed: a
+    /// symlink there is itself the thing to delete (`removeItem` removes the
+    /// link, not its target).
+    static func deleteContained(_ path: String, gitRoot: URL) -> String? {
+        let refusal = "refusing to delete \(path): it is outside the repository"
+        let root = gitRoot.standardizedFileURL
+        let url = root.appendingPathComponent(path).standardizedFileURL
+        let rootPrefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard !path.hasPrefix("/"), url.path.hasPrefix(rootPrefix) else { return refusal }
+        // `attributesOfItem` does not follow the last component, so a dangling
+        // symlink the batch created is still found (and deleted).
+        guard (try? FileManager.default.attributesOfItem(atPath: url.path)) != nil else { return nil }
+        // The item exists, so its parent does too, and both resolve the same
+        // way (`resolvingSymlinksInPath` drops a `/private` prefix only for an
+        // existing path — comparing an existing parent with an existing root
+        // keeps that consistent).
+        let realRoot = root.resolvingSymlinksInPath().path
+        let realParent = url.deletingLastPathComponent().resolvingSymlinksInPath().path
+        let realRootPrefix = realRoot.hasSuffix("/") ? realRoot : realRoot + "/"
+        guard realParent == realRoot || realParent.hasPrefix(realRootPrefix) else { return refusal }
+        do {
+            try FileManager.default.removeItem(
+                at: URL(fileURLWithPath: realParent).appendingPathComponent(url.lastPathComponent))
+        } catch {
+            return "could not delete \(path): \(error.localizedDescription)"
+        }
+        return nil
     }
 
     /// Reads a `git --literal-pathspecs ls-tree -z --name-only <tree> -- <path>`

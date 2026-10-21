@@ -192,9 +192,8 @@ func runRefactorRollbackChecks() async {
         git(["mv", "Foo.txt", "foo.txt"], root)
         try? "batch edit\n".write(to: url("foo.txt"), atomically: true, encoding: .utf8)
         let after = await guardUnderTest.snapshotTree(gitRoot: root) ?? ""
-        // What the runner's `treeDiff` reports (the same `git diff --name-only`).
-        let changed = gitOutput(["-c", "core.quotepath=off", "diff", "--name-only", caseBase, after], root)
-            .split(whereSeparator: \.isNewline).map(String.init)
+        // What the runner's `treeDiff` reports — its own query, not a copy.
+        let changed = await guardUnderTest.changedPaths(from: caseBase, to: after, gitRoot: root) ?? []
         expect(Set(changed) == ["Foo.txt", "foo.txt"],
                "the case-only rename shows up as Foo.txt and foo.txt, got \(changed)")
         let caseError = await guardUnderTest.restore(paths: changed, fromTree: caseBase, gitRoot: root)
@@ -207,6 +206,145 @@ func runRefactorRollbackChecks() async {
     } else {
         expect(false, "snapshotTree produced a base for the case-rename check")
     }
+
+    // A MOVE with a small edit — git's rename detection would list only the
+    // new name, so the old one was never restored and the new one (absent
+    // from the base) was deleted: the file was gone. `changedPaths` runs with
+    // `--no-renames`, so the move is both halves and the rollback puts the
+    // file back under its old name with its pre-move content.
+    let body = (1...30).map { "line \($0)\n" }.joined()
+    let moveRoot = makeTempDir()
+    defer { try? FileManager.default.removeItem(at: moveRoot) }
+    git(["init", "-q"], moveRoot)
+    try? FileManager.default.createDirectory(at: moveRoot.appendingPathComponent("old"),
+                                             withIntermediateDirectories: true)
+    try? (body + "flag = 1\n").write(to: moveRoot.appendingPathComponent("old/mod.txt"),
+                                     atomically: true, encoding: .utf8)
+    git(["add", "."], moveRoot)
+    git(["commit", "-qm", "init"], moveRoot)
+    if let moveBase = await guardUnderTest.snapshotTree(gitRoot: moveRoot) {
+        try? FileManager.default.createDirectory(at: moveRoot.appendingPathComponent("new"),
+                                                 withIntermediateDirectories: true)
+        git(["mv", "old/mod.txt", "new/mod.txt"], moveRoot)
+        try? (body + "flag = 2\n").write(to: moveRoot.appendingPathComponent("new/mod.txt"),
+                                         atomically: true, encoding: .utf8)
+        let moveAfter = await guardUnderTest.snapshotTree(gitRoot: moveRoot) ?? ""
+        // Precondition: git itself sees this as a rename (so the check tests
+        // the flag, not a move too big to be detected anyway).
+        let detected = gitOutput(["diff", "--name-status", "-M", moveBase, moveAfter], moveRoot)
+        expect(detected.hasPrefix("R"), "precondition: git's default diff reads the move as a rename, got \(detected)")
+        let moved = await guardUnderTest.changedPaths(from: moveBase, to: moveAfter, gitRoot: moveRoot) ?? []
+        expect(Set(moved) == ["old/mod.txt", "new/mod.txt"],
+               "a moved-and-edited file is listed under BOTH names, got \(moved)")
+        let moveError = await guardUnderTest.restore(paths: moved, fromTree: moveBase, gitRoot: moveRoot)
+        expect(moveError == nil, "restore after a move reports no error, got \(moveError ?? "nil")")
+        expect((try? String(contentsOf: moveRoot.appendingPathComponent("old/mod.txt"), encoding: .utf8))
+               == body + "flag = 1\n", "the moved file is back at its ORIGINAL path with its pre-move content")
+        expect(!FileManager.default.fileExists(atPath: moveRoot.appendingPathComponent("new/mod.txt").path),
+               "the moved-to path is gone")
+    } else {
+        expect(false, "snapshotTree produced a base for the move check")
+    }
+
+    // Names git C-quotes outside `-z` (a quote, a backslash, a tab, a
+    // newline) come back verbatim, so they are restorable at all.
+    let oddNames = ["q\"uote.txt", "back\\slash.txt", "tab\there.txt", "new\nline.txt"]
+    if let oddNameBase = await guardUnderTest.snapshotTree(gitRoot: moveRoot) {
+        for name in oddNames {
+            try? "x\n".write(to: moveRoot.appendingPathComponent(name), atomically: true, encoding: .utf8)
+        }
+        let oddAfter = await guardUnderTest.snapshotTree(gitRoot: moveRoot) ?? ""
+        let listed = await guardUnderTest.changedPaths(from: oddNameBase, to: oddAfter, gitRoot: moveRoot) ?? []
+        expect(Set(listed) == Set(oddNames), "quote/backslash/tab/newline names are listed raw, got \(listed)")
+        let oddRestore = await guardUnderTest.restore(paths: listed, fromTree: oddNameBase, gitRoot: moveRoot)
+        expect(oddRestore == nil, "they roll back cleanly, got \(oddRestore ?? "nil")")
+        expect(oddNames.allSatisfy { !FileManager.default.fileExists(atPath: moveRoot.appendingPathComponent($0).path) },
+               "each odd-named new file is deleted by the rollback")
+    } else {
+        expect(false, "snapshotTree produced a base for the odd-name list check")
+    }
+
+    // A batch that un-ignores a file: the base has `.env` ignored (so never
+    // snapshotted); the batch drops the pattern and the file reads as "added
+    // since the base". Deleting it as absent from the base would lose a file
+    // that was never in any git object — so the restore refuses outright.
+    let ignoreRoot = makeTempDir()
+    defer { try? FileManager.default.removeItem(at: ignoreRoot) }
+    git(["init", "-q"], ignoreRoot)
+    try? ".env\n*.log\n".write(to: ignoreRoot.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+    try? "SECRET=keep\n".write(to: ignoreRoot.appendingPathComponent(".env"), atomically: true, encoding: .utf8)
+    git(["add", "."], ignoreRoot)
+    git(["commit", "-qm", "init"], ignoreRoot)
+    if let ignoreBase = await guardUnderTest.snapshotTree(gitRoot: ignoreRoot) {
+        try? "*.log\n".write(to: ignoreRoot.appendingPathComponent(".gitignore"), atomically: true, encoding: .utf8)
+        let ignoreAfter = await guardUnderTest.snapshotTree(gitRoot: ignoreRoot) ?? ""
+        let unIgnored = await guardUnderTest.changedPaths(from: ignoreBase, to: ignoreAfter, gitRoot: ignoreRoot) ?? []
+        expect(Set(unIgnored) == [".gitignore", ".env"],
+               "precondition: the un-ignored .env reads as changed since the base, got \(unIgnored)")
+        let ignoreError = await guardUnderTest.restore(paths: unIgnored, fromTree: ignoreBase, gitRoot: ignoreRoot)
+        expect(ignoreError?.contains("nothing was restored") == true && ignoreError?.contains(".gitignore") == true,
+               "a restore touching a .gitignore fails closed and says why, got \(ignoreError ?? "nil")")
+        expect((try? String(contentsOf: ignoreRoot.appendingPathComponent(".env"), encoding: .utf8)) == "SECRET=keep\n",
+               "the un-ignored .env survives untouched")
+        expect((try? String(contentsOf: ignoreRoot.appendingPathComponent(".gitignore"), encoding: .utf8)) == "*.log\n",
+               "nothing else is touched either: the .gitignore keeps the batch's edit for review")
+        let nested = await guardUnderTest.restore(paths: ["sub/.gitignore", "a.txt"], fromTree: ignoreBase,
+                                                  gitRoot: ignoreRoot)
+        expect(nested?.contains("nothing was restored") == true, "a nested .gitignore fails closed the same way")
+    } else {
+        expect(false, "snapshotTree produced a base for the .gitignore check")
+    }
+
+    // A directory the batch swapped for a symlink to OUTSIDE the repo: a path
+    // under it that is "absent from the base" must not be deleted through the
+    // link — `standardizedFileURL` alone resolves no symlink on the way.
+    let outside = makeTempDir()
+    defer { try? FileManager.default.removeItem(at: outside) }
+    try? "outside\n".write(to: outside.appendingPathComponent("victim.txt"), atomically: true, encoding: .utf8)
+    if let linkBase = await guardUnderTest.snapshotTree(gitRoot: ignoreRoot) {
+        try? FileManager.default.createSymbolicLink(at: ignoreRoot.appendingPathComponent("sub"),
+                                                    withDestinationURL: outside)
+        let linkError = await guardUnderTest.restore(paths: ["sub/victim.txt"], fromTree: linkBase, gitRoot: ignoreRoot)
+        expect(linkError?.contains("outside the repository") == true,
+               "a delete through a symlinked directory is refused, got \(linkError ?? "nil")")
+        expect(FileManager.default.fileExists(atPath: outside.appendingPathComponent("victim.txt").path),
+               "the file outside the repository survives")
+        // The link itself is a path the batch created: deleting it removes the
+        // link, never what it points at.
+        let unlinkError = await guardUnderTest.restore(paths: ["sub"], fromTree: linkBase, gitRoot: ignoreRoot)
+        expect(unlinkError == nil, "a symlink the batch created is deleted, got \(unlinkError ?? "nil")")
+        expect((try? FileManager.default.destinationOfSymbolicLink(atPath: ignoreRoot.appendingPathComponent("sub").path)) == nil
+               && FileManager.default.fileExists(atPath: outside.appendingPathComponent("victim.txt").path),
+               "the link is gone and its target is not")
+    } else {
+        expect(false, "snapshotTree produced a base for the symlink check")
+    }
+
+    // Tree ids: only the LAST line of `write-tree`'s combined output, and only
+    // a full hex object id, is ever used — the id is later spliced into git
+    // command lines, so a warning (or anything worse) must never ride along.
+    let sha1 = String(repeating: "a1", count: 20)
+    let sha256 = String(repeating: "0f", count: 32)
+    expect(GitRepairScopeGuard.treeId(fromWriteTreeOutput: "\(sha1)\n") == sha1, "a bare SHA-1 tree id parses")
+    expect(GitRepairScopeGuard.treeId(fromWriteTreeOutput: sha256) == sha256, "a SHA-256 tree id parses")
+    expect(GitRepairScopeGuard.treeId(fromWriteTreeOutput:
+            "warning: in the working copy of 'a.txt', LF will be replaced by CRLF\n\(sha1)\n") == sha1,
+           "a git warning before the id is dropped")
+    for garbage in ["", "\n", "not a tree", "\(sha1); rm -rf ~", "$(touch pwned)", String(sha1.dropLast()),
+                    sha1.uppercased(), "\(sha1)\nwarning: trailing"] {
+        expect(GitRepairScopeGuard.treeId(fromWriteTreeOutput: garbage) == nil,
+               "a non-id write-tree output is rejected: \(garbage.debugDescription)")
+    }
+    // For real: CRLF conversion makes `git add` warn on stderr, which the
+    // verifier folds into the same output as `write-tree`'s id.
+    let crlfRoot = makeTempDir()
+    defer { try? FileManager.default.removeItem(at: crlfRoot) }
+    git(["init", "-q"], crlfRoot)
+    git(["config", "core.autocrlf", "true"], crlfRoot)
+    try? "lf\n".write(to: crlfRoot.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    let crlfTree = await guardUnderTest.snapshotTree(gitRoot: crlfRoot)
+    expect(crlfTree.map { gitOutput(["cat-file", "-t", $0], crlfRoot) == "tree\n" } == true,
+           "a snapshot whose `git add` warns still yields a real tree id, got \(crlfTree ?? "nil")")
 
     // The `RepairScopeGuarding` default (a guard that cannot run git) and
     // index-safety of the default protocol extension are internal-only
