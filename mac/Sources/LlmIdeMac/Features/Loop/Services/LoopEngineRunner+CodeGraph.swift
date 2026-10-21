@@ -67,12 +67,12 @@ extension LoopEngineRunner {
     /// Writes `RULES.md` beside GRAPH.md. A failure only warns: the rules digest
     /// helps the agent but must never stop the graph snapshot.
     private func writeRulesDigest(_ stage: LoopStage, runRoot: URL, mainRoot: URL) {
-        let planStage = runOrderedStages.first { $0.defaultKey == "refactor-plan" }
-        let checkStage = runOrderedStages.first { $0.defaultKey == "refactor-check" }
-        let testStage = runOrderedStages.first { $0.defaultKey == "refactor-test" }
+        // By role, not `defaultKey`: a loop created from the Refactoring
+        // template carries no keys, and its RULES.md must still name its checks.
+        let roles = RefactorRulesCollector.stageRoles(in: runOrderedStages)
         let digest = RefactorRulesCollector.digest(
-            gitRoot: runRoot, inputPath: planStage?.targetPath ?? ".",
-            checkCommand: checkStage?.command, testCommand: testStage?.command)
+            gitRoot: runRoot, inputPath: roles.planInput ?? ".",
+            checkCommand: roles.checkCommand, testCommand: roles.testCommand)
         do {
             try Self.writeGraphFile(Data(digest.utf8), to: LoopOutputLayout.refactorRules, root: mainRoot)
         } catch {

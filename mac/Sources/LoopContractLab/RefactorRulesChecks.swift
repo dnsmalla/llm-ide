@@ -87,5 +87,33 @@ func runRefactorRulesChecks() {
     write(rootH, "CLAUDE.md", "before\n```\ninside\n```\nafter")
     let digestH = RefactorRulesCollector.digest(gitRoot: rootH, inputPath: ".", checkCommand: nil, testCommand: nil)
     expect(digestH.contains("````\nbefore"), "the fence is longer than any backtick run in the source")
+
+    // The commands RULES.md names are found by ROLE: a loop created from the
+    // Refactoring template carries no `defaultKey`s (the template omits them).
+    func shell(_ name: String, _ command: String, _ order: Int, repair: Bool = true, key: String? = nil) -> LoopStage {
+        LoopStage(name: name, kind: .shellCommand, command: command, order: order, defaultKey: key, allowsRepair: repair)
+    }
+    let planner = LoopStage(name: "Refactor Plan", kind: .skill, order: 0, skillId: "skills/refactor-planner",
+                            targetPath: "Sources/App")
+    let apply = LoopStage(name: "Refactor Apply", kind: .skill, order: 3, skillId: "skills/refactor-apply")
+    let templateLike = [planner, shell("Test Baseline", "make test", 1, repair: false),
+                        shell("Check Baseline", "make lint", 2, repair: false), apply,
+                        shell("Check", "make lint", 4), shell("Test", "make test", 5)]
+    let roles = RefactorRulesCollector.stageRoles(in: templateLike)
+    expect(roles == .init(planInput: "Sources/App", checkCommand: "make lint", testCommand: "make test"),
+           "a keyless (template-made) loop still names its planner Input, Check and Test, got \(roles)")
+    let noCheck = RefactorRulesCollector.stageRoles(in: [planner, shell("Test Baseline", "make test", 1, repair: false),
+                                                         apply, shell("Test", "make test", 5)])
+    expect(noCheck.checkCommand == nil && noCheck.testCommand == "make test",
+           "without a Check stage only Test is named — never a baseline")
+    var disabledCheck = shell("Check", "make lint", 4)
+    disabledCheck.enabled = false
+    let offCheck = RefactorRulesCollector.stageRoles(in: [planner, apply, disabledCheck, shell("Test", "make test", 5)])
+    expect(offCheck.checkCommand == nil, "a disabled Check is not a check the loop runs")
+    let keyed = RefactorRulesCollector.stageRoles(in: [
+        planner, apply, shell("Lint", "make lint", 4, key: "refactor-check"),
+        shell("Unit", "make unit", 5, key: "refactor-test"), shell("Extra", "make extra", 6)])
+    expect(keyed.checkCommand == "make lint" && keyed.testCommand == "make unit",
+           "a stage carrying its defaultKey wins over position")
 }
 #endif

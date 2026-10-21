@@ -26,6 +26,45 @@ public enum RefactorRulesCollector {
         let text: String
     }
 
+    /// What the digest needs from a refactor loop's stages, found by ROLE.
+    public struct StageRoles: Equatable {
+        /// The planner's Input (its `targetPath`).
+        public var planInput: String?
+        /// The repairable lint/typecheck command the loop runs after Apply.
+        public var checkCommand: String?
+        /// The repairable test command the loop runs after Apply.
+        public var testCommand: String?
+
+        public init(planInput: String?, checkCommand: String?, testCommand: String?) {
+            self.planInput = planInput
+            self.checkCommand = checkCommand
+            self.testCommand = testCommand
+        }
+    }
+
+    /// The planner's Input and the Check / Test commands of `stages` (run
+    /// order). A loop created from the Refactoring template carries no
+    /// `defaultKey`s, so keys cannot be the only way in: each role takes its
+    /// `defaultKey` stage when an enabled one exists, else it is found by role.
+    /// Planner: the `skills/refactor-planner` skill stage. Check / Test: the
+    /// enabled, blocking, REPAIRABLE shell stages after the apply stage (all
+    /// of them when there is none) — the baselines refuse repair, so they never
+    /// match — the last one being Test (it runs last, as in every built-in)
+    /// and an earlier one Check.
+    public static func stageRoles(in stages: [LoopStage]) -> StageRoles {
+        let enabled = stages.filter(\.enabled)
+        func keyed(_ key: String) -> LoopStage? { enabled.first { $0.defaultKey == key } }
+        let planner = keyed("refactor-plan")
+            ?? enabled.first { $0.kind == .skill && $0.skillId == "skills/refactor-planner" }
+        let after = enabled.firstIndex(where: \.isRefactorApply).map { enabled[($0 + 1)...] }
+            ?? enabled[...]
+        let verifiers = after.filter { $0.verifies && $0.allowsRepair && $0.command != nil }
+        let test = keyed("refactor-test") ?? verifiers.last { $0.id != keyed("refactor-check")?.id }
+        let check = keyed("refactor-check") ?? verifiers.first { $0.id != test?.id }
+        return StageRoles(planInput: planner?.targetPath, checkCommand: check?.command,
+                          testCommand: test?.command)
+    }
+
     /// Builds the digest.
     ///
     /// - Parameters:
