@@ -671,7 +671,7 @@ final class RepairScopeGuardTests: XCTestCase {
             XCTAssertNotNil(result, "a failed probe must not read as success")
             XCTAssertTrue(result?.contains("nothing was restored") == true, result ?? "nil")
             XCTAssertTrue(FileManager.default.fileExists(atPath: file.path), "a failed probe never deletes")
-            XCTAssertFalse(verifier.commands.contains { $0.contains("git restore") }, "nothing is restored either")
+            XCTAssertFalse(verifier.commands.contains { $0.contains(" restore --source=") }, "nothing is restored either")
         }
     }
 

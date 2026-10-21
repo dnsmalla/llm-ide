@@ -596,15 +596,13 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         }
 
         var failures: [String] = []
-        // `--worktree` only (no `--staged`): the index is never touched, so a
-        // rollback cannot disturb whatever the user had staged for their own,
-        // unrelated commit.
-        if !present.isEmpty,
-           case .failure(let reason) = await run(
-               "git --literal-pathspecs restore --source=\(tree) --worktree -- \(Self.shellQuoted(present))",
-               gitRoot: gitRoot) {
-            failures.append(reason)
-        }
+        // Deletions FIRST, restores second. A case-only rename inside the batch
+        // (`Foo.txt` → `foo.txt`) lists `Foo.txt` as present in `tree` and
+        // `foo.txt` as absent; on a case-insensitive file system (macOS's
+        // default) both names are the SAME file, so deleting `foo.txt` after
+        // restoring `Foo.txt` would delete what the restore just put back —
+        // the user's pre-batch edits with it. Restoring last lets the base
+        // tree's content win on every file system.
         for path in absent {
             // `tree` has no entry for this path (the batch created it): delete it.
             // Resolve and contain the path first — `path` came from a `treeDiff`
@@ -624,6 +622,15 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
                     failures.append("could not delete \(path): \(error.localizedDescription)")
                 }
             }
+        }
+        // `--worktree` only (no `--staged`): the index is never touched, so a
+        // rollback cannot disturb whatever the user had staged for their own,
+        // unrelated commit.
+        if !present.isEmpty,
+           case .failure(let reason) = await run(
+               "git --literal-pathspecs restore --source=\(tree) --worktree -- \(Self.shellQuoted(present))",
+               gitRoot: gitRoot) {
+            failures.append(reason)
         }
         return failures.isEmpty ? nil : failures.joined(separator: "; ")
     }

@@ -179,6 +179,35 @@ func runRefactorRollbackChecks() async {
         expect(false, "snapshotTree produced a base for the odd-name check")
     }
 
+    // A case-only rename inside the batch (`Foo.txt` → `foo.txt`, then an
+    // edit). `treeDiff` lists `Foo.txt` (in the base) and `foo.txt` (not), and
+    // on a case-insensitive file system — macOS's default — both names are
+    // one file: deleting `foo.txt` must never take the restored `Foo.txt`
+    // (and the user's uncommitted edit in it) with it.
+    try? "committed\n".write(to: url("Foo.txt"), atomically: true, encoding: .utf8)
+    git(["add", "Foo.txt"], root)
+    git(["commit", "-qm", "foo"], root)
+    try? "user edit\n".write(to: url("Foo.txt"), atomically: true, encoding: .utf8)
+    if let caseBase = await guardUnderTest.snapshotTree(gitRoot: root) {
+        git(["mv", "Foo.txt", "foo.txt"], root)
+        try? "batch edit\n".write(to: url("foo.txt"), atomically: true, encoding: .utf8)
+        let after = await guardUnderTest.snapshotTree(gitRoot: root) ?? ""
+        // What the runner's `treeDiff` reports (the same `git diff --name-only`).
+        let changed = gitOutput(["-c", "core.quotepath=off", "diff", "--name-only", caseBase, after], root)
+            .split(whereSeparator: \.isNewline).map(String.init)
+        expect(Set(changed) == ["Foo.txt", "foo.txt"],
+               "the case-only rename shows up as Foo.txt and foo.txt, got \(changed)")
+        let caseError = await guardUnderTest.restore(paths: changed, fromTree: caseBase, gitRoot: root)
+        expect(caseError == nil, "restore after a case-only rename reports no error, got \(caseError ?? "nil")")
+        let names = (try? FileManager.default.contentsOfDirectory(atPath: root.path)) ?? []
+        expect(names.contains("Foo.txt") && !names.contains("foo.txt"),
+               "the base tree's Foo.txt is back under its own name, got \(names.sorted())")
+        expect((try? String(contentsOf: url("Foo.txt"), encoding: .utf8)) == "user edit\n",
+               "the restored Foo.txt survives the delete of foo.txt, with the user's pre-batch edit")
+    } else {
+        expect(false, "snapshotTree produced a base for the case-rename check")
+    }
+
     // The `RepairScopeGuarding` default (a guard that cannot run git) and
     // index-safety of the default protocol extension are internal-only
     // concerns (the protocol itself is not `public`) and are asserted by
