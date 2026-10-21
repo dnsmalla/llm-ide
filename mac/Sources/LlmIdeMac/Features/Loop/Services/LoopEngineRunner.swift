@@ -1553,7 +1553,11 @@ final class LoopEngineRunner: ObservableObject {
                     record(stage, startedAt: rerunStartedAt, duration: Date().timeIntervalSince(rerunStartedAt),
                            exitCode: 0, passed: true, output: "", score: nil,
                            agentNote: "flaky: failed once, passed on immediate re-run", flaky: true)
-                    flakyStages.append(stage.name)
+                    // Dedup: the same stage can flake across two different batches in one
+                    // run, and the notification text should name it once, not repeat it.
+                    if !flakyStages.contains(stage.name) {
+                        flakyStages.append(stage.name)
+                    }
                     stageStates[stage.id] = .passed
                     progress.clear(key: stage.id)
                     return .proceed

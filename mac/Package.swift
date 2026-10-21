@@ -137,6 +137,7 @@ if autoTasksIncluded {
         "MobileLoopStateTests.swift",
         "NoWallClockDefaultsTests.swift",
         "ProgressWatchTests.swift",
+        "RefactorPlanDiffTests.swift",
         "RefactorRulesCollectorTests.swift",
         "RegressionRunnerSweepAdapterTests.swift",
         "RepairScopeGuardTests.swift",
