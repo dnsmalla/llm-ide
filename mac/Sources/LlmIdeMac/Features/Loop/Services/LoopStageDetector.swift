@@ -1269,7 +1269,7 @@ public enum LoopStageDetector {
     /// - `test`: the project's own test command, alone.
     /// - `system-check`: llm-ide's per-subsystem checks, each marker-gated.
     /// - `plan`: the two plan-generation skill stages (`planStages()`).
-    /// - `refactor`: plan → apply one batch → test (`refactorStages`), plan-only
+    /// - `refactor`: plan → (apply one batch → test) per batch (`refactorStages`), plan-only
     ///   when no test command is detected.
     /// - `docs`: doc index → doc pages (`docStages()`).
     ///

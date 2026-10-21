@@ -240,6 +240,22 @@ extension LoopEngineView {
         return "\(shape). Every iteration re-runs all stages from the top until each gating check passes."
     }
 
+    /// Refactoring loop only: how many plan batches one run may apply. Shown
+    /// with the budgets because it multiplies them — iterations and repairs are
+    /// counted per batch, the time budget per run.
+    @ViewBuilder
+    private var refactorBatchesStepper: some View {
+        let t = theme.current
+        let range = LoopEngineConfig.refactorBatchesPerRunRange
+        let current = LoopEngineConfig.effectiveRefactorBatchesPerRun(refactorBatchesPerRun)
+        Stepper("Batches per run: \(current)",
+                value: Binding(get: { current }, set: { refactorBatchesPerRun = $0 }), in: range)
+        Text("After a batch passes every check, the run starts the plan's next todo batch, up to this many. Iterations and repairs count afresh for each batch; the time budget covers the whole run. A batch that fails is rolled back and ends the run.")
+            .font(Typography.caption)
+            .foregroundStyle(t.textMuted)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
     private var budgetSummary: String {
         let time = wallClockMinutes == 0 ? "no time limit" : "\(wallClockMinutes) min"
         return "\(maxIterations) iterations · \(time) · stop after \(consecutiveFailureStop) non-improving · \(maxRepairsPerStage) repairs/stage"
@@ -354,6 +370,9 @@ extension LoopEngineView {
                               pauseTimeoutMinutes: Binding(
                                   get: { Int(pauseTimeoutSeconds / 60) },
                                   set: { pauseTimeoutSeconds = Double($0) * 60 })) 
+            if stages.contains(where: { $0.enabled && $0.isRefactorApply }) {
+                refactorBatchesStepper
+            }
             Toggle("Use isolated git worktrees for concurrent runs", isOn: $useWorktreesForConcurrentRuns)
                 .font(Typography.body)
             Text("When another run is already using the main checkout, start in an isolated worktree instead of waiting. Changed worktrees and their branches are retained for review. Off by default.")

@@ -84,6 +84,35 @@ public struct LoopEngineConfig: Codable, Equatable {
     /// An absent key decodes as true, so existing loops pick it up.
     public var openMergeRequest: Bool = true
 
+    /// How many refactor batches one run of the Refactoring loop may apply
+    /// (design doc §3.6). After a batch passes every check the run starts the
+    /// plan's next `todo` batch, up to this many; iterations, the repair streak
+    /// and per-stage repair counts are per batch, while the time budget still
+    /// bounds the whole run (§5.4). `nil` = the default
+    /// (`defaultRefactorBatchesPerRun`), so a config saved before this existed
+    /// picks it up; 1 is the old one-batch-per-run behaviour. Only the
+    /// refactor loop reads it. Read through `effectiveRefactorBatchesPerRun`.
+    public var refactorBatchesPerRun: Int?
+
+    /// The batches-per-run default when `refactorBatchesPerRun` is unset.
+    public static let defaultRefactorBatchesPerRun = 3
+    /// The range the stepper offers and the runner clamps to.
+    public static let refactorBatchesPerRunRange = 1...10
+
+    /// `refactorBatchesPerRun`, defaulted and clamped to
+    /// `refactorBatchesPerRunRange`: a hand-edited 0 still runs one batch, and
+    /// a huge value cannot turn one unattended run into the whole plan.
+    public var effectiveRefactorBatchesPerRun: Int {
+        Self.effectiveRefactorBatchesPerRun(refactorBatchesPerRun)
+    }
+
+    /// The defaulting and clamping rule behind `effectiveRefactorBatchesPerRun`,
+    /// for an editor holding the raw value outside a config.
+    public static func effectiveRefactorBatchesPerRun(_ value: Int?) -> Int {
+        let range = refactorBatchesPerRunRange
+        return min(max(value ?? defaultRefactorBatchesPerRun, range.lowerBound), range.upperBound)
+    }
+
     /// Any enabled stage belongs to Self-Heal or its SDK Adoption sibling — keyed on the stages, not the
     /// flag, so a hand-edited loop.json, a template or "Run this stage only"
     /// cannot drop the guarantees below.
@@ -141,7 +170,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         case stages, maxIterations, consecutiveFailureStop
         case wallClockBudgetSeconds, maxRepairsPerStage, protectedPathPolicy, extraProtectedGlobs
         case writeSummaryNote, useWorktreesForConcurrentRuns, repairModel, alwaysUseWorktree
-        case openMergeRequest, pauseTimeoutSeconds
+        case openMergeRequest, pauseTimeoutSeconds, refactorBatchesPerRun
     }
 
     public init(stages: [LoopStage], maxIterations: Int = 10, consecutiveFailureStop: Int = 2,
@@ -149,7 +178,8 @@ public struct LoopEngineConfig: Codable, Equatable {
          protectedPathPolicy: ProtectedPathPolicy = .revert, extraProtectedGlobs: [String] = [],
          writeSummaryNote: Bool = false, useWorktreesForConcurrentRuns: Bool = false,
          repairModel: String? = nil, alwaysUseWorktree: Bool = false,
-         openMergeRequest: Bool = true, pauseTimeoutSeconds: Double = 1800) {
+         openMergeRequest: Bool = true, pauseTimeoutSeconds: Double = 1800,
+         refactorBatchesPerRun: Int? = nil) {
         self.stages = stages
         self.maxIterations = maxIterations
         self.consecutiveFailureStop = consecutiveFailureStop
@@ -163,6 +193,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         self.alwaysUseWorktree = alwaysUseWorktree
         self.openMergeRequest = openMergeRequest
         self.pauseTimeoutSeconds = pauseTimeoutSeconds
+        self.refactorBatchesPerRun = refactorBatchesPerRun
     }
 
     /// Same rule as `LoopStage.init(from:)`: every field added after the first
@@ -192,6 +223,10 @@ public struct LoopEngineConfig: Codable, Equatable {
         alwaysUseWorktree = try container.decodeIfPresent(Bool.self, forKey: .alwaysUseWorktree) ?? false
         openMergeRequest = try container.decodeIfPresent(Bool.self, forKey: .openMergeRequest) ?? true
         pauseTimeoutSeconds = try container.decodeIfPresent(Double.self, forKey: .pauseTimeoutSeconds) ?? 1800
+        // Absent and null both mean "the default": nil is resolved by
+        // `effectiveRefactorBatchesPerRun`, never stored as a number, so a later
+        // change of the default reaches every loop that never set one.
+        refactorBatchesPerRun = try container.decodeIfPresent(Int.self, forKey: .refactorBatchesPerRun)
     }
 
     /// Hand-written so `wallClockBudgetSeconds` is encoded as an explicit JSON
@@ -215,6 +250,7 @@ public struct LoopEngineConfig: Codable, Equatable {
         try container.encode(alwaysUseWorktree, forKey: .alwaysUseWorktree)
         try container.encode(openMergeRequest, forKey: .openMergeRequest)
         try container.encode(pauseTimeoutSeconds, forKey: .pauseTimeoutSeconds)
+        try container.encodeIfPresent(refactorBatchesPerRun, forKey: .refactorBatchesPerRun)
     }
 
     /// Whether an auto-detected stage list is safe to persist as the

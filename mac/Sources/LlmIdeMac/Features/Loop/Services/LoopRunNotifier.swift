@@ -45,7 +45,8 @@ enum LoopRunNotifier {
                                   duration: TimeInterval, flakyStages: [String] = [],
                                   rollback: String? = nil) {
         let flaky = flakyStages.isEmpty ? "" : " · passed after a re-run — possibly flaky (\(flakyStages.joined(separator: ", ")))"
-        // A refactor batch taken back out of the tree (`LoopBatchRollback.summary`).
+        // The refactor batches the run applied and rolled back
+        // (`LoopEngineRunner.batchesSummary`).
         let rolledBack = rollback.map { " · \($0)" } ?? ""
         let ok = status.code == LoopEngineStatus.success.code
         notify(title: ok ? "Loop finished — \(loopName)" : "Loop needs attention — \(loopName)",

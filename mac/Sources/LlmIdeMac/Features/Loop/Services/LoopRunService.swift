@@ -187,7 +187,7 @@ final class LoopRunService: ObservableObject, SessionScoped {
                                     iterations: runner.iteration,
                                     duration: Date().timeIntervalSince(startedAt),
                                     flakyStages: runner.flakyStages,
-                                    rollback: runner.batchRollback?.summary)
+                                    rollback: runner.batchesSummary)
             }
             onFinish(result)
         }

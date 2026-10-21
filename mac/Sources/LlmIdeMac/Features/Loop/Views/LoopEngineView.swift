@@ -87,6 +87,9 @@ struct LoopEngineView: View {
     /// Edited via the budgets editor (minutes, 0 = unlimited); held as seconds so
     /// a hand-edited sub-minute value is not silently rounded by a save.
     @State var pauseTimeoutSeconds: Double = 1800
+    /// `LoopEngineConfig.refactorBatchesPerRun` — nil (the default) until the
+    /// user moves the stepper, so an untouched loop follows the shipped default.
+    @State var refactorBatchesPerRun: Int?
     @State var selectedStageId: String?
     /// Log pane filter state. Per-page, deliberately not persisted: a filter
     /// left on across a relaunch would hide a later run's lines with no
@@ -1643,7 +1646,8 @@ struct LoopEngineView: View {
             repairModel: repairModel,
             alwaysUseWorktree: alwaysUseWorktree,
             openMergeRequest: openMergeRequest,
-            pauseTimeoutSeconds: pauseTimeoutSeconds)
+            pauseTimeoutSeconds: pauseTimeoutSeconds,
+            refactorBatchesPerRun: refactorBatchesPerRun)
     }
 
     /// The full `LoopDefinition` this page currently represents — `currentConfig`
@@ -1692,6 +1696,7 @@ struct LoopEngineView: View {
             protectedPathPolicy = ensuredConfig.protectedPathPolicy
             extraProtectedGlobs = ensuredConfig.extraProtectedGlobs
             pauseTimeoutSeconds = ensuredConfig.pauseTimeoutSeconds
+            refactorBatchesPerRun = ensuredConfig.refactorBatchesPerRun
             writeSummaryNote = ensuredConfig.writeSummaryNote
             useWorktreesForConcurrentRuns = ensuredConfig.useWorktreesForConcurrentRuns
             alwaysUseWorktree = ensuredConfig.alwaysUseWorktree
@@ -1751,6 +1756,7 @@ struct LoopEngineView: View {
         protectedPathPolicy = seed.protectedPathPolicy
         extraProtectedGlobs = seed.extraProtectedGlobs
         pauseTimeoutSeconds = seed.pauseTimeoutSeconds
+        refactorBatchesPerRun = seed.refactorBatchesPerRun
         writeSummaryNote = seed.writeSummaryNote
         useWorktreesForConcurrentRuns = seed.useWorktreesForConcurrentRuns
         alwaysUseWorktree = seed.alwaysUseWorktree
@@ -2105,6 +2111,7 @@ struct LoopEngineView: View {
         protectedPathPolicy = applied.protectedPathPolicy
         extraProtectedGlobs = applied.extraProtectedGlobs
         pauseTimeoutSeconds = applied.pauseTimeoutSeconds
+        refactorBatchesPerRun = applied.refactorBatchesPerRun
         writeSummaryNote = applied.writeSummaryNote
         useWorktreesForConcurrentRuns = applied.useWorktreesForConcurrentRuns
         alwaysUseWorktree = applied.alwaysUseWorktree

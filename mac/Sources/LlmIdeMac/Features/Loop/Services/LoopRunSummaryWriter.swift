@@ -165,6 +165,9 @@ final class NoteLoopRunSummaryWriter: LoopRunSummaryWriting {
         if let rollback = record.batchRollback {
             md += "\n**Rollback:** \(rollback.summary)\n"
         }
+        if let batches = record.batchesSummary {
+            md += "\n**Batches:** \(batches)\n"
+        }
         if let unverified = attempts.last(where: {
                $0.kind == .codeGraph && $0.outputTail.hasPrefix(LoopEngineRunner.codeGraphUnverifiedPrefix) }),
            unverified.graphDelta == nil {

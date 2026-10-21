@@ -151,8 +151,10 @@ public enum LoopDefaultLoopKey {
     /// hierarchical master plan (the "plan director").
     public static let plan = "plan"
     /// The refactoring loop: write a batched, behaviour-preserving refactor
-    /// plan (`llm-doc/loop/refactor/REFACTOR.md`), apply ONE batch of it, then run
-    /// the project's tests. Manual only — see `manualOnly`.
+    /// plan (`llm-doc/loop/refactor/REFACTOR.md`), apply one batch of it at a
+    /// time, each verified by the project's tests before the next starts (up to
+    /// `LoopEngineConfig.effectiveRefactorBatchesPerRun` per run). Manual only —
+    /// see `manualOnly`.
     public static let refactor = "refactor"
     /// The doc-optimization loop: index the codebase's areas, then write a
     /// generated, code-cited doc tree under `llm-doc/loop/docs/`.

@@ -127,6 +127,7 @@ extension LoopEngineRunner {
         }
         guard let before = graphBefore else {
             appendLog(.info, "  [\(stage.name)] no graph snapshot this run — nothing to compare")
+            lastVerifiedGraph = after
             return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "")
         }
         let delta = GraphReport.delta(before: before, after: after, expect: currentExpect)
@@ -147,6 +148,8 @@ extension LoopEngineRunner {
                                    batchId: currentBatchId, delta: delta.changes)
         }
         appendLog(.info, "  [\(stage.name)] graph delta · batch \(batch) · no regressions")
+        // What the next batch of this run is measured against (§3.6).
+        lastVerifiedGraph = after
         return finishCodeGraph(stage, startedAt: startedAt, passed: true, output: "",
                                batchId: currentBatchId, delta: delta.changes)
     }
@@ -349,7 +352,7 @@ extension LoopEngineRunner {
     /// The plan the apply stage edits — resolved exactly as it resolves it
     /// (and as `prepareNextBatchFile` does when there is no apply stage), so
     /// the rollback marks the same file the batch was read from.
-    private func refactorPlanURL(gitRoot: URL, faultsRoot: URL) -> URL? {
+    func refactorPlanURL(gitRoot: URL, faultsRoot: URL) -> URL? {
         let apply = runOrderedStages.first(where: { $0.isRefactorApply })
             ?? LoopStage(name: "Refactor Apply", kind: .skill, order: 0, skillId: "skills/refactor-apply",
                          targetPath: LoopOutputLayout.refactorPlan)

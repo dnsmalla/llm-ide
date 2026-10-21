@@ -70,6 +70,13 @@ final class LoopEngineRunner: ObservableObject {
     /// The in-flight run's own budgets, snapshotted at start. Published (not
     /// read from the page's editable state) so the display describes the run
     /// actually executing even after the user edits the config mid-run.
+    ///
+    /// `runMaxIterations` is also the ceiling the run itself stops at — the
+    /// value of `iteration` that ends it. Iterations are per refactor batch
+    /// (design doc §5.4): starting the next batch moves the ceiling to
+    /// `iteration + maxIterations`, so each batch gets the full count while
+    /// `iteration` (the journal's index, and what the header shows against
+    /// this number) keeps counting the whole run.
     @Published private(set) var runMaxIterations = 0
     @Published private(set) var runWallClockBudget: TimeInterval?
 
@@ -298,6 +305,14 @@ final class LoopEngineRunner: ObservableObject {
     /// The batch this run rolled back (or tried to), for the journal record,
     /// the summary note and the finish notification. Reset per run.
     var batchRollback: LoopBatchRollback?
+    /// The refactor batches this run applied and verified, and those the apply
+    /// stage skipped, in order (design doc §3.6). A run may go through several
+    /// (`LoopEngineConfig.effectiveRefactorBatchesPerRun`). Reset per run.
+    var appliedBatchIds: [String] = []
+    var skippedBatchIds: [String] = []
+    /// The graph the latest PASSING Graph Check measured — the verified state
+    /// the next batch's check is compared against (§3.6). Reset per run.
+    var lastVerifiedGraph: GraphReport?
     /// The full (uncapped by the journal's 4 KB tail) output of each blocking
     /// shell stage's latest run, by stage id — the ledger op parses test ids from it.
     var lastVerifyOutputs: [String: String] = [:]
@@ -509,7 +524,8 @@ final class LoopEngineRunner: ObservableObject {
         /// `.advisory` and therefore does not gate.
         case proceed
         /// A blocking stage failed and was handled (repaired or not); restart the
-        /// iteration from the first stage.
+        /// iteration from the first stage (the batch's first stage once the run
+        /// has moved on to a later refactor batch).
         case retryIteration
         /// A blocking stage failed and was repaired: re-verify THAT stage alone.
         /// The full pipeline re-runs only once it passes.
@@ -673,6 +689,9 @@ final class LoopEngineRunner: ObservableObject {
         currentBatchSkipped = false
         resetBatchRollbackState()
         batchRollback = nil
+        appliedBatchIds = []
+        skippedBatchIds = []
+        lastVerifiedGraph = nil
         lastVerifyOutputs = [:]
         pendingFailureLedger = nil
         writtenRoots = [:]
@@ -907,7 +926,11 @@ final class LoopEngineRunner: ObservableObject {
         // The stage whose decision ended the run, for a rollback's `- Blocked:`
         // line. Nil when the run ended between stages (budget, iterations).
         var terminatingStageName: String?
-        iterationLoop: while iteration < config.maxIterations {
+        // Where each iteration starts: stage 0, or — once the run moved on to a
+        // later refactor batch — that batch's first stage, so the planner and
+        // the stages before the batch are not re-run (design doc §3.6).
+        var pipelineStart = 0
+        iterationLoop: while iteration < runMaxIterations {
             // `RegressionSweepRunning.sweep` is fail-closed and
             // returns `false` on cancellation rather than throwing, so a
             // cancelled regression-sweep-only run would otherwise just
@@ -940,16 +963,21 @@ final class LoopEngineRunner: ObservableObject {
             iteration += 1
             iterationRecords.append(LoopIterationRecord(index: iteration))
             emit(LoopRunEvent(kind: LoopRunEvent.Kind.iterationStarted, iteration: iteration))
-            appendLog(.info, "Iteration \(iteration)/\(config.maxIterations)")
+            appendLog(.info, "Iteration \(iteration)/\(runMaxIterations)")
             // Every iteration re-runs every stage from the top — the pipeline
-            // display must show that, not keep last iteration's verdicts.
-            stageStates = Dictionary(uniqueKeysWithValues:
-                orderedStages.map { ($0.id, LiveStageState.pending) })
+            // display must show that, not keep last iteration's verdicts. In a
+            // later batch the stages before it keep the verdict they showed.
+            if pipelineStart == 0 {
+                stageStates = Dictionary(uniqueKeysWithValues:
+                    orderedStages.map { ($0.id, LiveStageState.pending) })
+            } else {
+                for stage in orderedStages[pipelineStart...] { stageStates[stage.id] = .pending }
+            }
 
             // The stage a repair just touched: it is re-verified alone, and the
             // pipeline restarts from the top only after it passes.
             var retriedStageID: String?
-            var stageIndex = 0
+            var stageIndex = pipelineStart
             while stageIndex < orderedStages.count {
                 let stage = orderedStages[stageIndex]
                 // The stage boundary is where a pause takes effect (see
@@ -1041,7 +1069,7 @@ final class LoopEngineRunner: ObservableObject {
                         // (a hand-built loop) still restarts from the top.
                         let batchStart = batchStarted
                             ? (RefactorBatchRollback.firstBatchStageIndex(in: orderedStages) ?? 0) : 0
-                        let restart = batchStart <= stageIndex ? batchStart : 0
+                        let restart = max(batchStart <= stageIndex ? batchStart : 0, pipelineStart)
                         if restart == 0 {
                             appendLog(.info, "  [\(stage.name)] passes after repair — re-running the full pipeline")
                         } else {
@@ -1071,7 +1099,7 @@ final class LoopEngineRunner: ObservableObject {
                     iteration += 1
                     iterationRecords.append(LoopIterationRecord(index: iteration))
                     emit(LoopRunEvent(kind: LoopRunEvent.Kind.iterationStarted, iteration: iteration))
-                    appendLog(.info, "Iteration \(iteration)/\(config.maxIterations) — re-verifying \(stage.name)")
+                    appendLog(.info, "Iteration \(iteration)/\(runMaxIterations) — re-verifying \(stage.name)")
                 case .retryIteration:
                     continue iterationLoop
                 case .terminate(let terminal):
@@ -1082,6 +1110,19 @@ final class LoopEngineRunner: ObservableObject {
             }
 
             if status == nil {
+                // The pipeline passed end to end. A refactor run may go on to
+                // the plan's next batch (design doc §3.6): iterations, the
+                // repair streak and per-stage repair counts start over for it
+                // (§5.4); the time budget keeps counting the whole run.
+                if let batchStart = RefactorBatchRollback.firstBatchStageIndex(in: orderedStages),
+                   let next = finishVerifiedBatch(config: config, budgetLeft: !budgetExhausted()) {
+                    startNextBatch(next, config: config, stages: orderedStages, batchStart: batchStart)
+                    progress = ProgressWatch()
+                    repairsUsed = [:]
+                    codeAppliedStageIDs.subtract(orderedStages[batchStart...].map(\.id))
+                    pipelineStart = batchStart
+                    continue iterationLoop
+                }
                 status = .success
                 break iterationLoop
             }
@@ -1098,7 +1139,7 @@ final class LoopEngineRunner: ObservableObject {
             status = .aborted
         }
         let pipelineStatus = status ?? .givenUp(reason: .maxIterations)
-        let verdict = Self.honestVerdict(pipelineStatus, iterations: iterationRecords)
+        var verdict = Self.honestVerdict(pipelineStatus, iterations: iterationRecords)
         // The one funnel every in-loop ending reaches (preflight exits come
         // before any batch can start). Decided on the PIPELINE's status, not
         // the honest verdict: a pipeline that passed end to end verified the
@@ -1113,10 +1154,43 @@ final class LoopEngineRunner: ObservableObject {
                 await self.rollBackCurrentBatch(reason: reason, stage: stageName)
             }.value
         }
+        verdict = keepingVerifiedBatches(verdict, pipelineStatus: pipelineStatus)
         return await finish(verdict,
                             config: config, faultsRoot: faultsRoot, gitRoot: runGitRoot,
                             projectId: projectId, startedAt: startedAt,
                             loopId: loopId, loopName: loopName)
+    }
+
+    /// Moves the run on to refactor batch `id` (design doc §3.6, §5.4): clears
+    /// the finished batch's state, re-bases the graph comparison on the state
+    /// its check verified, and gives the new batch a full iteration count. The
+    /// stall watch, repair counts and applied-stage set are `run`'s locals and
+    /// are reset there. Here, in the main file, because the per-stage agent
+    /// results, the attempt ledger and the iteration ceiling are private to it.
+    private func startNextBatch(_ id: String, config: LoopEngineConfig, stages: [LoopStage], batchStart: Int) {
+        let finished = currentBatchId ?? "the batch"
+        currentBatchId = nil
+        currentExpect = nil
+        currentBatchSkipped = false
+        refactorPlanBefore = nil
+        // The next batch takes its own base and rolls back only its own edits.
+        resetBatchRollbackState()
+        if let verified = lastVerifiedGraph {
+            graphBefore = verified
+            lastVerifiedGraph = nil
+        }
+        // The batch stages' previous agent replies and repair attempts belong to
+        // the finished batch: an apply that answers nothing must not be read as
+        // having re-applied it, and a repair is not told about another batch's.
+        for stage in stages[batchStart...] {
+            lastSkillResults[stage.id] = nil
+            lastRepairResults[stage.id] = nil
+            attemptLedgers[stage.id] = nil
+        }
+        runMaxIterations = iteration + config.maxIterations
+        let started = appliedBatchIds.count + skippedBatchIds.count + 1
+        appendLog(.info, "\(finished) done — starting batch \(id) (\(started) of at most "
+                  + "\(config.effectiveRefactorBatchesPerRun) this run; iterations count afresh)")
     }
 
     // MARK: - Stage execution
@@ -1220,7 +1294,7 @@ final class LoopEngineRunner: ObservableObject {
         if verdict.streak >= config.consecutiveFailureStop {
             return .terminate(.givenUp(reason: .regressionStalled))
         }
-        if iteration >= config.maxIterations {
+        if iteration >= runMaxIterations {
             return .terminate(.givenUp(reason: .maxIterations))
         }
         return .retryIteration
@@ -1428,7 +1502,7 @@ final class LoopEngineRunner: ObservableObject {
                     : .repeatedFailure
             return .terminate(.givenUp(reason: reason))
         }
-        if iteration >= config.maxIterations {
+        if iteration >= runMaxIterations {
             record(stage, startedAt: startedAt, duration: duration, exitCode: outcome.exitCode,
                    passed: false, output: outcome.output, outputHash: failureHash, score: score)
             return .terminate(.givenUp(reason: .maxIterations))
@@ -1836,7 +1910,7 @@ final class LoopEngineRunner: ObservableObject {
         if verdict.streak >= config.consecutiveFailureStop {
             return .terminate(.givenUp(reason: .noProgress(stageName: stage.name)))
         }
-        if iteration >= config.maxIterations { return .terminate(.givenUp(reason: .maxIterations)) }
+        if iteration >= runMaxIterations { return .terminate(.givenUp(reason: .maxIterations)) }
         if budgetExhausted() {
             appendLog(.warn, "  [\(stage.name)] no retry · the run's time budget is used up")
             return .terminate(.givenUp(reason: .wallClockExceeded))
@@ -2774,6 +2848,8 @@ final class LoopEngineRunner: ObservableObject {
             iterations: iterationRecords, statusCode: terminal.code,
             statusSummary: terminal.summary, loopId: loopId, loopName: loopName)
         record.batchRollback = batchRollback
+        record.appliedBatches = appliedBatchIds.isEmpty ? nil : appliedBatchIds
+        record.skippedBatches = skippedBatchIds.isEmpty ? nil : skippedBatchIds
         // A successful run that changed files: branch, commit, push, open a merge
         // request. Before the journal write so the record says where the fix went.
         // Fail-open like the journal: a failed shipment is reported, never a failed run.

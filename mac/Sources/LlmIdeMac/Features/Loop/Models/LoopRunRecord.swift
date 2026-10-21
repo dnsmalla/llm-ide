@@ -225,6 +225,19 @@ struct LoopRunRecord: Codable, Equatable {
     /// every run that rolled nothing back and for every record written before
     /// this existed. Optional, so older records decode.
     var batchRollback: LoopBatchRollback? = nil
+    /// The refactor batches this run applied and verified, and those the apply
+    /// stage skipped, in order (design doc §3.6). `nil` for every run that
+    /// finished no batch and for every record written before several batches
+    /// per run existed. Optional, so older records decode.
+    var appliedBatches: [String]? = nil
+    var skippedBatches: [String]? = nil
+
+    /// `Applied: R1, R2 · Rolled back: R3 (blocked: …)`, or nil when the run
+    /// kept no batch (`RefactorBatchSequence.batchesSummary`).
+    var batchesSummary: String? {
+        RefactorBatchSequence.batchesSummary(applied: appliedBatches ?? [], skipped: skippedBatches ?? [],
+                                             rolledBack: batchRollback?.listEntry)
+    }
 
     var durationSeconds: Double { endedAt.timeIntervalSince(startedAt) }
 }
@@ -252,6 +265,12 @@ struct LoopBatchRollback: Codable, Equatable {
             return "\(batchId) NOT rolled back — tree left as the batch made it (\(problem ?? "unknown")); blocked: \(reason)"
         }
         return "\(batchId) rolled back (blocked: \(reason))" + (problem.map { " — \($0)" } ?? "")
+    }
+
+    /// This rollback as one entry of the run's batch list (`RefactorBatchSequence.batchesSummary`).
+    var listEntry: String {
+        RefactorBatchSequence.rolledBackEntry(batchId: batchId, reason: reason,
+                                              treeRestored: treeRestored, problem: problem)
     }
 }
 

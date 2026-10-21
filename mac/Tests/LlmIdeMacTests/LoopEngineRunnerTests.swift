@@ -4147,4 +4147,315 @@ final class LoopEngineRunnerTests: XCTestCase {
             XCTAssertFalse(LoopEngineRunner.rollsBackBatch(status), status.summary)
         }
     }
+
+    // MARK: - Several refactor batches per run (design doc §3.6, §5.3, §5.4)
+
+    /// Plays a plan of several batches: the writer adds `Tests/<id>Tests.swift`
+    /// for the plan's first todo batch; Apply marks that batch done and edits
+    /// `Sources/<id>.swift` (and the plan). `appliedIds` is every batch Apply applied.
+    private final class MultiBatchSkillExecutor: LoopSkillExecuting {
+        let planURL: URL
+        let tree: TreeScriptGuard?
+        private(set) var skillIds: [String] = []
+        private(set) var appliedIds: [String] = []
+        init(planURL: URL, tree: TreeScriptGuard? = nil) {
+            self.planURL = planURL
+            self.tree = tree
+        }
+        func execute(skillId: String, targetPath: String?, message: String,
+                     repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
+            skillIds.append(skillId)
+            let plan = try String(contentsOf: planURL, encoding: .utf8)
+            guard let id = RefactorPlanDiff.firstTodo(in: plan)?.id else { return LoopAgentResult() }
+            switch skillId {
+            case "skills/test-gap-writer":
+                tree?.pending.append("Tests/\(id)Tests.swift")
+            case "skills/refactor-apply":
+                let marked = plan.components(separatedBy: "\n").map { line in
+                    line.hasPrefix("### \(id) ")
+                        ? line.replacingOccurrences(of: "(status: todo)", with: "(status: done)") : line
+                }.joined(separator: "\n")
+                try marked.write(to: planURL, atomically: true, encoding: .utf8)
+                appliedIds.append(id)
+                tree?.pending.append(contentsOf: ["Sources/\(id).swift", LoopOutputLayout.refactorPlan])
+            default:
+                break
+            }
+            return LoopAgentResult()
+        }
+    }
+
+    private static func multiBatchPlan(_ count: Int) -> String {
+        (1...count).map { "### R\($0) Batch \($0)  (status: todo)\n- Files: `Sources/R\($0).swift`\n" }
+            .joined(separator: "\n")
+    }
+
+    /// Planner → Test Write → Test Baseline → Apply → Test (`rollbackConfig(plan: true)`).
+    private func multiBatchConfig(batchesPerRun: Int?, maxIterations: Int = 10,
+                                  maxRepairsPerStage: Int = 5) -> LoopEngineConfig {
+        var config = rollbackConfig(plan: true)
+        config.maxIterations = maxIterations
+        config.maxRepairsPerStage = maxRepairsPerStage
+        config.refactorBatchesPerRun = batchesPerRun
+        return config
+    }
+
+    private func writersRun(_ skills: MultiBatchSkillExecutor) -> Int {
+        skills.skillIds.filter { $0 == "skills/test-gap-writer" }.count
+    }
+
+    /// A verified batch moves the run on to the plan's next todo batch — at the
+    /// batch's first stage, never back to the planner — until the run's limit
+    /// (3 by default); the rest of the plan waits for the next run.
+    func testAVerifiedBatchStartsTheNextOneUpToTheLimit() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.multiBatchPlan(4)])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: BatchRepairer(tree: tree), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: multiBatchConfig(batchesPerRun: nil), faultsRoot: repo, gitRoot: repo)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skills.appliedIds, ["R1", "R2", "R3"], "nil means 3 batches per run")
+        XCTAssertEqual(skills.skillIds.filter { $0 == "skills/refactor-planner" }.count, 1,
+                       "the planner is not re-run between batches")
+        XCTAssertEqual(writersRun(skills), 3, "each batch writes its own tests")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("### R3 Batch 3  (status: done)"), plan)
+        XCTAssertTrue(plan.contains("### R4 Batch 4  (status: todo)"), "the fourth batch waits for the next run")
+        XCTAssertTrue(tree.restores.isEmpty, "verified batches are never rolled back")
+        XCTAssertEqual(runner.iteration, 3, "one iteration per batch, numbered across the run")
+        XCTAssertEqual(journal.written.last?.appliedBatches, ["R1", "R2", "R3"])
+        XCTAssertNil(journal.written.last?.skippedBatches)
+        XCTAssertEqual(runner.batchesSummary, "Applied: R1, R2, R3")
+        let log = runner.log.map(\.text)
+        XCTAssertTrue(log.contains { $0.hasPrefix("R1 done — starting batch R2 (2 of at most 3 this run") },
+                      log.joined(separator: "\n"))
+        XCTAssertTrue(log.contains("Batch limit reached (3 per run)"), log.joined(separator: "\n"))
+    }
+
+    /// `refactorBatchesPerRun: 1` is the one-batch-per-run behaviour from before.
+    func testOneBatchPerRunStopsAfterTheFirstBatch() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.multiBatchPlan(2)])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: BatchRepairer(tree: tree), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), scopeGuard: tree)
+        let result = await runner.run(config: multiBatchConfig(batchesPerRun: 1), faultsRoot: repo, gitRoot: repo)
+
+        XCTAssertEqual(result, .success)
+        XCTAssertEqual(skills.appliedIds, ["R1"])
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("### R2 Batch 2  (status: todo)"), plan)
+        XCTAssertFalse(runner.log.contains { $0.text.contains("starting batch") })
+    }
+
+    /// Iterations, the repair streak and per-stage repair counts start over for
+    /// each batch (§5.4). With 2 iterations and 1 repair per stage, each batch
+    /// needs both (fail, repair, pass); counted per run the second batch would
+    /// have neither.
+    func testIterationsAndRepairCountsStartOverForEachBatch() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.multiBatchPlan(2)])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
+        let repairer = BatchRepairer(tree: tree)
+        // Each apply breaks the tests until the next repair fixes them. Batch 1:
+        // fail, fail the flake re-run, repair, pass. Batch 2 (the flake check is
+        // once per run): fail, repair, pass.
+        let verifier = StubVerifier { command in
+            guard command == "swift test", skills.appliedIds.count > repairer.repairCount else {
+                return VerifyOutcome(exitCode: 0, output: "")
+            }
+            return VerifyOutcome(exitCode: 1, output: "1 failing")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer, regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(
+            config: multiBatchConfig(batchesPerRun: nil, maxIterations: 2, maxRepairsPerStage: 1),
+            faultsRoot: repo, gitRoot: repo)
+
+        XCTAssertEqual(result, .success, runner.log.map(\.text).joined(separator: "\n"))
+        XCTAssertEqual(skills.appliedIds, ["R1", "R2"])
+        XCTAssertEqual(repairer.repairCount, 2, "one repair per batch, each within its own budget of 1")
+        XCTAssertEqual(runner.iteration, 4, "2 iterations per batch, numbered across the run")
+        XCTAssertEqual(runner.runMaxIterations, 4, "the ceiling moved to the second batch's own 2")
+        XCTAssertEqual(journal.written.last?.appliedBatches, ["R1", "R2"])
+        XCTAssertEqual(skills.skillIds.filter { $0 == "skills/refactor-planner" }.count, 1)
+    }
+
+    /// A LATER batch that fails is rolled back on its own — only its edits,
+    /// from its own base — and marked blocked; the run still succeeds with the
+    /// verified batch (§5.3), lists both, and attempts no further batch (§3.6).
+    func testALaterBatchRolledBackStillSucceedsWithTheVerifiedOnes() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.multiBatchPlan(3)])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
+        let repairer = BatchRepairer(tree: tree)
+        // R2's tests never pass, whatever the repairs do.
+        let verifier = StubVerifier { command in
+            command == "swift test" && skills.appliedIds.last == "R2"
+                ? VerifyOutcome(exitCode: 1, output: "1 failing") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: repairer, regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: multiBatchConfig(batchesPerRun: nil), faultsRoot: repo, gitRoot: repo)
+
+        XCTAssertEqual(result, .success, runner.log.map(\.text).joined(separator: "\n"))
+        XCTAssertEqual(skills.appliedIds, ["R1", "R2"], "a blocked batch ends the run; R3 is not attempted")
+        XCTAssertGreaterThanOrEqual(repairer.repairCount, 1)
+        XCTAssertEqual(tree.restores.count, 1)
+        let expected = (["Sources/R2.swift", "Tests/R2Tests.swift"]
+            + (1...max(repairer.repairCount, 1)).map { "Sources/C\($0).swift" }).sorted()
+        XCTAssertEqual(tree.restores.first?.paths, expected, "only R2's own edits, never R1's")
+        XCTAssertNotEqual(tree.restores.first?.tree, "t0", "R2's own base, taken after R1 was verified")
+
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("### R1 Batch 1  (status: done)"), plan)
+        XCTAssertTrue(plan.contains("### R2 Batch 2  (status: blocked)"), plan)
+        XCTAssertTrue(plan.contains("- Blocked: Test — given up"), plan)
+        XCTAssertTrue(plan.contains("### R3 Batch 3  (status: todo)"), plan)
+
+        let record = try XCTUnwrap(journal.written.last)
+        XCTAssertEqual(record.statusCode, LoopEngineStatus.success.code)
+        XCTAssertEqual(record.appliedBatches, ["R1"])
+        XCTAssertEqual(record.batchRollback?.batchId, "R2")
+        XCTAssertEqual(record.batchRollback?.treeRestored, true)
+        let summary = try XCTUnwrap(runner.batchesSummary)
+        XCTAssertTrue(summary.hasPrefix("Applied: R1 · Rolled back: R2 (blocked: Test — given up"), summary)
+        let note = NoteLoopRunSummaryWriter.render(record, title: "t")
+        XCTAssertTrue(note.contains("**Batches:** Applied: R1 · Rolled back: R2 (blocked: Test — given up"), note)
+        XCTAssertTrue(runner.log.contains { $0.text.hasPrefix("Keeping the 1 verified batch(es) (R1)") })
+    }
+
+    /// With nothing verified this run, a rollback still fails the run, and no
+    /// further batch is attempted.
+    func testAFirstBatchRolledBackFailsTheRunAndStartsNoOther() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.multiBatchPlan(3)])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: StubVerifier { command in
+                command == "swift test" ? VerifyOutcome(exitCode: 1, output: "1 failing") : VerifyOutcome(exitCode: 0, output: "")
+            },
+            stageRepairer: BatchRepairer(tree: tree), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: multiBatchConfig(batchesPerRun: nil), faultsRoot: repo, gitRoot: repo)
+
+        guard case .givenUp = result else { return XCTFail("expected a give-up, got \(String(describing: result))") }
+        XCTAssertEqual(skills.appliedIds, ["R1"])
+        XCTAssertNil(journal.written.last?.appliedBatches)
+        XCTAssertEqual(journal.written.last?.batchRollback?.batchId, "R1")
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("### R2 Batch 2  (status: todo)"), plan)
+    }
+
+    /// A later batch that fails but CANNOT be taken back out of the tree (its
+    /// edits could not all be tracked) keeps the failure: the tree holds an
+    /// unverified batch, which must never ship as a success.
+    func testALaterBatchLeftInTheTreeKeepsTheRunFailed() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.multiBatchPlan(2)])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = MultiBatchSkillExecutor(planURL: planURL, tree: tree)
+        // From R2's baseline on, git can no longer snapshot: R2's base exists,
+        // but its Apply leaves a tracking gap, so the rollback restores nothing.
+        let verifier = StubVerifier { command in
+            if self.writersRun(skills) >= 2 { tree.failSnapshots = true }
+            return command == "swift test" && skills.appliedIds.last == "R2"
+                ? VerifyOutcome(exitCode: 1, output: "1 failing") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: multiBatchConfig(batchesPerRun: nil), faultsRoot: repo, gitRoot: repo)
+
+        guard case .givenUp = result else { return XCTFail("expected a give-up, got \(String(describing: result))") }
+        let record = try XCTUnwrap(journal.written.last)
+        XCTAssertEqual(record.appliedBatches, ["R1"])
+        XCTAssertEqual(record.batchRollback?.batchId, "R2")
+        XCTAssertEqual(record.batchRollback?.treeRestored, false)
+        XCTAssertTrue(tree.restores.isEmpty)
+        XCTAssertTrue(runner.batchesSummary?.hasPrefix("Applied: R1 · Not rolled back: R2") == true,
+                      runner.batchesSummary ?? "nil")
+    }
+
+    /// Serves `graphs` in rescan order (the last one repeats), where the runner reads them.
+    private final class SequenceRescanner: GraphRescanning {
+        let graphs: [String]
+        private(set) var calls = 0
+        init(_ graphs: [String]) { self.graphs = graphs }
+        func rescan(repoRoot: URL) async -> GraphRescanOutcome {
+            let graph = graphs[min(calls, graphs.count - 1)]
+            calls += 1
+            let dir = repoRoot.appendingPathComponent("system/graph", isDirectory: true)
+            try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try? Data(graph.utf8).write(to: dir.appendingPathComponent("graph.json"))
+            return .rewritten
+        }
+    }
+
+    private static func twoFileGraphJSON(locA: Int, locB: Int) -> String {
+        func file(_ path: String, _ loc: Int) -> String {
+            #"{"path":"\#(path)","language":"swift","loc":\#(loc),"imports":[],"usedBy":[],"types":[],"functions":[]}"#
+        }
+        return #"{"version":"1.1","files":[\#(file("a.swift", locA)),\#(file("b.swift", locB))],"calls":[]}"#
+    }
+
+    /// Each batch's Graph Check is measured against the state the previous
+    /// batch's check verified, not the run's first snapshot (§3.6): R2's
+    /// counter falls by one, not by the two both batches together removed.
+    func testTheNextBatchIsMeasuredAgainstTheVerifiedGraph() async throws {
+        let planURL = repoRoot.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        try FileManager.default.createDirectory(at: planURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: repoRoot) }
+        try """
+        ### R1 Split A  (status: todo)
+        - Files: `a.swift`
+        - Expect: filesOver500Count 2 → 1
+
+        ### R2 Split B  (status: todo)
+        - Files: `b.swift`
+        - Expect: filesOver500Count 1 → 0
+        """.write(to: planURL, atomically: true, encoding: .utf8)
+        let rescanner = SequenceRescanner([Self.twoFileGraphJSON(locA: 600, locB: 600),
+                                           Self.twoFileGraphJSON(locA: 300, locB: 600),
+                                           Self.twoFileGraphJSON(locA: 300, locB: 300)])
+        let skills = MultiBatchSkillExecutor(planURL: planURL)
+        let runner = makeRunner(
+            verifier: StubVerifier { _ in VerifyOutcome(exitCode: 0, output: "") },
+            stageRepairer: StubRepairer(), regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: makeApprovals(approve: [("t1", "swift test")]),
+            graphRescanner: rescanner)
+        let result = await runner.run(config: refactorConfig(), faultsRoot: repoRoot, gitRoot: repoRoot)
+
+        XCTAssertEqual(result, .success, runner.log.map(\.text).joined(separator: "\n"))
+        XCTAssertEqual(skills.appliedIds, ["R1", "R2"])
+        XCTAssertEqual(rescanner.calls, 3, "one snapshot, one check per batch")
+        let checks = runner.iterationRecords.flatMap(\.attempts).filter { $0.stageId == "g2" && $0.passed }
+        XCTAssertEqual(checks.map(\.batchId), ["R1", "R2"])
+        XCTAssertEqual(checks.map { $0.graphDelta?["filesOver500Count"] }, [-1, -1])
+    }
 }

@@ -532,6 +532,7 @@ runRefactorConformChecks()
 runRefactorPlanRevisionChecks()
 await runRefactorRollbackChecks()
 runRefactorBatchRollbackChecks()
+runRefactorMultiBatchChecks()
 #endif
 
 if failures.isEmpty {
