@@ -105,8 +105,8 @@ struct AutoCodeView: View {
                 .buttonStyle(.borderless)
                 .help("Add Custom Task")
 
-                if FeatureCatalog.isMobileCompiled {
-                    Button { FeatureCatalog.refreshAutoTaskStateForMobile() } label: {
+                if FeatureRegistry.shared.compiledFeatures.contains(.mobileSync) {
+                    Button { autoCode.pushStateToMobile?() } label: {
                         Image(systemName: "arrow.triangle.2.circlepath")
                     }
                     .buttonStyle(.borderless)
@@ -341,7 +341,7 @@ struct AutoCodeView: View {
     /// calls the same underlying method for a manual, visible re-sync).
     private func persistCustomTasksChange() {
         customTasks = CustomAutoTask.loadAll()
-        FeatureCatalog.refreshAutoTaskStateForMobile()
+        autoCode.pushStateToMobile?()
     }
 
     @ViewBuilder

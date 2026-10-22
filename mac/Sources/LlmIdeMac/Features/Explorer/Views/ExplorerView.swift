@@ -193,7 +193,7 @@ struct ExplorerView: View {
                                 .transition(.move(edge: .trailing))
                         }
                     }
-                    FeatureCatalog.terminalPanel(projectDirectory: projectDirectory)
+                    TerminalPanelSlot(projectDirectory: projectDirectory)
                 }
             }
         // Rebuild all per-project tree state when the active project changes,

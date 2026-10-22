@@ -35,20 +35,6 @@ enum FeatureCatalog {
         return set
     }
 
-    /// True when this build was compiled with the Graph feature — i.e. a
-    /// lite build (`FEATURE_GRAPH` off) reports `false`. Callers outside
-    /// this file use this instead of naming `#if FEATURE_GRAPH` directly, so
-    /// a single seam decides "is Graph in this build" (`compiledFeatures`
-    /// already encodes it — no new `#if` needed here).
-    static var isGraphCompiled: Bool { compiledFeatures.contains(.codeGraph3D) }
-
-    /// True when this build was compiled with the Mobile Sync feature — i.e.
-    /// a build with `FEATURE_MOBILE` off reports `false`. Callers outside
-    /// this file use this instead of naming `#if FEATURE_MOBILE` directly, so
-    /// a single seam decides "is Mobile in this build" (`compiledFeatures`
-    /// already encodes it — no new `#if` needed here).
-    static var isMobileCompiled: Bool { compiledFeatures.contains(.mobileSync) }
-
     // MARK: - Graph
 
     #if FEATURE_GRAPH
@@ -197,23 +183,6 @@ enum FeatureCatalog {
         #endif
     }
 
-    /// Project memory viewer, shown as a sheet from Chat's Code Assistant
-    /// panel. Chat is never build-excluded, so this seam is what keeps
-    /// `CodeAssistant+Sheets.swift` from naming an Explorer-owned type
-    /// directly when Explorer is compiled out.
-    static func explorerProjectMemorySection(
-        api: LlmIdeAPIClient,
-        repos: [String],
-        workspaceRoot: String?,
-        sessionId: String?
-    ) -> AnyView? {
-        #if FEATURE_EXPLORER
-        return AnyView(ProjectMemoryView(api: api, repos: repos, workspaceRoot: workspaceRoot, sessionId: sessionId))
-        #else
-        return nil
-        #endif
-    }
-
     // MARK: - Gantt / Issues
 
     static func issuesPane(api: LlmIdeAPIClient) -> AnyView {
@@ -229,60 +198,6 @@ enum FeatureCatalog {
         return AnyView(GanttContainerView(api: api))
         #else
         return AnyView(EmptyView())
-        #endif
-    }
-
-    /// The "run against an existing issue" picker, embedded by
-    /// `CodeWorkflowSheet` / `QuickFixSheet` — Issues-owned, so it rides on
-    /// the same `FEATURE_GANTT` flag as `issuesPane`/`ganttPane` (see
-    /// Package.swift's `libExcludes`: Gantt lives inside `Features/Issues`,
-    /// so the one folder is excluded as a unit).
-    static func existingIssuePicker(
-        backend: RepoBackend,
-        projectId: String,
-        displayName: String,
-        isResolved: Bool,
-        onSelect: @escaping (RepoIssue) -> Void,
-        onCancel: @escaping () -> Void
-    ) -> AnyView {
-        #if FEATURE_GANTT
-        return AnyView(ExistingIssuePicker(
-            backend: backend,
-            projectId: projectId,
-            displayName: displayName,
-            isResolved: isResolved,
-            onSelect: onSelect,
-            onCancel: onCancel
-        ))
-        #else
-        return AnyView(EmptyView())
-        #endif
-    }
-
-    /// The open issues an agent turn is grounded in — Issues-owned data, read
-    /// by `MobileExploreBridge` for phone turns. Excluded builds answer with
-    /// no issues rather than failing to compile against Issues-only types.
-    static func recentIssuesContext(config: AppConfig, projectStore: ProjectStore) async
-        -> [AgentContext.RecentIssue]
-    {
-        #if FEATURE_GANTT
-        return await RecentIssuesResolver.contextIssues(config: config, projectStore: projectStore)
-        #else
-        return []
-        #endif
-    }
-
-    /// Force-refresh variant of `recentIssuesContext`, ignoring the resolver's
-    /// cache — the Mac panel's own refresh trigger (on appear, after creating
-    /// an issue).
-    @discardableResult
-    static func refreshRecentIssues(config: AppConfig, projectStore: ProjectStore) async
-        -> [AgentContext.RecentIssue]
-    {
-        #if FEATURE_GANTT
-        return await RecentIssuesResolver.fetch(config: config, projectStore: projectStore)
-        #else
-        return []
         #endif
     }
 
@@ -341,6 +256,53 @@ enum FeatureCatalog {
         ChatOutputRegistry.shared.install(ChatEngineOutputProvider())
     }
 
+    // MARK: - Cross-feature view/data seams
+
+    /// Install the Core seams through which features reach a build-excludable
+    /// feature's view or data without naming it (or naming this catalog):
+    /// Chat's code-change sheets open Issues' existing-issue picker, Chat and
+    /// Mobile Control ground agent turns in Issues' recent issues, Chat's
+    /// Code Assistant opens Explorer's project memory viewer, and Explorer
+    /// embeds the Terminal dock.
+    ///
+    /// Each install is guarded by its owning feature's flag and simply skipped
+    /// when that feature is compiled out; the registries' not-installed
+    /// fallbacks (`EmptyView` / `[]`) are exactly what the old `#else` branches
+    /// returned, so compiled-out behaviour is unchanged. Idempotent: every
+    /// install replaces.
+    static func installFeatureSeams() {
+        #if FEATURE_GANTT
+        // Issues and Gantt are one excludable folder (`Features/Issues`), so
+        // the picker and the resolver ride on the same `FEATURE_GANTT` flag as
+        // `issuesPane`/`ganttPane`.
+        let issues = IssueSeamRegistry.shared
+        issues.installPicker { request in
+            AnyView(ExistingIssuePicker(
+                backend: request.backend,
+                projectId: request.projectId,
+                displayName: request.displayName,
+                isResolved: request.isResolved,
+                onSelect: request.onSelect,
+                onCancel: request.onCancel))
+        }
+        issues.installRecentIssues(RecentIssuesResolverProvider())
+        #endif
+        #if FEATURE_EXPLORER
+        ProjectMemoryRegistry.shared.install { request in
+            AnyView(ProjectMemoryView(api: request.api, repos: request.repos,
+                                      workspaceRoot: request.workspaceRoot,
+                                      sessionId: request.sessionId))
+        }
+        #endif
+        #if FEATURE_TERMINAL
+        // The same factory AppShell's bottom dock calls, so Explorer's
+        // embedded dock shares `terminalSessions` with it.
+        TerminalPanelRegistry.shared.install { directory in
+            terminalPanel(projectDirectory: directory)
+        }
+        #endif
+    }
+
     // MARK: - Live seams
 
     /// Install Live's half of the Core live-capture seam: Library's meeting
@@ -379,8 +341,9 @@ enum FeatureCatalog {
         #endif
     }
 
-    /// Used by both AppShell call sites (the shared bottom dock) and
-    /// ExplorerView (its embedded editor-column dock).
+    /// Used by both AppShell call sites (the shared bottom dock) and, through
+    /// `TerminalPanelRegistry` (see `installFeatureSeams`), ExplorerView's
+    /// embedded editor-column dock.
     static func terminalPanel(projectDirectory: URL) -> AnyView {
         #if FEATURE_TERMINAL
         return AnyView(TerminalPanelView(projectDirectory: projectDirectory)
@@ -401,17 +364,6 @@ enum FeatureCatalog {
     private static var loopRunService: LoopRunService?
     private static var loopRunnerProvider: LoopRunnerProvider?
     #endif
-
-    /// Nil when Loop is compiled out. A caller that gets nil must degrade
-    /// visibly, not silently: a scheduled Loop task that quietly no-ops is
-    /// indistinguishable from one that ran and found nothing.
-    static func loopRunnerProviding() -> LoopRunnerProviding? {
-        #if FEATURE_AUTOTASK
-        return loopRunnerProvider
-        #else
-        return nil
-        #endif
-    }
 
     /// Build + wire the ENTIRE Auto Task / Loop stack (scheduler + settings +
     /// templates + skills + log store + on-disk run/action history) and
@@ -500,10 +452,12 @@ enum FeatureCatalog {
         loopRuns.logTaskKey = AutoTask.loopEngineering.rawValue
 
         // The scheduled Loop Engineering sweep (AutoCodeUpdateService+PipelineTasks)
-        // asks FeatureCatalog for a runner instead of constructing
-        // LoopEngineRunner and its collaborators itself.
+        // asks this provider for a runner instead of constructing
+        // LoopEngineRunner and its collaborators itself; handed over as a Core
+        // protocol so AutoTask never names Loop (or this catalog).
         let loopProvider = LoopRunnerProvider(api: api, config: config, activity: activity,
                                               laneRegistry: loopRuns)
+        service.loopRunnerProvider = loopProvider
         // The Loop page's Stop for a phone/schedule run is the lane's Stop.
         loopRuns.cancelLoopLane = { [weak service] in service?.cancelLoopLane() }
 
@@ -741,15 +695,6 @@ enum FeatureCatalog {
         #endif
     }
 
-    /// Refresh Auto Task state for the phone (scheduler list + logs).
-    /// AutoCodeView calls this instead of holding its own
-    /// `@Environment(MobileControlManager.self)`. No-op when compiled out.
-    static func refreshAutoTaskStateForMobile() {
-        #if FEATURE_MOBILE
-        mobileControlManager?.refreshAutoTaskStateForMobile()
-        #endif
-    }
-
     /// KeychainStore reaches these (through `FeatureCacheHooks`, installed by
     /// `installFeatureCacheHooks()` below) instead of naming `MobilePin`
     /// directly (precedent: `invalidateGraphEngineCache` above). No-op when compiled
@@ -811,6 +756,10 @@ enum FeatureCatalog {
         mobile.autoTaskBridge = MobileAutoTaskBridge(
             host: mobile, autoCode: service,
             settings: settings, logStore: taskLog)
+        // AutoCodeView's "push to iPhone" button and custom-task edits reach
+        // the manager only through this closure. `weak`: the manager is owned
+        // by this catalog, and the scheduler must not extend its lifetime.
+        service.pushStateToMobile = { [weak mobile] in mobile?.refreshAutoTaskStateForMobile() }
         let loopBridge = MobileLoopBridge(host: mobile, loopLane: service)
         // So the phone's Stop reaches desktop-initiated runs too, not only
         // the scheduler's. Assigned after init (rather than an init

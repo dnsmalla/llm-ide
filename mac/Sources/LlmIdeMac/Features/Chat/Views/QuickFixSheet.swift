@@ -66,7 +66,9 @@ struct QuickFixSheet: View {
             }
         }
         .sheet(isPresented: $showIssuePicker) {
-            FeatureCatalog.existingIssuePicker(
+            // Issues owns the picker; an Issues-less build gets the empty
+            // sheet it always did (the registry's fallback).
+            ExistingIssuePickerView(request: ExistingIssuePickerRequest(
                 backend: target.backend,
                 projectId: target.projectId,
                 displayName: target.displayName,
@@ -84,7 +86,7 @@ struct QuickFixSheet: View {
                     showIssuePicker = false
                     if svc.createdIssue == nil { dismiss() }
                 }
-            )
+            ))
         }
         .sheet(isPresented: $switchToGuided, onDismiss: { dismiss() }) {
             CodeWorkflowSheet(

@@ -736,7 +736,7 @@ extension AutoCodeUpdateService {
         // be a promise nothing in this build can fulfill. `enabledOrder`
         // already excludes this task when Graph isn't compiled, but a manual
         // run via `runSingle` bypasses that list, so guard here too.
-        guard FeatureCatalog.isGraphCompiled else {
+        guard FeatureRegistry.shared.compiledFeatures.contains(.codeGraph3D) else {
             taskErrors[key] = "Code Graph is not installed in this build — skipped."
             logStore.append(.generateKnowledge, "Code Graph is not installed in this build — skipping.")
             return
@@ -976,12 +976,12 @@ extension AutoCodeUpdateService {
             logStore.append(.loopEngineering,
                             "▸ \(loop.name) — \(enabledStageCount) enabled stage(s)")
 
-            guard let provider = FeatureCatalog.loopRunnerProviding() else {
+            guard let provider = loopRunnerProvider else {
                 // Should be unreachable — Loop and AutoTask are excluded
                 // together under one build flag (Package.swift), so a build
-                // that compiles this call site always registers a provider.
-                // Reaching here means the registration itself is missing or
-                // broken. Say so in the task log AND record it as a failure:
+                // that compiles this call site always has Shell inject a
+                // provider (`bootAutoTask`). Reaching here means that wiring
+                // is missing or broken. Say so in the task log AND record it as a failure:
                 // a silent skip reads as a successful empty run on the Auto
                 // Tasks card, and this is the degrade path the compiled-out
                 // case would otherwise be indistinguishable from.

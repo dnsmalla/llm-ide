@@ -14,6 +14,8 @@
 #   6    tests naming an excludable feature's type are testExcluded   (FAIL)
 #   7    Core is a leaf: Core/ClaudeLink never name Shell/feature types,
 #        bar CORE_LEAF_ALLOWLIST; stale allowlist rows also FAIL      (FAIL)
+#   8    features name no Shell type (Shell -> Features, never back),
+#        bar FEATURE_SHELL_ALLOWLIST; stale allowlist rows also FAIL  (FAIL)
 set -uo pipefail
 
 ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -528,7 +530,7 @@ awk -F'\t' '$3 != "typealias" {print $1 "\t" $2}' "$WORK/toplevel-all.txt" \
 # Strip comments/strings from a set of files once, into a mirror tree, so a
 # type named only in prose (`/// mirrors LoopStage`) never counts as a use.
 # Usage: <NUL-separated absolute paths on stdin> | strip_tree_into ROOT OUT
-# Each file lands at OUT/<path relative to ROOT>. Shared by checks 6 and 7.
+# Each file lands at OUT/<path relative to ROOT>. Shared by checks 6, 7 and 8.
 strip_tree_into() {
   xargs -0 perl -e '
   my ($root, $out) = splice(@ARGV, 0, 2);
@@ -725,6 +727,111 @@ if [ -s "$WORK/c7-stale.txt" ]; then
   status=1
 fi
 if [ ! -s "$WORK/c7-violations.txt" ] && [ ! -s "$WORK/c7-stale.txt" ]; then
+  echo "  none"
+fi
+
+# 8. Features never name Shell. Shell is the composition root: it names every
+#    feature and installs the Core seams they talk through, so an edge back
+#    from a feature into Shell (a `FeatureCatalog.x` call, a Shell view) makes
+#    that feature depend on the one layer that is allowed to depend on it.
+#    Checks 1–3 only look at feature -> feature edges and check 7 only at
+#    Core, so before this check those edges were invisible (and sealing a
+#    feature said nothing about them). Same machinery as check 7: forbidden =
+#    every top-level type declared under a Shell-layer path, minus any name
+#    ALSO declared in a Core or Feature layer (a twin the name cannot be
+#    attributed through); consumers = every `.swift` file in a `Feature:*`
+#    layer, comment- and string-stripped so prose and log strings never count.
+#    Same blind spot: a name used ONLY inside a string interpolation.
+#
+#    Allowlist: `path<TAB>symbol<TAB>reason`, path relative to Sources/LlmIdeMac,
+#    one row per deliberate edge. Empty on purpose — a feature that needs
+#    something from Shell gets a Core/Contracts seam that Shell installs. A
+#    row whose file is gone, or that no longer names the symbol, FAILS as stale.
+FEATURE_SHELL_ALLOWLIST=''
+
+echo "=== Feature files naming Shell types (features must never reference Shell) ==="
+awk -F'\t' '$3 == "Core" || $3 ~ /^Feature:/ {print $1}' "$WORK/c7-decl-layers.txt" \
+  | sort -u > "$WORK/c8-nonshell-names.txt"
+awk -F'\t' '
+  NR == FNR { other[$1] = 1; next }
+  $3 == "Shell" && !($1 in other) { print $1 }
+' "$WORK/c8-nonshell-names.txt" "$WORK/c7-decl-layers.txt" | sort -u > "$WORK/c8-forbidden.txt"
+
+# Feature-layer files, stripped once into a mirror tree.
+FEATURE_STRIPPED="$WORK/feature-stripped"
+mkdir -p "$FEATURE_STRIPPED"
+find "$SRC" -name '*.swift' | sort | awk -v src="$SRC/" '
+  NR == FNR {
+    if ($0 ~ /^[[:space:]]*(#|$)/) next
+    n = split($0, col, " "); if (n < 2) next
+    np++; pre[np] = col[1]; lay[np] = col[2]; next
+  }
+  {
+    rel = substr($0, length(src) + 1); l = "Unclassified"
+    for (i = 1; i <= np; i++) if (index(rel, pre[i]) == 1) { l = lay[i]; break }
+    if (l ~ /^Feature:/) printf "%s%c", $0, 0
+  }
+' "$MAP" - | strip_tree_into "$SRC" "$FEATURE_STRIPPED"
+feature_file_count="$(find "$FEATURE_STRIPPED" -name '*.swift' | wc -l | tr -d ' ')"
+
+# Vacuous-pass guard: Shell declares a few dozen top-level types; far fewer,
+# or no feature files at all, means a parser or feature-map.txt broke.
+c8_forbidden_count="$(wc -l < "$WORK/c8-forbidden.txt" | tr -d ' ')"
+c8_ok=1
+if [ "$c8_forbidden_count" -lt 15 ]; then
+  echo "  ERROR check 8 parser: only $c8_forbidden_count Shell top-level type names collected (expected dozens)" >&2
+  status=1; c8_ok=0
+fi
+if [ "$feature_file_count" -eq 0 ]; then
+  echo "  ERROR check 8 parser: zero Feature-layer files scanned (feature-map.txt has no Feature:* prefix matching Sources/LlmIdeMac?)" >&2
+  status=1; c8_ok=0
+fi
+
+# rel<TAB>symbol for every Shell name each feature file names.
+: > "$WORK/c8-hits.txt"
+if [ "$c8_ok" -eq 1 ]; then
+  grep -rowFf "$WORK/c8-forbidden.txt" "$FEATURE_STRIPPED" --include='*.swift' \
+    | awk -v root="$FEATURE_STRIPPED/" '{
+        i = index($0, ".swift:"); f = substr($0, 1, i + 5); sym = substr($0, i + 7)
+        print substr(f, length(root) + 1) "\t" sym
+      }' | sort -u > "$WORK/c8-hits.txt"
+fi
+
+printf '%s\n' "$FEATURE_SHELL_ALLOWLIST" | awk -F'\t' 'NF >= 2 && $1 !~ /^#/ {print $1 "\t" $2}' \
+  > "$WORK/c8-allow.txt"
+: > "$WORK/c8-stale.txt"
+while IFS="$(printf '\t')" read -r apath asym; do
+  if [ ! -f "$SRC/$apath" ]; then
+    echo "$apath  [$asym]  — file no longer exists" >> "$WORK/c8-stale.txt"
+  elif ! grep -qxF "$apath	$asym" "$WORK/c8-hits.txt"; then
+    echo "$apath  [$asym]  — file no longer names this Shell type" >> "$WORK/c8-stale.txt"
+  fi
+done < "$WORK/c8-allow.txt"
+
+if [ -s "$WORK/c8-allow.txt" ]; then
+  grep -vxFf "$WORK/c8-allow.txt" "$WORK/c8-hits.txt" > "$WORK/c8-violations.txt"
+else
+  cp "$WORK/c8-hits.txt" "$WORK/c8-violations.txt"
+fi
+if [ -s "$WORK/c8-violations.txt" ]; then
+  # One line per file, symbols comma-joined, owner = the file's feature.
+  awk -F'\t' '{ syms[$1] = ($1 in syms) ? syms[$1] "," $2 : $2 }
+    END { for (f in syms) print f "|" syms[f] }' "$WORK/c8-violations.txt" | sort \
+    | while IFS='|' read -r rel syms; do
+        feat="$(printf '%s' "$rel" | awk -F/ '{print $2}')"
+        echo "  ERROR  [$feat] $rel  ->  Shell  [$syms]"
+      done
+  echo "FAIL: a Feature file names a type declared under Shell/ — put a seam in Core/Contracts/ and have Shell install it" >&2
+  status=1
+fi
+if [ -s "$WORK/c8-stale.txt" ]; then
+  while read -r line; do
+    echo "  ERROR  stale allowlist row: $line"
+  done < "$WORK/c8-stale.txt"
+  echo "FAIL: a FEATURE_SHELL_ALLOWLIST row no longer matches a real reference — delete it" >&2
+  status=1
+fi
+if [ ! -s "$WORK/c8-violations.txt" ] && [ ! -s "$WORK/c8-stale.txt" ]; then
   echo "  none"
 fi
 

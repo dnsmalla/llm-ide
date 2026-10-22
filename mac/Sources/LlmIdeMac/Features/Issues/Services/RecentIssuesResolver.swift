@@ -124,3 +124,17 @@ enum RecentIssuesResolver {
         }
     }
 }
+
+/// Issues' side of the Core `RecentIssuesProviding` seam: Chat and Mobile
+/// Control read recent issues through `IssueSeamRegistry`, never by naming
+/// the resolver, so the resolver (and its one shared cache) stays Issues-owned.
+/// Shell installs this at boot when Issues is compiled in.
+struct RecentIssuesResolverProvider: RecentIssuesProviding {
+    func contextIssues(config: AppConfig, projectStore: ProjectStore) async -> [AgentContext.RecentIssue] {
+        await RecentIssuesResolver.contextIssues(config: config, projectStore: projectStore)
+    }
+
+    func fetch(config: AppConfig, projectStore: ProjectStore) async -> [AgentContext.RecentIssue] {
+        await RecentIssuesResolver.fetch(config: config, projectStore: projectStore)
+    }
+}

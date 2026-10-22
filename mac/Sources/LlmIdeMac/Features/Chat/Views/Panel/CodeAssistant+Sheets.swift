@@ -23,14 +23,15 @@ extension CodeAssistantPanel {
     private static let noIssueTrackerHint = "Add or activate a project in Settings → GitLab or GitHub."
 
     var showProjectMemorySheet: some View {
-        let section = FeatureCatalog.explorerProjectMemorySection(
+        // Explorer owns the viewer; an Explorer-less build shows the same
+        // empty sheet it always did (the registry's fallback).
+        ProjectMemorySectionView(request: ProjectMemoryRequest(
             api: api,
             repos: activeMemoryRepos,
             workspaceRoot: activeMemoryWorkspaceRoot,
             sessionId: engine.currentSessionIDString.isEmpty ? nil : engine.currentSessionIDString
-        )
-        return (section ?? AnyView(EmptyView()))
-            .environmentObject(theme)
+        ))
+        .environmentObject(theme)
     }
 
     var showingIssueSheetContent: some View {

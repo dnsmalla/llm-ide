@@ -123,7 +123,7 @@ enum MobileExploreBridge {
         // from this field — so a nil here meant a phone turn could not answer
         // "list the issues" at all, while the same prompt on the Mac could.
         // Cache-first: a phone turn moments after a Mac refresh costs nothing.
-        let recentIssues = await FeatureCatalog.recentIssuesContext(
+        let recentIssues = await IssueSeamRegistry.shared.recentIssuesContext(
             config: config, projectStore: projectStore)
 
         return AgentContext(

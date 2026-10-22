@@ -96,6 +96,19 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// nil makes the sweep fail visibly ("Loop is not included in this
     /// build") rather than quietly no-op.
     let loopSweepPlanner: (any LoopSweepPlanning)?
+    /// Builds the runner for each loop in the Loop Engineering sweep, behind
+    /// a Core seam so this feature never names Loop's collaborator types.
+    /// nil (tests, a missed wiring) makes the sweep fail visibly ("Loop is
+    /// not included in this build") rather than quietly no-op. Set by Shell
+    /// right after construction, not passed to `init`: the provider needs the
+    /// Loop run service, and building that BEFORE this scheduler would reorder
+    /// their `SessionScopedRegistry` enrolment — i.e. the sign-out reset order.
+    var loopRunnerProvider: (any LoopRunnerProviding)?
+    /// Pushes the current Auto Task state (scheduler list + logs) to a paired
+    /// iPhone. Set by Shell only when Mobile Control is compiled in, so this
+    /// feature never names the mobile manager; nil is a no-op, exactly what a
+    /// build without Mobile Control did.
+    var pushStateToMobile: (@MainActor () -> Void)?
     let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
 
     /// The project's saved Auto Task prompt templates. `weak` for the same
@@ -969,14 +982,14 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
         // there's nothing to report in a build with Graph compiled out, so
         // it's dropped from the pipeline order (the row reads skipped rather
         // than a false green). `reportKnowledge` itself still guards on
-        // `FeatureCatalog.isGraphCompiled` for the manual `runSingle` path,
+        // the same compiled-features check for the manual `runSingle` path,
         // which bypasses this list.
         let enabledOrder: [AutoTask] = [
             .sourceUpdate, .sourcesToIssue, .implementIssues, .reviewMerge,
             .reviewCode, .reviewDoc, .reviewConflicts,
             .updateIssues, .updatePlanStatus, .generateDoc,
             .regression, .generateKnowledge,
-        ].filter { $0 != .generateKnowledge || FeatureCatalog.isGraphCompiled }
+        ].filter { $0 != .generateKnowledge || FeatureRegistry.shared.compiledFeatures.contains(.codeGraph3D) }
 
         let needsRepo = enabledOrder.contains { isTaskEnabled($0) && $0.requiresLinkedRepo }
         let resolved: ResolvedRepo? = needsRepo ? resolveBackendAndProject() : nil

@@ -367,7 +367,7 @@ struct QuickChatContext {
     @MainActor
     func withRecentIssues(config: AppConfig, projectStore: ProjectStore) async -> AgentContext {
         var context = agentContext
-        let issues = await FeatureCatalog.recentIssuesContext(config: config, projectStore: projectStore)
+        let issues = await IssueSeamRegistry.shared.recentIssuesContext(config: config, projectStore: projectStore)
         if !issues.isEmpty { context.recentIssues = issues }
         return context
     }

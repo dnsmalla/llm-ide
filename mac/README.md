@@ -253,7 +253,10 @@ Sources/LlmIdeMac/
 │   │                         #   of Library's meeting detail, installed by Shell),
 │   │                         #   EditAcceptanceMode, SourceIngesting (Library ingestion for
 │   │                         #   AutoTask), LoopSweepPlanning (Loop's loop selection for
-│   │                         #   AutoTask's sweep), …)
+│   │                         #   AutoTask's sweep), IssueSeams (Issues' existing-issue picker
+│   │                         #   + recent issues), ProjectMemoryProviding (Explorer's memory
+│   │                         #   viewer), TerminalPanelProviding (the Terminal dock) — the
+│   │                         #   last three installed by Shell's installFeatureSeams, …)
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/, LibraryPicker, section chrome
 │   │                         #   features render (SectionChromeBar, PanelSectionTabs, WindowHeightKey)
 │   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging

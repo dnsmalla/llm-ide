@@ -269,6 +269,10 @@ public struct LlmIdeMacApp: App {
         // Live capture take-over for Library's meeting detail, which may not
         // name Live. Before any window renders, like the chat seams above.
         FeatureCatalog.installLiveSeams()
+        // Issues' picker + recent issues, Explorer's project memory viewer and
+        // the Terminal dock for features that may not name them (or this
+        // catalog). Before any window renders, like the seams above.
+        FeatureCatalog.installFeatureSeams()
     }
 
     public var body: some Scene {

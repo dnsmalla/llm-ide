@@ -77,7 +77,9 @@ struct CodeWorkflowSheet: View {
             }
         }
         .sheet(isPresented: $showExistingPicker) {
-            FeatureCatalog.existingIssuePicker(
+            // Issues owns the picker; an Issues-less build gets the empty
+            // sheet it always did (the registry's fallback).
+            ExistingIssuePickerView(request: ExistingIssuePickerRequest(
                 backend: target.backend,
                 projectId: target.projectId,
                 displayName: target.displayName,
@@ -92,7 +94,7 @@ struct CodeWorkflowSheet: View {
                     }
                 },
                 onCancel: { showExistingPicker = false }
-            )
+            ))
         }
     }
 
