@@ -244,9 +244,11 @@ Sources/LlmIdeMac/
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/
 │   ├── Editor/ · Generation/ · Incidents/ · Memory/ · Verification/
 │   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
-│   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex, …
+│   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex,
+│   │                         #   FolderIndexer, IngestTemplateRenderer, launch folder migrations, …
 │   ├── Platform/             # AppDelegate, Config, Theme, KeychainStore, SessionStore, utilities
-│   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding
+│   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding,
+│   │                         #   ProjectExporter (KB → project folder export)
 │   └── Repo/                 # GitLab/GitHub clients behind RepoBackend (Services/Repo/)
 └── ClaudeLink/               # Claude SDK/CLI glue (counted as Core)
 ```

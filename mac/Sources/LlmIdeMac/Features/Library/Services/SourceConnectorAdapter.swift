@@ -21,19 +21,8 @@ struct ClassifyRequest: Encodable {
     let body: [String: String]
 }
 
-/// `/kb/.../classify` response (twin of `LlmIdeAPIClient.EmailClassification`).
-struct SourceConnectorClassification: Decodable, Equatable {
-    let category: String
-    let noteWorthy: Bool
-    let summary: String
-    let todos: [Todo]
-    struct Todo: Decodable, Equatable {
-        let title: String
-        let detail: String
-        let due: String?
-        let priority: String
-    }
-}
+// `SourceConnectorClassification` (the classify response) lives in
+// Core/Networking/API/ because `LlmIdeAPIClient.postClassification` decodes it.
 
 /// Owns ONLY the wire-shape mechanics for one source. Everything else
 /// (raw storage, dedup, the generation loop, note writing, high-water

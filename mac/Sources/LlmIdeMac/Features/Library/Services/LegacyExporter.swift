@@ -1,26 +1,10 @@
 import Foundation
 
 final class LegacyExporter {
-    struct LegacyMeeting: Decodable {
-        let id: String
-        let title: String?
-        let started_at: Int64
-        let ended_at: Int64?
-        let transcript: String?
-        let notes: String?
-        let language: String?
-        let platform: String?
-    }
-    struct LegacyEntity: Decodable {
-        let kind: String         // action | decision | blocker
-        let owner: String?
-        let text: String
-        let due: String?
-    }
-    struct Record: Decodable {
-        let meeting: LegacyMeeting
-        let entities: [LegacyEntity]
-    }
+    /// The `/kb/export-all` line shape. Declared in Core because
+    /// `LlmIdeAPIClient.exportAll` decodes it and Core must not name a
+    /// Library type; aliased here so exporter call sites read unchanged.
+    typealias Record = LegacyExportRecord
     struct Report {
         var exported = 0
         var skipped = 0

@@ -14,13 +14,21 @@ import os.log
 enum SourceFolderMigration {
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "SourceFolderMigration")
 
+    /// The two fields of a connector manifest this migration needs. A plain
+    /// value instead of `SourceConnectorManifest` because the manifest is
+    /// Library-owned connector metadata and Core must not name it; Library maps
+    /// manifests into this (`ConnectorFolder.bundled()`), and Shell passes that
+    /// through `AppEnvironment`.
+    struct ConnectorFolder: Equatable, Sendable {
+        let inboxFolder: String
+        let noteType: String
+    }
+
     /// Merge-move every legacy raw folder under `sourceRoot` into its canonical
-    /// `source/<type>/` location. `connectors` is injected so tests can drive the
-    /// connector mapping without bundled resources; production passes
-    /// `SourceConnectorManifest.loadBundled()`.
+    /// `source/<type>/` location. `connectorFolders` is injected — no default —
+    /// so a caller cannot silently skip the connector moves by forgetting it.
     @MainActor
-    static func run(in sourceRoot: URL,
-                    connectors: [SourceConnectorManifest] = SourceConnectorManifest.loadBundled()) {
+    static func run(in sourceRoot: URL, connectorFolders: [ConnectorFolder]) {
         let fm = FileManager.default
 
         // 1. Email
@@ -29,7 +37,7 @@ enum SourceFolderMigration {
                   to:   sourceRoot.appendingPathComponent(NoteType.email.directoryName, isDirectory: true))
 
         // 2. Each connector: <inboxFolder>/ → <noteType.directoryName>/
-        for m in connectors {
+        for m in connectorFolders {
             mergeMove(fm,
                       from: sourceRoot.appendingPathComponent(m.inboxFolder, isDirectory: true),
                       to:   sourceRoot.appendingPathComponent(NoteType(m.noteType).directoryName, isDirectory: true))

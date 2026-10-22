@@ -18,7 +18,12 @@ final class AppEnvironment {
     ///   canonical, scaffolded location) instead of inside `meetings/system/`.
     ///   Pass `nil` when no project is active — the notes folder itself is
     ///   used as the root (legacy behaviour for standalone/no-project mode).
-    init(indexRootURL: URL? = nil) throws {
+    /// - Parameter connectorFolders: Legacy connector inbox → note-type folder
+    ///   mapping for `SourceFolderMigration`. Injected by Shell because the
+    ///   mapping comes from Library's bundled connector manifests, which Core
+    ///   must not name.
+    init(indexRootURL: URL? = nil,
+         connectorFolders: [SourceFolderMigration.ConnectorFolder]) throws {
         let config = NotesFolderConfig()
         let folder = config.currentFolder
         // One-time rename of any legacy `notes/` → `llm-doc/` under the notes
@@ -29,7 +34,7 @@ final class AppEnvironment {
             NotesToLlmDocMigration.run(in: project)
             SourceNestedLlmDocMigration.run(in: project)
         }
-        SourceFolderMigration.run(in: folder)
+        SourceFolderMigration.run(in: folder, connectorFolders: connectorFolders)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         // Place the SQLite index at <indexRoot>/system/index.sqlite.
         // When a project is open indexRootURL is the project root, so the

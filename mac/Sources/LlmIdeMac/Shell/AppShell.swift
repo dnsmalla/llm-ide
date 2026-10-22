@@ -333,7 +333,9 @@ struct AppShell: View {
     private func initWelcomeEnv() {
         guard welcomeEnv == nil else { return }
         do {
-            welcomeEnv = try AppEnvironment(indexRootURL: nil)
+            welcomeEnv = try AppEnvironment(
+                indexRootURL: nil,
+                connectorFolders: SourceFolderMigration.ConnectorFolder.bundled())
             welcomeEnvError = nil
         } catch {
             welcomeEnvError = error.localizedDescription
@@ -823,7 +825,9 @@ struct AppShell: View {
             // unscaffolded and harder to gitignore.
             let indexRoot = projectStore.activeProject
                 .map { URL(fileURLWithPath: $0.localPath) }
-            let env = try AppEnvironment(indexRootURL: indexRoot)
+            let env = try AppEnvironment(
+                indexRootURL: indexRoot,
+                connectorFolders: SourceFolderMigration.ConnectorFolder.bundled())
             // Never leave a replaced env's kqueue watcher running.
             appEnv?.indexer.stopWatching()
             self.appEnv = env

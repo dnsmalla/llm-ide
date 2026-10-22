@@ -122,16 +122,21 @@ llm-ide/
 │   │   │   ├── Incidents/   #   Incident capture + Self-Heal proposals (Loop's backing code,
 │   │   │   │                #   like Memory/ and Verification/)
 │   │   │   ├── Memory/      #   Fault reports, Q&A store — works with CodeGraph compiled out
-│   │   │   ├── Networking/  #   LlmIdeAPIClient + API/ extensions, BackendManager, AuthRedirectGuard
+│   │   │   ├── Networking/  #   LlmIdeAPIClient + API/ extensions (and the wire models they decode:
+│   │   │   │                #   SourceConnectorClassification, LegacyExportRecord), BackendManager,
+│   │   │   │                #   AuthRedirectGuard
 │   │   │   ├── Notes/       #   On-disk notes store every feature reads (Library's backing code):
 │   │   │   │                #   LibraryItem(Store), NoteService, NotesFolderConfig, MeetingIndex,
-│   │   │   │                #   Markdown/MeetingFrontmatter, FrontmatterCoder, NoteAction
+│   │   │   │                #   FolderIndexer, Markdown/MeetingFrontmatter, FrontmatterCoder,
+│   │   │   │                #   NoteAction, MeetingSummary, IngestTemplateRenderer, launch-time
+│   │   │   │                #   folder migrations (NotesToLlmDoc, SourceFolder, SourceNestedLlmDoc)
 │   │   │   ├── Platform/    #   App lifecycle + shared utilities: AppDelegate, BashService, Config,
 │   │   │   │                #   AppIdentity, AppJSON, DateFormatters, PathUtils, SecretRedactor,
 │   │   │   │                #   FilesystemSlug, AgentTypes, ActivityStore, SessionStore,
 │   │   │   │                #   NotificationNames, LaunchPathResolver, ProcessedActionsRegistry
 │   │   │   ├── Project/     #   Project/Plan/CodeTree models, WorkspaceRoot, FileSystemTree,
-│   │   │   │                #   ExplorerPaths, ProjectLayout, ProjectScaffolder, ProjectSkillsInstaller
+│   │   │   │                #   ExplorerPaths, ProjectLayout, ProjectScaffolder, ProjectSkillsInstaller,
+│   │   │   │                #   ProjectStore, ProjectExporter + ProjectExportBundle (KB → folder export)
 │   │   │   ├── Repo/        #   Models/ + Services/ — git clients shared by SourceControl,
 │   │   │   │                #   Issues, Gantt, AutoTask behind the RepoBackend protocol
 │   │   │   │                #   (GitHub/GitLab adapters + RepoBackendFactory in Services/Repo/),

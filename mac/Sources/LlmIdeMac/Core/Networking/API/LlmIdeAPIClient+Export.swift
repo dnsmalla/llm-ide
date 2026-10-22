@@ -231,9 +231,9 @@ extension LlmIdeAPIClient {
     }
 
     /// NDJSON stream of /kb/export-all.  Each non-terminal line is a
-    /// LegacyExporter.Record; the terminal line is `{"done": true, ...}`
+    /// LegacyExportRecord; the terminal line is `{"done": true, ...}`
     /// which we drop on the floor.
-    func exportAll() -> AsyncThrowingStream<LegacyExporter.Record, Error> {
+    func exportAll() -> AsyncThrowingStream<LegacyExportRecord, Error> {
         AsyncThrowingStream { continuation in
             Task {
                 do {
@@ -261,7 +261,7 @@ extension LlmIdeAPIClient {
                     }
                     for try await line in bytes.lines {
                         guard let data = line.data(using: .utf8) else { continue }
-                        if let rec = try? AppJSON.decoder.decode(LegacyExporter.Record.self, from: data) {
+                        if let rec = try? AppJSON.decoder.decode(LegacyExportRecord.self, from: data) {
                             continuation.yield(rec)
                         }
                     }
