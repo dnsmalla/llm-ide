@@ -16,8 +16,8 @@ How LLM-IDE gets its graphs, and how to supply a different engine.
 |---|---|---|
 | 正規モデル + JSON 契約 + 成果物レンダリング | `mac/LocalPackages/graph-kit/Sources/GraphCore/Model/` | 常在 |
 | レイアウトエンジン | `mac/LocalPackages/graph-kit/Sources/GraphCore/Layout/` | 常在 |
-| 描画（Canvas / 3D / パレット） | `mac/Sources/LlmIdeMac/Graph/Views/` | 常在 |
-| エンジン境界 | `mac/Sources/LlmIdeMac/Graph/Engine/` | 常在 |
+| 描画（Canvas / 3D / パレット） | `mac/Sources/LlmIdeMac/Features/CodeGraph/Views/` | 常在 |
+| エンジン境界 | `mac/Sources/LlmIdeMac/Features/CodeGraph/Engine/` | 常在 |
 | merge / InfiniteBrain 生成 | `mac/LocalPackages/graph-kit/Sources/GraphKit/` | **着脱可** |
 | **生成器（スキャナ・抽出器）** | `mac/LocalPackages/graph-kit/` | **着脱可** |
 
@@ -26,7 +26,7 @@ Graph ビューが真っ白になり「不要なら外す」が成立しませ�
 
 ## 契約
 
-アプリが期待するのは、`mac/Sources/LlmIdeMac/Graph/Engine/GraphEngine.swift` の
+アプリが期待するのは、`mac/Sources/LlmIdeMac/Features/CodeGraph/Engine/GraphEngine.swift` の
 `GraphEngine` プロトコルだけです。
 
 ```swift
@@ -106,8 +106,8 @@ func docSetFingerprint(roots: [URL]) -> String
 ## インストール
 
 Library → Plugins → Plugin Marketplace に git URL を入力します。clone は Mac アプリ側で
-実行されます（[`PluginGitInstaller.swift`](../../mac/Sources/LlmIdeMac/Services/PluginGitInstaller.swift) /
-[`PluginMarketplace.swift`](../../mac/Sources/LlmIdeMac/Services/PluginMarketplace.swift)）。
+実行されます（[`PluginGitInstaller.swift`](../../mac/Sources/LlmIdeMac/Features/Library/Services/PluginGitInstaller.swift) /
+[`PluginMarketplace.swift`](../../mac/Sources/LlmIdeMac/Features/Library/Services/PluginMarketplace.swift)）。
 プラグインは `~/Library/Application Support/llm-ide/plugins/<name>/` に展開されます。
 
 **`llm-sources/` はエンジンのホストに使えません。** あちらは設計上

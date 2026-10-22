@@ -110,28 +110,36 @@ llm-ide/
 │   │   ├── Core/        # Leaf infrastructure — never build-excluded, importable by ANY layer.
 │   │   │   │            #   Subfolders are named by CAPABILITY, not by feature:
 │   │   │   ├── Contracts/   #   Cross-feature protocols: LoopRunning, TaskLogWriting,
-│   │   │   │                #   MobileFeatureBridge
-│   │   │   ├── DesignSystem/#   Shared SwiftUI chrome: FileTreePanel, EditorTabBar,
-│   │   │   │                #   FileDetailView, SettingsSectionCard, Components/
+│   │   │   │                #   MobileFeatureBridge, ProjectNotesProviding
+│   │   │   ├── DesignSystem/#   Shared SwiftUI chrome: FileTreePanel, EditorTabBar, FileDetailView,
+│   │   │   │                #   ColorPalette, Components/ (SettingsSectionCard, ResizableDivider,
+│   │   │   │                #   PersistedPanelWidth, …)
 │   │   │   ├── Editor/      #   CompletionController/Menu, HunkStagingList
 │   │   │   ├── Generation/  #   GenerationRegistry + GenerationViewModel (concrete type,
 │   │   │   │                #   referenced unconditionally by Shell — see invariants.md)
+│   │   │   ├── Incidents/   #   Incident capture + Self-Heal proposals (Loop's backing code,
+│   │   │   │                #   like Memory/ and Verification/)
 │   │   │   ├── Memory/      #   Fault reports, Q&A store — works with CodeGraph compiled out
-│   │   │   ├── Networking/  #   API/ — LlmIdeAPIClient and extensions
-│   │   │   ├── Platform/    #   BashService, Config, AppIdentity, RegressionRunner,
-│   │   │   │                #   RepoGraphLocator, Memory/ (verification/fault-repair)
-│   │   │   ├── Project/     #   WorkspaceRoot, FileSystemTree, ExplorerPaths, ProjectLayout
+│   │   │   ├── Networking/  #   LlmIdeAPIClient + API/ extensions, BackendManager, AuthRedirectGuard
+│   │   │   ├── Platform/    #   App lifecycle + shared utilities: AppDelegate, BashService, Config,
+│   │   │   │                #   AppIdentity, AppJSON, DateFormatters, PathUtils, SecretRedactor,
+│   │   │   │                #   FilesystemSlug, AgentTypes, ActivityStore, SessionStore,
+│   │   │   │                #   NotificationNames, LaunchPathResolver, ProcessedActionsRegistry
+│   │   │   ├── Project/     #   Project/Plan/CodeTree models, WorkspaceRoot, FileSystemTree,
+│   │   │   │                #   ExplorerPaths, ProjectLayout, ProjectScaffolder, ProjectSkillsInstaller
 │   │   │   ├── Repo/        #   Models/ + Services/ — git clients shared by SourceControl,
 │   │   │   │                #   Issues, Gantt, AutoTask behind the RepoBackend protocol
-│   │   │   │                #   (GitHub/GitLab adapters + RepoBackendFactory in Services/Repo/)
-│   │   │   └── Verification/#   Verify-approval store, used by Loop
+│   │   │   │                #   (GitHub/GitLab adapters + RepoBackendFactory in Services/Repo/),
+│   │   │   │                #   RepoFileWatcher, RepoGraphLocator
+│   │   │   └── Verification/#   Verify-approval store, RegressionRunner, fault verify/repair (Loop's)
 │   │   ├── Features/    # One folder per ShellState.Section menu item + 4 non-menu features
 │   │   │   │            #   (Chat, MobileControl, Generation, Terminal). Normally
 │   │   │   │            #   {Models,Services,Views}; MUST NOT reference another feature.
 │   │   │   ├── Library/ · Live/ · Explorer/ · Search/ · ReviewConflicts/ · SourceControl/
 │   │   │   ├── Issues/ · Gantt/ · Visual/ · DocGen/ · AutoTask/ · CodeGraph/ · Loop/ · Settings/
-│   │   │   ├── Chat/    #   splits further: Models/ Engine/ Session/ Transport/ Services/
-│   │   │   │            #   Views/ (Panel/ = CodeAssistant, Quick/ = menu bar + sheet)
+│   │   │   ├── Chat/    #   splits further: Models/ (incl. DiffStats, ProposedEdit, ProposedPlan)
+│   │   │   │            #   Engine/ Session/ Transport/ Services/ Views/ (Panel/ = CodeAssistant
+│   │   │   │            #   + its action sheets, Quick/ = menu bar + sheet, Shared/)
 │   │   │   ├── MobileControl/  # WebSocket server, Bonjour, PIN cache, pairing UI
 │   │   │   ├── Generation/     # Doc Gen + Visual's shared generation VIEWS (not the
 │   │   │   │                   #   registry/view-model, which stay in Core/Generation)
@@ -140,15 +148,13 @@ llm-ide/
 │   │   ├── Shell/       # Composition root — the ONLY layer permitted to name every feature:
 │   │   │   │            #   app entry (LlmIdeMacApp.swift), AppShell, ContentView,
 │   │   │   │            #   FeatureCatalog, FeatureRegistry, AppFeature, ShellState,
-│   │   │   │            #   DeepLinkRouter
+│   │   │   │            #   DeepLinkRouter, LoginView, ReconnectView, CrashReportStore,
+│   │   │   │            #   PassiveModule, ProjectMigrator, Recovery/, Welcome/
 │   │   │   └── Chrome/  #   StatusBar, ActivityBell, TerminalPanelState (exempt from the
 │   │   │                #   feature/boundary rule, NOT from build-exclusion — see invariants.md)
-│   │   ├── ClaudeLink/  # Top-level (not under Core/), but declared Core in the feature map —
-│   │   │                #   see docs/explanation/claude-linker.md
-│   │   └── Agent/ · Services/ · Models/ · Utilities/ · ViewModels/ · Views/
-│   │       │            #   UNCLASSIFIED — 44 files not yet placed into Core or Features,
-│   │       │            #   exempt from the boundary rule until a follow-up task sorts them
-│   │       └──          #   (see mac/Scripts/feature-map.txt)
+│   │   └── ClaudeLink/  # Top-level (not under Core/), but declared Core in the feature map —
+│   │                    #   Claude SDK/CLI glue incl. ClaudeSubscriptionUsageClient;
+│   │                    #   see docs/explanation/claude-linker.md
 │   └── Tests/           # XCTest + swift-testing suites
 ├── docs/                # mkdocs site (Diátaxis framework)
 └── kb/                  # Runtime data only (SQLite db, dev secrets)
@@ -190,7 +196,7 @@ L4 routes       → any Node layer, never src/    (server.mjs, routes/*,
 - **`core/`** — Framework-free primitives only (Node built-ins + 3rd-party libs)
 - **`server/`** — HTTP routing, request pipeline (CORS → JWT → rate-limit → route)
 - **`kb/`** — SQLite access, every state-mutating helper takes `userId` first; `sources.mjs` owns the non-meeting source hub
-- **`agents/`** — Markdown skill files with frontmatter (`name`, `description`, `tools`, `applies_to`)
+- **`agents/`** — Server pipeline modules (`.mjs`, not skills): planner, risk, codegen/codegen-apply, dispatcher, outcome-watcher, meeting-agent, summarize, …
 - **`graphkit/`** — Code-graph primitives (graph model, layouts, memory writer); consumed by `agents/planner.mjs` + `agents/code-sync.mjs`, rendered by the Mac app
 - **`plugins/`** — Discovers/loads/install extension plugins; `claude-adapter.mjs` bridges the plugin tool surface to the agent runtime
 
@@ -200,17 +206,21 @@ Rule: **`Shell → Features → Core`**. A feature may import `Core`. A feature 
 
 Enforced **textually** by `mac/Scripts/feature-boundaries.sh` (run by `make regression`), because Swift has one module here — nothing at the compiler level stops one feature folder from importing another.
 
-**The gate currently REPORTS but does not yet ENFORCE the feature/feature rule.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`, and **no feature carries it yet**. 46 known cross-feature references currently emit `warn` and the gate still exits 0 because of them — do not assume a cross-feature reference fails the build today; it does not.
+Always compiled (never build-excludable): `Shell/`, `Core/`, `ClaudeLink/` and the features **Chat, Library, Live, Settings, ReviewConflicts** — Chat is the product's one non-excludable feature (`agent_chat`), and the other four have no `LLMIDE_FEATURES` key of their own, so they ship in every build, `make build-mac-min` included. Every other `Features/` folder is excluded by one of the seven `LLMIDE_FEATURES` keys in `mac/Package.swift`, which also applies the `file_explorer` dependency closure itself (dropping `file_explorer` drops `code_graph_3d`, `gantt_issues` and `doc_gen` with it, mirroring `AppFeature.requiredDependencies`).
 
-The gate's four checks that **do** fail the build (exit 1) today:
-1. `Shell`/`Core` referencing symbols owned by a build-excludable `Features/` folder.
-2. An `#elseif` anywhere under `Shell`/`Core` (flag-guard code must fail closed, not branch on an untracked condition).
-3. Every exclude path in `mac/Package.swift` must exist on disk — SwiftPM itself only *warns* on a bad exclude path and still exits 0, so this is the only thing that catches a moved file silently rejoining a build it should be excluded from.
-4. Every `mac/Sources/LlmIdeMac/…` path named by a literal in `scripts/`, `mac/Scripts/`, or `Makefile` must exist — a move never breaks Swift (one module), but it silently breaks anything outside Swift that names a path.
+**The gate currently REPORTS but does not yet ENFORCE the feature/feature rule.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`, and **no feature carries it yet**. 47 known cross-feature references currently emit `warn` and the gate still exits 0 because of them — do not assume a cross-feature reference fails the build today; it does not.
 
-Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Memory/` and `Core/Verification/` are Loop's — and references into those from other features are invisible to the check by design (it only flags edges into `Unclassified`-owned symbols and other sealed/unsealed feature folders). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`.
+The gate's six checks that **do** fail the build (exit 1) today:
+1. Any **always-compiled layer** (`Shell`, `Core`, `ClaudeLink`, Chat, Library, Live, Settings, ReviewConflicts — derived from `feature-map.txt` minus the excludable folders, not hard-coded) referencing a symbol owned by a build-excludable `Features/` folder without the matching `#if FEATURE_*` guard. Before, only `Shell`/`Core` were scanned, so an unguarded edge from an unsealed always-compiled feature passed the gate and surfaced only as a compile error in a reduced build.
+2. An `#elseif` anywhere in an always-compiled layer (flag-guard code must fail closed, not branch on an untracked condition).
+3. Every `libExcludes` path in `mac/Package.swift` must exist on disk — SwiftPM itself only *warns* on a bad exclude path and still exits 0, so this is the only thing that catches a moved file silently rejoining a build it should be excluded from.
+4. Every `testExcludes` entry in `mac/Package.swift` must exist under `mac/Tests/LlmIdeMacTests/`, for the same reason.
+5. Every `mac/Sources/LlmIdeMac/….swift` path named by a literal in `scripts/`, `mac/Scripts/`, or `Makefile` must exist — a move never breaks Swift (one module), but it silently breaks anything outside Swift that names a path.
+6. Every test file that references a build-excludable feature's top-level type must be in that feature's `testExcludes` in `mac/Package.swift` — the test target is only ever compiled with all features, so a missing entry otherwise stays invisible until someone runs `swift build --build-tests` under a reduced `LLMIDE_FEATURES`.
 
-Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
+Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Memory/` and `Core/Verification/` are Loop's — and references into those from other features are invisible to the check by design (it only flags edges from one `Features/` folder into another; every symbol under `Core/` is an allowed target). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`.
+
+Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`, `ProjectNotesProviding`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
 
 ## Critical Invariants
 

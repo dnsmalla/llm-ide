@@ -548,7 +548,7 @@ function isValidRef(ref) {
 }
 
 // Only public https git URLs are allowed. Mirrors
-// mac/Sources/LlmIdeMac/Services/PluginGitInstaller.swift normalize().
+// mac/Sources/LlmIdeMac/Features/Library/Services/PluginGitInstaller.swift normalize().
 export function normalizeGitUrl(raw) {
   if (typeof raw !== 'string' || !raw.trim()) return { ok: false, error: 'url is required' };
   const u = raw.trim();

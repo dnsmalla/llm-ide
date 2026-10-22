@@ -152,5 +152,5 @@ re-login". This is the expected hard-cutover behavior.
   rotation during a low-traffic window.
 - **Mac app's auto-restart loop may show several `--- Server started
   ---` lines in quick succession** as it adopts the new server. Not a
-  bug; that's the [BackendManager auto-restart](https://github.com/dnsmalla/llm-ide/blob/main/mac/Sources/LlmIdeMac/Services/BackendManager.swift)
+  bug; that's the [BackendManager auto-restart](https://github.com/dnsmalla/llm-ide/blob/main/mac/Sources/LlmIdeMac/Core/Networking/BackendManager.swift)
   doing its job.

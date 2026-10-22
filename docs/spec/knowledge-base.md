@@ -48,7 +48,7 @@ Notable tables added in recent migrations:
   `POST /kb/activity`, and `POST /kb/activity/seen`, all handled in
   `extension/routes/router.mjs`. Allowed event kinds are the `ACTIVITY_KINDS` set in
   `extension/kb/activity.mjs` (mirrored by the Swift `ActivityKind` enum in
-  `mac/Sources/LlmIdeMac/Services/ActivityStore.swift`); `model_fallback` is
+  `mac/Sources/LlmIdeMac/Core/Platform/ActivityStore.swift`); `model_fallback` is
   emitted when an auto-switch fires (see below).
 
 - **`usage_ledger`** / **`model_limits`** / **`quota_state`** (migration

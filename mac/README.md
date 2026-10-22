@@ -218,96 +218,65 @@ All editable from the **Settings** tab.
 
 ## Project Layout
 
-```
-Package.swift
+The app target is organised **Shell → Features → Core**: a feature may use `Core`, never another feature and never `Shell`. That layering is what lets a build drop whole feature folders (see [Feature builds](#feature-builds)). The authoritative folder → layer map is [`Scripts/feature-map.txt`](Scripts/feature-map.txt), checked by `Scripts/feature-boundaries.sh`.
+
+```text
+Package.swift                 # targets + LLMIDE_FEATURES build-time exclusion
 build_app.sh
 Sources/LlmIdeMac/
-├── LlmIdeMacApp.swift              # @main · environment graph · MenuBarExtra
-├── Models/
-│   ├── Config.swift                   # UserDefaults-backed prefs + GitLab saved projects
-│   ├── Theme.swift                    # dark / light / midnight palettes
-│   ├── GitLabModels.swift             # GitLabProject · GitLabIssue · GitLabLabel etc.
-│   ├── Caption.swift                  # Caption + MeetingSession
-│   └── Plan.swift                     # Plan / PlanTask / CodeRef / AnyCodable
-├── Services/
-│   ├── GitLabClient.swift             # async/await GitLab REST v4 client
-│   ├── GitHubClient.swift             # GitHub REST API client
-│   ├── KeychainStore.swift            # per-host JWT storage
-│   ├── SessionStore.swift             # @Published session, coalesced refresh
-│   ├── PermissionsService.swift       # AX / Screen Recording / Microphone probes
-│   ├── ShellState.swift
-│   ├── BashService.swift              # Bash/code execution service
-│   ├── WebSearchService.swift         # Web search with history and caching
-│   ├── API/                           # LlmIdeAPIClient split by domain
-│   │   ├── LlmIdeAPIClient+Auth.swift
-│   │   ├── LlmIdeAPIClient+Agent.swift
-│   │   ├── LlmIdeAPIClient+KB.swift
-│   │   ├── LlmIdeAPIClient+CodeAssist.swift
-│   │   ├── LlmIdeAPIClient+SourceControl.swift
-│   │   └── …
-│   └── Repo/                         # Unified GitLab/GitHub backend
-│       ├── RepoBackend.swift          # Shared protocol for GitLab/GitHub
-│       ├── GitLabClient.swift         # GitLab-specific adapter
-│       ├── GitHubClient.swift         # GitHub-specific adapter
-│       └── RepoBackendFactory.swift   # Client factory with guardrails
-│   └── CaptionScraper/
-│       ├── CaptionScraper.swift       # protocol + CaptionOrchestrator
-│       ├── ZoomCaptionScraper.swift
-│       ├── TeamsCaptionScraper.swift
-│       ├── AXCaptionReader.swift
-│       └── PlatformDetector.swift
-├── ViewModels/
-│   ├── GanttViewModel.swift           # issues · filters · layout · date ranges
-│   ├── PlanListViewModel.swift
-│   └── ReviewViewModel.swift
-├── Utilities/
-│   ├── ColorPalette.swift             # deterministic per-project colors
-│   └── DateFormatters.swift
-└── Views/
-    ├── AppShell.swift                 # root navigation + sidebar
-    ├── LoginView.swift
-    ├── SettingsView.swift
-    ├── TranscriptView.swift
-    ├── ReviewView.swift
-    ├── CodeAssistantPanel.swift      # AI chat assistant (main panel)
-    ├── CodeAssistant+Sheets.swift     # Chat sheet content views
-    ├── CodeAssistant+Issues.swift    # Issue routing and confirmation
-    ├── CodeAssistant+Attachments.swift # File attachment handling
-    ├── CodeAssistant+Git.swift       # Git operations
-    ├── CodeAssistant+PR.swift        # PR/MR creation
-    ├── CodeAssistant+Bash.swift     # Bash/code execution
-    ├── Library/                       # meeting list, detail, summary sections
-    ├── Issues/
-    │   ├── IssueBoardView.swift       # project picker · list · filter bar
-    │   ├── IssueDetailPanel.swift     # full issue detail + comments
-    │   ├── IssueCreateSheet.swift     # create / edit sheet
-    │   └── IssueKanbanPanel.swift     # kanban column view
-    ├── Gantt/
-    │   ├── GanttContainerView.swift   # project picker + load coordinator
-    │   ├── GanttView.swift            # timeline canvas + header bar + legend
-    │   └── GanttFilterBar.swift       # search · state · milestone · assignee · label · date
-    ├── Settings/
-    │   ├── BackendSettingsSection.swift      # Server & Backend (URL + Node process)
-    │   ├── RepoSettingsSection.swift         # GitLab + GitHub tabs
-    │   ├── FeatureProfileSettingsView.swift  # Workspace presets + toolbar
-    │   ├── PreferencesSettingsSection.swift  # General (theme, language, …)
-    │   ├── ProvidersSettingsSection.swift    # Model providers + Agent engine
-    │   └── …
-    ├── Shell/
-    │   └── SidebarView.swift
-    ├── Components/
-    │   ├── PRCreationSheet.swift      # PR/MR creation sheet
-    │   ├── BranchCreationSheet.swift   # Branch creation sheet
-    │   ├── GitOpSheet.swift           # Git operation confirmation
-    │   ├── UpdateFileSheet.swift      # File edit confirmation
-    │   ├── AttachmentChip.swift       # File attachment chip
-    │   ├── WebSearchHistoryView.swift # Web search history UI
-    │   ├── EmptyStateView.swift
-    │   ├── LabelChip.swift
-    │   ├── UserAvatar.swift
-    │   └── SectionLabel.swift
-    └── Shared/
+├── Shell/                    # composition root: LlmIdeMacApp (@main), AppShell, ContentView,
+│   │                         #   FeatureCatalog, FeatureRegistry, AppFeature, ShellState,
+│   │                         #   DeepLinkRouter, LoginView, ReconnectView, Recovery/, Welcome/
+│   └── Chrome/               # StatusBar, ActivityBell, toolbar, TerminalPanelState
+├── Features/                 # one folder per section; never references another feature
+│   ├── Chat/                 # Code Assistant + quick chat (Models/ Engine/ Session/
+│   │                         #   Transport/ Services/ Views/{Panel,Quick,Shared})
+│   ├── Library/ · Live/ · Settings/ · ReviewConflicts/        # always compiled
+│   ├── Explorer/ · Search/ · SourceControl/                   # file_explorer
+│   ├── CodeGraph/                                             # code_graph_3d
+│   ├── Issues/ · Gantt/                                       # gantt_issues
+│   ├── DocGen/ · Visual/ · Generation/                        # doc_gen
+│   ├── Terminal/                                              # terminal
+│   ├── AutoTask/ · Loop/                                      # auto_tasks
+│   └── MobileControl/                                         # mobile_sync
+├── Core/                     # leaf infrastructure, never excluded, usable by any layer
+│   ├── Contracts/            # cross-feature protocols (LoopRunning, MobileFeatureBridge, …)
+│   ├── DesignSystem/         # shared SwiftUI chrome + Components/
+│   ├── Editor/ · Generation/ · Incidents/ · Memory/ · Verification/
+│   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
+│   ├── Platform/             # AppDelegate, Config, Theme, KeychainStore, SessionStore, utilities
+│   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding
+│   └── Repo/                 # GitLab/GitHub clients behind RepoBackend (Services/Repo/)
+└── ClaudeLink/               # Claude SDK/CLI glue (counted as Core)
 ```
+
+The full annotated tree is in the repository root [`CLAUDE.md`](../CLAUDE.md) under "Project Structure".
+
+***
+
+## Feature builds
+
+Small and fast is a product goal: a build can leave features out of the compiled binary instead of only hiding them. `Package.swift` reads `LLMIDE_FEATURES`, a comma-separated list of the features to **include** (unset = all), and excludes every other feature's source folders and tests.
+
+| Key | Excludes |
+|---|---|
+| `code_graph_3d` | `Features/CodeGraph` (and the GraphCore/GraphKit products) |
+| `file_explorer` | `Features/Explorer`, `Features/Search`, `Features/SourceControl` |
+| `gantt_issues` | `Features/Issues`, `Features/Gantt` |
+| `doc_gen` | `Features/DocGen`, `Features/Visual`, `Features/Generation` |
+| `terminal` | `Features/Terminal` (and the SwiftTerm product) |
+| `auto_tasks` | `Features/AutoTask`, `Features/Loop` |
+| `mobile_sync` | `Features/MobileControl` (and the SharedProtocol product) |
+
+`agent_chat` is never excludable; Chat, Library, Live, Settings and ReviewConflicts are compiled into every build. `code_graph_3d`, `gantt_issues` and `doc_gen` depend on `file_explorer`, and `Package.swift` applies that closure itself: a list without `file_explorer` drops those three as well.
+
+```bash
+make build-mac-lite          # agent_chat,auto_tasks,mobile_sync
+make build-mac-min           # agent_chat only — all 7 excludable features removed
+make build-mac-mobile-only   # agent_chat,mobile_sync — guards the mobile/auto-tasks bridge seam
+```
+
+The targets pass `--manifest-cache none` (SwiftPM does not key its manifest cache on environment variables) and use their own `--scratch-path`. On a source checkout, Settings → Workspace → **Apply & Rebuild (remove disabled code)** does the same from inside the app: it stages a release build with only the enabled features and swaps it in on restart. The full contract is in [`docs/spec/macos-app.md`](../docs/spec/macos-app.md) ("Build-time feature selection" and "Apply & Rebuild").
 
 ***
 
@@ -315,7 +284,7 @@ Sources/LlmIdeMac/
 
 The orchestrator selects the first available scraper, so supporting a new platform (Webex, FaceTime, Discord) is a single-file addition:
 
-1. Create `Services/CaptionScraper/<Platform>CaptionScraper.swift` conforming to the `CaptionScraper` protocol — implement `isAvailable()` and `snapshot()`
+1. Create `Sources/LlmIdeMac/Features/Live/Services/<Platform>CaptionScraper.swift` conforming to the `CaptionScraper` protocol — implement `isAvailable()` and `snapshot()`
 2. Append it to `PlatformDetector.allScrapers`
 
 The orchestrator's `tick()` picks it up automatically on the next recording start.

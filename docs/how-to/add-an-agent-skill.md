@@ -68,7 +68,7 @@ This pulls `agent-tools/` → `internal/skills/` and `agent-globals/` (the `.md`
 
 ### 5. Mac client side (write tools only)
 
-Add a confirm sheet under `mac/Sources/LlmIdeMac/Agent/Views/` modelled on `CreateGitLabIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` keyed on `pendingTool.name`.
+Add a confirm sheet under `mac/Sources/LlmIdeMac/Features/Chat/Views/Panel/` modelled on `CreateIssueSheet.swift`. Wire it from `CodeAssistantPanel.swift` (same folder) keyed on `pendingTool.name`.
 
 ### 6. Restart and test
 

@@ -128,11 +128,17 @@ description says to start.
 - **`extension/src/`** — React 18 + TS + Vite. The side panel mounts
   the bundle (the floating popup was removed — ADR-0010). Start at
   `src/main.tsx`.
-- **`mac/Sources/LlmIdeMac/`** — SwiftUI app. Sub-divides into
-  `Models/`, `Services/`, `Views/`, `ViewModels/`. Services follow
-  the suffix taxonomy in `CLAUDE.md` (`*Store`, `*Service`,
-  `*Client`, `*Manager`, `*Mirror`, `*Router`). Start at
-  `LlmIdeMacApp.swift`. See [`spec/macos-app.md`](../spec/macos-app.md) for rebuild-grade detail.
+- **`mac/Sources/LlmIdeMac/`** — SwiftUI app, layered
+  **Shell → Features → Core**: `Shell/` is the composition root,
+  `Features/<Name>/` holds one folder per section (a feature never
+  references another feature, so build-excludable ones can be
+  compiled out via `LLMIDE_FEATURES`), and `Core/` (plus
+  `ClaudeLink/`) is shared infrastructure every layer may use. The
+  folder → layer map is
+  [`mac/Scripts/feature-map.txt`](https://github.com/dnsmalla/llm-ide/blob/main/mac/Scripts/feature-map.txt).
+  Types follow the suffix taxonomy in `CLAUDE.md` (`*Store`,
+  `*Service`, `*Client`, `*Manager`, `*Mirror`, `*Router`). Start at
+  `Shell/LlmIdeMacApp.swift`. See [`spec/macos-app.md`](../spec/macos-app.md) for rebuild-grade detail.
 - **`kb/`** — runtime data only: SQLite db, dev secrets, per-user
   vault payloads. Never read this directly from code; go through
   `extension/kb/db.mjs`.

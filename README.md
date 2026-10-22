@@ -223,6 +223,8 @@ cd mac && swift build
 swift run LlmIdeMac    # or open .build/debug/LlmIdeMac
 ```
 
+Small and fast is a product goal: `make build-mac-lite` (Chat, Auto Tasks, Mobile, Live, Library) and `make build-mac-min` (Chat only) compile unused features out of the binary, and Settings → Workspace → **Apply & Rebuild** does the same for the feature profile you pick in the app. See [Feature builds](mac/README.md#feature-builds).
+
 ---
 
 ## Usage
