@@ -269,18 +269,50 @@ final class BashService: Sendable {
     /// Read `handle` to EOF in bounded chunks on a background thread. Reading
     /// CONTINUES past the sink's retention limit on purpose — stopping early
     /// would leave the child blocked on a full pipe forever.
+    ///
+    /// POSIX `read`, NOT `FileHandle.read(upToCount:)`: on a pipe the latter
+    /// blocks until it has the FULL count or hits EOF. A background job
+    /// (`npm run dev &`) holds the write end open for its whole lifetime, so a
+    /// short output printed before it ("before\n") was never returned at all —
+    /// the bounded `backgroundDrainWindow` wait then expired and the result
+    /// came back as the background-job note alone, losing everything the
+    /// command printed. That is why CI's `testBackgroundJobDoesNotHoldTheResult`
+    /// failed on every run. `read(2)` returns whatever is available, so every
+    /// chunk reaches the sink as soon as it is written. (`availableData` would
+    /// also work, but it raises an Objective-C exception on a read error.)
+    ///
+    /// A dedicated thread rather than a GCD worker: the read still blocks for
+    /// as long as a background job holds the pipe, and parking that on the
+    /// shared global queue would pin one of its limited workers.
     private static func drainInBackground(_ handle: HandleBox,
                                           into sink: ByteSink,
                                           group: DispatchGroup) {
         group.enter()
-        DispatchQueue.global(qos: .utility).async {
+        let reader = Thread {
+            let fd = handle.handle.fileDescriptor
+            var buffer = [UInt8](repeating: 0, count: 64 * 1_024)
             while true {
-                let chunk = (try? handle.handle.read(upToCount: 64 * 1_024)) ?? nil
-                guard let chunk, !chunk.isEmpty else { break }
-                sink.append(chunk)
+                let count = buffer.withUnsafeMutableBytes { raw in
+                    Darwin.read(fd, raw.baseAddress, raw.count)
+                }
+                if count > 0 {
+                    sink.append(Data(buffer[0..<count]))
+                    continue
+                }
+                // Interrupted by a signal: retry. 0 is EOF; any other error
+                // ends the drain the same way the old nil/empty chunk did.
+                if count < 0 && errno == EINTR { continue }
+                break
             }
             group.leave()
         }
+        reader.name = "BashService.drain"
+        // Match the launching queue: output collection is on the path of a
+        // result the user is waiting for, so it must not be throttled as utility.
+        reader.qualityOfService = .userInitiated
+        // Small stack: the loop holds one 64 KB chunk on the heap, nothing deep.
+        reader.stackSize = 256 * 1_024
+        reader.start()
     }
 
     /// Validate a command for basic safety.
