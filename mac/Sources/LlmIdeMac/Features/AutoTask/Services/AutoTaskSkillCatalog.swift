@@ -34,15 +34,14 @@ final class AutoTaskSkillCatalog: ObservableObject {
 
     init() {}
 
-    /// Skills never offered to an Auto Task. `refactor-apply` edits code one
-    /// batch at a time and is safe only inside a Refactoring loop, where a Test
-    /// stage verifies each batch (the Loop's `LoopStage.codeApplySkillIds`); a
-    /// scheduled Auto Task has no verify stage, so it must not run it. Kept as
-    /// names here rather than read from the Loop feature (features never
-    /// reference each other); `AutoTaskSkillCatalogTests` pins the two in sync.
-    nonisolated static let excludedSkillNames: Set<String> = [
-        "refactor-apply", "test-gap-writer", "test-structure-setup",
-    ]
+    /// Skills never offered to an Auto Task. `refactor-apply` (and every other
+    /// code-applying skill) edits code and is safe only inside a loop where a
+    /// Test stage verifies the result; a scheduled Auto Task has no verify
+    /// stage, so it must not run them. Derived from Core's
+    /// `CodeApplyingSkills` — the same list the Loop's
+    /// `LoopStage.codeApplySkillIds` uses — so a newly added code-applying
+    /// skill cannot be forgotten here (features never reference each other).
+    nonisolated static let excludedSkillNames: Set<String> = CodeApplyingSkills.names
 
     /// The prompt line that invokes `name`.
     nonisolated static func directive(for name: String) -> String {

@@ -361,11 +361,9 @@ extension LoopStage {
     /// `REFACTOR.md` at a time, so the runner captures which batch it applied.
     var isRefactorApply: Bool { kind == .skill && skillId == "skills/refactor-apply" }
 
-    /// Skill ids whose stage applies code edits that must be verified.
-    static let codeApplySkillIds: Set<String> = [
-        "skills/refactor-apply", "skills/test-gap-writer", "skills/test-structure-setup",
-        "skills/refactor-conform",
-    ]
+    /// Skill ids whose stage applies code edits that must be verified. Owned by
+    /// Core (`CodeApplyingSkills`) so Auto Tasks exclude the same set.
+    static let codeApplySkillIds: Set<String> = CodeApplyingSkills.ids
 
     /// Whether this stage's skill may be missing from the project's installed
     /// central skills WITHOUT ending the run — true only for
