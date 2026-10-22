@@ -45,10 +45,15 @@ struct TierDefaultsTests {
         #expect(TierDefaults.purpose(for: .subagents) == nil)
     }
 
-    @Test func wireBodyStripsOnlyChatRoles() {
+    /// Only the Mac-only roles (chat modes and, since the Image tier, image
+    /// generation — the server has no consumer for it) are stripped; every
+    /// other role reaches the server.
+    @Test func wireBodyStripsOnlyMacOnlyRoles() {
         let features = Dictionary(uniqueKeysWithValues: RoutedFeature.allCases.map { ($0.rawValue, "cheap") })
         let wire = TierDefaults.wireBody(TierRoutingConfig(features: features), serverApiVersion: 73)
-        #expect(Set(wire.features.keys) == Set(RoutedFeature.allCases.filter { $0.group != .chat }.map(\.rawValue)))
+        #expect(Set(wire.features.keys) == Set(RoutedFeature.allCases.filter(\.isSentToServer).map(\.rawValue)))
+        #expect(RoutedFeature.allCases.filter { !$0.isSentToServer }
+                    == [.chatPlanning, .chatCoding, .chatReviewing, .chatDocuments, .imageGeneration])
     }
 
     @Test func purposePolicyUsesATierOnlyOnItsProvider() {

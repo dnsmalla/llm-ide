@@ -18,7 +18,7 @@ public enum RoutingTier: String, CaseIterable, Identifiable, Sendable {
 }
 
 /// Where a role runs. Decides what "unset" means and whether the server ever
-/// sees the role (chat roles never do — `TierDefaults.wireBody`).
+/// sees the role (chat and media roles never do — `isSentToServer`).
 public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
     /// The four chat modes: they only pick the MODEL of a chat already on the
     /// tier's provider, so they are Mac-only.
@@ -41,11 +41,25 @@ public enum RoutedFeatureGroup: String, CaseIterable, Sendable {
         case .media:      return "Media"
         }
     }
+
+    /// Whether roles in this group are mirrored to the server in
+    /// `POST /kb/routing-tiers` (`TierDefaults.wireBody`). Chat and Media roles
+    /// are Mac-only: the server has no consumer for them and would drop each as
+    /// `unknown_feature`, surfacing a warning for a setting that is correct.
+    /// An exhaustive switch so a new group has to decide, instead of leaking
+    /// onto the wire by default.
+    public var isSentToServer: Bool {
+        switch self {
+        case .background, .server: return true
+        case .chat, .media:        return false
+        }
+    }
 }
 
 /// A role whose provider + model can be routed by tier. The raw values are the
 /// wire keys of `features` in `POST /kb/routing-tiers` — do not rename. The
-/// `chat*` cases are Mac-only and are stripped from that body.
+/// Mac-only roles (`isSentToServer` false: chat modes, image generation) are
+/// stripped from that body.
 public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
     case subagents, loop, autoTasks, quickChat, pipeline, `internal`, decisions
     case chatPlanning, chatCoding, chatReviewing, chatDocuments
@@ -61,6 +75,9 @@ public enum RoutedFeature: String, CaseIterable, Identifiable, Sendable {
         case .imageGeneration:                                            return .media
         }
     }
+
+    /// Whether this role is sent to the server (see `RoutedFeatureGroup.isSentToServer`).
+    public var isSentToServer: Bool { group.isSentToServer }
 }
 
 

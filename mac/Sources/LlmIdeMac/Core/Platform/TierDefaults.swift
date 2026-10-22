@@ -167,7 +167,7 @@ public enum TierDefaults {
             // would report it as unknown_tier).
             guard RoutingTier(rawValue: value) != .image else { return false }
             guard let feature = RoutedFeature(rawValue: key) else { return true }
-            if feature.group == .chat || feature.group == .media { return false }
+            if !feature.isSentToServer { return false }
             guard let required = feature.requiredServerApiVersion else { return true }
             return (serverApiVersion ?? 0) >= required
         }

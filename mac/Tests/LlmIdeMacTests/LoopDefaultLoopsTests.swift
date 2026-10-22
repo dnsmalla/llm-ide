@@ -195,8 +195,9 @@ final class LoopDefaultLoopsTests: XCTestCase {
     }
 
     /// With a test command: the whole graph-verified pipeline. The test writer
-    /// proves the next batch's tests green before the apply, the apply is
-    /// verified by the suite, and the graph confirms the batch's counter fell.
+    /// proves the next batch's tests green before the apply, the conform pass
+    /// fixes RULES.md violations in what the apply touched, both are verified
+    /// by the suite, and the graph confirms the batch's counter fell.
     func testRefactorLoopPlansAppliesAndTestsWhenATestCommandIsDetected() throws {
         try write("Package.swift")
         let refactor = try XCTUnwrap(loop(LoopDefaultLoopKey.refactor,
@@ -205,12 +206,17 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(stages.compactMap(\.defaultKey), [
             "refactor-structure", "refactor-setup", "refactor-structure-check", "refactor-graph",
             "refactor-test-map", "refactor-plan", "refactor-plan-check", "refactor-test-write",
-            "refactor-test-baseline", "refactor-apply", "refactor-test", "refactor-ledger", "refactor-graph-check",
+            "refactor-test-baseline", "refactor-apply", "refactor-conform", "refactor-test", "refactor-ledger",
+            "refactor-graph-check",
         ])
         let byKey = Dictionary(uniqueKeysWithValues: stages.map { ($0.defaultKey ?? "", $0) })
         XCTAssertEqual(byKey["refactor-apply"]?.skillId, "skills/refactor-apply")
         XCTAssertEqual(byKey["refactor-apply"]?.targetPath, "llm-doc/loop/refactor/REFACTOR.md")
         XCTAssertEqual(byKey["refactor-apply"]?.outputPath, ".")
+        // Conform edits code too, so it must sit before the Test stage that verifies it.
+        XCTAssertEqual(byKey["refactor-conform"]?.skillId, "skills/refactor-conform")
+        XCTAssertEqual(byKey["refactor-conform"]?.appliesCode, true)
+        XCTAssertFalse(stages.contains { LoopStage.lacksVerifyAfter($0, in: stages) })
         XCTAssertEqual(byKey["refactor-test-write"]?.targetPath, "llm-doc/loop/refactor/NEXT-BATCH.md")
         XCTAssertEqual(byKey["refactor-test"]?.command, "swift test")
         XCTAssertEqual(byKey["refactor-test"]?.detectedCommand, "swift test")
@@ -270,8 +276,9 @@ final class LoopDefaultLoopsTests: XCTestCase {
         let stages = [LoopDefaultLoopKey.refactor, LoopDefaultLoopKey.docs]
             .flatMap { loop($0, in: loops)?.config.stages ?? [] }
             .filter { $0.kind == .skill }
-        // Refactoring: setup, plan, test writer and apply (the writer and apply exist beside a test command, which this repo has); Doc: index and writer.
-        XCTAssertEqual(stages.count, 6)
+        // Refactoring: setup, plan, test writer, apply and conform (the writer, apply and conform exist beside
+        // a test command, which this repo has); Doc: index and writer.
+        XCTAssertEqual(stages.count, 7)
         for stage in stages {
             let prompt = try XCTUnwrap(stage.prompt, "\(stage.name) has no prompt")
             XCTAssertFalse(prompt.contains("llm-doc"), "\(stage.name) bakes a path into its prompt")
@@ -383,11 +390,11 @@ final class LoopDefaultLoopsTests: XCTestCase {
 
     /// The template must never yield code edits without a verify stage: with no
     /// test tooling the two shell placeholders are dropped, which takes the
-    /// writer, the baseline and the apply with them (each needs a verify after
-    /// it). What remains is the plan side plus the ledger and graph verify,
+    /// writer, the baseline, the apply and the conform pass with them (each
+    /// needs a verify after it). What remains is the plan side plus the ledger and graph verify,
     /// which need no shell command. With tooling it has the default loop's shape.
     func testRefactoringTemplateDropsEveryCodeEditWithoutATestCommand() throws {
-        // No tooling: the two shell placeholders drop, and with them the writer and the apply.
+        // No tooling: the two shell placeholders drop, and with them the writer, the apply and the conform.
         XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.map(\.name), [
             "Refactor Structure", "Refactor Setup", "Refactor Structure Check", "Refactor Graph",
             "Refactor Test Map", "Refactor Plan", "Refactor Plan Check", "Test Ledger", "Refactor Graph Check",
@@ -395,7 +402,9 @@ final class LoopDefaultLoopsTests: XCTestCase {
         XCTAssertEqual(LoopTemplate.refactoring.applied(to: nil).stages.map(\.name),
                        LoopTemplate.refactoring.applied(to: repo).stages.map(\.name))
         try write("Package.swift")
-        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.count, 13)
+        // With tooling: the nine above plus Test Write, Test Baseline, Apply, Conform and Test. (Check
+        // Baseline / Check need a detected check command, which a bare Package.swift does not give.)
+        XCTAssertEqual(LoopTemplate.refactoring.applied(to: repo).stages.count, 14)
     }
 
     /// An existing project (the four earlier default loops, one tuned) gains
