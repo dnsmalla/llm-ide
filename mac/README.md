@@ -225,10 +225,9 @@ Package.swift                 # targets + LLMIDE_FEATURES build-time exclusion
 build_app.sh
 Sources/LlmIdeMac/
 ├── Shell/                    # composition root: LlmIdeMacApp (@main), AppShell, ContentView,
-│   │                         #   FeatureCatalog, FeatureRegistry, AppFeature, ShellState,
-│   │                         #   DeepLinkRouter, LoginView, ReconnectView, Recovery/, Welcome/,
-│   │                         #   ChatScope+Shell (scope → sidebar section)
-│   └── Chrome/               # StatusBar, ActivityBell, toolbar, TerminalPanelState
+│   │                         #   FeatureCatalog, DeepLinkRouter, LoginView, ReconnectView,
+│   │                         #   Recovery/, Welcome/, ChatScope+Shell (scope → sidebar section)
+│   └── Chrome/               # StatusBar, ActivityBell, toolbar, banners
 ├── Features/                 # one folder per section; never references another feature
 │   ├── Chat/                 # Code Assistant + quick chat (Models/ Engine/ Session/
 │   │                         #   Transport/ (CodeAssistTransport) Services/ Views/{Panel,Quick,Shared})
@@ -255,8 +254,11 @@ Sources/LlmIdeMac/
 │   │                         #   EditAcceptanceMode, SourceIngesting (Library ingestion for
 │   │                         #   AutoTask), LoopSweepPlanning (Loop's loop selection for
 │   │                         #   AutoTask's sweep), …)
-│   ├── DesignSystem/         # shared SwiftUI chrome + Components/, LibraryPicker
+│   ├── DesignSystem/         # shared SwiftUI chrome + Components/, LibraryPicker, section chrome
+│   │                         #   features render (SectionChromeBar, PanelSectionTabs, WindowHeightKey)
 │   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
+│   ├── FeatureToggles/       # feature runtime: AppFeature, ProfilePreset, FeatureRegistry,
+│   │                         #   AppModule/FeatureService (Shell's FeatureCatalog fills it at boot)
 │   ├── Generation/ · Incidents/ · Memory/ · Verification/
 │   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
 │   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex,
@@ -265,7 +267,7 @@ Sources/LlmIdeMac/
 │   │                         #   (MeetingFileStore, PartialRecovery, MeetingSummarizationService,
 │   │                         #   MeetingNoteWriter/Generator, IngestNoteDedup), …
 │   ├── Platform/             # AppDelegate + AppTerminationHooks, FeatureCacheHooks, Config, Theme,
-│   │                         #   KeychainStore, SessionStore, utilities
+│   │                         #   KeychainStore, SessionStore, ShellState, TerminalPanelState, utilities
 │   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding,
 │   │                         #   ProjectExporter (KB → project folder export),
 │   │                         #   ActiveProjectResolver (agent's active project)

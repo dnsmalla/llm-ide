@@ -9,10 +9,11 @@ import Foundation
 /// leaf, so the enum moved here and Shell keeps `ShellState.Section` as a
 /// typealias for its existing call sites.
 ///
-/// Only members that are pure data belong here. Anything that needs a Shell
-/// or Feature type (`backingFeature` → `AppFeature`, `resolveHome` → the
+/// Only members that are pure data belong here. Anything that needs the
+/// feature runtime (`backingFeature` → `AppFeature`, `resolveHome` → the
 /// compiled-feature set) or SwiftUI (`tint(_:)` → `Theme`/`Color`) is an
-/// `extension ShellSection` in `Shell/ShellState.swift`.
+/// `extension ShellSection` in `Core/Platform/ShellState.swift`, so this file
+/// stays Foundation-only plain data.
 ///
 /// Raw values are persisted (`hiddenSidebarSections`, `homeSection` in
 /// UserDefaults) and sent as activity links, so renaming a case is a data

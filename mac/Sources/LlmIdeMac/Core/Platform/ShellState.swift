@@ -6,11 +6,10 @@ import SwiftUI
 @Observable
 final class ShellState {
     /// Compatibility name for the Core-owned `ShellSection`. The enum moved to
-    /// `Core/Contracts/ShellSection.swift` so Core code can name a section
-    /// without naming Shell; this alias keeps every existing
-    /// `ShellState.Section` call site compiling unchanged. New code should
-    /// prefer `ShellSection`, and Core code MUST use it (Core may not name
-    /// `ShellState`).
+    /// `Core/Contracts/ShellSection.swift` so Core code could name a section
+    /// while `ShellState` still lived in Shell; this alias keeps every
+    /// existing `ShellState.Section` call site compiling unchanged. New code
+    /// should prefer `ShellSection`.
     typealias Section = ShellSection
 
     /// Compatibility name for the Core-owned `LibrarySelection` (moved to
@@ -69,8 +68,9 @@ final class ShellState {
     }
 }
 
-// Shell-side members of the Core-owned `ShellSection`: these name Shell types
-// (`AppFeature`), so they cannot live in `Core/Contracts/ShellSection.swift`.
+// Feature-runtime members of `ShellSection`: these name `AppFeature`
+// (Core/FeatureToggles), and are kept out of `Core/Contracts/ShellSection.swift`
+// so that contract file stays Foundation-only plain data.
 extension ShellSection {
     /// The excludable `AppFeature` that gates this section, if any. Single
     /// source of truth for "which build-time/runtime feature does this
@@ -110,9 +110,9 @@ extension ShellSection {
 }
 
 // Theme-aware tint for the section's SF Symbol. Lives on the enum so
-// the sidebar row and the Sidebar settings card can never drift. Kept in
-// Shell (though `Theme` is Core) so `Core/Contracts/ShellSection.swift` stays
-// Foundation-only plain data; this is presentation for the shell's chrome.
+// the sidebar row and the Sidebar settings card can never drift. Kept out of
+// `Core/Contracts/ShellSection.swift` so that file stays Foundation-only plain
+// data; this is presentation for the shell's chrome.
 extension ShellSection {
     func tint(_ theme: Theme) -> Color {
         switch self {

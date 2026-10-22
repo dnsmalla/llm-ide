@@ -5,15 +5,17 @@ import SwiftUI
 /// Panel-level state: open/closed and height. Created as `@State` in
 /// `AppShell`, propagated via `.environment()`.
 ///
-/// This type stays in Views/Shell (core, always compiled) because AppShell
-/// and StatusBar reference `isOpen`/`toggle(projectDirectory:)`
-/// unconditionally, regardless of whether the Terminal feature is selected.
+/// This type lives in Core (always compiled), not Features/Terminal, because
+/// AppShell and StatusBar reference `isOpen`/`toggle(projectDirectory:)`
+/// unconditionally, regardless of whether the Terminal feature is selected —
+/// and features outside Terminal name it too, which they may do only if it
+/// is Core (a feature never names Shell).
 ///
 /// Session management — the tab list, the active dock tab, and the concrete
-/// `TerminalSession` type (feature-owned in Views/Terminal because it
+/// `TerminalSession` type (feature-owned in Features/Terminal because it
 /// imports SwiftTerm, which is only linked when `terminal` is selected, see
 /// Package.swift) — lives in `TerminalDockSessions`
-/// (`Views/Terminal/TerminalDockSessions.swift`) and plugs into `toggle()`
+/// (`Features/Terminal/Views/TerminalDockSessions.swift`) and plugs into `toggle()`
 /// via the `onToggleRequested` hook. `FeatureCatalog.installTerminalHooks(on:)`
 /// is the ONLY place that installs it, and the ONLY place in the app that
 /// tests the Terminal build flag for this state — this file has none.

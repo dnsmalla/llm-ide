@@ -32,9 +32,9 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 
 **Governed source areas** under `mac/Sources/LlmIdeMac/`:
 
-- `Shell/` — composition root: app entry (`LlmIdeMacApp.swift`), `AppShell`, `FeatureCatalog`, `FeatureRegistry`, `ShellState`, login/recovery/welcome screens, and `Chrome/` (status bar, toolbar, `TerminalPanelState`)
+- `Shell/` — composition root: app entry (`LlmIdeMacApp.swift`), `AppShell`, `FeatureCatalog`, login/recovery/welcome screens, and `Chrome/` (status bar, toolbar, activity bell)
 - `Features/<Name>/` — one folder per build-excludable unit (`Models/`, `Services/`, `Views/`); a unit may hold several sections as sub-folders when one `LLMIDE_FEATURES` key excludes them together and they reference each other (`Generation/` holds `DocGen/` + `Visual/`, `Issues/` holds `Gantt/`); a feature never references another feature, which is what lets the build-excludable ones be compiled out
-- `Core/` — leaf infrastructure every layer may use: `Contracts/`, `DesignSystem/`, `Editor/`, `Generation/`, `Incidents/`, `Memory/`, `Networking/`, `Platform/`, `Project/`, `Repo/`, `Verification/`
+- `Core/` — leaf infrastructure every layer may use: `Contracts/`, `DesignSystem/` (incl. the section chrome features render: `SectionChromeBar`/`SectionToggle`, `PanelSectionTabs`, `WindowHeightKey`), `Editor/`, `FeatureToggles/` (`AppFeature`, `ProfilePreset`, `FeatureRegistry`, `AppModule`, `FeatureService`), `Generation/`, `Incidents/`, `Memory/`, `Networking/`, `Platform/` (incl. `ShellState`, `TerminalPanelState`), `Project/`, `Repo/`, `Verification/`
 - `ClaudeLink/` — Claude SDK/CLI glue, counted as Core
 - `Resources/` — bundled assets
 
@@ -114,9 +114,9 @@ A `MenuBarExtra` is declared at lines 272–285. Its icon (`record.circle.fill` 
 
 **Source:** `mac/Sources/LlmIdeMac/Shell/AppShell.swift`
 
-`AppShell` is the authenticated shell. It renders `WelcomeView` when `projectStore.activeProject == nil` (lines 39–40), and the full section layout when a project is active. The section layout is driven by `ShellState.section` (an `@Observable` object, `mac/Sources/LlmIdeMac/Shell/ShellState.swift`). `ShellState` is created once at the `AppShell` root and injected via `.environment(shell)`, so it has **app-session scope**: it survives section navigation (which tears the section views down and recreates them) and is reset only when the app relaunches. UI state that must outlive a section switch lives here rather than as the section view's `@State` — e.g. `ShellState.exploreChatVisible` keeps the Explorer's chat panel open across navigation (it would otherwise reset to closed every time `ExplorerView` is rebuilt), while still starting closed on a fresh launch.
+`AppShell` is the authenticated shell. It renders `WelcomeView` when `projectStore.activeProject == nil` (lines 39–40), and the full section layout when a project is active. The section layout is driven by `ShellState.section` (an `@Observable` object, `mac/Sources/LlmIdeMac/Core/Platform/ShellState.swift` — Core, so features can read it without naming Shell). `ShellState` is created once at the `AppShell` root and injected via `.environment(shell)`, so it has **app-session scope**: it survives section navigation (which tears the section views down and recreates them) and is reset only when the app relaunches. UI state that must outlive a section switch lives here rather than as the section view's `@State` — e.g. `ShellState.exploreChatVisible` keeps the Explorer's chat panel open across navigation (it would otherwise reset to closed every time `ExplorerView` is rebuilt), while still starting closed on a fresh launch.
 
-**Sections** (`ShellSection`, declared in `Core/Contracts/ShellSection.swift` so Core code can name a section; Shell keeps `ShellState.Section` as a typealias, and the Shell-only members `backingFeature`, `resolveHome` and `tint(_:)` live in `Shell/ShellState.swift`):
+**Sections** (`ShellSection`, declared in `Core/Contracts/ShellSection.swift` so Core code can name a section; `ShellState.Section` is kept as a typealias, and the feature-runtime/presentation members `backingFeature`, `resolveHome` and `tint(_:)` live in `Core/Platform/ShellState.swift` so the contract file stays Foundation-only):
 
 `library`, `live`, `explorer`, `search`, `conflicts`, `sourceControl`, `issues`, `gantt`, `visual`, `docGen`, `autoCode`, `codeGraph`, `loopEngine`, `settings`
 
@@ -140,7 +140,7 @@ A "lite" non-engineer build (the `LLMIDE_FEATURES=agent_chat,auto_tasks,mobile_s
 
 When AutoTask/LoopEngine is compiled out, the `MobileControlManager` invokes a `replyFeatureUnavailable` path to degrade phone requests for auto-tasks and loop operations to an explicit "not installed" acknowledgement (via `MobileFeatureBridge` protocol seam). A lite or minimum install is not durable across dev rebuilds: a later full `swift build` run overwrites it with the all-features default, since nothing records the feature selection outside that one build's Info.plist.
 
-**Mechanism notes:** `WindowHeightKey` (Terminal Panel content height broadcasting, `Shell/Chrome/WindowHeightKey.swift`) lives in the always-compiled Shell chrome rather than in `Features/Terminal/` so AppShell can publish window sizing unconditionally — the `.preference(key: WindowHeightKey.self, …)` call in AppShell has no terminal gate. The Terminal Panel itself is *not* always mounted: `TerminalPanelView` renders only while `state.isOpen` or a session is still alive (`dock.sessions` non-empty), and only where AppShell/ExplorerView choose to place it when the Terminal feature is enabled; once mounted it collapses to zero height (rather than unmounting) while `state.isOpen` is false but a session persists, which is what keeps PTYs and scrollback alive across toggle cycles. The terminal session state (`activeDockTab`, `sessions`, `activeIndex`, `nextTabNumber`) moved into a feature-owned store (`Features/Terminal/Views/TerminalDockSessions.swift`), while the core panel state (`TerminalPanelState`, responsible for isOpen/height tracking and a FeatureCatalog-wired onToggleRequested hook) lives in `Shell/Chrome/TerminalPanelState.swift`.
+**Mechanism notes:** `WindowHeightKey` (Terminal Panel content height broadcasting, `Core/DesignSystem/WindowHeightKey.swift`) lives in always-compiled Core rather than in `Features/Terminal/` so AppShell can publish window sizing unconditionally — the `.preference(key: WindowHeightKey.self, …)` call in AppShell has no terminal gate. The Terminal Panel itself is *not* always mounted: `TerminalPanelView` renders only while `state.isOpen` or a session is still alive (`dock.sessions` non-empty), and only where AppShell/ExplorerView choose to place it when the Terminal feature is enabled; once mounted it collapses to zero height (rather than unmounting) while `state.isOpen` is false but a session persists, which is what keeps PTYs and scrollback alive across toggle cycles. The terminal session state (`activeDockTab`, `sessions`, `activeIndex`, `nextTabNumber`) moved into a feature-owned store (`Features/Terminal/Views/TerminalDockSessions.swift`), while the core panel state (`TerminalPanelState`, responsible for isOpen/height tracking and a FeatureCatalog-wired onToggleRequested hook) lives in `Core/Platform/TerminalPanelState.swift` — always compiled, and Core so features other than Terminal may name it.
 
 **Gate:** `mac/Scripts/feature-boundaries.sh` (run by `make regression`) fails the build when any always-compiled layer (Shell, Core, ClaudeLink, Chat, Library, Live, Settings, ReviewConflicts) references a symbol owned by an excludable feature without the matching `#if FEATURE_*` guard, when a `libExcludes` or `testExcludes` path does not exist, when (check 6) a test file references an excludable feature's top-level type without being in that feature's `testExcludes`, and when (check 7) a `Core`-layer file (`Core/`, `ClaudeLink/`) names a top-level type declared under `Shell/` or `Features/` (one allowlisted `#if FEATURE_AUTOTASK` seam; stale allowlist rows fail too). The test target is only compiled with every feature in, so check 6 is what keeps `swift build --build-tests` under a reduced `LLMIDE_FEATURES` from breaking unnoticed.
 
@@ -179,7 +179,12 @@ The UI (`Features/Settings/Views/FeatureProfileSettingsView.swift`, `BuildRebuil
 
 ### Feature toggles and lifecycle (`FeatureRegistry`)
 
-Feature toggles are wired to `FeatureRegistry.refresh()`: each feature has
+The feature runtime (`AppFeature`, `ProfilePreset`, `FeatureRegistry`, the
+`AppModule` / `FeatureService` protocols) lives in `Core/FeatureToggles/`, so
+features may read it; Shell's `FeatureCatalog` assigns
+`FeatureRegistry.compiledFeatures` (from its `#if FEATURE_*` list) and
+registers the modules at boot. Feature toggles are wired to
+`FeatureRegistry.refresh()`: each feature has
 an `AppModule` (`AutoTaskModule`, `GraphModule`, `ChatModule`,
 `MobileModule`, `PassiveModule` for the view-only four) owning its
 services' `start()`/`stop()`. Disabling a feature stops its timers,

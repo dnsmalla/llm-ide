@@ -3,8 +3,8 @@ import SwiftUI
 /// Lets AppShell broadcast its content height down to any panel that needs
 /// it without polluting that panel's own layout.
 ///
-/// NOTE: lives in Views/Shell (a core, always-compiled folder), not
-/// Views/Terminal, even though today's only consumer is
+/// NOTE: lives in Core/DesignSystem (always compiled), not
+/// Features/Terminal, even though today's only consumer is
 /// `TerminalPanelView` — AppShell publishes it unconditionally (it has no
 /// `FEATURE_TERMINAL` gate around the `.preference(key: WindowHeightKey.self, …)`
 /// call), so the type must stay compiled regardless of the terminal

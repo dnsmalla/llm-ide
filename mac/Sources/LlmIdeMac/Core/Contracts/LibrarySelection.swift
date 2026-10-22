@@ -5,8 +5,8 @@ import Foundation
 /// Lives in Core (not nested in `ShellState`) because Core's
 /// `CompletionController` carries one as a navigation target — accepting a
 /// hook/MCP completion row lands on that exact Library row — and Core is a
-/// leaf that may not name Shell. Shell keeps `ShellState.LibrarySelection` as
-/// a typealias for its existing call sites. Every payload is a plain value
+/// leaf that may not name Shell. `ShellState` (now Core too) keeps
+/// `ShellState.LibrarySelection` as a typealias for its existing call sites. Every payload is a plain value
 /// (an id string or a file URL), so nothing here depends on a feature.
 enum LibrarySelection: Hashable {
     case meeting(String)

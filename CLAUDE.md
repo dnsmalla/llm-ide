@@ -120,7 +120,7 @@ llm-ide/
 │   │   │   │                #   for AutoTask's Loop Engineering sweep),
 │   │   │   │                #   ChatTransport (+Input/Result: the engine↔transport contract
 │   │   │   │                #   ClaudeLink's AgentV2Transport implements), ChatScope,
-│   │   │   │                #   ShellSection + LibrarySelection (Shell's section / Library-row
+│   │   │   │                #   ShellSection + LibrarySelection (the section / Library-row
 │   │   │   │                #   enums, aliased as ShellState.Section / .LibrarySelection),
 │   │   │   │                #   SettingsSectionRegistry (+Slot: feature-contributed Settings
 │   │   │   │                #   cards), ChatEnginePreference (Agent v2 toggle key),
@@ -133,9 +133,15 @@ llm-ide/
 │   │   │   ├── DesignSystem/#   Shared SwiftUI chrome: FileTreePanel, EditorTabBar, FileDetailView,
 │   │   │   │                #   ColorPalette, Components/ (SettingsSectionCard, ResizableDivider,
 │   │   │   │                #   PersistedPanelWidth, …), LibraryItem+UI (category colors),
-│   │   │   │                #   LibraryPicker (the "Add from Library" sheet other features open)
+│   │   │   │                #   LibraryPicker (the "Add from Library" sheet other features open),
+│   │   │   │                #   section chrome features render: SectionChromeBar (+SectionToggle),
+│   │   │   │                #   PanelSectionTabs (Explorer/Source Control/Search switcher),
+│   │   │   │                #   WindowHeightKey
 │   │   │   ├── Editor/      #   CompletionController/Menu, HunkStagingList, ChatSlashCommands
 │   │   │   │                #   (the built-in "/" catalog the completion menu lists)
+│   │   │   ├── FeatureToggles/ # Feature runtime: AppFeature (+ProfilePreset), FeatureRegistry
+│   │   │   │                #   (+AppModule / FeatureService protocols). Shell's FeatureCatalog
+│   │   │   │                #   assigns compiledFeatures and registers modules at boot
 │   │   │   ├── Generation/  #   GenerationRegistry + GenerationViewModel (concrete type,
 │   │   │   │                #   referenced unconditionally by Shell — see invariants.md)
 │   │   │   ├── Incidents/   #   Incident capture + Self-Heal proposals (Loop's backing code,
@@ -157,7 +163,11 @@ llm-ide/
 │   │   │   │                #   (graph/Mobile-PIN cache seams Shell installs), BashService, Config,
 │   │   │   │                #   AppIdentity, AppJSON, DateFormatters, PathUtils, SecretRedactor,
 │   │   │   │                #   FilesystemSlug, AgentTypes, ActivityStore, SessionStore,
-│   │   │   │                #   NotificationNames, LaunchPathResolver, ProcessedActionsRegistry
+│   │   │   │                #   NotificationNames, LaunchPathResolver, ProcessedActionsRegistry,
+│   │   │   │                #   ShellState (app-session UI state: section, Library selection,
+│   │   │   │                #   handoff ids; + ShellSection.backingFeature/resolveHome/tint),
+│   │   │   │                #   TerminalPanelState (dock open/height — always compiled, see
+│   │   │   │                #   invariants.md)
 │   │   │   ├── Project/     #   Project/Plan/CodeTree models, WorkspaceRoot, FileSystemTree,
 │   │   │   │                #   ExplorerPaths, ProjectLayout, ProjectScaffolder, ProjectSkillsInstaller,
 │   │   │   │                #   ProjectStore, ProjectExporter + ProjectExportBundle (KB → folder export)
@@ -181,15 +191,14 @@ llm-ide/
 │   │   │   ├── Generation/     # the doc_gen unit: Views/ = Doc Gen + Visual's shared
 │   │   │   │                   #   generation views, DocGen/ + Visual/ = the two menu
 │   │   │   │                   #   items (registry/view-model stay in Core/Generation)
-│   │   │   └── Terminal/       # excludable; Shell/Chrome/TerminalPanelState.swift stays
-│   │   │                       #   in Shell — see invariants.md
+│   │   │   └── Terminal/       # excludable; Core/Platform/TerminalPanelState.swift stays
+│   │   │                       #   outside it, in Core — see invariants.md
 │   │   ├── Shell/       # Composition root — the ONLY layer permitted to name every feature:
 │   │   │   │            #   app entry (LlmIdeMacApp.swift), AppShell, ContentView,
-│   │   │   │            #   FeatureCatalog, FeatureRegistry, AppFeature, ShellState,
-│   │   │   │            #   DeepLinkRouter, LoginView, ReconnectView, CrashReportStore,
-│   │   │   │            #   PassiveModule, ProjectMigrator, Recovery/, Welcome/,
+│   │   │   │            #   FeatureCatalog, DeepLinkRouter, LoginView, ReconnectView,
+│   │   │   │            #   CrashReportStore, PassiveModule, ProjectMigrator, Recovery/, Welcome/,
 │   │   │   │            #   ChatScope+Shell (scope → ShellSection mapping)
-│   │   │   └── Chrome/  #   StatusBar, ActivityBell, TerminalPanelState (exempt from the
+│   │   │   └── Chrome/  #   StatusBar, ActivityBell, toolbar/banners (exempt from the
 │   │   │                #   feature/boundary rule, NOT from build-exclusion — see invariants.md)
 │   │   └── ClaudeLink/  # Top-level (not under Core/), but declared Core in the feature map —
 │   │                    #   Claude SDK/CLI glue incl. ClaudeSubscriptionUsageClient;
@@ -247,7 +256,7 @@ Enforced **textually** by `mac/Scripts/feature-boundaries.sh` (run by `make regr
 
 Always compiled (never build-excludable): `Shell/`, `Core/`, `ClaudeLink/` and the features **Chat, Library, Live, Settings, ReviewConflicts** — Chat is the product's one non-excludable feature (`agent_chat`), and the other four have no `LLMIDE_FEATURES` key of their own, so they ship in every build, `make build-mac-min` included. Every other `Features/` folder is excluded by one of the seven `LLMIDE_FEATURES` keys in `mac/Package.swift`, which also applies the `file_explorer` dependency closure itself (dropping `file_explorer` drops `code_graph_3d`, `gantt_issues` and `doc_gen` with it, mirroring `AppFeature.requiredDependencies`). Menu items that one key excludes together **and** that reference each other are one folder, not several: `doc_gen` excludes the single `Features/Generation/` (shared generation views + `DocGen/` + `Visual/`), `gantt_issues` the single `Features/Issues/` (+ `Gantt/`). As separate folders their mutual references were cross-feature cycles that no seal could ever pass; inside one folder they are intra-feature. The menu items themselves stay separate (`ShellSection.backingFeature`).
 
-**The gate ENFORCES the feature/feature rule only for sealed features.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`. All 15 features are sealed today (zero outgoing cross-feature edges, so any new one FAILS the build): **CodeGraph, Search, Issues, ReviewConflicts, Terminal, Explorer, SourceControl, Generation, Settings, Chat, Live, Library, AutoTask, Loop, MobileControl**. The gate's cross-feature `warn` count is 0. **"Sealed" covers feature → feature only: the gate does not yet check feature → Shell**, and most sealed features still name Shell chrome or registry types (`PanelSectionTabs`, `SectionChromeBar`, `ShellState`, `FeatureRegistry` / `AppFeature` in Settings, `FeatureCatalog.terminalPanel` in Explorer, `FeatureCatalog.loopRunnerProviding()` in AutoTask) — a seal is not a claim of Shell-independence.
+**The gate ENFORCES the feature/feature rule only for sealed features.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`. All 15 features are sealed today (zero outgoing cross-feature edges, so any new one FAILS the build): **CodeGraph, Search, Issues, ReviewConflicts, Terminal, Explorer, SourceControl, Generation, Settings, Chat, Live, Library, AutoTask, Loop, MobileControl**. The gate's cross-feature `warn` count is 0. **"Sealed" covers feature → feature only: the gate does not yet check feature → Shell.** The Shell types features used to name — the feature runtime (`AppFeature`, `ProfilePreset`, `FeatureRegistry`, `AppModule`, `FeatureService`), `ShellState`, `TerminalPanelState` and the section chrome (`SectionChromeBar`/`SectionToggle`, `PanelSectionTabs`, `WindowHeightKey`) — now live in `Core/` (`FeatureToggles/`, `Platform/`, `DesignSystem/`). The remaining feature → Shell edges are calls into the composition root `FeatureCatalog` (e.g. `FeatureCatalog.terminalPanel` in Explorer, `FeatureCatalog.loopRunnerProviding()` in AutoTask) — a seal is not yet a claim of Shell-independence.
 
 The gate's seven checks that **do** fail the build (exit 1) today:
 1. Any **always-compiled layer** (`Shell`, `Core`, `ClaudeLink`, Chat, Library, Live, Settings, ReviewConflicts — derived from `feature-map.txt` minus the excludable folders, not hard-coded) referencing a symbol owned by a build-excludable `Features/` folder without the matching `#if FEATURE_*` guard. Before, only `Shell`/`Core` were scanned, so an unguarded edge from an unsealed always-compiled feature passed the gate and surfaced only as a compile error in a reduced build.
