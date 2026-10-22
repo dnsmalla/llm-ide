@@ -17,7 +17,10 @@ process.env.NODE_ENV = 'test';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const tmpDb = path.join(__dirname, `_sources-dedupe-${process.pid}.db`);
 process.env.LLMIDE_DB_PATH = tmpDb;
-for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) {
+  // Best-effort temp-DB removal: a leftover file must not fail the suite.
+  try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
+}
 
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
@@ -68,5 +71,8 @@ test('ingestSources isolates two users writing the same ref (no cross-user colli
 
 test('cleanup', () => {
   db.closeDb();
-  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) { try { fs.rmSync(f, { force: true }); } catch {} }
+  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) {
+    // Best-effort temp-DB removal: a leftover file must not fail the suite.
+    try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
+  }
 });

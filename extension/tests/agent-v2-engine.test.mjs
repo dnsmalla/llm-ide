@@ -650,11 +650,15 @@ test('runAgentV2Turn: an SDK launch failure is restated with the errno and cwd',
   // The SDK spawns lazily: the launch failure surfaces while the caller is
   // iterating the query, not when query() is constructed.
   const boom = () => ({
-    async *[Symbol.asyncIterator]() {
-      throw Object.assign(
-        new Error('Claude Code native binary at /x/claude exists but failed to launch. This usually means the binary does not match this system\u2019s libc'),
-        { errorClass: 'executable_launch_failed', code: 'EPERM' },
-      );
+    [Symbol.asyncIterator]() {
+      return {
+        next: async () => {
+          throw Object.assign(
+            new Error('Claude Code native binary at /x/claude exists but failed to launch. This usually means the binary does not match this system\u2019s libc'),
+            { errorClass: 'executable_launch_failed', code: 'EPERM' },
+          );
+        },
+      };
     },
   });
   await assert.rejects(
@@ -1444,7 +1448,12 @@ test('act tool: run-bash prompt decision answered "always-allow" saves a project
 
 test('resume failure maps to SESSION_UNRESUMABLE',
   withAnthropicKey('sk-ant-v2-test', async () => {
-    const boom = () => (async function* () { throw new Error('No conversation found with session id: x'); })();
+    // Rejects on the first next(), i.e. when the engine starts iterating.
+    const boom = () => ({
+      [Symbol.asyncIterator]: () => ({
+        next: async () => { throw new Error('No conversation found with session id: x'); },
+      }),
+    });
     await assert.rejects(
       runAgentV2Turn({
         message: 'm', userId: 'u1', mode: 'execute', agentContext: { workspaceRoot: WS },
