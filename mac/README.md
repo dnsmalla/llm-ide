@@ -249,7 +249,9 @@ Sources/LlmIdeMac/
 │   │                         #   sheets features embed, installed by Shell), ChatOutputProviding,
 │   │                         #   LiveCaptureProviding (LiveCaptureGate: Live's recording take-over
 │   │                         #   of Library's meeting detail, installed by Shell),
-│   │                         #   EditAcceptanceMode, …)
+│   │                         #   EditAcceptanceMode, SourceIngesting (Library ingestion for
+│   │                         #   AutoTask), LoopSweepPlanning (Loop's loop selection for
+│   │                         #   AutoTask's sweep), …)
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/, LibraryPicker
 │   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
 │   ├── Generation/ · Incidents/ · Memory/ · Verification/

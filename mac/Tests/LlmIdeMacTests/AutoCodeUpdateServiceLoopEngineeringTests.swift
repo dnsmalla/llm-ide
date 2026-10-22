@@ -34,7 +34,14 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
             autoTaskSettings: AutoTaskSettings(defaults: suite),
             registry: registry,
             api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456"),
-            logStore: TaskLogStore())
+            logStore: TaskLogStore(),
+            // Loop selection now lives behind the `LoopSweepPlanning` seam;
+            // without a planner the sweep refuses before choosing any loop,
+            // so the stage/loop-id and persistence guards below would never
+            // be reached. No runner provider is wired, so nothing actually
+            // runs — the sweep stops at "Loop is not included in this build"
+            // right after planning, exactly as before the seam existed.
+            loopSweepPlanner: LoopSweepPlanner())
     }
 
     func testSkipsWithTaskErrorWhenProjectRootIsEmpty() async {

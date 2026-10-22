@@ -6,17 +6,9 @@ import Foundation
 /// the default no-op `fetchAndIngest`.
 enum SourceMode { case liveCapture, fetch }
 
-/// Outcome of one source's `fetchAndIngest` run, surfaced on the Sources card.
-/// (Relocated from `SourceIngestService.Result` so the protocol can use it.)
-enum SourceIngestResult {
-    case imported(Int, moreAvailable: Int, oversize: Int) // N notes; more left; large skipped
-    case none                          // fetched, but nothing new
-    case noSource                      // no configured/enabled source
-    /// Fetch or ingest error. `imported` = notes that DID land before the
-    /// failure (0 for a fetch error that wrote nothing). The driver rescans
-    /// only when `imported > 0`, matching the original behavior.
-    case failure(String, imported: Int)
-}
+// `SourceIngestResult` (the outcome of `fetchAndIngest`) lives in
+// Core/Contracts/SourceIngesting.swift so AutoTask can read it through the
+// `SourceIngesting` seam without naming Library.
 
 /// Runtime dependencies a fetch source needs to ingest. Bundled so sources stay
 /// stateless (`SourceRegistry.all` is a static list) while the driver injects

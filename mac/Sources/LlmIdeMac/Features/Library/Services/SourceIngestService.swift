@@ -91,3 +91,32 @@ enum SourceIngestInFlight {
         running.contains(id)
     }
 }
+
+/// Library's side of the Core `SourceIngesting` seam: AutoTask's Source Update
+/// task drives ingestion through this so it never names `SourceIngestService`
+/// or `SourceRegistry` (and, through them, the connectors). Installed by
+/// Shell (`FeatureCatalog.bootAutoTask`).
+///
+/// Builds a fresh `SourceIngestService` per call because the service is bound
+/// to one project's notes folder + indexer, which come from the environment
+/// the scheduler passes in at run time — the active project can change
+/// between runs. The service is a stateless struct, so this costs nothing.
+@MainActor
+struct LibrarySourceIngester: SourceIngesting {
+    let api: LlmIdeAPIClient
+    let config: AppConfig
+
+    var fetchSources: [SourceIngestTarget] {
+        SourceRegistry.fetchSources.map { SourceIngestTarget(id: $0.id, displayName: $0.displayName) }
+    }
+
+    func importSource(id: String, into environment: AppEnvironment) async -> SourceIngestResult {
+        let service = SourceIngestService(
+            api: api,
+            config: config,
+            root: environment.notesConfig.currentFolder,
+            notesOutputFolder: environment.notesOutputFolder,
+            indexer: environment.indexer)
+        return await service.importSource(id: id)
+    }
+}

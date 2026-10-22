@@ -452,7 +452,12 @@ enum FeatureCatalog {
             runHistory: runHistory,
             projectStore: projectStore,
             api: api,
-            logStore: taskLog)
+            logStore: taskLog,
+            // Library's ingestion and Loop's loop selection reach AutoTask
+            // only through these Core seams; this is the one place that
+            // names the concrete types on both sides.
+            sourceIngester: LibrarySourceIngester(api: api, config: config),
+            loopSweepPlanner: LoopSweepPlanner())
         SessionScopedRegistry.shared.register(service)
 
         // The registry's `bootstrap()` (the disk-read path) is invoked
@@ -492,6 +497,7 @@ enum FeatureCatalog {
         let loopRuns = LoopRunService(api: api)
         loopRuns.activity = activity
         loopRuns.logStore = taskLog
+        loopRuns.logTaskKey = AutoTask.loopEngineering.rawValue
 
         // The scheduled Loop Engineering sweep (AutoCodeUpdateService+PipelineTasks)
         // asks FeatureCatalog for a runner instead of constructing

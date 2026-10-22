@@ -22,8 +22,8 @@ Shell/          Shell
 Core/           Core
 ClaudeLink/     Core
 Features/Chat/    Feature:Chat    sealed
-Features/AutoTask/     Feature:AutoTask
-Features/Loop/          Feature:Loop
+Features/AutoTask/     Feature:AutoTask    sealed
+Features/Loop/          Feature:Loop    sealed
 Features/CodeGraph/    Feature:CodeGraph    sealed
 Features/Search/    Feature:Search    sealed
 Features/Issues/    Feature:Issues    sealed

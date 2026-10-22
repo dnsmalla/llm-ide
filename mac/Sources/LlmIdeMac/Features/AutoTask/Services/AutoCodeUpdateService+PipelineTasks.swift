@@ -198,7 +198,9 @@ extension AutoCodeUpdateService {
     /// Fetch configured email/Slack sources into the meeting library.
     func runSourceUpdate() async {
         let key = AutoTask.sourceUpdate.rawValue
-        guard let api else {
+        // The ingester carries its own API client now; this guard stays so a
+        // service built without one keeps its long-standing skip message.
+        guard api != nil else {
             taskErrors[key] = "Source update skipped — no API client wired."
             logStore.append(.sourceUpdate, "Skipped — no API client.", level: .error)
             return
@@ -208,18 +210,20 @@ extension AutoCodeUpdateService {
             logStore.append(.sourceUpdate, "Skipped — no project environment.", level: .error)
             return
         }
-        let service = SourceIngestService(
-            api: api,
-            config: config,
-            root: env.notesConfig.currentFolder,
-            notesOutputFolder: env.notesOutputFolder,
-            indexer: env.indexer)
+        guard let ingester = sourceIngester else {
+            // Library is always compiled, so Shell always installs this; nil
+            // means the wiring is missing — say so rather than report an
+            // empty successful run.
+            taskErrors[key] = "Source update skipped — source ingestion not wired."
+            logStore.append(.sourceUpdate, "Skipped — source ingestion not wired.", level: .error)
+            return
+        }
         var importedTotal = 0
         var failures: [String] = []
-        for source in SourceRegistry.fetchSources {
+        for source in ingester.fetchSources {
             if Task.isCancelled { break }
             logStore.append(.sourceUpdate, "Fetching \(source.displayName)…")
-            switch await service.importSource(id: source.id) {
+            switch await ingester.importSource(id: source.id, into: env) {
             case .imported(let n, let more, let oversize):
                 importedTotal += n
                 var line = "Imported \(n) from \(source.displayName)."
@@ -844,7 +848,7 @@ extension AutoCodeUpdateService {
     /// - Parameter onlyStageId: When set, run just this one stage — the
     ///   phone's `loop_start_stage` counterpart to the desktop's "Run this
     ///   stage only". The stage is looked up across EVERY loop, and only the
-    ///   loop that owns it runs, via the same `LoopStage.soloing` mapping the
+    ///   loop that owns it runs, via the same stage-soloing mapping the
     ///   desktop uses: the target is force-enabled, every other stage in that
     ///   loop is disabled for this run only, and the saved config is
     ///   untouched. An id that matches no stage refuses the run — falling back
@@ -890,66 +894,55 @@ extension AutoCodeUpdateService {
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)
 
+        // Should be unreachable — Loop and AutoTask are excluded together
+        // under one build flag (Package.swift), and Shell always installs the
+        // planner. Fail visibly anyway: a silent skip reads as a successful
+        // empty run on the Auto Tasks card.
+        guard let planner = loopSweepPlanner else {
+            taskErrors[AutoTask.loopEngineering.rawValue] = "Loop — Loop is not included in this build."
+            logStore.append(.loopEngineering, "Loop is not included in this build — skipping.", level: .error)
+            return false
+        }
+
         // Every loop this project schedules, each run INDEPENDENTLY: its own
         // iteration budget, its own journal record, its own goal. They go one
         // at a time on the main checkout unless a loop opts into worktree
         // isolation (`useWorktreesForConcurrentRuns`) — then a concurrent
         // run gets its own tree under `<project>/system/loop-worktrees/`.
-        //
-        // `LoopEngineConfigStore.loops` is the shared entry point (see its doc
-        // comment): it creates this project's default loops, migrates a
-        // pre-split project into them, re-pins each loop's own stages, and
-        // persists the result only when that is safe — the `shouldPersist`
-        // rule this function used to apply inline.
-        let store = LoopEngineConfigStore.loops(projectRoot: faultsRoot, projectId: projectId,
-                                                gitRoot: gitRootURL, defaults: defaults)
-        var targets: [LoopDefinition]
-        if let onlyStageId {
-            // "Run just this stage" searches EVERY loop, not only the Primary
-            // one: the stages a surface can offer now come from several
-            // independent loops. The soloing mapping is unchanged — the target
-            // is force-enabled, every other stage in ITS loop is disabled for
-            // this run only, and nothing is written back.
-            guard var owner = store.loopContaining(stageId: onlyStageId),
-                  let soloed = LoopStage.soloing(owner.config.stages, id: onlyStageId) else {
-                taskErrors[AutoTask.loopEngineering.rawValue] =
-                    "Loop skipped — the requested stage no longer exists."
-                logStore.append(.loopEngineering,
-                                "Loop skipped — single-stage run asked for a stage that no longer exists.",
-                                level: .error)
-                return true
-            }
-            owner.config.stages = soloed
-            targets = [owner]
-        } else if let onlyLoopId {
-            // One named loop — the phone's Start, which shows and reports on a
-            // single loop. `runsOnSchedule` is deliberately NOT consulted: the
-            // user asked for THIS loop by hand, and an opted-out loop is still
-            // theirs to run.
-            guard let loop = store.loops.first(where: { $0.id == onlyLoopId }),
-                  loop.config.stages.contains(where: \.enabled) else {
-                taskErrors[AutoTask.loopEngineering.rawValue] =
-                    "Loop skipped — the requested loop no longer exists, or every stage in it is disabled."
-                logStore.append(.loopEngineering,
-                                "Loop skipped — the requested loop is gone or fully disabled.",
-                                level: .error)
-                return true
-            }
-            targets = [loop]
-        } else {
-            targets = store.scheduledLoops
-        }
-
-        // A project with nothing scheduled (or every stage switched off) is
-        // PARKED, not broken — the user did that deliberately. Skipping quietly
-        // here (info log, no taskError) beats letting the runner refuse on every
-        // cron tick, which would keep the task banner red and fill the journal
-        // with error records for a state the user considers "off".
-        guard !targets.isEmpty else {
+        // Which loops run (scheduled sweep, one named loop, or one soloed
+        // stage) is Loop's decision — see `LoopSweepPlanning`.
+        let targets: [LoopSweepTarget]
+        switch planner.planSweep(projectRoot: faultsRoot, projectId: projectId, gitRoot: gitRootURL,
+                                 defaults: defaults, onlyStageId: onlyStageId, onlyLoopId: onlyLoopId) {
+        case .run(let planned):
+            targets = planned
+        case .unknownStage:
+            // An id that matches no stage refuses the run — falling back to
+            // the full sweep would silently do far more than was asked.
+            taskErrors[AutoTask.loopEngineering.rawValue] =
+                "Loop skipped — the requested stage no longer exists."
+            logStore.append(.loopEngineering,
+                            "Loop skipped — single-stage run asked for a stage that no longer exists.",
+                            level: .error)
+            return true
+        case .unknownLoop:
+            taskErrors[AutoTask.loopEngineering.rawValue] =
+                "Loop skipped — the requested loop no longer exists, or every stage in it is disabled."
+            logStore.append(.loopEngineering,
+                            "Loop skipped — the requested loop is gone or fully disabled.",
+                            level: .error)
+            return true
+        case .parked(let hasLoops):
+            // A project with nothing scheduled (or every stage switched off) is
+            // PARKED, not broken — the user did that deliberately. Skipping
+            // quietly here (info log, no taskError) beats letting the runner
+            // refuse on every cron tick, which would keep the task banner red
+            // and fill the journal with error records for a state the user
+            // considers "off".
             taskErrors.removeValue(forKey: AutoTask.loopEngineering.rawValue)
-            logStore.append(.loopEngineering, store.loops.isEmpty
-                ? "Loop skipped — no loops are configured for this project."
-                : "Loop skipped — no loop is scheduled with an enabled stage.")
+            logStore.append(.loopEngineering, hasLoops
+                ? "Loop skipped — no loop is scheduled with an enabled stage."
+                : "Loop skipped — no loops are configured for this project.")
             return false
         }
 
@@ -962,9 +955,6 @@ extension AutoCodeUpdateService {
         // record status, so it must survive a mid-sweep bail-out below.
         var reachedTerminal = false
 
-        // Only the scheduled sweep re-reads: a loop the user named by hand
-        // (single loop / single stage) runs as asked whatever its schedule flag.
-        let rereadsBeforeRun = onlyStageId == nil && onlyLoopId == nil
         sweep: for plannedLoop in targets {
             // The Stop button cancels the enclosing task; stop starting NEW
             // loops the moment that happens rather than working through the
@@ -973,20 +963,16 @@ extension AutoCodeUpdateService {
                 logStore.append(.loopEngineering, "Stopped — remaining loop(s) skipped.", level: .error)
                 break
             }
-            var loop = plannedLoop
-            if rereadsBeforeRun {
-                let recheck = LoopEngineConfigStore.sweepRecheck(
-                    plannedLoop, projectRoot: faultsRoot, projectId: projectId,
-                    gitRoot: gitRootURL, defaults: defaults)
-                guard let fresh = recheck.loop else {
-                    logStore.append(.loopEngineering,
-                                    "Skipping \(plannedLoop.name) — \(recheck.skipReason ?? "it changed").")
-                    skipped += 1
-                    continue
-                }
-                loop = fresh
+            // The scheduled sweep re-reads each loop right before it runs; a
+            // loop named by hand passes through unchanged (Loop decides which).
+            let recheck = plannedLoop.recheck()
+            guard let loop = recheck.target else {
+                logStore.append(.loopEngineering,
+                                "Skipping \(plannedLoop.name) — \(recheck.skipReason ?? "it changed").")
+                skipped += 1
+                continue
             }
-            let enabledStageCount = loop.config.stages.filter(\.enabled).count
+            let enabledStageCount = loop.enabledStageCount
             logStore.append(.loopEngineering,
                             "▸ \(loop.name) — \(enabledStageCount) enabled stage(s)")
 
@@ -1021,11 +1007,7 @@ extension AutoCodeUpdateService {
             // (a run is already in progress for this repo, instance- or
             // process-wide). Use the RETURN VALUE, not runner.status, which per
             // its doc comment is only meaningful when run() returns non-nil.
-            let result = await runner.run(config: loop.config, faultsRoot: faultsRoot,
-                                          gitRoot: gitRootURL, projectId: projectId,
-                                          loopId: loop.id, loopName: loop.name,
-                                          goal: loop.goal, acceptanceCriteria: loop.acceptanceCriteria,
-                                          scopeGlobs: loop.scopeGlobs)
+            let result = await loop.run(runner)
             totalIterations += runner.iteration
             if result != nil { reachedTerminal = true }
 
@@ -1035,8 +1017,8 @@ extension AutoCodeUpdateService {
                 // Enabled count only — the runner skips disabled stages, and "all
                 // N passed" quoting the full list would claim coverage from
                 // stages the user switched off.
-                let skippedNote = enabledStageCount < loop.config.stages.count
-                    ? " (\(loop.config.stages.count - enabledStageCount) disabled stage(s) skipped)" : ""
+                let skippedNote = enabledStageCount < loop.stageCount
+                    ? " (\(loop.stageCount - enabledStageCount) disabled stage(s) skipped)" : ""
                 logStore.append(.loopEngineering, "\(loop.name) finished — all \(enabledStageCount) enabled stage(s) passed after \(runner.iteration) iteration(s)\(skippedNote).")
             case .givenUp:
                 // `.summary` (not raw `GivenUpReason` interpolation, which
@@ -1093,7 +1075,7 @@ extension AutoCodeUpdateService {
         // Same background-only banner desktop runs get from LoopRunService —
         // a scheduled run finishing while the user is elsewhere was previously
         // silent outside the activity feed.
-        LoopRunNotifier.notify(
+        planner.notifySweepFinished(
             title: passed == ran ? "Loop auto task finished"
                                            : "Loop auto task needs attention",
             body: "\(passed)/\(ran) loop(s) passed\(skipNote) · \(totalIterations) iteration(s)")

@@ -87,6 +87,15 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// here (not injected) because the runner is the one thing every surface —
     /// the page, the scheduler, the mobile bridge — already has a handle on.
     let taskConfigs: AutoTaskConfigStore
+    /// Library's source ingestion, behind a Core seam so this feature never
+    /// names `SourceIngestService` / `SourceRegistry`. nil (tests, older
+    /// callers) makes Source Update skip with a visible task error.
+    let sourceIngester: (any SourceIngesting)?
+    /// Loop's loop selection + completion banner for the Loop Engineering
+    /// sweep, behind a Core seam so this feature never names Loop's models.
+    /// nil makes the sweep fail visibly ("Loop is not included in this
+    /// build") rather than quietly no-op.
+    let loopSweepPlanner: (any LoopSweepPlanning)?
     let log = Logger(subsystem: "com.llmide.macapp", category: "AutoCodeUpdateService")
 
     /// The project's saved Auto Task prompt templates. `weak` for the same
@@ -151,7 +160,9 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     init(config: AppConfig, autoTaskSettings: AutoTaskSettings, backend: RepoBackend? = nil,
          registry: ProcessedActionsRegistry, runHistory: AutoTaskRunHistory? = nil,
          projectStore: ProjectStore? = nil,
-         api: LlmIdeAPIClient? = nil, logStore: TaskLogStore) {
+         api: LlmIdeAPIClient? = nil, logStore: TaskLogStore,
+         sourceIngester: (any SourceIngesting)? = nil,
+         loopSweepPlanner: (any LoopSweepPlanning)? = nil) {
         self.config = config
         self.autoTaskSettings = autoTaskSettings
         self.backendOverride = backend
@@ -167,6 +178,8 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
         self.projectStore = projectStore
         self.api = api
         self.logStore = logStore
+        self.sourceIngester = sourceIngester
+        self.loopSweepPlanner = loopSweepPlanner
         // Same defaults suite the rest of the service uses, so a test that
         // injects an isolated suite gets isolated task settings too.
         self.taskConfigs = AutoTaskConfigStore(defaults: config.userDefaults)

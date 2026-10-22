@@ -30,6 +30,12 @@ final class LoopRunService: ObservableObject, SessionScoped {
     /// app-level stores alive, mirroring `AutoCodeUpdateService.activity`.
     weak var activity: ActivityStore?
     weak var logStore: (any TaskLogWriting)?
+    /// The task key desktop runs are mirrored under in `logStore` — AutoTask's
+    /// Loop task id, which this feature must not name. Shell, the one layer
+    /// that may name both features, sets it next to `logStore`, so the key
+    /// can never drift from the one AutoTask's own Loop lane reads back. nil
+    /// (tests, a build without the wiring) disables the mirror.
+    var logTaskKey: String?
 
     /// A run on the Auto Task loop lane (started from the phone or the
     /// schedule), keyed like `activeKeys`. The Loop page shows it and routes
@@ -122,8 +128,8 @@ final class LoopRunService: ObservableObject, SessionScoped {
         // page being closed mid-run.
         let epoch = sessionEpoch
         runner.onLog = { [weak self] line in
-            guard let self, self.sessionEpoch == epoch else { return }
-            self.logStore?.append(AutoTask.loopEngineering.rawValue, line.text,
+            guard let self, self.sessionEpoch == epoch, let taskKey = self.logTaskKey else { return }
+            self.logStore?.append(taskKey, line.text,
                                    level: line.level == .error ? .error : .info)
         }
         runners[key] = runner
