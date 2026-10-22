@@ -26,7 +26,8 @@ struct LibraryItemStoreNotesScanTests {
         let root = try makeProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let items = LibraryItemStore.performScan(root: root, externalFolders: [])
+        let items = LibraryItemStore.performScan(root: root, externalFolders: [],
+                                        classifier: SourceRegistryClassifier())
         let note = try #require(items.first { $0.name == "2026-08-22-mail.md" })
         #expect(note.category == .notes)
         #expect(note.treePath == ["emails", "2026", "08"])
@@ -45,7 +46,8 @@ struct LibraryItemStoreNotesScanTests {
         try Data("{}".utf8).write(
             to: root.appendingPathComponent("llm-doc/emails/2026/08/index.json"))
 
-        let items = LibraryItemStore.performScan(root: root, externalFolders: [])
+        let items = LibraryItemStore.performScan(root: root, externalFolders: [],
+                                        classifier: SourceRegistryClassifier())
         let indexItems = items.filter { $0.name == "index.json" }
         #expect(indexItems.count == 1)
         #expect(indexItems.first?.treePath == ["emails", "2026", "08"])
@@ -69,7 +71,8 @@ struct LibraryItemStoreNotesScanTests {
         let root = try makeProject()
         defer { try? FileManager.default.removeItem(at: root) }
 
-        let items = LibraryItemStore.performScan(root: root, externalFolders: [])
+        let items = LibraryItemStore.performScan(root: root, externalFolders: [],
+                                        classifier: SourceRegistryClassifier())
         let loose = try #require(items.first { $0.name == "readme.md" })
         #expect(loose.folderOrigin == nil)
         #expect(loose.treePath == [])

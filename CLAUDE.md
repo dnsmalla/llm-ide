@@ -111,10 +111,11 @@ llm-ide/
 │   │   │   │            #   Subfolders are named by CAPABILITY, not by feature:
 │   │   │   ├── Contracts/   #   Cross-feature protocols: LoopRunning, TaskLogWriting,
 │   │   │   │                #   MobileFeatureBridge, MobileBridgeHosting,
-│   │   │   │                #   LoopLaneControlling, ProjectNotesProviding
+│   │   │   │                #   LoopLaneControlling, ProjectNotesProviding,
+│   │   │   │                #   NoteSourceClassifying (Library's SourceRegistry seam)
 │   │   │   ├── DesignSystem/#   Shared SwiftUI chrome: FileTreePanel, EditorTabBar, FileDetailView,
 │   │   │   │                #   ColorPalette, Components/ (SettingsSectionCard, ResizableDivider,
-│   │   │   │                #   PersistedPanelWidth, …)
+│   │   │   │                #   PersistedPanelWidth, …), LibraryItem+UI (category colors)
 │   │   │   ├── Editor/      #   CompletionController/Menu, HunkStagingList
 │   │   │   ├── Generation/  #   GenerationRegistry + GenerationViewModel (concrete type,
 │   │   │   │                #   referenced unconditionally by Shell — see invariants.md)
@@ -122,6 +123,9 @@ llm-ide/
 │   │   │   │                #   like Memory/ and Verification/)
 │   │   │   ├── Memory/      #   Fault reports, Q&A store — works with CodeGraph compiled out
 │   │   │   ├── Networking/  #   LlmIdeAPIClient + API/ extensions, BackendManager, AuthRedirectGuard
+│   │   │   ├── Notes/       #   On-disk notes store every feature reads (Library's backing code):
+│   │   │   │                #   LibraryItem(Store), NoteService, NotesFolderConfig, MeetingIndex,
+│   │   │   │                #   Markdown/MeetingFrontmatter, FrontmatterCoder, NoteAction
 │   │   │   ├── Platform/    #   App lifecycle + shared utilities: AppDelegate, BashService, Config,
 │   │   │   │                #   AppIdentity, AppJSON, DateFormatters, PathUtils, SecretRedactor,
 │   │   │   │                #   FilesystemSlug, AgentTypes, ActivityStore, SessionStore,
@@ -219,7 +223,7 @@ The gate's six checks that **do** fail the build (exit 1) today:
 5. Every `mac/Sources/LlmIdeMac/….swift` path named by a literal in `scripts/`, `mac/Scripts/`, or `Makefile` must exist — a move never breaks Swift (one module), but it silently breaks anything outside Swift that names a path.
 6. Every test file that references a build-excludable feature's top-level type must be in that feature's `testExcludes` in `mac/Package.swift` — the test target is only ever compiled with all features, so a missing entry otherwise stays invisible until someone runs `swift build --build-tests` under a reduced `LLMIDE_FEATURES`.
 
-Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Memory/` and `Core/Verification/` are Loop's — and references into those from other features are invisible to the check by design (it only flags edges from one `Features/` folder into another; every symbol under `Core/` is an allowed target). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`.
+Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Memory/` and `Core/Verification/` are Loop's, `Core/Notes/` is Library's — and references into those from other features are invisible to the check by design (it only flags edges from one `Features/` folder into another; every symbol under `Core/` is an allowed target). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`.
 
 Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`, `MobileBridgeHosting` (what the Auto Task / Loop phone bridges — which live in `Features/AutoTask/` and `Features/Loop/` — may ask of the mobile manager, with Foundation-only request/reply enums so they never import `SharedProtocol`), `LoopLaneControlling` (the AutoTask loop lane the Loop's phone bridge drives), `ProjectNotesProviding`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
 

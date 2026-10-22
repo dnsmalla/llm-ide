@@ -244,6 +244,7 @@ Sources/LlmIdeMac/
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/
 │   ├── Editor/ · Generation/ · Incidents/ · Memory/ · Verification/
 │   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
+│   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex, …
 │   ├── Platform/             # AppDelegate, Config, Theme, KeychainStore, SessionStore, utilities
 │   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding
 │   └── Repo/                 # GitLab/GitHub clients behind RepoBackend (Services/Repo/)

@@ -21,8 +21,8 @@ final class SourceConnector: InputSource {
     // concurrency checking.
     nonisolated let manifest: SourceConnectorManifest
     // `nonisolated` + `@Sendable` so SourceRegistry.all — a nonisolated static
-    // let, reached from nonisolated code such as
-    // LibraryItemStore.sourceId(for:) — can construct connectors without a
+    // let, reached from nonisolated code such as SourceRegistryClassifier
+    // during LibraryItemStore.sourceId(for:) — can construct connectors without a
     // main-actor-isolation warning (an error under the Swift 6 language mode).
     // Verified: `nonisolated init` alone is not enough; the property and the
     // closure type both have to say so.

@@ -40,7 +40,7 @@ final class LibraryItemStore {
     func sourceTreeEntries(forSourceId id: String) -> [CodeEntry] {
         if let cached = sourceTreeEntriesCache[id] { return cached }
         let subset = items.filter {
-            $0.category == .meetings && ($0.sourceId ?? MeetingSource().id) == id
+            $0.category == .meetings && ($0.sourceId ?? sourceClassifier.defaultSourceId) == id
         }
         let built = CodeEntry.build(from: subset, idPrefix: "source:\(id):")
         sourceTreeEntriesCache[id] = built
@@ -76,7 +76,16 @@ final class LibraryItemStore {
     /// and never persists.  `storeURL`/`StoreFile` are retained ONLY to
     /// DECODE the legacy `library_items.json` during the one-time migration
     /// (see `migrateLegacyIndexIfNeeded`).
-    init() {}
+    ///
+    /// `sourceClassifier` is injected (by Shell, backed by the Library
+    /// feature's `SourceRegistry`) because the source list drags in the
+    /// connectors, which Core must not name.
+    init(sourceClassifier: any NoteSourceClassifying) {
+        self.sourceClassifier = sourceClassifier
+    }
+
+    /// Maps `source/` files to their input source for the SOURCES sub-groups.
+    let sourceClassifier: any NoteSourceClassifying
 
     func items(for category: LibraryItem.Category) -> [LibraryItem] {
         items.filter { $0.category == category }
@@ -152,12 +161,13 @@ final class LibraryItemStore {
     ///     catches everything frontmatter can't: raw fetched mail is `.txt`
     ///     with no frontmatter at all, so classifying by content alone
     ///     dumped every email in `source/emails/` into the "Meetings" group.
-    nonisolated static func sourceId(for url: URL, rawDirectory: String? = nil) -> String {
-        if let explicit = frontmatterSourceId(for: url) { return explicit }
-        if let rawDirectory, let owner = SourceRegistry.source(forRawDirectory: rawDirectory) {
-            return owner.id
+    nonisolated static func sourceId(for url: URL, rawDirectory: String? = nil,
+                                     classifier: any NoteSourceClassifying) -> String {
+        if let explicit = frontmatterSourceId(for: url, classifier: classifier) { return explicit }
+        if let rawDirectory, let owner = classifier.sourceId(forRawDirectory: rawDirectory) {
+            return owner
         }
-        return MeetingSource().id
+        return classifier.defaultSourceId
     }
 
     /// The source a file's own frontmatter claims, or nil when it makes no
@@ -165,7 +175,8 @@ final class LibraryItemStore {
     /// value no registered source owns — an unknown value must NOT collapse
     /// to the meeting default here, or the directory fallback above could
     /// never run).
-    nonisolated private static func frontmatterSourceId(for url: URL) -> String? {
+    nonisolated private static func frontmatterSourceId(for url: URL,
+                                                     classifier: any NoteSourceClassifying) -> String? {
         guard url.pathExtension.lowercased() == "md",
               let handle = try? FileHandle(forReadingFrom: url) else { return nil }
         defer { try? handle.close() }
@@ -185,8 +196,8 @@ final class LibraryItemStore {
                 let value = line.dropFirst("platform:".count)
                     .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
                     .lowercased()
-                if let owner = SourceRegistry.all.first(where: { $0.platforms.contains(value) }) {
-                    return owner.id
+                if let owner = classifier.sourceId(forPlatform: value) {
+                    return owner
                 }
                 continue
             }
@@ -194,8 +205,8 @@ final class LibraryItemStore {
                 let value = line.dropFirst("source:".count)
                     .trimmingCharacters(in: CharacterSet(charactersIn: " \"'"))
                     .lowercased()
-                if let owner = SourceRegistry.all.first(where: { $0.platforms.contains(value) }) {
-                    fallbackId = owner.id
+                if let owner = classifier.sourceId(forPlatform: value) {
+                    fallbackId = owner
                 }
             }
         }
@@ -209,7 +220,8 @@ final class LibraryItemStore {
     /// emptied.
     func rescan() {
         scanGeneration &+= 1
-        items = Self.performScan(root: projectRoot, externalFolders: externalCodeFolders)
+        items = Self.performScan(root: projectRoot, externalFolders: externalCodeFolders,
+                                 classifier: sourceClassifier)
     }
 
     /// Bumped by every scan; an async scan applies its result only if no
@@ -229,8 +241,9 @@ final class LibraryItemStore {
         let generation = scanGeneration
         let root = projectRoot
         let external = externalCodeFolders
+        let classifier = sourceClassifier
         let scanned = await Task.detached(priority: .utility) {
-            Self.performScan(root: root, externalFolders: external)
+            Self.performScan(root: root, externalFolders: external, classifier: classifier)
         }.value
         // Drop a stale result: if the bound project changed while this scan
         // was in flight, `scanned` is the OLD project's items — assigning it
@@ -244,7 +257,8 @@ final class LibraryItemStore {
     /// + external code-folder references, apply the noise/relevance filters,
     /// classify meeting vs mail, and dedup by path. No instance/main-actor
     /// state — everything it needs is passed in — so it runs on any thread.
-    nonisolated static func performScan(root: URL?, externalFolders: [String]) -> [LibraryItem] {
+    nonisolated static func performScan(root: URL?, externalFolders: [String],
+                                        classifier: any NoteSourceClassifying) -> [LibraryItem] {
         guard let root else { return [] }
         let fm = FileManager.default
         var scanned: [LibraryItem] = []
@@ -312,14 +326,14 @@ final class LibraryItemStore {
                 // Meetings / Mail / … sub-groups.
                 if category == .meetings {
                     let rel = relativeDirComponents(of: fileURL, underComponents: rootComps)
-                    item.sourceId = sourceId(for: fileURL, rawDirectory: rel.first)
+                    item.sourceId = sourceId(for: fileURL, rawDirectory: rel.first, classifier: classifier)
                     // SOURCES sub-group tree (source/<source dir>/<YYYY>/<MM>/):
                     // paths render INSIDE a per-source sub-group, so an owning
                     // source's raw dir (the first component) would just repeat
                     // the sub-group header — drop it; the sub-tree starts at
                     // <YYYY>. Unowned dirs (e.g. documents/) keep their full
                     // path so their location stays visible.
-                    if let first = rel.first, SourceRegistry.source(forRawDirectory: first) != nil {
+                    if let first = rel.first, classifier.sourceId(forRawDirectory: first) != nil {
                         item.treePath = Array(rel.dropFirst())
                     } else {
                         item.treePath = rel

@@ -18,7 +18,7 @@ struct AppShell: View {
     @EnvironmentObject var commandStore: DocCommandStore
     @EnvironmentObject var docGenOutputStore: DocGenOutputStore
     @State private var shell = ShellState()
-    @State private var itemStore = LibraryItemStore()
+    @State private var itemStore = LibraryItemStore(sourceClassifier: SourceRegistryClassifier())
     @State private var crashReportStore = CrashReportStore()
     @State private var appEnv: AppEnvironment?
     /// Bumped after `GenerationRegistry.reset()` on a project switch. It is the

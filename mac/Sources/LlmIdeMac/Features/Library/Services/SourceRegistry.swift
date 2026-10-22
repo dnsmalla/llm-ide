@@ -59,3 +59,22 @@ enum SourceRegistry {
         all.filter { $0.mode == .fetch }
     }
 }
+
+/// `SourceRegistry` seen through the Core `NoteSourceClassifying` seam, so the
+/// Core-owned `LibraryItemStore` can classify `source/` files without naming
+/// the registry (and, through it, the connectors). Stateless: every lookup
+/// forwards to the static registry, so it is trivially `Sendable`.
+struct SourceRegistryClassifier: NoteSourceClassifying {
+    var defaultSourceId: String { MeetingSource().id }
+
+    func sourceId(forPlatform platform: String) -> String? {
+        // Exact membership, not `SourceRegistry.source(forPlatform:)`: that
+        // one defaults unknown values to meetings, which would stop the
+        // store's raw-directory fallback from ever running.
+        SourceRegistry.all.first { $0.platforms.contains(platform) }?.id
+    }
+
+    func sourceId(forRawDirectory directory: String) -> String? {
+        SourceRegistry.source(forRawDirectory: directory)?.id
+    }
+}

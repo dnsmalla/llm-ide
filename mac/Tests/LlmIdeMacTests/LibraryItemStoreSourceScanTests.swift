@@ -27,7 +27,8 @@ struct LibraryItemStoreSourceScanTests {
     }
 
     private func scanItem(named name: String, in root: URL) -> LibraryItem? {
-        LibraryItemStore.performScan(root: root, externalFolders: [])
+        LibraryItemStore.performScan(root: root, externalFolders: [],
+                                        classifier: SourceRegistryClassifier())
             .first { $0.name == name }
     }
 
