@@ -60,8 +60,8 @@ enum RecentIssuesResolver {
     /// both and refuses when they disagree — a key built from either one alone
     /// would call two different situations the same.
     private static func projectKey(config: AppConfig, projectStore: ProjectStore) -> String {
-        let workspace = CodeAssistantPanel.deriveActiveProject(from: projectStore.activeProject)?.url
-        let settings = CodeAssistantPanel.deriveActiveProject(fromConfig: config)?.url
+        let workspace = ActiveProjectResolver.project(from: projectStore.activeProject)?.url
+        let settings = ActiveProjectResolver.project(fromConfig: config)?.url
         return "\(workspace ?? "-")|\(settings ?? "-")"
     }
 
@@ -70,8 +70,8 @@ enum RecentIssuesResolver {
     private static func load(config: AppConfig, projectStore: ProjectStore) async
         -> [AgentContext.RecentIssue]
     {
-        let workspaceProject = CodeAssistantPanel.deriveActiveProject(from: projectStore.activeProject)
-        let configProject = CodeAssistantPanel.deriveActiveProject(fromConfig: config)
+        let workspaceProject = ActiveProjectResolver.project(from: projectStore.activeProject)
+        let configProject = ActiveProjectResolver.project(fromConfig: config)
         guard let activeProject = workspaceProject ?? configProject,
               let provider = activeProject.provider else { return [] }
         // The workspace's linked repo and the Settings-active project can

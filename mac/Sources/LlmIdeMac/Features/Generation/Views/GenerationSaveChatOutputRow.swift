@@ -8,7 +8,7 @@ import SwiftUI
 ///
 /// Originally Visual-only (`VisualPromptBar`); hoisted here once Doc Gen
 /// grew its own "Use chat" mode, because the two copies differ ONLY in which
-/// `ChatScope` they read from `ChatEngineRegistry` — everything else (the
+/// `ChatScope` they read the chat output for — everything else (the
 /// completed-reply filter, the double-press dedupe, the disabled/help text)
 /// is identical, and two copies drifting apart is exactly what the
 /// Doc Gen/Visual `Views/Shared` split exists to prevent. Lives under
@@ -21,7 +21,7 @@ struct GenerationSaveChatOutputRow: View {
     @ObservedObject var vm: GenerationViewModel
     let api: LlmIdeAPIClient
     /// Which chat this row reads from — `.visual` or `.docGen`. Each tab's
-    /// `CodeAssistantPanel(scope:)` uses the same value, so this always
+    /// chat panel (`ChatPanelRequest.scope`) uses the same value, so this always
     /// reads the conversation actually on screen for that tab.
     let scope: ChatScope
 
@@ -33,42 +33,14 @@ struct GenerationSaveChatOutputRow: View {
         projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
     }
 
-    /// The shared engine `CodeAssistantPanel(scope: scope, …)` renders for
-    /// this tab — same lookup, so this always reads the conversation
-    /// actually on screen. Registered as an `@Observable` read: this view's
-    /// body re-evaluates whenever `messages` changes, same as the panel
-    /// itself.
-    private var chatEngine: ChatEngine {
-        ChatEngineRegistry.shared.engine(for: scope, api: api)
-    }
-
-    /// The most recent assistant reply, or nil if there isn't one yet.
-    ///
-    /// Requires `status == .done` rather than merely excluding `.streaming`:
-    /// `ChatMessage.Status` also has `.stopped` (the user pressed Stop
-    /// mid-reply — `ChatEngine.finishStreamingTurn` keeps the partial
-    /// streamed text in `content`, only the wire encoder adds a "(stopped)"
-    /// marker) and `.failed` (a turn that errored mid-stream, same partial
-    /// `content` left in place, with the error in `metadata.failedError`).
-    /// Both hold genuinely incomplete text — saving one under this feature's
-    /// normal "Save chat output" label would write a truncated document with
-    /// no indication to the user that it isn't what they think it is.
-    ///
-    /// Broken into explicit, separately-typed steps (find the message, then
-    /// trim its content, then decide) rather than one chained guard: a
-    /// closure predicate combined with `.trimmingCharacters(...).isEmpty`
-    /// negation in a single condition is the same type-checker blowup shape
-    /// `GenerationEditorPanel.generatingTitle` was pulled out to avoid — passing
-    /// today doesn't mean it stays fast (or under the limit) on a different
-    /// toolchain.
+    /// The most recent assistant reply that finished normally, or nil if
+    /// there isn't one yet. Read through `ChatOutputRegistry` (installed by
+    /// Shell) so this feature never names Chat's engine; the provider reads
+    /// the same shared engine the chat panel for `scope` renders, observably,
+    /// so this body re-evaluates whenever that conversation changes. Stopped
+    /// or failed replies are excluded — see `ChatOutputProviding`.
     private var latestAssistantReply: String? {
-        let doneMessages = chatEngine.messages.filter { message -> Bool in
-            message.role == .assistant && message.status == .done
-        }
-        guard let last = doneMessages.last else { return nil }
-        let trimmed: String = last.content.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return nil }
-        return last.content
+        ChatOutputRegistry.shared.latestCompletedAssistantReply(scope: scope, api: api)
     }
 
     var body: some View {

@@ -244,7 +244,10 @@ Sources/LlmIdeMac/
 │   ├── Contracts/            # cross-feature protocols (LoopRunning, MobileFeatureBridge,
 │   │                         #   ChatTransport engine↔transport contract, ChatScope,
 │   │                         #   ShellSection + LibrarySelection, SettingsSectionRegistry
-│   │                         #   (features' Settings cards, registered by Shell), …)
+│   │                         #   (features' Settings cards, registered by Shell),
+│   │                         #   ChatPanelProviding (ChatPanelRegistry: chat panel + code-change
+│   │                         #   sheets features embed, installed by Shell), ChatOutputProviding,
+│   │                         #   EditAcceptanceMode, …)
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/
 │   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
 │   ├── Generation/ · Incidents/ · Memory/ · Verification/
@@ -254,8 +257,10 @@ Sources/LlmIdeMac/
 │   ├── Platform/             # AppDelegate + AppTerminationHooks, FeatureCacheHooks, Config, Theme,
 │   │                         #   KeychainStore, SessionStore, utilities
 │   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding,
-│   │                         #   ProjectExporter (KB → project folder export)
-│   └── Repo/                 # GitLab/GitHub clients behind RepoBackend (Services/Repo/)
+│   │                         #   ProjectExporter (KB → project folder export),
+│   │                         #   ActiveProjectResolver (agent's active project)
+│   └── Repo/                 # GitLab/GitHub clients behind RepoBackend (Services/Repo/),
+│                             #   CodeWorkflowTarget (Models/: code-change sheets' repo target)
 └── ClaudeLink/               # Claude SDK/CLI glue (counted as Core)
 ```
 

@@ -79,12 +79,14 @@ struct DocGenView: View {
                 VStack(spacing: 0) {
                     DocGenPromptBar(vm: vm, api: api)
                     Divider()
-                    CodeAssistantPanel(
+                    // Core seam (`ChatPanelRegistry`): Generation may not
+                    // name Chat's `CodeAssistantPanel`.
+                    ChatPanelView(request: ChatPanelRequest(
                         api: api,
                         scope: .docGen,
                         initialURL: nil,
                         showFileAttachButtons: true,
-                        showModelPicker: true)
+                        showModelPicker: true))
                 }
                 .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                 .transition(.move(edge: .trailing))

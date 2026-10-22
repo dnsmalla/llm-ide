@@ -75,41 +75,17 @@ extension CodeAssistantPanel {
 
     // MARK: - Agent context
 
-    /// Pure derivation: maps an active project (if any) to an
-    /// AgentContext.Project. Extracted as a static fn so unit tests can
-    /// exercise the conversion without instantiating a SwiftUI view.
+    /// Forwards to `ActiveProjectResolver.project(from:)` (Core), which owns
+    /// the derivation now that Issues needs it too. Kept so Chat's call sites
+    /// read the same as before.
     static func deriveActiveProject(from active: ProjectStore.ActiveProject?) -> AgentContext.Project? {
-        guard let active, let linked = active.bundle.settings.linkedRepo else { return nil }
-        return AgentContext.Project(
-            name: active.bundle.displayName,
-            url: linked.url,
-            defaultBranch: linked.defaultBranch,
-            provider: linked.kind == .gitlab ? "GitLab" : "GitHub")
+        ActiveProjectResolver.project(from: active)
     }
 
-    /// Fallback active-project derivation for users who configured a repo via
-    /// Settings → GitLab / GitHub (which populates `config.gitLabSavedProjects`
-    /// / `config.gitHubSavedRepos`) but whose open workspace bundle has no
-    /// `linkedRepo`. Without this, the agent's System context reports
-    /// "(none configured)" and the create-issue skill refuses — even though
-    /// `resolveIssueTarget()` could file the issue. Mirrors that resolver's
-    /// precedence (GitLab first, then GitHub) so the agent's view of the
-    /// active project matches where issues actually get filed.
+    /// Forwards to `ActiveProjectResolver.project(fromConfig:)` (Core) — the
+    /// Settings-configured fallback when the workspace has no linked repo.
     static func deriveActiveProject(fromConfig config: AppConfig) -> AgentContext.Project? {
-        switch config.activeConfigRepo {
-        case .gitlab(let p):
-            let name = !p.displayName.isEmpty ? p.displayName
-                : (URL(string: p.url)?.lastPathComponent ?? "project")
-            return AgentContext.Project(name: name, url: p.url,
-                                        defaultBranch: p.defaultBranch, provider: "GitLab")
-        case .github(let r):
-            let name = !r.displayName.isEmpty ? r.displayName
-                : (URL(string: r.url)?.lastPathComponent ?? "repository")
-            return AgentContext.Project(name: name, url: r.url,
-                                        defaultBranch: r.defaultBranch, provider: "GitHub")
-        case nil:
-            return nil
-        }
+        ActiveProjectResolver.project(fromConfig: config)
     }
 
     /// Builds the per-request snapshot of "what the agent should know":

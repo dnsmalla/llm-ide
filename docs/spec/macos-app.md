@@ -40,6 +40,8 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 
 The folder → layer map is `mac/Scripts/feature-map.txt`, and `mac/Scripts/feature-boundaries.sh` checks it (see "Build-time feature selection" below).
 
+A feature marked `sealed` in that map (CodeGraph, Search, Issues, ReviewConflicts, Terminal, Explorer, SourceControl, Generation, Settings) fails the gate on any reference to another feature; the rest are reported only. The seal covers feature → feature only; references from a feature to Shell types are not checked yet. Features that show the chat beside their content (Explorer, Review Conflicts, Doc Gen, Visual) embed it as `ChatPanelView(request: ChatPanelRequest(…))` and open the Quick Fix / guided code-change sheets as `CodeWorkflowSheetView` — Core seams in `Core/Contracts/ChatPanelProviding.swift` that Shell fills with Chat's `CodeAssistantPanel` / `CodeWorkflowSheet` / `QuickFixSheet` at boot (`FeatureCatalog.installChatSeams()`). Generation's "Save chat output" reads the latest finished reply through `ChatOutputRegistry` (`Core/Contracts/ChatOutputProviding.swift`), never `ChatEngine`.
+
 ---
 
 ## §2 App lifecycle

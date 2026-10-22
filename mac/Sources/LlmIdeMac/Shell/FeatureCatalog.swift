@@ -309,25 +309,36 @@ enum FeatureCatalog {
         #endif
     }
 
-    // MARK: - Chat panel
+    // MARK: - Chat seams
 
-    /// The Code Assistant panel, embedded by Review Conflicts and Visual.
-    /// Those features reach it through this factory rather than naming
-    /// `CodeAssistantPanel`, so Chat's internals can change without touching
-    /// them. Parameters mirror the existing call sites exactly (`ReviewView`
-    /// and `VisualView` both pass `showFileAttachButtons: true,
-    /// showModelPicker: true`; the defaults here match `CodeAssistantPanel`'s
-    /// own so a future caller with fewer arguments still behaves the same).
-    static func codeAssistantPanel(api: LlmIdeAPIClient,
-                                   scope: ChatScope,
-                                   initialURL: URL? = nil,
-                                   showFileAttachButtons: Bool = true,
-                                   showModelPicker: Bool = false) -> AnyView? {
-        AnyView(CodeAssistantPanel(api: api,
-                                   scope: scope,
-                                   initialURL: initialURL,
-                                   showFileAttachButtons: showFileAttachButtons,
-                                   showModelPicker: showModelPicker))
+    /// Install Chat's halves of the Core chat seams. Features embed the chat
+    /// panel (`ChatPanelView`), open the code-change sheets
+    /// (`CodeWorkflowSheetView`) and read chat output (`ChatOutputRegistry`)
+    /// without naming Chat; THIS is the one place that maps those requests to
+    /// Chat's concrete views and engine. Chat is never build-excluded, so the
+    /// installs need no feature guard. Idempotent: every install replaces.
+    ///
+    /// The panel maker forwards every request field to `CodeAssistantPanel`
+    /// unchanged — the request's defaults equal the panel's own, so behaviour
+    /// is identical to constructing the panel at the call site.
+    static func installChatSeams() {
+        let panels = ChatPanelRegistry.shared
+        panels.installPanel { request in
+            AnyView(CodeAssistantPanel(api: request.api,
+                                       scope: request.scope,
+                                       initialURL: request.initialURL,
+                                       showFileAttachButtons: request.showFileAttachButtons,
+                                       showModelPicker: request.showModelPicker))
+        }
+        panels.installCodeWorkflowSheet { request in
+            switch request.kind {
+            case .guided:
+                return AnyView(CodeWorkflowSheet(api: request.api, target: request.target))
+            case .quickFix:
+                return AnyView(QuickFixSheet(api: request.api, target: request.target))
+            }
+        }
+        ChatOutputRegistry.shared.install(ChatEngineOutputProvider())
     }
 
     // MARK: - Terminal

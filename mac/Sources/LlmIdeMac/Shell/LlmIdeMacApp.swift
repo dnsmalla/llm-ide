@@ -262,6 +262,10 @@ public struct LlmIdeMacApp: App {
         // renders Settings, because Settings only renders registry slots and
         // never names the features that fill them.
         FeatureCatalog.registerSettingsSections(api: client)
+        // Chat panel / code-change sheets / chat output for features that may
+        // not name Chat. Before any window renders, for the same reason as
+        // the Settings cards above.
+        FeatureCatalog.installChatSeams()
     }
 
     public var body: some Scene {

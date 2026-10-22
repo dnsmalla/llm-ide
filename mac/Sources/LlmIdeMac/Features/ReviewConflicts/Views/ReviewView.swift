@@ -145,14 +145,13 @@ struct ReviewView: View {
                    idealWidth: hasFile ? 460 : 180,
                    maxWidth: .infinity)
 
-            if chatVisible,
-               let codeAssistantPanel = FeatureCatalog.codeAssistantPanel(
-                   api: api,
-                   scope: .conflicts,
-                   initialURL: activeTabURL,
-                   showFileAttachButtons: true,
-                   showModelPicker: true) {
-                codeAssistantPanel
+            if chatVisible {
+                ChatPanelView(request: ChatPanelRequest(
+                    api: api,
+                    scope: .conflicts,
+                    initialURL: activeTabURL,
+                    showFileAttachButtons: true,
+                    showModelPicker: true))
                     .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                     .transition(.move(edge: .trailing))
             }
@@ -214,11 +213,18 @@ struct ReviewView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("Quick Fix (one screen) or Guided (5 steps) — start a Code update")
+        // The sheets are Chat's; Review Conflicts reaches them through the
+        // Core seam (`ChatPanelRegistry`, installed by Shell) so it never
+        // names Chat.
         .sheet(isPresented: $showWorkflowSheet) {
-            CodeWorkflowSheet(api: api, target: target).environmentObject(appConfig)
+            CodeWorkflowSheetView(request: CodeWorkflowSheetRequest(
+                api: api, target: target, kind: .guided))
+                .environmentObject(appConfig)
         }
         .sheet(isPresented: $showQuickFixSheet) {
-            QuickFixSheet(api: api, target: target).environmentObject(appConfig)
+            CodeWorkflowSheetView(request: CodeWorkflowSheetRequest(
+                api: api, target: target, kind: .quickFix))
+                .environmentObject(appConfig)
         }
     }
 

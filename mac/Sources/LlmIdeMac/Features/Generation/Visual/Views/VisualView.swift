@@ -93,17 +93,16 @@ struct VisualView: View {
             // moves OUTSIDE the split entirely (below) as a fixed-width
             // sibling — see DocGenView, which this mirrors exactly, for why
             // a fixed-width prompt bar must never be an HSplitView child.
-            if chatVisible,
-               let codeAssistantPanel = FeatureCatalog.codeAssistantPanel(
-                   api: api,
-                   scope: .visual,
-                   initialURL: treeSelectedURL,
-                   showFileAttachButtons: true,
-                   showModelPicker: true) {
+            if chatVisible {
                 VStack(spacing: 0) {
                     VisualPromptBar(vm: vm, api: api)
                     Divider()
-                    codeAssistantPanel
+                    ChatPanelView(request: ChatPanelRequest(
+                        api: api,
+                        scope: .visual,
+                        initialURL: treeSelectedURL,
+                        showFileAttachButtons: true,
+                        showModelPicker: true))
                 }
                 .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                 .transition(.move(edge: .trailing))

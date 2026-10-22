@@ -180,11 +180,15 @@ struct ExplorerView: View {
                             .frame(minWidth: 360, maxWidth: .infinity)
 
                         if chatVisible {
-                            CodeAssistantPanel(api: api,
-                                               scope: .explorer,
-                                               initialURL: activeTab,
-                                               showFileAttachButtons: true,
-                                               showModelPicker: true)
+                            // Through the Core seam, not `CodeAssistantPanel`
+                            // directly: Explorer may not name Chat (Shell
+                            // installs the panel into `ChatPanelRegistry`).
+                            ChatPanelView(request: ChatPanelRequest(
+                                api: api,
+                                scope: .explorer,
+                                initialURL: activeTab,
+                                showFileAttachButtons: true,
+                                showModelPicker: true))
                                 .persistedPanelWidth($chatPanelWidth, minWidth: 180, floor: 220)
                                 .transition(.move(edge: .trailing))
                         }
