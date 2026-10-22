@@ -30,7 +30,7 @@ export const FEATURE_ROUTE_GROUPS = Object.freeze({
     prefixes: Object.freeze(['/kb/ingest-code-graph']),
     load: async () => (await import('./code-graph.mjs')).handleCodeGraphRoutes,
   }),
-  // Gantt schedule overlay (Features/Gantt + Features/Issues only).
+  // Gantt schedule overlay (Features/Issues, incl. Issues/Gantt, only).
   gantt_issues: Object.freeze({
     prefixes: Object.freeze(['/kb/issue-schedule']),
     load: async () => (await import('./issue-schedule.mjs')).handleIssueScheduleRoutes,

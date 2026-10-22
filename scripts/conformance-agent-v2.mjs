@@ -322,8 +322,8 @@ if (models.chain.filter((c) => c.fast).length > 1) note('more than one chain ent
 // it fails on exactly the edit that reintroduces the bug — which the registry's
 // own unit assertions do not.
 for (const rel of [
-  'mac/Sources/LlmIdeMac/Features/DocGen/Views/DocGenView.swift',
-  'mac/Sources/LlmIdeMac/Features/Visual/Views/VisualView.swift',
+  'mac/Sources/LlmIdeMac/Features/Generation/DocGen/Views/DocGenView.swift',
+  'mac/Sources/LlmIdeMac/Features/Generation/Visual/Views/VisualView.swift',
 ]) {
   // Strip comments first: the fix's own explanatory doc comment QUOTES the
   // broken line, and a naive scan flags it — which it did, on the first run.

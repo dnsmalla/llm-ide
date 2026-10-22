@@ -235,8 +235,8 @@ enum FeatureCatalog {
     /// The "run against an existing issue" picker, embedded by
     /// `CodeWorkflowSheet` / `QuickFixSheet` — Issues-owned, so it rides on
     /// the same `FEATURE_GANTT` flag as `issuesPane`/`ganttPane` (see
-    /// Package.swift's `libExcludes`: `Features/Gantt` and `Features/Issues`
-    /// are excluded together).
+    /// Package.swift's `libExcludes`: Gantt lives inside `Features/Issues`,
+    /// so the one folder is excluded as a unit).
     static func existingIssuePicker(
         backend: RepoBackend,
         projectId: String,

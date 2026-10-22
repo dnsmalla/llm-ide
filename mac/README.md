@@ -271,8 +271,8 @@ Small and fast is a product goal: a build can leave features out of the compiled
 |---|---|
 | `code_graph_3d` | `Features/CodeGraph` (and the GraphCore/GraphKit products) |
 | `file_explorer` | `Features/Explorer`, `Features/Search`, `Features/SourceControl` |
-| `gantt_issues` | `Features/Issues`, `Features/Gantt` |
-| `doc_gen` | `Features/DocGen`, `Features/Visual`, `Features/Generation` |
+| `gantt_issues` | `Features/Issues` (Gantt lives in `Issues/Gantt/`) |
+| `doc_gen` | `Features/Generation` (Doc Gen and Visual live in `Generation/DocGen/`, `Generation/Visual/`) |
 | `terminal` | `Features/Terminal` (and the SwiftTerm product) |
 | `auto_tasks` | `Features/AutoTask`, `Features/Loop` |
 | `mobile_sync` | `Features/MobileControl` (and the SharedProtocol product) |

@@ -33,7 +33,7 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 **Governed source areas** under `mac/Sources/LlmIdeMac/`:
 
 - `Shell/` — composition root: app entry (`LlmIdeMacApp.swift`), `AppShell`, `FeatureCatalog`, `FeatureRegistry`, `ShellState`, login/recovery/welcome screens, and `Chrome/` (status bar, toolbar, `TerminalPanelState`)
-- `Features/<Name>/` — one folder per section (`Models/`, `Services/`, `Views/`); a feature never references another feature, which is what lets the build-excludable ones be compiled out
+- `Features/<Name>/` — one folder per build-excludable unit (`Models/`, `Services/`, `Views/`); a unit may hold several sections as sub-folders when one `LLMIDE_FEATURES` key excludes them together and they reference each other (`Generation/` holds `DocGen/` + `Visual/`, `Issues/` holds `Gantt/`); a feature never references another feature, which is what lets the build-excludable ones be compiled out
 - `Core/` — leaf infrastructure every layer may use: `Contracts/`, `DesignSystem/`, `Editor/`, `Generation/`, `Incidents/`, `Memory/`, `Networking/`, `Platform/`, `Project/`, `Repo/`, `Verification/`
 - `ClaudeLink/` — Claude SDK/CLI glue, counted as Core
 - `Resources/` — bundled assets

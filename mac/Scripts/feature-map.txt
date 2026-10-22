@@ -9,7 +9,14 @@
 # exempt from the cross-feature BOUNDARY rule (they may reference anything)
 # but are NOT exempt from the build-exclusion rule (see feature-boundaries.sh).
 # Seal a feature only once its collaborators are classified too — sealing
-# early hides real edges to still-unclassified code (see Gantt history).
+# early hides real edges to still-unclassified code (Gantt was once sealed
+# while Issues was still unclassified, so its seal passed only because its
+# edges into Issues were invisible — commit 09693696).
+# Menu items that one LLMIDE_FEATURES key excludes together AND that reference
+# each other are one unit, so they share one folder and one row here: their
+# menu items are sub-folders this prefix owns (Features/Generation/{DocGen,
+# Visual}/, Features/Issues/Gantt/). As separate rows the unit's internal
+# edges were reported as cross-feature — a cycle no seal could ever pass.
 
 Shell/          Shell
 Core/           Core
@@ -19,15 +26,12 @@ Features/AutoTask/     Feature:AutoTask
 Features/Loop/          Feature:Loop
 Features/CodeGraph/    Feature:CodeGraph
 Features/Search/    Feature:Search
-Features/Gantt/    Feature:Gantt
 Features/Issues/    Feature:Issues
 Features/ReviewConflicts/    Feature:ReviewConflicts
-Features/Visual/    Feature:Visual
 Features/Terminal/    Feature:Terminal
 Features/Live/    Feature:Live
 Features/Explorer/    Feature:Explorer
 Features/SourceControl/    Feature:SourceControl
-Features/DocGen/    Feature:DocGen
 Features/Generation/    Feature:Generation
 Features/Settings/    Feature:Settings
 Features/Library/    Feature:Library

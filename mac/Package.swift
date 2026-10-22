@@ -92,7 +92,9 @@ if explorerIncluded {
 if ganttIncluded {
     featureDefines.append(.define("FEATURE_GANTT"))
 } else {
-    libExcludes.append(contentsOf: ["Features/Gantt", "Features/Issues"])
+    // Gantt lives inside Features/Issues (Issues/Gantt/): the two reference
+    // each other and share this flag, so one folder drops both.
+    libExcludes.append("Features/Issues")
     testExcludes.append(contentsOf: [
         "GanttViewModelProviderParityTests.swift",
         "RepoIssuesLoadGateTests.swift",
@@ -105,9 +107,10 @@ if ganttIncluded {
 if docGenIncluded {
     featureDefines.append(.define("FEATURE_DOCGEN"))
 } else {
-    // Features/Visual mirrors Doc Gen's generation flow and rides on the same
-    // flag (see ShellState.Section.backingFeature) — exclude it here too.
-    libExcludes.append(contentsOf: ["Features/DocGen", "Features/Visual", "Features/Generation"])
+    // Doc Gen and Visual (Generation/DocGen/, Generation/Visual/) both build
+    // on the shared generation views in Generation/Views/ and ride on this one
+    // flag (see ShellState.Section.backingFeature), so one folder drops all three.
+    libExcludes.append("Features/Generation")
     // GenerationViewModelTests stays compiled: GenerationViewModel lives in
     // Core/Generation. GenerationTreeSelection, however, lives under the
     // excluded Features/Generation/Views, so its test must go with it.

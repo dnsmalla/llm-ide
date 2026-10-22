@@ -403,7 +403,8 @@ fi
 #    CI step. This is exactly how conformance-agent-v2.mjs kept hardcoding
 #    the pre-migration Views/DocGen/DocGenView.swift and
 #    Views/Visual/VisualView.swift after the Features/ migration moved both
-#    (to Features/DocGen/Views/ and Features/Visual/Views/), undetected through three reviews
+#    (to Features/DocGen/Views/ and Features/Visual/Views/, since merged into
+#    Features/Generation/{DocGen,Visual}/Views/), undetected through three reviews
 #    because every one of them only re-ran Swift builds and the boundary
 #    gate above.
 #

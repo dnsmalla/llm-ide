@@ -152,18 +152,21 @@ llm-ide/
 │   │   │   │                #   (GitHub/GitLab adapters + RepoBackendFactory in Services/Repo/),
 │   │   │   │                #   RepoFileWatcher, RepoGraphLocator
 │   │   │   └── Verification/#   Verify-approval store, RegressionRunner, fault verify/repair (Loop's)
-│   │   ├── Features/    # One folder per ShellState.Section menu item + 4 non-menu features
-│   │   │   │            #   (Chat, MobileControl, Generation, Terminal). Normally
-│   │   │   │            #   {Models,Services,Views}; MUST NOT reference another feature.
+│   │   ├── Features/    # One folder per build-excludable unit (a unit may hold several
+│   │   │   │            #   menu items as sub-folders: Generation/{DocGen,Visual},
+│   │   │   │            #   Issues/Gantt) + the non-menu features (Chat, MobileControl,
+│   │   │   │            #   Terminal). Normally {Models,Services,Views}; MUST NOT
+│   │   │   │            #   reference another feature.
 │   │   │   ├── Library/ · Live/ · Explorer/ · Search/ · ReviewConflicts/ · SourceControl/
-│   │   │   ├── Issues/ · Gantt/ · Visual/ · DocGen/ · AutoTask/ · CodeGraph/ · Loop/ · Settings/
+│   │   │   ├── Issues/ (+ Gantt/) · AutoTask/ · CodeGraph/ · Loop/ · Settings/
 │   │   │   ├── Chat/    #   splits further: Models/ (incl. DiffStats, ProposedEdit, ProposedPlan)
 │   │   │   │            #   Engine/ Session/ Transport/ (CodeAssistTransport, AgentV2Selection)
 │   │   │   │            #   Services/ Views/ (Panel/ = CodeAssistant
 │   │   │   │            #   + its action sheets, Quick/ = menu bar + sheet, Shared/)
 │   │   │   ├── MobileControl/  # WebSocket server, Bonjour, PIN cache, pairing UI
-│   │   │   ├── Generation/     # Doc Gen + Visual's shared generation VIEWS (not the
-│   │   │   │                   #   registry/view-model, which stay in Core/Generation)
+│   │   │   ├── Generation/     # the doc_gen unit: Views/ = Doc Gen + Visual's shared
+│   │   │   │                   #   generation views, DocGen/ + Visual/ = the two menu
+│   │   │   │                   #   items (registry/view-model stay in Core/Generation)
 │   │   │   └── Terminal/       # excludable; Shell/Chrome/TerminalPanelState.swift stays
 │   │   │                       #   in Shell — see invariants.md
 │   │   ├── Shell/       # Composition root — the ONLY layer permitted to name every feature:
@@ -228,9 +231,9 @@ Rule: **`Shell → Features → Core`**. A feature may import `Core`. A feature 
 
 Enforced **textually** by `mac/Scripts/feature-boundaries.sh` (run by `make regression`), because Swift has one module here — nothing at the compiler level stops one feature folder from importing another.
 
-Always compiled (never build-excludable): `Shell/`, `Core/`, `ClaudeLink/` and the features **Chat, Library, Live, Settings, ReviewConflicts** — Chat is the product's one non-excludable feature (`agent_chat`), and the other four have no `LLMIDE_FEATURES` key of their own, so they ship in every build, `make build-mac-min` included. Every other `Features/` folder is excluded by one of the seven `LLMIDE_FEATURES` keys in `mac/Package.swift`, which also applies the `file_explorer` dependency closure itself (dropping `file_explorer` drops `code_graph_3d`, `gantt_issues` and `doc_gen` with it, mirroring `AppFeature.requiredDependencies`).
+Always compiled (never build-excludable): `Shell/`, `Core/`, `ClaudeLink/` and the features **Chat, Library, Live, Settings, ReviewConflicts** — Chat is the product's one non-excludable feature (`agent_chat`), and the other four have no `LLMIDE_FEATURES` key of their own, so they ship in every build, `make build-mac-min` included. Every other `Features/` folder is excluded by one of the seven `LLMIDE_FEATURES` keys in `mac/Package.swift`, which also applies the `file_explorer` dependency closure itself (dropping `file_explorer` drops `code_graph_3d`, `gantt_issues` and `doc_gen` with it, mirroring `AppFeature.requiredDependencies`). Menu items that one key excludes together **and** that reference each other are one folder, not several: `doc_gen` excludes the single `Features/Generation/` (shared generation views + `DocGen/` + `Visual/`), `gantt_issues` the single `Features/Issues/` (+ `Gantt/`). As separate folders their mutual references were cross-feature cycles that no seal could ever pass; inside one folder they are intra-feature. The menu items themselves stay separate (`ShellSection.backingFeature`).
 
-**The gate currently REPORTS but does not yet ENFORCE the feature/feature rule.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`, and **no feature carries it yet**. 31 known cross-feature references currently emit `warn` and the gate still exits 0 because of them — do not assume a cross-feature reference fails the build today; it does not.
+**The gate currently REPORTS but does not yet ENFORCE the feature/feature rule.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`, and **no feature carries it yet**. 15 known cross-feature references currently emit `warn` and the gate still exits 0 because of them — do not assume a cross-feature reference fails the build today; it does not.
 
 The gate's seven checks that **do** fail the build (exit 1) today:
 1. Any **always-compiled layer** (`Shell`, `Core`, `ClaudeLink`, Chat, Library, Live, Settings, ReviewConflicts — derived from `feature-map.txt` minus the excludable folders, not hard-coded) referencing a symbol owned by a build-excludable `Features/` folder without the matching `#if FEATURE_*` guard. Before, only `Shell`/`Core` were scanned, so an unguarded edge from an unsealed always-compiled feature passed the gate and surfaced only as a compile error in a reduced build.
