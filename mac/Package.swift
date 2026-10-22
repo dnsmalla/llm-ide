@@ -9,19 +9,25 @@ import PackageDescription
 // SwiftPM does not key its manifest cache on env vars — selection changes
 // must build with `--manifest-cache none` (the Makefile targets do).
 //
-// NOTE: the dependency closure over `AppFeature.requiredDependencies` (e.g.
-// disabling `file_explorer` also disables `code_graph_3d`/`gantt_issues`/
-// `doc_gen`) is NOT applied here — this manifest trusts whatever set it is
-// given. Callers (the Phase 3 selection script, Makefile targets) are
-// responsible for passing an already-validated set, e.g. via
-// `AppFeature.validated(_:)`.
+// NOTE: the dependency closure over `AppFeature.requiredDependencies` IS
+// applied here (code_graph_3d / gantt_issues / doc_gen each require
+// file_explorer), because a hand-typed LLMIDE_FEATURES never passes through
+// `AppFeature.validated(_:)` the way Settings / Apply & Rebuild do. Without
+// it such a build compiles in features the app's own validated set then
+// refuses to enable, so the binary carries dead code and its compiled set
+// disagrees with what drift detection expects. The manifest cannot import
+// AppFeature, so the closure is restated below; keep it in step with
+// `AppFeature.requiredDependencies`.
 let envFeatures = ProcessInfo.processInfo.environment["LLMIDE_FEATURES"]
-let includedFeatures: Set<String> = envFeatures.map {
+let requestedFeatures: Set<String> = envFeatures.map {
     Set($0.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) })
 } ?? [   // unset → everything (list each excludable key here)
     "code_graph_3d", "file_explorer", "gantt_issues", "doc_gen", "terminal", "auto_tasks",
     "mobile_sync",
 ]
+let includedFeatures: Set<String> = requestedFeatures.contains("file_explorer")
+    ? requestedFeatures
+    : requestedFeatures.subtracting(["code_graph_3d", "gantt_issues", "doc_gen"])
 
 let graphIncluded = includedFeatures.contains("code_graph_3d")
 let explorerIncluded = includedFeatures.contains("file_explorer")
@@ -52,6 +58,10 @@ if graphIncluded {
         "GraphModuleTests.swift",
         "LoopGraphRescannerTests.swift",
         "IssuesGanttGraphFixesTests.swift",
+        "CodeGraphCitationUploadTests.swift",
+        "CodeNoteGeneratorCallsTests.swift",
+        "CodeNoteGeneratorKindsTests.swift",
+        "CodeNoteServiceSupersedeTests.swift",
     ])
 }
 if explorerIncluded {
@@ -61,12 +71,32 @@ if explorerIncluded {
     // ruling: option b) — they're navigated to via the Explorer's panel-header
     // switcher (PanelSectionTabs) and make little sense without a file tree.
     libExcludes.append(contentsOf: ["Features/Explorer", "Features/Search", "Features/SourceControl"])
+    // Tests naming an Explorer/Search/SourceControl type. TextFileWriter
+    // itself is Core, but TextFileWriterTests pins its size cap against
+    // SearchEngine.maxFileBytes, so the whole file goes with Search.
+    testExcludes.append(contentsOf: [
+        "ExplorerClipboardTests.swift",
+        "ExplorerDragPayloadTests.swift",
+        "ExplorerFileOpsTests.swift",
+        "ExplorerKeyCommandTests.swift",
+        "ExplorerTreeStorePersistenceTests.swift",
+        "ExplorerTreeStoreTests.swift",
+        "ExplorerTreeStoreWatchTests.swift",
+        "SearchEngineTests.swift",
+        "SearchReplaceTests.swift",
+        "SearchStreamTests.swift",
+        "SearchTruncationTests.swift",
+        "TextFileWriterTests.swift",
+    ])
 }
 if ganttIncluded {
     featureDefines.append(.define("FEATURE_GANTT"))
 } else {
     libExcludes.append(contentsOf: ["Features/Gantt", "Features/Issues"])
-    testExcludes.append("GanttViewModelProviderParityTests.swift")
+    testExcludes.append(contentsOf: [
+        "GanttViewModelProviderParityTests.swift",
+        "RepoIssuesLoadGateTests.swift",
+    ])
     // Also listed under graph — SwiftPM rejects duplicate exclude entries.
     if !testExcludes.contains("IssuesGanttGraphFixesTests.swift") {
         testExcludes.append("IssuesGanttGraphFixesTests.swift")
@@ -75,13 +105,13 @@ if ganttIncluded {
 if docGenIncluded {
     featureDefines.append(.define("FEATURE_DOCGEN"))
 } else {
-    // DocGenViewModelTests.swift / DocGenTreeSelectionTests.swift moved to
-    // GenerationViewModelTests.swift / GenerationTreeSelectionTests.swift
-    // alongside their subjects' move to Views/Shared (always compiled), so
-    // there is no longer a doc_gen-specific test file to exclude here.
-    // Views/Visual mirrors Doc Gen's generation flow and rides on the same
+    // Features/Visual mirrors Doc Gen's generation flow and rides on the same
     // flag (see ShellState.Section.backingFeature) — exclude it here too.
     libExcludes.append(contentsOf: ["Features/DocGen", "Features/Visual", "Features/Generation"])
+    // GenerationViewModelTests stays compiled: GenerationViewModel lives in
+    // Core/Generation. GenerationTreeSelection, however, lives under the
+    // excluded Features/Generation/Views, so its test must go with it.
+    testExcludes.append("GenerationTreeSelectionTests.swift")
 }
 if terminalIncluded {
     featureDefines.append(.define("FEATURE_TERMINAL"))
@@ -152,6 +182,32 @@ if autoTasksIncluded {
         "LoopStageDetectorTestLoopTests.swift",
         "LoopStageDetectorRefactorLoopTests.swift",
         "TestLedgerTests.swift",
+        "AutoCodeUpdateServiceCancelTests.swift",
+        "AutoCodeUpdateServiceLoopLaneTests.swift",
+        "AutoTaskTemplateApprovalTests.swift",
+        "AutoTaskWorktreeTests.swift",
+        "ConfigHardeningTests.swift",
+        "CronExpressionTests.swift",
+        "GraphIndexCallsTests.swift",
+        "GraphReportTests.swift",
+        "IssueImplementWorktreeTests.swift",
+        "LoopAgentRunningTests.swift",
+        "LoopArtifactCheckTests.swift",
+        "LoopAttemptLedgerTests.swift",
+        "LoopConfigBlessGateTests.swift",
+        "LoopFinalFixTests.swift",
+        "LoopPauseTimeoutTests.swift",
+        "LoopPhase1FixTests.swift",
+        "LoopSmartRunFlowTests.swift",
+        "LoopStageCodeGraphKindTests.swift",
+        "LoopStoreCacheTests.swift",
+        "LoopStoreVersioningTests.swift",
+        "MobileLoopSnapshotTests.swift",   // also in mobile_sync's list — deduped there
+        "MobileLoopStopTests.swift",       // also in mobile_sync's list — deduped there
+        "RegressionFaultSyncTests.swift",
+        "ReviewMergeCandidatesTests.swift",
+        "TestFailureExtractorTests.swift",
+        "VerifyCommandBuilderTests.swift",
     ])
 }
 if mobileIncluded {
@@ -184,10 +240,18 @@ if mobileIncluded {
         "MobileLoopStateTests.swift",   // also in auto_tasks's list — dedupe below
         "ExplorerMobileEngineResolverTests.swift",
         "MobileModuleTests.swift",
+        "MobileExploreScopeTests.swift",
+        "MobileExploreTurnPolicyTests.swift",
+        "MobileInflightTaskTests.swift",
+        "MobileLoopSnapshotTests.swift",   // also in auto_tasks's list — dedupe below
+        "MobileLoopStopTests.swift",       // also in auto_tasks's list — dedupe below
+        "MobilePairedDeviceExpiryTests.swift",
+        "MobilePhoneApprovalHookTests.swift",
+        "MobilePinValidationTests.swift",
     ]
-    // Dedupe against auto_tasks's testExcludes (MobileLoopStateTests can
-    // appear in both when auto_tasks is also excluded) — SwiftPM does not
-    // tolerate duplicate exclude entries.
+    // Dedupe against auto_tasks's testExcludes (the MobileLoop*Tests files
+    // marked above appear in both when auto_tasks is also excluded) — SwiftPM
+    // does not tolerate duplicate exclude entries.
     for name in mobileTestExcludes where !testExcludes.contains(name) {
         testExcludes.append(name)
     }
