@@ -524,6 +524,24 @@ find "$TESTROOT" -name '*.swift' -print0 | xargs -0 perl -e '
   }
 ' "$TESTROOT" "$TESTROOT_STRIPPED"
 
+# Guard against a vacuous pass: the two lists below come from textual parsers
+# of Package.swift and Sources/. If either parser silently yields nothing (a
+# reformatted manifest, a changed declaration style), the loop would run zero
+# times and report success without checking anything — so demand that every
+# flag the flagmap knows is present with an L row, and that the declaration
+# index is non-trivial, before trusting the result.
+expected_flags="$(awk -F'\t' '{print $1}' "$WORK/flagmap.txt" | sort -u)"
+parsed_flags="$(awk -F'\t' '$1=="L"{print $2}' "$WORK/flag-excludes.txt" | sort -u)"
+if [ -z "$parsed_flags" ] || [ "$expected_flags" != "$parsed_flags" ]; then
+  echo "  ERROR check 6 parser: flags with an L row in Package.swift ($(echo $parsed_flags | tr '\n' ' ')) != flagmap ($(echo $expected_flags | tr '\n' ' '))" >&2
+  status=1
+fi
+decl_count="$(wc -l < "$WORK/toplevel-decls.txt" | tr -d ' ')"
+if [ "$decl_count" -lt 100 ]; then
+  echo "  ERROR check 6 parser: only $decl_count top-level declarations indexed under Sources/ (expected hundreds)" >&2
+  status=1
+fi
+
 : > "$WORK/test-exclude-gaps.txt"
 for flag in $(awk -F'\t' '$1=="L"{print $2}' "$WORK/flag-excludes.txt" | sort -u); do
   awk -F'\t' -v f="$flag" '$1=="L" && $2==f {print "LlmIdeMac/" $3}' "$WORK/flag-excludes.txt" > "$WORK/paths.$flag"
