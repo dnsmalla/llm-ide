@@ -5,6 +5,7 @@ import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { handleKB, initFeatureRoutes } from './routes/router.mjs';
+import { prewarmAgentEngine } from './routes/agent-v2.mjs';
 import { enabledEndpoints } from './routes/feature-routes.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
@@ -1200,4 +1201,11 @@ server.listen(PORT, HOST, () => {
     pid: process.pid,
     config: configSummary(),
   });
+  // The v2 chat engine + Agent SDK are not on the boot path (routes/agent-v2.mjs
+  // loads them lazily), so /health answers ~200 ms sooner. Import them now,
+  // off the listen callback, so the first chat turn does not pay that cost
+  // either. Never throws — a failure is logged and the first turn retries.
+  if (config.enginePrewarm) {
+    setImmediate(() => { void prewarmAgentEngine(); });
+  }
 });

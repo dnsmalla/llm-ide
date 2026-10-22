@@ -42,6 +42,9 @@ async function withServer(features, fn) {
     LLMIDE_DB_PATH: path.join(dir, 'kb.db'),
     LLMIDE_JWT_SECRET: 'a'.repeat(48), LLMIDE_VAULT_KEY: 'b'.repeat(48),
     LLMIDE_BACKUP_INTERVAL_HOURS: '0',
+    // The health checks never need the chat engine; skip the post-listen prewarm
+    // so the spawned server is not charged ~65 ms of import on every run.
+    LLMIDE_ENGINE_PREWARM: '0',
   };
   // The node test runner marks its children; the server must boot as itself.
   delete env.NODE_TEST_CONTEXT;

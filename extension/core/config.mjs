@@ -210,6 +210,12 @@ export const config = Object.freeze({
   // so routing, /health and ENDPOINTS all read the same set.
   features:     parseFeatures(process.env.LLMIDE_FEATURES),
 
+  // Import the v2 chat engine + Agent SDK right after listen (server.mjs) so
+  // the first chat turn does not pay ~200 ms of module loading; boot itself
+  // never loads them. LLMIDE_ENGINE_PREWARM=0 skips it — module-count and
+  // boot-time measurements set it so they see boot cost only.
+  enginePrewarm: envBool('LLMIDE_ENGINE_PREWARM', true),
+
   // Database
   // Under the Node test runner (it sets NODE_TEST_CONTEXT in every test
   // process) a test that forgets LLMIDE_DB_PATH gets a per-process temp DB,

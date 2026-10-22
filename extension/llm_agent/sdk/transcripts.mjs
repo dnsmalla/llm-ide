@@ -9,7 +9,9 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { agentSdkHomeFor } from './engine.mjs';
+// From ./auth.mjs, not engine.mjs: routes/agent-v2.mjs imports this module at
+// boot, and engine.mjs would drag the Agent SDK onto the boot path with it.
+import { agentSdkHomeFor } from './auth.mjs';
 
 // Best-effort SDK transcript cleanup. KEYED turns run under the per-user
 // CLAUDE_CONFIG_DIR (agentSdkHomeFor); AMBIENT turns run under the

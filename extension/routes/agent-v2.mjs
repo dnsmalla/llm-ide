@@ -14,9 +14,9 @@
 //     true  = route handled (response written)
 //     false = not an /agent/v2/* request — caller continues dispatch
 // The `deps` seam ({ runTurn }) is how the tests fake the engine;
-// production always runs the real runAgentV2Turn.
+// production always runs the real runAgentV2Turn, loaded lazily (below).
 
-import { runAgentV2Turn, AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs';
+import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/constants.mjs';
 import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
 import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
@@ -42,6 +42,63 @@ import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
 
 const log = logger.child({ component: 'agent-v2' });
+
+// --- Lazy engine ---------------------------------------------------------------
+//
+// engine.mjs imports the Agent SDK and the whole engine graph (~200 ms of
+// module loading, measured). router.mjs imports this module statically, so a
+// static engine import put that cost on every server boot before /health could
+// answer. The engine is imported on the first turn instead — and server.mjs
+// prewarms it right after listen (prewarmAgentEngine), so in practice the first
+// turn does not pay it either.
+//
+// Memoised; a REJECTED import clears the memo so a transient failure (a
+// half-finished SDK update on disk, say) is retried on the next turn instead
+// of failing every turn until restart.
+const importEngine = () => import('../llm_agent/sdk/engine.mjs');
+let engineImporter = importEngine;
+let enginePromise = null;
+
+/** The engine module, imported once. Rejects (without memoising) on failure. */
+export function loadAgentEngine() {
+  enginePromise ??= Promise.resolve()
+    .then(() => engineImporter())
+    .catch((err) => { enginePromise = null; throw err; });
+  return enginePromise;
+}
+
+/** Tests only: swap the importer (null = the real one) and forget the memo. */
+export function __setEngineImporterForTest(fn) {
+  engineImporter = fn ?? importEngine;
+  enginePromise = null;
+}
+
+// The production `runTurn`. It awaits the import INSIDE the route's turn
+// try/catch, so an import failure ends the stream with the same terminal
+// ENGINE_ERROR event as any other engine failure.
+export async function runEngineTurn(args) {
+  const { runAgentV2Turn } = await loadAgentEngine();
+  return runAgentV2Turn(args);
+}
+
+/**
+ * Imports the engine ahead of the first turn. Never throws: a failure is
+ * logged and the memo is already cleared, so the first real turn retries.
+ * @returns {Promise<{ ok: boolean, ms: number }>}
+ */
+export async function prewarmAgentEngine({ log: out = log } = {}) {
+  const started = performance.now();
+  try {
+    await loadAgentEngine();
+    const ms = Math.round(performance.now() - started);
+    out.info('engine_prewarmed', { ms });
+    return { ok: true, ms };
+  } catch (err) {
+    const ms = Math.round(performance.now() - started);
+    out.warn('engine_prewarm_failed', { ms, error: err?.message || String(err) });
+    return { ok: false, ms };
+  }
+}
 
 // Mirrors buildEngineOptions' mode default so the mode_set echo reports
 // what actually ran. Keep the two in sync.
@@ -166,7 +223,7 @@ export function freshTurnHistory(body) {
 export async function handleAgentV2Routes(
   req,
   res,
-  deps = { runTurn: runAgentV2Turn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand },
+  deps = { runTurn: runEngineTurn, classifyMode: classifyCodeAssistMode, expandSlash: expandUserSlashCommand },
 ) {
   const url = req.url || '';
   if (!url.startsWith('/agent/v2')) return false;

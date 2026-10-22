@@ -23,10 +23,8 @@
 // `deps` ({ runAgent, validateRoot }) is the tests' seam for the engine.
 
 import { randomUUID } from 'node:crypto';
-import {
-  runLoopAgent, validateLoopRepoRoot, validateLoopExtraRoots, MAX_LOOP_MESSAGE_CHARS,
-} from '../llm_agent/sdk/loop-agent.mjs';
-import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/engine.mjs';
+// constants.mjs, not engine.mjs: a route must not load the chat engine for one string.
+import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/constants.mjs';
 import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { getDb, recordToolEvents } from '../kb/db.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
@@ -89,10 +87,35 @@ function meterRun(userId, out, requestedModel, turnId, provider = AGENT_SDK_PROV
   } catch { /* metering is best-effort */ }
 }
 
+// The Loop engine (llm_agent/sdk/loop-agent.mjs) imports the Agent SDK and
+// engine.mjs. This route module is loaded at boot whenever auto_tasks is
+// enabled (routes/feature-routes.mjs), so a static import put the SDK and the
+// whole chat engine on every default boot. Imported on the first Loop run
+// instead; memoised, and a rejected import is forgotten so the next run
+// retries rather than failing until restart.
+let loopEnginePromise = null;
+function loadLoopEngine() {
+  loopEnginePromise ??= import('../llm_agent/sdk/loop-agent.mjs')
+    .catch((err) => { loopEnginePromise = null; throw err; });
+  return loopEnginePromise;
+}
+
 export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}) {
   if (!(req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/agent-run')) return false;
-  const runAgent = deps.runAgent ?? runLoopAgent;
-  const validateRoot = deps.validateRoot ?? validateLoopRepoRoot;
+  let engine;
+  try {
+    engine = await loadLoopEngine();
+  } catch (err) {
+    // Same answer as a run that failed inside the engine (see the catch below).
+    process.stderr.write(`[loop-agent] engine import failed: ${err?.message || err}\n`);
+    sendJSON(res, 502, {
+      error: { code: 'INTERNAL_ERROR', message: 'The Loop agent run failed. Please try again.' },
+    });
+    return true;
+  }
+  const { validateLoopExtraRoots, MAX_LOOP_MESSAGE_CHARS } = engine;
+  const runAgent = deps.runAgent ?? engine.runLoopAgent;
+  const validateRoot = deps.validateRoot ?? engine.validateLoopRepoRoot;
 
   const body = parseJSON(await readBody(req, 2 * 1024 * 1024));
   if (!body || typeof body !== 'object') return validationError(res, 'Body must be a JSON object');

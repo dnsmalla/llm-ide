@@ -33,3 +33,13 @@ The server honours `LLMIDE_FEATURES`, the comma-separated list of ENABLED featur
 - **The outcome poller stays unconditional** — `/kb/dispatch` and review approvals (always-on) are what write the dispatched tasks it polls.
 - Tests: `tests/feature-config.test.mjs`, `tests/feature-routes.test.mjs`, `tests/server-features-health.test.mjs` (spawns `server.mjs`; needs local listen).
 
+### Lazy engine
+
+The Claude Agent SDK and the v2 chat engine (`llm_agent/sdk/engine.mjs`) are never on the boot path — nothing `server.mjs` imports statically (router, `server/*-routes.mjs`, the `auto_tasks` Loop route) loads them.
+
+- **Chat**: `routes/agent-v2.mjs` imports the engine on the first turn through `loadAgentEngine()` (memoised; a rejected import is forgotten so the next turn retries, and the failure reaches the client as the usual terminal `ENGINE_ERROR` event).
+- **Prewarm**: right after `server_started`, `server.mjs` calls `prewarmAgentEngine()` on `setImmediate` and logs `engine_prewarmed {ms}` or `engine_prewarm_failed`. `LLMIDE_ENGINE_PREWARM=0` (`config.enginePrewarm`) skips it — set it when measuring boot cost or module counts.
+- **Also lazy**: the SDK in `llm_agent/sdk/models.mjs` (first model listing), `spike-engine.mjs` in `server/ai-routes.mjs`, and `llm_agent/sdk/loop-agent.mjs` in `routes/loop-agent.mjs` (first Loop run).
+- **Constants a route needs** come from `llm_agent/sdk/constants.mjs` (`AGENT_SDK_PROVIDER`, `RESERVED_MCP_NAME`; no imports), and the auth ladder + engine home from `llm_agent/sdk/auth.mjs` (no SDK). `engine.mjs` re-exports all of them. Never import `engine.mjs` or the SDK statically from a module on the boot path — add the value to one of those two files instead.
+- Test: `tests/lazy-engine.test.mjs` (module-load hook over the boot path; also spawns `server.mjs`, so it needs local listen).
+

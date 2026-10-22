@@ -57,7 +57,6 @@ import { expandTilde } from '../../graphkit/memory.mjs';
 import { redactFence } from '../runtime/redaction.mjs';
 import { persistTurnMemory } from '../runtime/memory-persist.mjs';
 import { isBareGreeting } from '../runtime/memory-extract.mjs';
-import { config } from '../../core/config.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
@@ -67,7 +66,7 @@ import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory
 import { selectSessionMemory } from '../runtime/session-memory-select.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
-import { getSecret, makeSecretReader } from '../../server/vault.mjs';
+import { makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { resolveCustomProviderDispatch, isDecisionOnlyProvider, DECISION_ONLY_MESSAGE } from '../../providers/providers.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
@@ -82,28 +81,15 @@ import {
 } from '../../kb/tool-permissions.mjs';
 import { runBashGate, writePathGate } from '../tools/gates.mjs';
 import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
+import { AGENT_SDK_PROVIDER, RESERVED_MCP_NAME } from './constants.mjs';
+import { resolveAnthropicKey, agentSdkHomeFor } from './auth.mjs';
 
-// The provider id every SDK-engine turn runs on — the usage ledger and the
-// route layer meter against this instead of hardcoding the string, so "which
-// provider the Agent SDK is" stays linker knowledge.
-export const AGENT_SDK_PROVIDER = 'anthropic';
-
-// --- Auth: per-user vault key first, operator env as fallback -------------
-// (Moved here from spike-engine.mjs, which re-exports it for compatibility —
-// the v2 runner and the spike share one auth ladder.)
-
-export function resolveAnthropicKey(userId) {
-  if (userId) {
-    try {
-      const key = getSecret(getDb(), userId, 'claude.apiKey');
-      if (key) return { key, source: 'vault' };
-    } catch {
-      // Vault miss/unavailable — fall through to the environment.
-    }
-  }
-  if (process.env.ANTHROPIC_API_KEY) return { key: process.env.ANTHROPIC_API_KEY, source: 'env' };
-  return { key: null, source: 'none' };
-}
+// AGENT_SDK_PROVIDER / RESERVED_MCP_NAME live in ./constants.mjs and the auth
+// ladder + engine home in ./auth.mjs — both SDK-free, so routes and the boot
+// path can use them without loading this module (see those files). Re-exported
+// here so every existing importer of engine.mjs keeps working.
+export { AGENT_SDK_PROVIDER, RESERVED_MCP_NAME };
+export { resolveAnthropicKey, agentSdkHomeFor };
 
 // --- Provider → SDK auth (Anthropic-compatible gateways) ---------------------
 //
@@ -151,28 +137,6 @@ export function resolveAgentEngineAuth(provider, userId, { resolveCustom = resol
     : `The Agent engine runs on Anthropic-compatible providers only; "${provider}" is not one.`);
   err.code = 'PROVIDER_NOT_AGENT_CAPABLE';
   throw err;
-}
-
-// --- Per-user engine homes (spec §6/§11) --------------------------------------
-//
-// CLAUDE_CONFIG_DIR = <dataDir>/agent-sdk/<userId>/ isolates each tenant's
-// SDK transcripts and credentials (settingSources: [] isolates the operator's
-// SETTINGS; the config dir isolates everything else the SDK writes). Applied
-// to KEYED turns only: an ambient-auth turn relies on the operator's
-// `claude login`, which lives under the operator's default config dir, so
-// redirecting it would leave the subprocess "Not logged in". The base
-// follows the server's canonical data dir — the DB's directory (core/config:
-// <repo>/kb by default, wherever LLMIDE_DB_PATH points) — so engine homes sit
-// next to the other per-install runtime data. User ids are server-minted hex
-// (users.mjs); the charset guard keeps even a hand-edited id from escaping
-// the base via path traversal. Shared by the runner (composes the env every
-// keyed turn) and the route's transcript cleanup — one derivation, never two.
-
-const USER_ID_RE = /^[A-Za-z0-9_-]+$/;
-
-export function agentSdkHomeFor(userId) {
-  if (typeof userId !== 'string' || !USER_ID_RE.test(userId)) return null;
-  return path.join(path.dirname(config.dbPath), 'agent-sdk', userId);
 }
 
 // --- Auth → engine home + subprocess env (shared by chat and the Loop) ---------
@@ -417,9 +381,9 @@ export function v2ToolPolicyForMode(mode) {
   };
 }
 
-// The in-process llmide server owns this name; a user server answering to it
-// would REPLACE llm-ide's own tool surface for the turn.
-const RESERVED_MCP_NAME = 'llmide';
+// The in-process llmide server owns RESERVED_MCP_NAME (./constants.mjs); a
+// user server answering to it would REPLACE llm-ide's own tool surface for
+// the turn.
 
 /**
  * The user's own MCP servers for one turn, in SDK `mcpServers` shape, plus the

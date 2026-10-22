@@ -4,7 +4,6 @@ import { selectAttachments, splitImageAttachments, buildSkillsText } from '../co
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
-import { runSpikeQuery } from '../llm_agent/sdk/spike-engine.mjs';
 import { selectHistoryTurns } from '../llm_agent/runtime/loop.mjs';
 import { config } from '../core/config.mjs';
 import { readSkillInstructions } from '../llm_agent/skills/index.mjs';
@@ -398,6 +397,10 @@ export async function handleAIRoutes(req, res) {
     };
     writeEvent({ type: 'spike_start', keyHint: 'resolving…' });
     try {
+      // Imported per request, not at module load: spike-engine.mjs imports the
+      // Agent SDK, and this module is on server.mjs's boot path. An import
+      // failure lands in the catch below like any other spike failure.
+      const { runSpikeQuery } = await import('../llm_agent/sdk/spike-engine.mjs');
       const out = await runSpikeQuery({
         prompt,
         userId: req.user?.id,

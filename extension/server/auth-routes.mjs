@@ -62,6 +62,7 @@ function oauthCallbackHtml(res, msg, status = 200) {
 }
 import { recordAudit } from './audit.mjs';
 import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
+import { RESERVED_MCP_NAME } from '../llm_agent/sdk/constants.mjs';
 import { getUserPrefs, setUserPrefs, revokeJti } from '../kb/db.mjs';
 
 function send(res, status, body) {
@@ -1662,9 +1663,9 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       effectiveIds = new Set(Object.keys(effectiveMcpServers(req.user.id, {
         pluginEnabled: pluginEnabledFor(req.user.id),
       })));
-      // The engine refuses a server named `llmide` (RESERVED_MCP_NAME in
-      // llm_agent/sdk/engine.mjs, which a route should not import for one string).
-      effectiveIds.delete('llmide');
+      // The engine refuses a server with this name (llm_agent/sdk/engine.mjs
+      // buildUserMcpServers); the constant lives in the SDK-free constants.mjs.
+      effectiveIds.delete(RESERVED_MCP_NAME);
     } catch (err) {
       logger?.warn?.(`mcp-plugins: could not compute effective flags: ${err?.message || err}`);
       // `effective` stays off; the client falls back to enabled && consented.

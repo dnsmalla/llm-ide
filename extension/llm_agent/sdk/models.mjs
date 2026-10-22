@@ -12,9 +12,12 @@
 // Cached per auth identity for a while: the list changes on model releases,
 // not per turn, and each call spawns the CLI.
 
-import { query } from '@anthropic-ai/claude-agent-sdk';
-// NOTE: cyclic import (engine.mjs imports cachedEffortLevels); safe only because both sides use the imports at call time.
-import { resolveAnthropicKey, agentSdkHomeFor } from './engine.mjs';
+// The SDK is imported on the first listing, not at module load: router.mjs
+// imports this module at boot (for the picker route), and engine.mjs imports
+// it for cachedEffortLevels — a static SDK import here put the SDK (~75 ms)
+// on every server boot. Auth comes from the SDK-free ./auth.mjs, which also
+// removes the old engine.mjs <-> models.mjs import cycle.
+import { resolveAnthropicKey, agentSdkHomeFor } from './auth.mjs';
 
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 const CACHE_MS = 30 * 60 * 1000;
@@ -24,6 +27,16 @@ const CACHE_MS = 30 * 60 * 1000;
 const FAILURE_CACHE_MS = 60 * 1000;
 const TIMEOUT_MS = 20_000;
 const cache = new Map();
+
+// Memoised SDK import. A rejected import is forgotten so the next picker
+// load retries instead of failing until the server restarts.
+let sdkPromise = null;
+function loadSdkQuery() {
+  sdkPromise ??= import('@anthropic-ai/claude-agent-sdk')
+    .then((sdk) => sdk.query)
+    .catch((err) => { sdkPromise = null; throw err; });
+  return sdkPromise;
+}
 // One SDK call per auth identity at a time: concurrent picker loads share it.
 const inFlight = new Map();
 
@@ -114,7 +127,7 @@ function normalizedId(id) {
  * The account's Claude models, first = the SDK's default. Throws when the SDK
  * cannot answer (not logged in, no binary, timeout) — the caller falls back.
  */
-export async function listSdkModels(userId, { queryFn = query, now = Date.now } = {}) {
+export async function listSdkModels(userId, { queryFn = null, now = Date.now } = {}) {
   const { key } = resolveAnthropicKey(userId);
   const cacheKey = cacheKeyFor(key, userId);
   const hit = cache.get(cacheKey);
@@ -155,7 +168,8 @@ async function askSdk(userId, key, queryFn) {
   // answers control requests, and sends nothing to the model.
   const idle = (async function* idlePrompt() { await new Promise((r) => { release = r; }); yield* []; })();
   const sdkHome = key ? agentSdkHomeFor(userId) : null;
-  const q = queryFn({
+  const runQuery = queryFn ?? await loadSdkQuery();
+  const q = runQuery({
     prompt: idle,
     options: {
       settingSources: [],

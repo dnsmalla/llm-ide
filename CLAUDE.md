@@ -260,6 +260,7 @@ Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWrit
 - **8 MB request body limit** — DoS guard
 - **500 k-char prompt cap** — Keep within Claude CLI comfort zone
 - **`SERVER_API_VERSION` + `ALL_ENDPOINTS` array** — Bump version when wire format changes; `/health` advertises `ENDPOINTS` = `ALL_ENDPOINTS` minus disabled features' paths
+- **Agent SDK + engine are lazy-loaded** — Never on the boot path; prewarmed after listen; `LLMIDE_ENGINE_PREWARM=0` disables the prewarm (see `extension/CLAUDE.md` "Lazy engine")
 - **`LLMIDE_FEATURES` honoured** — Parsed once into `config.features` (`null` = all); a disabled feature's route group (`extension/routes/feature-routes.mjs`) is never imported and its paths 404 `{"error":"feature_disabled","feature":…}`; `/health` reports `features`
 
 ### SQLite (`extension/kb/db.mjs`)

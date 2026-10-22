@@ -20,13 +20,13 @@
 // Event model: the pure mapper lives in events.mjs (the single definition
 // of the v2 event vocabulary) and is re-exported here so existing spike
 // consumers keep importing it from this module. The llmide in-process MCP
-// server lives in tools.mjs. Auth (resolveAnthropicKey) lives in engine.mjs
+// server lives in tools.mjs. Auth (resolveAnthropicKey) lives in auth.mjs
 // and is re-exported below for existing importers.
 
 import { query } from '@anthropic-ai/claude-agent-sdk';
 import { mapSdkMessage } from './events.mjs';
 import { buildLlmIdeServer } from './tools.mjs';
-import { resolveAnthropicKey } from './engine.mjs';
+import { resolveAnthropicKey } from './auth.mjs';
 
 export { mapSdkMessage };
 export { resolveAnthropicKey };

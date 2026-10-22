@@ -43,6 +43,7 @@ Claude Agent SDK / claude CLI
 Enforcement:
 
 - **Server**: ESLint (`extension/eslint.config.mjs`, `CLAUDE_SDK_IMPORT`) rejects any import of `@anthropic-ai/claude-agent-sdk` outside `llm_agent/sdk/` (tests exempt). Zero-violation ratchet, like the layer rules.
+- **Server boot**: the SDK and `engine.mjs` are loaded lazily (first chat turn, or the post-listen prewarm) — never statically from a module on the boot path. Pinned by `extension/tests/lazy-engine.test.mjs`; see `extension/CLAUDE.md` "Lazy engine".
 - **Mac**: convention — `LlmIdeAPIClient.progressLabel`/`normalizedToolName` and `ToolApprovalCard.title`/`icon`/`alwaysAllowLabel` are one-line shims delegating into `ClaudeLink/`; keep new Claude knowledge (tool names, flags, model ids, error codes) inside `ClaudeLink/` files.
 
 ## What lives where
@@ -52,7 +53,8 @@ Enforcement:
 | `@anthropic-ai/claude-agent-sdk` import, `query()` options, resume semantics, `canUseTool` | `extension/llm_agent/sdk/engine.mjs` |
 | SDK message → wire event mapping | `extension/llm_agent/sdk/events.mjs` |
 | SDK transcript disk layout (`CLAUDE_CONFIG_DIR`, `~/.claude/projects/…`) | `extension/llm_agent/sdk/transcripts.mjs` |
-| Provider id the SDK engine meters under | `AGENT_SDK_PROVIDER` in `engine.mjs` |
+| Provider id the SDK engine meters under | `AGENT_SDK_PROVIDER` in `constants.mjs` (no imports, so routes can use it without loading the engine; re-exported by `engine.mjs`) |
+| Auth ladder (`resolveAnthropicKey`) + per-user engine home (`agentSdkHomeFor`) | `extension/llm_agent/sdk/auth.mjs` (SDK-free; re-exported by `engine.mjs`) |
 | `claude` CLI argv (`-p`, `--output-format stream-json`, `--mcp-config`, …), stream-json parsing, model-id regex, 500k prompt cap | `extension/providers/providers.mjs` + `runtime.mjs` |
 | `claude plugin …` argv (marketplace update, list --available --json, update --json --accept-command) and its JSON parsing | `extension/providers/claude-plugin-cli.mjs` |
 | SDK pin | `extension/package.json` (`@anthropic-ai/claude-agent-sdk`) |
