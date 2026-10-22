@@ -222,6 +222,28 @@ else
   echo "  none"
 fi
 
+# Build-excludable layers (and the FEATURE_* flag that excludes each), shared
+# by 3a, 3b and 6. Computed here, ahead of 3a, because 3a's consumer set is
+# derived from it.
+: > "$WORK/exc-layers.txt"
+: > "$WORK/layer-flag.txt"
+while read -r p; do
+  [[ "$p" == Features/* ]] || continue
+  lay="$(layer_of "$p/")"
+  echo "$lay" >> "$WORK/exc-layers.txt"
+  flag="$(awk -F'\t' -v path="$p" '$2==path{print $1; exit}' "$WORK/flagmap.txt")"
+  [ -n "$flag" ] && printf '%s\t%s\n' "$lay" "$flag" >> "$WORK/layer-flag.txt"
+done < "$WORK/libexcludes.txt"
+sort -u -o "$WORK/exc-layers.txt" "$WORK/exc-layers.txt"
+sort -u -o "$WORK/layer-flag.txt" "$WORK/layer-flag.txt"
+# Always-compiled layers = every layer the map (or the Unclassified default)
+# can produce, minus the excludable ones. Derived rather than listed so a
+# newly classified always-compiled feature is checked without editing this
+# script, and a feature that becomes excludable drops out automatically.
+{ awk '!/^#/ && NF>=2 {print $2}' "$MAP"; echo Unclassified; } | sort -u \
+  | grep -vxFf "$WORK/exc-layers.txt" > "$WORK/always-layers.txt"
+is_always_compiled() { grep -qxF "$1" "$WORK/always-layers.txt"; }
+
 # 3a. `strip_feature_guard_for_flag` only understands `#if`/`#else`/`#endif`.
 #     An `#elseif` branch inherits its enclosing `#if` frame's hidden/visible
 #     state as written today, which is backwards for the branch that runs
@@ -229,25 +251,25 @@ fi
 #     hypothetical one (reviewer-reproduced: `#if FEATURE_TERMINAL / x /
 #     #elseif DEBUG / <ref> / #endif` silently passed). Full `#elseif`
 #     support is deliberately out of scope; refuse it outright instead of
-#     guessing, so the first `#elseif` under Shell/Core forces a person to
-#     either restructure it (nested #if/#else) or extend the parser on
-#     purpose.
+#     guessing, so the first `#elseif` in an always-compiled layer forces a
+#     person to either restructure it (nested #if/#else) or extend the parser
+#     on purpose. Same consumer set as 3b, since 3b runs the parser on them.
 : > "$WORK/elseif-hits.txt"
 find "$SRC" -name '*.swift' | sort | while read -r f; do
   rel="${f#"$SRC"/}"
   consumer="$(layer_of "$rel")"
-  [[ "$consumer" == "Shell" || "$consumer" == "Core" ]] || continue
+  is_always_compiled "$consumer" || continue
   grep -n '^[[:space:]]*#elseif\b' "$f" | while IFS=: read -r lineno _; do
     echo "$rel:$lineno" >> "$WORK/elseif-hits.txt"
   done
 done
 
-echo "=== #elseif under Shell/Core (unsupported by the guard parser) ==="
+echo "=== #elseif in always-compiled layers (unsupported by the guard parser) ==="
 if [ -s "$WORK/elseif-hits.txt" ]; then
   sort "$WORK/elseif-hits.txt" | while read -r loc; do
     echo "  ERROR  $loc  — strip_feature_guard_for_flag has no #elseif support; restructure as nested #if/#else or extend the parser deliberately"
   done
-  echo "FAIL: #elseif found under Shell/Core; the build-exclusion guard parser cannot reason about it safely" >&2
+  echo "FAIL: #elseif found in an always-compiled layer; the build-exclusion guard parser cannot reason about it safely" >&2
   status=1
 else
   echo "  none"
@@ -262,28 +284,33 @@ fi
 #     referenced TerminalPanelState unconditionally after it moved into a
 #     now-excludable Features/Terminal folder, and the boundary check above
 #     never saw it because Shell consumers are always allowed through it.
-: > "$WORK/exc-layers.txt"
-: > "$WORK/layer-flag.txt"
-while read -r p; do
-  [[ "$p" == Features/* ]] || continue
-  lay="$(layer_of "$p/")"
-  echo "$lay" >> "$WORK/exc-layers.txt"
-  flag="$(awk -F'\t' -v path="$p" '$2==path{print $1; exit}' "$WORK/flagmap.txt")"
-  [ -n "$flag" ] && printf '%s\t%s\n' "$lay" "$flag" >> "$WORK/layer-flag.txt"
-done < "$WORK/libexcludes.txt"
-sort -u -o "$WORK/exc-layers.txt" "$WORK/exc-layers.txt"
-sort -u -o "$WORK/layer-flag.txt" "$WORK/layer-flag.txt"
-
+#
+#     The same break applies to EVERY always-compiled layer, not only
+#     Shell/Core: Chat, Library, Live, Settings and ReviewConflicts are
+#     compiled into build-mac-min too, and the boundary check only `warn`s on
+#     their cross-feature edges (none of them is sealed), so an unguarded
+#     reference from one of them into an excludable folder would pass this
+#     gate and surface only as a compile error in a reduced build.
+#     Unclassified is included for the same reason — nothing excludes those
+#     folders either.
 : > "$WORK/shell-violations.txt"
+# Per-owner symbol alternations, built once: the consumer loop below now
+# covers several hundred more files than Shell/Core alone, and re-running awk
+# over owned.txt per (file, owner) pair dominated its runtime.
+mkdir -p "$WORK/exc-syms"
+while read -r owner; do
+  [[ -z "$owner" ]] && continue
+  awk -v o="$owner" '$2==o{print $1}' "$WORK/owned.txt" | paste -sd'|' - > "$WORK/exc-syms/${owner#Feature:}"
+done < "$WORK/exc-layers.txt"
 if [ -s "$WORK/exc-layers.txt" ]; then
   find "$SRC" -name '*.swift' | sort | while read -r f; do
     rel="${f#"$SRC"/}"
     consumer="$(layer_of "$rel")"
-    [[ "$consumer" == "Shell" || "$consumer" == "Core" ]] || continue
+    is_always_compiled "$consumer" || continue
     raw_body="$(strip "$f")"
     while read -r owner; do
       [[ -z "$owner" ]] && continue
-      syms="$(awk -v o="$owner" '$2==o{print $1}' "$WORK/owned.txt" | paste -sd'|' -)"
+      syms="$(cat "$WORK/exc-syms/${owner#Feature:}")"
       [[ -z "$syms" ]] && continue
       # Fail closed: no derivable flag for this owner means no guard can be
       # trusted to hide it, so scan the RAW (unstripped-of-guards) body.
@@ -300,12 +327,12 @@ if [ -s "$WORK/exc-layers.txt" ]; then
   done
 fi
 
-echo "=== Shell/Core references into build-excludable features ==="
+echo "=== always-compiled layer references into build-excludable features ==="
 if [ -s "$WORK/shell-violations.txt" ]; then
   sort "$WORK/shell-violations.txt" | while IFS='|' read -r layer line; do
     echo "  ERROR  [$layer] $line"
   done
-  echo "FAIL: Shell/Core references a symbol owned by a build-excludable feature" >&2
+  echo "FAIL: an always-compiled layer references a symbol owned by a build-excludable feature" >&2
   status=1
 else
   echo "  none"
@@ -363,8 +390,9 @@ fi
 #    check above only ever catches that class. It silently breaks anything
 #    OUTSIDE Swift that names a path by hand: a script, a Makefile target, a
 #    CI step. This is exactly how conformance-agent-v2.mjs kept hardcoding
-#    Views/DocGen/DocGenView.swift and Views/Visual/VisualView.swift after
-#    the Features/ migration moved both, undetected through three reviews
+#    the pre-migration Views/DocGen/DocGenView.swift and
+#    Views/Visual/VisualView.swift after the Features/ migration moved both
+#    (to Features/DocGen/Views/ and Features/Visual/Views/), undetected through three reviews
 #    because every one of them only re-ran Swift builds and the boundary
 #    gate above.
 #
@@ -414,6 +442,116 @@ if [ -s "$WORK/stale-path-hits.txt" ]; then
   status=1
 else
   echo "  none"
+fi
+
+# 6. Every test file that names a type owned by a build-excludable feature
+#    must be in THAT feature's testExcludes. The test target is never compiled
+#    with features removed (`make regression` and CI run `swift test` on the
+#    full build only; lite/min/mobile-only are built, not tested), so a
+#    missing entry is invisible until someone runs
+#    `swift build --build-tests` under a reduced LLMIDE_FEATURES — by which
+#    time 50 files had drifted out of the hand-maintained lists. Package.swift
+#    is the source of truth for both sides: which Sources paths each FEATURE_*
+#    flag excludes, and which test files it excludes with them.
+#
+#    Ownership is by TOP-LEVEL declaration only. A nested type (e.g. a
+#    feature's `enum Error` or `struct Key`) is reachable from a test only
+#    through its parent's name, which already counts, while matching the bare
+#    nested name flags every unrelated `Error`/`Key` in the suite. A name is
+#    owned by a flag only when EVERY declaration of it lies under that flag's
+#    excluded paths — a name declared elsewhere too cannot be attributed, the
+#    same rule as the declaration map in check 1. Known blind spot, by
+#    construction: extension members and top-level functions/typealiases
+#    declared inside an excludable folder are not types and are not seen.
+#
+#    Excluded paths per flag come from two shapes: the else-body of
+#    `if x { featureDefines.append(.define("F")) } else { ... }` (any nesting
+#    depth, so the `if !testExcludes.contains(...)` dedupe appends count), and
+#    any other `if ... !x { libExcludes.append(...) }` block — the
+#    mobile-on/auto_tasks-off bridge files are excluded that way, so their
+#    types belong to FEATURE_AUTOTASK as well as FEATURE_MOBILE.
+echo "=== test files referencing build-excludable feature types vs testExcludes ==="
+perl -e '
+  local $/; my $t = <STDIN>;
+  sub body_at { my ($text, $start) = @_; my $d = 1; my $i = $start; my $n = length($text);
+    while ($i < $n && $d > 0) { my $c = substr($text, $i, 1); $d++ if $c eq "{"; $d-- if $c eq "}"; $i++; }
+    return substr($text, $start, $i - $start - 1); }
+  sub emit { my ($flag, $body) = @_;
+    while ($body =~ /"([^"]+)"/g) { my $v = $1;
+      if ($v =~ m{^Features/}) { print "L\t$flag\t$v\n"; }
+      elsif ($v =~ /\.swift$/) { print "T\t$flag\t$v\n"; } } }
+  my %varflag;
+  while ($t =~ /if\s+(\w+)\s*\{\s*featureDefines\.append\(\.define\("([^"]+)"\)\)\s*\}\s*else\s*\{/gs) {
+    $varflag{$1} = $2; emit($2, body_at($t, pos($t)));
+  }
+  while ($t =~ /\bif\s+[^{\n]*?!\s*(\w+)\s*\{/g) {
+    next unless exists $varflag{$1};
+    emit($varflag{$1}, body_at($t, pos($t)));
+  }
+' < "$ROOT/Package.swift" | sort -u > "$WORK/flag-excludes.txt"
+
+# One perl process for every Sources file (not one per file, as check 1 does)
+# keeps this check to about a second. Rows: name<TAB>path relative to Sources/.
+find "$ROOT/Sources" -name '*.swift' -print0 | xargs -0 perl -e '
+  my $root = shift @ARGV;
+  for my $f (@ARGV) {
+    open(my $fh, "<", $f) or next; local $/; my $t = <$fh>; close $fh;
+    $t =~ s{/\*.*?\*/}{}gs; $t =~ s{"""[^"]*(?:"(?!"")[^"]*)*"""}{""}gs;
+    $t =~ s{"(?:\\.|[^"\\\n])*"}{""}g; $t =~ s{//[^\n]*}{}g;
+    (my $rel = $f) =~ s{^\Q$root\E/}{};
+    while ($t =~ /^(?:@\w+(?:\([^)\n]*\))?\s+|(?:public|package|internal|private|fileprivate|open|final|indirect|nonisolated)\s+)*(?:class|struct|enum|protocol|actor)\s+([A-Za-z_]\w*)/mg) {
+      print "$1\t$rel\n";
+    }
+  }
+' "$ROOT/Sources" | sort -u > "$WORK/toplevel-decls.txt"
+
+# Strip comments/strings from every test file once, into a mirror tree, so a
+# type named only in prose (`/// mirrors LoopStage`) never counts as a use.
+TESTROOT_STRIPPED="$WORK/tests-stripped"
+mkdir -p "$TESTROOT_STRIPPED"
+find "$TESTROOT" -name '*.swift' -print0 | xargs -0 perl -e '
+  my ($root, $out) = splice(@ARGV, 0, 2);
+  for my $f (@ARGV) {
+    open(my $fh, "<", $f) or next; local $/; my $t = <$fh>; close $fh;
+    $t =~ s{/\*.*?\*/}{}gs; $t =~ s{"""[^"]*(?:"(?!"")[^"]*)*"""}{""}gs;
+    $t =~ s{"(?:\\.|[^"\\\n])*"}{""}g; $t =~ s{//[^\n]*}{}g;
+    (my $rel = $f) =~ s{^\Q$root\E/}{};
+    my $dst = "$out/$rel"; (my $dir = $dst) =~ s{/[^/]+$}{};
+    system("mkdir", "-p", $dir) unless -d $dir;
+    open(my $oh, ">", $dst) or die "$dst: $!"; print $oh $t; close $oh;
+  }
+' "$TESTROOT" "$TESTROOT_STRIPPED"
+
+: > "$WORK/test-exclude-gaps.txt"
+for flag in $(awk -F'\t' '$1=="L"{print $2}' "$WORK/flag-excludes.txt" | sort -u); do
+  awk -F'\t' -v f="$flag" '$1=="L" && $2==f {print "LlmIdeMac/" $3}' "$WORK/flag-excludes.txt" > "$WORK/paths.$flag"
+  awk -F'\t' -v f="$flag" '$1=="T" && $2==f {print $3}' "$WORK/flag-excludes.txt" > "$WORK/tests.$flag"
+  # Owned = every declaration site of the name lies under one of the flag's paths.
+  awk -F'\t' '
+    NR == FNR { paths[++np] = $0; next }
+    { total[$1]++
+      for (i = 1; i <= np; i++) {
+        p = paths[i]
+        if ($2 == p || index($2, p "/") == 1) { inside[$1]++; break }
+      } }
+    END { for (n in total) if (inside[n] == total[n]) print n }
+  ' "$WORK/paths.$flag" "$WORK/toplevel-decls.txt" | sort > "$WORK/names.$flag"
+  [ -s "$WORK/names.$flag" ] || continue
+  grep -rlwFf "$WORK/names.$flag" "$TESTROOT_STRIPPED" --include='*.swift' | sort | while read -r hit; do
+    rel="${hit#"$TESTROOT_STRIPPED"/}"
+    grep -qxF "$rel" "$WORK/tests.$flag" && continue
+    names="$(grep -owFf "$WORK/names.$flag" "$hit" | sort -u | paste -sd, -)"
+    echo "$flag|$rel  [$names]" >> "$WORK/test-exclude-gaps.txt"
+  done
+done
+if [ -s "$WORK/test-exclude-gaps.txt" ]; then
+  sort "$WORK/test-exclude-gaps.txt" | while IFS='|' read -r flag line; do
+    echo "  ERROR  [$flag] $line  — add to that feature's testExcludes in Package.swift"
+  done
+  echo "FAIL: a test file names a build-excludable feature's type but is not excluded with that feature" >&2
+  status=1
+else
+  echo "  every such test file is excluded with its feature"
 fi
 
 exit $status
