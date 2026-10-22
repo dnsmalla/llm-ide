@@ -242,6 +242,9 @@ Sources/LlmIdeMac/
 │   └── MobileControl/                                         # mobile_sync
 ├── Core/                     # leaf infrastructure, never excluded, usable by any layer
 │   ├── Contracts/            # cross-feature protocols (LoopRunning, MobileFeatureBridge,
+│   │                         #   MobileChatHosting (Mobile Control's view of Chat: phone
+│   │                         #   chat turns, Explorer sessions, approvals; Chat implements,
+│   │                         #   Shell installs in bootMobile),
 │   │                         #   ChatTransport engine↔transport contract, ChatScope,
 │   │                         #   ShellSection + LibrarySelection, SettingsSectionRegistry
 │   │                         #   (features' Settings cards, registered by Shell),

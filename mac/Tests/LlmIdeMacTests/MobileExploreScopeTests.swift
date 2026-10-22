@@ -26,8 +26,8 @@ struct MobileExploreScopeTests {
             let quick = ChatSession(scope: .quick, title: "Q")
             ChatSessionStore.save(explorer)
             ChatSessionStore.save(quick)
-            #expect(MobileControlManager.loadExplorerSession(id: explorer.id)?.id == explorer.id)
-            #expect(MobileControlManager.loadExplorerSession(id: quick.id) == nil)
+            #expect(ChatMobileHost.loadExplorerSession(id: explorer.id)?.id == explorer.id)
+            #expect(ChatMobileHost.loadExplorerSession(id: quick.id) == nil)
             #expect(ChatSessionStore.load(id: quick.id) != nil)
         }
     }
@@ -40,6 +40,9 @@ struct MobileExploreScopeTests {
             ChatSessionStore.save(explorer)
             ChatSessionStore.save(quick)
             let manager = MobileControlManager()
+            // The manager reaches Chat only through the host Shell installs;
+            // without it the delete is answered "Chat not installed".
+            manager.chatHost = ChatMobileHost()
             await manager.handleExploreDelete(quick.id)
             #expect(ChatSessionStore.load(id: quick.id) != nil, "the quick chat must survive a phone delete")
             await manager.handleExploreDelete(explorer.id)

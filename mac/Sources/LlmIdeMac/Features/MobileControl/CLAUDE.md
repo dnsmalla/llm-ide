@@ -12,8 +12,8 @@ iPhone App (SwiftUI, ios_app/)
     ▼
 LLM-IDE Mac app (native NWListener WebSocket on :3006)
     │ MobileControlManager.handleInbound
-    ├──► LLM-IDE Chat → LlmIdeAPIClient (:3456)
-    ├──► Explorer sessions → ChatSessionStore
+    ├──► LLM-IDE Chat → chatHost (MobileChatHosting) → Chat's shared .quick engine → :3456
+    ├──► Explorer chats/sessions → chatHost → Chat's .explorer engines + session store
     ├──► Auto Tasks → AutoCodeUpdateService / AutoTaskSettings
     └──► Loop → the loopEngineering auto task + LoopRunJournal
         │
@@ -25,6 +25,8 @@ LLM-IDE Server (Node.js @ :3456)
 `MobileControlManager` dispatches Auto Tasks and Loop requests through `MobileFeatureBridge` protocol — when either feature is compiled out (via `LLMIDE_FEATURES`), the phone receives a degrade reply instead of routing to the feature's service.
 
 The Auto Task and Loop bridges are **not** in this folder: `MobileAutoTaskBridge` lives in `Features/AutoTask/Services/` and `MobileLoopBridge` in `Features/Loop/Services/`. They see the manager only as `MobileBridgeHosting` (`Core/Contracts/`), which the manager implements in `Services/MobileControlManager+BridgeHost.swift` — that file owns their whole wire mapping (tag → `MobileAutoTaskRequest`/`MobileLoopRequest`, `MobileAutoTaskReply`/`MobileLoopReply` → `SharedProtocol` types), because the bridges compile with `auto_tasks` even when `mobile_sync` (and so `SharedProtocol`) is out. A new `auto_task_*`/`loop_*` tag must update the routing Set, that decode switch, the request enum and the bridge's `switch`; `MobileFeatureBridgeTests` pins the Set against the decode.
+
+**Phone chat reaches Chat only through `chatHost`.** MobileControl is sealed: it may not name any Chat type (`ChatEngine`, `ChatEngineRegistry`, `ChatSession`, `ChatSessionStore`, `QuickChatContext`, …). Everything the chat arms need — `llmide_chat` / history / clear on the shared quick chat, `explore_chat` turns, `explore_*` session list/load/new/rename/delete, parked-approval relay (`onExternalApproval`, `parkedApproval`, `submitPhone*`) — goes through `MobileControlManager.chatHost: (any MobileChatHosting)?` and the `MobileChatTurnEngine` handles it returns (`Core/Contracts/MobileChatHosting.swift`, Core/Foundation types only). Chat implements it in `Features/Chat/Services/ChatMobileHost.swift`, which also owns `ExplorerMobileEngineResolver` (the off-screen `.explorer` engine pool, registered as `ChatEngineRegistry`'s external holder when the host is built); Shell sets `manager.chatHost = ChatMobileHost()` in `FeatureCatalog.bootMobile`. A nil host answers each chat request with `replyFeatureUnavailable(feature: "Chat", …)`. A new chat capability extends the protocol (and `ChatMobileHost`) rather than reaching into Chat; tests that drive the manager's chat paths must set `chatHost` themselves.
 
 **Build-time exclusion:** Mobile Control is excludable at build time via the `mobile_sync` feature (settings key `LLMIDE_FEATURES=…`). When excluded, the whole `Features/MobileControl/` folder (MobileControlManager, WebSocket server, Bonjour advertiser, PIN cache, its own per-feature bridges, and iPhone pairing UI) is removed entirely, along with the SharedProtocol product dependency (iOS wire types). The core `MobileFeatureBridge` protocol stays in-tree to support dynamic downgrades when other features are excluded (Phase 2d).
 

@@ -240,7 +240,6 @@ if mobileIncluded {
         "PairingThrottleTests.swift",
         "MobilePairedDeviceStoreTests.swift",
         "MobileExploreIndexStoreTests.swift",
-        "ExplorerMobileEngineResolverTests.swift",
         "MobileModuleTests.swift",
         "MobileExploreScopeTests.swift",
         "MobileExploreTurnPolicyTests.swift",

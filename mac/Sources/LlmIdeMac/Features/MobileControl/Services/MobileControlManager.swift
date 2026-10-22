@@ -166,7 +166,7 @@ final class MobileControlManager {
     private func sweepToolApprovalsIfOff() {
         guard !phoneAccess.isAllowed(.toolApprovals) else { return }
         for (commandId, entry) in pendingPhoneApprovals
-        where entry.engine.pendingApproval?.approval.kind == "ToolApproval" {
+        where entry.engine.parkedApproval?.kind == "ToolApproval" {
             pendingPhoneApprovals.removeValue(forKey: commandId)
             truncatedToolRequestIds.remove(entry.requestId)
             Task { await server?.send(ApprovalCleared(
@@ -192,16 +192,14 @@ final class MobileControlManager {
     /// Persisted `@file` / `/skill` browse indexes under Application Support settings/.
     let exploreIndex = MobileExploreIndexStore()
 
-    /// Resolves which `.explorer` `ChatEngine` `handleExploreChat` drives a
-    /// turn on — the shared, Mac-panel-visible one when safe, or a private
-    /// off-screen engine when the Mac is already showing a different session
-    /// (see that type's doc comment for why this exists).
-    /// The phone bridge's off-screen `.explorer` engines. Registered with
-    /// `ChatEngineRegistry` as its external holder (see `ExternalEngineHolder`)
-    /// so the registry can see these engines when it resolves which engine
-    /// owns a session — without that, a session the phone is running here
-    /// looks unheld and the Mac opens a second engine on the same file.
-    private let explorerMobileEngineResolver = ExplorerMobileEngineResolver()
+    /// Chat's side of every phone chat path — quick chat, Explorer chats and
+    /// their sessions, parked approvals — behind the Core seam
+    /// (`Core/Contracts/MobileChatHosting.swift`), because Mobile Control may
+    /// not name Chat's types. Shell installs Chat's implementation in
+    /// `FeatureCatalog.bootMobile`; while nil, every chat request is answered
+    /// "Chat not installed" instead of reaching an engine. Strong: nothing
+    /// else keeps the host (and the off-screen engine pool it owns) alive.
+    var chatHost: (any MobileChatHosting)?
 
     /// The question each in-flight phone turn is parked on, with the engine
     /// holding it — so the answer goes back to THAT engine, and the turn's end
@@ -211,7 +209,7 @@ final class MobileControlManager {
     /// run on different ones: `llmide_chat` on the quick-chat engine,
     /// `explore_chat` on whichever the resolver picked (shared or off-screen).
     /// Looking the engine up again at answer time would find the wrong one.
-    private var pendingPhoneApprovals: [String: (engine: ChatEngine, requestId: String)] = [:]
+    private var pendingPhoneApprovals: [String: (engine: any MobileChatTurnEngine, requestId: String)] = [:]
     /// Tool prompts whose shown content was cut (by the server or by `MobileToolApproval`): the phone
     /// cannot allow what it could not read, so the Mac refuses `allow` for these.
     private var truncatedToolRequestIds: Set<String> = []
@@ -281,12 +279,6 @@ final class MobileControlManager {
     init() {
         pairedDevices = pairedDeviceStore.all
         installPhoneAccessObserver()
-        // The registry must be able to see this pool — see
-        // `explorerMobileEngineResolver` and `ExternalEngineHolder`. Set here
-        // rather than at first use: `switchDisplayedSession` consults the
-        // holder on the MAC user's action, which can happen before the phone
-        // has ever driven a turn.
-        ChatEngineRegistry.shared.externalHolder = explorerMobileEngineResolver
         // Best-effort teardown of the native server on force-quit / Cmd-Q /
         // logout so the listener + Bonjour service don't briefly outlive the
         // app. `stop()` is idempotent and main-isolated like this hook.
@@ -788,12 +780,12 @@ final class MobileControlManager {
         append(.info, "🔍 handleExplore type='\(type)'")
         switch type {
         case MobileProtocol.Tag.exploreListSessions:
-            // `ChatSessionStore` is Mac-local JSON keyed by `ChatScope.explorer`.
-            let rows = ChatSessionStore.list(for: .explorer, visibleInProject: activeExplorerProjectId).map {
-                ExploreSessionSummary(id: $0.id.uuidString,
-                                      title: $0.title,
-                                      lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
+            // Mac-local Explorer chats (Chat's session store, scope `.explorer`).
+            guard let chatHost else {
+                replyFeatureUnavailable(feature: "Chat", commandId: "explore_list")
+                return
             }
+            let rows = Self.exploreSummaries(chatHost.explorerSessions(visibleInProject: activeExplorerProjectId))
             append(.info, "Explore list: \(rows.count) session(s)")
             reply(ExploreSessionList(sessions: rows))
         case MobileProtocol.Tag.exploreLoadSession:
@@ -807,22 +799,29 @@ final class MobileControlManager {
                 reply(CommandError(commandId: "explore_load", message: "Invalid session id"))
                 return
             }
-            guard let s = Self.loadExplorerSession(id: sid, visibleInProject: activeExplorerProjectId) else {
+            guard let chatHost else {
+                replyFeatureUnavailable(feature: "Chat", commandId: "explore_load")
+                return
+            }
+            guard let s = chatHost.explorerSession(id: sid, visibleInProject: activeExplorerProjectId) else {
                 append(.info, "Explore load: session \(sid.uuidString.prefix(8)) not found")
                 reply(CommandError(commandId: "explore_load",
                                    message: "Session not found on Mac — it may have been deleted."))
                 return
             }
-            let turns = s.messages.map { ChatTurn(from: $0.wireTurn()) }
+            let turns = s.lines.map { ChatTurn(role: $0.role, content: $0.content) }
             append(.info, "Explore load: \(s.id.uuidString.prefix(8))")
             reply(ExploreSessionHistory(sessionId: s.id.uuidString,
                                         title: s.title,
                                         history: turns))
         case MobileProtocol.Tag.exploreNewSession:
-            let s = ChatSession(scope: .explorer, title: "New chat", projectId: activeExplorerProjectId)
-            ChatSessionStore.save(s)
-            append(.info, "Explore new: \(s.id.uuidString.prefix(8))")
-            reply(ExploreSessionCreated(sessionId: s.id.uuidString))
+            guard let chatHost else {
+                replyFeatureUnavailable(feature: "Chat", commandId: "explore_new")
+                return
+            }
+            let newId = chatHost.createExplorerSession(projectId: activeExplorerProjectId)
+            append(.info, "Explore new: \(newId.uuidString.prefix(8))")
+            reply(ExploreSessionCreated(sessionId: newId.uuidString))
         case MobileProtocol.Tag.exploreDeleteSession:
             // Refused synchronously, before the phone's follow-up re-list is
             // handled, so the list it gets back still shows the kept session.
@@ -921,25 +920,6 @@ final class MobileControlManager {
         return WorkspaceRoot.resolve(config: config, projectStore: projectStore)
     }
 
-    /// Resolve (creating if needed) the SAME `.quick` `ChatEngine` the menu
-    /// bar and the LLM Chat sheet drive, pointed at the Mac's currently
-    /// active project — there is no SwiftUI view here to do this via
-    /// `.onAppear`/`.onChange`, so this collapses both of those into one call
-    /// for the phone.
-    ///
-    /// `QuickChatContext.attach` is that decision, shared with both Mac
-    /// surfaces' `.onAppear`/`.onChange` — including the case this method
-    /// used to be the only correct implementation of: an engine already
-    /// loaded for a STALE project must be repointed via
-    /// `switchQuickChatProject(to:)`, never by poking `quickChatProjectId`.
-    private func quickChatEngine(for ctx: QuickChatContext, api: LlmIdeAPIClient) -> ChatEngine {
-        let engine = ChatEngineRegistry.shared.engine(for: .quick, api: api)
-        // No session list on the phone, and this runs per request — skip the
-        // list re-read the Mac surfaces want on every open.
-        QuickChatContext.attach(engine, toProject: ctx.projectId, refreshSessionListIfUnchanged: false)
-        return engine
-    }
-
     /// Drive a phone chat turn through the SAME shared `.quick` `ChatEngine`
     /// the menu bar and the LLM Chat sheet drive (`ChatEngineRegistry`) —
     /// one conversation across all three surfaces, rather than the phone
@@ -952,6 +932,10 @@ final class MobileControlManager {
     private func handleChat(_ chat: LlmIdeChat) async {
         guard let api else {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
+            return
+        }
+        guard let chatHost else {
+            replyFeatureUnavailable(feature: "Chat", commandId: chat.commandId)
             return
         }
         // This knowingly removes a WORKING path, and the loss is real: the
@@ -996,24 +980,24 @@ final class MobileControlManager {
         // loopback GET with a 2 s budget, against a turn that is about to
         // take seconds anyway.
         await backendManager?.refreshServerApiVersion()
-        guard QuickChatContext.serverSupportsAsk(backendManager?.serverApiVersion) else {
+        guard chatHost.quickChatServerSupportsAsk(apiVersion: backendManager?.serverApiVersion) else {
             await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
-                stream: QuickChatContext.unsupportedServerMessage(apiVersion: backendManager?.serverApiVersion),
+                stream: chatHost.quickChatUnsupportedServerMessage(apiVersion: backendManager?.serverApiVersion),
                 done: true)))
             return
         }
         guard let config, let projectStore,
-              let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else {
+              let quick = chatHost.quickChat(config: config, projectStore: projectStore, api: api) else {
             // A normal reply, NOT a CommandError: the phone renders an error
             // as a failure, and "no project is open on the Mac" is an
             // answer — same no-project gate the menu bar / LLM Chat sheet use.
             await server?.send(Output(commandId: chat.commandId, payload: OutputPayload(
-                stream: QuickChatContext.noProjectMessage, done: true)))
+                stream: chatHost.quickChatNoProjectMessage, done: true)))
             return
         }
-        let engine = quickChatEngine(for: ctx, api: api)
+        let engine = quick.engine
         guard let sid = UUID(uuidString: engine.currentSessionIDString) else {
-            // Unreachable in practice — `quickChatEngine` always lands on a
+            // Unreachable in practice — `quickChat` always lands on a
             // real session — but a CommandError beats a silent hang if a
             // future change to that resolution ever leaves it empty.
             await server?.send(CommandError(commandId: chat.commandId, message: "Could not open your chat on the Mac."))
@@ -1038,12 +1022,9 @@ final class MobileControlManager {
                 message: message,
                 skillIds: [],
                 attachments: [],
-                // Topped up with the project's open issues — this handler can
-                // await, and `## Recent open issues` is the only way an agent
-                // learns about them (no tool fetches issues). Without it the
-                // phone answered "list the issues" with nothing while the Mac
-                // panel, which has always passed them, listed them fine.
-                agentContext: await ctx.withRecentIssues(config: config, projectStore: projectStore),
+                // Topped up with the project's open issues (see
+                // `ChatMobileHost.quickChat`) — this handler can await.
+                agentContext: await quick.agentContext(),
                 model: model,
                 provider: provider,
                 // Classified like the Mac's Auto, then clamped server-side to
@@ -1064,6 +1045,7 @@ final class MobileControlManager {
                 // the plan is simply the reply. So they need no confirmation
                 // channel, and `execute` still lands on `ask`.
                 mode: "auto_read_only",
+                permissionMode: nil,
                 routeFallback: routeFallback,
                 expectedSessionID: sid,
                 onProgress: { [weak self] label in
@@ -1079,7 +1061,7 @@ final class MobileControlManager {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
-        } catch let error where ChatEngine.isCancellation(error) {
+        } catch let error where chatHost.isTurnCancellation(error) {
             // Covers a Mac-side Stop too — same as explore_chat below.
             append(.info, "llmide_chat cancelled: \(chat.commandId.prefix(8))")
             await notifyStoppedOnMac(chat.commandId)
@@ -1094,23 +1076,23 @@ final class MobileControlManager {
         }
     }
 
-    /// Proxy an explorer chat turn through a `ChatEngine` — the SAME shared
-    /// instance the Mac Explorer panel renders (`ChatEngineRegistry.shared`,
-    /// Task 12) when that's safe, or a private off-screen engine when it
-    /// isn't (`ExplorerMobileEngineResolver` — see its doc comment: the
+    /// Proxy an explorer chat turn through a chat engine — the SAME shared
+    /// instance the Mac Explorer panel renders when that's safe, or a private
+    /// off-screen engine when it isn't (`chatHost.explorerTurnEngine`, whose
+    /// Chat implementation is `ExplorerMobileEngineResolver` — see its doc comment: the
     /// shared engine must never be force-switched away from a DIFFERENT
     /// session the Mac is already showing, since that would silently cancel
     /// the Mac user's in-flight turn and yank their screen to an unrelated
     /// chat). Persistence, the synthetic-turn append, and the streamed round
-    /// trip all go through `ChatEngine.runExternalTurn`, a 1:1 mirror of the
-    /// panel's own `runTurn` — no direct `ChatSessionStore` reads/writes here.
+    /// trip all go through the engine's `runExternalTurn`, a 1:1 mirror of the
+    /// panel's own `runTurn` — no direct session-store reads/writes here.
     ///
     /// The engine is resolved as LATE as possible — right before
     /// `runExternalTurn`, after every `await` this method does on the way
     /// there (`MobileExploreBridge.buildAgentContext`'s `git` subprocesses in
     /// particular, which can take hundreds of ms to seconds on a large
     /// repo). Code review caught that resolving it any earlier reopens a
-    /// version of the exact hijack `explorerMobileEngineResolver` exists to
+    /// version of the exact hijack the explorer engine resolver exists to
     /// prevent: the shared engine could be switched to a different session
     /// by the Mac user during that window, between resolve and use. This
     /// narrows the window but — since resolving still can't be the LAST
@@ -1120,6 +1102,10 @@ final class MobileControlManager {
     private func handleExploreChat(_ chat: ExploreChat) async {
         guard let api else {
             await server?.send(CommandError(commandId: chat.commandId, message: "Backend not configured"))
+            return
+        }
+        guard let chatHost else {
+            replyFeatureUnavailable(feature: "Chat", commandId: chat.commandId)
             return
         }
         guard let sid = UUID(uuidString: chat.sessionId) else {
@@ -1134,7 +1120,7 @@ final class MobileControlManager {
         // Project-scoped too: a stale id from another project would otherwise
         // keep chatting in that project's session with THIS project's
         // workspace context (refs, agent context) attached.
-        guard Self.loadExplorerSession(id: sid, visibleInProject: activeExplorerProjectId) != nil else {
+        guard chatHost.explorerSession(id: sid, visibleInProject: activeExplorerProjectId) != nil else {
             append(.info, "explore_chat: session \(chat.sessionId.prefix(8)) not found")
             await server?.send(CommandError(commandId: chat.commandId, message: "Session not found on Mac — it may have been deleted. Reload your explorer sessions."))
             return
@@ -1169,8 +1155,7 @@ final class MobileControlManager {
                 append(.info, "explore_chat: Mac workspace not wired — attachments/refs may be limited")
             }
         }
-        let shared = ChatEngineRegistry.shared.engine(for: .explorer, api: api)
-        guard let engine = explorerMobileEngineResolver.engine(for: sid, sharedExplorerEngine: shared, api: api) else {
+        guard let engine = chatHost.explorerTurnEngine(for: sid, api: api) else {
             append(.info, "explore_chat: could not resolve session \(chat.sessionId.prefix(8))")
             await server?.send(CommandError(commandId: chat.commandId, message: "Could not open that session on your Mac."))
             return
@@ -1219,7 +1204,7 @@ final class MobileControlManager {
             guard !isMobileCommandCancelled(chat.commandId) else { return }
             await server?.send(Output(commandId: chat.commandId,
                                       payload: OutputPayload(stream: reply, done: true)))
-        } catch let error where ChatEngine.isCancellation(error) {
+        } catch let error where chatHost.isTurnCancellation(error) {
             // Same as llmide_chat: a Mac-side Stop of a phone-driven turn
             // surfaces as URLError.cancelled (streaming) or the wrapped
             // APIError.network shape (buffered fallback), not CancellationError.
@@ -1234,71 +1219,25 @@ final class MobileControlManager {
     }
 
     /// Delete an explorer session on behalf of the phone, routed through
-    /// whichever engine currently holds it. The old direct
-    /// `ChatSessionStore.delete` resurrected the chat whenever an engine
-    /// still had it loaded: `persistCurrentChat` recreates the file when
-    /// `load(id:)` comes back nil (`?? ChatSession(id:scope:)` keeps the id),
-    /// so the Mac panel's next history change — or an in-flight phone turn's
-    /// cancellation-path persist — brought the deleted chat right back, and
-    /// the server's session-memory rows for it were never forgotten.
-    ///
-    /// `ChatEngine.deleteSession` already does every piece correctly for a
-    /// session its engine is showing (cancel + finalize the in-flight turn,
-    /// delete, fall back to the next session or mint a fresh one — which is
-    /// also what moves the engine OFF the deleted id so nothing can
-    /// re-persist it), so the shared engine goes through it when it is
-    /// showing the session. Off-screen engines — parked by the Mac mid-turn
-    /// or held by this bridge — are detached and dropped instead
-    /// (`ChatEngineRegistry.discardOffScreenEngines`); the parked lot used
-    /// to be skipped entirely, so a parked turn resurrected the chat. The
-    /// file itself is then removed directly — plus the memory forget the raw
-    /// path used to skip, which is also re-issued unconditionally because
-    /// off-screen engines never get a panel to wire their
-    /// `forgetSessionMemory` hook (a duplicate server DELETE is idempotent).
-    ///
-    /// Refuses a session that exists but is not an Explorer chat: the phone
-    /// sends a bare UUID, and without this a paired phone could delete any
-    /// ChatSession on the Mac (the quick chat, a conflicts/visual/docGen
-    /// chat). An id that no longer exists still runs the engine cleanup.
+    /// whichever engine currently holds it so nothing can persist it back
+    /// (see `ChatMobileHost.deleteExplorerSession` for why each step exists).
+    /// Refuses a non-Explorer session and an Explorer chat of another
+    /// project: the phone sends a bare UUID and only ever listed the active
+    /// project's Explorer chats.
     // internal: pinned by MobileExploreScopeTests
     func handleExploreDelete(_ uid: UUID) async {
-        if let existing = ChatSessionStore.load(id: uid), existing.scope != .explorer {
+        guard let chatHost else {
+            append(.stderr, "Explore delete: Chat not installed")
+            return
+        }
+        switch await chatHost.deleteExplorerSession(id: uid, visibleInProject: activeExplorerProjectId, api: api) {
+        case .notExplorer:
             append(.info, "Explore delete: \(uid.uuidString.prefix(8)) is not an Explorer chat — refused")
-            return
-        }
-        // The phone only ever listed the active project's chats; an id from
-        // another project is stale and must not delete a chat it cannot see.
-        if let existing = ChatSessionStore.load(id: uid),
-           !Self.isExplorerSession(existing, visibleInProject: activeExplorerProjectId) {
+        case .otherProject:
             append(.info, "Explore delete: \(uid.uuidString.prefix(8)) belongs to another project — refused")
-            return
+        case .deleted:
+            append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
         }
-        // `api` is optional only so the network forget at the tail degrades
-        // gracefully — the local file delete and engine routing above it
-        // must not be skipped when it's nil, or the phone silently keeps a
-        // session it deleted.
-        let shared = api.map { ChatEngineRegistry.shared.engine(for: .explorer, api: $0) }
-        // Off-screen engines FIRST — the one the Mac parked mid-turn and the
-        // one this bridge holds for a phone turn. Left running, either would
-        // persist the chat again at turn end and resurrect it. They are
-        // forgotten rather than `deleteSession`ed: that would move an engine
-        // nothing displays onto a fallback chat and overwrite the Explorer's
-        // "last active chat" pointer from it.
-        ChatEngineRegistry.shared.discardOffScreenEngines(sessionID: uid)
-        if shared?.currentSessionIDString == uid.uuidString {
-            await shared?.deleteSession(uid)
-        }
-        if ChatSessionStore.load(id: uid) != nil {
-            ChatSessionStore.delete(id: uid)
-        }
-        if let api {
-            _ = try? await api.forgetSessionMemory(sessionId: uid.uuidString)
-        }
-        // Drop any cached off-screen engine for this id too — a later
-        // explore_chat referencing the same (now-deleted) session must not
-        // resolve to a stale cached instance.
-        explorerMobileEngineResolver.forget(sessionID: uid)
-        append(.info, "Explore delete: \(uid.uuidString.prefix(8))")
     }
 
     /// Prepend each extracted file's text as a fenced block before the user's
@@ -1460,10 +1399,10 @@ final class MobileControlManager {
     /// overwrite the single-slot hook of the turn that IS running (and whose
     /// questions must keep reaching its own phone command).
     // internal: pinned by MobilePhoneApprovalHookTests
-    func beginPhoneApprovals(engine: ChatEngine, commandId: String) {
+    func beginPhoneApprovals(engine: any MobileChatTurnEngine, commandId: String) {
         guard !engine.busy else { return }
         phoneApprovalOwners[ObjectIdentifier(engine)] = commandId
-        engine.hooks.onExternalApproval = { [weak self] approval in
+        engine.onExternalApproval = { [weak self] approval in
             guard let self else { return }
             Task { await self.sendApprovalToPhone(approval, commandId: commandId, engine: engine) }
         }
@@ -1477,11 +1416,11 @@ final class MobileControlManager {
     /// that was rejected as busy never installed one, and clearing anyway
     /// would silence the running turn's questions on the phone.
     // internal: pinned by MobilePhoneApprovalHookTests
-    func endPhoneApprovals(engine: ChatEngine, commandId: String) {
+    func endPhoneApprovals(engine: any MobileChatTurnEngine, commandId: String) {
         let key = ObjectIdentifier(engine)
         if phoneApprovalOwners[key] == commandId {
             phoneApprovalOwners.removeValue(forKey: key)
-            engine.hooks.onExternalApproval = nil
+            engine.onExternalApproval = nil
         }
         guard let entry = pendingPhoneApprovals.removeValue(forKey: commandId) else { return }
         Task { [weak self] in
@@ -1493,7 +1432,7 @@ final class MobileControlManager {
 
     /// Mac → phone: a question the turn is parked on.
     private func sendApprovalToPhone(_ approval: AgentV2Approval, commandId: String,
-                                     engine: ChatEngine) async {
+                                     engine: any MobileChatTurnEngine) async {
         // ToolApproval (allow/deny a write) is deliberately NOT forwarded: the
         // phone runs read-only modes, so one should never park — and if one
         // ever did, an allow button on a surface with no diff view is not a
@@ -1540,11 +1479,11 @@ final class MobileControlManager {
 
     private func handleToolApprovalAnswer(_ answer: ToolApprovalAnswer) async {
         let entry = pendingPhoneApprovals[answer.commandId]
-        let pending = entry?.engine.pendingApproval
+        let pending = entry?.engine.parkedApproval
         if let why = Self.toolAnswerRefusal(
             switchOn: phoneAccess.isAllowed(.toolApprovals),
-            pendingRequestId: entry.flatMap { $0.requestId == answer.requestId ? pending?.approval.requestId : nil },
-            pendingKind: pending?.approval.kind, answerRequestId: answer.requestId) {
+            pendingRequestId: entry.flatMap { $0.requestId == answer.requestId ? pending?.requestId : nil },
+            pendingKind: pending?.kind, answerRequestId: answer.requestId) {
             // Refused: the prompt (if any) stays parked on the Mac for its owner to decide.
             await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId, reason: why))
             return
@@ -1559,21 +1498,21 @@ final class MobileControlManager {
             return
         }
         truncatedToolRequestIds.remove(answer.requestId)
-        append(.info, "tool approval from phone: \(answer.allow ? "allow" : "deny") \(pending.approval.toolName ?? "tool")")
-        await entry.engine.submitToolDecision(action: answer.allow ? "allow" : "deny")
+        append(.info, "tool approval from phone: \(answer.allow ? "allow" : "deny") \(pending.toolName ?? "tool")")
+        let submitError = await entry.engine.submitPhoneToolDecision(action: answer.allow ? "allow" : "deny")
         pendingPhoneApprovals.removeValue(forKey: answer.commandId)
         await server?.send(ApprovalCleared(commandId: answer.commandId, requestId: answer.requestId,
-                                           reason: pending.lastError))
+                                           reason: submitError))
     }
 
     private func handleApprovalAnswer(_ answer: ApprovalAnswer) async {
         guard let entry = pendingPhoneApprovals[answer.commandId],
               entry.requestId == answer.requestId,
-              let pending = entry.engine.pendingApproval,
-              pending.approval.requestId == answer.requestId,
+              let pending = entry.engine.parkedApproval,
+              pending.requestId == answer.requestId,
               // A TOOL prompt is answered only through `tool_approval_answer` (which checks the switch):
               // this question path posts no action, which the server reads as a deny.
-              pending.approval.kind == "AskUserQuestion" else {
+              pending.kind == "AskUserQuestion" else {
             // Already answered, expired, or belongs to another turn. Tell the
             // phone rather than leaving its card up waiting for a reply that
             // is never coming.
@@ -1582,14 +1521,14 @@ final class MobileControlManager {
                 reason: "That question is no longer open."))
             return
         }
-        await entry.engine.submitApproval(answers: answer.answers)
+        let submitError = await entry.engine.submitPhoneApproval(answers: answer.answers)
         pendingPhoneApprovals.removeValue(forKey: answer.commandId)
         // Either it landed (the card should go) or it failed and the state
         // kept its error for the Mac to show; the phone's copy is done either
         // way — a retry belongs to the surface that can see the error.
         await server?.send(ApprovalCleared(
             commandId: answer.commandId, requestId: answer.requestId,
-            reason: pending.lastError))
+            reason: submitError))
     }
 
     // MARK: - Paired devices
@@ -1667,13 +1606,18 @@ final class MobileControlManager {
     }
 
     private func pushExploreSessionListIfPaired() {
-        guard mobileClientPaired else { return }
-        let rows = ChatSessionStore.list(for: .explorer, visibleInProject: activeExplorerProjectId).map {
+        guard mobileClientPaired, let chatHost else { return }
+        let rows = Self.exploreSummaries(chatHost.explorerSessions(visibleInProject: activeExplorerProjectId))
+        reply(ExploreSessionList(sessions: rows))
+    }
+
+    /// Chat's session rows → the phone's wire rows (uuid string + epoch seconds).
+    private static func exploreSummaries(_ sessions: [MobileChatSessionSummary]) -> [ExploreSessionSummary] {
+        sessions.map {
             ExploreSessionSummary(id: $0.id.uuidString,
                                   title: $0.title,
                                   lastUsedAt: $0.lastUsedAt.timeIntervalSince1970)
         }
-        reply(ExploreSessionList(sessions: rows))
     }
 
     private func pushMacStatusIfPaired() async {
@@ -1687,7 +1631,7 @@ final class MobileControlManager {
         sessionDirectoryWatcher?.stop()
         sessionDirectoryWatcher = nil
         guard case .running = status,
-              let dir = ChatSessionStore.explorerSessionsDirectory else { return }
+              let dir = chatHost?.explorerSessionsDirectory else { return }
         sessionDirectoryWatcher = RepoFileWatcher(repoRoot: dir, debounce: 1.0) { [weak self] in
             Task { @MainActor in self?.pushExploreSessionListIfPaired() }
         }
@@ -1743,7 +1687,7 @@ final class MobileControlManager {
     }
 
     /// The project Explorer chats are scoped to — the Mac's active project,
-    /// same as the Explorer panel (`ChatEngine.explorerProjectId`). The phone
+    /// same as the Explorer panel (the chat engine's `explorerProjectId`). The phone
     /// lists and creates Explorer chats under it.
     private var activeExplorerProjectId: String? {
         projectStore?.activeProject?.bundle.id
@@ -1772,9 +1716,9 @@ final class MobileControlManager {
         cancelMobileInflightTask(commandId: m.commandId)
     }
 
-    /// Route the phone's history request onto `engine.messages` — the
-    /// `.quick` engine's own transcript now IS the phone's chat history
-    /// (`ChatSessionStore`), not the retired `/kb/agent/ask/history` table
+    /// Route the phone's history request onto the quick engine's transcript
+    /// — the `.quick` engine's own transcript now IS the phone's chat history
+    /// (Chat's session store), not the retired `/kb/agent/ask/history` table
     /// this used to poll. `limit` still bounds the reply size the same way
     /// the old server-side query parameter did.
     private func handleLlmIdeChatHistoryList(data: Data) async {
@@ -1784,7 +1728,11 @@ final class MobileControlManager {
             reply(CommandError(commandId: "llmide_chat_history", message: "Backend not configured"))
             return
         }
-        guard let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else {
+        guard let chatHost else {
+            replyFeatureUnavailable(feature: "Chat", commandId: "llmide_chat_history")
+            return
+        }
+        guard let quick = chatHost.quickChat(config: config, projectStore: projectStore, api: api) else {
             // No project open → no `.quick` session to read; an empty
             // transcript rather than an error, since "no history yet" is a
             // legitimate state (unlike `handleChat`'s no-project decline,
@@ -1792,19 +1740,17 @@ final class MobileControlManager {
             reply(LlmIdeChatHistoryReply(messages: []))
             return
         }
-        let engine = quickChatEngine(for: ctx, api: api)
         // Tool-result rows are internal turn bookkeeping, not part of the
-        // simple back-and-forth the phone renders — filtered the same way
-        // the retired `/kb/agent/ask/history` table (user/assistant rows
-        // only) implicitly was.
-        let turns = engine.messages
-            .filter { $0.role == .user || $0.role == .assistant }
+        // simple back-and-forth the phone renders — `conversationLines`
+        // filters them the same way the retired `/kb/agent/ask/history`
+        // table (user/assistant rows only) implicitly was.
+        let turns = quick.engine.conversationLines
             .suffix(limit)
-            .map { ChatTurn(role: $0.role.rawValue, content: $0.content) }
+            .map { ChatTurn(role: $0.role, content: $0.content) }
         reply(LlmIdeChatHistoryReply(messages: turns))
     }
 
-    /// Route the phone's "clear" onto `engine.clearCurrentChat()` — the same
+    /// Route the phone's "clear" onto the quick engine's `clearCurrentChat()` — the same
     /// header-trash action the LLM Chat sheet/menu bar use, which also
     /// forgets the chat's server-side session memory. The retired
     /// `clearAgentAskHistory()` wiped the wrong (unread) table.
@@ -1821,15 +1767,18 @@ final class MobileControlManager {
             reply(CommandError(commandId: "llmide_chat_history_clear", message: "Backend not configured"))
             return
         }
+        guard let chatHost else {
+            replyFeatureUnavailable(feature: "Chat", commandId: "llmide_chat_history_clear")
+            return
+        }
         guard let config, let projectStore,
-              let ctx = QuickChatContext.resolve(config: config, projectStore: projectStore) else {
+              let quick = chatHost.quickChat(config: config, projectStore: projectStore, api: api) else {
             // No project open → nothing to clear; ack rather than error,
             // mirroring the history-list's no-project behavior above.
             reply(LlmIdeChatHistoryClearAck(ok: true))
             return
         }
-        let engine = quickChatEngine(for: ctx, api: api)
-        await engine.clearCurrentChat()
+        await quick.engine.clearCurrentChat()
         reply(LlmIdeChatHistoryClearAck(ok: true))
     }
 
@@ -1842,46 +1791,25 @@ final class MobileControlManager {
         cancelMobileInflightTask(commandId: m.commandId)
     }
 
-    /// The Explorer chat with this id, or nil when there is none — including
-    /// when the id names a session of another scope (quick chat, conflicts,
-    /// visual, docGen). Every `explore_*` handler that takes a phone-supplied
-    /// session id goes through this, so the phone can reach Explorer chats
-    /// only.
-    // internal: pinned by MobileExploreScopeTests
-    static func loadExplorerSession(id: UUID) -> ChatSession? {
-        guard let session = ChatSessionStore.load(id: id), session.scope == .explorer else { return nil }
-        return session
-    }
-
-    /// `loadExplorerSession(id:)` narrowed to the chats the phone's list shows
-    /// for `projectId` — the handlers checked scope but not project, so a
-    /// session id the phone kept from project A still loaded, renamed and
-    /// chatted after the Mac switched to project B.
-    static func loadExplorerSession(id: UUID, visibleInProject projectId: String?) -> ChatSession? {
-        guard let session = loadExplorerSession(id: id),
-              isExplorerSession(session, visibleInProject: projectId) else { return nil }
-        return session
-    }
-
-    /// The exact rule of `ChatSessionStore.list(for:visibleInProject:)`: its
-    /// own project's chats plus unassigned ones; everything when no project is open.
-    nonisolated static func isExplorerSession(_ session: ChatSession, visibleInProject projectId: String?) -> Bool {
-        guard let projectId else { return true }
-        return session.projectId == nil || session.projectId == projectId
-    }
-
     private func handleExploreRenameSession(data: Data) {
+        guard let chatHost else {
+            replyFeatureUnavailable(feature: "Chat", commandId: "explore_rename")
+            return
+        }
         guard let m = try? decoder.decode(ExploreRenameSession.self, from: data),
-              let sid = UUID(uuidString: m.sessionId),
-              var session = Self.loadExplorerSession(id: sid, visibleInProject: activeExplorerProjectId) else {
+              let sid = UUID(uuidString: m.sessionId) else {
             reply(CommandError(commandId: "explore_rename", message: "Session not found on Mac"))
             return
         }
         let trimmed = m.title.trimmingCharacters(in: .whitespacesAndNewlines)
-        session.title = trimmed.isEmpty ? "Untitled" : trimmed
-        ChatSessionStore.save(session)
-        append(.info, "Explore rename: \(sid.uuidString.prefix(8)) (\(session.title.count) chars)")
-        reply(ExploreSessionRenamed(sessionId: sid.uuidString, title: session.title))
+        guard let title = chatHost.renameExplorerSession(
+            id: sid, visibleInProject: activeExplorerProjectId,
+            title: trimmed.isEmpty ? "Untitled" : trimmed) else {
+            reply(CommandError(commandId: "explore_rename", message: "Session not found on Mac"))
+            return
+        }
+        append(.info, "Explore rename: \(sid.uuidString.prefix(8)) (\(title.count) chars)")
+        reply(ExploreSessionRenamed(sessionId: sid.uuidString, title: title))
         pushExploreSessionListIfPaired()
     }
 
@@ -1915,34 +1843,6 @@ final class MobileControlManager {
                          mobileControlUp: mobileControlUp)
     }
 }
-
-// MARK: - ChatTurn ↔ CodeAssistTurn mapping
-
-/// The SharedProtocol `ChatTurn` (wire shape) and the Mac-side
-/// `LlmIdeAPIClient.CodeAssistTurn` (Code Assistant view-model) carry the same
-/// `{role, content}` payload but differ in the `id`/role-enum representation.
-/// Defined in the Mac target (not SharedProtocol) because `CodeAssistTurn` is
-/// Mac-local and a SharedProtocol-side dependency would be circular.
-///
-/// Only the → direction survives Task 12: `handleExploreChat` used to decode
-/// the phone's own cached `chat.history` (← direction, `CodeAssistTurn.init(
-/// from: ChatTurn)`) into the request it sent. It now drives
-/// `ChatEngine.runExternalTurn`, which packs the request from the engine's
-/// OWN canonical `messages` via `packHistory` — the same source of truth the
-/// Mac panel's own turns use — so the phone's cached copy is no longer read
-/// for that purpose (`explore_load_session`, the ← direction's other would-be
-/// use, only ever needed →, never ←). The `ExploreChat.history` wire field
-/// was removed outright in 2026-08-17; an unknown `history` key from an
-/// older phone is ignored, but an older Mac decoding a newer phone's
-/// message would fail — the two apps update together.
-extension ChatTurn {
-    /// Code Assistant view-model → SharedProtocol wire shape: drop the
-    /// client-only `id`, surface the role as its raw string ("user"/"assistant").
-    init(from t: LlmIdeAPIClient.CodeAssistTurn) {
-        self.init(role: t.role.rawValue, content: t.content)
-    }
-}
-
 
 /// A lock-protected `[String]` the manager updates on the main actor and the WebSocket server
 /// reads from its own queue when it builds the `Connected` reply.

@@ -664,6 +664,13 @@ enum FeatureCatalog {
         manager.config = config
         manager.projectStore = projectStore
         manager.backendManager = backend
+        // Chat's side of every phone chat path (quick chat, Explorer chats,
+        // approvals) — Mobile Control sees it only as `MobileChatHosting`, so
+        // Shell is the one place that names both. Built here, not lazily: its
+        // init registers the phone's off-screen engine pool with
+        // `ChatEngineRegistry`, which the Mac consults on its own session
+        // switches before the phone ever drives a turn.
+        manager.chatHost = ChatMobileHost()
         mobileControlManager = manager
         manager.activityBridge = MobileActivityBridge(manager: manager, store: activity)
         manager.registerPhoneToolBridges()

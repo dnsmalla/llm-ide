@@ -1,7 +1,12 @@
 import Foundation
 
 /// Decides which `ChatEngine` a phone-driven `.explorer` turn
-/// (`MobileControlManager.handleExploreChat`) should actually run on.
+/// (Mobile Control's `explore_chat`, reached through
+/// `ChatMobileHost.explorerTurnEngine`) should actually run on.
+///
+/// Lives in Chat, not Mobile Control: it is pure engine/registry policy and
+/// names only Chat types, and Mobile Control may not name Chat (it sees the
+/// result only as `MobileChatTurnEngine` — `Core/Contracts/MobileChatHosting`).
 ///
 /// Fixes a real bug in Task 12's first pass: `ChatEngineRegistry` gives the
 /// Mac `CodeAssistantPanel` and the mobile bridge the SAME shared `.explorer`
