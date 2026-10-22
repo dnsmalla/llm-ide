@@ -178,6 +178,9 @@ public struct LlmIdeMacApp: App {
         activity.start()
         SessionScopedRegistry.shared.register(activity)
         SessionScopedRegistry.shared.register(ChatEngineRegistry.shared)
+        // Chat's session writes are debounced; AppDelegate (Core) cannot name
+        // the registry, so Shell hands it the flush to run at quit.
+        AppTerminationHooks.register("chat sessions") { ChatEngineRegistry.shared.flushAll() }
         self._activityStore = State(wrappedValue: activity)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg,

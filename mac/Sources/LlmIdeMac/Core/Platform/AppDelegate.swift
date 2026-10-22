@@ -105,12 +105,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     /// flushed here. The delegate, not a view's `onReceive`, because the app
     /// keeps running with every window closed — no view would be around to
     /// observe the notification.
+    ///
+    /// Order matters and is preserved: incidents first, then every hook Shell
+    /// registered (`AppTerminationHooks`) — Chat's debounced session writes
+    /// among them; without that flush a quit mid-stream lost up to a second
+    /// of the reply, and parked chats' tails. Chat is flushed through the
+    /// hook list because this delegate is Core and may not name a feature.
     func applicationWillTerminate(_ notification: Notification) {
         MainActor.assumeIsolated {
             IncidentStore.shared.flushPendingSave()
-            // Chat writes are debounced too; without this a quit mid-stream
-            // lost up to a second of the reply, and parked chats' tails.
-            ChatEngineRegistry.shared.flushAll()
+            AppTerminationHooks.runAll()
         }
     }
 }

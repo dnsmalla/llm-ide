@@ -226,11 +226,12 @@ build_app.sh
 Sources/LlmIdeMac/
 ├── Shell/                    # composition root: LlmIdeMacApp (@main), AppShell, ContentView,
 │   │                         #   FeatureCatalog, FeatureRegistry, AppFeature, ShellState,
-│   │                         #   DeepLinkRouter, LoginView, ReconnectView, Recovery/, Welcome/
+│   │                         #   DeepLinkRouter, LoginView, ReconnectView, Recovery/, Welcome/,
+│   │                         #   ChatScope+Shell (scope → sidebar section)
 │   └── Chrome/               # StatusBar, ActivityBell, toolbar, TerminalPanelState
 ├── Features/                 # one folder per section; never references another feature
 │   ├── Chat/                 # Code Assistant + quick chat (Models/ Engine/ Session/
-│   │                         #   Transport/ Services/ Views/{Panel,Quick,Shared})
+│   │                         #   Transport/ (CodeAssistTransport) Services/ Views/{Panel,Quick,Shared})
 │   ├── Library/ · Live/ · Settings/ · ReviewConflicts/        # always compiled
 │   ├── Explorer/ · Search/ · SourceControl/                   # file_explorer
 │   ├── CodeGraph/                                             # code_graph_3d
@@ -240,13 +241,16 @@ Sources/LlmIdeMac/
 │   ├── AutoTask/ · Loop/                                      # auto_tasks
 │   └── MobileControl/                                         # mobile_sync
 ├── Core/                     # leaf infrastructure, never excluded, usable by any layer
-│   ├── Contracts/            # cross-feature protocols (LoopRunning, MobileFeatureBridge, …)
+│   ├── Contracts/            # cross-feature protocols (LoopRunning, MobileFeatureBridge,
+│   │                         #   ChatTransport engine↔transport contract, ChatScope, …)
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/
-│   ├── Editor/ · Generation/ · Incidents/ · Memory/ · Verification/
+│   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
+│   ├── Generation/ · Incidents/ · Memory/ · Verification/
 │   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
 │   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex,
 │   │                         #   FolderIndexer, IngestTemplateRenderer, launch folder migrations, …
-│   ├── Platform/             # AppDelegate, Config, Theme, KeychainStore, SessionStore, utilities
+│   ├── Platform/             # AppDelegate + AppTerminationHooks, Config, Theme, KeychainStore,
+│   │                         #   SessionStore, utilities
 │   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding,
 │   │                         #   ProjectExporter (KB → project folder export)
 │   └── Repo/                 # GitLab/GitHub clients behind RepoBackend (Services/Repo/)

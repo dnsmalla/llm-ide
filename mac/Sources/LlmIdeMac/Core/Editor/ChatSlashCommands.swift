@@ -12,6 +12,11 @@ import Foundation
 /// /teleport, /keybindings, ...) has no llm-ide analogue at all, and showing
 /// them as if they worked would be worse than not showing them — so they are
 /// simply not declared here at all.
+///
+/// Lives in Core/Editor, not Features/Chat: it is a pure catalog + parser (no
+/// engine or session state), and `CompletionController` — Core — builds the
+/// "/" menu rows and the plugin-shadowing filter from it. Chat's composers
+/// still call the recognizers; a feature may import Core, not the reverse.
 enum ChatSlashCommands {
 
     // MARK: - Catalog (single source of truth)

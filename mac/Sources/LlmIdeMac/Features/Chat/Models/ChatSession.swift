@@ -1,30 +1,7 @@
 import Foundation
 import os
 
-/// Which sidebar section a chat belongs to. A section can own many chats;
-/// `ChatSessionStore.list(for:)` filters the UUID session files down to
-/// this scope. Add a case when a new section gets chat.
-enum ChatScope: String, Codable, CaseIterable {
-    case explorer, conflicts, visual, docGen
-    // `quick` is the menu-bar / LLM Chat sheet / iPhone conversation — one shared
-    // session, distinct from the panel scopes so a quick question does not land in
-    // the user's working chat.
-    case quick
-
-    /// The sidebar section that hosts this scope's `CodeAssistantPanel`, so a
-    /// caller holding only a `ChatScope` (e.g. `ChatEngineRegistry`) can route
-    /// the user to it. Nil for `.quick` — it has no section, it's reached by
-    /// opening the LLM Chat sheet or the menu-bar window instead.
-    var shellSection: ShellState.Section? {
-        switch self {
-        case .explorer: return .explorer
-        case .conflicts: return .conflicts
-        case .visual: return .visual
-        case .docGen: return .docGen
-        case .quick: return nil
-        }
-    }
-}
+// `ChatScope` lives in Core/Contracts/ChatScope.swift (a cross-feature value).
 
 /// One persisted Code Assistant chat. Stored as its own
 /// `sessions/<uuid>.json` file under Application Support, tagged with the

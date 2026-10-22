@@ -59,6 +59,7 @@ Enforcement:
 | SDK surface ledger (adopted / ignored / needs-human per top-level item) | `extension/llm_agent/sdk/sdk-surface.json` (gate: `tests/sdk-surface-ledger.test.mjs`, tool: `scripts/sdk-surface.mjs`) |
 | Wire event decode (Mac) | `ClaudeLink/AgentV2Event.swift` |
 | v2 request body, event→result mapping, `SESSION_UNRESUMABLE` handling | `ClaudeLink/AgentV2Transport.swift` (the HTTP/SSE transport itself is generic: `LlmIdeAPIClient+CodeAssist.swift`) |
+| Transport contract `AgentV2Transport` implements (`ChatTransport` protocol, `ChatTransportInput`, `ChatTransportResult`) — engine-neutral, no Claude knowledge | `Core/Contracts/ChatTransport.swift` (in Core so ClaudeLink, a leaf, never names a feature type; the legacy engine's implementation is `Features/Chat/Transport/CodeAssistTransport.swift`) |
 | Retired Claude model-id migration map | `ClaudeCLI.retiredModelIds` (merged by `AppConfig`) |
 | Tool-name → verb/title/icon vocabulary (SDK built-ins + llm-ide tools) | `ClaudeLink/ClaudeToolPresentation.swift` |
 | CLI executable, `-p`, `--permission-mode acceptEdits`, fallback model ids, provider id, vault key (Mac) | `ClaudeLink/ClaudeCLI.swift` |
