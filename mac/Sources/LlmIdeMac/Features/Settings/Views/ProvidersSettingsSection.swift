@@ -67,7 +67,7 @@ struct ProvidersSettingsSection: View {
         .onChange(of: config.activeCLI) { _, _ in Task { await refreshLiveModels() } }
     }
 
-    @AppStorage(AgentV2Selection.toggleKey) private var useAgentV2 = true
+    @AppStorage(ChatEnginePreference.useAgentV2DefaultsKey) private var useAgentV2 = true
 
     @ViewBuilder
     private var agentEngineToggle: some View {

@@ -104,14 +104,6 @@ enum FeatureCatalog {
         #endif
     }
 
-    static func graphSettingsSection() -> AnyView? {
-        #if FEATURE_GRAPH
-        return AnyView(GraphSettingsSection())
-        #else
-        return nil
-        #endif
-    }
-
     /// Drop the cached graph-engine resolution (e.g. after a plugin
     /// install/uninstall may have added or removed one). No-op when the
     /// feature is compiled out — callers outside Graph/ (auth/plugin routes)
@@ -124,25 +116,52 @@ enum FeatureCatalog {
         #endif
     }
 
-    // MARK: - Live
+    // MARK: - Settings sections
 
-    /// Live capture's own settings panel. Settings composes contributed
-    /// sections rather than owning each feature's panel — same seam as
-    /// `graphSettingsSection()`.
-    static func liveCaptureSettingsSection() -> AnyView? {
-        AnyView(MeetingCaptureMatrixView())
-    }
-
-    // MARK: - Loop
-
-    /// App-wide Loop defaults card (new-project budgets/policy + the stage
-    /// timeouts every run falls back to). Nil when Loop is compiled out
-    /// (it ships with Auto Tasks) — same seam as `graphSettingsSection()`.
-    static func loopDefaultsSettingsSection() -> AnyView? {
+    /// Contribute every feature-owned Settings card to
+    /// `SettingsSectionRegistry`. Settings renders slots and never names a
+    /// feature; THIS is the one place that decides which card goes where.
+    /// A card whose feature is compiled out is simply not registered, so its
+    /// slot renders nothing. Idempotent: the registry replaces on
+    /// re-registration, so calling this again can never duplicate a card.
+    static func registerSettingsSections(api: LlmIdeAPIClient) {
+        let registry = SettingsSectionRegistry.shared
+        // Library's inputs hub. Library is never build-excluded. The id is
+        // also the `.scrollSettingsToCard` anchor Library's "Connect a
+        // source…" deep link posts — keep the two in sync.
+        registry.register(slot: .connections, id: "connections") {
+            AnyView(ConnectionsSettingsHost(api: api))
+        }
+        // Live's capture-platform matrix, shown inside Connections → Meetings.
+        // Live is never build-excluded.
+        registry.register(slot: .meetingCapture, id: "meeting-capture-matrix") {
+            AnyView(MeetingCaptureMatrixView())
+        }
+        #if FEATURE_MOBILE
+        registry.register(slot: .mobileControl, id: "mobile-control") {
+            AnyView(MobileControlSettingsSection())
+        }
+        #endif
+        // App-wide Loop defaults card (new-project budgets/policy + the stage
+        // timeouts every run falls back to). Loop ships with Auto Tasks.
         #if FEATURE_AUTOTASK
-        return AnyView(LoopNewProjectDefaultsPanel())
-        #else
-        return nil
+        registry.register(slot: .loopDefaults, id: "loop-defaults") {
+            AnyView(LoopNewProjectDefaultsPanel())
+        }
+        #endif
+        // Source Control is gated on the Explorer flag, which is what
+        // excludes it from lite/min builds. `RepoSettingsSection` embeds the
+        // GitHub and GitLab sections itself, so it is the only card needed.
+        #if FEATURE_EXPLORER
+        registry.register(slot: .sourceControl, id: "source-control") {
+            AnyView(RepoSettingsSection(api: api))
+        }
+        #endif
+        // Graph auto-update cadence + upload-truncation banner.
+        #if FEATURE_GRAPH
+        registry.register(slot: .graph, id: "code-graph") {
+            AnyView(GraphSettingsSection())
+        }
         #endif
     }
 
@@ -175,18 +194,6 @@ enum FeatureCatalog {
         return AnyView(SourceControlView(api: api))
         #else
         return AnyView(EmptyView())
-        #endif
-    }
-
-    /// Source Control's settings panel(s). Gated on the Explorer flag, which
-    /// is what excludes Source Control from lite/min builds. `RepoSettingsSection`
-    /// is the only top-level call site Settings needs — it embeds the GitHub
-    /// and GitLab sections itself, so there is nothing else to return here.
-    static func sourceControlSettingsSections(api: LlmIdeAPIClient) -> [AnyView] {
-        #if FEATURE_EXPLORER
-        return [AnyView(RepoSettingsSection(api: api))]
-        #else
-        return []
         #endif
     }
 
@@ -698,14 +705,6 @@ enum FeatureCatalog {
         #endif
     }
 
-    static func mobileControlSettingsSection() -> AnyView? {
-        #if FEATURE_MOBILE
-        return AnyView(MobileControlSettingsSection())
-        #else
-        return nil
-        #endif
-    }
-
     /// Refresh Auto Task state for the phone (scheduler list + logs).
     /// AutoCodeView calls this instead of holding its own
     /// `@Environment(MobileControlManager.self)`. No-op when compiled out.
@@ -814,5 +813,24 @@ enum FeatureCatalog {
         runs.graphRescanner = rescanner
         loopRunnerProvider?.graphRescanner = rescanner
         #endif
+    }
+}
+
+/// Shell-side host for Library's Connections card: observes the feature
+/// registry and hands the card plain Auto Tasks availability values, so the
+/// Library view never names `FeatureRegistry`/`AppFeature` (Shell types).
+/// Observing here keeps the "Not installed" / "Enable Auto-Tasks" hints live
+/// when the Workspace feature toggles change on the same Settings page.
+private struct ConnectionsSettingsHost: View {
+    let api: LlmIdeAPIClient
+    @ObservedObject private var registry = FeatureRegistry.shared
+
+    var body: some View {
+        // AutoCaptureService runs as an Auto Task module
+        // (`AutoTaskModule.feature == .autoTasks`).
+        ConnectionsSettingsSection(
+            api: api,
+            autoTasksCompiled: registry.compiledFeatures.contains(.autoTasks),
+            autoTasksEnabled: registry.isEnabled(.autoTasks))
     }
 }

@@ -3,12 +3,21 @@ import Foundation
 /// Single source of truth for which meeting platforms LLM-IDE captures
 /// natively on macOS vs via the Chrome extension. `PlatformDetector` only
 /// registers native scrapers — this matrix is what user-facing copy should cite.
+///
+/// Lives in Core (platform facts, no behaviour) because the copy is cited by
+/// several peers that may not name each other: Live (capture matrix view,
+/// permissions onboarding), Library (Settings → Connections → Meetings) and
+/// Settings (Help guide).
 enum MeetingCaptureMatrix {
     struct Platform: Equatable, Identifiable, Sendable {
         let id: String
         let displayName: String
         /// `CaptureSource.rawValue` implemented by the native scraper, or nil
-        /// when this platform is extension-only.
+        /// when this platform is extension-only. Spelled as the wire literal,
+        /// not `CaptureSource.x.rawValue`, because `CaptureSource` is a Live
+        /// type and Core is a leaf. Drift is caught by
+        /// `MeetingCaptureMatrixTests`, which requires these values to equal
+        /// `PlatformDetector.allScrapers`' sources and to parse as `CaptureSource`.
         let nativeSourceRawValue: String?
         let chromeExtension: Bool
 
@@ -17,9 +26,9 @@ enum MeetingCaptureMatrix {
 
     static let platforms: [Platform] = [
         Platform(id: "zoom", displayName: "Zoom",
-                 nativeSourceRawValue: CaptureSource.zoomDesktop.rawValue, chromeExtension: true),
+                 nativeSourceRawValue: "zoom-desktop", chromeExtension: true),
         Platform(id: "teams", displayName: "Microsoft Teams",
-                 nativeSourceRawValue: CaptureSource.teamsDesktop.rawValue, chromeExtension: true),
+                 nativeSourceRawValue: "teams-desktop", chromeExtension: true),
         Platform(id: "meet", displayName: "Google Meet",
                  nativeSourceRawValue: nil, chromeExtension: true),
     ]

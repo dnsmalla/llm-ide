@@ -243,7 +243,8 @@ Sources/LlmIdeMac/
 ├── Core/                     # leaf infrastructure, never excluded, usable by any layer
 │   ├── Contracts/            # cross-feature protocols (LoopRunning, MobileFeatureBridge,
 │   │                         #   ChatTransport engine↔transport contract, ChatScope,
-│   │                         #   ShellSection + LibrarySelection, …)
+│   │                         #   ShellSection + LibrarySelection, SettingsSectionRegistry
+│   │                         #   (features' Settings cards, registered by Shell), …)
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/
 │   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
 │   ├── Generation/ · Incidents/ · Memory/ · Verification/

@@ -258,6 +258,10 @@ public struct LlmIdeMacApp: App {
         for feature in [AppFeature.fileExplorer, .ganttIssues, .docGen, .terminal] {
             featureRegistry.register(module: PassiveModule(feature: feature))
         }
+        // Feature-owned Settings cards. Registered here, before any window
+        // renders Settings, because Settings only renders registry slots and
+        // never names the features that fill them.
+        FeatureCatalog.registerSettingsSections(api: client)
     }
 
     public var body: some Scene {

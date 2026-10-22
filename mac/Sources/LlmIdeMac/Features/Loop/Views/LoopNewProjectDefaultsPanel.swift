@@ -2,7 +2,8 @@ import SwiftUI
 
 /// App-wide Loop defaults: budgets and policy inherited by **new** projects,
 /// plus the stage timeouts every run falls back to. A Settings card, composed
-/// into Settings through `FeatureCatalog.loopDefaultsSettingsSection()` — it
+/// into Settings through the `SettingsSectionRegistry` `.loopDefaults` slot
+/// (registered by `FeatureCatalog.registerSettingsSections`) — it
 /// used to sit at the bottom of the Loop sidebar, where expanding it reshaped
 /// the loop list.
 struct LoopNewProjectDefaultsPanel: View {

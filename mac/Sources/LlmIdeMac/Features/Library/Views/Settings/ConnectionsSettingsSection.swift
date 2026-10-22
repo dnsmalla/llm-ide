@@ -27,6 +27,13 @@ enum ConnectionsSelection {
 /// shown as "coming soon". This is the only place input capture is
 /// *configured*.
 ///
+/// Owned by Library (every source sheet, store and ingest service it drives
+/// is Library's), contributed to the Settings page through
+/// `SettingsSectionRegistry` slot `.connections` — Shell registers it at boot
+/// (`FeatureCatalog.registerSettingsSections`), so Settings never names it.
+/// The Auto Tasks availability it needs comes in as plain values from that
+/// Shell host, so this view never names `FeatureRegistry`/`AppFeature`.
+///
 /// It used to be a standalone activity-bar section ("Sources"), but that
 /// collided with the Library's own "Sources" section (the files those inputs
 /// produce). It now lives here and is reachable directly or via the
@@ -43,7 +50,12 @@ struct ConnectionsSettingsSection: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var sourceLinks: SourceLinkStore
     @Environment(AppEnvironment.self) private var env
-    @ObservedObject var registry = FeatureRegistry.shared
+    /// Auto Tasks (which runs AutoCaptureService) is compiled into this
+    /// binary. Supplied by Shell, which observes the feature registry and
+    /// re-renders this view when it changes.
+    let autoTasksCompiled: Bool
+    /// Auto Tasks is compiled in AND enabled at runtime.
+    let autoTasksEnabled: Bool
 
     /// Persisted per-section like `SettingsSectionCard`, so it survives launches.
     @AppStorage("settings.section.Connections.expanded") private var isExpanded = false
@@ -178,9 +190,7 @@ struct ConnectionsSettingsSection: View {
     /// The preference alone is not "On": the service only starts while the
     /// Auto-Tasks feature is compiled in AND enabled at runtime.
     private var isAutoCaptureLive: Bool {
-        config.autoCaptureOnMeeting
-            && registry.compiledFeatures.contains(.autoTasks)
-            && registry.isEnabled(.autoTasks)
+        config.autoCaptureOnMeeting && autoTasksCompiled && autoTasksEnabled
     }
 
     /// The single home for meeting capture config: the auto-capture toggle
@@ -210,22 +220,22 @@ struct ConnectionsSettingsSection: View {
                 // (`AutoTaskModule.feature == .autoTasks`) — with that
                 // feature not compiled in, FeatureRegistry never starts it,
                 // so this toggle would silently do nothing.
-                .disabled(!registry.compiledFeatures.contains(.autoTasks))
-                if !registry.compiledFeatures.contains(.autoTasks) {
+                .disabled(!autoTasksCompiled)
+                if !autoTasksCompiled {
                     Text("Not installed")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
-                } else if !registry.isEnabled(.autoTasks) {
+                } else if !autoTasksEnabled {
                     Text("Enable Auto-Tasks in Workspace")
                         .font(Typography.caption)
                         .foregroundStyle(theme.current.textMuted)
                 }
             }
 
-            if let liveCaptureSettings = FeatureCatalog.liveCaptureSettingsSection() {
-                liveCaptureSettings
-                    .environmentObject(theme)
-            }
+            // Live's capture-platform matrix, contributed through the
+            // registry (Library may not name Live's view).
+            SettingsSlotView(slot: .meetingCapture)
+                .environmentObject(theme)
 
             DisclosureGroup(isExpanded: $showMeetingAdvanced) {
                 HStack {

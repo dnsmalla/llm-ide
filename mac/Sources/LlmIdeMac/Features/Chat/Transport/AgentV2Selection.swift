@@ -12,8 +12,9 @@ public enum AgentV2Selection {
     /// `@AppStorage`/UserDefaults key for the user's engine toggle. The
     /// Settings row (`ProvidersSettingsSection`) writes through
     /// `@AppStorage`, which is backed by the same `UserDefaults.standard`
-    /// this type reads — the two can never disagree.
-    static let toggleKey = "chat.useAgentV2"
+    /// this type reads — the two can never disagree. Forwards to the Core
+    /// constant so Settings can name the key without naming Chat.
+    static let toggleKey = ChatEnginePreference.useAgentV2DefaultsKey
 
     /// The backend provider id the v2 engine runs on (the built-in Claude
     /// CLI tool's `AICliTool.provider`; the server-side engine always drives

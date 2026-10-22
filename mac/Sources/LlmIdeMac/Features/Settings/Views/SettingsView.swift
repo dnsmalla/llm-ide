@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// The Settings page. Owns only Settings' own cards; every card a FEATURE
+/// owns is contributed through `SettingsSectionRegistry` (registered by Shell
+/// at boot) and rendered here by slot, so this view never names another
+/// feature or Shell. A slot whose feature is compiled out is simply empty.
 struct SettingsView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
@@ -8,8 +12,9 @@ struct SettingsView: View {
     var body: some View {
         // ScrollViewReader so Library's "Open in Settings" deep-link can
         // jump to a specific card. Anchor id matches the string posted with
-        // `.scrollSettingsToCard` ("connections" today). Plugin install/
-        // browse lives in Library → Plugins.
+        // `.scrollSettingsToCard` ("connections" today — the id Shell
+        // registers Library's card under; `SettingsSlotView` applies it as
+        // `.id`). Plugin install/browse lives in Library → Plugins.
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: Spacing.lg) {
@@ -21,11 +26,9 @@ struct SettingsView: View {
                             .foregroundStyle(theme.current.textMuted)
                         FeatureProfileSettingsSection()
                         BackendSettingsSection()
-                        ConnectionsSettingsSection(api: api).id("connections")
+                        SettingsSlotView(slot: .connections)
                         UpdatesSettingsSection()
-                        if let mobile = FeatureCatalog.mobileControlSettingsSection() {
-                            mobile
-                        }
+                        SettingsSlotView(slot: .mobileControl)
                         PreferencesSettingsSection(api: api)
                         // App-scoped, not project-scoped: an "Always Allow"
                         // grant is per-(user, tool) and outlives any project,
@@ -44,9 +47,7 @@ struct SettingsView: View {
                             ProvidersSettingsSection(api: api)
                             CustomProvidersSection(api: api)
                             TierRoutingSection(api: api)
-                            if let loopDefaults = FeatureCatalog.loopDefaultsSettingsSection() {
-                                loopDefaults
-                            }
+                            SettingsSlotView(slot: .loopDefaults)
                             if AppSourceRoot.gitRoot != nil {
                                 SelfHealSettingsSection()
                             }
@@ -64,20 +65,17 @@ struct SettingsView: View {
                                     .font(Typography.title)
                                     .foregroundStyle(theme.current.textMuted)
                                 PathsSettingsSection()
-                                ForEach(Array(FeatureCatalog.sourceControlSettingsSections(api: api).enumerated()), id: \.offset) { _, section in
-                                    section
-                                }
+                                SettingsSlotView(slot: .sourceControl)
                                 // Memory listing stays here (not on a feature
                                 // page) because it has no other home. The
                                 // graph-specific card (auto-update cadence,
-                                // upload-truncation banner) is nil when Code
-                                // Graph is compiled out — dropping it from
-                                // Settings would orphan the only UI for
+                                // upload-truncation banner) is never
+                                // registered when Code Graph is compiled out,
+                                // so the slot renders nothing — dropping it
+                                // from Settings would orphan the only UI for
                                 // GraphAutoUpdater's interval when it IS built.
                                 MemorySettingsSection()
-                                if let graphSettings = FeatureCatalog.graphSettingsSection() {
-                                    graphSettings
-                                }
+                                SettingsSlotView(slot: .graph)
                             }
                         }
                         .id(activeId)

@@ -2,7 +2,9 @@ import SwiftUI
 
 /// Per-provider checklist of allowed repo operations. An unchecked op is
 /// skipped by automation and its manual button is disabled. Rendered at the
-/// bottom of GitHubSettingsSection / GitLabSettingsSection.
+/// bottom of GitHubSettingsSection / GitLabSettingsSection. Lives in Core
+/// (not Settings) because Source Control renders it and a feature may not
+/// name another feature's type; it depends only on Core repo types.
 struct OperationsAllowlistView: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
