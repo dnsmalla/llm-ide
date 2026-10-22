@@ -5,11 +5,8 @@ struct MeetingDetailView: View {
     let api: LlmIdeAPIClient
     @Environment(ShellState.self) private var shell
     @Environment(AppEnvironment.self) private var env
-    @EnvironmentObject var capture: CaptionOrchestrator
     @EnvironmentObject var theme: ThemeStore
     @State private var vm: MeetingDetailViewModel?
-    @State private var meetingTitleDraft: String = ""
-    @State private var recordingPulse = false
     @State private var isLoadingVM = false
     @State private var loadError: String?
     /// Bumped by every `reload(for:)`; only the newest reload may publish
@@ -21,10 +18,11 @@ struct MeetingDetailView: View {
     @State private var newestMeetingId: String?
 
     var body: some View {
-        Group {
-            if capture.isRunning || isPostStopBanner {
-                recordingView
-            } else if let vm, shell.selectedMeetingId != nil {
+        // A running capture (or its post-stop ingest banner) takes the pane
+        // over. Live owns that view and the decision, behind the Core seam,
+        // so Library never names Live's `CaptionOrchestrator`/`TranscriptView`.
+        LiveCaptureGate(api: api) {
+            if let vm, shell.selectedMeetingId != nil {
                 detailContent(vm: vm)
             } else if isLoadingVM {
                 ProgressView()
@@ -64,80 +62,6 @@ struct MeetingDetailView: View {
             Label("Select a Meeting", systemImage: "doc.text")
         } description: {
             Text("Choose a meeting from the list to view its summary and transcript.")
-        }
-    }
-
-    // MARK: - Recording / post-stop view
-
-    private var isPostStopBanner: Bool {
-        if case .success = capture.lastIngestStatus { return true }
-        if case .failure = capture.lastIngestStatus { return true }
-        if case .ingesting = capture.lastIngestStatus { return true }
-        return false
-    }
-
-    private var recordingView: some View {
-        VStack(spacing: 0) {
-            recordingBanner
-            Divider()
-            TranscriptView(api: api)
-        }
-    }
-
-    private var recordingBanner: some View {
-        HStack(spacing: 12) {
-            // Pulsing indicator
-            ZStack {
-                if capture.isRunning {
-                    Circle()
-                        .fill(theme.current.danger.opacity(0.3))
-                        .frame(width: 20, height: 20)
-                        .scaleEffect(recordingPulse ? 1.5 : 1.0)
-                        .animation(.easeInOut(duration: 0.8).repeatForever(autoreverses: true),
-                                   value: recordingPulse)
-                }
-                Image(systemName: capture.isRunning ? "waveform" : "checkmark.circle.fill")
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(capture.isRunning ? theme.current.danger : theme.current.accent3)
-            }
-            .onAppear { recordingPulse = true }
-            .onDisappear { recordingPulse = false }
-
-            if capture.isRunning {
-                TextField("Meeting title…", text: $meetingTitleDraft)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 280)
-                Button("Stop & Save") {
-                    Task {
-                        _ = await capture.stopAndIngest(api: api, meetingTitle: meetingTitleDraft)
-                        meetingTitleDraft = ""
-                    }
-                }
-                .buttonStyle(.borderedProminent)
-                .controlSize(.regular)
-            } else if let copy = ingestStatusCopy {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(copy.text)
-                        .font(.callout)
-                        .foregroundStyle(copy.isError ? theme.current.danger : theme.current.textMuted)
-                        .lineLimit(2)
-                }
-            }
-            Spacer()
-        }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 10)
-        .background(.regularMaterial)
-    }
-
-    private var ingestStatusCopy: (text: String, isError: Bool)? {
-        switch capture.lastIngestStatus {
-        case .idle:     return nil
-        case .ingesting: return ("Saving…", false)
-        case .success(let id, let dur):
-            return ("Saved · summarizing in background (\(id.suffix(6)), \(dur)s)", false)
-        case .failure(let msg):
-            return (msg, true)
         }
     }
 

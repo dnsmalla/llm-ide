@@ -3,6 +3,10 @@ import os
 
 /// File-based meeting store.  One .md file per meeting.  Lifecycle:
 ///   createPartial → appendCaption* → finalize (rename) → writeSummary
+///
+/// Core, not Library: Live writes the file during capture and Library reads /
+/// re-summarizes it afterwards, so it is shared notes storage, not either
+/// feature's own type.
 final class MeetingFileStore {
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "MeetingFileStore")
     let root: URL

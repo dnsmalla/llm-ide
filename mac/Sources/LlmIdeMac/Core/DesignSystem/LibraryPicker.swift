@@ -6,6 +6,11 @@ import SwiftUI
 /// there instead of opening their own file pickers. There is intentionally no
 /// "browse to add" — if an item isn't in the Library, the user adds it from the
 /// Library first.
+///
+/// Core (beside `LibraryItem+UI.swift`), not the Library feature: its consumers
+/// are OTHER features (Chat's "Add from Library"), and it depends only on the
+/// Core `LibraryItemStore`, so keeping it in Library forced a feature→feature
+/// edge for no gain.
 struct LibraryPicker: View {
     enum Mode { case single, multi }
 

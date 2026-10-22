@@ -266,6 +266,9 @@ public struct LlmIdeMacApp: App {
         // not name Chat. Before any window renders, for the same reason as
         // the Settings cards above.
         FeatureCatalog.installChatSeams()
+        // Live capture take-over for Library's meeting detail, which may not
+        // name Live. Before any window renders, like the chat seams above.
+        FeatureCatalog.installLiveSeams()
     }
 
     public var body: some Scene {

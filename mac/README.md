@@ -247,13 +247,18 @@ Sources/LlmIdeMac/
 │   │                         #   (features' Settings cards, registered by Shell),
 │   │                         #   ChatPanelProviding (ChatPanelRegistry: chat panel + code-change
 │   │                         #   sheets features embed, installed by Shell), ChatOutputProviding,
+│   │                         #   LiveCaptureProviding (LiveCaptureGate: Live's recording take-over
+│   │                         #   of Library's meeting detail, installed by Shell),
 │   │                         #   EditAcceptanceMode, …)
-│   ├── DesignSystem/         # shared SwiftUI chrome + Components/
+│   ├── DesignSystem/         # shared SwiftUI chrome + Components/, LibraryPicker
 │   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
 │   ├── Generation/ · Incidents/ · Memory/ · Verification/
 │   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
 │   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex,
-│   │                         #   FolderIndexer, IngestTemplateRenderer, launch folder migrations, …
+│   │                         #   FolderIndexer, IngestTemplateRenderer, launch folder migrations,
+│   │                         #   meeting files + summarization shared by Live and Library
+│   │                         #   (MeetingFileStore, PartialRecovery, MeetingSummarizationService,
+│   │                         #   MeetingNoteWriter/Generator, IngestNoteDedup), …
 │   ├── Platform/             # AppDelegate + AppTerminationHooks, FeatureCacheHooks, Config, Theme,
 │   │                         #   KeychainStore, SessionStore, utilities
 │   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding,

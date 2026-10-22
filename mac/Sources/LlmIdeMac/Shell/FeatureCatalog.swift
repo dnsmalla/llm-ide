@@ -341,6 +341,18 @@ enum FeatureCatalog {
         ChatOutputRegistry.shared.install(ChatEngineOutputProvider())
     }
 
+    // MARK: - Live seams
+
+    /// Install Live's half of the Core live-capture seam: Library's meeting
+    /// detail wraps its content in `LiveCaptureGate`, and THIS maps that to
+    /// Live's `LiveCaptureGateView`, so Library never names Live. Live is
+    /// never build-excluded, so no feature guard. Idempotent: install replaces.
+    static func installLiveSeams() {
+        LiveCaptureRegistry.shared.install { request in
+            AnyView(LiveCaptureGateView(request: request))
+        }
+    }
+
     // MARK: - Terminal
 
     #if FEATURE_TERMINAL

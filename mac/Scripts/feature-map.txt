@@ -21,7 +21,7 @@
 Shell/          Shell
 Core/           Core
 ClaudeLink/     Core
-Features/Chat/          Feature:Chat
+Features/Chat/    Feature:Chat    sealed
 Features/AutoTask/     Feature:AutoTask
 Features/Loop/          Feature:Loop
 Features/CodeGraph/    Feature:CodeGraph    sealed
@@ -29,10 +29,10 @@ Features/Search/    Feature:Search    sealed
 Features/Issues/    Feature:Issues    sealed
 Features/ReviewConflicts/    Feature:ReviewConflicts    sealed
 Features/Terminal/    Feature:Terminal    sealed
-Features/Live/    Feature:Live
+Features/Live/    Feature:Live    sealed
 Features/Explorer/    Feature:Explorer    sealed
 Features/SourceControl/    Feature:SourceControl    sealed
 Features/Generation/    Feature:Generation    sealed
 Features/Settings/    Feature:Settings    sealed
-Features/Library/    Feature:Library
+Features/Library/    Feature:Library    sealed
 Features/MobileControl/    Feature:MobileControl

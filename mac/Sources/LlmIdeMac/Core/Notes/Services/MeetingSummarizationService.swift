@@ -6,6 +6,11 @@ private let sumLog = Logger(subsystem: "com.llmide.macapp", category: "Summariza
 /// Shared summarization pipeline used by AppShell, CaptionScraper, and
 /// MeetingDetailViewModel.
 ///
+/// Lives in Core (the notes capability) rather than Library because Live's
+/// capture pipeline and Library's meeting detail both run it, and features
+/// may not name each other. Its whole closure (`MeetingFileStore`,
+/// `MeetingNoteWriter`, `MeetingNoteGenerator`, `IngestNoteDedup`) is Core.
+///
 /// Produces **two** llm-doc outputs per meeting:
 ///   1. `.docx` via bundled `note_template.docx` + Python (existing polished note)
 ///   2. `.md`  via `<project>/templates/meeting-note/template.md` (editable layout)
