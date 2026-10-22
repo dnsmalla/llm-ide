@@ -3,6 +3,17 @@
 # A Feature may reference Core and Shell-owned symbols, but NEVER another
 # Feature's. Swift has no intra-target boundary enforcement, so this is a
 # textual check. See docs/superpowers/specs/2026-09-15-mac-feature-isolation-design.md
+#
+# Checks, in script order (numbers match the section comments below):
+#   1-3  feature -> feature references (warn; FAIL only for `sealed` features)
+#        and feature -> Unclassified (informational)
+#   3a   #elseif in an always-compiled layer                        (FAIL)
+#   3b   always-compiled layer -> build-excludable feature, unguarded (FAIL)
+#   4    Package.swift libExcludes / testExcludes paths exist         (FAIL)
+#   5    non-Swift files name only existing LlmIdeMac/*.swift paths   (FAIL)
+#   6    tests naming an excludable feature's type are testExcluded   (FAIL)
+#   7    Core is a leaf: Core/ClaudeLink never name Shell/feature types,
+#        bar CORE_LEAF_ALLOWLIST; stale allowlist rows also FAIL      (FAIL)
 set -uo pipefail
 
 ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
@@ -493,7 +504,11 @@ perl -e '
 ' < "$ROOT/Package.swift" | sort -u > "$WORK/flag-excludes.txt"
 
 # One perl process for every Sources file (not one per file, as check 1 does)
-# keeps this check to about a second. Rows: name<TAB>path relative to Sources/.
+# keeps this check to about a second. Rows of toplevel-all.txt:
+# name<TAB>path relative to Sources/<TAB>keyword. Check 6 uses the TYPE rows
+# only (toplevel-decls.txt: name<TAB>path, no typealias); check 7 also needs
+# top-level typealiases, since Core naming a feature's typealias is the same
+# leaf violation as naming its struct.
 find "$ROOT/Sources" -name '*.swift' -print0 | xargs -0 perl -e '
   my $root = shift @ARGV;
   for my $f (@ARGV) {
@@ -501,17 +516,20 @@ find "$ROOT/Sources" -name '*.swift' -print0 | xargs -0 perl -e '
     $t =~ s{/\*.*?\*/}{}gs; $t =~ s{"""[^"]*(?:"(?!"")[^"]*)*"""}{""}gs;
     $t =~ s{"(?:\\.|[^"\\\n])*"}{""}g; $t =~ s{//[^\n]*}{}g;
     (my $rel = $f) =~ s{^\Q$root\E/}{};
-    while ($t =~ /^(?:@\w+(?:\([^)\n]*\))?\s+|(?:public|package|internal|private|fileprivate|open|final|indirect|nonisolated)\s+)*(?:class|struct|enum|protocol|actor)\s+([A-Za-z_]\w*)/mg) {
-      print "$1\t$rel\n";
+    while ($t =~ /^(?:@\w+(?:\([^)\n]*\))?\s+|(?:public|package|internal|private|fileprivate|open|final|indirect|nonisolated)\s+)*(class|struct|enum|protocol|actor|typealias)\s+([A-Za-z_]\w*)/mg) {
+      print "$2\t$rel\t$1\n";
     }
   }
-' "$ROOT/Sources" | sort -u > "$WORK/toplevel-decls.txt"
+' "$ROOT/Sources" | sort -u > "$WORK/toplevel-all.txt"
+awk -F'\t' '$3 != "typealias" {print $1 "\t" $2}' "$WORK/toplevel-all.txt" \
+  | sort -u > "$WORK/toplevel-decls.txt"
 
-# Strip comments/strings from every test file once, into a mirror tree, so a
+# Strip comments/strings from a set of files once, into a mirror tree, so a
 # type named only in prose (`/// mirrors LoopStage`) never counts as a use.
-TESTROOT_STRIPPED="$WORK/tests-stripped"
-mkdir -p "$TESTROOT_STRIPPED"
-find "$TESTROOT" -name '*.swift' -print0 | xargs -0 perl -e '
+# Usage: <NUL-separated absolute paths on stdin> | strip_tree_into ROOT OUT
+# Each file lands at OUT/<path relative to ROOT>. Shared by checks 6 and 7.
+strip_tree_into() {
+  xargs -0 perl -e '
   my ($root, $out) = splice(@ARGV, 0, 2);
   for my $f (@ARGV) {
     open(my $fh, "<", $f) or next; local $/; my $t = <$fh>; close $fh;
@@ -522,7 +540,11 @@ find "$TESTROOT" -name '*.swift' -print0 | xargs -0 perl -e '
     system("mkdir", "-p", $dir) unless -d $dir;
     open(my $oh, ">", $dst) or die "$dst: $!"; print $oh $t; close $oh;
   }
-' "$TESTROOT" "$TESTROOT_STRIPPED"
+' "$1" "$2"
+}
+TESTROOT_STRIPPED="$WORK/tests-stripped"
+mkdir -p "$TESTROOT_STRIPPED"
+find "$TESTROOT" -name '*.swift' -print0 | strip_tree_into "$TESTROOT" "$TESTROOT_STRIPPED"
 
 # Guard against a vacuous pass: the two lists below come from textual parsers
 # of Package.swift and Sources/. If either parser silently yields nothing (a
@@ -572,6 +594,137 @@ if [ -s "$WORK/test-exclude-gaps.txt" ]; then
   status=1
 else
   echo "  every such test file is excluded with its feature"
+fi
+
+# 7. Core is a leaf. Every `.swift` file whose layer is `Core` (Core/** and
+#    ClaudeLink/**, per feature-map.txt) may name only Core-, Unclassified-
+#    and SDK-owned types — never a top-level type declared under a Shell or
+#    Feature:* path. Checks 1–6 never looked at this direction: the boundary
+#    rule exempts Core as a consumer, and 3b only sees Core -> BUILD-EXCLUDABLE
+#    feature edges, so Core -> Chat/Library/Settings/Shell edges were invisible
+#    until an ad-hoc scan found them. Forbidden = every top-level
+#    class/struct/enum/protocol/actor/typealias declared under Sources/LlmIdeMac
+#    in a Shell/Feature layer, minus any name ALSO declared in Core (a `#if`
+#    stub/twin, or a collision the name cannot be attributed through — same
+#    ownership rule as checks 1 and 6). Matched word-for-word against a
+#    comment- and string-literal-stripped copy of each Core file, so prose
+#    and log strings never count. Known blind spot: a name used ONLY inside a
+#    string interpolation (`"\(Foo.bar)"`) is stripped with its literal.
+#
+#    Allowlist: one row per deliberate seam, TAB-separated
+#    `path<TAB>symbol<TAB>reason`, path relative to Sources/LlmIdeMac. A row
+#    skips exactly that (file, symbol) pair. A row whose file is gone, or
+#    whose symbol that file no longer names as a Shell/feature type, FAILS as
+#    stale — so the list can only shrink when the seam does, never rot.
+CORE_LEAF_ALLOWLIST='Core/Contracts/LoopRunning.swift	LoopEngineConfig	deliberate #if FEATURE_AUTOTASK seam (see file doc comment)'
+
+echo "=== Core-layer files naming Shell/feature types (Core must be a leaf) ==="
+# Layer for each top-level declaration under LlmIdeMac/, using the same
+# first-matching-prefix rule as layer_of() but in one awk pass.
+# Rows: name<TAB>path relative to Sources/LlmIdeMac<TAB>layer.
+awk -F'\t' '
+  NR == FNR {
+    if ($0 ~ /^[[:space:]]*(#|$)/) next
+    n = split($0, col, " "); if (n < 2) next
+    np++; pre[np] = col[1]; lay[np] = col[2]; next
+  }
+  index($2, "LlmIdeMac/") == 1 {
+    rel = substr($2, length("LlmIdeMac/") + 1); l = "Unclassified"
+    for (i = 1; i <= np; i++) if (index(rel, pre[i]) == 1) { l = lay[i]; break }
+    print $1 "\t" rel "\t" l
+  }
+' "$MAP" "$WORK/toplevel-all.txt" > "$WORK/c7-decl-layers.txt"
+awk -F'\t' '$3 == "Core" {print $1}' "$WORK/c7-decl-layers.txt" | sort -u > "$WORK/c7-core-names.txt"
+# name<TAB>owner layers ("+"-joined when a name is declared in several).
+awk -F'\t' '
+  NR == FNR { core[$1] = 1; next }
+  ($3 == "Shell" || $3 ~ /^Feature:/) && !($1 in core) {
+    key = $1 SUBSEP $3
+    if (!(key in seen)) { seen[key] = 1; own[$1] = ($1 in own) ? own[$1] "+" $3 : $3 }
+  }
+  END { for (n in own) print n "\t" own[n] }
+' "$WORK/c7-core-names.txt" "$WORK/c7-decl-layers.txt" | sort > "$WORK/c7-owners.txt"
+cut -f1 "$WORK/c7-owners.txt" > "$WORK/c7-forbidden.txt"
+
+# Core-layer files, stripped once into a mirror tree.
+CORE_STRIPPED="$WORK/core-stripped"
+mkdir -p "$CORE_STRIPPED"
+find "$SRC" -name '*.swift' | sort | awk -v src="$SRC/" '
+  NR == FNR {
+    if ($0 ~ /^[[:space:]]*(#|$)/) next
+    n = split($0, col, " "); if (n < 2) next
+    np++; pre[np] = col[1]; lay[np] = col[2]; next
+  }
+  {
+    rel = substr($0, length(src) + 1); l = "Unclassified"
+    for (i = 1; i <= np; i++) if (index(rel, pre[i]) == 1) { l = lay[i]; break }
+    if (l == "Core") printf "%s%c", $0, 0
+  }
+' "$MAP" - | strip_tree_into "$SRC" "$CORE_STRIPPED"
+core_file_count="$(find "$CORE_STRIPPED" -name '*.swift' | wc -l | tr -d ' ')"
+
+# Vacuous-pass guard, as for check 6: an empty or tiny forbidden list, or no
+# Core files, means a parser broke — not that Core is clean.
+forbidden_count="$(wc -l < "$WORK/c7-forbidden.txt" | tr -d ' ')"
+c7_ok=1
+if [ "$forbidden_count" -lt 300 ]; then
+  echo "  ERROR check 7 parser: only $forbidden_count Shell/feature top-level type names collected (expected hundreds)" >&2
+  status=1; c7_ok=0
+fi
+if [ "$core_file_count" -eq 0 ]; then
+  echo "  ERROR check 7 parser: zero Core-layer files scanned (feature-map.txt has no Core prefix matching Sources/LlmIdeMac?)" >&2
+  status=1; c7_ok=0
+fi
+
+# rel<TAB>symbol for every forbidden name each Core file names.
+: > "$WORK/c7-hits.txt"
+if [ "$c7_ok" -eq 1 ]; then
+  grep -rowFf "$WORK/c7-forbidden.txt" "$CORE_STRIPPED" --include='*.swift' \
+    | awk -v root="$CORE_STRIPPED/" '{
+        i = index($0, ".swift:"); f = substr($0, 1, i + 5); sym = substr($0, i + 7)
+        print substr(f, length(root) + 1) "\t" sym
+      }' | sort -u > "$WORK/c7-hits.txt"
+fi
+
+printf '%s\n' "$CORE_LEAF_ALLOWLIST" | awk -F'\t' 'NF >= 2 && $1 !~ /^#/ {print $1 "\t" $2}' \
+  > "$WORK/c7-allow.txt"
+: > "$WORK/c7-stale.txt"
+while IFS="$(printf '\t')" read -r apath asym; do
+  if [ ! -f "$SRC/$apath" ]; then
+    echo "$apath  [$asym]  — file no longer exists" >> "$WORK/c7-stale.txt"
+  elif ! grep -qxF "$apath	$asym" "$WORK/c7-hits.txt"; then
+    echo "$apath  [$asym]  — file no longer names this as a Shell/feature type" >> "$WORK/c7-stale.txt"
+  fi
+done < "$WORK/c7-allow.txt"
+
+if [ -s "$WORK/c7-allow.txt" ]; then
+  grep -vxFf "$WORK/c7-allow.txt" "$WORK/c7-hits.txt" > "$WORK/c7-violations.txt"
+else
+  cp "$WORK/c7-hits.txt" "$WORK/c7-violations.txt"
+fi
+if [ -s "$WORK/c7-violations.txt" ]; then
+  # Group per (owner layer, file), like the warn lines of check 2.
+  awk -F'\t' '
+    NR == FNR { own[$1] = $2; next }
+    { key = own[$2] "|" $1; syms[key] = (key in syms) ? syms[key] "," $2 : $2 }
+    END { for (k in syms) print k "|" syms[k] }
+  ' "$WORK/c7-owners.txt" "$WORK/c7-violations.txt" | sort \
+    | while IFS='|' read -r owner rel syms; do
+        short="$(printf '%s' "$owner" | sed 's/Feature://g')"
+        echo "  ERROR  [$short] $rel  ->  $owner  [$syms]"
+      done
+  echo "FAIL: a Core-layer file names a type declared under Shell/ or Features/ — move the type to Core, or put a protocol in Core/Contracts/" >&2
+  status=1
+fi
+if [ -s "$WORK/c7-stale.txt" ]; then
+  while read -r line; do
+    echo "  ERROR  stale allowlist row: $line"
+  done < "$WORK/c7-stale.txt"
+  echo "FAIL: a CORE_LEAF_ALLOWLIST row no longer matches a real reference — delete it" >&2
+  status=1
+fi
+if [ ! -s "$WORK/c7-violations.txt" ] && [ ! -s "$WORK/c7-stale.txt" ]; then
+  echo "  none"
 fi
 
 exit $status
