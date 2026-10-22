@@ -88,6 +88,28 @@ final class BackendManager {
     /// The loopback port the Node backend listens on. Single source of truth.
     nonisolated static let defaultBackendPort = 3456
 
+    /// The environment variable the Node server reads to decide which
+    /// feature route groups to load (comma-separated `AppFeature` raw values;
+    /// unset/empty → all, the same semantics as `mac/Package.swift`).
+    nonisolated static let featuresEnvKey = "LLMIDE_FEATURES"
+
+    /// Returns the ENABLED feature keys to hand the spawned server, or nil to
+    /// leave `LLMIDE_FEATURES` unset (the server then loads every group).
+    /// Never return `[]` to mean "none": an empty value also reads as "all".
+    ///
+    /// A seam rather than a direct `FeatureRegistry` read because Core is a
+    /// leaf and may not name Shell types; Shell installs the real provider in
+    /// `LlmIdeMacApp.init`, before any `start`. The default (nil) is what a
+    /// run without Shell's boot — tests, labs — should get: a full server.
+    ///
+    /// Read on every spawn (start, restart, auto-restart), so a feature-set
+    /// change made in Settings takes effect at the NEXT backend start. The app
+    /// never restarts the backend just because the set changed: that would
+    /// kill in-flight Loop / agent work for a cosmetic reconfiguration. An
+    /// ADOPTED external server is not affected at all — it keeps whatever
+    /// environment it was launched with.
+    static var featureKeysProvider: @MainActor () -> [String]? = { nil }
+
     enum Status: Equatable {
         case stopped
         case starting
@@ -417,22 +439,21 @@ final class BackendManager {
         forgetServerApiVersion()
     }
 
-    private func spawn(nodePath: String, workURL: URL) {
-        status = .starting
-        lastError = nil
-        adoptedExternal = false
-
-        let proc = Process()
-        proc.executableURL = URL(fileURLWithPath: nodePath)
-        proc.arguments = ["server.mjs"]
-        proc.currentDirectoryURL = workURL
+    /// Build the backend child's environment from `base` (the app's own
+    /// environment) and the enabled feature keys. Pure, so it is testable
+    /// without spawning node.
+    ///
+    /// - Postcondition: only allowlisted variables from `base` survive;
+    ///   `LLMIDE_FEATURES` is present iff `featureKeys` is non-nil, and then
+    ///   holds the keys sorted and comma-joined — never the inherited value.
+    nonisolated static func childEnvironment(base: [String: String],
+                                             featureKeys: [String]?) -> [String: String] {
         // Build the child environment from an allowlist instead of inheriting
         // the full shell env. Passing the full inherited env would expose
         // unrelated ambient secrets (AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, etc.)
         // to the Node server and every subprocess it spawns (claude, git, …).
         // We preserve exactly what the server legitimately needs: standard
         // POSIX vars, locale/XDG, NODE_ENV, and our own config prefixes.
-        let base = ProcessInfo.processInfo.environment
         let exactAllow: Set<String> = [
             "PATH", "HOME", "USER", "LOGNAME", "SHELL", "TMPDIR", "TERM",
             "LANG", "LC_ALL", "LC_CTYPE", "NODE_ENV",
@@ -442,6 +463,15 @@ final class BackendManager {
         var env: [String: String] = [:]
         for (k, v) in base where exactAllow.contains(k) || prefixAllow.contains(where: { k.hasPrefix($0) }) {
             env[k] = v
+        }
+        // The `LLMIDE_` prefix would otherwise pass through whatever feature
+        // list the app happened to be launched with (a leftover from a
+        // `LLMIDE_FEATURES=… swift build` shell, say). The server's route set
+        // must follow the user's ACTIVE toggles, so the inherited value is
+        // always dropped and only the app's own state is written back.
+        env.removeValue(forKey: featuresEnvKey)
+        if let featureKeys {
+            env[featuresEnvKey] = featureKeys.sorted().joined(separator: ",")
         }
         env["TERM"] = "dumb"
         env["MEETNOTES_LOG_JSON"] = env["MEETNOTES_LOG_JSON"] ?? "0"
@@ -460,7 +490,21 @@ final class BackendManager {
         env["PATH"] = (cliDirs + inherited)
             .filter { !$0.isEmpty && seenPath.insert($0).inserted }
             .joined(separator: ":")
-        proc.environment = env
+        return env
+    }
+
+    private func spawn(nodePath: String, workURL: URL) {
+        status = .starting
+        lastError = nil
+        adoptedExternal = false
+
+        let proc = Process()
+        proc.executableURL = URL(fileURLWithPath: nodePath)
+        proc.arguments = ["server.mjs"]
+        proc.currentDirectoryURL = workURL
+        proc.environment = Self.childEnvironment(
+            base: ProcessInfo.processInfo.environment,
+            featureKeys: Self.featureKeysProvider())
 
         let stdOut = Pipe()
         let stdErr = Pipe()

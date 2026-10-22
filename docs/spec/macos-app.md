@@ -186,6 +186,21 @@ watchers, and listeners; presets do the same in bulk. Rule: init is free,
 call `refresh()`, so auth-scoped modules (graph, chat mirror) stop on
 logout via `runtimeReady`.
 
+**Server side of the feature set.** The runtime feature set (active ∩
+compiled, plus `agent_chat` always) also reaches the Node backend: Shell
+installs `BackendManager.featureKeysProvider` at boot, and every spawn
+(start, restart, auto-restart) writes it into the child's environment as
+`LLMIDE_FEATURES` — sorted, comma-separated `AppFeature` raw values, the
+same keys and semantics as `mac/Package.swift` (unset/empty → all). An
+`LLMIDE_FEATURES` inherited from the app's own environment is always
+dropped first, never passed through (`BackendManager.childEnvironment`).
+The server does not load a disabled feature's route groups and answers
+them with 404 `feature_disabled`. A toggle applies on the **next backend
+start** — the app deliberately does not restart the backend when the set
+changes, because that would kill in-flight Loop/agent work; Settings →
+Workspace says so in its hint. An adopted external server (one already
+listening on :3456) keeps whatever environment it was launched with.
+
 ### Key service contracts
 
 #### `SessionStore` (`Core/Platform/SessionStore.swift`)

@@ -203,6 +203,18 @@ public struct LlmIdeMacApp: App {
         // window exists — breaking the "registry starts nothing here"
         // contract the comment above documents.
         featureRegistry.compiledFeatures = FeatureCatalog.compiledFeatures
+        // Tell the Node backend which feature route groups to load. Read on
+        // every spawn (Core cannot name the registry, hence the seam), so a
+        // toggle applies at the next backend start — never by restarting it.
+        // `isEnabled` semantics (active ∩ compiled): a feature compiled out
+        // of this binary has no Mac surface to serve. `agent_chat` is always
+        // included: the agent routes it gates also back other surfaces, and
+        // it keeps the list non-empty — an empty value reads as "all".
+        BackendManager.featureKeysProvider = {
+            let registry = FeatureRegistry.shared
+            let enabled = registry.activeFeatures.intersection(registry.compiledFeatures)
+            return AppFeature.validated(enabled.union([.agentChat])).map(\.rawValue)
+        }
         // Builds the Mobile Control stack (native WebSocket server + Bonjour
         // + PIN pairing) and registers MobileModule. Runs BEFORE
         // bootAutoTask so construction order matches what the inline code

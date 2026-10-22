@@ -27,8 +27,11 @@ struct FeatureProfileSettingsSection: View {
     private var workspaceCard: some View {
         SettingsSectionCard(icon: "slider.horizontal.3", title: "Workspace") {
             VStack(alignment: .leading, spacing: Spacing.sm) {
+                // The last sentence is there because the backend is NOT
+                // restarted on a toggle (that would kill in-flight Loop/agent
+                // work); BackendManager reads the set on its next spawn.
                 SettingsHint(
-                    "Presets turn features off completely (toolbar + navigation). Toolbar toggles below only hide menu buttons — deep links and shortcuts still work."
+                    "Presets turn features off completely (toolbar + navigation). Toolbar toggles below only hide menu buttons — deep links and shortcuts still work. The local server picks up feature changes the next time it starts."
                 )
 
                 HStack(spacing: Spacing.md) {
