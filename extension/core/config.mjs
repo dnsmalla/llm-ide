@@ -50,6 +50,62 @@ function envIntClamped(name, fallback, min, max) {
   return clamped;
 }
 
+// --- Feature set (LLMIDE_FEATURES) ---------------------------------------
+//
+// The Mac app can build without some features (mac/Package.swift reads the
+// same variable) and passes its ENABLED list to the server it spawns, so the
+// server stops loading and serving what that app can no longer call. Keys are
+// the Mac's AppFeature raw values; agent_chat cannot be excluded, so it is
+// always in the set. Unset / empty = every feature (null), which is also what
+// the Chrome-extension-only setup and every pre-existing deployment get.
+export const FEATURE_KEYS = Object.freeze([
+  'agent_chat', 'file_explorer', 'code_graph_3d', 'gantt_issues',
+  'terminal', 'doc_gen', 'mobile_sync', 'auto_tasks',
+]);
+
+// Restates AppFeature.requiredDependencies, the closure mac/Package.swift also
+// applies: a hand-typed list naming one of these without file_explorer builds
+// a Mac app WITHOUT it, so the server must not keep serving it either.
+const FEATURE_REQUIRES = Object.freeze({
+  code_graph_3d: ['file_explorer'],
+  gantt_issues:  ['file_explorer'],
+  doc_gen:       ['file_explorer'],
+});
+
+// A Set whose mutators throw. Object.freeze alone does not stop Set#add, and
+// the set is shared process-wide (config is frozen), so a stray mutation would
+// silently change what every later request sees.
+function readOnlySet(values) {
+  const set = new Set(values);
+  const refuse = () => { throw new TypeError('config.features is read-only'); };
+  Object.defineProperties(set, { add: { value: refuse }, delete: { value: refuse }, clear: { value: refuse } });
+  return Object.freeze(set);
+}
+
+/**
+ * Parse an LLMIDE_FEATURES value.
+ *
+ * @param {string|undefined} raw comma-separated enabled feature keys
+ * @param {(line: string) => void} [warn] sink for the one-line warnings
+ * @returns {ReadonlySet<string>|null} null = every feature; else the enabled
+ *   keys (agent_chat always included, file_explorer closure applied)
+ */
+export function parseFeatures(raw, warn = console.warn) {
+  if (typeof raw !== 'string' || raw.trim() === '') return null;
+  const requested = raw.split(',').map((s) => s.trim()).filter(Boolean);
+  const unknown = requested.filter((k) => !FEATURE_KEYS.includes(k));
+  if (unknown.length > 0) {
+    warn(`[config] LLMIDE_FEATURES: ignoring unknown feature key(s) ${unknown.join(', ')} (known: ${FEATURE_KEYS.join(', ')})`);
+  }
+  const enabled = new Set(['agent_chat', ...requested.filter((k) => FEATURE_KEYS.includes(k))]);
+  const dropped = [...enabled].filter((k) => (FEATURE_REQUIRES[k] || []).some((dep) => !enabled.has(dep)));
+  if (dropped.length > 0) {
+    for (const k of dropped) enabled.delete(k);
+    warn(`[config] LLMIDE_FEATURES: disabling ${dropped.join(', ')} — each requires file_explorer, which is not enabled`);
+  }
+  return readOnlySet(enabled);
+}
+
 // --- Secrets -------------------------------------------------------------
 //
 // JWT_SECRET signs access + refresh tokens.  VAULT_KEY derives per-user
@@ -149,6 +205,10 @@ export const config = Object.freeze({
   // meeting transcript (~3 MB) plus JSON framing headroom.
   bodyLimitMB:  envInt('LLMIDE_BODY_LIMIT_MB', 8),
   trustProxy:   envBool('LLMIDE_TRUST_PROXY', false),
+
+  // Enabled features (see parseFeatures above): null = all. Parsed once here
+  // so routing, /health and ENDPOINTS all read the same set.
+  features:     parseFeatures(process.env.LLMIDE_FEATURES),
 
   // Database
   // Under the Node test runner (it sets NODE_TEST_CONTEXT in every test
@@ -263,5 +323,6 @@ export function configSummary() {
     vaultKeyDigest:  digest(config.vaultKey),
     accessTokenTTLSec: config.accessTokenTTLSec,
     registrationOpen: config.registrationOpen,
+    features: config.features ? [...config.features].sort() : null,
   };
 }

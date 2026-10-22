@@ -4,7 +4,8 @@ import http from 'http';
 import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
-import { handleKB } from './routes/router.mjs';
+import { handleKB, initFeatureRoutes } from './routes/router.mjs';
+import { enabledEndpoints } from './routes/feature-routes.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
 
@@ -267,8 +268,11 @@ const HOST = config.host;
 //   v71 — ask-subagent results gain `meta: { subagent, provider, model, tier?, ms }` as their FIRST key (so a 20k-truncated tool_result text keeps it; what actually ran — the default after a routeFallback, model "default" when the deployment default ran unnamed, `tier` only when the routed provider+model ran; v2 carries it inside the tool_result text JSON); the legacy /code-assist `progress` event for an ask-subagent call gains `subagent: <name>`.
 //   v72 — the classic /code-assist `usage` (JSON body and the SSE `done` event) gains the turn's summed model tokens: `inputTokens`, `outputTokens`, optional `cacheReadTokens` / `cacheCreationTokens`, and `modelCalls` (calls that reported tokens) — omitted when none did. Covers the native tool loop (now also metered into the usage ledger), the Anthropic HTTP stream, and every other metered call; a reply streamed through a provider CLI prints no usage and is not counted.
 //   v73 — decisions: new decision-only provider `jev` (vault `jev.apiKey`, env JEV_AI_API_KEY; /kb/providers/verify lists its models, /kb/providers/models lists them) — every chat/completion path refuses it (400 PROVIDER_UNAVAILABLE "Jev is a decision provider…"). Tier routing: `jev` is a valid tier provider and `decisions` a new feature; a jev tier serves `decisions` only — featureStatus reports `decision_only` for any other feature and routes it to its default. New agent tool `decide` (kind read, both engines; plugin subagents opt in via `allowed_tools`) → { engine: 'jev'|'llm', model, answers, fallback? }; tool schemas may declare `type: object`.
-const SERVER_API_VERSION = 73;
-const ENDPOINTS = [
+//   v74 — LLMIDE_FEATURES (comma-separated ENABLED feature keys, the Mac's AppFeature raw values; unset/empty = all) is honoured: a disabled feature's route group (auto_tasks → /kb/loop/*, gantt_issues → /kb/issue-schedule, code_graph_3d → /kb/ingest-code-graph) is never loaded and answers 404 { error: 'feature_disabled', feature }; /health gains `features` (null = all, else the sorted enabled keys) and its `endpoints` omit the disabled groups' paths.
+const SERVER_API_VERSION = 74;
+// Every endpoint this server can serve. ENDPOINTS (below) is what /health
+// advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
+const ALL_ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
   '/generate-doc',
@@ -375,6 +379,7 @@ const ENDPOINTS = [
   '/kb/chat/sessions/:id',
   '/kb/chat/sessions/:id/messages',
 ];
+const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 
 // Map a route URL to a rate-limit profile (see server/rate-limit.mjs).
 // Anything not listed has no limit applied.
@@ -637,6 +642,7 @@ const server = http.createServer(async (req, res) => {
       endpoints: ENDPOINTS,
       serverStartedAt: SERVER_STARTED_AT,
       skillsAvailable,
+      features: config.features,
     }));
     return;
   }
@@ -1102,6 +1108,11 @@ if (!IS_LOOPBACK && !config.allowRemote) {
   process.exit(1);
 }
 
+// Import the enabled feature route groups BEFORE accepting traffic: a broken
+// route module then fails the boot (as its static import used to) instead of
+// the first request, and no request pays the import cost.
+await initFeatureRoutes(config.features);
+
 server.listen(PORT, HOST, () => {
   // Even when remote binding is explicitly allowed, warn loudly so the
   // operator is reminded the app itself terminates no TLS.
@@ -1185,6 +1196,7 @@ server.listen(PORT, HOST, () => {
     port: PORT,
     apiVersion: SERVER_API_VERSION,
     endpoints: ENDPOINTS.length,
+    features: config.features ? [...config.features].sort() : null,
     pid: process.pid,
     config: configSummary(),
   });

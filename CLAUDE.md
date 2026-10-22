@@ -69,7 +69,8 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 - **Pure Node HTTP** — No framework (Express/Fastify); reduces dependency surface
 - **SQLite WAL+FTS5** — Single database per install, full-text search across meetings/code/tickets
 - **Per-user tenancy** — Every owned row carries `user_id`; FTS5 hits are hydrated with user-scoped queries
-- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0040)
+- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0041)
+- **Runtime feature set → server** — the Mac app writes the user's active features (active ∩ compiled, `agent_chat` always) into the backend child's env as `LLMIDE_FEATURES` (sorted `AppFeature` raw values; unset/empty → all, same as `mac/Package.swift`) via `BackendManager.featureKeysProvider`, which Shell installs in `LlmIdeMacApp.init`; an inherited `LLMIDE_FEATURES` is always dropped (`BackendManager.childEnvironment`). Disabled route groups answer 404 `feature_disabled`. A toggle applies on the NEXT backend start — never auto-restart the backend on a feature change (it kills in-flight Loop/agent work); an adopted external server keeps its own env.
 
 ## Project Structure
 
@@ -258,7 +259,8 @@ Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWrit
 - **`runClaude()` prefers user's stored `claude.apiKey`** — Falls back to operator's Claude CLI; never silent fallback
 - **8 MB request body limit** — DoS guard
 - **500 k-char prompt cap** — Keep within Claude CLI comfort zone
-- **`SERVER_API_VERSION` + `ENDPOINTS` array** — Bump version when wire format changes
+- **`SERVER_API_VERSION` + `ALL_ENDPOINTS` array** — Bump version when wire format changes; `/health` advertises `ENDPOINTS` = `ALL_ENDPOINTS` minus disabled features' paths
+- **`LLMIDE_FEATURES` honoured** — Parsed once into `config.features` (`null` = all); a disabled feature's route group (`extension/routes/feature-routes.mjs`) is never imported and its paths 404 `{"error":"feature_disabled","feature":…}`; `/health` reports `features`
 
 ### SQLite (`extension/kb/db.mjs`)
 - **better-sqlite3 is single-writer** — All writes serialized by V8 event loop
@@ -297,7 +299,7 @@ Mac app ↔ iPhone companion (WebSocket `:3006`, Bonjour, PIN pairing). Details:
 | I want to… | Touch these files |
 |---|---|
 | Support new meeting platform | `extension/src/content/caption-scraper.ts` (add reader), `detectPlatform()` |
-| Add new AI feature | New server endpoint in `extension/server.mjs` + add to `ENDPOINTS` + bump `SERVER_API_VERSION` + add to `REQUIRED_ENDPOINTS` in `extension/src/sidepanel/App.tsx` + new hook under `extension/src/sidepanel/hooks/` (with `language` param + AbortController) |
+| Add new AI feature | New server endpoint in `extension/server.mjs` + add to `ALL_ENDPOINTS` (a route owned by one excludable Mac feature: own route module registered in `extension/routes/feature-routes.mjs`) + bump `SERVER_API_VERSION` + add to `REQUIRED_ENDPOINTS` in `extension/src/sidepanel/App.tsx` + new hook under `extension/src/sidepanel/hooks/` (with `language` param + AbortController) |
 | Add new UI language | `LANGUAGE_NAMES` in `extension/server.mjs` + `HEADING_LABELS` for questions + LanguageSelector option |
 | Change server port | `extension/src/lib/config.ts` default + `extension/server.mjs` `PORT` + CORS origin list |
 | Persist UI state | `chrome.storage.local` via the owning hook; do NOT add new store |

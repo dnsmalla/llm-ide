@@ -12,6 +12,7 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 - **Auth** — `Authorization: Bearer <access_token>` for everything except the public routes below
 - **Versioning** — `SERVER_API_VERSION` reported by `GET /health`; the client compares against its `REQUIRED_ENDPOINTS` allowlist and surfaces a "restart server" banner on mismatch
 - **Error envelope** — `{ "error": { "code": "...", "message": "...", "details": {} } }`
+- **Feature set** — `LLMIDE_FEATURES` (comma-separated enabled feature keys, the Mac app's build features; unset/empty = all) prunes feature-owned route groups. See [Feature-pruned routes](#feature-pruned-routes)
 
 ## Error codes
 
@@ -30,7 +31,7 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/health` | Status, schema version, uptime, endpoint list |
+| `GET` | `/health` | Status, schema version, uptime, endpoint list, enabled `features` |
 | `GET` | `/launch-app` | Deep link into the macOS app |
 | `POST` | `/auth/register` | Create an account |
 | `POST` | `/auth/login` | Exchange password for access + refresh tokens |
@@ -133,6 +134,24 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | `GET` | `/kb/agent/feedback/stats` | Aggregate feedback |
 | `GET` | `/kb/agent/persona` | Read persona prompt |
 | `PUT` | `/kb/agent/persona` | Update persona prompt |
+
+## Feature-pruned routes
+
+The macOS app can be built without some features and starts its server with the same list in `LLMIDE_FEATURES` (for example `agent_chat,file_explorer,terminal`). The server then never imports a disabled feature's route module, and that module's paths answer:
+
+```json
+{ "error": "feature_disabled", "feature": "auto_tasks" }
+```
+
+with status `404`. The body is deliberately not the usual error envelope, so a client can tell a disabled feature from an unknown route.
+
+| Feature key | Paths |
+|---|---|
+| `auto_tasks` | `/kb/loop/*` (`/kb/loop/agent-run`) |
+| `gantt_issues` | `/kb/issue-schedule` |
+| `code_graph_3d` | `/kb/ingest-code-graph` |
+
+`GET /health` reports the applied set as `features` (`null` = every feature, otherwise the sorted enabled keys) and leaves the disabled paths out of `endpoints`. The Chrome extension's `REQUIRED_ENDPOINTS` are all always-on, so any feature set satisfies it. `doc_gen` prunes nothing on the server: the Chrome extension also calls `/generate-doc` and `/generate-docx`. Unknown keys are ignored with one warning line. `code_graph_3d`, `gantt_issues` and `doc_gen` are dropped when `file_explorer` is not enabled, the same rule `mac/Package.swift` applies.
 
 ## Rate limits
 

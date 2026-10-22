@@ -6,6 +6,7 @@ export function buildHealthPayload({
   endpoints,
   serverStartedAt,
   skillsAvailable,
+  features = null,
 }) {
   return {
     status: dbOk && claude?.ok && skillsAvailable !== false ? 'ok' : 'degraded',
@@ -13,6 +14,10 @@ export function buildHealthPayload({
     schemaVersion: migration?.current ?? 0,
     uptimeSec: Math.round((Date.now() - serverStartedAt) / 1000),
     endpoints,
+    // LLMIDE_FEATURES as the server applied it: null = every feature, else the
+    // enabled keys, sorted (JSON has no Set; a stable order lets the Mac
+    // compare it with the feature set it launched the server with).
+    features: features ? [...features].sort() : null,
     checks: {
       db: dbOk,
       claude: !!claude?.ok,

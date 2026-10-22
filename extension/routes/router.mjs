@@ -6,7 +6,6 @@
 import * as kb from '../kb/db.mjs';
 import { indexLocalRepo } from '../connectors/git.mjs';
 import { indexScip } from '../connectors/scip.mjs';
-import { ingestStructureGraph } from '../connectors/structure-graph.mjs';
 import { indexGithubIssues, indexTicketsJson } from '../connectors/issues.mjs';
 import { indexJUnit } from '../connectors/qa.mjs';
 import { indexBoxFolder, boxTest } from '../connectors/box.mjs';
@@ -20,12 +19,14 @@ import { listRuns } from '../agents/meeting-agent.mjs';
 // live-sessions imports moved into routes/live.mjs.
 import { handleAgentRoutes } from './agent.mjs';
 import { handleAgentV2Routes } from './agent-v2.mjs';
-import { handleLoopAgentRoutes } from './loop-agent.mjs';
 import { handlePlanningRoutes } from './planning.mjs';
-import { handleIssueScheduleRoutes } from './issue-schedule.mjs';
 import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
 import { handleChatRoutes } from './chat.mjs';
+// Feature-owned groups (loop-agent, issue-schedule, code-graph) are NOT
+// imported here: routes/feature-routes.mjs loads only the enabled ones.
+import { loadFeatureRoutes, featureDisabledFor, sendFeatureDisabled } from './feature-routes.mjs';
+import { config } from '../core/config.mjs';
 // runGuardrails moved into routes/review.mjs.
 import { summarizeTranscript } from '../agents/summarize.mjs';
 import { classifyEmail } from '../agents/email-classify.mjs';
@@ -80,6 +81,24 @@ function resolveSlackToken(userId) {
   return getSecret(kb.getDb(), userId, 'slack.userToken') || getSecret(kb.getDb(), userId, 'slack.botToken');
 }
 
+// The feature set routing honours and the promise of its loaded handlers.
+// server.mjs calls initFeatureRoutes(config.features) before listen; a caller
+// that never does (the route tests) gets config.features on first request.
+let activeFeatures = config.features;
+let featureRoutes = null;
+
+/**
+ * Load the enabled feature route groups (see routes/feature-routes.mjs).
+ *
+ * @param {ReadonlySet<string>|null} [features] enabled keys; null = all
+ * @returns {Promise<{ handlers: Record<string, Function>, disabledPrefixes: string[] }>}
+ */
+export function initFeatureRoutes(features = config.features) {
+  activeFeatures = features;
+  featureRoutes = loadFeatureRoutes(features);
+  return featureRoutes;
+}
+
 // Returns true if the request was handled (response written), false if
 // the URL is not a /kb/* or /agent/v2/* path — caller falls through to its
 // own routing.
@@ -101,6 +120,15 @@ export async function handleKB(req, res) {
   }
 
   try {
+    // A disabled feature's paths answer before any route runs. No always-on
+    // route shares these prefixes, so the dispatch order below is unchanged.
+    const disabledFeature = featureDisabledFor(url, activeFeatures);
+    if (disabledFeature) {
+      sendFeatureDisabled(res, disabledFeature);
+      return true;
+    }
+    const { handlers: featureHandlers } = await (featureRoutes ?? initFeatureRoutes(activeFeatures));
+
     if (req.method === 'POST' && url === '/kb/ingest') {
       const body = parseJSON(await readBody(req));
       if (!body?.id) {
@@ -469,38 +497,9 @@ export async function handleKB(req, res) {
       return true;
     }
 
-    // Structural code graph from the Mac app (StructureGraphBuilder output).
-    // Same allow-list gate as /kb/ingest-scip — the repo path is used as the
-    // storage key and is echoed back to agents, so it must be a repo the user
-    // has explicitly registered. Large graphs arrive in batches: the client
-    // sets `replace` on the first batch only.
-    if (req.method === 'POST' && url === '/kb/ingest-code-graph') {
-      const body = parseJSON(await readBody(req));
-      if (!body?.repoPath || typeof body.repoPath !== 'string' ||
-          !body?.graph || typeof body.graph !== 'object') {
-        sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'repoPath and graph are required' } });
-        return true;
-      }
-      const nodePath = await import('node:path');
-      const normalized = nodePath.resolve(body.repoPath);
-      const allowlist = kb.userRepoAllowlist(userId);
-      if (!allowlist.includes(normalized)) {
-        sendJSON(res, 403, { error: { code: 'PATH_NOT_APPROVED', message: 'Repo path is not on your allow-list' } });
-        return true;
-      }
-      try {
-        const result = ingestStructureGraph(userId, normalized, body.graph,
-          {
-            replace: body.replace === true,
-            commitSha: typeof body.commitSha === 'string' ? body.commitSha : null,
-            generatedAt: typeof body.generatedAt === 'string' ? body.generatedAt : null,
-          });
-        sendJSON(res, 200, { ok: true, ...result });
-      } catch (err) {
-        sendJSON(res, 400, { error: { code: 'CODE_GRAPH_INGEST_FAILED', message: err.message } });
-      }
-      return true;
-    }
+    // Structural code graph from the Mac app (code_graph_3d). Lives in
+    // routes/code-graph.mjs; absent when that feature is disabled.
+    if (await featureHandlers.code_graph_3d?.(req, res, { userId, url })) return true;
 
     if (req.method === 'POST' && url === '/kb/connect-github-issues') {
       const body = parseJSON(await readBody(req, 1024 * 1024));
@@ -1182,7 +1181,8 @@ export async function handleKB(req, res) {
     // Lives in routes/issue-schedule.mjs. GET/PUT/DELETE /kb/issue-schedule —
     // the per-user store that supplies start/due/estimate/dependsOn for
     // GitHub issues (which carry none natively) so the gantt can draw bars.
-    if (await handleIssueScheduleRoutes(req, res, { userId, url })) return true;
+    // Absent when gantt_issues is disabled (routes/feature-routes.mjs).
+    if (await featureHandlers.gantt_issues?.(req, res, { userId, url })) return true;
 
     // Phase 6: review queue ------------------------------------------
 
@@ -1212,7 +1212,8 @@ export async function handleKB(req, res) {
     // ── Loop headless agent run (/kb/loop/agent-run) ───────────────
     // The Mac Loop's confined, non-interactive file-editing step (skill
     // stages + repairs). See routes/loop-agent.mjs.
-    if (await handleLoopAgentRoutes(req, res, { userId })) return true;
+    // Absent when auto_tasks is disabled (routes/feature-routes.mjs).
+    if (await featureHandlers.auto_tasks?.(req, res, { userId })) return true;
 
     // (Old inline agent block removed — extracted to routes/agent.mjs)
 

@@ -80,13 +80,31 @@ components:
         apiVersion:    { type: integer }
         schemaVersion: { type: integer }
         uptimeSec:     { type: integer }
-        endpoints:     { type: array, items: { type: string } }
+        endpoints:     { type: array, items: { type: string }, description: 'Endpoints this process serves — a feature disabled by LLMIDE_FEATURES drops its paths (v74)' }
+        features:
+          type: array
+          nullable: true
+          items: { type: string }
+          description: >
+            LLMIDE_FEATURES as applied (v74): null = every feature; otherwise the
+            enabled feature keys, sorted (agent_chat always present).
         checks:
           type: object
           properties:
             db:          { type: boolean }
             claude:      { type: boolean }
             claudeError: { type: string }
+
+    FeatureDisabled:
+      type: object
+      description: >
+        404 body for a path owned by a feature the server was started without
+        (LLMIDE_FEATURES). Deliberately not the Error envelope: a client can tell
+        it from an unknown route without parsing a message.
+      required: [error, feature]
+      properties:
+        error:   { type: string, enum: [feature_disabled] }
+        feature: { type: string, enum: [auto_tasks, gantt_issues, code_graph_3d] }
 
     Plan:
       type: object
@@ -902,6 +920,7 @@ paths:
       responses:
         '200': { description: ok }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: 'feature_disabled — LLMIDE_FEATURES omits gantt_issues; the route module is not loaded', content: { application/json: { schema: { $ref: '#/components/schemas/FeatureDisabled' } } } }
     put:
       summary: Create or replace one issue's schedule overlay
       requestBody:
@@ -922,6 +941,7 @@ paths:
       responses:
         '200': { description: ok }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: 'feature_disabled — LLMIDE_FEATURES omits gantt_issues; the route module is not loaded', content: { application/json: { schema: { $ref: '#/components/schemas/FeatureDisabled' } } } }
     delete:
       summary: Remove one issue's schedule overlay
       requestBody:
@@ -938,6 +958,7 @@ paths:
       responses:
         '200': { description: ok }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: 'feature_disabled — LLMIDE_FEATURES omits gantt_issues; the route module is not loaded', content: { application/json: { schema: { $ref: '#/components/schemas/FeatureDisabled' } } } }
 
   /kb/generate-code:
     post:
@@ -1591,6 +1612,7 @@ paths:
               schema: { type: object, properties: { ok: { type: boolean }, repo: { type: string }, nodes: { type: integer }, edges: { type: integer }, droppedNodes: { type: integer }, droppedEdges: { type: integer }, replaced: { type: boolean } } }
         '400': { description: Missing fields or batch over the per-request cap, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: Path not on user allow-list, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: 'feature_disabled — LLMIDE_FEATURES omits code_graph_3d; the route module is not loaded', content: { application/json: { schema: { $ref: '#/components/schemas/FeatureDisabled' } } } }
 
   /kb/connect-github-issues:
     post:
@@ -3535,6 +3557,7 @@ paths:
         '502': { description: INTERNAL_ERROR — the engine failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '503': { description: NO_KEY — no Anthropic credentials, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '504': { description: AGENT_RUN_TIMEOUT — timeoutMs elapsed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '404': { description: 'feature_disabled — LLMIDE_FEATURES omits auto_tasks; the route module is not loaded', content: { application/json: { schema: { $ref: '#/components/schemas/FeatureDisabled' } } } }
 
   /agent/v2/session:
     delete:

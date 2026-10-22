@@ -69,3 +69,19 @@ test('buildNotFoundDetails includes restart hint and advertised endpoints', () =
   assert.match(details.hint, /Restart node server\.mjs/i);
   assert.deepEqual(details.endpoints, ['/generate-notes', '/kb/system/status']);
 });
+
+test('buildHealthPayload reports the enabled feature set (null = every feature)', () => {
+  const base = {
+    dbOk: true, claude: { ok: true }, migration: { current: 7 }, apiVersion: 74,
+    endpoints: ['/generate-notes'], serverStartedAt: Date.now(),
+  };
+  // Omitted → null, so a caller that predates LLMIDE_FEATURES reads "all".
+  assert.equal(buildHealthPayload(base).features, null);
+  assert.equal(buildHealthPayload({ ...base, features: null }).features, null);
+  // A Set is reported as a sorted array — JSON has no Set, and a stable order
+  // lets a client compare it with its own list.
+  assert.deepEqual(
+    buildHealthPayload({ ...base, features: new Set(['auto_tasks', 'agent_chat']) }).features,
+    ['agent_chat', 'auto_tasks'],
+  );
+});
