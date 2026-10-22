@@ -114,7 +114,7 @@ A `MenuBarExtra` is declared at lines 272–285. Its icon (`record.circle.fill` 
 
 `AppShell` is the authenticated shell. It renders `WelcomeView` when `projectStore.activeProject == nil` (lines 39–40), and the full section layout when a project is active. The section layout is driven by `ShellState.section` (an `@Observable` object, `mac/Sources/LlmIdeMac/Shell/ShellState.swift`). `ShellState` is created once at the `AppShell` root and injected via `.environment(shell)`, so it has **app-session scope**: it survives section navigation (which tears the section views down and recreates them) and is reset only when the app relaunches. UI state that must outlive a section switch lives here rather than as the section view's `@State` — e.g. `ShellState.exploreChatVisible` keeps the Explorer's chat panel open across navigation (it would otherwise reset to closed every time `ExplorerView` is rebuilt), while still starting closed on a fresh launch.
 
-**Sections** (`ShellState.Section`, `ShellState.swift` line 9):
+**Sections** (`ShellSection`, declared in `Core/Contracts/ShellSection.swift` so Core code can name a section; Shell keeps `ShellState.Section` as a typealias, and the Shell-only members `backingFeature`, `resolveHome` and `tint(_:)` live in `Shell/ShellState.swift`):
 
 `library`, `live`, `explorer`, `search`, `conflicts`, `sourceControl`, `issues`, `gantt`, `visual`, `docGen`, `autoCode`, `codeGraph`, `loopEngine`, `settings`
 

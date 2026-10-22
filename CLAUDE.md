@@ -114,7 +114,9 @@ llm-ide/
 │   │   │   │                #   LoopLaneControlling, ProjectNotesProviding,
 │   │   │   │                #   NoteSourceClassifying (Library's SourceRegistry seam),
 │   │   │   │                #   ChatTransport (+Input/Result: the engine↔transport contract
-│   │   │   │                #   ClaudeLink's AgentV2Transport implements), ChatScope
+│   │   │   │                #   ClaudeLink's AgentV2Transport implements), ChatScope,
+│   │   │   │                #   ShellSection + LibrarySelection (Shell's section / Library-row
+│   │   │   │                #   enums, aliased as ShellState.Section / .LibrarySelection)
 │   │   │   ├── DesignSystem/#   Shared SwiftUI chrome: FileTreePanel, EditorTabBar, FileDetailView,
 │   │   │   │                #   ColorPalette, Components/ (SettingsSectionCard, ResizableDivider,
 │   │   │   │                #   PersistedPanelWidth, …), LibraryItem+UI (category colors)
@@ -134,7 +136,8 @@ llm-ide/
 │   │   │   │                #   NoteAction, MeetingSummary, IngestTemplateRenderer, launch-time
 │   │   │   │                #   folder migrations (NotesToLlmDoc, SourceFolder, SourceNestedLlmDoc)
 │   │   │   ├── Platform/    #   App lifecycle + shared utilities: AppDelegate (+ AppTerminationHooks:
-│   │   │   │                #   quit-time flushes Shell registers, e.g. Chat's), BashService, Config,
+│   │   │   │                #   quit-time flushes Shell registers, e.g. Chat's), FeatureCacheHooks
+│   │   │   │                #   (graph/Mobile-PIN cache seams Shell installs), BashService, Config,
 │   │   │   │                #   AppIdentity, AppJSON, DateFormatters, PathUtils, SecretRedactor,
 │   │   │   │                #   FilesystemSlug, AgentTypes, ActivityStore, SessionStore,
 │   │   │   │                #   NotificationNames, LaunchPathResolver, ProcessedActionsRegistry
@@ -165,7 +168,7 @@ llm-ide/
 │   │   │   │            #   FeatureCatalog, FeatureRegistry, AppFeature, ShellState,
 │   │   │   │            #   DeepLinkRouter, LoginView, ReconnectView, CrashReportStore,
 │   │   │   │            #   PassiveModule, ProjectMigrator, Recovery/, Welcome/,
-│   │   │   │            #   ChatScope+Shell (scope → ShellState.Section mapping)
+│   │   │   │            #   ChatScope+Shell (scope → ShellSection mapping)
 │   │   │   └── Chrome/  #   StatusBar, ActivityBell, TerminalPanelState (exempt from the
 │   │   │                #   feature/boundary rule, NOT from build-exclusion — see invariants.md)
 │   │   └── ClaudeLink/  # Top-level (not under Core/), but declared Core in the feature map —
@@ -236,7 +239,7 @@ The gate's six checks that **do** fail the build (exit 1) today:
 
 Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Memory/` and `Core/Verification/` are Loop's, `Core/Notes/` is Library's — and references into those from other features are invisible to the check by design (it only flags edges from one `Features/` folder into another; every symbol under `Core/` is an allowed target). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`.
 
-Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`, `MobileBridgeHosting` (what the Auto Task / Loop phone bridges — which live in `Features/AutoTask/` and `Features/Loop/` — may ask of the mobile manager, with Foundation-only request/reply enums so they never import `SharedProtocol`), `LoopLaneControlling` (the AutoTask loop lane the Loop's phone bridge drives), `ProjectNotesProviding`, `ChatTransport` (Chat's engine ↔ transport contract, implemented by Chat's `CodeAssistTransport` and ClaudeLink's `AgentV2Transport`), `ChatScope`. Quit-time work a feature owns is registered by Shell through `AppTerminationHooks` (Core/Platform) rather than named in `AppDelegate`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
+Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`, `MobileBridgeHosting` (what the Auto Task / Loop phone bridges — which live in `Features/AutoTask/` and `Features/Loop/` — may ask of the mobile manager, with Foundation-only request/reply enums so they never import `SharedProtocol`), `LoopLaneControlling` (the AutoTask loop lane the Loop's phone bridge drives), `ProjectNotesProviding`, `ChatTransport` (Chat's engine ↔ transport contract, implemented by Chat's `CodeAssistTransport` and ClaudeLink's `AgentV2Transport`), `ChatScope`, `ShellSection` / `LibrarySelection` (the section and Library-row enums Core must name; Shell keeps `ShellState.Section` / `ShellState.LibrarySelection` as typealiases for existing call sites — new code and all Core code use the Core names). Quit-time work a feature owns is registered by Shell through `AppTerminationHooks` (Core/Platform) rather than named in `AppDelegate`; likewise feature cache side effects Core triggers (graph-engine cache invalidation, Mobile PIN warm/clear) go through `FeatureCacheHooks` (Core/Platform), which Shell installs at boot via `FeatureCatalog.installFeatureCacheHooks()`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
 
 ## Critical Invariants
 

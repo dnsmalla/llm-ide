@@ -663,7 +663,7 @@ final class AppConfig: ObservableObject {
     }
 
     // ── Sidebar visibility ────────────────────────────────────────────
-    /// Raw values of `ShellState.Section` the user has hidden from the
+    /// Raw values of `ShellSection` the user has hidden from the
     /// sidebar. Persisted across launches. Only sections listed in
     /// `Section.userHideable` may appear here — Library and Settings
     /// are never hidden (otherwise the user has no way back).
@@ -673,7 +673,7 @@ final class AppConfig: ObservableObject {
         }
     }
 
-    /// The section the Home toolbar button opens — a `ShellState.Section`
+    /// The section the Home toolbar button opens — a `ShellSection`
     /// rawValue, default `.explorer`. Sanitized on read so a stale value from
     /// an enum-rename refactor falls back to Explorer. Hidden landings are
     /// substituted by `AppShell.effectiveHome()`.
@@ -919,14 +919,14 @@ final class AppConfig: ObservableObject {
             // across enum-rename refactors. Only Section.userHideable
             // values are accepted (Library / Live / Settings must never
             // end up here even via manual UserDefaults editing).
-            let allowed = Set(ShellState.Section.userHideable.map(\.rawValue))
+            let allowed = Set(ShellSection.userHideable.map(\.rawValue))
             self.hiddenSidebarSections = Set(raw).intersection(allowed)
         } else {
             self.hiddenSidebarSections = []
         }
 
-        let homeRaw = defaults.object(forKey: "homeSection") as? String ?? ShellState.Section.explorer.rawValue
-        self.homeSection = ShellState.Section(rawValue: homeRaw) != nil ? homeRaw : ShellState.Section.explorer.rawValue
+        let homeRaw = defaults.object(forKey: "homeSection") as? String ?? ShellSection.explorer.rawValue
+        self.homeSection = ShellSection(rawValue: homeRaw) != nil ? homeRaw : ShellSection.explorer.rawValue
     }
 
     /// Validates the server URL before persisting it.  Only localhost /

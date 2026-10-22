@@ -130,6 +130,11 @@ public struct LlmIdeMacApp: App {
         // Before any view reads the model config: Standard becomes the
         // default and purpose models become chat roles (one-time part flagged).
         cfg.migrateToTierDefaults(customProviders: CustomProvider.load())
+        // Must precede warmSessionCache: it is the first reader of Core's
+        // feature cache hooks (Mobile PIN warm-up), and an uninstalled hook
+        // silently no-ops — the PIN would then load lazily on first mobile
+        // use and cost a second keychain unlock prompt.
+        FeatureCatalog.installFeatureCacheHooks()
         KeychainStore.warmSessionCache(
             refreshTokenHost: cfg.serverURL,
             gitLabHost: cfg.gitLabBaseURL)

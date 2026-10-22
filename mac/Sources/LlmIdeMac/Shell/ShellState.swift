@@ -5,101 +5,18 @@ import SwiftUI
 @MainActor
 @Observable
 final class ShellState {
-    enum Section: String, Hashable, CaseIterable {
-        case library, live, explorer, search, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, loopEngine, settings
+    /// Compatibility name for the Core-owned `ShellSection`. The enum moved to
+    /// `Core/Contracts/ShellSection.swift` so Core code can name a section
+    /// without naming Shell; this alias keeps every existing
+    /// `ShellState.Section` call site compiling unchanged. New code should
+    /// prefer `ShellSection`, and Core code MUST use it (Core may not name
+    /// `ShellState`).
+    typealias Section = ShellSection
 
-        /// User-friendly label — single source of truth so the sidebar
-        /// row, the settings toggle and any future menu item agree.
-        var label: String {
-            switch self {
-            case .library:   return "Library"
-            case .live:      return "Live"
-            case .explorer:  return "Explorer"
-            case .search:    return "Search"
-            case .conflicts: return "Review Conflicts"
-            case .sourceControl: return "Source Control"
-            case .issues:    return "Issues"
-            case .gantt:     return "Gantt"
-            case .visual:    return "Visual"
-            case .docGen:    return "Doc Gen"
-            case .autoCode:  return "Auto Tasks"
-            case .codeGraph: return "Code Graph"
-            case .loopEngine: return "Loop"
-            case .settings:  return "Settings"
-            }
-        }
-
-        var systemImage: String {
-            switch self {
-            case .library:   return "books.vertical"
-            case .live:      return "waveform"
-            case .explorer:  return "folder"
-            case .search:    return "magnifyingglass"
-            case .conflicts: return "exclamationmark.triangle"
-            case .sourceControl: return "arrow.triangle.branch"
-            case .issues:    return "checklist"
-            case .gantt:     return "chart.bar.doc.horizontal"
-            case .visual:    return "photo.on.rectangle.angled"
-            case .docGen:    return "wand.and.stars"
-            case .autoCode:  return "arrow.triangle.2.circlepath.circle"
-            case .codeGraph: return "point.3.connected.trianglepath.dotted"
-            case .loopEngine: return "repeat.circle"
-            case .settings:  return "gearshape"
-            }
-        }
-
-        /// Sections the user is allowed to hide from the top bar. Library is the
-        /// landing fallback when hidden sections are selected; Settings is the
-        /// only way back if everything else is hidden — neither can be
-        /// turned off. `.live` is already conditional on capture state
-        /// so it doesn't appear here either.
-        ///
-        /// `.loopEngine` WAS excluded, on the grounds that it is the single
-        /// permanent home for regression. Hiding it no longer strands that: the
-        /// `.openSection` handler sets the section directly with no visibility
-        /// check, so every route into the Loop still works while its toolbar button
-        /// is hidden — Settings → Loop's "Open Loop" button, the menu-bar
-        /// open-fault and last-regression rows, and the chat loop command. Hiding
-        /// removes the button, not the page.
-        static let userHideable: [Section] = [
-            .explorer, .search, .conflicts, .sourceControl, .issues, .gantt, .visual,
-            .docGen, .autoCode, .codeGraph, .loopEngine
-        ]
-
-        /// Resolve the effective Home landing: the chosen section if it's a real
-        /// case, not currently hidden, and its `backingFeature` (if any) is
-        /// compiled into this build, else `.library` (always visible — Library
-        /// isn't in `userHideable` and carries no `backingFeature`). Pure so the
-        /// shell and tests share one definition of "where Home goes." `compiled`
-        /// is a parameter rather than a `FeatureRegistry.shared` read so this
-        /// stays trivially testable — callers pass
-        /// `FeatureRegistry.shared.compiledFeatures`. Without this check, a
-        /// lite build whose home section names a compiled-out feature (e.g.
-        /// `.explorer` with Explorer excluded) would land on the "not
-        /// installed" placeholder instead of a usable page.
-        static func resolveHome(_ rawValue: String, hidden: Set<String>, compiled: Set<AppFeature>) -> Section {
-            guard let chosen = Section(rawValue: rawValue),
-                  !hidden.contains(chosen.rawValue) else { return .library }
-            if let feature = chosen.backingFeature, !compiled.contains(feature) {
-                return .library
-            }
-            return chosen
-        }
-    }
-
-    enum LibrarySelection: Hashable {
-        case meeting(String)
-        case file(URL)
-        /// A plugin row. String is the plugin's `name` field.
-        case plugin(String)
-        /// An LLM-source row. String is the source's `id` field.
-        case llmSource(String)
-        /// An MCP-plugin row. String is the plugin's `id` field.
-        case mcpPlugin(String)
-        /// A connector row. String is the catalog entry's `id` field
-        /// (e.g. "box", "slack", "gdrive").
-        case connector(String)
-    }
+    /// Compatibility name for the Core-owned `LibrarySelection` (moved to
+    /// `Core/Contracts/LibrarySelection.swift` for the same reason as
+    /// `Section`). New code should prefer `LibrarySelection`.
+    typealias LibrarySelection = LlmIdeMacLib.LibrarySelection
 
     /// Pre-seed value only — `ShellState()` is created as `@State` before any
     /// environment (config, registry) is reachable, so it can't resolve the
@@ -152,7 +69,9 @@ final class ShellState {
     }
 }
 
-extension ShellState.Section {
+// Shell-side members of the Core-owned `ShellSection`: these name Shell types
+// (`AppFeature`), so they cannot live in `Core/Contracts/ShellSection.swift`.
+extension ShellSection {
     /// The excludable `AppFeature` that gates this section, if any. Single
     /// source of truth for "which build-time/runtime feature does this
     /// section need" — AppShell's toolbar filter, its feature-change
@@ -169,23 +88,32 @@ extension ShellState.Section {
         }
     }
 
-    /// Map a deep-link tab name (as published by `DeepLinkRouter`) to a
-    /// section, without modifying the router.  Returns `nil` for
-    /// unknown tabs so callers can fall back to the default landing.
-    init?(deepLinkTabName name: String) {
-        switch name {
-        case "transcript": self = .live
-        case "history":    self = .library
-        case "visual":     self = .visual
-        case "settings":   self = .settings
-        default:           return nil
+    /// Resolve the effective Home landing: the chosen section if it's a real
+    /// case, not currently hidden, and its `backingFeature` (if any) is
+    /// compiled into this build, else `.library` (always visible — Library
+    /// isn't in `userHideable` and carries no `backingFeature`). Pure so the
+    /// shell and tests share one definition of "where Home goes." `compiled`
+    /// is a parameter rather than a `FeatureRegistry.shared` read so this
+    /// stays trivially testable — callers pass
+    /// `FeatureRegistry.shared.compiledFeatures`. Without this check, a
+    /// lite build whose home section names a compiled-out feature (e.g.
+    /// `.explorer` with Explorer excluded) would land on the "not
+    /// installed" placeholder instead of a usable page.
+    static func resolveHome(_ rawValue: String, hidden: Set<String>, compiled: Set<AppFeature>) -> ShellSection {
+        guard let chosen = ShellSection(rawValue: rawValue),
+              !hidden.contains(chosen.rawValue) else { return .library }
+        if let feature = chosen.backingFeature, !compiled.contains(feature) {
+            return .library
         }
+        return chosen
     }
 }
 
 // Theme-aware tint for the section's SF Symbol. Lives on the enum so
-// the sidebar row and the Sidebar settings card can never drift.
-extension ShellState.Section {
+// the sidebar row and the Sidebar settings card can never drift. Kept in
+// Shell (though `Theme` is Core) so `Core/Contracts/ShellSection.swift` stays
+// Foundation-only plain data; this is presentation for the shell's chrome.
+extension ShellSection {
     func tint(_ theme: Theme) -> Color {
         switch self {
         // ── Notes (blue family) ──────────────────────────

@@ -222,7 +222,7 @@ enum KeychainStore {
         // in this single launch-time pass instead of lazily on first mobile-
         // control use — which would otherwise cost a second unlock prompt.
         // No-op when Mobile Control is compiled out.
-        FeatureCatalog.warmMobilePinCache()
+        FeatureCacheHooks.warmMobilePinCache()
     }
 
     /// Drop the in-memory mirror after a wipe attempt.
@@ -240,7 +240,7 @@ enum KeychainStore {
         loadFailed = false
         lastFailureStatus = nil
         lock.unlock()
-        FeatureCatalog.clearMobilePinSessionCache()
+        FeatureCacheHooks.clearMobilePinSessionCache()
     }
 
     // MARK: - JWT refresh token

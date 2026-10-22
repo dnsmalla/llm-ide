@@ -36,7 +36,7 @@ final class CompletionController: ObservableObject {
         let insert: String?    // command/skill: text the draft becomes
         let fileURL: URL?      // file: attach this
         let skillId: String?   // librarySkill: "<family>/<dir>" sent to the server
-        let target: ShellState.LibrarySelection?  // hook/mcp: row to select in the Library
+        let target: LibrarySelection?  // hook/mcp: row to select in the Library
         // Search keys, precomputed at build time (items are built once per
         // catalog load / file walk) so per-keystroke ranking allocates nothing:
         // lowercased label without its leading "/" (typing "sum" must
@@ -47,7 +47,7 @@ final class CompletionController: ObservableObject {
 
         init(id: String, kind: Kind, label: String, detail: String,
              insert: String?, fileURL: URL?, skillId: String? = nil,
-             target: ShellState.LibrarySelection? = nil) {
+             target: LibrarySelection? = nil) {
             self.id = id; self.kind = kind; self.label = label; self.detail = detail
             self.insert = insert; self.fileURL = fileURL; self.skillId = skillId
             self.target = target
@@ -72,7 +72,7 @@ final class CompletionController: ObservableObject {
         /// aren't invocable from chat (a hook fires on events; an MCP server is
         /// managed in the Library), so accepting one lands on that exact row's
         /// detail instead of an undifferentiated Library root.
-        case navigate(section: ShellState.Section, target: ShellState.LibrarySelection?, newDraft: String)
+        case navigate(section: ShellSection, target: LibrarySelection?, newDraft: String)
     }
 
     private enum Mode { case none, command, file }

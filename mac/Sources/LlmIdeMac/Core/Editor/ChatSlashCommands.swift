@@ -26,7 +26,7 @@ enum ChatSlashCommands {
     /// behavior cannot drift apart (they used to be three hand-kept copies).
     enum Action: Equatable {
         case clearChat
-        case openSection(ShellState.Section)
+        case openSection(ShellSection)
         case switchModel
     }
 
@@ -101,8 +101,8 @@ enum ChatSlashCommands {
             .map { $0.lowercased() }
     )
 
-    private static let sectionCommands: [String: ShellState.Section] = {
-        var map: [String: ShellState.Section] = [:]
+    private static let sectionCommands: [String: ShellSection] = {
+        var map: [String: ShellSection] = [:]
         for b in builtins {
             guard case .openSection(let section) = b.action else { continue }
             for name in [b.label] + b.aliases { map[name.lowercased()] = section }
@@ -119,7 +119,7 @@ enum ChatSlashCommands {
     /// the section commands — real navigation via the same `.openSection`
     /// notification AppShell already listens for (see NotificationNames.swift),
     /// not a fake/inert entry.
-    static func sectionCommand(_ text: String) -> ShellState.Section? {
+    static func sectionCommand(_ text: String) -> ShellSection? {
         sectionCommands[text.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()]
     }
 

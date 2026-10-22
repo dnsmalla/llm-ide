@@ -242,15 +242,16 @@ Sources/LlmIdeMac/
 │   └── MobileControl/                                         # mobile_sync
 ├── Core/                     # leaf infrastructure, never excluded, usable by any layer
 │   ├── Contracts/            # cross-feature protocols (LoopRunning, MobileFeatureBridge,
-│   │                         #   ChatTransport engine↔transport contract, ChatScope, …)
+│   │                         #   ChatTransport engine↔transport contract, ChatScope,
+│   │                         #   ShellSection + LibrarySelection, …)
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/
 │   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
 │   ├── Generation/ · Incidents/ · Memory/ · Verification/
 │   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
 │   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex,
 │   │                         #   FolderIndexer, IngestTemplateRenderer, launch folder migrations, …
-│   ├── Platform/             # AppDelegate + AppTerminationHooks, Config, Theme, KeychainStore,
-│   │                         #   SessionStore, utilities
+│   ├── Platform/             # AppDelegate + AppTerminationHooks, FeatureCacheHooks, Config, Theme,
+│   │                         #   KeychainStore, SessionStore, utilities
 │   ├── Project/              # Project/Plan models, WorkspaceRoot, ProjectStore, scaffolding,
 │   │                         #   ProjectExporter (KB → project folder export)
 │   └── Repo/                 # GitLab/GitHub clients behind RepoBackend (Services/Repo/)

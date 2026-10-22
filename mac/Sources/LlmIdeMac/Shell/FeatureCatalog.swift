@@ -115,7 +115,9 @@ enum FeatureCatalog {
     /// Drop the cached graph-engine resolution (e.g. after a plugin
     /// install/uninstall may have added or removed one). No-op when the
     /// feature is compiled out — callers outside Graph/ (auth/plugin routes)
-    /// go through this seam instead of naming `GraphEngines` directly.
+    /// go through this seam instead of naming `GraphEngines` directly; Core
+    /// callers reach it via `FeatureCacheHooks` (see
+    /// `installFeatureCacheHooks()`).
     static func invalidateGraphEngineCache() {
         #if FEATURE_GRAPH
         GraphEngines.invalidate()
@@ -713,8 +715,9 @@ enum FeatureCatalog {
         #endif
     }
 
-    /// KeychainStore calls these instead of naming `MobilePin` directly
-    /// (precedent: `invalidateGraphEngineCache` above). No-op when compiled
+    /// KeychainStore reaches these (through `FeatureCacheHooks`, installed by
+    /// `installFeatureCacheHooks()` below) instead of naming `MobilePin`
+    /// directly (precedent: `invalidateGraphEngineCache` above). No-op when compiled
     /// out. `nonisolated` — unlike the manager-forwarding seams above, these
     /// wrap `MobilePin`'s own static cache (not the MainActor-isolated
     /// `mobileControlManager`), and KeychainStore's callers (session warm-up
@@ -731,6 +734,17 @@ enum FeatureCatalog {
         #if FEATURE_MOBILE
         MobilePin.clearSessionCache()
         #endif
+    }
+
+    /// Point Core's `FeatureCacheHooks` at the forwarders above. Core may not
+    /// name this catalog (it is a leaf), so `LlmIdeMacApp.init` calls this
+    /// once, BEFORE `KeychainStore.warmSessionCache` — the earliest reader of
+    /// any of these hooks. The forwarders keep their own `#if`, so a build
+    /// without Graph / Mobile installs closures that are still no-ops.
+    static func installFeatureCacheHooks() {
+        FeatureCacheHooks.invalidateGraphEngineCache = { FeatureCatalog.invalidateGraphEngineCache() }
+        FeatureCacheHooks.warmMobilePinCache = { FeatureCatalog.warmMobilePinCache() }
+        FeatureCacheHooks.clearMobilePinSessionCache = { FeatureCatalog.clearMobilePinSessionCache() }
     }
 
     /// Wire the Auto Task + Loop feature bridges onto the stored mobile
