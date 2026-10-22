@@ -19,7 +19,8 @@ async function freshDb() {
   if (!_db) _db = await import('../kb/db.mjs');
   _db.closeDb();
   for (const suffix of ['', '-wal', '-shm']) {
-    try { fs.unlinkSync(tmpDb + suffix); } catch {}
+    // ENOENT is expected on the first run: there is no prior DB file to remove.
+    try { fs.unlinkSync(tmpDb + suffix); } catch { /* ignore */ }
   }
 }
 
@@ -76,7 +77,7 @@ test('loop_engineering_done is an allowed activity kind and round-trips', async 
 // two lists together so that cannot recur.
 test('every ActivityKind the Mac app sends is accepted by the server allow-list', async () => {
   const { ACTIVITY_KINDS } = await import('../kb/activity.mjs');
-  const swiftPath = path.join(__dirname, '../../mac/Sources/LlmIdeMac/Services/ActivityStore.swift');
+  const swiftPath = path.join(__dirname, '../../mac/Sources/LlmIdeMac/Core/Platform/ActivityStore.swift');
   const swift = fs.readFileSync(swiftPath, 'utf8');
   const block = swift.match(/enum ActivityKind: String, CaseIterable \{([\s\S]*?)\n\}/);
   assert.ok(block, 'enum ActivityKind not found in ActivityStore.swift — update this test if it moved');
