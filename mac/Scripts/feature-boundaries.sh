@@ -467,9 +467,11 @@ fi
 #    Excluded paths per flag come from two shapes: the else-body of
 #    `if x { featureDefines.append(.define("F")) } else { ... }` (any nesting
 #    depth, so the `if !testExcludes.contains(...)` dedupe appends count), and
-#    any other `if ... !x { libExcludes.append(...) }` block — the
-#    mobile-on/auto_tasks-off bridge files are excluded that way, so their
-#    types belong to FEATURE_AUTOTASK as well as FEATURE_MOBILE.
+#    any other `if ... !x { libExcludes.append(...) }` block — a per-file
+#    exclude for a cross-feature quadrant would be written that way, and its
+#    types would then belong to that flag as well. (The Auto Task / Loop
+#    mobile bridges once needed one; they now live in their own features
+#    behind Core/Contracts' `MobileBridgeHosting`, so none exists today.)
 echo "=== test files referencing build-excludable feature types vs testExcludes ==="
 perl -e '
   local $/; my $t = <STDIN>;

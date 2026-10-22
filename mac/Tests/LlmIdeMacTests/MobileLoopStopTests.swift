@@ -18,7 +18,7 @@ final class MobileLoopStopTests: XCTestCase {
         XCTAssertTrue(service.isSchedulerArmed)
 
         let manager = MobileControlManager()
-        let bridge = MobileLoopBridge(manager: manager, autoCode: service)
+        let bridge = MobileLoopBridge(host: manager, loopLane: service)
         XCTAssertTrue(bridge.handle(type: "loop_stop", data: nil))
 
         XCTAssertTrue(service.isSchedulerArmed, "phone Stop must not invalidate the scheduler timer")
@@ -42,7 +42,7 @@ final class MobileLoopStopTests: XCTestCase {
         // Starting a Loop from the phone is behind a switch that defaults off.
         manager.phoneAccess.set(.loopControl, true)
         defer { UserDefaults.standard.removeObject(forKey: PhoneAccessSettings.key(.loopControl)) }
-        let bridge = MobileLoopBridge(manager: manager, autoCode: makeService())
+        let bridge = MobileLoopBridge(host: manager, loopLane: makeService())
         XCTAssertTrue(bridge.handle(type: "loop_start", data: nil))
         XCTAssertTrue(bridge.handle(type: "loop_stop", data: nil))   // before the start's Task runs
         for _ in 0..<200 where !manager.logLines.contains(where: { $0.text.contains("cancelled by a Stop") }) {

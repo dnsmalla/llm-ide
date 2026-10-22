@@ -4,10 +4,12 @@ import Foundation
 /// slice of the mobile protocol. When a feature is compiled out the slot
 /// stays nil and the manager answers with a "not installed" ack instead.
 ///
-/// `MobileControlManager` (Services/, always linked) holds only this
-/// protocol type — never a concrete `MobileAutoTaskBridge`/`MobileLoopBridge`
-/// — so the AutoTask/ and LoopEngine/ folders that own those concrete types
-/// can later be excluded from the build without touching this file.
+/// `MobileControlManager` holds only this protocol type — never a concrete
+/// `MobileAutoTaskBridge`/`MobileLoopBridge` — so Features/AutoTask and
+/// Features/Loop, which own those concrete types, can be excluded from the
+/// build without touching the manager. The reverse seam is
+/// `MobileBridgeHosting`: those bridges see the manager only through it, so
+/// Features/MobileControl can be excluded without touching them.
 @MainActor
 protocol MobileFeatureBridge: AnyObject {
     /// Handle one inbound message. Return false when the type is not ours

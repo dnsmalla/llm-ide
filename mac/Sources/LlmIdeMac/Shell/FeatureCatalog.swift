@@ -740,6 +740,13 @@ enum FeatureCatalog {
     /// instances the UI observes — mutating through them keeps Settings, the
     /// Menu bar, and the scheduler in sync.
     ///
+    /// This is the one place that names both sides: the bridges live in
+    /// Features/AutoTask and Features/Loop and see the manager only as
+    /// `MobileBridgeHosting` (and the Loop bridge sees the scheduler only as
+    /// `LoopLaneControlling`), so neither feature folder names the other's
+    /// concrete types. Hence the combined guard below — the only build that
+    /// has both a manager and the bridges to hand it.
+    ///
     /// Called unconditionally from the tail of both `bootMobile` and
     /// `bootAutoTask` — a true no-op unless BOTH features are compiled in,
     /// and idempotent (guarded on `autoTaskBridge == nil`) so it's safe for
@@ -753,9 +760,9 @@ enum FeatureCatalog {
               let taskLog = autoTaskLogStore,
               mobile.autoTaskBridge == nil else { return }
         mobile.autoTaskBridge = MobileAutoTaskBridge(
-            manager: mobile, autoCode: service,
+            host: mobile, autoCode: service,
             settings: settings, logStore: taskLog)
-        let loopBridge = MobileLoopBridge(manager: mobile, autoCode: service)
+        let loopBridge = MobileLoopBridge(host: mobile, loopLane: service)
         // So the phone's Stop reaches desktop-initiated runs too, not only
         // the scheduler's. Assigned after init (rather than an init
         // parameter) because this wiring function is called from BOTH boot

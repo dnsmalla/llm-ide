@@ -24,7 +24,9 @@ LLM-IDE Server (Node.js @ :3456)
 
 `MobileControlManager` dispatches Auto Tasks and Loop requests through `MobileFeatureBridge` protocol — when either feature is compiled out (via `LLMIDE_FEATURES`), the phone receives a degrade reply instead of routing to the feature's service.
 
-**Build-time exclusion:** Mobile Control is excludable at build time via the `mobile_sync` feature (settings key `LLMIDE_FEATURES=…`). When excluded, the 15-file mobile unit (MobileControlManager, WebSocket server, Bonjour advertiser, PIN cache, bridges, and iPhone pairing UI) is removed entirely, along with the SharedProtocol product dependency (iOS wire types). The core `MobileFeatureBridge` protocol stays in-tree to support dynamic downgrades when other features are excluded (Phase 2d).
+The Auto Task and Loop bridges are **not** in this folder: `MobileAutoTaskBridge` lives in `Features/AutoTask/Services/` and `MobileLoopBridge` in `Features/Loop/Services/`. They see the manager only as `MobileBridgeHosting` (`Core/Contracts/`), which the manager implements in `Services/MobileControlManager+BridgeHost.swift` — that file owns their whole wire mapping (tag → `MobileAutoTaskRequest`/`MobileLoopRequest`, `MobileAutoTaskReply`/`MobileLoopReply` → `SharedProtocol` types), because the bridges compile with `auto_tasks` even when `mobile_sync` (and so `SharedProtocol`) is out. A new `auto_task_*`/`loop_*` tag must update the routing Set, that decode switch, the request enum and the bridge's `switch`; `MobileFeatureBridgeTests` pins the Set against the decode.
+
+**Build-time exclusion:** Mobile Control is excludable at build time via the `mobile_sync` feature (settings key `LLMIDE_FEATURES=…`). When excluded, the whole `Features/MobileControl/` folder (MobileControlManager, WebSocket server, Bonjour advertiser, PIN cache, its own per-feature bridges, and iPhone pairing UI) is removed entirely, along with the SharedProtocol product dependency (iOS wire types). The core `MobileFeatureBridge` protocol stays in-tree to support dynamic downgrades when other features are excluded (Phase 2d).
 
 ## Quick Start
 

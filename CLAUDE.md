@@ -110,7 +110,8 @@ llm-ide/
 │   │   ├── Core/        # Leaf infrastructure — never build-excluded, importable by ANY layer.
 │   │   │   │            #   Subfolders are named by CAPABILITY, not by feature:
 │   │   │   ├── Contracts/   #   Cross-feature protocols: LoopRunning, TaskLogWriting,
-│   │   │   │                #   MobileFeatureBridge, ProjectNotesProviding
+│   │   │   │                #   MobileFeatureBridge, MobileBridgeHosting,
+│   │   │   │                #   LoopLaneControlling, ProjectNotesProviding
 │   │   │   ├── DesignSystem/#   Shared SwiftUI chrome: FileTreePanel, EditorTabBar, FileDetailView,
 │   │   │   │                #   ColorPalette, Components/ (SettingsSectionCard, ResizableDivider,
 │   │   │   │                #   PersistedPanelWidth, …)
@@ -208,7 +209,7 @@ Enforced **textually** by `mac/Scripts/feature-boundaries.sh` (run by `make regr
 
 Always compiled (never build-excludable): `Shell/`, `Core/`, `ClaudeLink/` and the features **Chat, Library, Live, Settings, ReviewConflicts** — Chat is the product's one non-excludable feature (`agent_chat`), and the other four have no `LLMIDE_FEATURES` key of their own, so they ship in every build, `make build-mac-min` included. Every other `Features/` folder is excluded by one of the seven `LLMIDE_FEATURES` keys in `mac/Package.swift`, which also applies the `file_explorer` dependency closure itself (dropping `file_explorer` drops `code_graph_3d`, `gantt_issues` and `doc_gen` with it, mirroring `AppFeature.requiredDependencies`).
 
-**The gate currently REPORTS but does not yet ENFORCE the feature/feature rule.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`, and **no feature carries it yet**. 47 known cross-feature references currently emit `warn` and the gate still exits 0 because of them — do not assume a cross-feature reference fails the build today; it does not.
+**The gate currently REPORTS but does not yet ENFORCE the feature/feature rule.** Enforcement is per-feature, via a `sealed` third column in `mac/Scripts/feature-map.txt`, and **no feature carries it yet**. 44 known cross-feature references currently emit `warn` and the gate still exits 0 because of them — do not assume a cross-feature reference fails the build today; it does not.
 
 The gate's six checks that **do** fail the build (exit 1) today:
 1. Any **always-compiled layer** (`Shell`, `Core`, `ClaudeLink`, Chat, Library, Live, Settings, ReviewConflicts — derived from `feature-map.txt` minus the excludable folders, not hard-coded) referencing a symbol owned by a build-excludable `Features/` folder without the matching `#if FEATURE_*` guard. Before, only `Shell`/`Core` were scanned, so an unguarded edge from an unsealed always-compiled feature passed the gate and surfaced only as a compile error in a reduced build.
@@ -220,7 +221,7 @@ The gate's six checks that **do** fail the build (exit 1) today:
 
 Known limitation, stated plainly: **the gate cannot see edges that pass through `Core/`.** Several features' backing code legitimately lives in `Core/` today — `Core/Repo/` is Source Control's, `Core/Generation/` is Doc Gen + Visual's, `Core/Memory/` and `Core/Verification/` are Loop's — and references into those from other features are invisible to the check by design (it only flags edges from one `Features/` folder into another; every symbol under `Core/` is an allowed target). Sealing every feature will therefore produce a *clean* gate over a tree that still has real coupling running through `Core`.
 
-Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`, `ProjectNotesProviding`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
+Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWriting`, `MobileFeatureBridge`, `MobileBridgeHosting` (what the Auto Task / Loop phone bridges — which live in `Features/AutoTask/` and `Features/Loop/` — may ask of the mobile manager, with Foundation-only request/reply enums so they never import `SharedProtocol`), `LoopLaneControlling` (the AutoTask loop lane the Loop's phone bridge drives), `ProjectNotesProviding`. When two features need to talk, add or extend a protocol there rather than importing one feature's concrete type from another — and never un-seal a sealed feature to land a change; move the shared type to `Core/` or add a `Core/Contracts/` protocol instead.
 
 ## Critical Invariants
 

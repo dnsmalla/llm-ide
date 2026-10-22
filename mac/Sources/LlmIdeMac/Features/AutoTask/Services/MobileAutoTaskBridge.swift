@@ -1,31 +1,32 @@
 import Combine
 import Foundation
-import SharedProtocol
 
-/// Serves the `auto_task_*` slice of the mobile protocol on behalf of
-/// `MobileControlManager` — see `MobileFeatureBridge`'s doc comment for why
-/// the manager holds this behind a protocol rather than this concrete type.
+/// Serves the `auto_task_*` slice of the mobile protocol on behalf of the
+/// mobile manager — see `MobileFeatureBridge`'s doc comment for why the
+/// manager holds this behind a protocol rather than this concrete type.
 ///
-/// Every method below is the pre-split `MobileControlManager` body moved
-/// verbatim (Phase 2c Task 1): `self`-implicit references to the manager's
-/// `append`/`reply`/`replyNotConfigured`/`decoder`/`mobileClientPaired` became
-/// `manager?.`-qualified, and the old `autoCode`/`autoTaskSettings`/`logStore`
-/// manager properties became this bridge's own stored refs (`autoTaskSettings`
-/// renamed to `settings` to match the initializer's parameter label). The
-/// `mobileClientPaired`-gated push helpers keep the exact original guard so
-/// their behavior is unchanged by the split.
+/// Lives in Features/AutoTask, not Features/MobileControl: it is Auto Tasks'
+/// half of the phone seam. It reaches the manager only through
+/// `MobileBridgeHosting` (Core/Contracts), so it names no MobileControl type
+/// and needs no `SharedProtocol` import — the host decodes
+/// `MobileAutoTaskRequest` from the wire and encodes `MobileAutoTaskReply`
+/// back onto it. That is what lets this file compile in a build with
+/// `auto_tasks` on and `mobile_sync` off, where `SharedProtocol` is not linked.
+///
+/// The `mobileClientPaired`-gated push helpers keep their guard so a
+/// desktop-side change sends nothing while no phone is listening.
 @MainActor
 final class MobileAutoTaskBridge: MobileFeatureBridge {
-    weak var manager: MobileControlManager?
+    weak var host: (any MobileBridgeHosting)?
     var autoCode: AutoCodeUpdateService?
     var settings: AutoTaskSettings?
     var logStore: TaskLogStore?
 
     private var cancellables = Set<AnyCancellable>()
 
-    init(manager: MobileControlManager, autoCode: AutoCodeUpdateService,
+    init(host: any MobileBridgeHosting, autoCode: AutoCodeUpdateService,
          settings: AutoTaskSettings, logStore: TaskLogStore) {
-        self.manager = manager
+        self.host = host
         self.autoCode = autoCode
         self.settings = settings
         self.logStore = logStore
@@ -34,30 +35,32 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     // MARK: - MobileFeatureBridge
 
     /// Handle `auto_task_*` messages: list / toggle / run / stop / history for
-    /// the Auto Task scheduler. Each case is the pre-existing body moved
-    /// verbatim from the old monolithic `handleInbound` switch (by way of
-    /// `MobileControlManager.handleAutoTask`); the `autoCode`/`settings` deps
-    /// are @MainActor like the manager. `manager?.replyNotConfigured(commandId:logLabel:)`
+    /// the Auto Task scheduler, plus the setup channel. The `autoCode`/`settings`
+    /// deps are @MainActor like the manager. `host?.replyNotConfigured(commandId:logLabel:)`
     /// mirrors a `CommandError` when the wiring is absent so the phone shows a
     /// concrete reason. `data` is optional so a manager-triggered synthetic
     /// call (e.g. an immediate push right after pairing) can pass `nil` for
     /// message types that never decode a payload.
     func handle(type: String, data: Data?) -> Bool {
-        switch type {
-        case MobileProtocol.Tag.autoTaskList:
+        guard let request = host?.decodeAutoTaskRequest(type: type, data: data) else {
+            host?.logInfo("Unhandled auto-task type: \(type)")
+            return false
+        }
+        switch request {
+        case .list:
             // Snapshot the current Auto Task scheduler + per-task state. Both
-            // deps are @MainActor like this manager, so the reads below are
+            // deps are @MainActor like this bridge, so the reads below are
             // isolation-safe. Missing wiring → a CommandError so the phone
             // shows a concrete reason instead of an unanswered request.
             guard let state = buildAutoTaskState() else {
-                manager?.replyNotConfigured(commandId: "auto_task", logLabel: "auto_task_list")
+                host?.replyNotConfigured(commandId: "auto_task", logLabel: "auto_task_list")
                 return true
             }
-            manager?.append(.info, "Auto-task state: \(state.isRunning ? "running" : "idle"), master=\(state.masterEnabled)")
-            manager?.reply(state)
+            host?.logInfo("Auto-task state: \(state.isRunning ? "running" : "idle"), master=\(state.masterEnabled)")
+            host?.sendAutoTaskReply(.state(state))
             return true
 
-        case MobileProtocol.Tag.autoTaskToggle:
+        case .toggle(let toggle):
             // Flip the master enable (task == nil), a built-in per-task flag,
             // or (new) a custom task's isEnabled. Routes through
             // AutoTaskSettings.setEnabled / .enabled for built-ins so the
@@ -66,52 +69,52 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             // CustomAutoTask.save() directly (they have no AutoTaskSettings
             // entry — enabled-state lives on the struct itself).
             guard controlAllowed else {
-                manager?.reply(AutoTaskAck(ok: false, message: PhoneAccess.autoTaskControl.deniedMessage))
+                host?.sendAutoTaskReply(.ack(ok: false, message: controlDeniedMessage))
                 return true
             }
-            if let m = try? manager?.decoder.decode(AutoTaskToggle.self, from: data ?? Data()) {
+            if let m = toggle {
                 if let taskName = m.task, let t = AutoTask(rawValue: taskName) {
                     settings?.setEnabled(m.enabled, task: t)
-                    manager?.append(.info, "Auto-task toggle \(t.rawValue)=\(m.enabled)")
+                    host?.logInfo("Auto-task toggle \(t.rawValue)=\(m.enabled)")
                 } else if let taskName = m.task,
                           var custom = CustomAutoTask.loadAll().first(where: { $0.id == taskName }) {
                     custom.isEnabled = m.enabled
                     custom.save()
                     NotificationCenter.default.post(name: .customAutoTasksChanged, object: nil)
-                    manager?.append(.info, "Custom auto-task toggle \(custom.name)=\(m.enabled)")
+                    host?.logInfo("Custom auto-task toggle \(custom.name)=\(m.enabled)")
                 } else if m.task == nil {
                     guard FeatureRegistry.shared.isEnabled(.autoTasks) else {
-                        manager?.append(.info, "Auto-task master toggle ignored: feature disabled on Mac")
+                        host?.logInfo("Auto-task master toggle ignored: feature disabled on Mac")
                         replyAutoTaskStateOrAck()
                         return true
                     }
                     settings?.enabled = m.enabled
-                    manager?.append(.info, "Auto-task master=\(m.enabled)")
+                    host?.logInfo("Auto-task master=\(m.enabled)")
                 } else {
-                    manager?.append(.stderr, "auto_task_toggle: unknown task id \(m.task ?? "?")")
+                    host?.logError("auto_task_toggle: unknown task id \(m.task ?? "?")")
                 }
                 replyAutoTaskStateOrAck()
             } else {
-                manager?.append(.stderr, "auto_task_toggle decode failed (\(MobileLogPolicy.frameLabel(data)))")
-                manager?.reply(CommandError(commandId: "auto_task_toggle",
-                                            message: "Invalid auto-task toggle request from phone."))
+                host?.logDecodeFailure(type: type, data: data)
+                host?.replyCommandError(commandId: "auto_task_toggle",
+                                        message: "Invalid auto-task toggle request from phone.")
             }
             return true
 
-        case MobileProtocol.Tag.autoTaskRun:
+        case .run(let run):
             // Trigger a global run (task == nil) or a single per-task manual
             // run. `runNow()`/`runSingle(_:)` are @MainActor-sync — each spins
             // its own internal `Task` — so no await is needed; we're already
             // on the main actor here (handleInbound is main-isolated).
             guard controlAllowed else {
-                manager?.reply(AutoTaskAck(ok: false, message: PhoneAccess.autoTaskControl.deniedMessage))
+                host?.sendAutoTaskReply(.ack(ok: false, message: controlDeniedMessage))
                 return true
             }
             guard let ac = autoCode else {
-                manager?.replyNotConfigured(commandId: "auto_task_run", logLabel: "auto_task_run")
+                host?.replyNotConfigured(commandId: "auto_task_run", logLabel: "auto_task_run")
                 return true
             }
-            if let m = try? manager?.decoder.decode(AutoTaskRun.self, from: data ?? Data()) {
+            if let m = run {
                 // Four-way branch, mirroring the toggle handler above:
                 // built-in task / custom task / no task = global run / an
                 // unrecognized non-nil id (e.g. the phone still shows a
@@ -123,100 +126,93 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                 if let raw = m.task, let t = AutoTask(rawValue: raw) {
                     started = ac.runSingle(t, trigger: .phone)
                     if started {
-                        manager?.append(.info, "Auto-task run single: \(t.rawValue)")
+                        host?.logInfo("Auto-task run single: \(t.rawValue)")
                     }
                 } else if let raw = m.task,
                           let custom = CustomAutoTask.loadAll().first(where: { $0.id == raw }) {
                     started = ac.runSingleCustom(custom, trigger: .phone)
                     if started {
-                        manager?.append(.info, "Custom auto-task run: \(custom.name)")
+                        host?.logInfo("Custom auto-task run: \(custom.name)")
                     }
                 } else if m.task == nil {
                     started = ac.runNow(trigger: .phone)
                     if started {
-                        manager?.append(.info, "Auto-task run now")
+                        host?.logInfo("Auto-task run now")
                     }
                 } else {
                     unrecognized = true
-                    manager?.append(.stderr, "auto_task_run: unknown task id \(m.task ?? "?")")
+                    host?.logError("auto_task_run: unknown task id \(m.task ?? "?")")
                 }
                 if unrecognized {
-                    manager?.reply(CommandError(commandId: "auto_task_run",
-                                                message: "That task no longer exists on your Mac. Refresh the task list."))
+                    host?.replyCommandError(commandId: "auto_task_run",
+                                            message: "That task no longer exists on your Mac. Refresh the task list.")
                 } else if started {
                     replyAutoTaskStateOrAck()
                 } else {
-                    manager?.append(.info, "Auto-task run ignored — already running on Mac")
-                    manager?.reply(AutoTaskAck(ok: false,
-                                               message: "Auto Tasks is already running on your Mac. Tap Stop first."))
+                    host?.logInfo("Auto-task run ignored — already running on Mac")
+                    host?.sendAutoTaskReply(.ack(ok: false,
+                                                 message: "Auto Tasks is already running on your Mac. Tap Stop first."))
                 }
             } else {
-                manager?.append(.stderr, "auto_task_run decode failed (\(MobileLogPolicy.frameLabel(data)))")
-                manager?.reply(CommandError(commandId: "auto_task_run",
-                                            message: "Invalid auto-task run request from phone."))
+                host?.logDecodeFailure(type: type, data: data)
+                host?.replyCommandError(commandId: "auto_task_run",
+                                        message: "Invalid auto-task run request from phone.")
             }
             return true
 
-        case MobileProtocol.Tag.autoTaskStop:
+        case .stop:
             // `cancel()` is @MainActor-sync: cancels the in-flight `runTask`
             // and terminates the active subprocess. No-op when idle; nil-safe
             // via `?` (no wiring → ack still replies, phone doesn't hang).
             autoCode?.cancel()
-            manager?.append(.info, "Auto-task stop")
+            host?.logInfo("Auto-task stop")
             replyAutoTaskStateOrAck()
             return true
 
-        case MobileProtocol.Tag.autoTaskHistory:
+        case .history:
             // Snapshot the processed-actions registry. `allEntries` is
             // @Published on AutoCodeUpdateService (a cached copy of
             // Registry.allEntries()), so the read is cheap and main-isolated.
             // `actionText` is free text lifted from meeting notes / tickets and
             // can carry pasted tokens, so it is redacted like the log tail —
-            // off the main actor, as PhoneRedaction requires.
+            // off the main actor, as the redactor requires.
             let raw = (autoCode?.allEntries ?? []).map {
                 (text: $0.actionText, status: $0.status.rawValue,
                  lastUpdated: $0.lastUpdated.timeIntervalSince1970)
             }
+            // No host means no phone to send to; never fall back to raw text.
+            let redact = host?.phoneTextRedactor ?? { _ in "" }
             Task { [weak self] in
                 let entries = await Task.detached(priority: .userInitiated) {
                     raw.map {
-                        AutoTaskHistoryEntry(actionText: PhoneRedaction.logLine($0.text),
-                                             status: $0.status,
-                                             lastUpdated: $0.lastUpdated)
+                        MobileAutoTaskReply.HistoryEntry(actionText: redact($0.text),
+                                                         status: $0.status,
+                                                         lastUpdated: $0.lastUpdated)
                     }
                 }.value
-                self?.manager?.append(.info, "Auto-task history: \(entries.count) entries")
-                self?.manager?.reply(AutoTaskHistoryReply(entries: entries))
+                self?.host?.logInfo("Auto-task history: \(entries.count) entries")
+                self?.host?.sendAutoTaskReply(.history(entries))
             }
             return true
 
-        case MobileProtocol.Tag.autoTaskLogsList:
+        case .logsList:
             if let logs = buildAutoTaskLogsReply() {
-                manager?.append(.info, "Auto-task logs: \(logs.tasks.count) task buffer(s), \(logs.tasks.reduce(0) { $0 + $1.lines.count }) line(s)")
-                manager?.reply(logs)
+                host?.logInfo("Auto-task logs: \(logs.tasks.count) task buffer(s), \(logs.tasks.reduce(0) { $0 + $1.lines.count }) line(s)")
+                host?.sendAutoTaskReply(.logs(logs))
             } else {
-                manager?.replyNotConfigured(commandId: "auto_task_logs", logLabel: "auto_task_logs_list")
+                host?.replyNotConfigured(commandId: "auto_task_logs", logLabel: "auto_task_logs_list")
             }
             return true
 
-        case MobileProtocol.Tag.autoTaskSetupList,
-             MobileProtocol.Tag.autoTaskConfigSet,
-             MobileProtocol.Tag.autoTaskTemplateSave,
-             MobileProtocol.Tag.autoTaskTemplateRename,
-             MobileProtocol.Tag.autoTaskTemplateDelete:
-            handleAutoTaskSetup(type: type, data: data)
+        case .setupList, .configSet, .templateSave, .templateRename, .templateDelete:
+            handleAutoTaskSetup(request, type: type, data: data)
             return true
-
-        default:
-            manager?.append(.info, "Unhandled auto-task type: \(type)")
-            return false
         }
     }
 
     /// Subscribe to Mac-side Auto Task changes and push snapshots to a paired
-    /// iPhone without waiting for a pull request. Moved verbatim from
-    /// `MobileControlManager.installMobilePushObservers` (the auto-task
-    /// slice); called once from the manager's own `installMobilePushObservers`.
+    /// iPhone without waiting for a pull request. Called once by the mobile
+    /// manager when it installs its own push observers.
     func installPushObservers() {
         cancellables.removeAll()
 
@@ -271,23 +267,23 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// than an ack: a template rename can CHANGE the template's id (the id is
     /// the filename stem) and repoint other tasks' configs, so an ack would
     /// leave the phone holding state the Mac has already moved past.
-    private func handleAutoTaskSetup(type: String, data: Data?) {
+    private func handleAutoTaskSetup(_ request: MobileAutoTaskRequest, type: String, data: Data?) {
         guard let autoCode, let templates = autoCode.autoTaskTemplates else {
-            manager?.replyNotConfigured(commandId: "auto_task_setup", logLabel: type)
+            host?.replyNotConfigured(commandId: "auto_task_setup", logLabel: type)
             return
         }
         // Everything except the snapshot request writes config or templates that a later run acts on.
-        if type != MobileProtocol.Tag.autoTaskSetupList, !controlAllowed {
-            manager?.reply(CommandError(commandId: type, message: PhoneAccess.autoTaskControl.deniedMessage))
+        if request != .setupList, !controlAllowed {
+            host?.replyCommandError(commandId: type, message: controlDeniedMessage)
             return
         }
 
-        switch type {
-        case MobileProtocol.Tag.autoTaskSetupList:
+        switch request {
+        case .setupList:
             break   // snapshot only — fall through to the reply below
 
-        case MobileProtocol.Tag.autoTaskConfigSet:
-            guard let m = try? manager?.decoder.decode(AutoTaskConfigSet.self, from: data ?? Data()) else {
+        case .configSet(let configSet):
+            guard let m = configSet else {
                 replyAutoTaskSetupDecodeFailure(type: type, data: data)
                 return
             }
@@ -297,25 +293,25 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             // end up in a prompt that a `.implement` task acts on — so both are
             // checked before anything is stored.
             guard isKnownAutoTaskId(m.taskId) else {
-                manager?.append(.stderr, "auto_task_config_set: unknown task id \(m.taskId)")
-                manager?.reply(CommandError(commandId: "auto_task_config_set",
-                                            message: "That task no longer exists on your Mac. Refresh the task list."))
+                host?.logError("auto_task_config_set: unknown task id \(m.taskId)")
+                host?.replyCommandError(commandId: "auto_task_config_set",
+                                        message: "That task no longer exists on your Mac. Refresh the task list.")
                 return
             }
             guard let inputPath = validatedProjectPath(m.inputPath),
                   let outputPath = validatedProjectPath(m.outputPath) else {
-                manager?.append(.stderr, "auto_task_config_set: rejected a path outside the project")
-                manager?.reply(CommandError(commandId: "auto_task_config_set",
-                                            message: "Paths must be folders inside the open project."))
+                host?.logError("auto_task_config_set: rejected a path outside the project")
+                host?.replyCommandError(commandId: "auto_task_config_set",
+                                        message: "Paths must be folders inside the open project.")
                 return
             }
             // `skillName` is interpolated into "Use the <name> skill:" at the head of a prompt a
             // `.implement` task acts on, so only a skill the project really has may be named.
             let name = AutoTaskConfig.normalized(m.skillName)
             if let name, !isKnownSkill(name) {
-                manager?.append(.stderr, "auto_task_config_set: unknown skill \(name)")
-                manager?.reply(CommandError(commandId: "auto_task_config_set",
-                                            message: "That skill isn't in the open project. Refresh the task settings."))
+                host?.logError("auto_task_config_set: unknown skill \(name)")
+                host?.replyCommandError(commandId: "auto_task_config_set",
+                                        message: "That skill isn't in the open project. Refresh the task settings.")
                 return
             }
             // Routed through the same store the Mac page writes to, so the
@@ -326,20 +322,20 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                                skillDirective: name.map { AutoTaskSkillCatalog.directive(for: $0) },
                                templateId: m.templateId),
                 for: m.taskId)
-            manager?.append(.info, "Auto-task config set for \(m.taskId)")
+            host?.logInfo("Auto-task config set for \(m.taskId)")
 
-        case MobileProtocol.Tag.autoTaskTemplateSave:
-            guard let m = try? manager?.decoder.decode(AutoTaskTemplateSave.self, from: data ?? Data()) else {
+        case .templateSave(let save):
+            guard let m = save else {
                 replyAutoTaskSetupDecodeFailure(type: type, data: data)
                 return
             }
             guard let id = m.id else {
                 guard templates.create(name: m.name, body: m.body) != nil else {
-                    manager?.reply(CommandError(commandId: "auto_task_template_save",
-                                                message: "Could not create “\(m.name)” — is a project open on your Mac?"))
+                    host?.replyCommandError(commandId: "auto_task_template_save",
+                                            message: "Could not create “\(m.name)” — is a project open on your Mac?")
                     return
                 }
-                manager?.append(.info, "Auto-task template created: \(m.name)")
+                host?.logInfo("Auto-task template created: \(m.name)")
                 break
             }
             // Body and name are applied HERE, in one message, because a rename
@@ -347,45 +343,46 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             // rename serviced first would make the body write target a file
             // that no longer exists.
             guard templates.update(id: id, body: m.body) else {
-                manager?.reply(CommandError(commandId: "auto_task_template_save",
-                                            message: "Could not save “\(m.name)” on your Mac."))
+                host?.replyCommandError(commandId: "auto_task_template_save",
+                                        message: "Could not save “\(m.name)” on your Mac.")
                 return
             }
             let trimmedName = m.name.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmedName.isEmpty, templates.template(id: id)?.name != trimmedName,
                templates.rename(id: id, to: trimmedName) == nil {
-                manager?.reply(CommandError(commandId: "auto_task_template_save",
-                                            message: "Saved “\(m.name)”, but could not rename it."))
+                host?.replyCommandError(commandId: "auto_task_template_save",
+                                        message: "Saved “\(m.name)”, but could not rename it.")
                 return
             }
-            manager?.append(.info, "Auto-task template saved: \(id)")
+            host?.logInfo("Auto-task template saved: \(id)")
 
-        case MobileProtocol.Tag.autoTaskTemplateRename:
-            guard let m = try? manager?.decoder.decode(AutoTaskTemplateRename.self, from: data ?? Data()) else {
+        case .templateRename(let rename):
+            guard let m = rename else {
                 replyAutoTaskSetupDecodeFailure(type: type, data: data)
                 return
             }
             guard templates.rename(id: m.id, to: m.name) != nil else {
-                manager?.reply(CommandError(commandId: "auto_task_template_rename",
-                                            message: "Could not rename that template on your Mac."))
+                host?.replyCommandError(commandId: "auto_task_template_rename",
+                                        message: "Could not rename that template on your Mac.")
                 return
             }
-            manager?.append(.info, "Auto-task template renamed: \(m.id) → \(m.name)")
+            host?.logInfo("Auto-task template renamed: \(m.id) → \(m.name)")
 
-        case MobileProtocol.Tag.autoTaskTemplateDelete:
-            guard let m = try? manager?.decoder.decode(AutoTaskTemplateDelete.self, from: data ?? Data()) else {
+        case .templateDelete(let delete):
+            guard let m = delete else {
                 replyAutoTaskSetupDecodeFailure(type: type, data: data)
                 return
             }
             guard templates.delete(id: m.id) else {
-                manager?.reply(CommandError(commandId: "auto_task_template_delete",
-                                            message: "Could not delete that template on your Mac."))
+                host?.replyCommandError(commandId: "auto_task_template_delete",
+                                        message: "Could not delete that template on your Mac.")
                 return
             }
-            manager?.append(.info, "Auto-task template deleted: \(m.id)")
+            host?.logInfo("Auto-task template deleted: \(m.id)")
 
-        default:
-            manager?.append(.info, "Unhandled auto-task setup type: \(type)")
+        case .list, .toggle, .run, .stop, .history, .logsList:
+            // Not a setup message; `handle` never routes these here.
+            host?.logInfo("Unhandled auto-task setup type: \(type)")
             return
         }
 
@@ -393,13 +390,18 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     }
 
     /// Re-read on every request: a phone may hold an old capability list after the switch flips off.
+    /// Fails closed: no host means no switch to consult.
     private var controlAllowed: Bool {
-        manager?.phoneAccess.isAllowed(.autoTaskControl) == true
+        host?.isPhoneAccessAllowed(.autoTaskControl) == true
+    }
+
+    private var controlDeniedMessage: String {
+        host?.phoneAccessDeniedMessage(.autoTaskControl) ?? ""
     }
 
     /// True when `name` is a skill the active project's catalog lists (the same scan the setup reply offers).
     private func isKnownSkill(_ name: String) -> Bool {
-        guard let root = manager?.projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
+        guard let root = host?.projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
         else { return false }
         return AutoTaskSkillCatalog.scan(projectRoot: root).contains { $0.name == name }
     }
@@ -417,16 +419,16 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// clear.
     private func validatedProjectPath(_ value: String?) -> String?? {
         guard let trimmed = AutoTaskConfig.normalized(value) else { return .some(nil) }
-        guard let root = manager?.projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
+        guard let root = host?.projectStore?.activeProject.map({ URL(fileURLWithPath: $0.localPath) })
         else { return nil }
         guard AutoTaskPromptComposer.absolutePath(trimmed, root: root) != nil else { return nil }
         return .some(trimmed)
     }
 
     private func replyAutoTaskSetupDecodeFailure(type: String, data: Data?) {
-        manager?.append(.stderr, "\(MobileLogPolicy.typeLabel(type)) decode failed (\(MobileLogPolicy.frameLabel(data)))")
-        manager?.reply(CommandError(commandId: type,
-                                    message: "Invalid auto-task setup request from phone."))
+        host?.logDecodeFailure(type: type, data: data)
+        host?.replyCommandError(commandId: type,
+                                message: "Invalid auto-task setup request from phone.")
     }
 
     /// Build and send the setup snapshot.
@@ -437,16 +439,16 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// stutter the Mac UI on each tap of the phone's picker.
     private func replyAutoTaskSetup(autoCode: AutoCodeUpdateService,
                                     templates: AutoTaskTemplateStore) {
-        let root = manager?.projectStore?.activeProject.map { URL(fileURLWithPath: $0.localPath) }
+        let root = host?.projectStore?.activeProject.map { URL(fileURLWithPath: $0.localPath) }
         Task { [weak self] in
             let scanned = await Task.detached(priority: .userInitiated) {
                 (skills: root.map { AutoTaskSkillCatalog.scan(projectRoot: $0) } ?? [],
                  folders: AutoTaskFolderCatalog.scan(projectRoot: root))
             }.value
             guard let self else { return }
-            self.manager?.reply(self.buildAutoTaskSetupReply(
+            self.host?.sendAutoTaskReply(.setup(self.buildAutoTaskSetupReply(
                 autoCode: autoCode, templates: templates, root: root,
-                skills: scanned.skills, folders: scanned.folders))
+                skills: scanned.skills, folders: scanned.folders)))
         }
     }
 
@@ -454,20 +456,20 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                                          templates: AutoTaskTemplateStore,
                                          root: URL?,
                                          skills: [AutoTaskSkillCatalog.Entry],
-                                         folders: [AutoTaskFolderCatalog.Folder]) -> AutoTaskSetupReply {
-        AutoTaskSetupReply(
+                                         folders: [AutoTaskFolderCatalog.Folder]) -> MobileAutoTaskReply.Setup {
+        MobileAutoTaskReply.Setup(
             hasProject: root != nil,
-            projectName: manager?.projectStore?.activeProject?.bundle.displayName,
+            projectName: host?.projectStore?.activeProject?.bundle.displayName,
             templates: templates.templates.map {
-                AutoTaskTemplateInfo(id: $0.id, name: $0.name, body: $0.body)
+                MobileAutoTaskReply.Template(id: $0.id, name: $0.name, body: $0.body)
             },
             configs: autoCode.taskConfigs.configs.map { taskId, config in
-                AutoTaskConfigInfo(taskId: taskId, inputPath: config.inputPath,
-                                   outputPath: config.outputPath,
-                                   skillName: config.skillName,
-                                   templateId: config.templateId)
+                MobileAutoTaskReply.TaskConfig(taskId: taskId, inputPath: config.inputPath,
+                                               outputPath: config.outputPath,
+                                               skillName: config.skillName,
+                                               templateId: config.templateId)
             }.sorted { $0.taskId < $1.taskId },
-            skills: skills.map { AutoTaskSkillInfo(name: $0.name, description: $0.description) },
+            skills: skills.map { MobileAutoTaskReply.Skill(name: $0.name, description: $0.description) },
             folders: folders.map(\.path))
     }
 
@@ -475,17 +477,17 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
 
     /// Build the wire snapshot the iPhone mirrors. Returns nil when the Auto
     /// Task stack isn't wired (previews / tests).
-    private func buildAutoTaskState() -> AutoTaskState? {
+    private func buildAutoTaskState() -> MobileAutoTaskReply.State? {
         guard let ac = autoCode, let s = settings else { return nil }
         // The template warning rides in `lastError` when there is no real error,
         // so the phone also learns its edited template is being ignored.
         let allInfos = AutoTask.allCases.map { t in
-            AutoTaskInfo(id: t.rawValue, label: t.label,
+            MobileAutoTaskReply.TaskInfo(id: t.rawValue, label: t.label,
                          enabled: s.isEnabled(task: t),
                          lastError: ac.taskErrors[t.rawValue] ?? ac.visibleTemplateWarning(for: t.rawValue))
         }
         let customInfos = CustomAutoTask.loadAll().map { t in
-            AutoTaskInfo(id: t.id, label: t.name, enabled: t.isEnabled,
+            MobileAutoTaskReply.TaskInfo(id: t.id, label: t.name, enabled: t.isEnabled,
                          lastError: ac.taskErrors[t.id] ?? ac.visibleTemplateWarning(for: t.id))
         }
         // Mirror the Mac "Show only enabled" filter: when on, the phone sees
@@ -493,7 +495,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
         // Custom tasks participate identically to built-ins.
         let combined = allInfos + customInfos
         let infos = s.showOnlyEnabledTasks ? combined.filter { $0.enabled } : combined
-        return AutoTaskState(masterEnabled: s.enabled,
+        return MobileAutoTaskReply.State(masterEnabled: s.enabled,
                              isRunning: ac.isRunning || ac.hasScheduledRun,
                              currentTask: ac.currentTask?.rawValue ?? ac.currentCustomTaskId,
                              currentStep: ac.currentStep,
@@ -509,54 +511,56 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
     /// ack — so execution status mirrors the Mac without a manual refresh.
     private func replyAutoTaskStateOrAck() {
         if let state = buildAutoTaskState() {
-            manager?.reply(state)
+            host?.sendAutoTaskReply(.state(state))
             pushAutoTaskLogsIfPaired()
         } else {
-            manager?.reply(AutoTaskAck(ok: true, message: nil))
+            host?.sendAutoTaskReply(.ack(ok: true, message: nil))
         }
     }
 
     /// Build the wire snapshot of per-task live logs for the iPhone run screen.
-    private func buildAutoTaskLogsReply() -> AutoTaskLogsReply? {
+    private func buildAutoTaskLogsReply() -> MobileAutoTaskReply.Logs? {
         guard let logStore else { return nil }
+        // No host means no phone to send to; never fall back to raw text.
+        let redact = host?.phoneTextRedactor ?? { _ in "" }
         let current = autoCode?.currentTask?.rawValue ?? autoCode?.currentCustomTaskId
         let builtIn = AutoTask.allCases.map { task in
             let lines = logStore.lines(for: task).map { line in
-                AutoTaskLogLine(id: line.id.uuidString,
-                                timestamp: line.timestamp.timeIntervalSince1970,
-                                level: line.level.rawValue,
-                                text: PhoneRedaction.logLine(line.text))
+                MobileAutoTaskReply.LogLine(id: line.id.uuidString,
+                                            timestamp: line.timestamp.timeIntervalSince1970,
+                                            level: line.level.rawValue,
+                                            text: redact(line.text))
             }
-            return AutoTaskTaskLogs(id: task.rawValue, label: task.label, lines: lines)
+            return MobileAutoTaskReply.TaskLogs(id: task.rawValue, label: task.label, lines: lines)
         }
         let custom = CustomAutoTask.loadAll().map { task in
             let lines = logStore.lines(for: task.id).map { line in
-                AutoTaskLogLine(id: line.id.uuidString,
-                                timestamp: line.timestamp.timeIntervalSince1970,
-                                level: line.level.rawValue,
-                                text: PhoneRedaction.logLine(line.text))
+                MobileAutoTaskReply.LogLine(id: line.id.uuidString,
+                                            timestamp: line.timestamp.timeIntervalSince1970,
+                                            level: line.level.rawValue,
+                                            text: redact(line.text))
             }
-            return AutoTaskTaskLogs(id: task.id, label: task.name, lines: lines)
+            return MobileAutoTaskReply.TaskLogs(id: task.id, label: task.name, lines: lines)
         }
-        return AutoTaskLogsReply(currentTask: current, tasks: builtIn + custom)
+        return MobileAutoTaskReply.Logs(currentTask: current, tasks: builtIn + custom)
     }
 
     private func pushAutoTaskStateIfPaired() {
-        guard manager?.mobileClientPaired == true, let state = buildAutoTaskState() else { return }
-        manager?.reply(state)
+        guard host?.mobileClientPaired == true, let state = buildAutoTaskState() else { return }
+        host?.sendAutoTaskReply(.state(state))
     }
 
     /// Push the per-task settings + template snapshot after a desktop-side
     /// change, so the phone's next `AutoTaskConfigSet` (a whole-config
     /// replace) is built on current state rather than a stale one.
     private func pushAutoTaskSetupIfPaired() {
-        guard manager?.mobileClientPaired == true, let autoCode,
+        guard host?.mobileClientPaired == true, let autoCode,
               let templates = autoCode.autoTaskTemplates else { return }
         replyAutoTaskSetup(autoCode: autoCode, templates: templates)
     }
 
     private func pushAutoTaskLogsIfPaired() {
-        guard manager?.mobileClientPaired == true, let logs = buildAutoTaskLogsReply() else { return }
-        manager?.reply(logs)
+        guard host?.mobileClientPaired == true, let logs = buildAutoTaskLogsReply() else { return }
+        host?.sendAutoTaskReply(.logs(logs))
     }
 }

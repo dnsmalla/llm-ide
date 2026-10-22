@@ -31,6 +31,36 @@ final class MobileFeatureBridgeTests: XCTestCase {
         XCTAssertEqual(spy.handled, ["loop_status_list"])
     }
 
+    /// The Auto Task / Loop bridges live outside MobileControl and never see a
+    /// wire tag: they act only on what the manager's `MobileBridgeHosting`
+    /// decode hands them. A tag routed to a bridge but missing from that
+    /// decode would be logged as "Unhandled" and dropped, so pin the decode
+    /// against the same routing Sets.
+    func testHostDecodesEveryRoutedAutoTaskAndLoopType() {
+        let manager = MobileControlManager()
+        for type in MobileControlManager.autoTaskMessageTypes {
+            XCTAssertNotNil(manager.decodeAutoTaskRequest(type: type, data: nil), type)
+        }
+        for type in MobileControlManager.loopMessageTypes {
+            XCTAssertNotNil(manager.decodeLoopRequest(type: type, data: nil), type)
+        }
+        XCTAssertNil(manager.decodeAutoTaskRequest(type: "loop_stop", data: nil))
+        XCTAssertNil(manager.decodeLoopRequest(type: "auto_task_list", data: nil))
+    }
+
+    /// A recognised type with an undecodable payload keeps its case with a nil
+    /// payload, so the bridge runs its access checks before reporting it.
+    func testHostKeepsTheCaseForAnUndecodablePayload() {
+        let manager = MobileControlManager()
+        XCTAssertEqual(manager.decodeAutoTaskRequest(type: "auto_task_toggle", data: Data("{}".utf8)),
+                       .toggle(nil))
+        XCTAssertEqual(manager.decodeLoopRequest(type: "loop_start_stage", data: nil),
+                       .startStage(stageId: nil))
+        let toggle = Data(#"{"type":"auto_task_toggle","task":"reviewCode","enabled":true}"#.utf8)
+        XCTAssertEqual(manager.decodeAutoTaskRequest(type: "auto_task_toggle", data: toggle),
+                       .toggle(.init(task: "reviewCode", enabled: true)))
+    }
+
     func testNilBridgeStillReportsHandledSoCallerAcksUnavailable() {
         let manager = MobileControlManager()
         // No bridges installed: routing must still claim the message (true)

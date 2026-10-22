@@ -1,29 +1,32 @@
 import Foundation
-import SharedProtocol
 
-/// Serves the `loop_*` slice of the mobile protocol on behalf of
-/// `MobileControlManager` — see `MobileFeatureBridge`'s doc comment for why
-/// the manager holds this behind a protocol rather than this concrete type.
+/// Serves the `loop_*` slice of the mobile protocol on behalf of the mobile
+/// manager — see `MobileFeatureBridge`'s doc comment for why the manager holds
+/// this behind a protocol rather than this concrete type.
 ///
-/// Every method below is the pre-split `MobileControlManager` body moved
-/// verbatim (Phase 2c Task 1): `self`-implicit references to the manager's
-/// `append`/`reply`/`decoder`/`config`/`projectStore` became
-/// `manager?.`-qualified, and the manager's own `logStore` read became
-/// `autoCode?.logStore` (this bridge holds no `logStore` of its own — the
-/// auto-code service already owns one, and `loopEngineering` is itself an
-/// Auto Task under the hood).
+/// Lives in Features/Loop, not Features/MobileControl: it is the Loop's half of
+/// the phone seam. It reaches the manager only through `MobileBridgeHosting`
+/// and the AutoTask scheduler only through `LoopLaneControlling` (both in
+/// Core/Contracts), so it names no MobileControl or AutoTask type and needs no
+/// `SharedProtocol` import — the host decodes `MobileLoopRequest` from the wire
+/// and encodes `MobileLoopReply` back onto it. That is what lets this file
+/// compile in a build with `auto_tasks` on and `mobile_sync` off, where
+/// `SharedProtocol` is not linked at all.
 ///
 /// The phone is a CONTROL SURFACE only — no part of running a loop lives on
 /// it or in this bridge. Starting one delegates to the Mac's existing
-/// `loopEngineering` auto task, which is the single path that already wires
-/// every dependency a run needs (stage repairer, regression sweep, skill
-/// executor, journal) and produces a journal record identical to a scheduled
-/// run's. Reimplementing that here would have been a second runner
+/// `loopEngineering` auto task (via its loop lane), which is the single path
+/// that already wires every dependency a run needs (stage repairer, regression
+/// sweep, skill executor, journal) and produces a journal record identical to
+/// a scheduled run's. Reimplementing that here would have been a second runner
 /// construction to keep in step with the first.
 @MainActor
 final class MobileLoopBridge: MobileFeatureBridge {
-    weak var manager: MobileControlManager?
-    var autoCode: AutoCodeUpdateService?
+    weak var host: (any MobileBridgeHosting)?
+    /// AutoTask's loop lane. Strong, as the concrete service reference was
+    /// before: the bridge is installed for the app's lifetime and the service
+    /// outlives it anyway.
+    var loopLane: (any LoopLaneControlling)?
     /// Owner of DESKTOP-initiated runs. Without it `loop_stop` reached only
     /// the scheduler's runner, so a run the user started on the Mac kept
     /// going — the phone reported "Stop requested", the run ignored it, and
@@ -46,43 +49,45 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// answered is dropped rather than overwriting the newer answer.
     private(set) var requestGate = MobileLoopRequestGate()
 
-    init(manager: MobileControlManager, autoCode: AutoCodeUpdateService) {
-        self.manager = manager
-        self.autoCode = autoCode
+    init(host: any MobileBridgeHosting, loopLane: any LoopLaneControlling) {
+        self.host = host
+        self.loopLane = loopLane
     }
 
     // MARK: - MobileFeatureBridge
 
     /// Handle `loop_*` messages: snapshot / start / stop / history for the
-    /// active project's Loop. Each case is the pre-existing body moved
-    /// verbatim from the old monolithic `handleInbound` switch (by way of
-    /// `MobileControlManager.handleLoop`). `data` is optional so a
-    /// manager-triggered synthetic call can pass `nil` for message types that
-    /// never decode a payload.
+    /// active project's Loop. `data` is optional so a manager-triggered
+    /// synthetic call can pass `nil` for message types that never decode a
+    /// payload.
     func handle(type: String, data: Data?) -> Bool {
-        switch type {
-        case MobileProtocol.Tag.loopStatusList:
+        guard let request = host?.decodeLoopRequest(type: type, data: data) else {
+            host?.logInfo("Unhandled loop type: \(type)")
+            return false
+        }
+        switch request {
+        case .status:
             let seq = requestGate.issue()
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let state = await self.buildLoopState()
                 guard self.requestGate.claim(seq, .status) else { return }
-                self.manager?.reply(state)
+                self.host?.sendLoopReply(.state(state))
             }
             return true
 
-        case MobileProtocol.Tag.loopStart:
+        case .start:
             guard loopControlAllowed else {
-                manager?.reply(LoopAck(accepted: false, message: PhoneAccess.loopControl.deniedMessage))
+                host?.sendLoopReply(.ack(accepted: false, message: loopControlDeniedMessage))
                 return true
             }
-            guard let autoCode else {
+            guard let loopLane else {
                 // Not `replyNotConfigured`: that says "Auto-tasks not
                 // configured", which is true underneath but reads as a
                 // non-sequitur when the user pressed Start on the Loop page.
-                manager?.append(.stderr, "loop_start: auto-code service not wired")
-                manager?.reply(CommandError(commandId: "loop_start",
-                                            message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
+                host?.logError("loop_start: auto-code service not wired")
+                host?.replyCommandError(commandId: "loop_start",
+                                        message: "The Mac app can't run a loop right now — its auto-code service isn't wired up.")
                 return true
             }
             let seq = requestGate.issue()
@@ -93,16 +98,16 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 guard self.requestGate.claim(seq, .start) else { return }
                 // A Stop that arrived while the snapshot loaded cancels this start.
                 guard self.requestGate.stopGeneration == stopGeneration else {
-                    self.manager?.append(.info, "loop_start cancelled by a Stop sent meanwhile")
-                    self.manager?.reply(LoopAck(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
+                    self.host?.logInfo("loop_start cancelled by a Stop sent meanwhile")
+                    self.host?.sendLoopReply(.ack(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
                     return
                 }
                 // Refuse for a concrete reason rather than firing a run that the
                 // Mac would reject a moment later for the same reason.
                 guard state.configured else {
-                    self.manager?.append(.stderr, "loop_start: no project or no saved loop config")
-                    self.manager?.reply(LoopAck(accepted: false,
-                                           message: "No loop is set up for the active project. Create one on the Mac first."))
+                    self.host?.logError("loop_start: no project or no saved loop config")
+                    self.host?.sendLoopReply(.ack(accepted: false,
+                                                  message: "No loop is set up for the active project. Create one on the Mac first."))
                     return
                 }
                 // When a run is already in flight, queue behind it — the runner's
@@ -111,44 +116,43 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 // this page shows one loop's stages, log tail and history, and a
                 // project now has several independent loops. Starting the sweep
                 // here would run loops the phone never showed.
-                guard let context = self.manager?.config.flatMap({ cfg in
-                          self.manager?.projectStore.flatMap { WorkspaceRoot.context(config: cfg, projectStore: $0) }
+                guard let context = self.host?.config.flatMap({ cfg in
+                          self.host?.projectStore.flatMap { WorkspaceRoot.context(config: cfg, projectStore: $0) }
                       }),
-                      let projectId = self.manager?.projectStore?.activeProject?.bundle.id,
+                      let projectId = self.host?.projectStore?.activeProject?.bundle.id,
                       let primary = LoopEngineConfigStore.primaryLoop(
                           projectRoot: context.projectRoot, projectId: projectId,
                           gitRoot: context.gitRoot) else {
-                    self.manager?.append(.stderr, "loop_start: no resolvable project loop")
-                    self.manager?.reply(LoopAck(accepted: false,
-                                           message: "No loop is set up for the active project. Create one on the Mac first."))
+                    self.host?.logError("loop_start: no resolvable project loop")
+                    self.host?.sendLoopReply(.ack(accepted: false,
+                                                  message: "No loop is set up for the active project. Create one on the Mac first."))
                     return
                 }
-                // runSingleLoop is @MainActor-sync and spins its own Task; false
+                // Synchronous on the main actor and spins its own Task; false
                 // means the scheduler declined (already busy).
-                let started = autoCode.runSingleLoop(loopId: primary.id, trigger: .phone)
+                let started = loopLane.runSingleLoopFromPhone(loopId: primary.id)
                 self.startedHereTracker.noteStart(succeeded: started)
-                self.manager?.append(started ? .info : .stderr, "loop_start \(started ? "accepted" : "declined by scheduler")")
+                self.log(started, "loop_start \(started ? "accepted" : "declined by scheduler")")
                 let queuedNote = state.running ? " Queued behind the current run." : ""
-                self.manager?.reply(LoopAck(accepted: started,
-                                       message: started ? "Loop started.\(queuedNote)" : "The Mac declined to start a run right now."))
+                self.host?.sendLoopReply(.ack(accepted: started,
+                                              message: started ? "Loop started.\(queuedNote)" : "The Mac declined to start a run right now."))
             }
             return true
 
-        case MobileProtocol.Tag.loopStartStage:
+        case .startStage(let stageId):
             guard loopControlAllowed else {
-                manager?.reply(LoopAck(accepted: false, message: PhoneAccess.loopControl.deniedMessage))
+                host?.sendLoopReply(.ack(accepted: false, message: loopControlDeniedMessage))
                 return true
             }
-            guard let req = try? manager?.decoder.decode(LoopStartStage.self, from: data ?? Data()),
-                  !req.stageId.isEmpty else {
-                manager?.reply(CommandError(commandId: "loop_start_stage",
-                                            message: "Malformed loop_start_stage payload."))
+            guard let stageId, !stageId.isEmpty else {
+                host?.replyCommandError(commandId: "loop_start_stage",
+                                        message: "Malformed loop_start_stage payload.")
                 return true
             }
-            guard let autoCode else {
-                manager?.append(.stderr, "loop_start_stage: auto-code service not wired")
-                manager?.reply(CommandError(commandId: "loop_start_stage",
-                                            message: "The Mac app can't run a loop right now — its auto-code service isn't wired up."))
+            guard let loopLane else {
+                host?.logError("loop_start_stage: auto-code service not wired")
+                host?.replyCommandError(commandId: "loop_start_stage",
+                                        message: "The Mac app can't run a loop right now — its auto-code service isn't wired up.")
                 return true
             }
             let seq = requestGate.issue()
@@ -158,92 +162,103 @@ final class MobileLoopBridge: MobileFeatureBridge {
                 let state = await self.buildLoopState()
                 guard self.requestGate.claim(seq, .start) else { return }
                 guard self.requestGate.stopGeneration == stopGeneration else {
-                    self.manager?.append(.info, "loop_start_stage cancelled by a Stop sent meanwhile")
-                    self.manager?.reply(LoopAck(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
+                    self.host?.logInfo("loop_start_stage cancelled by a Stop sent meanwhile")
+                    self.host?.sendLoopReply(.ack(accepted: false, message: MobileLoopRequestGate.stoppedBeforeStart))
                     return
                 }
                 guard state.configured else {
-                    self.manager?.append(.stderr, "loop_start_stage: no project or no saved loop config")
-                    self.manager?.reply(LoopAck(accepted: false,
-                                           message: "No loop is set up for the active project. Create one on the Mac first."))
+                    self.host?.logError("loop_start_stage: no project or no saved loop config")
+                    self.host?.sendLoopReply(.ack(accepted: false,
+                                                  message: "No loop is set up for the active project. Create one on the Mac first."))
                     return
                 }
-                guard let stage = state.stages.first(where: { $0.stageId == req.stageId }) else {
-                    self.manager?.append(.stderr, "loop_start_stage: unknown stage id")
-                    self.manager?.reply(LoopAck(accepted: false,
-                                           message: "That stage no longer exists — refresh and try again."))
+                guard let stage = state.stages.first(where: { $0.stageId == stageId }) else {
+                    self.host?.logError("loop_start_stage: unknown stage id")
+                    self.host?.sendLoopReply(.ack(accepted: false,
+                                                  message: "That stage no longer exists — refresh and try again."))
                     return
                 }
                 // Queue behind an in-flight run when needed — see `loop_start`.
-                let started = autoCode.runSingleLoopStage(stageId: req.stageId, trigger: .phone)
+                let started = loopLane.runSingleLoopStageFromPhone(stageId: stageId)
                 self.startedHereTracker.noteStart(succeeded: started)
-                self.manager?.append(started ? .info : .stderr,
-                                "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")
+                self.log(started,
+                         "loop_start_stage \(started ? "accepted" : "declined by scheduler") — \(stage.name)")
                 let queuedNote = state.running ? " Queued behind the current run." : ""
-                self.manager?.reply(LoopAck(accepted: started,
-                                       message: started ? "Stage \"\(stage.name)\" started.\(queuedNote)"
-                                                        : "The Mac declined to start a run right now."))
+                self.host?.sendLoopReply(.ack(accepted: started,
+                                              message: started ? "Stage \"\(stage.name)\" started.\(queuedNote)"
+                                                               : "The Mac declined to start a run right now."))
             }
             return true
 
-        case MobileProtocol.Tag.loopStop:
-            guard let autoCode else {
-                manager?.append(.stderr, "loop_stop: auto-code service not wired")
-                manager?.reply(CommandError(commandId: "loop_stop",
-                                            message: "The Mac app can't stop a loop right now — its auto-code service isn't wired up."))
+        case .stop:
+            guard let loopLane else {
+                host?.logError("loop_stop: auto-code service not wired")
+                host?.replyCommandError(commandId: "loop_stop",
+                                        message: "The Mac app can't stop a loop right now — its auto-code service isn't wired up.")
                 return true
             }
-            // `cancelLoopLane()`, not `stop()`/`cancel()`: stop() also
-            // invalidates the Auto Task scheduler timer, and cancel() would
+            // `cancelLoopLane()`, not the service's `stop()`/`cancel()`: stop()
+            // also invalidates the Auto Task scheduler timer, and cancel() would
             // kill unrelated Auto Task runs; a loop runs on its own lane.
             requestGate.noteStop()
-            autoCode.cancelLoopLane()
+            loopLane.cancelLoopLane()
             // Also cancel any desktop-initiated run for the active project.
             // `stopAll` rather than the Primary loop's id: the phone only
             // ever shows Primary, but Stop meaning "stop the loop that is
             // running" is the only reading a user has — leaving a different
             // loop's desktop run going would look like Stop did nothing.
-            if let projectId = manager?.projectStore?.activeProject?.bundle.id {
+            if let projectId = host?.projectStore?.activeProject?.bundle.id {
                 runService?.stopAll(projectId: projectId)
             }
             loopStartedHere = false
-            manager?.append(.info, "loop_stop requested from phone")
-            manager?.reply(LoopAck(accepted: true, message: "Stop requested."))
+            host?.logInfo("loop_stop requested from phone")
+            host?.sendLoopReply(.ack(accepted: true, message: "Stop requested."))
             return true
 
-        case MobileProtocol.Tag.loopHistory:
-            let limit = (try? manager?.decoder.decode(LoopHistoryRequest.self, from: data ?? Data()))?.limit ?? 15
+        case .history(let requested):
+            let limit = requested ?? 15
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 let runs = await self.loopHistory(limit: min(max(limit, 1), 50))
-                self.manager?.reply(LoopHistoryReply(runs: runs))
+                self.host?.sendLoopReply(.history(runs))
             }
             return true
-
-        default:
-            manager?.append(.info, "Unhandled loop type: \(type)")
-            return false
         }
     }
 
     /// Re-read on every request: a phone may hold an old capability list after the switch flips off.
-    /// Stop is deliberately ungated so a phone can always halt a run.
+    /// Stop is deliberately ungated so a phone can always halt a run. Fails
+    /// closed: no host means no switch to consult.
     private var loopControlAllowed: Bool {
-        manager?.phoneAccess.isAllowed(.loopControl) == true
+        host?.isPhoneAccessAllowed(.loopControl) == true
+    }
+
+    private var loopControlDeniedMessage: String {
+        host?.phoneAccessDeniedMessage(.loopControl) ?? ""
+    }
+
+    /// Info line on success, error line otherwise — the scheduler declining a
+    /// start is worth the red line it always got.
+    private func log(_ succeeded: Bool, _ text: String) {
+        if succeeded {
+            host?.logInfo(text)
+        } else {
+            host?.logError(text)
+        }
     }
 
     /// No push-on-change subscriptions exist for Loop today — the phone only
     /// ever pulls (`loop_status_list`), so this is intentionally a no-op.
-    /// Kept so the manager can call it unconditionally alongside
-    /// `autoTaskBridge?.installPushObservers()`.
+    /// Kept so the manager can call it unconditionally alongside the Auto
+    /// Task bridge's `installPushObservers()`.
     func installPushObservers() {
         // Intentionally empty — see doc comment above.
     }
 
     /// No-op counterpart to `installPushObservers()` — this bridge holds no
     /// Combine subscriptions of its own to cancel (see that method's doc
-    /// comment). Kept so the manager can call it unconditionally alongside
-    /// `autoTaskBridge?.removePushObservers()`.
+    /// comment). Kept so the manager can call it unconditionally alongside the
+    /// Auto Task bridge's `removePushObservers()`.
     func removePushObservers() {
         // Intentionally empty — no subscriptions to cancel.
     }
@@ -254,27 +269,28 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// runner's PROCESS-WIDE guard rather than anything this bridge owns, so a
     /// run started on the desktop or by the scheduler is reported honestly
     /// instead of appearing idle to the phone.
-    private func buildLoopState() async -> LoopState {
-        guard let config = manager?.config, let projectStore = manager?.projectStore,
+    private func buildLoopState() async -> MobileLoopReply.State {
+        guard let config = host?.config, let projectStore = host?.projectStore,
               let project = projectStore.activeProject,
               let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else {
-            return LoopState(configured: false, projectName: nil, running: false, startedHere: false,
-                             iteration: 0, maxIterations: 0, logTail: [], lastStatusSummary: nil,
-                             lastFinishedAt: nil, stages: [], queuedCount: 0)
+            return MobileLoopReply.State(configured: false, projectName: nil, running: false, startedHere: false,
+                                         iteration: 0, maxIterations: 0, logTail: [], lastStatusSummary: nil,
+                                         lastFinishedAt: nil, stages: [], queuedCount: 0)
         }
         let projectId = project.bundle.id
         let running = context.gitRoot.map { LoopEngineRunner.isRunActive(gitRoot: $0) } ?? false
         let queuedCount = context.gitRoot.map { LoopEngineRunner.queuedRunCount(gitRoot: $0) } ?? 0
         startedHereTracker.observe(running: running)
-        // `logStore` lives on the auto-code service, not this bridge — Loop
+        // The log buffer lives on the auto-code service, not this bridge — Loop
         // runs as the `loopEngineering` Auto Task under the hood, so its live
         // log tail is that task's buffer in the SAME store the Mac Auto Tasks
         // page observes.
         // Raw text only here; redaction runs in the detached task below
-        // (PhoneRedaction's regexes are too slow for the main actor on a long line).
-        let rawTail = (autoCode?.logStore.buffers[AutoTask.loopEngineering.rawValue] ?? [])
-            .suffix(40)
-            .map(\.text)
+        // (the redactor's regexes are too slow for the main actor on a long line).
+        let rawTail = Array((loopLane?.loopLaneLogTexts ?? []).suffix(40))
+        // No host means no phone to send to; redact everything away rather
+        // than fall back to sending raw text.
+        let redact = host?.phoneTextRedactor ?? { _ in "" }
         let startedHere = running && loopStartedHere
         let projectRoot = context.projectRoot
         let gitRoot = context.gitRoot
@@ -284,11 +300,11 @@ final class MobileLoopBridge: MobileFeatureBridge {
         let (primary, recent, tail, redactedSummary) = await Task.detached(priority: .userInitiated) {
             () -> (LoopDefinition?, LoopRunIndexEntry?, [String], String?) in
             let snap = Self.loadSnapshot(projectRoot: projectRoot, projectId: projectId, gitRoot: gitRoot)
-            return (snap.primary, snap.recent, rawTail.map { PhoneRedaction.logLine($0) },
-                    snap.recent.map { PhoneRedaction.logLine($0.statusSummary) })
+            return (snap.primary, snap.recent, rawTail.map { redact($0) },
+                    snap.recent.map { redact($0.statusSummary) })
         }.value
         let loopConfig = primary?.config
-        return LoopState(
+        return MobileLoopReply.State(
             configured: loopConfig != nil,
             projectName: project.bundle.displayName,
             running: running,
@@ -310,10 +326,10 @@ final class MobileLoopBridge: MobileFeatureBridge {
             stages: (loopConfig?.stages ?? [])
                 .sorted { $0.order < $1.order }
                 .map {
-                    LoopStageInfo(name: $0.name, kind: $0.kind.rawValue,
-                                  severity: $0.severity.rawValue,
-                                  enabled: $0.enabled, order: $0.order,
-                                  stageId: $0.id)
+                    MobileLoopReply.StageInfo(name: $0.name, kind: $0.kind.rawValue,
+                                              severity: $0.severity.rawValue,
+                                              enabled: $0.enabled, order: $0.order,
+                                              stageId: $0.id)
                 },
             queuedCount: queuedCount
         )
@@ -370,26 +386,27 @@ final class MobileLoopBridge: MobileFeatureBridge {
     /// (the design commitment predating multi-loop support), so this must
     /// filter out any other loop's runs the same way `LoopEngineView`'s own
     /// past-runs list does.
-    private func loopHistory(limit: Int) async -> [LoopRunSummary] {
-        guard let config = manager?.config, let projectStore = manager?.projectStore,
+    private func loopHistory(limit: Int) async -> [MobileLoopReply.RunSummary] {
+        guard let config = host?.config, let projectStore = host?.projectStore,
               let project = projectStore.activeProject,
               let context = WorkspaceRoot.context(config: config, projectStore: projectStore) else { return [] }
         let projectId = project.bundle.id
         let root = context.projectRoot
         let gitRoot = context.gitRoot
-        let entries = await Task.detached(priority: .userInitiated) { () -> [LoopRunSummary] in
+        let redact = host?.phoneTextRedactor ?? { _ in "" }
+        let entries = await Task.detached(priority: .userInitiated) { () -> [MobileLoopReply.RunSummary] in
             let primaryId = LoopEngineConfigStore.primaryLoop(projectRoot: root, projectId: projectId,
                                                               gitRoot: gitRoot)?.id
             // Redacted here, still off the main actor: a run's summary is
             // agent-written free text and can quote a secret it saw.
             return Self.scopedHistory(root: root, primaryId: primaryId, limit: limit).map {
-                LoopRunSummary(id: $0.id,
-                               startedAt: $0.startedAt.timeIntervalSince1970,
-                               durationSeconds: $0.durationSeconds,
-                               iterationsUsed: $0.iterationsUsed,
-                               statusCode: $0.statusCode,
-                               statusSummary: PhoneRedaction.logLine($0.statusSummary),
-                               trigger: $0.trigger.rawValue)
+                MobileLoopReply.RunSummary(id: $0.id,
+                                           startedAt: $0.startedAt.timeIntervalSince1970,
+                                           durationSeconds: $0.durationSeconds,
+                                           iterationsUsed: $0.iterationsUsed,
+                                           statusCode: $0.statusCode,
+                                           statusSummary: redact($0.statusSummary),
+                                           trigger: $0.trigger.rawValue)
             }
         }.value
         return entries

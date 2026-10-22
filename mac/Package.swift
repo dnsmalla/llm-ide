@@ -202,7 +202,7 @@ if autoTasksIncluded {
         "LoopStageCodeGraphKindTests.swift",
         "LoopStoreCacheTests.swift",
         "LoopStoreVersioningTests.swift",
-        "MobileLoopSnapshotTests.swift",   // also in mobile_sync's list — deduped there
+        "MobileLoopSnapshotTests.swift",
         "MobileLoopStopTests.swift",       // also in mobile_sync's list — deduped there
         "RegressionFaultSyncTests.swift",
         "ReviewMergeCandidatesTests.swift",
@@ -237,43 +237,26 @@ if mobileIncluded {
         "PairingThrottleTests.swift",
         "MobilePairedDeviceStoreTests.swift",
         "MobileExploreIndexStoreTests.swift",
-        "MobileLoopStateTests.swift",   // also in auto_tasks's list — dedupe below
         "ExplorerMobileEngineResolverTests.swift",
         "MobileModuleTests.swift",
         "MobileExploreScopeTests.swift",
         "MobileExploreTurnPolicyTests.swift",
         "MobileInflightTaskTests.swift",
-        "MobileLoopSnapshotTests.swift",   // also in auto_tasks's list — dedupe below
         "MobileLoopStopTests.swift",       // also in auto_tasks's list — dedupe below
         "MobilePairedDeviceExpiryTests.swift",
         "MobilePhoneApprovalHookTests.swift",
         "MobilePinValidationTests.swift",
     ]
-    // Dedupe against auto_tasks's testExcludes (the MobileLoop*Tests files
-    // marked above appear in both when auto_tasks is also excluded) — SwiftPM
-    // does not tolerate duplicate exclude entries.
+    // Dedupe against auto_tasks's testExcludes (MobileLoopStopTests, marked
+    // above, drives the Loop bridge through a real MobileControlManager, so it
+    // appears in both lists) — SwiftPM does not tolerate duplicate exclude
+    // entries. The Loop/Auto Task bridges themselves need no entry here: they
+    // live in Features/Loop and Features/AutoTask, reach the manager only
+    // through Core/Contracts' `MobileBridgeHosting`, and import no
+    // SharedProtocol, so a mobile-off build compiles them as-is.
     for name in mobileTestExcludes where !testExcludes.contains(name) {
         testExcludes.append(name)
     }
-}
-if mobileIncluded && !autoTasksIncluded {
-    // MobileAutoTaskBridge / MobileLoopBridge are UNSEALED (Task 23 pending
-    // Tasks 17-18's protocol work): they still name AutoTask/Loop concrete
-    // types directly. Before this task they lived inside AutoTask/ and
-    // LoopEngine/, so `auto_tasks`'s own wholesale folder exclude (above)
-    // removed them for free whenever auto_tasks was off, mobile or not. Now
-    // that both live under the always-compiled Features/MobileControl/, that
-    // free protection is gone — build-mac-mobile-only (mobile ON, auto_tasks
-    // OFF) is exactly the config that exercises this, so these two files
-    // need their own exclude. Kept as its OWN top-level `if` (not nested
-    // inside the `if mobileIncluded { featureDefines... } else { ... }`
-    // above) so feature-boundaries.sh's flagmap parser — which requires that
-    // if-body to contain only the featureDefines.append call — still
-    // recognizes Features/MobileControl as FEATURE_MOBILE-gated.
-    libExcludes.append(contentsOf: [
-        "Features/MobileControl/Services/MobileAutoTaskBridge.swift",
-        "Features/MobileControl/Services/MobileLoopBridge.swift",
-    ])
 }
 if mobileIncluded {
     // The folder's agent guide is not a resource; without this every build
