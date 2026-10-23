@@ -129,8 +129,14 @@ struct MarkdownDetailView: View {
             // for the self-sizing chat bubble (see `MarkdownRenderer.html`).
             // A ```mermaid fence used to render as a code block here and as a
             // diagram in Doc Gen, for the same file.
-            MarkdownWebView(markdown: content, isDark: theme.current.isDark,
-                            enableMermaid: true)
+            //
+            // mermaid itself is an on-demand install; until it is, the banner
+            // offers it and the fences render as code blocks.
+            VStack(spacing: 0) {
+                MermaidInstallBanner(markdown: content)
+                MarkdownWebView(markdown: content, isDark: theme.current.isDark,
+                                enableMermaid: true)
+            }
         }
     }
 }
@@ -161,6 +167,10 @@ struct MarkdownWebView: NSViewRepresentable {
     /// `MarkdownRenderer.html(for:isDark:compact:enableMermaid:)` for why it is
     /// opt-in rather than always on.
     var enableMermaid: Bool = false
+    /// Observed so a preview reloads by itself when mermaid finishes
+    /// installing (or is removed in Settings) — the markdown has not changed,
+    /// so nothing else would trigger `updateNSView`'s reload.
+    @ObservedObject private var mermaidRuntime = MermaidRuntime.shared
 
     func makeCoordinator() -> Coordinator { Coordinator() }
 
@@ -195,8 +205,17 @@ struct MarkdownWebView: NSViewRepresentable {
         // identical operation the identical way.
         guard context.coordinator.lastMarkdown != markdown
                 || context.coordinator.lastDark != isDark
-                || context.coordinator.lastMermaid != enableMermaid else { return }
+                || context.coordinator.lastMermaid != enableMermaid
+                || context.coordinator.lastMermaidInstalled != mermaidRenderable else { return }
         load(into: nsView, context: context)
+    }
+
+    /// True only when installing/removing Mermaid would change THIS preview's
+    /// output. Comparing the bare install flag reloaded every open preview —
+    /// including ones without a mermaid fence or with Mermaid disabled — on
+    /// install or remove, flashing them and losing their scroll position.
+    private var mermaidRenderable: Bool {
+        enableMermaid && MarkdownRenderer.needsMermaid(markdown) && mermaidRuntime.isInstalled
     }
 
     private func load(into webView: WKWebView, context: Context) {
@@ -208,6 +227,7 @@ struct MarkdownWebView: NSViewRepresentable {
         context.coordinator.lastMarkdown = markdown
         context.coordinator.lastDark = isDark
         context.coordinator.lastMermaid = enableMermaid
+        context.coordinator.lastMermaidInstalled = mermaidRenderable
         webView.loadHTMLString(buildHTML(), baseURL: nil)
     }
 
@@ -215,6 +235,7 @@ struct MarkdownWebView: NSViewRepresentable {
         var lastMarkdown: String?
         var lastDark: Bool?
         var lastMermaid: Bool?
+        var lastMermaidInstalled: Bool?
 
         /// The system can kill a WKWebView's content process under memory
         /// pressure, which blanks the view. The unconditional reload this class
@@ -231,6 +252,7 @@ struct MarkdownWebView: NSViewRepresentable {
             lastMarkdown = nil
             lastDark = nil
             lastMermaid = nil
+            lastMermaidInstalled = nil
             reload?(webView)
         }
 

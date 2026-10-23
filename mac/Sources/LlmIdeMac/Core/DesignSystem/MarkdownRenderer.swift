@@ -18,8 +18,16 @@ enum MarkdownRenderer {
     ///   would be sized before the diagram existed. It is also 3.4 MB for the
     ///   web view to parse. Only the generation preview, which scrolls itself
     ///   and needs no measured height, asks for it.
+    /// - Parameter mermaidScript: the verified mermaid.js, or nil when the
+    ///   optional component is not installed. An autoclosure so the 3.4 MB
+    ///   lookup only happens for a document that opted in AND has a fence;
+    ///   injectable so the contract labs can assert the gating without the
+    ///   real script on disk. With nil, fences render as ordinary code blocks
+    ///   (`renderMermaid` guards on `window.mermaid`) and the hosting view
+    ///   shows `MermaidInstallBanner` instead.
     static func html(for markdown: String, isDark: Bool, compact: Bool = false,
-                     enableMermaid: Bool = false) -> String {
+                     enableMermaid: Bool = false,
+                     mermaidScript: @autoclosure () -> String? = Mermaid.script()) -> String {
         let bg             = isDark ? "#1e1e1e" : "#ffffff"
         let fg             = isDark ? "#d4d4d4" : "#1a1a1a"
         let codeBg         = isDark ? "#2d2d2d" : "#f5f5f5"
@@ -75,9 +83,12 @@ enum MarkdownRenderer {
                                   with: Self.needsHighlighting(markdown) ? Hljs.js : "")
             // Same gating as the highlighter above, and for a stronger reason:
             // mermaid is ~3.4 MB. Ship it only when the caller opted in AND the
-            // document actually contains a mermaid fence.
+            // document actually contains a mermaid fence — and only if the
+            // optional component is installed; otherwise the placeholder is
+            // emptied so the fence stays a plain code block.
             .replacingOccurrences(of: "{{mermaidJS}}",
-                                  with: (enableMermaid && Self.needsMermaid(markdown)) ? Mermaid.js : "")
+                                  with: (enableMermaid && Self.needsMermaid(markdown))
+                                      ? (mermaidScript() ?? "") : "")
             .replacingOccurrences(of: "{{mermaidTheme}}", with: Mermaid.theme(isDark: isDark))
             .replacingOccurrences(of: "{{content}}", with: escaped)
     }

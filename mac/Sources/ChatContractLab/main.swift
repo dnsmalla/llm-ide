@@ -197,6 +197,32 @@ do {
     // by the feature simply never working.
     expect(GenerationConformance.previewShipsMermaid(markdown: withFence, enabled: true),
            "the generation preview DOES ship mermaid for a document with a diagram")
+
+    // mermaid is an on-demand download now. Not installed: the fence must
+    // survive as an ordinary code block — no placeholder left in the document,
+    // the fence source still in the template literal for renderMarkdown.
+    let fallback = GenerationConformance.previewWithoutMermaidInstalled(markdown: withFence)
+    expect(!fallback.contains("{{mermaidJS}}"), "no {{mermaidJS}} placeholder survives when mermaid is not installed")
+    expect(!fallback.contains(GenerationConformance.mermaidFixtureScript),
+           "nothing is shipped as mermaid when it is not installed")
+    expect(fallback.contains("\\`\\`\\`mermaid"), "the fence source is still rendered (as a code block)")
+}
+
+// The mermaid installer's integrity check: the only thing between a network
+// response and script execution inside the preview's WKWebView.
+do {
+    expect(MermaidConformance.wrongHashIsRejectedAndNothingWritten(),
+           "a wrong-hash download is rejected and nothing is written")
+    expect(MermaidConformance.matchingHashIsWritten(),
+           "a matching download is written at the versioned path")
+    expect(MermaidConformance.tamperedInstalledFileIsNotServed(),
+           "an installed file edited on disk afterwards is never served")
+    expect(MermaidConformance.installedScriptRelativePath()
+               == "runtime/mermaid/\(MermaidConformance.pinnedVersion)/mermaid.min.js",
+           "installed under runtime/mermaid/<version>/mermaid.min.js")
+    expect(MermaidConformance.pinnedDownloadURL
+               == "https://cdn.jsdelivr.net/npm/mermaid@\(MermaidConformance.pinnedVersion)/dist/mermaid.min.js",
+           "the download URL names the exact pinned version, never a range")
 }
 
 // GenerationRegistry — a running generation must outlive the view that started

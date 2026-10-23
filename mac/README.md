@@ -208,6 +208,25 @@ All editable from the **Settings** tab.
 - **Account:** `<server-host>::refresh_token`
 - **Accessibility:** `kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly` — does not sync via iCloud
 
+### Optional components
+
+Large runtime pieces the app does not ship and downloads only when you ask.
+Manage them in **Settings → Optional components**.
+
+| Component | Size | Needed for | Stored at |
+|---|---|---|---|
+| mermaid 11.17.2 | 3.4 MB | Drawing ```` ```mermaid ```` blocks as diagrams in markdown previews (Library/Explorer/Search, plan editor, Doc Gen) | `~/Library/Application Support/llm-ide/runtime/mermaid/11.17.2/mermaid.min.js` |
+
+- Nothing downloads on its own. A preview whose document has a mermaid block
+  shows an **Install** banner; until you click it the block renders as code.
+- The file comes from `https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js`
+  and is used only if its SHA-256 matches the hash pinned in
+  `Sources/LlmIdeMac/Core/Editor/Mermaid.swift` — also re-checked every time
+  the app loads it from disk.
+- **Remove** in Settings deletes the folder; previews fall back to code blocks.
+- To bump the pin: `npm install mermaid@<version> --no-save && node Scripts/mermaid-pin.mjs <version>`
+  (confirms the CDN file equals the npm tarball, then prints the constants).
+
 ### Changing the backend URL
 
 1. Settings → Server → enter the new URL → **Save**
@@ -259,7 +278,8 @@ Sources/LlmIdeMac/
 │   │                         #   last three installed by Shell's installFeatureSeams, …)
 │   ├── DesignSystem/         # shared SwiftUI chrome + Components/, LibraryPicker, section chrome
 │   │                         #   features render (SectionChromeBar, PanelSectionTabs, WindowHeightKey)
-│   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging
+│   ├── Editor/               # completion menu + ChatSlashCommands ("/" catalog), hunk staging,
+│   │                         #   Mermaid/MermaidRuntime (on-demand diagram component)
 │   ├── FeatureToggles/       # feature runtime: AppFeature, ProfilePreset, FeatureRegistry,
 │   │                         #   AppModule/FeatureService (Shell's FeatureCatalog fills it at boot)
 │   ├── Generation/ · Incidents/ · Memory/ · Verification/

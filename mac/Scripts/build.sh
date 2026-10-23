@@ -247,7 +247,14 @@ PLIST
 if [ -d "$PROJ_DIR/Sources/LlmIdeMac/Resources" ]; then
   # monaco-src/ is the build-time input to Scripts/build-monaco-bundle.mjs;
   # the app loads the generated Resources/monaco/ instead (see Package.swift).
-  rsync -a --exclude 'monaco-src' "$PROJ_DIR/Sources/LlmIdeMac/Resources/" "$APP_DIR/Contents/Resources/"
+  #
+  # mermaid/ is an OPTIONAL component the app downloads on demand (Settings →
+  # Optional components, or the banner over a preview with a ```mermaid fence)
+  # into Application Support — see Core/Editor/MermaidRuntime.swift. It is no
+  # longer in the source tree; the exclude keeps a stale local copy (an old
+  # checkout, or a pre-on-demand build tree) from quietly putting 3.4 MB back
+  # into the .app. The leading `/` anchors the pattern to Resources/ itself.
+  rsync -a --exclude 'monaco-src' --exclude '/mermaid/' "$PROJ_DIR/Sources/LlmIdeMac/Resources/" "$APP_DIR/Contents/Resources/"
 fi
 
 cd "$PROJ_DIR"
@@ -338,7 +345,7 @@ for res_bundle in "$SCRATCH_DIR"/release/*.bundle; do
   [ -d "$res_bundle" ] || continue
   # The app's own bundle is already mirrored loose into Contents/Resources by
   # the rsync above (and read from Bundle.main first) — copying it would ship
-  # ~8 MB of monaco/mermaid twice.
+  # ~4.3 MB of monaco twice.
   [ "$(basename "$res_bundle")" = "LlmIdeMac_LlmIdeMacLib.bundle" ] && continue
   rm -rf "$APP_DIR/Contents/Resources/$(basename "$res_bundle")"
   cp -R "$res_bundle" "$APP_DIR/Contents/Resources/"

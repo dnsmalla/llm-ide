@@ -54,15 +54,28 @@ public enum GenerationConformance {
     /// `SelfSizingMarkdownView` would be sized before the diagram existed — and
     /// it is 3.4 MB for the web view to parse on every reply.
     public static func previewShipsMermaid(markdown: String, enabled: Bool) -> Bool {
-        // Look for the BUNDLE, not for `mermaid.initialize` — that call lives in
+        // Look for the SCRIPT, not for `mermaid.initialize` — that call lives in
         // the template unconditionally, guarded by `if (!window.mermaid)`, so
         // searching for it reports true for every document. (It did, and the
         // assertions caught it.)
-        guard !Mermaid.js.isEmpty else { return false }
-        let fingerprint = String(Mermaid.js.prefix(400))
-        return MarkdownRenderer.html(for: markdown, isDark: false, enableMermaid: enabled)
-            .contains(fingerprint)
+        //
+        // A fixture script rather than the real one: mermaid is an on-demand
+        // download now, absent on CI and on any machine that never installed
+        // it, and the gating under test does not depend on the script's bytes.
+        MarkdownRenderer.html(for: markdown, isDark: false, enableMermaid: enabled,
+                              mermaidScript: mermaidFixtureScript)
+            .contains(mermaidFixtureScript)
     }
+
+    /// The document the preview renders for `markdown` when mermaid is wanted
+    /// but NOT installed — the fallback the install banner sits above.
+    public static func previewWithoutMermaidInstalled(markdown: String) -> String {
+        MarkdownRenderer.html(for: markdown, isDark: false, enableMermaid: true,
+                              mermaidScript: nil)
+    }
+
+    /// Distinctive enough that no template or markdown text contains it.
+    public static let mermaidFixtureScript = "/* mermaid-fixture-7f3a */ window.__mermaidFixture = 1;"
 
     /// The rendered document's `const raw = \`…\`` line — the JS template
     /// literal the markdown body is embedded in.

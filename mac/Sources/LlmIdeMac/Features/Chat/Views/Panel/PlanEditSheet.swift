@@ -350,12 +350,20 @@ struct PlanEditSheet: View {
                         // MarkdownRenderer keeps the bundle out of plans that
                         // have none. `id(content.count)` is not needed — the
                         // view reloads on an input change (see MarkdownWebView).
-                        MarkdownWebView(markdown: content,
-                                        isDark: theme.current.isDark,
-                                        enableMermaid: true)
-                            .frame(minHeight: 320)
-                            .overlay(RoundedRectangle(cornerRadius: 4)
-                                        .stroke(Color.secondary.opacity(0.3)))
+                        // The banner offers the on-demand mermaid install
+                        // when the plan has a diagram and it is missing; it
+                        // renders nothing otherwise.
+                        VStack(spacing: 0) {
+                            MermaidInstallBanner(markdown: content,
+                                                 outerPadding: EdgeInsets(top: 0, leading: 0,
+                                                                          bottom: 6, trailing: 0))
+                            MarkdownWebView(markdown: content,
+                                            isDark: theme.current.isDark,
+                                            enableMermaid: true)
+                                .frame(minHeight: 320)
+                                .overlay(RoundedRectangle(cornerRadius: 4)
+                                            .stroke(Color.secondary.opacity(0.3)))
+                        }
                     } else {
                         TextEditor(text: $content)
                             .font(.system(size: 12, design: .monospaced))

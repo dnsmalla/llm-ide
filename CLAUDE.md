@@ -140,7 +140,8 @@ llm-ide/
 │   │   │   │                #   section chrome features render: SectionChromeBar (+SectionToggle),
 │   │   │   │                #   PanelSectionTabs (Explorer/Source Control/Search switcher),
 │   │   │   │                #   WindowHeightKey
-│   │   │   ├── Editor/      #   CompletionController/Menu, HunkStagingList, ChatSlashCommands
+│   │   │   ├── Editor/      #   CompletionController/Menu, HunkStagingList, ChatSlashCommands,
+│   │   │   │                #   Mermaid + MermaidRuntime (diagram renderer, downloaded on demand)
 │   │   │   │                #   (the built-in "/" catalog the completion menu lists)
 │   │   │   ├── FeatureToggles/ # Feature runtime: AppFeature (+ProfilePreset), FeatureRegistry
 │   │   │   │                #   (+AppModule / FeatureService protocols). Shell's FeatureCatalog

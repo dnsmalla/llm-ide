@@ -529,9 +529,14 @@ struct GenerationEditorPanel<ToolbarAccessory: View>: View {
                     // not disturb a measured height), and the fence-gating in
                     // MarkdownRenderer keeps the 3.4 MB bundle out of documents
                     // that have no diagram.
-                    MarkdownWebView(markdown: vm.editedContent,
-                                    isDark: theme.current.isDark,
-                                    enableMermaid: true)
+                    // mermaid is an on-demand install: the banner offers it
+                    // for a document with a diagram, and is empty otherwise.
+                    VStack(spacing: 0) {
+                        MermaidInstallBanner(markdown: vm.editedContent)
+                        MarkdownWebView(markdown: vm.editedContent,
+                                        isDark: theme.current.isDark,
+                                        enableMermaid: true)
+                    }
                 } else {
                     ScrollView {
                         Text(vm.editedContent)

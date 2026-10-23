@@ -30,6 +30,15 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 
 **Bundled resources** (lines 28–35): `note_template.docx`, `generate_meeting_note.py`, vendored highlight.js v11.9.0 (`highlight.min.js`), and two highlight.js themes (`atom-one-dark.min.css`, `atom-one-light.min.css`).
 
+**Not bundled — mermaid (on-demand optional component).** mermaid.js (3.4 MB), which draws ```` ```mermaid ```` fences in the markdown previews that opt in (`MarkdownWebView(enableMermaid: true)`: Library/Explorer/Search/Review file preview, plan editor, Doc Gen/Visual), is no longer shipped in the app: `Package.swift` declares no `Resources/mermaid` and `Scripts/build.sh` rsyncs Resources with `--exclude '/mermaid/'`.
+
+- **Install trigger:** user action only — the `MermaidInstallBanner` over a preview whose document contains a mermaid fence, or Settings → Optional components. No automatic download (local-first; works offline). Until installed, fences render as ordinary code blocks (`renderMermaid` guards on `window.mermaid`).
+- **Source:** `https://cdn.jsdelivr.net/npm/mermaid@11.17.2/dist/mermaid.min.js` — exact version, never a range.
+- **Integrity:** the body must hash to the SHA-256 pinned in `Core/Editor/Mermaid.swift` (`581ed7d7…390eb8`, identical to the file previously vendored). A mismatch writes nothing. The loader (`MermaidScriptCache`) re-hashes whatever it reads from disk before handing it to a web view, so a file altered after install is ignored. Download capped at 16 MB.
+- **Storage:** `~/Library/Application Support/llm-ide/runtime/mermaid/<version>/mermaid.min.js`, written atomically (temp file + rename); installing a new version prunes the others; Settings → Remove deletes `runtime/mermaid/`.
+- **State:** `MermaidRuntime.shared` (`@MainActor`, `notInstalled / downloading / installed / failed`); `MarkdownWebView` observes it and reloads when it flips, so an open preview draws its diagrams right after install.
+- **Pin bump:** `Scripts/mermaid-pin.mjs <version>` checks the CDN file against the npm tarball and prints `version` / `sha256` / `byteCount`. `chat-contract-lab` asserts the integrity check, path layout, pinned URL shape and the not-installed fallback.
+
 **Governed source areas** under `mac/Sources/LlmIdeMac/`:
 
 - `Shell/` — composition root: app entry (`LlmIdeMacApp.swift`), `AppShell`, `FeatureCatalog`, login/recovery/welcome screens, and `Chrome/` (status bar, toolbar, activity bell)
