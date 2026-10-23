@@ -44,7 +44,7 @@ final class AutoCodeUpdateServicePipelineTasksTests: XCTestCase {
     /// All-passing verdicts → green summary, no error signaled.
     func testRegressionSweepSummary_allPassing_isGreen() {
         let s = AutoCodeUpdateService.regressionSweepSummary(
-            verdicts: [.unchanged, .repaired], autoReopen: false)
+            outcome: .tally([.unchanged, .repaired]), autoReopen: false)
         XCTAssertFalse(s.shouldSignalError)
         XCTAssertTrue(s.logLine.contains("no regressions"), "was: \(s.logLine)")
     }
@@ -53,7 +53,7 @@ final class AutoCodeUpdateServicePipelineTasksTests: XCTestCase {
     /// worked before the fix and must keep working.
     func testRegressionSweepSummary_regressed_signalsError() {
         let s = AutoCodeUpdateService.regressionSweepSummary(
-            verdicts: [.unchanged, .regressed], autoReopen: false)
+            outcome: .tally([.unchanged, .regressed]), autoReopen: false)
         XCTAssertTrue(s.shouldSignalError)
         XCTAssertTrue(s.logLine.contains("regressed"), "was: \(s.logLine)")
     }
@@ -63,7 +63,7 @@ final class AutoCodeUpdateServicePipelineTasksTests: XCTestCase {
     /// fixed fault was `.failed` reported "no regressions". Must be fail-closed.
     func testRegressionSweepSummary_failedSignalsError() {
         let s = AutoCodeUpdateService.regressionSweepSummary(
-            verdicts: [.failed("boom"), .failed("boom2")], autoReopen: false)
+            outcome: .tally([.failed("boom"), .failed("boom2")]), autoReopen: false)
         XCTAssertTrue(s.shouldSignalError, "every fault .failed must not be a false green")
     }
 
@@ -71,20 +71,20 @@ final class AutoCodeUpdateServicePipelineTasksTests: XCTestCase {
     /// signal an error, not stay silent.
     func testRegressionSweepSummary_needsApprovalSignalsError() {
         let s = AutoCodeUpdateService.regressionSweepSummary(
-            verdicts: [.needsApproval, .unchanged], autoReopen: true)
+            outcome: .tally([.needsApproval, .unchanged]), autoReopen: true)
         XCTAssertTrue(s.shouldSignalError)
     }
 
     /// `.repairFailed` and `.pending` are also non-passing — fail-closed.
     func testRegressionSweepSummary_repairFailedAndPendingSignalError() {
         let s = AutoCodeUpdateService.regressionSweepSummary(
-            verdicts: [.repairFailed("x"), .pending], autoReopen: false)
+            outcome: .tally([.repairFailed("x"), .pending]), autoReopen: false)
         XCTAssertTrue(s.shouldSignalError)
     }
 
     func testRegressionSweepSummary_emptyIsGreen() {
         let s = AutoCodeUpdateService.regressionSweepSummary(
-            verdicts: [], autoReopen: false)
+            outcome: .tally([]), autoReopen: false)
         XCTAssertFalse(s.shouldSignalError)
         XCTAssertTrue(s.logLine.contains("No fixed faults"), "was: \(s.logLine)")
     }

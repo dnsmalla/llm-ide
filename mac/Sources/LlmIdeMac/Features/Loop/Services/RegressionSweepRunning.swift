@@ -1,22 +1,8 @@
 import Foundation
 
-/// Per-sweep outcome: a pass/fail verdict plus the verdict-count breakdown
-/// the runner needs to (a) log human-readable progress and (b) detect a
-/// stall (regressed count not shrinking across iterations). The seam
-/// `LoopEngineRunner` depends on instead of `RegressionRunner` directly,
-/// so its own tests can fake this stage in isolation.
-struct SweepOutcome: Equatable {
-    let passed: Bool
-    let total: Int
-    let regressed: Int
-    let unchanged: Int
-    let repaired: Int
-    let repairFailed: Int
-    let needsApproval: Int
-    let failed: Int
-    let pending: Int
-}
-
+/// The seam `LoopEngineRunner` depends on instead of `RegressionRunner`
+/// directly, so its own tests can fake this stage in isolation. Its result,
+/// `SweepOutcome`, lives in Core/Contracts.
 protocol RegressionSweepRunning {
     /// `repairGuard` wraps each fault repair the sweep makes — the Loop passes
     /// its protected-path guard so the sweep's own repairs are checked like
@@ -50,12 +36,34 @@ extension RegressionSweepRunning {
 }
 
 extension SweepOutcome {
-    /// Faults that make the sweep fail: everything that is not `.unchanged`
-    /// or `.repaired`. The regression stage's progress score — `regressed`
-    /// alone is always 0 once repair is attempted (a repaired-or-not fault is
-    /// `.repaired` / `.repairFailed`, never `.regressed`), so it could never
-    /// show progress or a stall.
-    var failingCount: Int { max(0, total - (unchanged + repaired)) }
+    /// Counts a finished sweep's verdicts. Shared by the Loop's
+    /// `RegressionRunnerSweepAdapter` and the standalone Regression auto-task
+    /// (`LoopRunnerProvider.runRegressionSweep`), so both classify verdicts
+    /// the same way. The switch is exhaustive (no `default:`) so a future
+    /// `Verdict` case can't silently fall into "passing".
+    static func tally(_ verdicts: [RegressionRunner.Verdict]) -> SweepOutcome {
+        var regressed = 0, unchanged = 0, repaired = 0
+        var repairFailed = 0, needsApproval = 0, failed = 0, pending = 0
+        for verdict in verdicts {
+            switch verdict {
+            case .pending:        pending += 1
+            case .unchanged:      unchanged += 1
+            // A skipped repair leaves the fault regressed (the Loop always
+            // passes a guard, so it never sees one).
+            case .regressed, .repairSkipped: regressed += 1
+            case .repaired:       repaired += 1
+            case .repairFailed:   repairFailed += 1
+            case .needsApproval:  needsApproval += 1
+            case .failed:         failed += 1
+            }
+        }
+        let nonPassing = regressed + repairFailed + needsApproval + failed + pending
+        return SweepOutcome(passed: nonPassing == 0,
+                            total: verdicts.count,
+                            regressed: regressed, unchanged: unchanged, repaired: repaired,
+                            repairFailed: repairFailed, needsApproval: needsApproval,
+                            failed: failed, pending: pending)
+    }
 }
 
 /// Production adapter wrapping the real `RegressionRunner`. A sweep
@@ -66,8 +74,8 @@ extension SweepOutcome {
 /// during a cancelled sweep) are both treated as not-passed rather
 /// than silently ignored: fail-closed on ambiguity, matching
 /// `VerifyApprovalStore`'s stance elsewhere in this codebase. The
-/// verdict switch below is intentionally exhaustive (no `default:`)
-/// so a future `Verdict` case can't silently fall into "not failing."
+/// verdict switch (`SweepOutcome.tally`) is intentionally exhaustive (no
+/// `default:`) so a future `Verdict` case can't silently fall into "not failing."
 ///
 /// Owns `runner` exclusively: callers must hand this adapter a
 /// dedicated `RegressionRunner` it alone drives. Passing in a runner
@@ -111,26 +119,6 @@ final class RegressionRunnerSweepAdapter: @preconcurrency RegressionSweepRunning
         await runner.run(faultsRoot: faultsRoot, gitRoot: gitRoot, attemptRepair: attemptRepair,
                          repairGuard: repairGuard, deadline: deadline)
 
-        var regressed = 0, unchanged = 0, repaired = 0
-        var repairFailed = 0, needsApproval = 0, failed = 0, pending = 0
-        for result in runner.results {
-            switch result.verdict {
-            case .pending:        pending += 1
-            case .unchanged:      unchanged += 1
-            // A skipped repair leaves the fault regressed (the Loop always
-            // passes a guard, so it never sees one).
-            case .regressed, .repairSkipped: regressed += 1
-            case .repaired:       repaired += 1
-            case .repairFailed:   repairFailed += 1
-            case .needsApproval:  needsApproval += 1
-            case .failed:         failed += 1
-            }
-        }
-        let nonPassing = regressed + repairFailed + needsApproval + failed + pending
-        return SweepOutcome(passed: nonPassing == 0,
-                            total: runner.results.count,
-                            regressed: regressed, unchanged: unchanged, repaired: repaired,
-                            repairFailed: repairFailed, needsApproval: needsApproval,
-                            failed: failed, pending: pending)
+        return SweepOutcome.tally(runner.results.map(\.verdict))
     }
 }

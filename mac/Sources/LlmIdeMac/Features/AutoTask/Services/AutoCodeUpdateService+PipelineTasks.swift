@@ -129,17 +129,17 @@ extension AutoCodeUpdateService {
         "Heads up — branch `\(branch)` has been pushed and merge request \(mrURL) is open for your review."
     }
 
-    /// Pure summary of a regression sweep's verdict list, factored out of
+    /// Pure summary of a regression sweep's outcome, factored out of
     /// `runRegressionSweep` so the fail-closed verdict accounting is
-    /// unit-testable without spinning up the full `RegressionRunner`.
+    /// unit-testable without spinning up a real sweep.
     ///
-    /// The non-passing verdict set mirrors `RegressionRunnerSweepAdapter`'s
-    /// `SweepOutcome.passed` logic (regressed + repairFailed + needsApproval
-    /// + failed + pending): any verdict that isn't `.unchanged` or `.repaired`
-    /// means the fault could NOT be confirmed still-fixed, so the sweep must
-    /// signal an error rather than report a false green. Before this helper,
-    /// `runRegressionSweep` keyed the card off `.regressed` ALONE, so a run
-    /// where every fixed fault came back `.failed`/`.needsApproval`/
+    /// Non-passing means `SweepOutcome.failingCount` (everything that isn't
+    /// `.unchanged` or `.repaired`: regressed + repairFailed + needsApproval
+    /// + failed + pending) — the same set the Loop's regression stage fails
+    /// on. Any such fault could NOT be confirmed still-fixed, so the sweep
+    /// must signal an error rather than report a false green. Before this
+    /// helper, `runRegressionSweep` keyed the card off `.regressed` ALONE, so
+    /// a run where every fixed fault came back `.failed`/`.needsApproval`/
     /// `.repairFailed`/`.pending` logged "no regressions" and cleared the card.
     struct RegressionSweepSummary: Equatable {
         /// Human-readable line for the task log.
@@ -152,31 +152,18 @@ extension AutoCodeUpdateService {
     }
 
     static func regressionSweepSummary(
-        verdicts: [RegressionRunner.Verdict],
+        outcome: SweepOutcome,
         autoReopen: Bool
     ) -> RegressionSweepSummary {
-        let total = verdicts.count
+        let total = outcome.total
         guard total > 0 else {
             return RegressionSweepSummary(
                 logLine: "No fixed faults to re-verify.",
                 shouldSignalError: false)
         }
-        var regressed = 0
-        var nonPassing = 0
-        // Exhaustive switch (no `default:`) so a future `Verdict` case can't
-        // silently fall into "passing" — same stance as
-        // `RegressionRunnerSweepAdapter.sweep`.
-        for verdict in verdicts {
-            switch verdict {
-            case .unchanged, .repaired:
-                break // passing — confirmed still fixed
-            case .regressed, .repairSkipped:
-                regressed += 1
-                nonPassing += 1
-            case .repairFailed, .needsApproval, .pending, .failed:
-                nonPassing += 1
-            }
-        }
+        // `regressed` already includes `.repairSkipped` (see `SweepOutcome.tally`).
+        let regressed = outcome.regressed
+        let nonPassing = outcome.failingCount
         if regressed > 0 {
             let reopened = autoReopen ? " (auto-reopened)" : ""
             return RegressionSweepSummary(
@@ -763,14 +750,15 @@ extension AutoCodeUpdateService {
         taskErrors.removeValue(forKey: key)
     }
 
-    /// Drives RegressionRunner once against the active repo. Failure
-    /// modes — no API client wired, no local repo, runner throws —
-    /// surface in taskErrors so the AutoCodeView card flips the
-    /// regression row to ⚠. The runner itself publishes per-fault
-    /// progress to its own @Published state; this entry point waits
-    /// for the run to finish then records a summary line.
+    /// Drives Loop's regression runner once against the active repo, through
+    /// `loopRunnerProvider` (AutoTask never names the runner: it is Loop's).
+    /// Failure modes — no API client wired, no local repo, no Loop provider —
+    /// surface in taskErrors so the AutoCodeView card flips the regression
+    /// row to ⚠. The runner publishes per-fault progress to the activity
+    /// store; this entry point waits for the run to finish then records a
+    /// summary line.
     func runRegressionSweep(projectRoot: String, gitRoot: String) async {
-        guard let api else {
+        guard api != nil else {
             taskErrors[AutoTask.regression.rawValue] = "Regression skipped — no API client wired."
             return
         }
@@ -778,37 +766,30 @@ extension AutoCodeUpdateService {
             taskErrors[AutoTask.regression.rawValue] = "Regression skipped — no project root resolved."
             return
         }
+        guard let provider = loopRunnerProvider else {
+            // Unreachable in a real build, like the Loop Engineering sweep's
+            // twin guard: Shell always injects the provider (`bootAutoTask`).
+            // Recorded as an error so a broken wiring never reads as a pass.
+            taskErrors[AutoTask.regression.rawValue] = "Regression skipped — Loop is not included in this build."
+            return
+        }
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         // gitRoot is the cloned working tree where verify commands + git ops
         // run; empty only in degenerate config, in which case command faults
         // are skipped by the runner.
         let gitRootURL = gitRoot.isEmpty ? nil : URL(fileURLWithPath: gitRoot, isDirectory: true)
-        let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
-        let judge = CodeAssistJudge(api: api)
-        let repairer = AgentFaultRepairer(api: api)
-        let runner = RegressionRunner(prompter: prompter, judge: judge,
-                                      verifier: ShellFaultVerifier(), repairer: repairer,
-                                      verifyTimeout: autoTaskSettings.regressionVerifyTimeout, config: config)
-        runner.activity = activity
-        // Every sweep repair runs inside the protected-path guard (default
-        // globs, revert): an unattended repair must never keep an edit to the
-        // test it is meant to satisfy. RegressionRunner refuses to repair
-        // without one.
         let logStore = self.logStore
-        let repairGuard = ProtectedPathRepairGuard.make(registrar: APILoopRepoRegistrar(api: api), log: { line in
-            logStore.append(.regression, line, level: .error)
-        })
-        await runner.run(faultsRoot: faultsRoot, gitRoot: gitRootURL,
-                         autoReopen: autoTaskSettings.regressionAutoReopen,
-                         attemptRepair: autoTaskSettings.regressionAttemptRepair,
-                         repairGuard: repairGuard)
-        // RegressionRunner's published `results` lives on its own
-        // lifetime — we read once after the await for the summary. The
-        // verdict→summary accounting is fail-closed (any non-passing
+        let outcome = await provider.runRegressionSweep(
+            faultsRoot: faultsRoot, gitRoot: gitRootURL,
+            autoReopen: autoTaskSettings.regressionAutoReopen,
+            attemptRepair: autoTaskSettings.regressionAttemptRepair,
+            verifyTimeout: autoTaskSettings.regressionVerifyTimeout,
+            logError: { line in logStore.append(.regression, line, level: .error) })
+        // The verdict→summary accounting is fail-closed (any non-passing
         // verdict signals an error, not just `.regressed`) and lives in the
         // pure `regressionSweepSummary` helper so it's unit-testable.
         let summary = Self.regressionSweepSummary(
-            verdicts: runner.results.map(\.verdict),
+            outcome: outcome,
             autoReopen: autoTaskSettings.regressionAutoReopen)
         let key = AutoTask.regression.rawValue
         if summary.shouldSignalError {

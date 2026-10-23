@@ -282,7 +282,7 @@ Sources/LlmIdeMac/
 │   │                         #   Mermaid/MermaidRuntime (on-demand diagram component)
 │   ├── FeatureToggles/       # feature runtime: AppFeature, ProfilePreset, FeatureRegistry,
 │   │                         #   AppModule/FeatureService (Shell's FeatureCatalog fills it at boot)
-│   ├── Generation/ · Incidents/ · Memory/ · Verification/
+│   ├── Generation/ · Incidents/ · Memory/
 │   ├── Networking/           # LlmIdeAPIClient + API/ extensions, BackendManager
 │   ├── Notes/                # on-disk notes store: LibraryItemStore, NoteService, MeetingIndex,
 │   │                         #   FolderIndexer, IngestTemplateRenderer, launch folder migrations,

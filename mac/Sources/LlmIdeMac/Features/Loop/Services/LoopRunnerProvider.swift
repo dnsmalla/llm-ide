@@ -52,6 +52,30 @@ final class LoopRunnerProvider: LoopRunnerProviding {
         laneRegistry?.attachLaneRunner(runner, trigger: trigger)
         return runner
     }
+
+    func runRegressionSweep(faultsRoot: URL, gitRoot: URL?, autoReopen: Bool, attemptRepair: Bool,
+                            verifyTimeout: TimeInterval,
+                            logError: @escaping @MainActor (String) -> Void) async -> SweepOutcome {
+        // The collaborator graph `AutoCodeUpdateService.runRegressionSweep`
+        // built inline before it moved here — deliberately WITHOUT the Loop's
+        // tier routes, so the standalone task keeps the server's default model.
+        let prompter = CodeAssistPrompter(api: api, agent: config.activeCLI)
+        let judge = CodeAssistJudge(api: api)
+        let repairer = AgentFaultRepairer(api: api)
+        let runner = RegressionRunner(prompter: prompter, judge: judge,
+                                      verifier: ShellFaultVerifier(), repairer: repairer,
+                                      verifyTimeout: verifyTimeout, config: config)
+        runner.activity = activity
+        // An unattended repair must never keep an edit to the test it is meant
+        // to satisfy; RegressionRunner refuses to repair without a guard.
+        let repairGuard = ProtectedPathRepairGuard.make(registrar: APILoopRepoRegistrar(api: api),
+                                                        log: logError)
+        await runner.run(faultsRoot: faultsRoot, gitRoot: gitRoot,
+                         autoReopen: autoReopen, attemptRepair: attemptRepair,
+                         repairGuard: repairGuard)
+        // A fresh runner per call, so `results` is this sweep's alone.
+        return SweepOutcome.tally(runner.results.map(\.verdict))
+    }
 }
 
 /// The Loop's tier route for its AGENT steps (skill stages, stage repairs,

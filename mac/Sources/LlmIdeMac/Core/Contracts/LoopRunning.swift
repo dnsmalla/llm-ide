@@ -63,4 +63,14 @@ protocol LoopRunning: AnyObject {
 @MainActor
 protocol LoopRunnerProviding: AnyObject {
     func makeRunner(trigger: LoopRunTrigger, regressionVerifyTimeout: TimeInterval) -> LoopRunning
+
+    /// Runs AutoTask's standalone Regression task once: re-verifies every
+    /// `fixed` fault under `faultsRoot`, optionally reopening and repairing.
+    /// Here, not in AutoTask, because the regression runner and its
+    /// collaborators are Loop's (compiled out with Loop under `auto_tasks`);
+    /// AutoTask only needs the verdict counts back. Every repair runs inside
+    /// the protected-path guard, which reports through `logError`.
+    func runRegressionSweep(faultsRoot: URL, gitRoot: URL?, autoReopen: Bool, attemptRepair: Bool,
+                            verifyTimeout: TimeInterval,
+                            logError: @escaping @MainActor (String) -> Void) async -> SweepOutcome
 }

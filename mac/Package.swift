@@ -210,6 +210,13 @@ if autoTasksIncluded {
         "ReviewMergeCandidatesTests.swift",
         "TestFailureExtractorTests.swift",
         "VerifyCommandBuilderTests.swift",
+        // The verify/repair/regression machinery (Features/Loop/Services/
+        // Verification, Models/VerifyApprovalStore + AppWrittenFiles) used to
+        // sit in Core/Verification and so ran in every build; it is Loop's.
+        "AppWrittenFilesTests.swift",
+        "GroupedSubprocessTests.swift",
+        "VerifyApprovalStoreLoopStageTests.swift",
+        "VerifyApprovalStoreTests.swift",
     ])
 }
 if mobileIncluded {

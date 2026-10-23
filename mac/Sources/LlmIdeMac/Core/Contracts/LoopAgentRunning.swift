@@ -7,10 +7,10 @@ import Foundation
 /// would need approval is denied rather than parked. The Loop verifies the
 /// result by running its own stages.
 ///
-/// Lives in `Core/Contracts` because three callers in two layers need it: the
-/// Loop's skill executor and stage repairer (`Features/Loop`) and the fault
-/// repairer (`Core/Verification`) — a feature-local type would be a
-/// Core → Feature edge.
+/// Lives in `Core/Contracts` because `LlmIdeAPIClient` (`Core/Networking`)
+/// produces it for the Loop's callers — skill executor, stage repairer and
+/// fault repairer, all in `Features/Loop` — and a feature-local type would be
+/// a Core → Feature edge.
 struct LoopAgentResult: Equatable, Sendable {
     struct Usage: Codable, Equatable, Sendable {
         var inputTokens: Int?
