@@ -17,6 +17,10 @@
 #   8    features name no Shell type (Shell -> Features, never back),
 #        bar FEATURE_SHELL_ALLOWLIST; stale allowlist rows also FAIL  (FAIL)
 set -uo pipefail
+# Byte-order collation for every sort/uniq/comm below: GitHub's macOS runners
+# default to en_US.UTF-8, where sort orders lines differently than on a
+# C-locale dev machine, so the same tree could print in a different order.
+export LC_ALL=C
 
 ROOT="${1:-$(cd "$(dirname "$0")/.." && pwd)}"
 SRC="$ROOT/Sources/LlmIdeMac"
@@ -68,22 +72,42 @@ perl -e '
   }
 ' < "$ROOT/Package.swift" | sort -u > "$WORK/flagmap.txt"
 
+# feature-map.txt rows, read ONCE into arrays with the same `read -r prefix
+# lay sealed` split every lookup has always used (whitespace-split, comment
+# and blank lines skipped, an unterminated last line ignored). layer_of() and
+# is_sealed() used to re-read the map — and run in a `$(...)` subshell —
+# per call, i.e. a fork plus a full map read for every Swift file in every
+# check; that alone was a large share of the gate's runtime.
+MAP_N=0
+while read -r prefix lay sealed; do
+  [[ -z "$prefix" || "$prefix" == \#* ]] && continue
+  MAP_PREFIX[$MAP_N]="$prefix"
+  MAP_LAYER[$MAP_N]="$lay"
+  MAP_SEALED[$MAP_N]="$sealed"
+  MAP_N=$((MAP_N+1))
+done < "$MAP"
+
+# First matching prefix wins. Sets LAYER instead of echoing it so callers
+# never pay for a subshell. The prefix is expanded UNQUOTED on purpose, as a
+# glob, exactly as before; file-layers.txt below records the result once per
+# file so every check reuses the same assignment.
 layer_of() {
-  local rel="$1" prefix lay sealed
-  while read -r prefix lay sealed; do
-    [[ -z "$prefix" || "$prefix" == \#* ]] && continue
-    [[ "$rel" == $prefix* ]] && { echo "$lay"; return; }
-  done < "$MAP"
-  echo "Unclassified"
+  local rel="$1" i=0
+  while [ "$i" -lt "$MAP_N" ]; do
+    [[ "$rel" == ${MAP_PREFIX[$i]}* ]] && { LAYER="${MAP_LAYER[$i]}"; return; }
+    i=$((i+1))
+  done
+  LAYER="Unclassified"
 }
 
+# True when ANY map row gives layer $1 the `sealed` third column.
 is_sealed() {
-  local want="$1" prefix lay sealed
-  while read -r prefix lay sealed; do
-    [[ -z "$prefix" || "$prefix" == \#* ]] && continue
-    [[ "$lay" == "$want" && "$sealed" == "sealed" ]] && { echo yes; return; }
-  done < "$MAP"
-  echo no
+  local want="$1" i=0
+  while [ "$i" -lt "$MAP_N" ]; do
+    [[ "${MAP_LAYER[$i]}" == "$want" && "${MAP_SEALED[$i]}" == "sealed" ]] && return 0
+    i=$((i+1))
+  done
+  return 1
 }
 
 # Comments and string literals must go before ANY matching: doc-comment prose
@@ -131,8 +155,49 @@ sub strip_swift {
   return $text;
 }
 '
-strip() {
-  perl -0777 -pe "$STRIP_SWIFT_PL"' $_ = strip_swift($_);' "$1"
+# Strip comments/strings from a set of files once, into a mirror tree, so a
+# type named only in prose (`/// mirrors LoopStage`) never counts as a use.
+# Usage: <NUL-separated absolute paths on stdin> | strip_tree_into ROOT OUT
+# Each file lands at OUT/<path relative to ROOT>. One perl process strips the
+# whole set: checks 1-3b used to start a perl per file per check (and 3b per
+# file x owner), which dominated the gate's runtime. Shared by checks 1-3b
+# (all of Sources/LlmIdeMac, stripped once), 6, 7 and 8.
+strip_tree_into() {
+  xargs -0 perl -e "$STRIP_SWIFT_PL"'
+  my ($root, $out) = splice(@ARGV, 0, 2);
+  for my $f (@ARGV) {
+    open(my $fh, "<", $f) or next; local $/; my $t = <$fh>; close $fh;
+    $t = strip_swift($t);
+    (my $rel = $f) =~ s{^\Q$root\E/}{};
+    my $dst = "$out/$rel"; (my $dir = $dst) =~ s{/[^/]+$}{};
+    system("mkdir", "-p", $dir) unless -d $dir;
+    open(my $oh, ">", $dst) or die "$dst: $!"; print $oh $t; close $oh;
+  }
+' "$1" "$2"
+}
+
+# `grep -rHo...` over a mirror tree prints MIRROR/<rel>:<match>. Turn that
+# into <rel><TAB><match>; the match is an identifier, so the LAST colon ends
+# the path.
+mirror_hits() {
+  awk -v root="$1/" '{
+    i = length($0); while (i > 0 && substr($0, i, 1) != ":") i--
+    print substr($0, length(root) + 1, i - length(root) - 1) "\t" substr($0, i + 1)
+  }'
+}
+
+# stdin: <rel><TAB><symbol> rows. stdout: <rel><TAB><hits>, one row per rel,
+# hits = that rel's symbols through `sort -u | paste -sd, -` — the very
+# pipeline the per-file loops ran, so ordering and dedup are unchanged.
+group_hits() {
+  awk -F'\t' '
+    !($1 in seen) { order[++n] = $1; seen[$1] = 1 }
+    { syms[$1] = syms[$1] " " $2 }
+    END { for (i = 1; i <= n; i++) print order[i] "\t" syms[order[i]] }
+  ' | while IFS="$(printf '\t')" read -r rel syms; do
+    # shellcheck disable=SC2086 # word-split on purpose: identifiers only
+    printf '%s\t%s\n' "$rel" "$(printf '%s\n' $syms | sort -u | paste -sd, -)"
+  done
 }
 
 # For the Shell/Core build-exclusion check only: given the ONE flag that
@@ -152,52 +217,70 @@ strip() {
 # the right branch instead of the literal-opposite one. Conservative on `||`:
 # `#if FLAG || OTHER` can still compile even when FLAG is false, so it is
 # never treated as safe cover regardless of branch.
-strip_feature_guard_for_flag() {
-  local flag="$1"
-  perl -e '
-    my $flag = shift @ARGV;
-    my @stack;
-    while (my $line = <STDIN>) {
-      if ($line =~ /^\s*#if\s+(.*)$/) {
-        my $cond = $1;
-        my $relevant = 0;
-        my $negated = 0;
-        if ($cond !~ /\|\|/ && $cond =~ /\b\Q$flag\E\b/) {
-          $relevant = 1;
-          $negated = ($cond =~ /!\s*\Q$flag\E\b/) ? 1 : 0;
-        }
-        push @stack, { relevant => $relevant, negated => $negated, inElse => 0 };
-        next;
+# Perl source, spliced into the one perl process check 3b runs (it used to be
+# a separate perl per (file, owner) pair). Line semantics are those of the
+# former STDIN loop: each line keeps its "\n", the last may lack one.
+STRIP_GUARD_PL='
+sub strip_feature_guard_for_flag {
+  my ($text, $flag) = @_;
+  my @stack; my $out = "";
+  for my $line (split /^/m, $text) {
+    if ($line =~ /^\s*#if\s+(.*)$/) {
+      my $cond = $1;
+      my $relevant = 0;
+      my $negated = 0;
+      if ($cond !~ /\|\|/ && $cond =~ /\b\Q$flag\E\b/) {
+        $relevant = 1;
+        $negated = ($cond =~ /!\s*\Q$flag\E\b/) ? 1 : 0;
       }
-      if ($line =~ /^\s*#else\b/) {
-        $stack[-1]{inElse} = 1 if @stack;
-        next;
-      }
-      if ($line =~ /^\s*#endif\b/) {
-        pop @stack if @stack;
-        next;
-      }
-      my $hidden = 0;
-      for my $fr (@stack) {
-        next unless $fr->{relevant};
-        my $h = (!$fr->{negated} && !$fr->{inElse}) || ($fr->{negated} && $fr->{inElse});
-        if ($h) { $hidden = 1; last; }
-      }
-      print $line unless $hidden;
+      push @stack, { relevant => $relevant, negated => $negated, inElse => 0 };
+      next;
     }
-  ' "$flag"
+    if ($line =~ /^\s*#else\b/) {
+      $stack[-1]{inElse} = 1 if @stack;
+      next;
+    }
+    if ($line =~ /^\s*#endif\b/) {
+      pop @stack if @stack;
+      next;
+    }
+    my $hidden = 0;
+    for my $fr (@stack) {
+      next unless $fr->{relevant};
+      my $h = (!$fr->{negated} && !$fr->{inElse}) || ($fr->{negated} && $fr->{inElse});
+      if ($h) { $hidden = 1; last; }
+    }
+    $out .= $line unless $hidden;
+  }
+  return $out;
 }
+'
+
+# Every Sources/LlmIdeMac Swift file's layer, computed once (rel<TAB>layer,
+# sorted by path) and joined against by every check through 3b instead of
+# calling layer_of() per file per check.
+find "$SRC" -name '*.swift' | sort | while read -r f; do
+  rel="${f#"$SRC"/}"
+  layer_of "$rel"
+  printf '%s\t%s\n' "$rel" "$LAYER"
+done > "$WORK/file-layers.txt"
+
+# ...and every one of those files stripped once, into a mirror tree that
+# checks 1-3b grep in a single pass each.
+SRC_STRIPPED="$WORK/src-stripped"
+mkdir -p "$SRC_STRIPPED"
+find "$SRC" -name '*.swift' -print0 | strip_tree_into "$SRC" "$SRC_STRIPPED"
 
 # 1. Declaration map: symbol -> layer.
 #    TOP-LEVEL declarations only (column 0). A nested `enum Error` inside a
 #    Loop type otherwise claims every stdlib `Error` in the module — that one
 #    bug produced 8 of the 13 false positives in the prototype.
-find "$SRC" -name '*.swift' | while read -r f; do
-  rel="${f#"$SRC"/}"
-  strip "$f" \
-    | grep -oE '^(public |internal |final |@MainActor )*(class|struct|enum|protocol|actor) [A-Z][A-Za-z0-9_]{2,}' \
-    | awk -v l="$(layer_of "$rel")" '{print $NF, l}'
-done | sort -u > "$WORK/decls.txt"
+grep -rHoE '^(public |internal |final |@MainActor )*(class|struct|enum|protocol|actor) [A-Z][A-Za-z0-9_]{2,}' \
+    "$SRC_STRIPPED" \
+  | mirror_hits "$SRC_STRIPPED" \
+  | awk -F'\t' 'NR == FNR { lay[$1] = $2; next }
+      { n = split($2, w, " "); print w[n], lay[$1] }' "$WORK/file-layers.txt" - \
+  | sort -u > "$WORK/decls.txt"
 
 # Symbols declared in more than one place cannot be attributed to an owner;
 # skip them rather than guess.
@@ -210,38 +293,64 @@ fi
 
 awk '$2 ~ /^Feature:/ {print $2}' "$WORK/owned.txt" | sort -u > "$WORK/features.txt"
 
+# Background `grep -HowE PATTERN` over the files listed in LIST (one path per
+# line, relative to ROOT), raw MIRROR/<rel>:<match> output to OUT. The caller
+# `wait`s. BSD grep -o over a few-hundred-name alternation costs seconds per
+# owner, so checks 2 and 3b run one per owner concurrently — the same pattern,
+# flags and files as the per-file loops, so the matches are identical; only
+# the process count and the wall-clock change.
+grep_words_bg() {
+  awk -v r="$2/" '{ printf "%s%s%c", r, $0, 0 }' "$3" \
+    | xargs -0 grep -HowE "$1" > "$4" &
+}
+
 # 2. Scan every Feature-owned file for other Features' symbols.
+#    One grep per owner over the stripped Feature-layer files, keeping only
+#    consumers other than the owner itself.
 : > "$WORK/violations.txt"
-find "$SRC" -name '*.swift' | sort | while read -r f; do
-  rel="${f#"$SRC"/}"
-  consumer="$(layer_of "$rel")"
-  [[ "$consumer" != Feature:* ]] && continue   # Core and Shell may reference anything
-  body="$(strip "$f")"
-  while read -r owner; do
-    [[ "$owner" == "$consumer" ]] && continue
-    syms="$(awk -v o="$owner" '$2==o{print $1}' "$WORK/owned.txt" | paste -sd'|' -)"
-    [[ -z "$syms" ]] && continue
-    hits="$(printf '%s' "$body" | grep -owE "$syms" | sort -u | paste -sd, -)"
-    [[ -n "$hits" ]] && \
-      echo "${consumer#Feature:}|$rel  ->  ${owner#Feature:}  [$hits]" >> "$WORK/violations.txt"
-  done < "$WORK/features.txt"
-done
+awk -F'\t' '$2 ~ /^Feature:/ {print $1}' "$WORK/file-layers.txt" > "$WORK/feature-files.txt"
+mkdir -p "$WORK/c2"
+i=0
+while read -r owner; do
+  i=$((i+1))
+  syms="$(awk -v o="$owner" '$2==o{print $1}' "$WORK/owned.txt" | paste -sd'|' -)"
+  [[ -z "$syms" ]] && continue
+  printf '%s\n' "$owner" > "$WORK/c2/$i.owner"
+  grep_words_bg "$syms" "$SRC_STRIPPED" "$WORK/feature-files.txt" "$WORK/c2/$i.hits"
+done < "$WORK/features.txt"
 
 # 2b. Report (never fail on) Feature -> Unclassified references. An edge that
 #     will matter once the other side is classified should be visible now
 #     rather than ambushing whichever later task moves that code.
+#     (Its grep runs alongside check 2's.)
 : > "$WORK/pending.txt"
 uc_syms="$(awk '$2=="Unclassified"{print $1}' "$WORK/owned.txt" | paste -sd'|' -)"
 if [ -n "$uc_syms" ]; then
-  find "$SRC" -name '*.swift' | sort | while read -r f; do
-    rel="${f#"$SRC"/}"
-    consumer="$(layer_of "$rel")"
-    [[ "$consumer" != Feature:* ]] && continue
-    body="$(strip "$f")"
-    hits="$(printf '%s' "$body" | grep -owE "$uc_syms" | sort -u | paste -sd, -)"
-    [[ -n "$hits" ]] && \
-      echo "${consumer#Feature:}|$rel  ->  Unclassified  [$hits]" >> "$WORK/pending.txt"
-  done
+  grep_words_bg "$uc_syms" "$SRC_STRIPPED" "$WORK/feature-files.txt" "$WORK/c2b.hits"
+fi
+wait
+
+j=0
+while [ "$j" -lt "$i" ]; do
+  j=$((j+1))
+  [ -f "$WORK/c2/$j.owner" ] || continue
+  owner="$(cat "$WORK/c2/$j.owner")"
+  mirror_hits "$SRC_STRIPPED" < "$WORK/c2/$j.hits" \
+    | awk -F'\t' -v o="$owner" 'NR == FNR { lay[$1] = $2; next }
+        lay[$1] ~ /^Feature:/ && lay[$1] != o' "$WORK/file-layers.txt" - \
+    | group_hits \
+    | awk -F'\t' -v o="$owner" 'NR == FNR { lay[$1] = $2; next }
+        { c = lay[$1]; sub(/^Feature:/, "", c); w = o; sub(/^Feature:/, "", w)
+          print c "|" $1 "  ->  " w "  [" $2 "]" }' "$WORK/file-layers.txt" - \
+    >> "$WORK/violations.txt"
+done
+if [ -n "$uc_syms" ]; then
+  mirror_hits "$SRC_STRIPPED" < "$WORK/c2b.hits" \
+    | group_hits \
+    | awk -F'\t' 'NR == FNR { lay[$1] = $2; next }
+        { c = lay[$1]; sub(/^Feature:/, "", c); print c "|" $1 "  ->  Unclassified  [" $2 "]" }' \
+      "$WORK/file-layers.txt" - \
+    > "$WORK/pending.txt"
 fi
 
 # 3. Report everything; fail only on SEALED features.
@@ -251,7 +360,7 @@ fi
 status=0
 echo "=== cross-feature references ==="
 sort "$WORK/violations.txt" | while IFS='|' read -r feat line; do
-  if [ "$(is_sealed "Feature:$feat")" = yes ]; then
+  if is_sealed "Feature:$feat"; then
     echo "  FAIL  [sealed $feat] $line"
   else
     echo "  warn  [$feat] $line"
@@ -259,7 +368,7 @@ sort "$WORK/violations.txt" | while IFS='|' read -r feat line; do
 done
 sealed_hits=0
 while IFS='|' read -r feat line; do
-  [ "$(is_sealed "Feature:$feat")" = yes ] && sealed_hits=$((sealed_hits+1))
+  is_sealed "Feature:$feat" && sealed_hits=$((sealed_hits+1))
 done < "$WORK/violations.txt"
 echo "total: $(wc -l < "$WORK/violations.txt" | tr -d ' ')  sealed violations: $sealed_hits"
 [ "$sealed_hits" -gt 0 ] && { echo "FAIL: a sealed feature references another feature" >&2; status=1; }
@@ -280,7 +389,7 @@ fi
 : > "$WORK/layer-flag.txt"
 while read -r p; do
   [[ "$p" == Features/* ]] || continue
-  lay="$(layer_of "$p/")"
+  layer_of "$p/"; lay="$LAYER"
   echo "$lay" >> "$WORK/exc-layers.txt"
   flag="$(awk -F'\t' -v path="$p" '$2==path{print $1; exit}' "$WORK/flagmap.txt")"
   [ -n "$flag" ] && printf '%s\t%s\n' "$lay" "$flag" >> "$WORK/layer-flag.txt"
@@ -293,7 +402,10 @@ sort -u -o "$WORK/layer-flag.txt" "$WORK/layer-flag.txt"
 # script, and a feature that becomes excludable drops out automatically.
 { awk '!/^#/ && NF>=2 {print $2}' "$MAP"; echo Unclassified; } | sort -u \
   | grep -vxFf "$WORK/exc-layers.txt" > "$WORK/always-layers.txt"
-is_always_compiled() { grep -qxF "$1" "$WORK/always-layers.txt"; }
+# Files whose layer is always compiled (rel, sorted) — the consumer set of
+# both 3a and 3b.
+awk -F'\t' 'NR == FNR { always[$0] = 1; next } ($2 in always) { print $1 }' \
+  "$WORK/always-layers.txt" "$WORK/file-layers.txt" > "$WORK/always-files.txt"
 
 # 3a. `strip_feature_guard_for_flag` only understands `#if`/`#else`/`#endif`.
 #     An `#elseif` branch inherits its enclosing `#if` frame's hidden/visible
@@ -306,14 +418,13 @@ is_always_compiled() { grep -qxF "$1" "$WORK/always-layers.txt"; }
 #     person to either restructure it (nested #if/#else) or extend the parser
 #     on purpose. Same consumer set as 3b, since 3b runs the parser on them.
 : > "$WORK/elseif-hits.txt"
-find "$SRC" -name '*.swift' | sort | while read -r f; do
-  rel="${f#"$SRC"/}"
-  consumer="$(layer_of "$rel")"
-  is_always_compiled "$consumer" || continue
-  grep -n '^[[:space:]]*#elseif\b' "$f" | while IFS=: read -r lineno _; do
-    echo "$rel:$lineno" >> "$WORK/elseif-hits.txt"
-  done
-done
+if [ -s "$WORK/always-files.txt" ]; then
+  # One grep over every consumer (raw source, as before), run from $SRC so
+  # -H prints the same rel path the report uses.
+  ( cd "$SRC" && tr '\n' '\0' < "$WORK/always-files.txt" \
+      | xargs -0 grep -Hn '^[[:space:]]*#elseif\b' ) \
+    | awk -F: '{ print $1 ":" $2 }' > "$WORK/elseif-hits.txt"
+fi
 
 echo "=== #elseif in always-compiled layers (unsupported by the guard parser) ==="
 if [ -s "$WORK/elseif-hits.txt" ]; then
@@ -345,36 +456,75 @@ fi
 #     Unclassified is included for the same reason — nothing excludes those
 #     folders either.
 : > "$WORK/shell-violations.txt"
-# Per-owner symbol alternations, built once: the consumer loop below now
-# covers several hundred more files than Shell/Core alone, and re-running awk
-# over owned.txt per (file, owner) pair dominated its runtime.
+# Per-owner symbol alternations, built once: the consumer set below covers
+# several hundred files, and re-running awk over owned.txt per (file, owner)
+# pair dominated its runtime.
 mkdir -p "$WORK/exc-syms"
 while read -r owner; do
   [[ -z "$owner" ]] && continue
   awk -v o="$owner" '$2==o{print $1}' "$WORK/owned.txt" | paste -sd'|' - > "$WORK/exc-syms/${owner#Feature:}"
 done < "$WORK/exc-layers.txt"
 if [ -s "$WORK/exc-layers.txt" ]; then
-  find "$SRC" -name '*.swift' | sort | while read -r f; do
-    rel="${f#"$SRC"/}"
-    consumer="$(layer_of "$rel")"
-    is_always_compiled "$consumer" || continue
-    raw_body="$(strip "$f")"
-    while read -r owner; do
-      [[ -z "$owner" ]] && continue
-      syms="$(cat "$WORK/exc-syms/${owner#Feature:}")"
-      [[ -z "$syms" ]] && continue
-      # Fail closed: no derivable flag for this owner means no guard can be
-      # trusted to hide it, so scan the RAW (unstripped-of-guards) body.
-      flag="$(awk -F'\t' -v o="$owner" '$1==o{print $2; exit}' "$WORK/layer-flag.txt")"
-      if [ -n "$flag" ]; then
-        body="$(printf '%s' "$raw_body" | strip_feature_guard_for_flag "$flag")"
-      else
-        body="$raw_body"
-      fi
-      hits="$(printf '%s' "$body" | grep -owE "$syms" | sort -u | paste -sd, -)"
-      [[ -n "$hits" ]] && \
-        echo "$consumer|$rel  ->  ${owner#Feature:} (build-excludable)  [$hits]" >> "$WORK/shell-violations.txt"
-    done < "$WORK/exc-layers.txt"
+  # Every distinct guarding flag, and for each one a mirror of the consumers
+  # with that flag's never-compiled branches removed — all built by ONE perl
+  # process (it was one perl per file x owner). Each body is the stripped
+  # file minus its trailing newlines: exactly what the former per-file
+  # `$(strip ...)` command substitution fed the filter.
+  GUARD_STRIPPED="$WORK/guard-stripped"
+  mkdir -p "$GUARD_STRIPPED"
+  cut -f2 "$WORK/layer-flag.txt" | sort -u > "$WORK/guard-flags.txt"
+  if [ -s "$WORK/guard-flags.txt" ] && [ -s "$WORK/always-files.txt" ]; then
+    perl -e "$STRIP_GUARD_PL"'
+      my ($in, $out, $flagfile) = @ARGV;
+      open(my $ff, "<", $flagfile) or die "$flagfile: $!";
+      my @flags = map { chomp; $_ } <$ff>; close $ff;
+      while (my $rel = <STDIN>) {
+        chomp $rel;
+        open(my $fh, "<", "$in/$rel") or next;
+        my $t = do { local $/; <$fh> }; close $fh;
+        $t =~ s/\n+\z//;
+        # No #if/#else/#endif line at all: the filter would return the text
+        # unchanged for every flag, so skip running it.
+        my $plain = ($t !~ /^\s*#(?:if\s|else\b|endif\b)/m);
+        for my $flag (@flags) {
+          my $dst = "$out/$flag/$rel"; (my $dir = $dst) =~ s{/[^/]+$}{};
+          system("mkdir", "-p", $dir) unless -d $dir;
+          open(my $oh, ">", $dst) or die "$dst: $!";
+          print $oh ($plain ? $t : strip_feature_guard_for_flag($t, $flag)); close $oh;
+        }
+      }
+    ' "$SRC_STRIPPED" "$GUARD_STRIPPED" "$WORK/guard-flags.txt" < "$WORK/always-files.txt"
+  fi
+  mkdir -p "$WORK/c3b"
+  i=0
+  while read -r owner; do
+    [[ -z "$owner" ]] && continue
+    syms="$(cat "$WORK/exc-syms/${owner#Feature:}")"
+    [[ -z "$syms" ]] && continue
+    # Fail closed: no derivable flag for this owner means no guard can be
+    # trusted to hide it, so scan the RAW (unstripped-of-guards) body.
+    flag="$(awk -F'\t' -v o="$owner" '$1==o{print $2; exit}' "$WORK/layer-flag.txt")"
+    if [ -n "$flag" ]; then
+      scan_root="$GUARD_STRIPPED/$flag"
+    else
+      scan_root="$SRC_STRIPPED"
+    fi
+    [ -d "$scan_root" ] || continue
+    i=$((i+1))
+    printf '%s\n%s\n' "$owner" "$scan_root" > "$WORK/c3b/$i.owner"
+    grep_words_bg "$syms" "$scan_root" "$WORK/always-files.txt" "$WORK/c3b/$i.hits"
+  done < "$WORK/exc-layers.txt"
+  wait
+  j=0
+  while [ "$j" -lt "$i" ]; do
+    j=$((j+1))
+    { read -r owner; read -r scan_root; } < "$WORK/c3b/$j.owner"
+    mirror_hits "$scan_root" < "$WORK/c3b/$j.hits" \
+      | group_hits \
+      | awk -F'\t' -v o="$owner" 'NR == FNR { lay[$1] = $2; next }
+          { w = o; sub(/^Feature:/, "", w)
+            print lay[$1] "|" $1 "  ->  " w " (build-excludable)  [" $2 "]" }' "$WORK/file-layers.txt" - \
+      >> "$WORK/shell-violations.txt"
   done
 fi
 
@@ -544,7 +694,7 @@ perl -e '
   }
 ' < "$ROOT/Package.swift" | sort -u > "$WORK/flag-excludes.txt"
 
-# One perl process for every Sources file (not one per file, as check 1 does)
+# One perl process for every Sources file (check 1 now strips in one pass too)
 # keeps this check to about a second. Rows of toplevel-all.txt:
 # name<TAB>path relative to Sources/<TAB>keyword. Check 6 uses the TYPE rows
 # only (toplevel-decls.txt: name<TAB>path, no typealias); check 7 also needs
@@ -564,23 +714,6 @@ find "$ROOT/Sources" -name '*.swift' -print0 | xargs -0 perl -e "$STRIP_SWIFT_PL
 awk -F'\t' '$3 != "typealias" {print $1 "\t" $2}' "$WORK/toplevel-all.txt" \
   | sort -u > "$WORK/toplevel-decls.txt"
 
-# Strip comments/strings from a set of files once, into a mirror tree, so a
-# type named only in prose (`/// mirrors LoopStage`) never counts as a use.
-# Usage: <NUL-separated absolute paths on stdin> | strip_tree_into ROOT OUT
-# Each file lands at OUT/<path relative to ROOT>. Shared by checks 6, 7 and 8.
-strip_tree_into() {
-  xargs -0 perl -e "$STRIP_SWIFT_PL"'
-  my ($root, $out) = splice(@ARGV, 0, 2);
-  for my $f (@ARGV) {
-    open(my $fh, "<", $f) or next; local $/; my $t = <$fh>; close $fh;
-    $t = strip_swift($t);
-    (my $rel = $f) =~ s{^\Q$root\E/}{};
-    my $dst = "$out/$rel"; (my $dir = $dst) =~ s{/[^/]+$}{};
-    system("mkdir", "-p", $dir) unless -d $dir;
-    open(my $oh, ">", $dst) or die "$dst: $!"; print $oh $t; close $oh;
-  }
-' "$1" "$2"
-}
 TESTROOT_STRIPPED="$WORK/tests-stripped"
 mkdir -p "$TESTROOT_STRIPPED"
 find "$TESTROOT" -name '*.swift' -print0 | strip_tree_into "$TESTROOT" "$TESTROOT_STRIPPED"
