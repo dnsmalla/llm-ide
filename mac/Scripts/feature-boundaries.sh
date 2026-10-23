@@ -89,12 +89,50 @@ is_sealed() {
 # Comments and string literals must go before ANY matching: doc-comment prose
 # like "mirroring AutoCodeView's split" is not a dependency, and counting it
 # produced 9 of 13 false positives when this gate was prototyped.
+#
+# ONE left-to-right pass, not one substitution per token kind. Separate passes
+# each see the other kinds' delimiters as live text: stripping block comments
+# first let a string such as "src/*" open a "comment" that ran to the next
+# `*/` in the file, silently deleting the real code in between (and any
+# reference there); stripping strings first instead lets a `"` inside a
+# comment start a "string". A single regex alternation consumes whichever
+# token STARTS first, so a delimiter inside a string or comment is never seen.
+# Token kinds, in the alternation's order (longer openers before their
+# prefixes, so `"""` is never read as an empty "" plus a stray quote):
+#   /* */ block comments, NESTED as Swift allows (a flat `.*?` would end at the
+#         inner `*/` and expose the tail of the outer comment as code);
+#   //    line comments;
+#   #"""…"""#, #"…"#  raw strings — `\` is not an escape there, and the `#`
+#         count must match, so `#"a\"#` ends at `"#`;
+#   """…"""           multi-line strings, `\"""` escaped;
+#   "…"               single-line strings with escapes, never across a newline.
+# Comments become whitespace that keeps their newlines (Swift treats a comment
+# as whitespace; `Foo/**/Bar` must not fuse into one identifier, and the
+# line-anchored declaration scan below must not see two lines glued into one).
+# Strings become "" so call shapes such as `f("")` stay recognisable.
+# Known limit, unchanged from the multi-pass version: code inside a string
+# interpolation `"\(…)"` is treated as string content.
+# Single-quoted perl source on purpose; it is spliced into each perl -e below.
+STRIP_SWIFT_PL='
+sub strip_swift {
+  my ($text) = @_;
+  $text =~ s{
+      (?<block> /\* (?: (?&block) | [^/*]++ | /(?!\*) | \*(?!/) )*+ \*/ )
+    | (?<line>  //[^\n]* )
+    | (?<rawml> (?<hm>\#+) """ .*? """ \k<hm> )
+    | (?<raw>   (?<hs>\#+) "   [^\n]*? "   \k<hs> )
+    | (?<ml>    """ (?: \\. | [^\\] )*? """ )
+    | (?<str>   "   (?: \\. | [^"\\\n] )* " )
+  }{
+    defined $+{block} ? (($+{block} =~ tr/\n//) ? "\n" x ($+{block} =~ tr/\n//) : " ")
+    : defined $+{line} ? ""
+    : "\"\""
+  }gsxe;
+  return $text;
+}
+'
 strip() {
-  perl -0777 -pe '
-    s{/\*.*?\*/}{}gs;
-    s{"""[^"]*(?:"(?!"")[^"]*)*"""}{""}gs;
-    s{"(?:\\.|[^"\\\n])*"}{""}g;
-    s{//[^\n]*}{}g;' "$1"
+  perl -0777 -pe "$STRIP_SWIFT_PL"' $_ = strip_swift($_);' "$1"
 }
 
 # For the Shell/Core build-exclusion check only: given the ONE flag that
@@ -512,12 +550,11 @@ perl -e '
 # only (toplevel-decls.txt: name<TAB>path, no typealias); check 7 also needs
 # top-level typealiases, since Core naming a feature's typealias is the same
 # leaf violation as naming its struct.
-find "$ROOT/Sources" -name '*.swift' -print0 | xargs -0 perl -e '
+find "$ROOT/Sources" -name '*.swift' -print0 | xargs -0 perl -e "$STRIP_SWIFT_PL"'
   my $root = shift @ARGV;
   for my $f (@ARGV) {
     open(my $fh, "<", $f) or next; local $/; my $t = <$fh>; close $fh;
-    $t =~ s{/\*.*?\*/}{}gs; $t =~ s{"""[^"]*(?:"(?!"")[^"]*)*"""}{""}gs;
-    $t =~ s{"(?:\\.|[^"\\\n])*"}{""}g; $t =~ s{//[^\n]*}{}g;
+    $t = strip_swift($t);
     (my $rel = $f) =~ s{^\Q$root\E/}{};
     while ($t =~ /^(?:@\w+(?:\([^)\n]*\))?\s+|(?:public|package|internal|private|fileprivate|open|final|indirect|nonisolated)\s+)*(class|struct|enum|protocol|actor|typealias)\s+([A-Za-z_]\w*)/mg) {
       print "$2\t$rel\t$1\n";
@@ -532,12 +569,11 @@ awk -F'\t' '$3 != "typealias" {print $1 "\t" $2}' "$WORK/toplevel-all.txt" \
 # Usage: <NUL-separated absolute paths on stdin> | strip_tree_into ROOT OUT
 # Each file lands at OUT/<path relative to ROOT>. Shared by checks 6, 7 and 8.
 strip_tree_into() {
-  xargs -0 perl -e '
+  xargs -0 perl -e "$STRIP_SWIFT_PL"'
   my ($root, $out) = splice(@ARGV, 0, 2);
   for my $f (@ARGV) {
     open(my $fh, "<", $f) or next; local $/; my $t = <$fh>; close $fh;
-    $t =~ s{/\*.*?\*/}{}gs; $t =~ s{"""[^"]*(?:"(?!"")[^"]*)*"""}{""}gs;
-    $t =~ s{"(?:\\.|[^"\\\n])*"}{""}g; $t =~ s{//[^\n]*}{}g;
+    $t = strip_swift($t);
     (my $rel = $f) =~ s{^\Q$root\E/}{};
     my $dst = "$out/$rel"; (my $dir = $dst) =~ s{/[^/]+$}{};
     system("mkdir", "-p", $dir) unless -d $dir;

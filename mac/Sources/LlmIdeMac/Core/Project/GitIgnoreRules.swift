@@ -50,6 +50,10 @@ struct GitIgnoreRule {
 /// escapes. A pattern containing `[`, `]` or `\` degrades to a LITERAL match
 /// (every metacharacter regex-escaped) rather than silently meaning something
 /// else. `core.excludesFile` (the user's global ignore) is not consulted.
+///
+/// Lives in Core (beside `GlobMatch` / `IgnoreList`), not Explorer: both
+/// Explorer and the sealed Search feature use it, and Search may not name an
+/// Explorer type. It is Foundation-only, so Core stays a leaf.
 struct GitIgnoreRules {
     private(set) var rules: [GitIgnoreRule] = []
 
