@@ -94,6 +94,57 @@ struct MermaidRuntimeTests {
         #expect(Mermaid.version.split(separator: ".").count == 3)
     }
 
+    // MARK: - Chunked download
+
+    private static func stream(_ count: Int) -> AsyncStream<UInt8> {
+        AsyncStream { continuation in
+            for index in 0..<count { continuation.yield(UInt8(truncatingIfNeeded: index)) }
+            continuation.finish()
+        }
+    }
+
+    private final class ProgressLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var values: [Int] = []
+        func record(_ value: Int) {
+            lock.withLock { values.append(value) }
+        }
+        var all: [Int] {
+            lock.withLock { values }
+        }
+    }
+
+    @Test("The chunked collector returns every byte and reports per chunk")
+    func collectorKeepsBytesAndProgress() async throws {
+        let count = URLSessionMermaidDownloader.chunkSize * 2 + 10
+        let log = ProgressLog()
+        let data = try await URLSessionMermaidDownloader.collect(
+            Self.stream(count), maxBytes: count) { log.record($0) }
+        #expect(data == Data((0..<count).map { UInt8(truncatingIfNeeded: $0) }))
+        let chunk = URLSessionMermaidDownloader.chunkSize
+        #expect(log.all == [chunk, chunk * 2, count])
+    }
+
+    @Test("The chunked collector enforces the size cap, mid-stream and on the tail")
+    func collectorEnforcesCap() async {
+        let chunk = URLSessionMermaidDownloader.chunkSize
+        await #expect(throws: MermaidInstallError.tooLarge(limit: chunk)) {
+            _ = try await URLSessionMermaidDownloader.collect(
+                Self.stream(chunk * 3), maxBytes: chunk) { _ in }
+        }
+        await #expect(throws: MermaidInstallError.tooLarge(limit: 5)) {
+            _ = try await URLSessionMermaidDownloader.collect(
+                Self.stream(6), maxBytes: 5) { _ in }
+        }
+    }
+
+    @Test("The only script candidate is the installed copy")
+    func onlyInstalledCandidate() {
+        #expect(Mermaid.candidateURLs() == [Mermaid.installedScriptURL])
+        #expect(Mermaid.installedScriptURL.path.hasSuffix(
+            "runtime/mermaid/\(Mermaid.version)/mermaid.min.js"))
+    }
+
     // MARK: - Layout
 
     @Test("Installed under runtime/mermaid/<version>/mermaid.min.js")

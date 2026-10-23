@@ -40,13 +40,24 @@ fileprivate func writeCrashReportFile(_ text: String, kind: String) {
                      atomically: true, encoding: .utf8)
 }
 
+// Where our code is loaded and which build it is (LC_UUID), so the stack in
+// an exception crash file can be symbolicated against the dSYM — release
+// binaries are stripped, so `callStackSymbols` alone names only exported
+// symbols. A lazily-initialised global (the handler is a C function pointer
+// and cannot capture), forced in `installCrashHandlers()` so the dladdr +
+// load-command walk happens at startup, never first inside the handler.
+fileprivate let crashBinaryImage: String = CrashBinaryImage.describe()
+
 fileprivate func installCrashHandlers() {
+    _ = crashBinaryImage
     NSSetUncaughtExceptionHandler { exception in
         crashLog.critical(
             "Uncaught \(exception.name.rawValue, privacy: .public): \(exception.reason ?? "<no reason>", privacy: .public)\nstack: \(exception.callStackSymbols.joined(separator: "\n"), privacy: .public)"
         )
+        // Not a signal handler: an NSException handler runs on the throwing
+        // thread before abort(), so ordinary Foundation calls are fine here.
         writeCrashReportFile(
-            "Uncaught \(exception.name.rawValue): \(exception.reason ?? "<no reason>")\nstack:\n\(exception.callStackSymbols.joined(separator: "\n"))",
+            "Uncaught \(exception.name.rawValue): \(exception.reason ?? "<no reason>")\nstack:\n\(exception.callStackSymbols.joined(separator: "\n"))\n\n\(crashBinaryImage)\n",
             kind: "exception"
         )
         crashExceptionReported = 1

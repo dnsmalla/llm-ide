@@ -114,8 +114,8 @@ enum FeatureCatalog {
         let registry = SettingsSectionRegistry.shared
         // Library's inputs hub. Library is never build-excluded. The id is
         // also the `.scrollSettingsToCard` anchor Library's "Connect a
-        // source…" deep link posts — keep the two in sync.
-        registry.register(slot: .connections, id: "connections") {
+        // source…" deep link posts; both use `SettingsAnchor.connections`.
+        registry.register(slot: .connections, id: SettingsAnchor.connections) {
             AnyView(ConnectionsSettingsHost(api: api))
         }
         // Live's capture-platform matrix, shown inside Connections → Meetings.

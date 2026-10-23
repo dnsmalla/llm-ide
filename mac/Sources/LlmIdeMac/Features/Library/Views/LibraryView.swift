@@ -726,7 +726,8 @@ struct LibraryView: View {
                     // Jump to Settings → Connections (the inputs hub) and
                     // expand it via the deep-link the section listens for.
                     shell.section = .settings
-                    NotificationCenter.default.post(name: .scrollSettingsToCard, object: "connections")
+                    NotificationCenter.default.post(name: .scrollSettingsToCard,
+                                                    object: SettingsAnchor.connections)
                 } label: {
                     Label("Connect a source…", systemImage: "tray.and.arrow.down")
                 }
@@ -1706,7 +1707,8 @@ struct LibraryView: View {
                     // lives in Settings → Connections; this section only
                     // decides which cards appear there.
                     shell.section = .settings
-                    NotificationCenter.default.post(name: .scrollSettingsToCard, object: "connections")
+                    NotificationCenter.default.post(name: .scrollSettingsToCard,
+                                                    object: SettingsAnchor.connections)
                 } label: { Label("Configure in Settings…", systemImage: "gearshape") }
             } label: {
                 Image(systemName: "plus")

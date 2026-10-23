@@ -60,6 +60,24 @@ final class ActiveProjectResolverTests: XCTestCase {
         XCTAssertEqual(resolved?.provider, "GitHub")
     }
 
+    /// The config fallback is token-gated (via `activeConfigRepo`). The phone
+    /// bridge (`MobileExploreBridge`) used to carry a private copy that checked
+    /// the tokens inline; it now calls this resolver, so the gating it relied
+    /// on is pinned here: an active repo without a token is not the active
+    /// project, and a tokenless GitLab falls through to a tokened GitHub.
+    func testConfigFallbackIsTokenGated() {
+        config.gitLabSavedProjects = [SavedGitLabProject(url: "https://gitlab.com/acme/widgets",
+                                                         displayName: "Widgets", isActive: true)]
+        XCTAssertNil(ActiveProjectResolver.project(fromConfig: config))
+
+        var repo = SavedGitHubRepo()
+        repo.url = "https://github.com/acme/gadgets"
+        repo.isActive = true
+        config.gitHubSavedRepos = [repo]
+        config.gitHubToken = "token"
+        XCTAssertEqual(ActiveProjectResolver.project(fromConfig: config)?.provider, "GitHub")
+    }
+
     func testChatStaticsForwardToTheResolver() {
         config.gitLabSavedProjects = [SavedGitLabProject(url: "https://gitlab.com/acme/widgets",
                                                          displayName: "Widgets", isActive: true)]

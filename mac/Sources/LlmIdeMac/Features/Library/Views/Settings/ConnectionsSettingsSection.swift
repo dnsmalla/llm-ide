@@ -38,7 +38,7 @@ enum ConnectionsSelection {
 /// collided with the Library's own "Sources" section (the files those inputs
 /// produce). It now lives here and is reachable directly or via the
 /// "Connect a source…" deep-link in the Library's Sources section
-/// (`.scrollSettingsToCard` with anchor "connections").
+/// (`.scrollSettingsToCard` with anchor `SettingsAnchor.connections`).
 ///
 /// Unlike most settings sections this does NOT wrap its body in
 /// `SettingsSectionCard` — that would card-wrap the content, and the input
@@ -161,7 +161,7 @@ struct ConnectionsSettingsSection: View {
         .animation(.easeInOut(duration: 0.18), value: isExpanded)
         // Deep-link from the Library Sources section lands here expanded.
         .onReceive(NotificationCenter.default.publisher(for: .scrollSettingsToCard)) { note in
-            if note.object as? String == "connections" { isExpanded = true }
+            if note.object as? String == SettingsAnchor.connections { isExpanded = true }
         }
     }
 

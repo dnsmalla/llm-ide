@@ -16,11 +16,16 @@ private final class SpyModule: AppModule {
 @MainActor
 final class FeatureRegistryTests: XCTestCase {
 
-    private func makeRegistry() -> FeatureRegistry {
+    /// - Parameter compiled: what the registry treats as compiled into the
+    ///   binary. Tests never run Shell's boot, so without this every feature
+    ///   reads as compiled (see `FeatureRegistry.compiledFeatures`).
+    private func makeRegistry(
+        compiled: Set<AppFeature> = Set(AppFeature.allCases)
+    ) -> FeatureRegistry {
         let name = "FeatureRegistryTests-\(UUID().uuidString)"
         let suite = UserDefaults(suiteName: name)!
         suite.removePersistentDomain(forName: name)
-        return FeatureRegistry(defaults: suite)
+        return FeatureRegistry(defaults: suite, compiledFeatures: compiled)
     }
 
     func testRefreshStartsOnlyEnabledModules() {
@@ -102,10 +107,27 @@ final class FeatureRegistryTests: XCTestCase {
         XCTAssertEqual(graph.startCount, 0)
     }
 
+    /// Without Shell's boot the default is "everything compiled" — the
+    /// hazard this pins is that a test forgetting the parameter silently
+    /// tests the full build.
+    func testUnbootedRegistryTreatsEveryFeatureAsCompiled() {
+        XCTAssertEqual(makeRegistry().compiledFeatures, Set(AppFeature.allCases))
+    }
+
+    func testInitCompiledFeaturesAppliesWithoutStartingAnything() {
+        let compiled = Set(AppFeature.allCases).subtracting([.codeGraph3D])
+        let registry = makeRegistry(compiled: compiled)
+        XCTAssertEqual(registry.compiledFeatures, compiled)
+        XCTAssertFalse(registry.isEnabled(.codeGraph3D))
+        let graph = SpyModule(.codeGraph3D)
+        registry.register(module: graph)
+        registry.refresh()
+        XCTAssertEqual(graph.startCount, 0)
+    }
+
     func testCompiledOutViewFeatureIsHiddenFromEnabledSet() {
-        let registry = makeRegistry()
-        registry.compiledFeatures = Set(AppFeature.allCases)
-            .subtracting([.terminal, .ganttIssues])
+        let registry = makeRegistry(compiled: Set(AppFeature.allCases)
+            .subtracting([.terminal, .ganttIssues]))
         registry.updateFeatureSet(Set(AppFeature.allCases), markCustom: false)
         XCTAssertFalse(registry.isEnabled(.terminal))
         XCTAssertFalse(registry.isEnabled(.ganttIssues))

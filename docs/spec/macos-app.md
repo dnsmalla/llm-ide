@@ -37,14 +37,14 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 - **Integrity:** the body must hash to the SHA-256 pinned in `Core/Editor/Mermaid.swift` (`581ed7d7…390eb8`, identical to the file previously vendored). A mismatch writes nothing. The loader (`MermaidScriptCache`) re-hashes whatever it reads from disk before handing it to a web view, so a file altered after install is ignored. Download capped at 16 MB.
 - **Storage:** `~/Library/Application Support/llm-ide/runtime/mermaid/<version>/mermaid.min.js`, written atomically (temp file + rename); installing a new version prunes the others; Settings → Remove deletes `runtime/mermaid/`.
 - **State:** `MermaidRuntime.shared` (`@MainActor`, `notInstalled / downloading / installed / failed`); `MarkdownWebView` observes it and reloads when it flips, so an open preview draws its diagrams right after install.
-- **Pin bump:** `Scripts/mermaid-pin.mjs <version>` checks the CDN file against the npm tarball and prints `version` / `sha256` / `byteCount`. `chat-contract-lab` asserts the integrity check, path layout, pinned URL shape and the not-installed fallback.
+- **Pin bump:** `Scripts/mermaid-pin.mjs <version>` checks the CDN file against the npm tarball and prints `version` / `sha256` / `byteCount`. `chat-contract-lab` asserts the integrity check, path layout, pinned URL shape, the not-installed fallback, the chunked download reader (every byte kept, progress per 64 KB chunk, 16 MB cap) and that the installed copy is the loader's only candidate (the old in-bundle lookups are gone — a stale dev `.build` bundle used to keep serving mermaid after Remove). The installed path is resolved once per process, so a render with mermaid not installed costs one failed file read.
 
 **Release bundle: stripped executable, dSYM beside it.** `Scripts/build.sh` copies `swift build -c release`'s `LlmIdeMac` into `Contents/MacOS/`, adds the Sparkle rpath, then, still before `sign.sh`:
 
 1. `xcrun dsymutil <scratch>/release/LlmIdeMac -o <APP_DIR>.dSYM` reads the **unstripped** binary in the SwiftPM scratch dir and writes the dSYM beside the bundle (default `mac/LlmIdeMac.app.dSYM`). It is never inside the `.app`, so it is not sealed by the signature, not in the DMG and not installed.
 2. `xcrun strip -S -x Contents/MacOS/LlmIdeMac` removes debug stabs and local symbols and keeps exported ones. That is the only binary stripped: Sparkle's framework, `Autoupdate`, `Updater.app` and XPC services are third-party and already signed.
 
-Stripping must come before signing, because `strip` rewrites the Mach-O and so invalidates any signature already on it. `strip` and `install_name_tool` keep `LC_UUID`, so the bundled executable and the dSYM have the same UUID. Nothing at runtime reads local symbol names: Swift reflection uses the `__swift5_*` metadata sections, dyld uses exported symbols, and the app never `dlsym`s into itself. The one cost is that the uncaught-exception crash file (`NSException.callStackSymbols`, `installCrashHandlers` in `Shell/LlmIdeMacApp.swift`) names only the nearest exported symbol for the app's own frames. Signal crash files carry no stack in either case. The system `.ips` report plus the dSYM symbolicates fully.
+Stripping must come before signing, because `strip` rewrites the Mach-O and so invalidates any signature already on it. `strip` and `install_name_tool` keep `LC_UUID`, so the bundled executable and the dSYM have the same UUID. Nothing at runtime reads local symbol names: Swift reflection uses the `__swift5_*` metadata sections, dyld uses exported symbols, and the app never `dlsym`s into itself. The one cost is that the uncaught-exception crash file (`NSException.callStackSymbols`, `installCrashHandlers` in `Shell/LlmIdeMacApp.swift`) names only the nearest exported symbol for the app's own frames, so that file also records the image's path, arch, `LC_UUID` and load address (`Shell/CrashBinaryImage.swift`, computed once at handler install from `#dsohandle`): enough to pick the matching dSYM and run `atos -o <dSYM>/Contents/Resources/DWARF/LlmIdeMac -arch <arch> -l <load address> <frame address>`. Signal crash files carry no stack in either case. The system `.ips` report plus the dSYM symbolicates fully.
 
 `LLMIDE_SKIP_STRIP=1` leaves the symbol table in; the dSYM is still written. If `dsymutil` fails, the build warns and does not strip. The old `<APP_DIR>.dSYM` is deleted together with the old bundle at the start of a build, so a dSYM that does not match the binary is never left behind.
 
@@ -201,7 +201,9 @@ The feature runtime (`AppFeature`, `ProfilePreset`, `FeatureRegistry`, the
 `AppModule` / `FeatureService` protocols) lives in `Core/FeatureToggles/`, so
 features may read it; Shell's `FeatureCatalog` assigns
 `FeatureRegistry.compiledFeatures` (from its `#if FEATURE_*` list) and
-registers the modules at boot. Feature toggles are wired to
+registers the modules at boot. Until that boot runs, `compiledFeatures`
+reads as every feature — Core cannot know the real set — so tests and labs
+that care pass it in: `FeatureRegistry(defaults:compiledFeatures:)`. Feature toggles are wired to
 `FeatureRegistry.refresh()`: each feature has
 an `AppModule` (`AutoTaskModule`, `GraphModule`, `ChatModule`,
 `MobileModule`, `PassiveModule` for the view-only four) owning its

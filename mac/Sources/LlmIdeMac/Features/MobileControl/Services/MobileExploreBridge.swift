@@ -83,8 +83,12 @@ enum MobileExploreBridge {
     /// because this caller happened to pass the chat UUID.
     static func buildAgentContext(config: AppConfig, projectStore: ProjectStore,
                                   sessionId: String?) async -> AgentContext {
-        let activeProject = deriveActiveProject(from: projectStore.activeProject)
-            ?? deriveActiveProject(fromConfig: config)
+        // Same resolver the Mac panel uses (via CodeAssistantPanel's
+        // forwarders), so a phone turn names the same active project. The
+        // config fallback is token-gated inside `activeConfigRepo`, exactly as
+        // the private copy this replaced checked the tokens inline.
+        let activeProject = ActiveProjectResolver.project(from: projectStore.activeProject)
+            ?? ActiveProjectResolver.project(fromConfig: config)
         let workspaceRoot = WorkspaceRoot.resolve(config: config, projectStore: projectStore)
             .map { PathUtils.homeRelative($0.path) }
 
@@ -140,33 +144,6 @@ enum MobileExploreBridge {
             currentBranch: gitBranch,
             gitStatus: gitStatus
         )
-    }
-
-    private static func deriveActiveProject(from active: ProjectStore.ActiveProject?) -> AgentContext.Project? {
-        guard let active, let linked = active.bundle.settings.linkedRepo else { return nil }
-        return AgentContext.Project(
-            name: active.bundle.displayName,
-            url: linked.url,
-            defaultBranch: linked.defaultBranch,
-            provider: linked.kind == .gitlab ? "GitLab" : "GitHub")
-    }
-
-    private static func deriveActiveProject(fromConfig config: AppConfig) -> AgentContext.Project? {
-        if !config.gitLabToken.isEmpty,
-           let p = config.gitLabSavedProjects.first(where: { $0.isActive }) {
-            let name = !p.displayName.isEmpty ? p.displayName
-                : (URL(string: p.url)?.lastPathComponent ?? "project")
-            return AgentContext.Project(name: name, url: p.url,
-                                        defaultBranch: p.defaultBranch, provider: "GitLab")
-        }
-        if !config.gitHubToken.isEmpty,
-           let r = config.gitHubSavedRepos.first(where: { $0.isActive }) {
-            let name = !r.displayName.isEmpty ? r.displayName
-                : (URL(string: r.url)?.lastPathComponent ?? "repository")
-            return AgentContext.Project(name: name, url: r.url,
-                                        defaultBranch: r.defaultBranch, provider: "GitHub")
-        }
-        return nil
     }
 
     static func homeRelativePathForDisplay(_ p: String) -> String {

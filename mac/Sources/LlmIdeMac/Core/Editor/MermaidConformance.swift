@@ -49,6 +49,40 @@ public enum MermaidConformance {
         }
     }
 
+    /// The download's chunked collector returns every byte, reports progress
+    /// once per full chunk plus once at the end, and throws `tooLarge` past
+    /// the cap. Driven by an in-memory stream — no network.
+    public static func chunkedCollectorKeepsBytesProgressAndCap() -> Bool {
+        let chunk = URLSessionMermaidDownloader.chunkSize
+        let count = chunk * 2 + 10
+        let expected = Data((0..<count).map { UInt8(truncatingIfNeeded: $0) })
+        return runBlocking {
+            let log = ProgressLog()
+            guard let data = try? await URLSessionMermaidDownloader.collect(
+                byteStream(count), maxBytes: count, progress: { log.record($0) }),
+                  data == expected,
+                  log.values == [chunk, chunk * 2, count] else { return false }
+            do {
+                _ = try await URLSessionMermaidDownloader.collect(
+                    byteStream(count), maxBytes: chunk, progress: { _ in })
+                return false
+            } catch MermaidInstallError.tooLarge {
+                return true
+            } catch {
+                return false
+            }
+        }
+    }
+
+    /// The loader looks in exactly one place: the installed copy. (The old
+    /// in-bundle lookups kept serving a stale dev `.build` copy after
+    /// `remove()`.)
+    public static func onlyInstalledCopyIsACandidate() -> Bool {
+        Mermaid.candidateURLs() == [Mermaid.installedScriptURL]
+            && Mermaid.installedScriptURL.path.hasSuffix(
+                "runtime/mermaid/\(Mermaid.version)/mermaid.min.js")
+    }
+
     /// The install path relative to the Application Support root.
     public static func installedScriptRelativePath() -> String {
         let root = URL(fileURLWithPath: "/root", isDirectory: true)
@@ -67,6 +101,38 @@ public enum MermaidConformance {
                    progress: @escaping @Sendable (Int) -> Void) async throws -> Data {
             throw URLError(.notConnectedToInternet)
         }
+    }
+
+    private final class ProgressLog: @unchecked Sendable {
+        private let lock = NSLock()
+        private var recorded: [Int] = []
+        func record(_ value: Int) {
+            lock.withLock { recorded.append(value) }
+        }
+        var values: [Int] {
+            lock.withLock { recorded }
+        }
+    }
+
+    private static func byteStream(_ count: Int) -> AsyncStream<UInt8> {
+        AsyncStream { continuation in
+            for index in 0..<count { continuation.yield(UInt8(truncatingIfNeeded: index)) }
+            continuation.finish()
+        }
+    }
+
+    /// The lab's top-level code is synchronous. Safe to block here: the work
+    /// runs on the global executor and never hops to the main actor.
+    private static func runBlocking(_ body: @escaping @Sendable () async -> Bool) -> Bool {
+        final class Box: @unchecked Sendable { var value = false }
+        let box = Box()
+        let done = DispatchSemaphore(value: 0)
+        Task.detached {
+            box.value = await body()
+            done.signal()
+        }
+        done.wait()
+        return box.value
     }
 
     private static func makeInstaller(root: URL, expecting payload: Data) -> MermaidInstaller {

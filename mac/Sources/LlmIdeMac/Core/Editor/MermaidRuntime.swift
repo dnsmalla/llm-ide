@@ -50,19 +50,48 @@ struct URLSessionMermaidDownloader: MermaidDownloading {
         if response.expectedContentLength > Int64(maxBytes) {
             throw MermaidInstallError.tooLarge(limit: maxBytes)
         }
+        return try await Self.collect(
+            bytes, maxBytes: maxBytes,
+            expectedLength: Int(clamping: max(0, response.expectedContentLength)),
+            progress: progress)
+    }
+
+    /// Bytes handed to `Data` / `progress` at a time. One progress callback
+    /// per chunk is ~55 for this file — a smooth bar without flooding the
+    /// main actor.
+    static let chunkSize = 65_536
+
+    /// Drain `bytes` into one `Data`, `chunkSize` bytes at a time.
+    ///
+    /// `URLSession.AsyncBytes` only iterates per byte, but the old loop also
+    /// did a `Data.append` + size check + progress test PER BYTE (~3.5 M
+    /// times for this file). Here the per-byte work is a store into a
+    /// pre-reserved array; the copy into `Data`, the cap check and the
+    /// progress report happen once per chunk.
+    ///
+    /// - Postcondition: returns every byte of `bytes`, or throws `.tooLarge`
+    ///   once the running total exceeds `maxBytes` — checked per chunk, so
+    ///   memory stays bounded by `maxBytes + chunkSize`.
+    /// - `progress` gets the running total after each full chunk and once
+    ///   at the end.
+    static func collect<Bytes: AsyncSequence>(
+        _ bytes: Bytes, maxBytes: Int, expectedLength: Int = 0,
+        progress: @escaping @Sendable (Int) -> Void
+    ) async throws -> Data where Bytes.Element == UInt8 {
         var data = Data()
-        data.reserveCapacity(min(maxBytes, max(0, Int(response.expectedContentLength))))
-        var lastReported = 0
+        data.reserveCapacity(min(maxBytes, expectedLength))
+        var chunk: [UInt8] = []
+        chunk.reserveCapacity(chunkSize)
         for try await byte in bytes {
-            data.append(byte)
+            chunk.append(byte)
+            guard chunk.count == chunkSize else { continue }
+            data.append(contentsOf: chunk)
+            chunk.removeAll(keepingCapacity: true)
             if data.count > maxBytes { throw MermaidInstallError.tooLarge(limit: maxBytes) }
-            // Throttled: one callback per 64 KB is ~55 for this file, enough
-            // for a smooth bar without flooding the main actor.
-            if data.count - lastReported >= 65_536 {
-                lastReported = data.count
-                progress(data.count)
-            }
+            progress(data.count)
         }
+        data.append(contentsOf: chunk)
+        if data.count > maxBytes { throw MermaidInstallError.tooLarge(limit: maxBytes) }
         progress(data.count)
         return data
     }
@@ -244,8 +273,8 @@ final class MermaidRuntime: ObservableObject {
         }
     }
 
-    /// Delete the downloaded copy. `state` stays `.installed` only when a dev
-    /// build still carries a bundled copy the loader prefers.
+    /// Delete the downloaded copy. The installed copy is the loader's only
+    /// candidate, so this always ends `.notInstalled` (or `.failed`).
     func remove() {
         do {
             try installer.remove()

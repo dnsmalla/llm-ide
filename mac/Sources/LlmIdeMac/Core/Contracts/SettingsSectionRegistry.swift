@@ -25,13 +25,27 @@ enum SettingsSectionSlot: String, CaseIterable, Sendable {
     case graph
 }
 
+/// Scroll anchors a deep link can post with `.scrollSettingsToCard`.
+///
+/// Each is the `id` a card is registered under (the anchor IS the card's id,
+/// see `RegisteredSettingsSection.id`), so the registering side (Shell), the
+/// posting side and the card that reacts to it must all spell it the same.
+/// One constant here instead of a string literal in each of those places,
+/// so a rename cannot silently break the deep link.
+enum SettingsAnchor {
+    /// Library's Connections card (inputs hub) — the target of Library's
+    /// "Connect a source…" / "Open in Settings" deep links.
+    static let connections = "connections"
+}
+
 /// One registered Settings card. `make` is evaluated on every render of the
 /// hosting view, so it must be cheap and side-effect free (construct a view,
 /// nothing more).
 struct RegisteredSettingsSection: Identifiable {
     /// Stable identity. Used as the SwiftUI identity AND as the
     /// `ScrollViewReader` anchor — `.scrollSettingsToCard` posts this string
-    /// (e.g. "connections"), so ids must be unique across ALL slots.
+    /// (e.g. `SettingsAnchor.connections`), so ids must be unique across ALL
+    /// slots.
     let id: String
     let slot: SettingsSectionSlot
     /// Primary sort key within a slot (ascending).

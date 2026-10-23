@@ -12,7 +12,7 @@ struct SettingsView: View {
     var body: some View {
         // ScrollViewReader so Library's "Open in Settings" deep-link can
         // jump to a specific card. Anchor id matches the string posted with
-        // `.scrollSettingsToCard` ("connections" today — the id Shell
+        // `.scrollSettingsToCard` (`SettingsAnchor.connections` today — the id Shell
         // registers Library's card under; `SettingsSlotView` applies it as
         // `.id`). Plugin install/browse lives in Library → Plugins.
         ScrollViewReader { proxy in

@@ -403,7 +403,7 @@ atos -arch arm64 -o LlmIdeMac.app.dSYM/Contents/Resources/DWARF/LlmIdeMac \
   -l <LlmIdeMac load address> <frame address>
 ```
 
-The app's own crash banner logs (`Application Support/llm-ide/crashes/`) name only exported symbols for the app's frames once it is stripped.
+The app's own crash banner logs (`Application Support/llm-ide/crashes/`) name only exported symbols for the app's frames once it is stripped. An uncaught-exception log therefore ends with a binary-image block (written by `CrashBinaryImage` in `Shell/CrashBinaryImage.swift`): the image path, arch, `uuid` (compare with `dwarfdump --uuid`) and `load address` — the `-l` value for the `atos` command above, with the stack's addresses as the frame addresses. Signal logs carry no stack, so they get no block.
 
 To debug a release build with the full symbol table left in the executable, run `LLMIDE_SKIP_STRIP=1 ./build_app.sh`. The dSYM is written either way. If `dsymutil` fails, `build.sh` warns and leaves the executable unstripped, because a binary whose symbols are saved nowhere cannot be symbolicated.
 

@@ -46,8 +46,16 @@ final class FeatureRegistry: ObservableObject {
     /// underlying service forgot its own guard.
     private var running: Set<AppFeature> = []
 
-    init(defaults: UserDefaults = .standard) {
+    /// - Parameter compiledFeatures: what this binary contains. Defaults to
+    ///   every feature for the reason documented on `compiledFeatures`; a
+    ///   test or lab that exercises compiled-out behaviour passes the reduced
+    ///   set here instead of relying on Shell's boot (which it never runs).
+    init(defaults: UserDefaults = .standard,
+         compiledFeatures: Set<AppFeature> = Set(AppFeature.allCases)) {
         self.defaults = defaults
+        // Assigned in init, so `didSet` (and its refresh()) does not fire —
+        // harmless: no module is registered yet.
+        self.compiledFeatures = compiledFeatures
         loadSavedFeatures()
     }
 
@@ -59,7 +67,16 @@ final class FeatureRegistry: ObservableObject {
     /// FeatureCatalog at boot; a compiled-out feature can never be enabled,
     /// started, or shown as available. Kept as a settable property (not a
     /// FeatureCatalog reference) so this core type stays catalog-agnostic.
-    var compiledFeatures: Set<AppFeature> = Set(AppFeature.allCases) {
+    ///
+    /// WARNING: until Shell's boot assigns it, this reads as EVERY feature —
+    /// Core cannot know the real set (the `#if FEATURE_*` checks live only in
+    /// Shell/FeatureCatalog). Anything that never runs that boot — XCTest /
+    /// swift-testing suites, the `*-contract-lab` executables, previews — sees
+    /// a compiled-out feature as compiled in, including on `.shared`. Code
+    /// under test that branches on this set must be handed the real one:
+    /// construct the registry with `init(defaults:compiledFeatures:)`, or
+    /// assign this property before registering modules (the didSet refreshes).
+    var compiledFeatures: Set<AppFeature> {
         didSet { refresh() }
     }
 

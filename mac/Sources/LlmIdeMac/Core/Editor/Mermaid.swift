@@ -14,7 +14,7 @@ import Foundation
 /// bundles its own DOMPurify, and that is what makes `securityLevel: 'strict'`
 /// actually sanitise the SVG the preview injects with innerHTML — so a script
 /// that is not byte-for-byte the reviewed release is never handed to a web
-/// view, wherever it came from (download, disk, or a stale dev bundle).
+/// view, wherever it came from (the download, or a file edited on disk).
 enum Mermaid {
     /// The pinned mermaid release. Bumping it means bumping `sha256` and
     /// `byteCount` together: `Scripts/mermaid-pin.mjs <version>` prints all
@@ -47,39 +47,23 @@ enum Mermaid {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
     }
 
-    /// Where a script may be found, in order: a dev build's leftover bundled
-    /// copy first (so nothing breaks for a checkout mid-migration), then the
-    /// user-installed copy.
-    static func candidateURLs() -> [URL] {
-        bundledCandidateURLs() + [MermaidInstaller.makeDefault().scriptURL]
-    }
+    /// Where the user-installed copy lives. Resolved ONCE per process: the
+    /// path cannot change while the app runs, and resolving it is not free —
+    /// `MermaidInstaller.makeDefault()` goes through
+    /// `AppIdentity.applicationSupportRoot()`, which stats (and may create)
+    /// the support folder. Before this was cached, every render of a fenced
+    /// document with mermaid NOT installed (a cache miss — misses are not
+    /// cached, see `MermaidScriptCache`) repeated that file-system work.
+    static let installedScriptURL: URL = MermaidInstaller.makeDefault().scriptURL
 
-    /// The pre-on-demand lookup, kept only for dev builds that still have the
-    /// file beside them (an old `.build` resource bundle). A release `.app` no
-    /// longer contains it — `Scripts/build.sh` excludes it.
+    /// Where a script may be found: only the user-installed copy.
     ///
-    /// Never `Bundle.module` here: its generated accessor calls fatalError when
-    /// the bundle is not beside the .app or at the absolute `.build` path baked
-    /// in at compile time — i.e. on every machine but the one that built the
-    /// app. `Bundle(url:)` returns nil instead.
-    private static func bundledCandidateURLs() -> [URL] {
-        var candidates = [
-            Bundle.main.url(forResource: "mermaid.min", withExtension: "js", subdirectory: "mermaid"),
-            Bundle.main.url(forResource: "mermaid.min", withExtension: "js"),
-        ]
-        let owning = Bundle(for: MermaidBundleLocator.self)
-        var roots: [URL] = []
-        for base in [owning.bundleURL, Bundle.main.bundleURL] {
-            roots.append(base)
-            roots.append(base.deletingLastPathComponent())
-        }
-        if let resourceURL = owning.resourceURL { roots.append(resourceURL) }
-        if let resourceURL = Bundle.main.resourceURL { roots.append(resourceURL) }
-        for root in roots {
-            let bundle = Bundle(url: root.appendingPathComponent("LlmIdeMac_LlmIdeMacLib.bundle"))
-            candidates.append(bundle?.url(forResource: "mermaid.min", withExtension: "js", subdirectory: "mermaid"))
-        }
-        return candidates.compactMap { $0 }
+    /// The old in-bundle `mermaid/mermaid.min.js` lookups are gone: the app no
+    /// longer ships the file, and a stale `.build` resource bundle that still
+    /// had it made `MermaidRuntime.remove()` look inert in dev builds (the
+    /// loader went on serving the leftover copy).
+    static func candidateURLs() -> [URL] {
+        [installedScriptURL]
     }
 }
 
@@ -129,7 +113,3 @@ final class MermaidScriptCache: @unchecked Sendable {
         lock.unlock()
     }
 }
-
-/// Anchor class for `Bundle(for:)` — resolves to whichever bundle this module
-/// was linked into (the app, or a test bundle).
-private final class MermaidBundleLocator {}

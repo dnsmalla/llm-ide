@@ -192,4 +192,13 @@ final class SearchEngineTests: XCTestCase {
         try "hello".write(to: small, atomically: true, encoding: .utf8)
         XCTAssertEqual(SearchEngine.fileText(at: small), "hello")
     }
+
+    /// The editor can open (and save) any file Search can match in, so a
+    /// replace never produces a file the editor then refuses. Lives here, not
+    /// in TextFileWriterTests, because it names `SearchEngine` (compiled out
+    /// with `file_explorer`) — TextFileWriter itself is Core and its suite
+    /// must keep running in reduced builds.
+    func testEditorCapSitsAboveSearchPerFileLimit() {
+        XCTAssertGreaterThan(TextFileWriter.maxEditableBytes, SearchEngine.maxFileBytes)
+    }
 }

@@ -71,9 +71,9 @@ if explorerIncluded {
     // ruling: option b) — they're navigated to via the Explorer's panel-header
     // switcher (PanelSectionTabs) and make little sense without a file tree.
     libExcludes.append(contentsOf: ["Features/Explorer", "Features/Search", "Features/SourceControl"])
-    // Tests naming an Explorer/Search/SourceControl type. TextFileWriter
-    // itself is Core, but TextFileWriterTests pins its size cap against
-    // SearchEngine.maxFileBytes, so the whole file goes with Search.
+    // Tests naming an Explorer/Search/SourceControl type. (TextFileWriterTests
+    // is NOT here: its one SearchEngine assertion moved to SearchEngineTests,
+    // so the Core writer keeps its coverage in reduced builds.)
     testExcludes.append(contentsOf: [
         "ExplorerClipboardTests.swift",
         "ExplorerDragPayloadTests.swift",
@@ -86,7 +86,6 @@ if explorerIncluded {
         "SearchReplaceTests.swift",
         "SearchStreamTests.swift",
         "SearchTruncationTests.swift",
-        "TextFileWriterTests.swift",
     ])
 }
 if ganttIncluded {

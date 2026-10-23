@@ -220,6 +220,10 @@ do {
     expect(MermaidConformance.installedScriptRelativePath()
                == "runtime/mermaid/\(MermaidConformance.pinnedVersion)/mermaid.min.js",
            "installed under runtime/mermaid/<version>/mermaid.min.js")
+    expect(MermaidConformance.chunkedCollectorKeepsBytesProgressAndCap(),
+           "the download is read in chunks: every byte kept, progress per chunk, size cap enforced")
+    expect(MermaidConformance.onlyInstalledCopyIsACandidate(),
+           "the installed copy is the loader's only candidate (no stale in-bundle lookups)")
     expect(MermaidConformance.pinnedDownloadURL
                == "https://cdn.jsdelivr.net/npm/mermaid@\(MermaidConformance.pinnedVersion)/dist/mermaid.min.js",
            "the download URL names the exact pinned version, never a range")

@@ -97,10 +97,10 @@ struct TextFileWriterTests {
         #expect(perms?.intValue == 0o755)
     }
 
-    @Test("the editor cap sits above Search's per-file scan limit")
-    func editorCapAboveSearchCap() {
-        #expect(TextFileWriter.maxEditableBytes > SearchEngine.maxFileBytes)
-    }
+    // The "editor cap sits above Search's per-file scan limit" assertion lives
+    // in SearchEngineTests: it names `SearchEngine`, which is compiled out with
+    // `file_explorer`, and keeping it here forced this whole Core-writer suite
+    // out of reduced builds with it.
 }
 
 /// The confirmations added for LLM-source removal and source Disconnect.
