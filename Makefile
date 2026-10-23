@@ -110,7 +110,7 @@ regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-m
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
 # intra-target boundary enforcement, so this is a textual check over the
 # symbol declarations/references in mac/Sources/LlmIdeMac. Runs first in
-# `regression` (~16s) because failing fast beats failing after four Swift
+# `regression` (~30s) because failing fast beats failing after four Swift
 # builds.
 feature-gates:
 	cd mac && ./Scripts/feature-boundaries.sh
