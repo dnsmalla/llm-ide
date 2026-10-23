@@ -209,7 +209,10 @@ jobs:
 
       - name: Upload swift test log
         if: always()
-        uses: actions/upload-artifact@v4
+        # v6+ runs on Node 24 (v4 targeted the deprecated Node 20 runtime).
+        # Artifact semantics are unchanged since v4: immutable, one upload
+        # per name per run — this job uploads `swift-test-log` exactly once.
+        uses: actions/upload-artifact@v7
         with:
           name: swift-test-log
           path: |

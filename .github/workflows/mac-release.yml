@@ -141,6 +141,43 @@ jobs:
           LLMIDE_NOTARY_PROFILE: ${{ env.NOTARY_PROFILE }}
         run: Scripts/release.sh
 
+      # build.sh strips the shipped binary and writes the debug symbols to
+      # LlmIdeMac.app.dSYM BESIDE the bundle (not inside it, so it is neither
+      # signed nor shipped in the DMG). Without this step the dSYM dies with
+      # the runner, and a crash report from this exact build can never be
+      # symbolicated — a later rebuild (other runner image, toolchain) is not
+      # guaranteed to reproduce the binary's UUID. Kept as a workflow
+      # artifact, NOT a release asset:
+      # symbols are for us, not for users downloading the DMG.
+      - name: Zip dSYM
+        id: dsym
+        run: |
+          if [ ! -d LlmIdeMac.app.dSYM ]; then
+            echo "::warning::LlmIdeMac.app.dSYM not found — crash reports from this release will not be symbolicatable"
+            exit 0
+          fi
+          # Tag + CFBundleVersion in the name so the zip maps back to the
+          # exact release without opening it. ditto (not zip) keeps the
+          # bundle's structure and metadata the way Apple tools expect.
+          zip_name="LlmIdeMac_${GITHUB_REF_NAME}_b${LLMIDE_BUILD_NUMBER}.app.dSYM.zip"
+          ditto -c -k --sequesterRsrc --keepParent LlmIdeMac.app.dSYM "$zip_name"
+          echo "zip=mac/$zip_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload dSYM as a workflow artifact
+        if: steps.dsym.outputs.zip != ''
+        uses: actions/upload-artifact@v7
+        with:
+          # `uses:` steps ignore `defaults.run.working-directory`, hence the
+          # repo-relative path from the step output. `archive: false` uploads
+          # the zip as-is (no zip-in-a-zip); the artifact is then named after
+          # the file, which already carries the tag and build number.
+          path: ${{ steps.dsym.outputs.zip }}
+          archive: false
+          if-no-files-found: error
+          # 90 days is the maximum unless raised in the repo settings; keep a
+          # copy elsewhere if a release must stay symbolicatable for longer.
+          retention-days: 90
+
       - name: Clean up ephemeral keychain
         if: always()
         run: security delete-keychain "$KEYCHAIN_NAME" || true
