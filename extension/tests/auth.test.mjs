@@ -13,18 +13,10 @@ process.env.NODE_ENV = 'test';
 const { signAccessToken, verifyAccessToken, hashRefreshToken, newRefreshToken } =
   await import('../server/jwt.mjs');
 
-// Patch isJtiRevoked so auth.mjs doesn't open the SQLite DB in unit tests.
-// All tests run in-process; we restore after the module is loaded.
-import { register } from 'node:module';
-// Simple mock: patch the db module before auth.mjs imports it.
-// We use a global flag to simulate revocation in one test.
-let _mockRevoked = false;
 const { authenticate, isPublicPath } = await import('../server/auth.mjs');
-// Override the revocation check at the module level for tests.
-// authenticate() calls isJtiRevoked from kb/db; we patch via a test-only
-// wrapper by replacing the real DB call in the auth module's closure
-// at import time isn't possible without a loader. Instead we test the
-// JTI path via verifyAccessToken which is fully unit-testable.
+// authenticate() calls isJtiRevoked from kb/db, and replacing that call inside
+// the auth module's closure is not possible without a module loader. The JTI
+// path is tested via verifyAccessToken instead, which is fully unit-testable.
 
 function fakeReq(headers = {}, url = '/kb/stats', method = 'POST') {
   return { headers, url, method };
@@ -79,7 +71,6 @@ test('verifyAccessToken rejects alg=none impersonation', () => {
 
 test('verifyAccessToken rejects expired tokens', () => {
   // Build a token with exp in the past by manipulating the payload directly.
-  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   // Use a valid token then swap its payload for one with exp = 1 (epoch start).
   const t = signAccessToken({ userId: 'u-exp' });
   const parts = t.split('.');
@@ -92,7 +83,6 @@ test('verifyAccessToken rejects expired tokens', () => {
 });
 
 test('verifyAccessToken rejects tokens with future iat (clock skew > 10s)', () => {
-  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const t = signAccessToken({ userId: 'u-future' });
   const parts = t.split('.');
   const orig = JSON.parse(Buffer.from(parts[1], 'base64url').toString());
@@ -107,7 +97,6 @@ test('verifyAccessToken rejects refresh-typed tokens (opaque strings)', () => {
 });
 
 test('verifyAccessToken rejects wrong issuer', () => {
-  const header = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url');
   const t = signAccessToken({ userId: 'u1' });
   const parts = t.split('.');
   const orig = JSON.parse(Buffer.from(parts[1], 'base64url').toString());

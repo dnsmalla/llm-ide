@@ -146,7 +146,7 @@ test('H-2: guardrail catches a GitHub token split across a line break', () => {
 
 // ── Per-user prefs: server-side validation ───────────────────────────
 
-import { getUserPrefs, setUserPrefs, getDb, closeDb } from '../kb/db.mjs';
+import { getUserPrefs, setUserPrefs, getDb } from '../kb/db.mjs';
 
 test('prefs: setUserPrefs only accepts allow-listed keys + coerces types', () => {
   // Use a deterministic test user; the test runner shares db.mjs state

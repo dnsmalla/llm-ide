@@ -5,9 +5,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import crypto from 'node:crypto';
 import Database from 'better-sqlite3';
-import os from 'node:os';
-import path from 'node:path';
-import fs from 'node:fs';
 
 process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);

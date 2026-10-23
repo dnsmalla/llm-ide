@@ -418,7 +418,7 @@ test('attachments: fenced as data with caps 30 files / 80k per file / 200k total
   const many = [];
   for (let i = 0; i < 32; i++) many.push({ path: `/Users/someone/proj/f${i}.txt`, content: 'x'.repeat(1000) });
   many.push({ path: '/Users/someone/proj/big.txt', content: 'y'.repeat(90_000) });
-  const { prompt, meta } = buildEngineOptions(
+  const { prompt } = buildEngineOptions(
     { userId: 'u', mode: 'review', attachments: many, agentContext: {} },
     { readSkill: () => null, roots: () => [] },
   );

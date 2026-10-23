@@ -2,8 +2,6 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
-import fs from 'node:fs';
-import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { buildAnthropicCliArgs } from '../providers/providers.mjs';
 

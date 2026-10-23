@@ -24,7 +24,8 @@
 
 import { randomUUID } from 'node:crypto';
 // constants.mjs, not engine.mjs: a route must not load the chat engine for one string.
-import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/constants.mjs';
+// MAX_LOOP_MESSAGE_CHARS is here too, so validation runs before the Loop engine import.
+import { AGENT_SDK_PROVIDER, MAX_LOOP_MESSAGE_CHARS } from '../llm_agent/sdk/constants.mjs';
 import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { getDb, recordToolEvents } from '../kb/db.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
@@ -102,20 +103,6 @@ function loadLoopEngine() {
 
 export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}) {
   if (!(req.method === 'POST' && (req.url || '').split('?')[0] === '/kb/loop/agent-run')) return false;
-  let engine;
-  try {
-    engine = await loadLoopEngine();
-  } catch (err) {
-    // Same answer as a run that failed inside the engine (see the catch below).
-    process.stderr.write(`[loop-agent] engine import failed: ${err?.message || err}\n`);
-    sendJSON(res, 502, {
-      error: { code: 'INTERNAL_ERROR', message: 'The Loop agent run failed. Please try again.' },
-    });
-    return true;
-  }
-  const { validateLoopExtraRoots, MAX_LOOP_MESSAGE_CHARS } = engine;
-  const runAgent = deps.runAgent ?? engine.runLoopAgent;
-  const validateRoot = deps.validateRoot ?? engine.validateLoopRepoRoot;
 
   const body = parseJSON(await readBody(req, 2 * 1024 * 1024));
   if (!body || typeof body !== 'object') return validationError(res, 'Body must be a JSON object');
@@ -140,9 +127,27 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   const provider = body.provider ? body.provider.trim() || undefined : undefined;
   const meteredProvider = provider || AGENT_SDK_PROVIDER;
 
+  // The engine is imported only now: everything above is pure validation, so
+  // a malformed request is answered without pulling in the Agent SDK. The
+  // root checks below are engine code (the allow-list and worktree rules live
+  // with the security rules they protect), so this is the first real use.
+  let engine;
+  try {
+    engine = await loadLoopEngine();
+  } catch (err) {
+    // Same answer as a run that failed inside the engine (see the catch below).
+    process.stderr.write(`[loop-agent] engine import failed: ${err?.message || err}\n`);
+    sendJSON(res, 502, {
+      error: { code: 'INTERNAL_ERROR', message: 'The Loop agent run failed. Please try again.' },
+    });
+    return true;
+  }
+  const runAgent = deps.runAgent ?? engine.runLoopAgent;
+  const validateRoot = deps.validateRoot ?? engine.validateLoopRepoRoot;
+
   const rootCheck = validateRoot(userId, body.repoRoot);
   if (!rootCheck.ok) return validationError(res, rootCheck.reason, 'REPO_ROOT_NOT_ALLOWED');
-  const extraCheck = validateLoopExtraRoots(body.extraRoots, rootCheck.root);
+  const extraCheck = engine.validateLoopExtraRoots(body.extraRoots, rootCheck.root);
   if (!extraCheck.ok) return validationError(res, extraCheck.reason, 'EXTRA_ROOT_NOT_ALLOWED');
 
   // One controller for both ways a run ends early: the timeout, and the

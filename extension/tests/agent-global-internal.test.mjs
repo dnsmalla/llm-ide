@@ -253,14 +253,8 @@ test('e2e: regression guard — global never sees app-specific context', async (
   // Use a capturing fake claude so we can inspect what prompt global
   // received vs what internal received.
   const promptsSeen = [];
-  const fakeClaude = scriptedClaude([
-    (prompt) => {
-      // Will never be called as a function in this minimal e2e; the
-      // simpler closure form is below.
-    },
-  ]);
-  // Use a different approach: introspect by capturing each call's
-  // first argument.
+  // scriptedClaude ignores its arguments, so capture each call's first
+  // argument (the prompt) with a hand-rolled fake instead.
   const capturingClaude = async (prompt) => {
     promptsSeen.push(prompt);
     if (promptsSeen.length === 1) {

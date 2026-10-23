@@ -53,6 +53,7 @@ import { withToolOutputCap } from './tool-output-cap.mjs';
 import { createToolAccounting } from './tool-accounting.mjs';
 import { createProgressGuard } from './loop-progress.mjs';
 import { LOOP_BASE_PROMPT, compactEnvironmentBlock, loopCustomPromptEnabled } from './compact-system-prompt.mjs';
+import { MAX_LOOP_MESSAGE_CHARS } from './constants.mjs';
 
 // The only built-ins a Loop run may see. Everything else — Bash, WebFetch,
 // WebSearch, Agent/Task, AskUserQuestion, NotebookEdit, Skill, … — is absent
@@ -78,9 +79,9 @@ const LOOP_AGENT_DISALLOWED = Object.freeze([
 // A Loop step is one focused edit, not a chat — but a repair across a few
 // files legitimately takes a few dozen tool calls.
 const MAX_TURNS = 60;
-// The composed Loop message (goal + failure output + instructions) is small;
-// this only bounds a pathological one.
-export const MAX_LOOP_MESSAGE_CHARS = 200_000;
+// The composed Loop message's cap lives in constants.mjs (the route validates
+// against it without loading this module); re-exported for existing importers.
+export { MAX_LOOP_MESSAGE_CHARS };
 
 // Worktree parents the Mac's LoopWorktreeManager creates (sibling layout, and
 // the split project layout's `<project>/system/loop-worktrees`).

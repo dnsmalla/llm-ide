@@ -231,7 +231,9 @@ test('rejects zip with path-traversal entries', { skip: skipReason || false }, a
     const r1 = spawnSync('zip', ['-r', zipPath, 'safe'], { cwd: stage });
     if (r1.status !== 0) throw new Error('zip phase 1 failed');
     // zip from outside the staging dir with a relative escape
-    const r2 = spawnSync('zip', ['-g', zipPath, '../sneaky.txt'], { cwd: stage });
+    // Exit status not checked: the listing below decides whether a
+    // traversing entry was actually written.
+    spawnSync('zip', ['-g', zipPath, '../sneaky.txt'], { cwd: stage });
     // `zip` strips leading ../ by default, so this test may not produce
     // an actually-traversing entry. If it didn't, skip the assertion.
     const listing = spawnSync('unzip', ['-Z1', zipPath], { encoding: 'utf8' }).stdout || '';

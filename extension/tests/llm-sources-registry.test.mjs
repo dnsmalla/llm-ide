@@ -313,7 +313,7 @@ test('discovery readers skip an oversize manifest and cap entry count', () => {
   assert.equal(listDiscoveryHooks(many).length, 1000, 'listing capped at 1000 entries');
 });
 
-import { normalizeGitUrl, addSource, removeSource, updateSource, syncBuiltin, __setGitRunner } from '../llm-sources/registry.mjs';
+import { normalizeGitUrl, addSource, removeSource, __setGitRunner } from '../llm-sources/registry.mjs';
 
 test('normalizeGitUrl rejects unsafe schemes and localhost, accepts https', () => {
   assert.ok(normalizeGitUrl('https://github.com/o/r.git').ok);

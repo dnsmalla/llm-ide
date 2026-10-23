@@ -68,7 +68,8 @@ test('subsequent creates do not change active', () => {
 test('setActiveAgentPersona switches active id', () => {
   reset();
   const u = provision();
-  const first  = db.createAgentPersona(u.id, { name: 'First' });
+  // Created first so the switch picks between two personas, not the only one.
+  db.createAgentPersona(u.id, { name: 'First' });
   const second = db.createAgentPersona(u.id, { name: 'Second' });
   db.setActiveAgentPersona(u.id, second.id);
   assert.equal(db.listAgentPersonas(u.id).active, second.id);

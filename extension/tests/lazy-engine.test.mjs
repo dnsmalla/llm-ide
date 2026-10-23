@@ -8,8 +8,10 @@
 //     (a transient failure must not break chat until restart);
 //   - an import failure reaches the client through the existing turn error
 //     path (terminal ENGINE_ERROR event), not as a crashed request;
-//   - the constants a route needs (AGENT_SDK_PROVIDER, RESERVED_MCP_NAME) are
-//     the same values the engine uses.
+//   - the constants a route needs (AGENT_SDK_PROVIDER, RESERVED_MCP_NAME,
+//     MAX_LOOP_MESSAGE_CHARS) are the same values the engine uses;
+//   - the Loop route rejects a malformed request before it imports the Loop
+//     engine (llm_agent/sdk/loop-agent.mjs), with the same 400 as before.
 //
 // Uses an in-process module-load hook (registerHooks, Node >= 22.15), like
 // tests/feature-routes.test.mjs; each test file runs in its own process.
@@ -57,7 +59,7 @@ await import('../server/ai-routes.mjs');
 await import('../server/auth-routes.mjs');
 // Loaded at boot whenever auto_tasks is enabled (routes/feature-routes.mjs);
 // its Loop engine import is lazy for the same reason.
-await import('../routes/loop-agent.mjs');
+const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
 const { listSdkModels, __clearSdkModelsCacheForTest } = await import('../llm_agent/sdk/models.mjs');
 await import('../llm_agent/sdk/transcripts.mjs');
 const constants = await import('../llm_agent/sdk/constants.mjs');
@@ -69,8 +71,10 @@ process.on('exit', () => {
   fs.rmSync(tmpDir, { recursive: true, force: true });
 });
 
-function makeReq({ method, url, body, user }) {
-  const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
+function makeReq({ method, url, body, rawBody, user }) {
+  const chunks = rawBody != null
+    ? [Buffer.from(rawBody)]
+    : (body == null ? [] : [Buffer.from(JSON.stringify(body))]);
   const req = {
     method, url, user, headers: {},
     on(event, cb) {
@@ -102,6 +106,42 @@ test('boot path: server.mjs static imports (+ the Loop route) load neither engin
   assert.equal(loadedUrls.some((u) => u.endsWith('/llm_agent/sdk/loop-agent.mjs')), false, 'Loop engine loaded with its route');
   assert.equal(engineLoaded(), false, 'llm_agent/sdk/engine.mjs loaded on the boot path');
   assert.equal(sdkLoaded(), false, '@anthropic-ai/claude-agent-sdk loaded on the boot path');
+});
+
+const loopEngineLoaded = () => loadedUrls.some((u) => u.endsWith('/llm_agent/sdk/loop-agent.mjs'));
+
+// A malformed Loop request costs no engine import: validation needs only pure
+// constants (constants.mjs), so a client hammering the route with bad bodies
+// cannot pull the Agent SDK into a server that never ran a Loop step. The
+// expected bodies are the ones the route answered before the import moved —
+// the wire contract the Mac decodes must not change with the load order.
+test('loop route: a malformed request is rejected with 400 without importing the Loop engine', { skip: !hasLoadHooks }, async () => {
+  const validation = (message) => ({ error: { code: 'VALIDATION_FAILED', message } });
+  const max = constants.MAX_LOOP_MESSAGE_CHARS;
+  const cases = [
+    [{ rawBody: 'not json' }, validation('Body must be a JSON object')],
+    [{ body: 'a string' }, validation('Body must be a JSON object')],
+    [{ body: { repoRoot: '/tmp' } }, validation('message is required')],
+    [{ body: { message: '   ' } }, validation('message is required')],
+    [{ body: { message: 'x'.repeat(max + 1) } }, validation(`message exceeds ${max} characters`)],
+    [{ body: { message: 'x', skills: 'a' } }, validation('skills must be an array of ids')],
+    [{ body: { message: 'x', skills: ['a', 'b', 'c', 'd', 'e', 'f'] } }, validation('skills must be at most 5 non-empty id strings')],
+    [{ body: { message: 'x', timeoutMs: -5 } }, validation('timeoutMs must be a positive number of milliseconds')],
+    [{ body: { message: 'x', provider: 'p'.repeat(129) } }, validation('provider must be a string of at most 128 characters')],
+  ];
+  for (const [input, expected] of cases) {
+    const res = makeRes();
+    const handled = await handleLoopAgentRoutes(
+      makeReq({ method: 'POST', url: '/kb/loop/agent-run', ...input }), res, { userId: 'u-lazy' },
+      // No deps: a validation failure must not reach the runAgent/validateRoot seam.
+    );
+    assert.equal(handled, true);
+    assert.equal(res.statusCode, 400, JSON.stringify(input).slice(0, 120));
+    assert.deepEqual(JSON.parse(res._body), expected);
+  }
+  assert.equal(max, 200_000, 'the Loop message cap is unchanged');
+  assert.equal(loopEngineLoaded(), false, 'a rejected request imported the Loop engine');
+  assert.equal(sdkLoaded(), false, 'a rejected request imported the Agent SDK');
 });
 
 test('models: an injected queryFn lists models without loading the SDK', { skip: !hasLoadHooks }, async () => {
@@ -184,6 +224,9 @@ test('loader: the real import loads the engine and the SDK; constants match the 
   assert.equal(engine.AGENT_SDK_PROVIDER, constants.AGENT_SDK_PROVIDER);
   assert.equal(constants.AGENT_SDK_PROVIDER, 'anthropic');
   assert.equal(constants.RESERVED_MCP_NAME, 'llmide');
+  // The Loop engine re-exports the constant its route validates with: one definition.
+  const loopEngine = await import('../llm_agent/sdk/loop-agent.mjs');
+  assert.equal(loopEngine.MAX_LOOP_MESSAGE_CHARS, constants.MAX_LOOP_MESSAGE_CHARS);
   const auth = await import('../llm_agent/sdk/auth.mjs');
   assert.equal(engine.resolveAnthropicKey, auth.resolveAnthropicKey, 'engine re-exports the one auth ladder');
   assert.equal(engine.agentSdkHomeFor, auth.agentSdkHomeFor);

@@ -26,7 +26,6 @@ const okResponse = {
 };
 const overloaded = { status: 529, body: { error: { type: 'overloaded' } } };
 const unavailable = { status: 503, body: { error: { type: 'unavailable' } } };
-const unauthorized = { status: 401, body: { error: { type: 'auth' } } };
 
 test('runClaude: 529 then 200 → returns content (one retry)', async () => {
   globalThis.fetch = mockFetchSequence([overloaded, okResponse]);
