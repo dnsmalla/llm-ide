@@ -1,5 +1,5 @@
 {
-  "sdkVersion": "0.3.292",
+  "sdkVersion": "0.3.301",
   "items": {
     "messages.SDKAPIRetryMessage": {
       "status": "needs-human",
