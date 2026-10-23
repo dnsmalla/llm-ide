@@ -18,6 +18,8 @@ cd mac
 
 This compiles via Swift Package Manager, packages an `.app` bundle, and opens it. The app expects the server at `127.0.0.1:3456`.
 
+The bundled executable is stripped. Its debug symbols are written next to the bundle as `mac/LlmIdeMac.app.dSYM`. Run `LLMIDE_SKIP_STRIP=1 ./build_app.sh` to keep them in the executable for debugging.
+
 For a release DMG:
 
 ```bash

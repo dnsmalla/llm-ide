@@ -106,6 +106,10 @@ That produces `mac/LlmIdeMac_v0.2.0.dmg`. The DMG contains the .app
 with Sparkle wired in via Info.plist — clients of this DMG will
 auto-update on the next release.
 
+It also leaves `mac/LlmIdeMac.app.dSYM`, the debug symbols of the stripped
+executable. The dSYM is not in the DMG, so archive it with the release: it is
+what symbolicates crash reports from this build.
+
 **CI alternative:** pushing a `mac-vX.Y.Z` tag (matching `mac/VERSION`)
 runs this same build → sign → notarize → DMG pipeline in GitHub Actions
 and attaches the DMG to a GitHub Release — see

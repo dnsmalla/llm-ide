@@ -4,6 +4,10 @@
 # Standalone — does not sign, notarize, or package.
 # Usage: ./Scripts/build.sh [--clean-all]
 #   --clean-all: Remove all build caches and rebuild from scratch
+# Env:
+#   LLMIDE_SKIP_STRIP=1  keep the full symbol table in the bundled executable
+#                        (debugging a release build). The dSYM is written
+#                        either way, beside the bundle as <app>.app.dSYM.
 # ============================================
 set -euo pipefail
 
@@ -80,8 +84,16 @@ else
   echo -e "${BLUE}[build]${NC} LLMIDE_SKIP_KILL=1 — leaving any running $APP_NAME alone"
 fi
 
+# The dSYM sits BESIDE the bundle, never inside it: inside, it would be sealed
+# into the signature, shipped in the DMG (it is ~5x the stripped binary), and
+# installed into /Applications. One name per bundle — `<app>.app.dSYM`, Xcode's
+# convention — so a staged rebuild's dSYM lands in its own staging dir.
+DSYM_DIR="$APP_DIR.dSYM"
+
 echo -e "${BLUE}[build]${NC} cleaning old bundle at $APP_DIR..."
-rm -rf "$APP_DIR"
+# The old dSYM goes too: if this build fails half-way, a leftover dSYM from the
+# PREVIOUS binary would sit next to whatever is there and silently mis-match.
+rm -rf "$APP_DIR" "$DSYM_DIR"
 
 echo -e "${BLUE}[build]${NC} creating bundle skeleton..."
 mkdir -p "$APP_DIR/Contents/MacOS"
@@ -371,6 +383,52 @@ else
   echo -e "${BLUE}[build]${NC} Sparkle.framework not found in .build — auto-update will be inert."
 fi
 
+# Debug symbols out, then strip — BOTH before signing: strip rewrites the
+# Mach-O, which invalidates any signature already on it, and sign.sh below
+# (plus release.sh's own sign.sh pass) must seal the final bytes.
+#
+# Why strip: a release binary is ~63% symbol table (measured 72.7 MB → 27.7 MB,
+# almost all of it Swift's long mangled LOCAL symbol names — `strip -S` alone,
+# debug stabs only, saves just ~7 MB). Nothing at runtime reads those names:
+# Swift reflection/Mirror and protocol conformances use the __swift5_*
+# metadata sections, the ObjC runtime its own sections, and dyld only the
+# EXPORTED symbols, which `-x` keeps. No code here dlsym()s into itself.
+#
+# What it costs, and why that is acceptable: an in-process backtrace
+# (NSException.callStackSymbols, used by the uncaught-exception crash file —
+# installCrashHandlers in Shell/LlmIdeMacApp.swift) names only the nearest
+# EXPORTED symbol for our own frames. Signal crash files carry no stack at all,
+# and macOS's own crash report (~/Library/Logs/DiagnosticReports/*.ips) lists
+# every binary image with its UUID and load address, which is exactly what the
+# dSYM symbolicates (`atos -o <app>.app.dSYM/Contents/Resources/DWARF/LlmIdeMac
+# -l <load address> <frame address>`).
+#
+# dsymutil reads the UNSTRIPPED binary in the scratch dir (its debug map points
+# at the .o files there); strip and install_name_tool keep LC_UUID, so the
+# stripped copy and the dSYM still match. If dsymutil fails we do NOT strip: a
+# binary whose symbols exist nowhere is worse than a big one.
+echo -e "${BLUE}[build]${NC} writing debug symbols to $DSYM_DIR..."
+if xcrun dsymutil "$BUILT_BIN" -o "$DSYM_DIR"; then
+  DSYM_OK=1
+else
+  DSYM_OK=0
+  rm -rf "$DSYM_DIR"
+  echo -e "${YELLOW}[build]${NC} WARN: dsymutil failed — leaving the executable UNSTRIPPED so crashes stay symbolicatable" >&2
+fi
+
+APP_BIN="$APP_DIR/Contents/MacOS/$APP_NAME"
+if [ "${LLMIDE_SKIP_STRIP:-0}" = "1" ]; then
+  echo -e "${BLUE}[build]${NC} LLMIDE_SKIP_STRIP=1 — executable keeps its full symbol table"
+elif [ "$DSYM_OK" = "1" ]; then
+  # Only OUR executable. Sparkle's framework, Autoupdate, Updater.app and XPC
+  # services arrive pre-built from a third party; stripping them is not ours to
+  # do and buys nothing (they are already release-stripped).
+  # -S: debug (stabs) symbols. -x: local symbols; global/exported ones stay.
+  bin_bytes_before=$(stat -f %z "$APP_BIN")
+  xcrun strip -S -x "$APP_BIN"
+  echo -e "${BLUE}[build]${NC} stripped executable: $bin_bytes_before → $(stat -f %z "$APP_BIN") bytes"
+fi
+
 # Always leave the bundle signed. An UNSIGNED app has no code identity, so
 # macOS can't match it against the ACL on our keychain items — reads of the
 # saved refresh token get denied and the user is bounced back to the login
@@ -379,3 +437,8 @@ fi
 "$SCRIPT_DIR/sign.sh"
 
 echo -e "${GREEN}[build]${NC} ok — $APP_DIR"
+# An `if`, not `[ … ] && echo`: as the script's last command, a false test
+# would become build.sh's exit status and fail every caller under set -e.
+if [ -d "$DSYM_DIR" ]; then
+  echo -e "${GREEN}[build]${NC} dSYM — $DSYM_DIR"
+fi

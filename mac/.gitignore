@@ -8,6 +8,8 @@ LlmIdeMac.app/
 LlmIdeMac.app.bak/
 *.dmg
 dmg_temp/
+# Debug symbols Scripts/build.sh writes beside the bundle (LlmIdeMac.app.dSYM)
+*.dSYM/
 
 # Local-only / runtime
 *.log

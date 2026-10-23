@@ -38,6 +38,13 @@ cd mac
 ./build_app.sh --dmg      # also produce the DMG
 ```
 
+The build strips the app's executable before signing. Its debug symbols are
+written beside the bundle as `mac/LlmIdeMac.app.dSYM`, which is not in the DMG.
+Archive that dSYM with the release: without it, the shipped build's crash
+reports cannot be symbolicated. Set `LLMIDE_SKIP_STRIP=1` to keep the symbols
+in the executable instead. See
+[mac/README.md → Stripped executable and debug symbols](https://github.com/dnsmalla/llm-ide/blob/main/mac/README.md#stripped-executable-and-debug-symbols).
+
 Distribution-grade signing and notarisation require a Developer ID — see
 [ship-production-build](ship-production-build.md). Attach the DMG to the
 GitHub Release manually:

@@ -383,6 +383,30 @@ The default `build_app.sh` produces an **ad-hoc signed** build, which Gatekeeper
 4. **Auto-update:** wire [Sparkle](https://sparkle-project.org/) — the DMG is already UDZO format and Sparkle-compatible
 5. **Skip the Mac App Store** — Accessibility-based caption scraping conflicts with MAS sandbox requirements
 
+### Stripped executable and debug symbols
+
+`Scripts/build.sh` (and so `build_app.sh`, `Scripts/release.sh` and Apply & Rebuild) strips the app's own executable with `strip -S -x` before signing. About 60% of a release binary is Swift's local symbol names, which nothing reads at runtime. Sparkle's pre-built helpers are left as they are.
+
+The debug symbols are first written with `dsymutil` to a dSYM **beside** the bundle, never inside it:
+
+| Build | dSYM |
+|---|---|
+| `build_app.sh`, `Scripts/build.sh`, `Scripts/release.sh` | `mac/LlmIdeMac.app.dSYM` |
+| `LLMIDE_APP_DIR=<dir>/X.app` | `<dir>/X.app.dSYM` |
+| Apply & Rebuild | `~/Library/Application Support/llm-ide/rebuild-staging/LlmIdeMac.app.dSYM` (the swap installs only the `.app`; the next rebuild replaces it) |
+
+Keep the dSYM of every build you hand out: it is the only way to put names on that build's crash frames. macOS writes its crash reports to `~/Library/Logs/DiagnosticReports/*.ips`, which list each image's UUID and load address. To symbolicate a frame:
+
+```bash
+dwarfdump --uuid LlmIdeMac.app.dSYM    # must match the crash report's LlmIdeMac UUID
+atos -arch arm64 -o LlmIdeMac.app.dSYM/Contents/Resources/DWARF/LlmIdeMac \
+  -l <LlmIdeMac load address> <frame address>
+```
+
+The app's own crash banner logs (`Application Support/llm-ide/crashes/`) name only exported symbols for the app's frames once it is stripped.
+
+To debug a release build with the full symbol table left in the executable, run `LLMIDE_SKIP_STRIP=1 ./build_app.sh`. The dSYM is written either way. If `dsymutil` fails, `build.sh` warns and leaves the executable unstripped, because a binary whose symbols are saved nowhere cannot be symbolicated.
+
 ***
 
 ## Tech Stack
