@@ -13,8 +13,14 @@ struct ComposerProviderMenuTests {
         s.selectedProvider = provider
         s.selectedModel = model
         s.configuredSecretKeys = keys
+        // Claude's models come ONLY from the live list (no hardcoded ids — see
+        // AICliTool.models), so without an entry here the Claude section is
+        // empty and filtered out, or present, depending on what other tests
+        // left in the process-wide LiveModelCache. That made this suite pass
+        // or fail by test order on CI. Seed it so the suite is hermetic.
         s.liveModels = ["deepseek": [AIModel(id: "deepseek-flash", displayName: "deepseek-flash"),
-                                     AIModel(id: "deepseek-v4-pro", displayName: "deepseek-v4-pro")]]
+                                     AIModel(id: "deepseek-v4-pro", displayName: "deepseek-v4-pro")],
+                        AICliTool.claudeCode.provider: [AIModel(id: "claude-test", displayName: "claude-test")]]
         return s
     }
 
