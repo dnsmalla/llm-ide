@@ -1165,6 +1165,28 @@ test('native Bash: prompt-tier command parks a ToolApproval carrying args.comman
   assert.equal(d.behavior, 'allow');
 }));
 
+test('native Bash / run-bash: a saved `cat` rule covers README.md but never a sensitive path', withAnthropicKey('sk-ant-v2-test', async () => {
+  const user = registerUser(getDb(), { email: 'v2native-sens@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  addRule(user.id, WS, 'Bash', 'cat');
+  addRule(user.id, WS, 'run-bash', 'cat');
+  const script = { messages: [{ type: 'init', session_id: 'sdk-sens' }, { type: 'result', subtype: 'success', session_id: 'sdk-sens' }] };
+  const events = [];
+  await runAgentV2Turn({
+    message: 'm', userId: user.id, mode: 'execute', agentContext: { workspaceRoot: WS },
+    resumeSdkSessionId: 'sdk-sens', onEvent: (e) => events.push(e), queryFactory: makeFakeQuery(script),
+  }, turnInjectable);
+  assert.equal((await script.options.canUseTool('Bash', { command: 'cat README.md' })).behavior, 'allow');
+  for (const tool of ['Bash', 'mcp__llmide__run-bash']) {
+    events.length = 0;
+    const decision = script.options.canUseTool(tool, { command: 'cat ~/.ssh/id_rsa' });
+    const req = events.find((e) => e.type === 'approval_request');
+    assert.ok(req, `${tool}: a saved rule must not skip the prompt`);
+    assert.equal(req.suggestion, undefined, `${tool}: no always-allow offer`);
+    answerDecision({ requestId: req.requestId, sdkSessionId: 'sdk-sens', userId: user.id, action: 'deny' });
+    assert.equal((await decision).behavior, 'deny');
+  }
+}));
+
 test('native Edit: in-workspace target parks with diff args; always-allow grants edits for this chat', withAnthropicKey('sk-ant-v2-test', async () => {
   const user = registerUser(getDb(), { email: 'v2native-edit@example.com', password: 'CorrectHorseBattery', displayName: 't' });
   const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'v2edit-'));
