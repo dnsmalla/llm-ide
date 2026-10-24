@@ -29,6 +29,23 @@ function envInt(name, fallback) {
   return Number.isFinite(n) ? n : fallback;
 }
 
+/**
+ * Whether self-registration is open. Remote mode (LLMIDE_ALLOW_REMOTE=1)
+ * closes it unless LLMIDE_ALLOW_REMOTE_REGISTRATION=1 is also set: every user
+ * is an admin (agents, MCP stdio, plugin installs), so open signup on a
+ * network-reachable server is remote code execution for any peer.
+ * LLMIDE_DISABLE_REGISTRATION=1 still force-closes everywhere.
+ */
+export function computeRegistrationOpen(prod, env = process.env) {
+  const flag = (n) => /^(1|true|yes|on)$/i.test(env[n] ?? '');
+  const disabled = env.LLMIDE_DISABLE_REGISTRATION !== undefined
+    ? flag('LLMIDE_DISABLE_REGISTRATION')
+    : prod; // prod default closed, dev default open
+  if (disabled) return false;
+  if (flag('LLMIDE_ALLOW_REMOTE')) return flag('LLMIDE_ALLOW_REMOTE_REGISTRATION');
+  return true;
+}
+
 function envBool(name, fallback) {
   const v = process.env[name];
   if (v === undefined) return fallback;
@@ -266,9 +283,9 @@ export const config = Object.freeze({
   // first-run setup still works without extra env vars.
   // Set LLMIDE_DISABLE_REGISTRATION=0 to re-open in prod, or
   // LLMIDE_DISABLE_REGISTRATION=1 to force-close in dev.
-  registrationOpen: isProd
-    ? !envBool('LLMIDE_DISABLE_REGISTRATION', true)   // prod: closed unless opt-in
-    : !envBool('LLMIDE_DISABLE_REGISTRATION', false),  // dev:  open unless opt-out
+  // Remote mode (LLMIDE_ALLOW_REMOTE=1) additionally closes it unless
+  // LLMIDE_ALLOW_REMOTE_REGISTRATION=1 — see computeRegistrationOpen.
+  registrationOpen: computeRegistrationOpen(isProd, process.env),
 
   // CORS — comma-separated list of allowed origins beyond the always-
   // accepted chrome-extension://* / localhost / 127.0.0.1 set.

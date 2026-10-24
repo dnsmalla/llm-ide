@@ -84,7 +84,7 @@ When `NODE_ENV` is not `production` and either `LLMIDE_JWT_SECRET` or `LLMIDE_VA
 
 ### Loopback override
 
-`LLMIDE_ALLOW_REMOTE=1` is required to bind a non-loopback address. Without it, a non-loopback `LLMIDE_HOST` causes `process.exit(1)` at startup (`server.mjs:721–735`).
+`LLMIDE_ALLOW_REMOTE=1` is required to bind a non-loopback address. Without it, a non-loopback `LLMIDE_HOST` causes `process.exit(1)` at startup (`server.mjs:721–735`). Remote mode also closes registration unless `LLMIDE_ALLOW_REMOTE_REGISTRATION=1` (`core/config.mjs#computeRegistrationOpen`).
 
 Do not restate the full env-var table here — consult [`../reference/env-vars.md`](../reference/env-vars.md).
 
