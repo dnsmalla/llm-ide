@@ -129,7 +129,7 @@ function safeBranchName(taskId) {
 const GH_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
 // Strict ref-name subset: no leading '-' (would parse as a git option),
 // no '..', no '@{', no trailing '/' or '.lock'.
-const BASE_BRANCH_RE = /^[A-Za-z0-9_][A-Za-z0-9_.\/-]*$/;
+const BASE_BRANCH_RE = /^[A-Za-z0-9_][A-Za-z0-9_./-]*$/;
 
 export function assertSafeGhRepo(ghRepo) {
   if (typeof ghRepo !== 'string' || !GH_REPO_RE.test(ghRepo)
