@@ -212,3 +212,14 @@ test('imap password is bound to a host; re-saving the password clears the bindin
   setSecret(db, 'u1', 'email.imapPassword', 'pw2');
   assert.equal(checkImapHostBinding(db, 'u1', 'evil.example.net').ok, true, 'new password rebinds on first use');
 });
+
+test('imap host binding is server-internal: not user-settable, not listed', async () => {
+  const { isUserSettableVaultKey, listSecretKeys, bindImapHost } = await import('../server/vault.mjs');
+  assert.equal(isUserSettableVaultKey('email.imapPasswordHost'), false);
+  assert.ok(!VAULT_KEYS.includes('email.imapPasswordHost'));
+  assert.equal(isUserSettableVaultKey('email.imapPassword'), true);
+  const db = secretsDb();
+  setSecret(db, 'u1', 'email.imapPassword', 'pw');
+  bindImapHost(db, 'u1', 'imap.example.com');
+  assert.deepEqual(listSecretKeys(db, 'u1').map((r) => r.secret_key), ['email.imapPassword']);
+});

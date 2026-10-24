@@ -182,6 +182,11 @@ const CUSTOM_PROVIDER_KEY_RE = /^custom\.[a-z0-9-]+\.apiKey$/;
 // registry's own SLUG_RE shape.
 const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
 
+// Server-internal keys: readable/writable through setSecret/getSecret, but never
+// settable by a client or listed to one (the IMAP host binding would otherwise
+// be defeatable by POSTing a host of the attacker's choosing).
+const INTERNAL_KEYS = new Set(['email.imapPasswordHost']);
+
 /**
  * Keys a user may set through the generic `POST /auth/me/secrets`: the fixed
  * list plus the per-provider `custom.<id>.apiKey` pattern (the Mac's custom
@@ -190,7 +195,8 @@ const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
  * writes them.
  */
 export function isUserSettableVaultKey(key) {
-  return typeof key === 'string' && (ALLOWED_KEYS.has(key) || CUSTOM_PROVIDER_KEY_RE.test(key));
+  if (typeof key !== 'string' || INTERNAL_KEYS.has(key)) return false;
+  return ALLOWED_KEYS.has(key) || CUSTOM_PROVIDER_KEY_RE.test(key);
 }
 
 function ensureAllowed(key) {
@@ -255,7 +261,7 @@ export function getSecret(db, userId, key) {
 export function listSecretKeys(db, userId) {
   return db.prepare(
     'SELECT secret_key, updated_at FROM user_secrets WHERE user_id = ?',
-  ).all(String(userId));
+  ).all(String(userId)).filter((r) => !INTERNAL_KEYS.has(r.secret_key));
 }
 
 // Fetch multiple secrets in one DB round-trip.  Returns a plain object
@@ -292,7 +298,7 @@ export function getSecrets(db, userId, keys) {
   return out;
 }
 
-export const VAULT_KEYS = Array.from(ALLOWED_KEYS);
+export const VAULT_KEYS = Array.from(ALLOWED_KEYS).filter((k) => !INTERNAL_KEYS.has(k));
 
 /**
  * Re-encrypt any secrets for `userId` that were stored without AAD
