@@ -385,6 +385,9 @@ const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 // Map a route URL to a rate-limit profile (see server/rate-limit.mjs).
 // Anything not listed has no limit applied.
 function rateLimitProfile(url, method) {
+  // Route handlers strip `?…` before matching, so the profile lookup must too —
+  // otherwise `POST /kb/loop/agent-run?x=1` would dodge its bucket entirely.
+  url = url.split('?')[0];
   // Expensive GET reads get a profile BEFORE the POST-only short-circuit.
   // /kb/export-all streams a user's whole meeting corpus, so it must be
   // throttled even though it's a GET. (Strip any query string first.)

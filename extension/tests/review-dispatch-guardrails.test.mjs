@@ -154,3 +154,31 @@ test('/kb/dispatch: a non-dispatch review cannot authorize a dispatch', async ()
   assert.equal(r.status, 403);
   assert.equal(r.body.error.code, 'REVIEW_KIND_MISMATCH');
 });
+
+test('/kb/dispatch: request config naming another destination is refused', async () => {
+  reset();
+  seedPlan([{ id: 't1', title: 'Fine' }]);
+  const reviewId = approvedReview({ planId: 'plan1', target: 'github', config: { repo: 'a/b' } });
+  const r = await call('POST', '/kb/dispatch', { planId: 'plan1', target: 'github', reviewId, config: { repo: 'evil/other', token: 'x' } });
+  assert.equal(r.status, 409);
+  assert.equal(r.body.error.code, 'REVIEW_CONFIG_MISMATCH');
+  assert.equal(db.getReview(U, reviewId).status, 'approved'); // not consumed
+});
+
+test('/kb/dispatch: an approved review with no destination refuses one from the request', async () => {
+  reset();
+  seedPlan([{ id: 't1', title: 'Fine' }]);
+  const reviewId = approvedReview({ planId: 'plan1', target: 'github' });
+  const r = await call('POST', '/kb/dispatch', { planId: 'plan1', target: 'github', reviewId, config: CONFIG });
+  assert.equal(r.status, 409);
+  assert.equal(r.body.error.code, 'REVIEW_CONFIG_MISMATCH');
+});
+
+test('/kb/dispatch: matching destination passes the config check (credentials may come from the request)', async () => {
+  reset();
+  seedPlan([{ id: 't1', title: 'Fine' }]);
+  const reviewId = approvedReview({ planId: 'plan1', target: 'github', config: { repo: 'a/b' } });
+  const r = await call('POST', '/kb/dispatch', { planId: 'plan1', target: 'github', reviewId, config: { repo: 'a/b', token: 'tok' } });
+  assert.notEqual(r.body?.error?.code, 'REVIEW_CONFIG_MISMATCH');
+  assert.notEqual(r.status, 409);
+});

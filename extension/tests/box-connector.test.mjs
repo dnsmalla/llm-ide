@@ -258,3 +258,31 @@ test('indexBoxFolder refreshes the token on a 401 and retries', async () => {
     for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
   }
 });
+
+test('replaceBoxIndex ingests >MAX_INGEST_BATCH rows and rolls back on failure', async () => {
+  const dbmod = await import('../kb/db.mjs');
+  dbmod.closeDb();
+  for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  const { getDb, MAX_INGEST_BATCH } = await import('../kb/db.mjs');
+  const { registerUser } = await import('../server/users.mjs');
+  const db = getDb();
+  const userId = registerUser(db, { email: `boxrep-${Math.floor(performance.now()*1000)}@ex.com`, password: 'pw-12345678' }).id;
+  const { replaceBoxIndex } = await import('../connectors/box.mjs');
+  const row = (i) => ({ kind: 'doc', ref: `box:F:${i}`, chunkIdx: 0, title: `t${i}`, body: `c${i}`, meta: {} });
+  try {
+    const n = MAX_INGEST_BATCH + 10;
+    const big = Array.from({ length: n }, (_, i) => row(i));
+    assert.equal(replaceBoxIndex(userId, 'F', big), n);
+    const count = () => db.prepare("SELECT COUNT(*) c FROM sources WHERE user_id=? AND kind='doc'").get(userId).c;
+    assert.equal(count(), n);
+    // A bad row in the SECOND page must leave the old index intact.
+    const bad = Array.from({ length: n }, (_, i) => row(i));
+    // A title whose String() coercion throws aborts the second page.
+    bad[MAX_INGEST_BATCH + 1] = { ...row(MAX_INGEST_BATCH + 1), title: { toString() { throw new Error('boom'); } } };
+    assert.throws(() => replaceBoxIndex(userId, 'F', bad));
+    assert.equal(count(), n, 'old rows survive a failed re-index');
+  } finally {
+    dbmod.closeDb();
+    for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
+  }
+});

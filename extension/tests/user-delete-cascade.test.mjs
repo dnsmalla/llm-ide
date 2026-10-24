@@ -331,3 +331,50 @@ test.after(() => {
     try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
   }
 });
+
+// Future-proofing: enumerate EVERY table with a user_id column, seed one row
+// for the doomed user in each, and require zero left afterwards. A table added
+// by a later migration without a matching delete in deleteUserCascade fails
+// here instead of silently surviving account deletion.
+test('leaves no row in ANY user_id table (audit_log is anonymised instead)', () => {
+  reset();
+  const doomed = provision('doomed@example.com').id;
+  const handle = db.getDb();
+  const tables = handle.prepare(
+    "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+  ).all().map((r) => r.name).filter((name) => {
+    if (name === 'users' || name === 'audit_log') return false;
+    return handle.prepare(`PRAGMA table_info("${name}")`).all().some((c) => c.name === 'user_id');
+  });
+  assert.ok(tables.length > 20, `expected many user_id tables, got ${tables.length}`);
+
+  handle.pragma('foreign_keys = OFF'); // seed freely; parents may not exist
+  const seeded = [];
+  for (const name of tables) {
+    const cols = handle.prepare(`PRAGMA table_info("${name}")`).all();
+    const ddl = handle.prepare("SELECT sql FROM sqlite_master WHERE name = ?").get(name).sql;
+    const names = []; const vals = [];
+    for (const c of cols) {
+      if (c.name === 'user_id') { names.push(c.name); vals.push(doomed); continue; }
+      if (c.dflt_value !== null) continue;
+      if (c.pk && /^INT/i.test(c.type) && cols.filter((x) => x.pk).length === 1) continue; // rowid alias
+      if (!c.notnull && !c.pk) continue;
+      names.push(c.name);
+      // Honour `col IN ('a','b')` CHECKs by picking the first allowed literal.
+      const allowed = new RegExp(`"?${c.name}"?\\s+IN\\s*\\(\\s*'([^']*)'`, 'i').exec(ddl);
+      vals.push(allowed ? allowed[1] : /INT|REAL|NUM|BOOL/i.test(c.type) ? 1 : `seed-${name}-${c.name}`);
+    }
+    const q = names.map((n) => `"${n}"`).join(',');
+    try {
+      handle.prepare(`INSERT INTO "${name}" (${q}) VALUES (${names.map(() => '?').join(',')})`).run(...vals);
+      seeded.push(name);
+    } catch (e) {
+      assert.fail(`could not seed ${name}: ${e.message}`);
+    }
+  }
+  handle.pragma('foreign_keys = ON');
+
+  db.deleteUserCascade(doomed);
+  const left = seeded.filter((n) => handle.prepare(`SELECT COUNT(*) AS n FROM "${n}" WHERE user_id = ?`).get(doomed).n > 0);
+  assert.deepEqual(left, [], `tables still holding the deleted user's rows: ${left.join(', ')}`);
+});

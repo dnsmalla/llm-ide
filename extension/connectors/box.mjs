@@ -4,7 +4,7 @@
 // Network is global fetch (fixed host api.box.com, so no SSRF surface),
 // mirroring connectors/slack-source.mjs. Tests stub global.fetch.
 import { chunkLines, } from './git.mjs';
-import { ingestSources, deleteSourcesByPrefix } from '../kb/db.mjs';
+import { ingestSources, deleteSourcesByPrefix, getDb, MAX_INGEST_BATCH } from '../kb/db.mjs';
 
 const TOKEN_URL = 'https://api.box.com/oauth2/token';
 const API = 'https://api.box.com/2.0';
@@ -254,7 +254,22 @@ export async function indexBoxFolder(userId, creds, opts = {}) {
     if (!text) { skipped += 1; continue; }
     items.push(...toSourceRows({ folderId: creds.folderId, fileId: f.id, name: f.name, modifiedAt: f.modifiedAt, path: f.path, text }));
   }
-  deleteSourcesByPrefix(userId, 'doc', `box:${creds.folderId}:`);
-  const indexed = ingestSources(userId, items);
+  const indexed = replaceBoxIndex(userId, creds.folderId, items);
   return { indexed, files: files.length - skipped, skipped, truncated: state.truncated };
+}
+
+/**
+ * Swap a folder's indexed rows for `items` atomically. Delete + ingest share
+ * one transaction so a failure mid-ingest rolls back to the old index instead
+ * of leaving it empty; ingestSources caps a single call, so slice inside it.
+ */
+export function replaceBoxIndex(userId, folderId, items) {
+  return getDb().transaction(() => {
+    deleteSourcesByPrefix(userId, 'doc', `box:${folderId}:`);
+    let total = 0;
+    for (let i = 0; i < items.length; i += MAX_INGEST_BATCH) {
+      total += ingestSources(userId, items.slice(i, i + MAX_INGEST_BATCH));
+    }
+    return total;
+  })();
 }
