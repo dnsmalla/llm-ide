@@ -357,6 +357,34 @@ func runRefactorRollbackChecks() async {
     expect(crlfTree.map { gitOutput(["cat-file", "-t", $0], crlfRoot) == "tree\n" } == true,
            "a snapshot whose `git add` warns still yields a real tree id, got \(crlfTree ?? "nil")")
 
+    // A path absent from the base is deleted only when it is in `deletable`
+    // (the agent reported creating it): the user's own new file looks the same
+    // to git and must survive; the agent's created file goes.
+    let delRoot = makeTempDir()
+    defer { try? FileManager.default.removeItem(at: delRoot) }
+    git(["init", "-q"], delRoot)
+    try? "a1\n".write(to: delRoot.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+    git(["add", "."], delRoot)
+    git(["commit", "-qm", "init"], delRoot)
+    if let delBase = await guardUnderTest.snapshotTree(gitRoot: delRoot) {
+        try? "agent\n".write(to: delRoot.appendingPathComponent("agent-new.txt"), atomically: true, encoding: .utf8)
+        try? "user\n".write(to: delRoot.appendingPathComponent("notes.md"), atomically: true, encoding: .utf8)
+        try? "a2\n".write(to: delRoot.appendingPathComponent("a.txt"), atomically: true, encoding: .utf8)
+        let outcome = await guardUnderTest.restore(
+            paths: ["a.txt", "agent-new.txt", "notes.md"], fromTree: delBase, gitRoot: delRoot,
+            deletable: ["agent-new.txt"])
+        expect(outcome.problem == nil, "deletable restore reports no error, got \(outcome.problem ?? "nil")")
+        expect(outcome.leftAlone == ["notes.md"], "the unreported absent path is reported left alone")
+        expect(!FileManager.default.fileExists(atPath: delRoot.appendingPathComponent("agent-new.txt").path),
+               "a file the agent reported creating is deleted on rollback")
+        expect((try? String(contentsOf: delRoot.appendingPathComponent("notes.md"), encoding: .utf8)) == "user\n",
+               "a file the agent did not report creating is never deleted")
+        expect((try? String(contentsOf: delRoot.appendingPathComponent("a.txt"), encoding: .utf8)) == "a1\n",
+               "present paths are still restored alongside the filtered deletes")
+    } else {
+        expect(false, "snapshotTree produced a base for the deletable check")
+    }
+
     // The `RepairScopeGuarding` default (a guard that cannot run git) and
     // index-safety of the default protocol extension are internal-only
     // concerns (the protocol itself is not `public`) and are asserted by

@@ -92,6 +92,12 @@ protocol RepairScopeGuarding: AnyObject {
     /// (a file it un-ignored would read as new and be deleted for good).
     /// Returns `nil` on success, else a diagnostic.
     func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String?
+    /// As above, but a path absent from `tree` is deleted only when it is in
+    /// `deletable` (the batch's own creations); any other absent path is left in
+    /// place and named in `leftAlone`. A file the loop did not verifiably create
+    /// is never destroyed — it may be one the user made meanwhile.
+    func restore(paths: [String], fromTree tree: String, gitRoot: URL,
+                 deletable: Set<String>) async -> RestoreResult
     /// Restores `paths` to their committed state. Returns `nil` on success, or a
     /// diagnostic.
     func revert(paths: [String], gitRoot: URL) async -> String?
@@ -107,6 +113,17 @@ protocol RepairScopeGuarding: AnyObject {
     /// edit that was there first would be destroyed, so it is left in place.
     func revertUnlisted(paths: [String], created: Set<String>, before: RepairScopeSnapshot,
                         gitRoot: URL) async -> String?
+}
+
+/// The outcome of a `restore(…deletable:)`: why it failed (nil on success) and
+/// the paths it deliberately did not touch.
+public struct RestoreResult: Equatable {
+    public var problem: String?
+    public var leftAlone: [String]
+    public init(problem: String? = nil, leftAlone: [String] = []) {
+        self.problem = problem
+        self.leftAlone = leftAlone
+    }
 }
 
 /// What a repair changed, tree to tree: all changed paths, `git diff --stat`,
@@ -128,6 +145,12 @@ extension RepairScopeGuarding {
     /// leaving the tree in its post-batch state.
     func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String? {
         paths.isEmpty ? nil : "restore unavailable"
+    }
+
+    /// Default: no deletion filter — forwards to the plain restore.
+    func restore(paths: [String], fromTree tree: String, gitRoot: URL,
+                 deletable: Set<String>) async -> RestoreResult {
+        RestoreResult(problem: await restore(paths: paths, fromTree: tree, gitRoot: gitRoot))
     }
 
     /// Fail-closed default: a guard that cannot restore unlisted paths says
@@ -595,7 +618,18 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
     }
 
     public func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String? {
-        guard !paths.isEmpty else { return nil }
+        await restoreFiltered(paths: paths, fromTree: tree, gitRoot: gitRoot, deletable: nil).problem
+    }
+
+    public func restore(paths: [String], fromTree tree: String, gitRoot: URL,
+                        deletable: Set<String>) async -> RestoreResult {
+        await restoreFiltered(paths: paths, fromTree: tree, gitRoot: gitRoot, deletable: deletable)
+    }
+
+    /// `deletable == nil` deletes every absent path (the plain restore).
+    private func restoreFiltered(paths: [String], fromTree tree: String, gitRoot: URL,
+                                 deletable: Set<String>?) async -> RestoreResult {
+        guard !paths.isEmpty else { return RestoreResult() }
         // A changed `.gitignore` fails the whole restore closed. `snapshotTree`
         // records the tree through `git add -A`, which honours the CURRENT
         // ignore rules: a batch that un-ignores a file (drops `.env` from
@@ -606,8 +640,8 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         // tree is left for a human to sort out.
         let ignoreFiles = paths.filter(Self.isGitignore)
         if !ignoreFiles.isEmpty {
-            return "the batch changed \(ignoreFiles.joined(separator: ", ")), so a file it un-ignored "
-                + "would look new and be deleted for good; nothing was restored — review the tree by hand"
+            return RestoreResult(problem: "the batch changed \(ignoreFiles.joined(separator: ", ")), so a file it un-ignored "
+                + "would look new and be deleted for good; nothing was restored — review the tree by hand")
         }
         let quotedTree = Self.shellQuoted([tree])
         // Classify by presence in `tree` rather than in the CURRENT working tree:
@@ -634,14 +668,14 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
                 case true?: present.append(path)
                 case false?: absent.append(path)
                 case nil:
-                    return "could not confirm whether \(path) exists in \(tree): unexpected listing "
-                        + "\(listing.prefix(200)); nothing was restored"
+                    return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): unexpected listing "
+                        + "\(listing.prefix(200)); nothing was restored")
                 }
             case .failure(let reason):
-                return "could not confirm whether \(path) exists in \(tree): \(reason); nothing was restored"
+                return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): \(reason); nothing was restored")
             case .truncated:
                 // Mirrors `check`'s `.elided` → `.unverifiable`.
-                return "could not confirm whether \(path) exists in \(tree): \(Self.truncatedReason)"
+                return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): \(Self.truncatedReason)")
             }
         }
 
@@ -653,7 +687,15 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         // restoring `Foo.txt` would delete what the restore just put back —
         // the user's pre-batch edits with it. Restoring last lets the base
         // tree's content win on every file system.
+        var leftAlone: [String] = []
         for path in absent {
+            // Absent from `tree` is not proof the batch made it: a file the user
+            // created while the batch ran looks identical. Only a path the agent
+            // reported creating is deleted; the rest stays and is reported.
+            if let deletable, !deletable.contains(path) {
+                leftAlone.append(path)
+                continue
+            }
             // `tree` has no entry for this path (the batch created it): delete it.
             // Contained first — `path` came from a `treeDiff` this guard itself
             // produced, but neither a `..`/absolute entry nor a directory the
@@ -669,7 +711,8 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
                gitRoot: gitRoot) {
             failures.append(reason)
         }
-        return failures.isEmpty ? nil : failures.joined(separator: "; ")
+        return RestoreResult(problem: failures.isEmpty ? nil : failures.joined(separator: "; "),
+                             leftAlone: leftAlone)
     }
 
     /// Deletes repo-relative `path` only when it really lives inside `gitRoot`;

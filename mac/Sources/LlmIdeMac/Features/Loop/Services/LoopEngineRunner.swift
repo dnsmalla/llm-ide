@@ -292,6 +292,23 @@ final class LoopEngineRunner: ObservableObject {
     /// the whole base-to-now diff, so a concurrent edit of the user's to some
     /// other file is never rolled back with the batch (§5.2).
     var batchChangedPaths: Set<String> = []
+    /// The tree id right after the batch's last recorded edit (the base until
+    /// the first one). A rollback diffs it against the tree NOW: whatever
+    /// changed in between was changed by someone other than the batch, and is
+    /// left alone (`rollBackCurrentBatch`).
+    var batchLastTree: String?
+    /// The subset of `batchChangedPaths` an agent edit both changed and
+    /// REPORTED creating — the only paths a rollback may delete.
+    var batchCreatedPaths: Set<String> = []
+    /// Per changed path, the tree snapshotted right before the FIRST agent edit
+    /// that touched it. A rollback restores each path from there, not from the
+    /// batch base, so what the user saved in between (during a long baseline)
+    /// survives. A save made INSIDE an agent edit's own window is still not
+    /// told apart from the agent's write.
+    var batchFirstTouchTree: [String: String] = [:]
+    /// What the agent said it wrote in the edit that just ran, handed from
+    /// `guardedEdit` to `withScopeGuard`'s bookkeeping.
+    var lastAgentReported = AgentReportedEdits()
     /// Whether this run's batch has started (its base was attempted, even if
     /// the snapshot failed). Decides the "passed after repair" restart target.
     var batchStarted = false
@@ -2481,7 +2498,7 @@ final class LoopEngineRunner: ObservableObject {
         let result = await guardedEdit(stage: stage, config: config, gitRoot: gitRoot,
                                        scopeGlobs: scopeGlobs, edit: edit)
         if let batchTreeBefore {
-            await recordBatchEdit(stage, since: batchTreeBefore, gitRoot: gitRoot)
+            await recordBatchEdit(stage, since: batchTreeBefore, reported: lastAgentReported, gitRoot: gitRoot)
         }
         return result
     }
@@ -2492,6 +2509,7 @@ final class LoopEngineRunner: ObservableObject {
                              scopeGlobs: [String],
                              edit: () async throws -> LoopAgentResult?) async -> GuardedEditResult {
         lastGuardSnapshot = nil
+        lastAgentReported = AgentReportedEdits()
         guard Self.effectivePolicy(for: stage, config: config) != .off else {
             // Policy `.off` skips the scope check, but the test writer/setup guards
             // still need to know what was already dirty before the agent ran, or
@@ -2500,7 +2518,13 @@ final class LoopEngineRunner: ObservableObject {
                 lastGuardSnapshot = await scopeGuard.snapshot(gitRoot: gitRoot, protectedGlobs: config.protectedGlobs,
                                                               scopeGlobs: scopeGlobs)
             }
-            do { _ = try await edit() } catch { return .failed(error, .notChecked, violations: [], changed: []) }
+            // The rollback bookkeeping still needs what the agent says it wrote.
+            do {
+                if let result = try await edit() {
+                    lastAgentReported = AgentReportedEdits(paths: Set(result.changedPaths),
+                                                           created: Set(result.createdPaths))
+                }
+            } catch { return .failed(error, .notChecked, violations: [], changed: []) }
             return .completed(.notChecked, violations: [], changed: [])
         }
 
@@ -2523,6 +2547,7 @@ final class LoopEngineRunner: ObservableObject {
                                               created: Set(result.createdPaths))
             }
         } catch { thrown = error }
+        lastAgentReported = reported
         // Checked in a task of its own, which a Stop does not cancel: after a
         // Stop the edit's task is cancelled, the guard's git probes would fail
         // in it (`.indeterminate`, fail-open) and whatever the agent wrote

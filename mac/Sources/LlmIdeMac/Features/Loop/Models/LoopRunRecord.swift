@@ -265,9 +265,18 @@ struct LoopBatchRollback: Codable, Equatable {
     /// than `blocked`. Nil — never false — otherwise, so records written
     /// before this field existed read the same as a blocked batch.
     var backToTodo: Bool? = nil
+    /// Paths a partial rollback deliberately left as it found them (changed
+    /// outside the batch, or not verifiably created by it). Nil when none, so
+    /// older records decode unchanged.
+    var leftAlonePaths: [String]? = nil
 
     /// One line for the summary note and the finish notification.
     var summary: String {
+        if !treeRestored, let left = leftAlonePaths, !left.isEmpty {
+            return "\(batchId) PARTLY rolled back — \(restoredPaths.count) path(s) restored, "
+                + "\(left.count) left as found (\(left.joined(separator: ", "))); blocked: \(reason)"
+                + (problem.map { " — \($0)" } ?? "")
+        }
         guard treeRestored else {
             return "\(batchId) NOT rolled back — tree left as the batch made it (\(problem ?? "unknown")); blocked: \(reason)"
         }
@@ -279,7 +288,9 @@ struct LoopBatchRollback: Codable, Equatable {
     var listEntry: String {
         RefactorBatchSequence.rolledBackEntry(batchId: batchId, reason: reason,
                                               treeRestored: treeRestored, problem: problem,
-                                              backToTodo: backToTodo == true)
+                                              backToTodo: backToTodo == true,
+                                              restoredCount: restoredPaths.count,
+                                              leftAlone: leftAlonePaths ?? [])
     }
 }
 

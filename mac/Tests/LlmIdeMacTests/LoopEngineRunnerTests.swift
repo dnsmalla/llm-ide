@@ -3820,6 +3820,11 @@ final class LoopEngineRunnerTests: XCTestCase {
         /// steps[k] = the paths that turned tree `t<k>` into `t<k+1>`.
         private var steps: [[String]] = []
         private(set) var restores: [(paths: [String], tree: String)] = []
+        /// The deletion allowlist each `restore` was handed.
+        private(set) var deletables: [Set<String>] = []
+        /// Paths the base tree "does not have" (the batch created them): the fake
+        /// leaves one alone unless it is in the `deletable` set, as the real guard does.
+        var absentPaths: Set<String> = []
         /// When set, every `snapshotTree` fails (no git), so no batch base exists.
         var failSnapshots = false
         func snapshotTree(gitRoot: URL) async -> String? {
@@ -3848,6 +3853,12 @@ final class LoopEngineRunnerTests: XCTestCase {
             restores.append((paths, tree))
             return nil
         }
+        func restore(paths: [String], fromTree tree: String, gitRoot: URL,
+                     deletable: Set<String>) async -> RestoreResult {
+            restores.append((paths, tree))
+            deletables.append(deletable)
+            return RestoreResult(leftAlone: paths.filter { absentPaths.contains($0) && !deletable.contains($0) })
+        }
         func revert(paths: [String], gitRoot: URL) async -> String? { nil }
     }
 
@@ -3857,17 +3868,27 @@ final class LoopEngineRunnerTests: XCTestCase {
     private final class BatchSkillExecutor: LoopSkillExecuting {
         let tree: TreeScriptGuard
         let planURL: URL
+        /// Whether the test writer reports `Tests/R1Tests.swift` as created.
+        let reportsCreatedTest: Bool
+        /// Where a reporting writer puts its test: under `rollbackRepoWithTestRoot`'s test root.
+        static let rootedTestPath = "Tests/R1Tests/R1Tests.swift"
+        /// The apply stage also edits `Sources/A.swift` (and the baseline may
+        /// have a user save of it just before).
         private(set) var skillIds: [String] = []
-        init(tree: TreeScriptGuard, planURL: URL) {
+        init(tree: TreeScriptGuard, planURL: URL, reportsCreatedTest: Bool = false) {
             self.tree = tree
             self.planURL = planURL
+            self.reportsCreatedTest = reportsCreatedTest
         }
         func execute(skillId: String, targetPath: String?, message: String,
                      repoRoot: URL, extraRoots: [URL], timeout: TimeInterval?) async throws -> LoopAgentResult {
             skillIds.append(skillId)
             switch skillId {
             case "skills/test-gap-writer":
-                tree.pending.append("Tests/R1Tests.swift")
+                tree.pending.append(reportsCreatedTest ? Self.rootedTestPath : "Tests/R1Tests.swift")
+                if reportsCreatedTest {
+                    return LoopAgentResult(changedPaths: [Self.rootedTestPath], createdPaths: [Self.rootedTestPath])
+                }
             case "skills/refactor-apply":
                 let plan = try String(contentsOf: planURL, encoding: .utf8)
                 try plan.replacingOccurrences(of: "(status: todo)", with: "(status: done)")
@@ -3955,11 +3976,13 @@ final class LoopEngineRunnerTests: XCTestCase {
 
         guard case .givenUp = result else { return XCTFail("expected a give-up, got \(String(describing: result))") }
         XCTAssertGreaterThanOrEqual(repairer.repairCount, 2)
-        XCTAssertEqual(tree.restores.count, 1)
         let expected = ["Sources/A.swift", "Sources/B.swift"]
             + (1...repairer.repairCount).map { "Sources/C\($0).swift" } + ["Tests/R1Tests.swift"]
-        XCTAssertEqual(tree.restores.first?.paths, expected.sorted())
-        XCTAssertEqual(tree.restores.first?.tree, "t0", "restored to the base taken before the test writer")
+        // One restore per source tree: each path goes back to how it was just
+        // before the first batch edit that touched it.
+        XCTAssertEqual(tree.restores.flatMap(\.paths).sorted(), expected.sorted())
+        XCTAssertEqual(tree.restores.first(where: { $0.paths.contains("Tests/R1Tests.swift") })?.tree, "t0",
+                       "the writer's file is restored to the base taken before the test writer")
 
         let plan = try String(contentsOf: planURL, encoding: .utf8)
         XCTAssertTrue(plan.contains("### R1 Split Big  (status: blocked)"), plan)
@@ -3976,6 +3999,105 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertTrue(rollback.summary.hasPrefix("R1 rolled back (blocked: Test — given up"), rollback.summary)
         let note = NoteLoopRunSummaryWriter.render(try XCTUnwrap(journal.written.last), title: "t")
         XCTAssertTrue(note.contains("**Rollback:** R1 rolled back (blocked: Test — given up"), note)
+    }
+
+    /// A file changed after the batch's last recorded edit — the user saving
+    /// `Sources/A.swift` while the final Test ran — is not the batch's to undo:
+    /// the rollback leaves it alone, reports it, and does not call the tree
+    /// restored. Only the test file the agent REPORTED creating may be deleted.
+    func testRollbackLeavesPathsChangedAfterTheLastEditAloneAndDeletesOnlyReportedCreations() async throws {
+        let repo = try rollbackRepoWithTestRoot()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = BatchSkillExecutor(tree: tree, planURL: planURL, reportsCreatedTest: true)
+        // The test root's own command is also run by the baseline (written roots),
+        // so "swift test" may only go red once Apply has run.
+        let verifier = StubVerifier { command in
+            if command == "swift test", skills.skillIds.contains("skills/refactor-apply") {
+                tree.pending.append("Sources/A.swift")  // the user's save, outside any agent window
+                return VerifyOutcome(exitCode: 1, output: "1 failing")
+            }
+            return VerifyOutcome(exitCode: 0, output: "")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills,
+            approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        let result = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+
+        guard case .givenUp = result else { return XCTFail("expected a give-up, got \(String(describing: result))") }
+        let restored = tree.restores.flatMap(\.paths)
+        XCTAssertFalse(restored.contains("Sources/A.swift"), "a path changed after the last edit is not restored")
+        XCTAssertTrue(restored.contains("Sources/B.swift"))
+        XCTAssertEqual(tree.deletables.first, [BatchSkillExecutor.rootedTestPath],
+                       "only the creation the agent reported may be deleted")
+        let rollback = try XCTUnwrap(journal.written.last?.batchRollback)
+        XCTAssertFalse(rollback.treeRestored, "a rollback that left paths alone is not a clean restore")
+        XCTAssertEqual(rollback.leftAlonePaths, ["Sources/A.swift"])
+        XCTAssertTrue(rollback.summary.contains("PARTLY rolled back"), rollback.summary)
+        XCTAssertFalse(rollback.restoredPaths.contains("Sources/A.swift"))
+        let plan = try String(contentsOf: planURL, encoding: .utf8)
+        XCTAssertTrue(plan.contains("(status: blocked)"), plan)
+    }
+
+    /// A user save of `Sources/A.swift` during the Test Baseline — between the
+    /// writer's edit and Apply's — is part of the tree Apply started from, so the
+    /// rollback restores A.swift to THAT, not to the older batch base.
+    func testRollbackRestoresAPathToHowItWasBeforeTheFirstBatchEditThatTouchedIt() async throws {
+        let repo = try rollbackRepoWithTestRoot()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = BatchSkillExecutor(tree: tree, planURL: planURL, reportsCreatedTest: true)
+        let verifier = StubVerifier { command in
+            if command == "swift build" { tree.pending.append("Sources/A.swift") }  // the user's save
+            // Red only after Apply: the baseline also runs the test root's "swift test".
+            return command == "swift test" && skills.skillIds.contains("skills/refactor-apply")
+                ? VerifyOutcome(exitCode: 1, output: "1 failing") : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills,
+            approvals: rollbackApprovals(repo), scopeGuard: tree)
+        _ = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+
+        let aTree = try XCTUnwrap(tree.restores.first(where: { $0.paths.contains("Sources/A.swift") })?.tree)
+        XCTAssertNotEqual(aTree, "t0", "A.swift is restored to the tree before Apply, which holds the user's save")
+        XCTAssertEqual(tree.restores.first(where: { $0.paths.contains(BatchSkillExecutor.rootedTestPath) })?.tree, "t0")
+    }
+
+    /// A minimal SwiftPM layout so the Test Write placement guard accepts a
+    /// file under `Tests/R1Tests/`.
+    private func rollbackRepoWithTestRoot() throws -> URL {
+        try TempRepo.make(files: [
+            LoopOutputLayout.refactorPlan: Self.rollbackPlan,
+            "Package.swift": ".testTarget(name: \"R1Tests\")\n",
+            "Tests/R1Tests/Keep.swift": "// keep\n",
+        ])
+    }
+
+    /// Without a report that the agent created the test file (the shipped
+    /// scripted executor reports nothing), nothing may be deleted.
+    func testRollbackDeletesNothingTheAgentDidNotReportCreating() async throws {
+        let repo = try TempRepo.make(files: [LoopOutputLayout.refactorPlan: Self.rollbackPlan])
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let verifier = StubVerifier { command in
+            command == "swift test" ? VerifyOutcome(exitCode: 1, output: "1 failing")
+                                    : VerifyOutcome(exitCode: 0, output: "")
+        }
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: BatchSkillExecutor(tree: tree, planURL: planURL),
+            approvals: rollbackApprovals(repo), scopeGuard: tree)
+        _ = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+        XCTAssertEqual(tree.deletables.first, [])
     }
 
     /// A Stop (`.aborted`) is the user stepping in to look: the applied batch
@@ -4201,7 +4323,8 @@ final class LoopEngineRunnerTests: XCTestCase {
         let result = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
 
         guard case .error = result else { return XCTFail("expected an error, got \(String(describing: result))") }
-        XCTAssertEqual(tree.restores.count, 1, "the applied batch is still taken back out")
+        XCTAssertTrue(tree.restores.flatMap(\.paths).contains("Sources/A.swift"),
+                      "the applied batch is still taken back out")
         let plan = try String(contentsOf: planURL, encoding: .utf8)
         XCTAssertTrue(plan.contains("### R1 Split Big  (status: todo)"), "Apply's done is undone: \(plan)")
         XCTAssertEqual(journal.written.last?.batchRollback?.backToTodo, true)
@@ -4476,11 +4599,11 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertEqual(result, .success, runner.log.map(\.text).joined(separator: "\n"))
         XCTAssertEqual(skills.appliedIds, ["R1", "R2"], "a blocked batch ends the run; R3 is not attempted")
         XCTAssertGreaterThanOrEqual(repairer.repairCount, 1)
-        XCTAssertEqual(tree.restores.count, 1)
         let expected = (["Sources/R2.swift", "Tests/R2Tests.swift"]
             + (1...max(repairer.repairCount, 1)).map { "Sources/C\($0).swift" }).sorted()
-        XCTAssertEqual(tree.restores.first?.paths, expected, "only R2's own edits, never R1's")
-        XCTAssertNotEqual(tree.restores.first?.tree, "t0", "R2's own base, taken after R1 was verified")
+        // One restore per first-touch tree: compare the union across calls.
+        XCTAssertEqual(tree.restores.flatMap(\.paths).sorted(), expected, "only R2's own edits, never R1's")
+        XCTAssertFalse(tree.restores.contains { $0.tree == "t0" }, "R2's own trees, taken after R1 was verified")
 
         let plan = try String(contentsOf: planURL, encoding: .utf8)
         XCTAssertTrue(plan.contains("### R1 Batch 1  (status: done)"), plan)

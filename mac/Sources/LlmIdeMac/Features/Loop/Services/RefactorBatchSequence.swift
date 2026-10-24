@@ -26,7 +26,12 @@ public enum RefactorBatchSequence {
     /// put back to `todo` (`backToTodo`) says so instead of `blocked`; one whose
     /// tree could not be restored is always blocked.
     public static func rolledBackEntry(batchId: String, reason: String, treeRestored: Bool,
-                                       problem: String?, backToTodo: Bool = false) -> String {
+                                       problem: String?, backToTodo: Bool = false,
+                                       restoredCount: Int = 0, leftAlone: [String] = []) -> String {
+        if !treeRestored, !leftAlone.isEmpty {
+            return "Partly rolled back: \(batchId) (\(restoredCount) restored, \(leftAlone.count) left as found: "
+                + "\(leftAlone.joined(separator: ", ")); blocked: \(reason))" + (problem.map { " — \($0)" } ?? "")
+        }
         guard treeRestored else {
             return "Not rolled back: \(batchId) — tree left as the batch made it "
                 + "(\(problem ?? "unknown")); blocked: \(reason)"
