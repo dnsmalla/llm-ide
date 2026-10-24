@@ -40,12 +40,35 @@ export function redactReviewItem(item) {
   return { ...item, payload: stripReviewSecrets(item.payload).payload };
 }
 
-const held = new Map(); // `${userId}:${reviewId}` -> secrets
+// Held credentials are bounded: entries expire after HELD_TTL_MS (checked
+// lazily on access/insert) and each user keeps at most HELD_MAX_PER_USER
+// (oldest evicted first — Map preserves insertion order).
+export const HELD_TTL_MS = 24 * 60 * 60 * 1000;
+export const HELD_MAX_PER_USER = 100;
+
+const held = new Map(); // `${userId}:${reviewId}` -> { secrets, at, userId }
 const holdKey = (userId, id) => `${userId}:${id}`;
-export function holdSecrets(userId, id, secrets) {
-  if (secrets && Object.keys(secrets).length) held.set(holdKey(userId, id), secrets);
+
+function sweepExpired(now) {
+  for (const [k, v] of held) if (now - v.at > HELD_TTL_MS) held.delete(k);
 }
-export function takeHeldSecrets(userId, id) { return held.get(holdKey(userId, id)) || {}; }
+
+export function holdSecrets(userId, id, secrets, now = Date.now()) {
+  if (!secrets || !Object.keys(secrets).length) return;
+  sweepExpired(now);
+  const key = holdKey(userId, id);
+  held.delete(key); // re-insert so it counts as newest
+  held.set(key, { secrets, at: now, userId });
+  const mine = [...held].filter(([, v]) => v.userId === userId);
+  for (let i = 0; i < mine.length - HELD_MAX_PER_USER; i++) held.delete(mine[i][0]);
+}
+export function takeHeldSecrets(userId, id, now = Date.now()) {
+  const key = holdKey(userId, id);
+  const e = held.get(key);
+  if (!e) return {};
+  if (now - e.at > HELD_TTL_MS) { held.delete(key); return {}; }
+  return e.secrets;
+}
 export function dropHeldSecrets(userId, id) { held.delete(holdKey(userId, id)); }
 
 function vaultGet(db, userId, key) {

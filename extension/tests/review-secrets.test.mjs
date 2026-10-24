@@ -158,3 +158,18 @@ test('migration 0042 scrubs secrets from existing review payloads', () => {
   assert.ok(!raw.includes(TOKEN));
   assert.equal(JSON.parse(raw).config.repo, 'a/b');
 });
+
+test('held secrets expire after the TTL and are capped per user', async () => {
+  const m = await import('../server/review-secrets.mjs');
+  const t0 = 1_000_000;
+  m.holdSecrets('u-ttl', 'r1', { config: { token: 'x' } }, t0);
+  assert.deepEqual(m.takeHeldSecrets('u-ttl', 'r1', t0 + m.HELD_TTL_MS - 1), { config: { token: 'x' } });
+  assert.deepEqual(m.takeHeldSecrets('u-ttl', 'r1', t0 + m.HELD_TTL_MS + 1), {});
+  for (let i = 0; i < m.HELD_MAX_PER_USER + 5; i++) m.holdSecrets('u-cap', `r${i}`, { config: { token: 't' } }, t0);
+  m.holdSecrets('u-other', 'keep', { config: { token: 'k' } }, t0);
+  assert.deepEqual(m.takeHeldSecrets('u-cap', 'r0', t0), {});
+  assert.deepEqual(m.takeHeldSecrets('u-cap', 'r4', t0), {});
+  assert.ok(m.takeHeldSecrets('u-cap', 'r5', t0).config);
+  assert.ok(m.takeHeldSecrets('u-cap', `r${m.HELD_MAX_PER_USER + 4}`, t0).config);
+  assert.ok(m.takeHeldSecrets('u-other', 'keep', t0).config);
+});
