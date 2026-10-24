@@ -76,6 +76,22 @@ final class AutoCodeUpdateServiceMeteringTests: XCTestCase {
         XCTAssertEqual(ClaudeCLI.meteredRunArgs(maxTurns: 5).last, "5")
     }
 
+    func testAbortedRunRecordsAbortedAndDropsPartialOutput() {
+        let partial = parse(#"{"type":"result","subtype":"succ"#)
+        XCTAssertFalse(partial.parsed)
+        XCTAssertEqual(AutoCodeUpdateService.meteredStopReason(partial, aborted: true), "aborted")
+        XCTAssertNil(AutoCodeUpdateService.meteredStopReason(partial, aborted: false))
+        let dropped = AutoCodeUpdateService.meteredReply(partial, processOK: false)
+        XCTAssertEqual(dropped.text, "")
+        XCTAssertNotNil(dropped.note)
+        // A clean exit with unparseable stdout keeps its text (older CLI / plain reply).
+        let plain = parse("hello")
+        XCTAssertEqual(AutoCodeUpdateService.meteredReply(plain, processOK: true).text, "hello")
+        let ok = parse(#"{"type":"result","subtype":"success","is_error":false,"result":"done"}"#)
+        XCTAssertEqual(AutoCodeUpdateService.meteredReply(ok, processOK: false).text, "done")
+        XCTAssertEqual(AutoCodeUpdateService.meteredStopReason(ok, aborted: false), "success")
+    }
+
     func testTurnCapIsPerPurpose() {
         XCTAssertEqual(ClaudeCLI.autoTaskMaxTurns(implement: false), 30)
         XCTAssertEqual(ClaudeCLI.autoTaskMaxTurns(implement: true), 120)
