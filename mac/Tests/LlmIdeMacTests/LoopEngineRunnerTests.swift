@@ -3855,9 +3855,20 @@ final class LoopEngineRunnerTests: XCTestCase {
         }
         func restore(paths: [String], fromTree tree: String, gitRoot: URL,
                      deletable: Set<String>) async -> RestoreResult {
-            restores.append((paths, tree))
+            await restore(groups: [tree: paths], gitRoot: gitRoot, deletable: deletable)
+        }
+        /// Records one entry per source tree, as the real multi-tree restore performs one per group.
+        func restore(groups: [String: [String]], gitRoot: URL, deletable: Set<String>) async -> RestoreResult {
+            var out = RestoreResult()
             deletables.append(deletable)
-            return RestoreResult(leftAlone: paths.filter { absentPaths.contains($0) && !deletable.contains($0) })
+            for tree in groups.keys.sorted() {
+                let paths = groups[tree] ?? []
+                restores.append((paths, tree))
+                let left = paths.filter { absentPaths.contains($0) && !deletable.contains($0) }
+                out.leftAlone += left
+                out.changed += paths.filter { !left.contains($0) }
+            }
+            return out
         }
         func revert(paths: [String], gitRoot: URL) async -> String? { nil }
     }
@@ -4041,6 +4052,38 @@ final class LoopEngineRunnerTests: XCTestCase {
         XCTAssertFalse(rollback.restoredPaths.contains("Sources/A.swift"))
         let plan = try String(contentsOf: planURL, encoding: .utf8)
         XCTAssertTrue(plan.contains("(status: blocked)"), plan)
+    }
+
+    /// A user save of an ALREADY-touched path between two agent edits: A.swift
+    /// is changed by Apply, the user saves it during the first Test run, and the
+    /// later repair edits only other files. A.swift changed after the batch last
+    /// touched IT, so the rollback leaves it alone.
+    func testRollbackLeavesAnAlreadyTouchedPathTheUserSavedBetweenEditsAlone() async throws {
+        let repo = try rollbackRepoWithTestRoot()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let planURL = repo.appendingPathComponent(LoopOutputLayout.refactorPlan)
+        let tree = TreeScriptGuard()
+        let skills = BatchSkillExecutor(tree: tree, planURL: planURL, reportsCreatedTest: true)
+        var saved = false
+        let verifier = StubVerifier { command in
+            guard command == "swift test", skills.skillIds.contains("skills/refactor-apply") else {
+                return VerifyOutcome(exitCode: 0, output: "")
+            }
+            if !saved { saved = true; tree.pending.append("Sources/A.swift") }  // the user's save
+            return VerifyOutcome(exitCode: 1, output: "1 failing")
+        }
+        let journal = InMemoryJournal()
+        let runner = makeRunner(
+            verifier: verifier, stageRepairer: BatchRepairer(tree: tree),
+            regressionSweep: StubRegressionSweep(alwaysPasses: true),
+            skillExecutor: skills, approvals: rollbackApprovals(repo), journal: journal, scopeGuard: tree)
+        _ = await runner.run(config: rollbackConfig(), faultsRoot: repo, gitRoot: repo)
+
+        XCTAssertFalse(tree.restores.flatMap(\.paths).contains("Sources/A.swift"))
+        XCTAssertTrue(tree.restores.flatMap(\.paths).contains("Sources/B.swift"))
+        let rollback = try XCTUnwrap(journal.written.last?.batchRollback)
+        XCTAssertEqual(rollback.leftAlonePaths, ["Sources/A.swift"])
+        XCTAssertFalse(rollback.restoredPaths.contains("Sources/A.swift"))
     }
 
     /// A user save of `Sources/A.swift` during the Test Baseline — between the

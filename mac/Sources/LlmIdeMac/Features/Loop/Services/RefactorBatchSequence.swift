@@ -28,7 +28,7 @@ public enum RefactorBatchSequence {
     public static func rolledBackEntry(batchId: String, reason: String, treeRestored: Bool,
                                        problem: String?, backToTodo: Bool = false,
                                        restoredCount: Int = 0, leftAlone: [String] = []) -> String {
-        if !treeRestored, !leftAlone.isEmpty {
+        if !treeRestored, !leftAlone.isEmpty, restoredCount > 0 || problem == nil {
             return "Partly rolled back: \(batchId) (\(restoredCount) restored, \(leftAlone.count) left as found: "
                 + "\(leftAlone.joined(separator: ", ")); blocked: \(reason))" + (problem.map { " — \($0)" } ?? "")
         }

@@ -272,7 +272,7 @@ struct LoopBatchRollback: Codable, Equatable {
 
     /// One line for the summary note and the finish notification.
     var summary: String {
-        if !treeRestored, let left = leftAlonePaths, !left.isEmpty {
+        if !treeRestored, let left = leftAlonePaths, !left.isEmpty, !restoredPaths.isEmpty || problem == nil {
             return "\(batchId) PARTLY rolled back — \(restoredPaths.count) path(s) restored, "
                 + "\(left.count) left as found (\(left.joined(separator: ", "))); blocked: \(reason)"
                 + (problem.map { " — \($0)" } ?? "")

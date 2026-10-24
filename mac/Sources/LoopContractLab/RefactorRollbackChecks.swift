@@ -385,6 +385,35 @@ func runRefactorRollbackChecks() async {
         expect(false, "snapshotTree produced a base for the deletable check")
     }
 
+    // Two source trees in ONE call, with a case-only rename across the groups:
+    // `Foo.txt` (edited by edit 1, restored from the base) and `foo.txt` (made
+    // by edit 2, created per the agent, absent from the tree before edit 2).
+    // Deletions must run before EVERY restore, whatever the tree-id order, or on
+    // a case-insensitive file system the delete would take the restored file.
+    let grpRoot = makeTempDir()
+    defer { try? FileManager.default.removeItem(at: grpRoot) }
+    git(["init", "-q"], grpRoot)
+    try? "base\n".write(to: grpRoot.appendingPathComponent("Foo.txt"), atomically: true, encoding: .utf8)
+    git(["add", "."], grpRoot)
+    git(["commit", "-qm", "init"], grpRoot)
+    if let t0 = await guardUnderTest.snapshotTree(gitRoot: grpRoot) {
+        try? "e1\n".write(to: grpRoot.appendingPathComponent("Foo.txt"), atomically: true, encoding: .utf8)
+        if let t1 = await guardUnderTest.snapshotTree(gitRoot: grpRoot) {
+            try? FileManager.default.removeItem(at: grpRoot.appendingPathComponent("Foo.txt"))
+            try? "e2\n".write(to: grpRoot.appendingPathComponent("foo.txt"), atomically: true, encoding: .utf8)
+            let grp = await guardUnderTest.restore(
+                groups: [t0: ["Foo.txt"], t1: ["foo.txt"]], gitRoot: grpRoot, deletable: ["foo.txt"])
+            expect(grp.problem == nil, "multi-tree restore reports no error, got \(grp.problem ?? "nil")")
+            expect((try? String(contentsOf: grpRoot.appendingPathComponent("Foo.txt"), encoding: .utf8)) == "base\n",
+                   "a case-only rename across groups ends with the restored Foo.txt, not the deleted one")
+            expect(Set(grp.changed) == ["Foo.txt", "foo.txt"], "the result lists every path it changed")
+        } else {
+            expect(false, "snapshotTree produced the second tree for the multi-tree check")
+        }
+    } else {
+        expect(false, "snapshotTree produced the first tree for the multi-tree check")
+    }
+
     // The `RepairScopeGuarding` default (a guard that cannot run git) and
     // index-safety of the default protocol extension are internal-only
     // concerns (the protocol itself is not `public`) and are asserted by

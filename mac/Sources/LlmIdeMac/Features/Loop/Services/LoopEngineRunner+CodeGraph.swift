@@ -231,7 +231,7 @@ extension LoopEngineRunner {
     func resetBatchRollbackState() {
         batchBaseTree = nil
         batchChangedPaths = []
-        batchLastTree = nil
+        batchLastTouchTree = [:]
         batchCreatedPaths = []
         batchFirstTouchTree = [:]
         batchStarted = false
@@ -255,7 +255,6 @@ extension LoopEngineRunner {
             .flatMap { try? String(contentsOf: $0, encoding: .utf8) }
             .flatMap { RefactorPlanDiff.firstTodo(in: $0)?.id }
         batchBaseTree = await scopeGuard.snapshotTree(gitRoot: gitRoot)
-        batchLastTree = batchBaseTree
         if batchBaseTree == nil {
             appendLog(.warn, "  [\(stage.name)] could not snapshot the working tree; a failed batch "
                       + "will be marked blocked but its edits will stay in the tree")
@@ -292,7 +291,7 @@ extension LoopEngineRunner {
         // Only a path the agent says it created may later be deleted: absent
         // from the base is also what a file the user made mid-edit looks like.
         batchCreatedPaths.formUnion(Set(seen.changed).intersection(reported.created))
-        batchLastTree = seen.after
+        for path in seen.changed { batchLastTouchTree[path] = seen.after }
     }
 
     /// An edit whose paths could not be attributed makes the rollback set
@@ -339,52 +338,52 @@ extension LoopEngineRunner {
         let blockedReason = RefactorBatchRollback.blockedReason(stageName: stage, summary: reason)
         let restoreProblem: String?
         var leftAlone: [String] = []
+        var restored: [String] = []
         if let base = batchBaseTree {
             if let gap = batchTrackingGap {
                 restoreProblem = "\(gap), so the batch's edits are not all known"
-            } else if let changedSince = await pathsChangedSinceLastEdit(gitRoot: ctx.gitRoot) {
+            } else if let outside = await pathsChangedOutsideBatch(paths, gitRoot: ctx.gitRoot) {
                 // Per-path exclusion rather than fail-closed: each path's fate
-                // is independent, and what the user changed after the batch's
-                // last edit is theirs to keep. The batch is then reported as
-                // NOT fully rolled back (`treeRestored` false → `blocked`, never
-                // retried as-is on top of the leftovers), so it is never read
-                // as clean.
-                let outside = paths.filter(changedSince.contains)
-                leftAlone = outside
-                paths.removeAll(where: changedSince.contains)
-                // One restore per source tree: each path goes back to how it
-                // was just before the first batch edit that touched it.
+                // is independent, and what the user changed after the batch last
+                // touched that path is theirs to keep. The batch is then reported
+                // as NOT fully rolled back (`treeRestored` false → `blocked`,
+                // never retried as-is on top of the leftovers), so it is never
+                // read as clean.
+                leftAlone = paths.filter(outside.contains)
+                paths.removeAll(where: outside.contains)
+                // Each path goes back to how it was just before the first batch
+                // edit that touched it, all trees in ONE call so every deletion
+                // runs before any restore (case-only renames across trees).
                 var groups: [String: [String]] = [:]
                 for path in paths { groups[batchFirstTouchTree[path] ?? base, default: []].append(path) }
-                var problems: [String] = []
-                for tree in groups.keys.sorted() {
-                    let result = await scopeGuard.restore(paths: groups[tree] ?? [], fromTree: tree,
-                                                          gitRoot: ctx.gitRoot, deletable: batchCreatedPaths)
-                    leftAlone += result.leftAlone
-                    if let problem = result.problem { problems.append(problem) }
-                }
-                restoreProblem = problems.isEmpty ? nil : problems.joined(separator: "; ")
+                let result = await scopeGuard.restore(groups: groups, gitRoot: ctx.gitRoot,
+                                                      deletable: batchCreatedPaths)
+                leftAlone += result.leftAlone + result.failed
+                restored = result.changed
+                restoreProblem = result.problem
             } else {
-                restoreProblem = "could not tell what changed in the tree since the batch's last edit"
+                restoreProblem = "could not tell what changed in the tree since the batch last touched its paths"
             }
         } else {
             restoreProblem = "there is no snapshot of the tree from before the batch"
         }
-        paths.removeAll(where: leftAlone.contains)
         leftAlone = Array(Set(leftAlone)).sorted()
+        restored = Array(Set(restored).subtracting(leftAlone)).sorted()
         let treeRestored = restoreProblem == nil && leftAlone.isEmpty
-        if let restoreProblem {
+        if treeRestored {
+            appendLog(.warn, RefactorBatchRollback.rolledBackMessage(batchId: batchId))
+        } else if !restored.isEmpty {
+            appendLog(.error, "\(batchId) partly rolled back: \(restored.count) restored, \(leftAlone.count) left as found"
+                      + (restoreProblem.map { " (\($0))" } ?? ""))
+        } else if let restoreProblem {
             appendLog(.error, "\(batchId) NOT rolled back: \(restoreProblem) — the batch's edits are still in the working tree")
         } else {
-            appendLog(.warn, treeRestored ? RefactorBatchRollback.rolledBackMessage(batchId: batchId)
-                      : "\(batchId) partly rolled back: \(paths.count) restored, \(leftAlone.count) left as found")
-            if !paths.isEmpty {
-                appendLog(.info, "  restored \(paths.count) path(s): \(paths.joined(separator: ", "))")
-            }
-            if !leftAlone.isEmpty {
-                appendLog(.warn, "  left as found (changed outside the batch, or not created by it): "
-                          + leftAlone.joined(separator: ", "))
-            }
+            appendLog(.warn, "\(batchId) not rolled back: every path was left as found")
+        }
+        if !restored.isEmpty { appendLog(.info, "  restored \(restored.count) path(s): \(restored.joined(separator: ", "))") }
+        if !leftAlone.isEmpty {
+            appendLog(.warn, "  left as found (changed outside the batch, not created by it, or failed): "
+                      + leftAlone.joined(separator: ", "))
         }
         let outcome = RefactorBatchRollback.planOutcome(
             endedWithError: endedWithError, terminatingStage: terminatingStage,
@@ -406,7 +405,7 @@ extension LoopEngineRunner {
         if let planProblem { appendLog(.warn, planProblem) }
         let problems = [restoreProblem, planProblem].compactMap { $0 }
         batchRollback = LoopBatchRollback(
-            batchId: batchId, stageName: stage, reason: blockedReason, restoredPaths: paths,
+            batchId: batchId, stageName: stage, reason: blockedReason, restoredPaths: restored,
             treeRestored: treeRestored,
             problem: problems.isEmpty ? nil : problems.joined(separator: "; "),
             backToTodo: outcome == .todo ? true : nil,
@@ -414,18 +413,30 @@ extension LoopEngineRunner {
         return treeRestored
     }
 
-    /// Paths that changed between the tree after the batch's last recorded
-    /// edit and the tree now — by a shell stage, a save of the user's, any
-    /// other process. In a task of its own like `recordBatchEdit`, so a Stop
-    /// cannot cancel the probes. nil when it cannot be told (fail closed).
-    private func pathsChangedSinceLastEdit(gitRoot: URL) async -> Set<String>? {
-        guard let last = batchLastTree else { return nil }
+    /// Which of `paths` changed after the batch last touched THEM — by a shell
+    /// stage, a save of the user's, any other process: each path's own
+    /// last-touch tree is diffed against a fresh snapshot (one diff per distinct
+    /// tree). In a task of its own like `recordBatchEdit`, so a Stop cannot
+    /// cancel the probes. nil when it cannot be told (fail closed). Blind spots:
+    /// a change made INSIDE an agent edit's own window, and a user save to a
+    /// path that a LATER agent edit also touches — that save is folded into the
+    /// edit's before-tree and restored over by the first-touch restore.
+    private func pathsChangedOutsideBatch(_ paths: [String], gitRoot: URL) async -> Set<String>? {
+        var byTree: [String: [String]] = [:]
+        for path in paths {
+            guard let tree = batchLastTouchTree[path] else { return nil }
+            byTree[tree, default: []].append(path)
+        }
         return await Task { @MainActor in
-            guard let now = await self.scopeGuard.snapshotTree(gitRoot: gitRoot),
-                  let diff = await self.scopeGuard.treeDiff(from: last, to: now, gitRoot: gitRoot,
-                                                            maxChars: 0, isQuotable: { _ in false })
-            else { return nil }
-            return Set(diff.changedPaths)
+            guard let now = await self.scopeGuard.snapshotTree(gitRoot: gitRoot) else { return nil }
+            var outside: Set<String> = []
+            for (tree, here) in byTree {
+                guard let diff = await self.scopeGuard.treeDiff(from: tree, to: now, gitRoot: gitRoot,
+                                                                maxChars: 0, isQuotable: { _ in false })
+                else { return nil }
+                outside.formUnion(Set(diff.changedPaths).intersection(here))
+            }
+            return outside
         }.value
     }
 

@@ -292,11 +292,11 @@ final class LoopEngineRunner: ObservableObject {
     /// the whole base-to-now diff, so a concurrent edit of the user's to some
     /// other file is never rolled back with the batch (§5.2).
     var batchChangedPaths: Set<String> = []
-    /// The tree id right after the batch's last recorded edit (the base until
-    /// the first one). A rollback diffs it against the tree NOW: whatever
-    /// changed in between was changed by someone other than the batch, and is
-    /// left alone (`rollBackCurrentBatch`).
-    var batchLastTree: String?
+    /// Per changed path, the tree id right after the batch's last recorded edit
+    /// that touched it. A rollback diffs each path's own entry against the tree
+    /// NOW: whatever changed in between was changed by someone other than the
+    /// batch, and is left alone (`rollBackCurrentBatch`).
+    var batchLastTouchTree: [String: String] = [:]
     /// The subset of `batchChangedPaths` an agent edit both changed and
     /// REPORTED creating — the only paths a rollback may delete.
     var batchCreatedPaths: Set<String> = []

@@ -98,6 +98,12 @@ protocol RepairScopeGuarding: AnyObject {
     /// is never destroyed — it may be one the user made meanwhile.
     func restore(paths: [String], fromTree tree: String, gitRoot: URL,
                  deletable: Set<String>) async -> RestoreResult
+    /// Several source trees in ONE call: `groups` maps a tree id to the paths
+    /// restored from it. Every group is classified first (any failed probe
+    /// aborts before anything is touched), then ALL deletions run, then one
+    /// `git restore` per group — so a case-only rename whose two names fall in
+    /// different groups still ends with the restored file, never the deleted one.
+    func restore(groups: [String: [String]], gitRoot: URL, deletable: Set<String>) async -> RestoreResult
     /// Restores `paths` to their committed state. Returns `nil` on success, or a
     /// diagnostic.
     func revert(paths: [String], gitRoot: URL) async -> String?
@@ -120,9 +126,16 @@ protocol RepairScopeGuarding: AnyObject {
 public struct RestoreResult: Equatable {
     public var problem: String?
     public var leftAlone: [String]
-    public init(problem: String? = nil, leftAlone: [String] = []) {
+    /// Paths actually restored or deleted (a partial failure still lists what it did).
+    public var changed: [String]
+    /// Paths whose restore or delete was attempted and failed.
+    public var failed: [String]
+    public init(problem: String? = nil, leftAlone: [String] = [], changed: [String] = [],
+                failed: [String] = []) {
         self.problem = problem
         self.leftAlone = leftAlone
+        self.changed = changed
+        self.failed = failed
     }
 }
 
@@ -150,7 +163,25 @@ extension RepairScopeGuarding {
     /// Default: no deletion filter — forwards to the plain restore.
     func restore(paths: [String], fromTree tree: String, gitRoot: URL,
                  deletable: Set<String>) async -> RestoreResult {
-        RestoreResult(problem: await restore(paths: paths, fromTree: tree, gitRoot: gitRoot))
+        let problem = await restore(paths: paths, fromTree: tree, gitRoot: gitRoot)
+        return RestoreResult(problem: problem, changed: problem == nil ? paths : [],
+                             failed: problem == nil ? [] : paths)
+    }
+
+    /// Default: one single-tree restore per group, in tree-id order (a guard
+    /// without its own multi-tree implementation has no cross-group ordering).
+    func restore(groups: [String: [String]], gitRoot: URL, deletable: Set<String>) async -> RestoreResult {
+        var out = RestoreResult()
+        var problems: [String] = []
+        for tree in groups.keys.sorted() {
+            let r = await restore(paths: groups[tree] ?? [], fromTree: tree, gitRoot: gitRoot, deletable: deletable)
+            out.leftAlone += r.leftAlone
+            out.changed += r.changed
+            out.failed += r.failed
+            if let problem = r.problem { problems.append(problem) }
+        }
+        out.problem = problems.isEmpty ? nil : problems.joined(separator: "; ")
+        return out
     }
 
     /// Fail-closed default: a guard that cannot restore unlisted paths says
@@ -618,17 +649,22 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
     }
 
     public func restore(paths: [String], fromTree tree: String, gitRoot: URL) async -> String? {
-        await restoreFiltered(paths: paths, fromTree: tree, gitRoot: gitRoot, deletable: nil).problem
+        await restoreFiltered(groups: [tree: paths], gitRoot: gitRoot, deletable: nil).problem
     }
 
     public func restore(paths: [String], fromTree tree: String, gitRoot: URL,
                         deletable: Set<String>) async -> RestoreResult {
-        await restoreFiltered(paths: paths, fromTree: tree, gitRoot: gitRoot, deletable: deletable)
+        await restoreFiltered(groups: [tree: paths], gitRoot: gitRoot, deletable: deletable)
+    }
+
+    public func restore(groups: [String: [String]], gitRoot: URL, deletable: Set<String>) async -> RestoreResult {
+        await restoreFiltered(groups: groups, gitRoot: gitRoot, deletable: deletable)
     }
 
     /// `deletable == nil` deletes every absent path (the plain restore).
-    private func restoreFiltered(paths: [String], fromTree tree: String, gitRoot: URL,
+    private func restoreFiltered(groups: [String: [String]], gitRoot: URL,
                                  deletable: Set<String>?) async -> RestoreResult {
+        let paths = groups.keys.sorted().flatMap { groups[$0] ?? [] }
         guard !paths.isEmpty else { return RestoreResult() }
         // A changed `.gitignore` fails the whole restore closed. `snapshotTree`
         // records the tree through `git add -A`, which honours the CURRENT
@@ -643,43 +679,50 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
             return RestoreResult(problem: "the batch changed \(ignoreFiles.joined(separator: ", ")), so a file it un-ignored "
                 + "would look new and be deleted for good; nothing was restored — review the tree by hand")
         }
-        let quotedTree = Self.shellQuoted([tree])
-        // Classify by presence in `tree` rather than in the CURRENT working tree:
-        // a path the batch deleted is absent now but present in `tree`, and must
-        // be restored, not skipped as "already gone".
+        // Classify by presence in each path's source tree rather than in the
+        // CURRENT working tree: a path the batch deleted is absent now but
+        // present in its tree, and must be restored, not skipped as "already gone".
         //
         // "Absent" needs a POSITIVE answer: `git ls-tree` exits 0 and lists
         // nothing for the path. Every other outcome — a non-zero exit (bad tree
         // id, git missing), a probe thrown out by cancellation (a Stop surfaces
         // here as a `.failure`, not an exception), cut-short output, or a
         // listing that does not name the path exactly — aborts the whole call
-        // before anything is touched. Reading "the probe failed" as "absent"
-        // would DELETE the file, user's own earlier edits included.
-        var present: [String] = []
+        // before anything is touched, across ALL groups. Reading "the probe
+        // failed" as "absent" would DELETE the file, user's own earlier edits
+        // included.
+        var present: [(tree: String, paths: [String])] = []
         var absent: [String] = []
-        for path in paths {
-            // `--literal-pathspecs`: a name like `:x.txt` or `a*.txt` is that
-            // file, never pathspec magic or a glob. `-z`: names come back raw
-            // and NUL-terminated — no quoting, nothing to trim.
-            let probe = "git --literal-pathspecs ls-tree -z --name-only \(quotedTree) -- \(Self.shellQuoted([path]))"
-            switch await run(probe, gitRoot: gitRoot) {
-            case .success(let listing):
-                switch Self.treePresence(of: path, listing: listing) {
-                case true?: present.append(path)
-                case false?: absent.append(path)
-                case nil:
-                    return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): unexpected listing "
-                        + "\(listing.prefix(200)); nothing was restored")
+        for tree in groups.keys.sorted() {
+            let quotedTree = Self.shellQuoted([tree])
+            var here: [String] = []
+            for path in groups[tree] ?? [] {
+                // `--literal-pathspecs`: a name like `:x.txt` or `a*.txt` is that
+                // file, never pathspec magic or a glob. `-z`: names come back raw
+                // and NUL-terminated — no quoting, nothing to trim.
+                let probe = "git --literal-pathspecs ls-tree -z --name-only \(quotedTree) -- \(Self.shellQuoted([path]))"
+                switch await run(probe, gitRoot: gitRoot) {
+                case .success(let listing):
+                    switch Self.treePresence(of: path, listing: listing) {
+                    case true?: here.append(path)
+                    case false?: absent.append(path)
+                    case nil:
+                        return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): unexpected listing "
+                            + "\(listing.prefix(200)); nothing was restored")
+                    }
+                case .failure(let reason):
+                    return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): \(reason); nothing was restored")
+                case .truncated:
+                    // Mirrors `check`'s `.elided` → `.unverifiable`.
+                    return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): \(Self.truncatedReason)")
                 }
-            case .failure(let reason):
-                return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): \(reason); nothing was restored")
-            case .truncated:
-                // Mirrors `check`'s `.elided` → `.unverifiable`.
-                return RestoreResult(problem: "could not confirm whether \(path) exists in \(tree): \(Self.truncatedReason)")
             }
+            if !here.isEmpty { present.append((tree, here)) }
         }
 
         var failures: [String] = []
+        var changed: [String] = []
+        var failed: [String] = []
         // Deletions FIRST, restores second. A case-only rename inside the batch
         // (`Foo.txt` → `foo.txt`) lists `Foo.txt` as present in `tree` and
         // `foo.txt` as absent; on a case-insensitive file system (macOS's
@@ -700,19 +743,26 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
             // Contained first — `path` came from a `treeDiff` this guard itself
             // produced, but neither a `..`/absolute entry nor a directory the
             // batch swapped for a symlink may reach outside the repository.
-            if let failure = Self.deleteContained(path, gitRoot: gitRoot) { failures.append(failure) }
+            if let failure = Self.deleteContained(path, gitRoot: gitRoot) {
+                failures.append(failure); failed.append(path)
+            } else {
+                changed.append(path)
+            }
         }
         // `--worktree` only (no `--staged`): the index is never touched, so a
         // rollback cannot disturb whatever the user had staged for their own,
         // unrelated commit.
-        if !present.isEmpty,
-           case .failure(let reason) = await run(
-               "git --literal-pathspecs restore --source=\(quotedTree) --worktree -- \(Self.shellQuoted(present))",
-               gitRoot: gitRoot) {
-            failures.append(reason)
+        for (tree, here) in present {
+            if case .failure(let reason) = await run(
+                "git --literal-pathspecs restore --source=\(Self.shellQuoted([tree])) --worktree -- \(Self.shellQuoted(here))",
+                gitRoot: gitRoot) {
+                failures.append(reason); failed += here
+            } else {
+                changed += here
+            }
         }
         return RestoreResult(problem: failures.isEmpty ? nil : failures.joined(separator: "; "),
-                             leftAlone: leftAlone)
+                             leftAlone: leftAlone, changed: changed, failed: failed)
     }
 
     /// Deletes repo-relative `path` only when it really lives inside `gitRoot`;
