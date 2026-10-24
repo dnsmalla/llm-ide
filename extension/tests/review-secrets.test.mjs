@@ -159,6 +159,29 @@ test('migration 0042 scrubs secrets from existing review payloads', () => {
   assert.equal(JSON.parse(raw).config.repo, 'a/b');
 });
 
+test('migration 0043 scrubs every secret-looking leaf under config and pr, idempotently', () => {
+  reset();
+  const item = db.submitReview(U, {
+    kind: 'dispatch', planId: 'plan1', title: 'legacy2',
+    payload: {
+      planId: 'plan1', target: 'github', other: { password: 'keep-outside-sections' },
+      config: { repo: 'a/b', password: 'pw1', clientSecret: 'cs1', api_key: 'ak1', githubToken: 'gt1', draft: true, labels: ['x'], nested: { n: 1 } },
+      pr: { ghRepo: 'a/b', ghToken: 'pt1', secret: 's1', baseBranch: 'main' },
+    },
+    guardrails: {},
+  });
+  const sql = fs.readFileSync(path.join(__dirname, '../kb/migrations/0043_scrub_review_secret_leaves.sql'), 'utf8');
+  db.getDb().exec(sql);
+  db.getDb().exec(sql); // idempotent
+  const raw = db.getDb().prepare('SELECT payload FROM review_items WHERE id = ?').get(item.id).payload;
+  for (const v of ['pw1', 'cs1', 'ak1', 'gt1', 'pt1', 's1']) assert.ok(!raw.includes(v), v);
+  const p = JSON.parse(raw);
+  assert.deepEqual(p.config, { repo: 'a/b', draft: true, labels: ['x'], nested: { n: 1 } });
+  assert.deepEqual(p.pr, { ghRepo: 'a/b', baseBranch: 'main' });
+  assert.equal(p.other.password, 'keep-outside-sections');
+  assert.equal(p.target, 'github');
+});
+
 test('held secrets expire after the TTL and are capped per user', async () => {
   const m = await import('../server/review-secrets.mjs');
   const t0 = 1_000_000;
