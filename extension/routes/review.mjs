@@ -14,6 +14,10 @@ import { applyCodegen } from '../agents/codegen-apply.mjs';
 import { openPullRequest } from '../agents/github-pr.mjs';
 import { runGuardrails } from '../guardrails/rules.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import {
+  stripReviewSecrets, redactReviewItem, holdSecrets, takeHeldSecrets, dropHeldSecrets,
+  resolveReviewCreds, withCreds,
+} from '../kb/review-secrets.mjs';
 
 // Replace every client-suppliable field the guardrail engine judges with
 // the server's own copy, so a client can't pass review with data that
@@ -45,8 +49,13 @@ export async function handleReviewRoutes(req, res, ctx) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'kind and payload required' } });
       return true;
     }
-    const payload = withAuthoritativeData(userId, body.kind, body.payload);
-    const guardrails = runGuardrails(body.kind, payload);
+    // Credentials never reach the DB: strip them, judge guardrails with the
+    // credentials this item would execute with (vault + any supplied now),
+    // persist only the stripped payload.
+    const { payload: stripped, secrets } = stripReviewSecrets(body.payload);
+    const payload = withAuthoritativeData(userId, body.kind, stripped);
+    const creds = resolveReviewCreds(kb.getDb(), userId, payload, { held: secrets });
+    const guardrails = runGuardrails(body.kind, withCreds(payload, creds));
     try {
       const item = kb.submitReview(userId, {
         kind: body.kind,
@@ -56,7 +65,10 @@ export async function handleReviewRoutes(req, res, ctx) {
         payload,
         guardrails,
       });
-      sendJSON(res, 200, item);
+      // Memory-only (lost on restart) so approve can still run when the
+      // client supplied the credential at submit time and the vault has none.
+      holdSecrets(userId, item.id, secrets);
+      sendJSON(res, 200, redactReviewItem(item));
     } catch (err) {
       sendJSON(res, 400, { error: { code: 'REVIEW_SUBMIT_FAILED', message: err.message } });
     }
@@ -76,7 +88,7 @@ export async function handleReviewRoutes(req, res, ctx) {
     const id = decodeURIComponent(url.slice('/kb/review/get/'.length).split('?')[0]);
     const item = kb.getReview(userId, id);
     if (!item) { sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } }); return true; }
-    sendJSON(res, 200, item);
+    sendJSON(res, 200, redactReviewItem(item));
     return true;
   }
 
@@ -88,7 +100,8 @@ export async function handleReviewRoutes(req, res, ctx) {
       reviewerNote: body.note,
     });
     if (!updated) { sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } }); return true; }
-    sendJSON(res, 200, updated);
+    dropHeldSecrets(userId, body.id);
+    sendJSON(res, 200, redactReviewItem(updated));
     return true;
   }
 
@@ -110,14 +123,29 @@ export async function handleReviewRoutes(req, res, ctx) {
     // Re-run guardrails right before execution — payloads can be
     // tampered with on disk, and the plan's tasks may have been edited
     // since submit. Server-side data is re-read at decision time.
-    const evalPayload = withAuthoritativeData(userId, item.kind, item.payload);
+    // Credentials: vault < held from submit < supplied on this request.
+    const creds = resolveReviewCreds(kb.getDb(), userId, item.payload, {
+      held: takeHeldSecrets(userId, body.id),
+      supplied: { config: body.config, pr: body.pr },
+    });
+    const evalPayload = withCreds(withAuthoritativeData(userId, item.kind, item.payload), creds);
     const guardrails = runGuardrails(item.kind, evalPayload);
     if (!guardrails.passed) {
       const refreshed = kb.setReviewStatus(userId, body.id, {
         status: 'rejected',
         reviewerNote: 'Auto-rejected: guardrails fail at approval time.',
       });
-      sendJSON(res, 422, { error: { code: 'GUARDRAILS_FAILED', message: 'Guardrails fail at approval time' }, guardrails, item: refreshed });
+      dropHeldSecrets(userId, body.id);
+      const credFail = guardrails.findings?.some((f) => f.ruleId === 'dispatch.creds');
+      sendJSON(res, 422, {
+        error: {
+          code: credFail ? 'CREDENTIAL_REQUIRED' : 'GUARDRAILS_FAILED',
+          message: credFail
+            ? 'Credential required: store it in the vault (Settings) or send it with the approve request'
+            : 'Guardrails fail at approval time',
+        },
+        guardrails, item: redactReviewItem(refreshed),
+      });
       return true;
     }
 
@@ -139,7 +167,7 @@ export async function handleReviewRoutes(req, res, ctx) {
           planId: item.payload.planId,
           target: item.payload.target,
           taskIds: item.payload.taskIds,
-          config: item.payload.config || {},
+          config: evalPayload.config || {},
         });
       } else if (item.kind === 'codegen-apply') {
         const apply = applyCodegen({
@@ -154,16 +182,16 @@ export async function handleReviewRoutes(req, res, ctx) {
         // payload.pr is fully specified — a missing config means the
         // reviewer chose "files only" and we stop after writing.
         let pr;
-        if (item.payload.pr && item.payload.pr.ghRepo && item.payload.pr.ghToken) {
+        if (evalPayload.pr && evalPayload.pr.ghRepo && evalPayload.pr.ghToken) {
           pr = await openPullRequest({
             repoPath: item.payload.repoPath,
             taskId: item.payload.taskId,
             files: item.payload.files,
             tests: item.payload.tests,
             summary: item.payload.summary,
-            ghRepo: item.payload.pr.ghRepo,
-            ghToken: item.payload.pr.ghToken,
-            baseBranch: item.payload.pr.baseBranch,
+            ghRepo: evalPayload.pr.ghRepo,
+            ghToken: evalPayload.pr.ghToken,
+            baseBranch: evalPayload.pr.baseBranch,
           });
         }
         result = pr ? { ...apply, pr } : apply;
@@ -171,13 +199,15 @@ export async function handleReviewRoutes(req, res, ctx) {
         throw new Error(`Unknown review kind: ${item.kind}`);
       }
       const finished = kb.setReviewStatus(userId, body.id, { status: 'executed', result });
-      sendJSON(res, 200, finished);
+      dropHeldSecrets(userId, body.id);
+      sendJSON(res, 200, redactReviewItem(finished));
     } catch (err) {
       const finished = kb.setReviewStatus(userId, body.id, {
         status: 'failed',
         result: { error: err.message || 'execution failed' },
       });
-      sendJSON(res, 500, { error: { code: 'REVIEW_EXECUTION_FAILED', message: err.message || 'execution failed' }, item: finished });
+      dropHeldSecrets(userId, body.id);
+      sendJSON(res, 500, { error: { code: 'REVIEW_EXECUTION_FAILED', message: err.message || 'execution failed' }, item: redactReviewItem(finished) });
     }
     return true;
   }

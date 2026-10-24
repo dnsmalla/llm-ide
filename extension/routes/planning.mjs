@@ -11,6 +11,7 @@
 //     false = not a planning route — caller continues dispatch
 
 import * as kb from '../kb/db.mjs';
+import { resolveReviewCreds } from '../kb/review-secrets.mjs';
 import { generatePlan } from '../agents/planner.mjs';
 import { analyzeRisks } from '../agents/risk.mjs';
 import { codeSync } from '../agents/code-sync.mjs';
@@ -264,7 +265,8 @@ export async function handlePlanningRoutes(req, res, ctx) {
         planId: body.planId,
         target,
         taskIds,
-        config: body.config || {},
+        // Vault credential underneath; anything the client sends wins.
+        config: { ...resolveReviewCreds(kb.getDb(), userId, { target }).config, ...(body.config || {}) },
       });
       sendJSON(res, 200, result);
     } catch (err) {
