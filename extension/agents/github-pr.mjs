@@ -126,12 +126,42 @@ function safeBranchName(taskId) {
   return `llmide/auto/${slug}`;
 }
 
+const GH_REPO_RE = /^[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+$/;
+// Strict ref-name subset: no leading '-' (would parse as a git option),
+// no '..', no '@{', no trailing '/' or '.lock'.
+const BASE_BRANCH_RE = /^[A-Za-z0-9_][A-Za-z0-9_.\/-]*$/;
+
+export function assertSafeGhRepo(ghRepo) {
+  if (typeof ghRepo !== 'string' || !GH_REPO_RE.test(ghRepo)
+      || ghRepo.split('/').some((seg) => seg === '.' || seg === '..')) {
+    throw new Error('Invalid GitHub repo: expected "owner/name"');
+  }
+}
+
+export async function assertSafeBaseBranch(repoPath, base) {
+  if (typeof base !== 'string' || base.length === 0 || base.length > 200
+      || !BASE_BRANCH_RE.test(base)
+      || base.includes('..') || base.includes('//')
+      || base.endsWith('/') || base.endsWith('.') || base.endsWith('.lock')) {
+    throw new Error('Invalid base branch name');
+  }
+  try {
+    await execGit(repoPath, ['check-ref-format', '--branch', base]);
+  } catch {
+    throw new Error('Invalid base branch name');
+  }
+}
+
 export async function openPullRequest({
   repoPath, taskId, files = [], tests = [], summary, ghRepo, ghToken, baseBranch,
 }) {
   if (!ghRepo || !ghToken) throw new Error('PR creation requires GitHub repo + token');
   if (!repoPath) throw new Error('repoPath required');
   if ((files.length + tests.length) === 0) throw new Error('No files to commit');
+  assertSafeGhRepo(ghRepo);
+  if (baseBranch !== undefined && baseBranch !== null && baseBranch !== '') {
+    await assertSafeBaseBranch(repoPath, baseBranch);
+  }
 
   // Defensive: make sure this is a git repo.  The status command exits
   // non-zero outside of one and the error bubbles up clearly.
@@ -139,6 +169,7 @@ export async function openPullRequest({
 
   const branch = safeBranchName(taskId);
   const base = baseBranch || await inferDefaultBranch(repoPath);
+  await assertSafeBaseBranch(repoPath, base);
 
   // Refuse to clobber an existing branch with the same name — the user
   // can delete it locally and retry if they really want a fresh attempt.
