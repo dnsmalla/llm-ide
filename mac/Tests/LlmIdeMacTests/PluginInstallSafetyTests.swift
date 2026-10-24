@@ -42,6 +42,29 @@ struct PluginInstallSafetyTests {
         guard case .cloneFailed = other else { Issue.record("expected .cloneFailed, got \(other)"); return }
     }
 
+    @Test("https URLs get .git appended so GitLab's smart-HTTP path is hit without a redirect")
+    func normalizeAppendsDotGit() throws {
+        #expect(try PluginGitInstaller.normalize("https://gitlab.com/o/r") == "https://gitlab.com/o/r.git")
+        #expect(try PluginGitInstaller.normalize("https://gitlab.com/o/r/") == "https://gitlab.com/o/r.git")
+        #expect(try PluginGitInstaller.normalize("https://gitlab.com/o/r.git") == "https://gitlab.com/o/r.git")
+        #expect(try PluginGitInstaller.normalize("git@gitlab.com:o/r") == "git@gitlab.com:o/r")
+    }
+
+    @Test("a 301 from the server maps to the moved-repository error")
+    func http301MapsToRedirected() {
+        let e = PluginGitInstaller.cloneError(stderr: "fatal: unable to access 'https://x/y/': The requested URL returned error: 301", code: 128)
+        guard case .redirected = e else { Issue.record("expected .redirected, got \(e)"); return }
+    }
+
+    @Test("ls-remote carries the redirect lock before the subcommand")
+    func lsRemoteArgsHardenRedirects() throws {
+        let args = PluginGitInstaller.lsRemoteArgs(url: "https://example.com/o/r.git", patterns: ["HEAD"])
+        let idx = try #require(args.firstIndex(of: "ls-remote"))
+        #expect(args[..<idx].contains("http.followRedirects=false"))
+        #expect(args[..<idx].contains("protocol.allow=never"))
+        #expect(args.suffix(3) == ["--", "https://example.com/o/r.git", "HEAD"])
+    }
+
     @Test("a plugin path that is a symlink out of the clone is refused")
     func resolveRefusesSymlinkEscape() throws {
         let root = try makeTempDir()

@@ -11,7 +11,7 @@ struct PluginGitURLGateTests {
         #expect(try PluginGitInstaller.normalize(" https://github.com/owner/repo.git ")
             == "https://github.com/owner/repo.git")
         #expect(try PluginGitInstaller.normalize("git@gitlab.com:owner/repo.git") == "git@gitlab.com:owner/repo.git")
-        #expect(try PluginGitInstaller.normalize("https://8.8.8.8/owner/repo") == "https://8.8.8.8/owner/repo")
+        #expect(try PluginGitInstaller.normalize("https://8.8.8.8/owner/repo") == "https://8.8.8.8/owner/repo.git")
     }
 
     @Test("plain http and other schemes are refused")

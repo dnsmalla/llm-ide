@@ -98,8 +98,15 @@ enum PluginGitInstaller {
         // private address (DNS rebinding) is not caught here. Redirects are
         // closed separately: `cloneArgs` turns off `http.followRedirects`, so a
         // public URL cannot 302 to 127.0.0.1 or 169.254.169.254 after this check.
+        // The cost is that a browser URL GitLab 301s to `<repo>.git` would fail,
+        // so the path gets `.git` appended here (a trailing `/` is dropped first).
         if isDisallowedHost(host) { throw InstallError.localHost }
-        return trimmed
+        guard var comps = URLComponents(string: trimmed) else { return trimmed }
+        var path = comps.path
+        while path.hasSuffix("/") { path.removeLast() }
+        if !path.isEmpty, !path.hasSuffix(".git") { path += ".git" }
+        comps.path = path
+        return comps.string ?? trimmed
     }
 
     /// True for a host that names this machine or a non-public network:
@@ -203,7 +210,8 @@ enum PluginGitInstaller {
     /// a message the user can act on; anything else stays a plain clone failure.
     static func cloneError(stderr: String, code: Int32) -> InstallError {
         let lower = stderr.lowercased()
-        if lower.contains("unable to update url base from redirection") || lower.contains("redirect") {
+        if lower.contains("unable to update url base from redirection") || lower.contains("redirect")
+            || ["301", "302", "307", "308"].contains(where: { lower.contains("returned error: \($0)") }) {
             return .redirected
         }
         return .cloneFailed(stderr.isEmpty ? "git exited \(code)" : stderr)
@@ -309,13 +317,19 @@ enum PluginGitInstaller {
         return StagedRepo(repoRoot: clonedDir, commit: commit, normalizedURL: normalizedURL, cleanup: cleanup)
     }
 
+    /// `ls-remote` argv with the same redirect/transport lock as a clone: the
+    /// periodic update check runs it against stored URLs.
+    static func lsRemoteArgs(url: String, patterns: [String]) -> [String] {
+        cloneConfigArgs + ["ls-remote", "--", url] + patterns
+    }
+
     /// `git ls-remote -- <url> <patterns…>` through the hardened runner, killed
     /// after `timeoutSec`. Returns stdout, or nil on any failure (bad URL,
     /// network, timeout). Used by the update checker, which must never hang.
     static func lsRemote(url rawURL: String, patterns: [String], timeoutSec: TimeInterval) async -> String? {
         guard let url = try? normalize(rawURL) else { return nil }
         guard let res = try? await runProcess(
-            "/usr/bin/git", args: ["ls-remote", "--", url] + patterns, timeoutSec: timeoutSec),
+            "/usr/bin/git", args: lsRemoteArgs(url: url, patterns: patterns), timeoutSec: timeoutSec),
               res.code == 0 else { return nil }
         return res.stdout
     }
