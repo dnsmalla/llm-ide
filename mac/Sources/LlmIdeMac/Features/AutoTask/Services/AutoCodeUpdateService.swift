@@ -772,7 +772,12 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
                 // unchanged since the last SUCCESSFUL review → nothing to learn.
                 let gitRoot = resolved.gitRoot
                 let head = await Task.detached { Self.headSha(at: gitRoot) }.value
-                let signature = Self.reviewSignature(head: head, template: template)
+                // The signature covers the EXACT prompt that will be sent (the
+                // approved template body + this task's config, composed), not
+                // just the built-in template text — editing either must re-run.
+                let prompt = composedPrompt(taskId: task.rawValue, ownPrompt: template,
+                                            projectRoot: resolved.projectRoot, writesFiles: false)
+                let signature = Self.reviewSignature(head: head, template: prompt)
                 let previous = Self.loadReviewSignature(taskId: task.rawValue, gitRoot: gitRoot)
                 if let reason = Self.reviewSkipReason(trigger: trigger, previous: previous, current: signature) {
                     skipSummary = reason
@@ -781,10 +786,7 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
                     logStore.append(task, "Skipped — \(reason).")
                     return
                 }
-                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
-                                                             ownPrompt: template,
-                                                             projectRoot: resolved.projectRoot,
-                                                             writesFiles: false),
+                let ok = await runCLI(prompt: prompt,
                                       localPath: gitRoot, logSuffix: task.logSuffix,
                                       logDir: logDir, logStoreId: task.rawValue,
                                       purposeMode: "review")
