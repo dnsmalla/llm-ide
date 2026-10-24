@@ -178,6 +178,31 @@ export function useTranscript() {
     };
   }, []);
 
+  // Persist the session in progress and drop its draft. Idempotent: the
+  // session id is cleared first, so a second call (local Stop followed by the
+  // CAPTION_STATUS echo, or vice versa) finds nothing to save. A failed save
+  // keeps the draft, so the next open recovers it.
+  const persistSession = useCallback(() => {
+    const snap = snapshot();
+    sessionIdRef.current = null;
+    if (!snap) return;
+    persistTranscript(snap)
+      .then(() => clearTranscriptDraft(snap.id).catch(() => {}))
+      .catch((err) => {
+        const msg =
+          err instanceof StorageQuotaError
+            ? 'Transcript too large to save — download it manually before closing.'
+            : 'Failed to save transcript to local storage.';
+        setSaveError(msg);
+      });
+  }, [snapshot]);
+
+  // The message listener is registered once; reach persistSession via a ref.
+  const persistSessionRef = useRef(persistSession);
+  useEffect(() => {
+    persistSessionRef.current = persistSession;
+  }, [persistSession]);
+
   // Crash-safe checkpoint. The transcript is only saved for real on Stop, so
   // closing the panel / a crash / quitting the browser mid-meeting used to
   // lose all of it. While recording, rewrite a draft on a fixed heartbeat
@@ -287,10 +312,21 @@ export function useTranscript() {
         // it up from this broadcast — so captions aren't dropped in a
         // window that never called startRecording() itself.
         if (message.active) {
+          // A late-mounted instance may be showing a loaded historical
+          // transcript; start clean so live captions don't append to it.
+          if (!isRecordingRef.current) {
+            setSegments([]);
+            setInterimText('');
+            setElapsed(0);
+          }
           setRecordingSync(true, 'captions');
         } else {
+          const wasRecording = isRecordingRef.current;
           setRecordingSync(false);
           setInterimText('');
+          // Stop pressed in ANOTHER panel instance: this one owns the session
+          // (sessionIdRef set), so it must save it. No-op if already saved.
+          if (wasRecording && sessionIdRef.current) persistSessionRef.current();
         }
         return;
       }
@@ -704,21 +740,9 @@ export function useTranscript() {
     setRecordingSync(false);
     setInterimText('');
 
-    // Auto-persist the session (from refs — see snapshot()), then drop its
-    // draft. A failed save keeps the draft, so the next open recovers it.
-    const snap = snapshot();
-    sessionIdRef.current = null;
-    if (!snap) return;
-    persistTranscript(snap)
-      .then(() => clearTranscriptDraft(snap.id).catch(() => {}))
-      .catch((err) => {
-        const msg =
-          err instanceof StorageQuotaError
-            ? 'Transcript too large to save — download it manually before closing.'
-            : 'Failed to save transcript to local storage.';
-        setSaveError(msg);
-      });
-  }, [stopAllRecognition, cleanupMic, setRecordingSync, snapshot]);
+    // Auto-persist the session (from refs — see snapshot()).
+    persistSession();
+  }, [stopAllRecognition, cleanupMic, setRecordingSync, persistSession]);
 
   const clearTranscript = useCallback(() => {
     setSegments([]);
