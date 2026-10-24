@@ -1112,7 +1112,27 @@ final class BackendManager {
     /// roughly 30-80 ms per call on warm systems, which is the path
     /// the app takes on every launch before adopt-or-spawn.
     nonisolated static func isPortInUse(port: Int) async -> Bool {
-        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return false }
+        switch await probePort(port: port) {
+        case .listening: return true
+        case .refused: return false
+        case .timedOut:
+            // No answer inside the 250 ms ceiling is NOT "free": a slow but
+            // healthy listener looks the same, and spawning a second node
+            // against it ends in an EADDRINUSE crash loop. Ask /health (~2 s)
+            // before deciding; a failed probe then gets one more connect try,
+            // and a second silence is reported conservatively as in use.
+            if await probeHealthDetail().ok { return true }
+            switch await probePort(port: port) {
+            case .refused: return false
+            case .listening, .timedOut: return true
+            }
+        }
+    }
+
+    enum PortProbe: Equatable { case listening, refused, timedOut }
+
+    nonisolated static func probePort(port: Int) async -> PortProbe {
+        guard let nwPort = NWEndpoint.Port(rawValue: UInt16(port)) else { return .refused }
         let host = NWEndpoint.Host("127.0.0.1")
         let params = NWParameters.tcp
         // Skip Bonjour/proxy resolution — we're hitting loopback only.
@@ -1120,13 +1140,13 @@ final class BackendManager {
         let conn = NWConnection(host: host, port: nwPort, using: params)
         let queue = DispatchQueue.global(qos: .userInitiated)
 
-        return await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+        return await withCheckedContinuation { (cont: CheckedContinuation<PortProbe, Never>) in
             // Guard against double-resume — Network framework can fire
             // multiple state callbacks (e.g. .preparing → .failed) and
             // the timeout race would otherwise resume twice.
             let resumedLock = NSLock()
             nonisolated(unsafe) var resumed = false
-            let finish: @Sendable (Bool) -> Void = { result in
+            let finish: @Sendable (PortProbe) -> Void = { result in
                 resumedLock.lock()
                 let already = resumed
                 resumed = true
@@ -1138,13 +1158,13 @@ final class BackendManager {
             conn.stateUpdateHandler = { state in
                 switch state {
                 case .ready:
-                    finish(true)        // port is bound — something is listening
+                    finish(.listening)  // port is bound — something is listening
                 case .failed, .cancelled:
-                    finish(false)       // connection-refused / unreachable → no listener
+                    finish(.refused)    // connection-refused / unreachable → no listener
                 case .waiting:
                     // .waiting means the kernel told us "no route / refused";
                     // for loopback this is effectively "closed."
-                    finish(false)
+                    finish(.refused)
                 default:
                     break
                 }
@@ -1152,7 +1172,7 @@ final class BackendManager {
             conn.start(queue: queue)
             // Hard ceiling so a hostile firewall rule can't stall startup.
             queue.asyncAfter(deadline: .now() + 0.25) {
-                finish(false)
+                finish(.timedOut)
             }
         }
     }
