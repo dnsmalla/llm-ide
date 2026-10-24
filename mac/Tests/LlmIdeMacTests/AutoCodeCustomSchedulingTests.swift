@@ -25,6 +25,8 @@ final class AutoCodeCustomSchedulingTests: XCTestCase {
         super.tearDown()
     }
 
+    private let project = "proj-test"
+
     private func makeService() -> AutoCodeUpdateService {
         let settings = AutoTaskSettings(defaults: suite)
         settings.enabled = true
@@ -46,11 +48,13 @@ final class AutoCodeCustomSchedulingTests: XCTestCase {
         t.save(in: suite)
 
         // No customNextFireAt seeded yet → not due.
-        XCTAssertFalse(svc.dueCustomTasks(now: now).contains { $0.id == t.id })
+        XCTAssertFalse(svc.dueCustomTasks(now: now, activeProjectId: project).contains { $0.id == t.id })
 
         // Seed a fire in the past → due.
         svc.autoTaskSettings.setCustomNextFireAt(past, for: t.id)
-        XCTAssertTrue(svc.dueCustomTasks(now: now).contains { $0.id == t.id })
+        XCTAssertTrue(svc.dueCustomTasks(now: now, activeProjectId: project).contains { $0.id == t.id })
+        // No active project → nothing runs, even when due.
+        XCTAssertFalse(svc.dueCustomTasks(now: now, activeProjectId: nil).contains { $0.id == t.id })
     }
 
     func testManualCustomTaskNeverDue() {
@@ -60,7 +64,7 @@ final class AutoCodeCustomSchedulingTests: XCTestCase {
         t.save(in: suite)
         // Even with a past fire, a manual (cron-less) task is never auto-scheduled.
         svc.autoTaskSettings.setCustomNextFireAt(Date().addingTimeInterval(-300), for: t.id)
-        XCTAssertFalse(svc.dueCustomTasks(now: Date()).contains { $0.id == t.id })
+        XCTAssertFalse(svc.dueCustomTasks(now: Date(), activeProjectId: project).contains { $0.id == t.id })
     }
 
     func testDisabledCustomTaskNeverDue() {
@@ -70,7 +74,7 @@ final class AutoCodeCustomSchedulingTests: XCTestCase {
         t.isEnabled = false
         t.save(in: suite)
         svc.autoTaskSettings.setCustomNextFireAt(Date().addingTimeInterval(-300), for: t.id)
-        XCTAssertFalse(svc.dueCustomTasks(now: Date()).contains { $0.id == t.id })
+        XCTAssertFalse(svc.dueCustomTasks(now: Date(), activeProjectId: project).contains { $0.id == t.id })
     }
 
     func testMasterDisabledSkipsCustomTasks() {
@@ -80,7 +84,7 @@ final class AutoCodeCustomSchedulingTests: XCTestCase {
         t.cron = "0 * * * *"
         t.save(in: suite)
         svc.autoTaskSettings.setCustomNextFireAt(Date().addingTimeInterval(-300), for: t.id)
-        XCTAssertTrue(svc.dueCustomTasks(now: Date()).isEmpty)
+        XCTAssertTrue(svc.dueCustomTasks(now: Date(), activeProjectId: project).isEmpty)
     }
 
     func testRealignCustomNextFirePushesFuture() {
