@@ -29,7 +29,7 @@ final class AppEnvironment {
         // One-time rename of any legacy `notes/` → `llm-doc/` under the notes
         // root and the project root, before the indexer scans, so existing
         // generated notes are picked up at their new location.
-        NotesToLlmDocMigration.run(in: folder)
+        NotesToLlmDocMigration.runForNotesFolder(folder)
         if let project = indexRootURL {
             NotesToLlmDocMigration.run(in: project)
             SourceNestedLlmDocMigration.run(in: project)

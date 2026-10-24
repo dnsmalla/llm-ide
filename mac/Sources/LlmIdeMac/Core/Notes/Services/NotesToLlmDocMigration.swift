@@ -12,6 +12,18 @@ import os.log
 enum NotesToLlmDocMigration {
     private static let log = Logger(subsystem: "com.llmide.macapp", category: "NotesToLlmDocMigration")
 
+    /// Run for the active notes folder. When that folder is a project's
+    /// `<project>/source/` (parent holds `system/project.json`), `source/notes/`
+    /// is the user's raw content, not legacy generated notes — leave it alone.
+    @MainActor
+    static func runForNotesFolder(_ folder: URL) {
+        if folder.lastPathComponent == "source" {
+            let layout = ProjectLayout(root: folder.deletingLastPathComponent())
+            if FileManager.default.fileExists(atPath: layout.projectJSON.path) { return }
+        }
+        run(in: folder)
+    }
+
     /// If `<root>/notes` exists and `<root>/llm-doc` does not, rename it.
     /// If both exist, leave `notes/` in place rather than risk clobbering a
     /// newer `llm-doc/`. No-op when neither exists.
