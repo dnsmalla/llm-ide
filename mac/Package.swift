@@ -129,6 +129,7 @@ if autoTasksIncluded {
         "ArtifactCheckSectionRulesTests.swift",
         "AutoCodeCustomSchedulingTests.swift",
         "CustomAutoTaskProjectScopeTests.swift",
+        "MobileAutoTaskBridgeScopeTests.swift",
         "AutoCodeUpdateServiceCLITests.swift",
         "AutoCodeUpdateServiceComposedPromptTests.swift",
         "AutoCodeUpdateServiceCronTests.swift",
