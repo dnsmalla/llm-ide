@@ -50,6 +50,17 @@ final class AutoCodeUpdateServiceLoopEngineeringTests: XCTestCase {
         XCTAssertEqual(service.taskErrors[AutoTask.loopEngineering.rawValue], "Loop skipped — no project root resolved.")
     }
 
+    /// A bail-out before anything started must report didStart == false so the
+    /// run is recorded `.skipped`, not `.failed`.
+    func testBailOutsReportDidStartFalse() async {
+        let service = makeService()
+        let a = await service.runLoopEngineeringSweep(projectRoot: "", gitRoot: "", projectId: nil)
+        XCTAssertFalse(a)
+        let b = await service.runLoopEngineeringSweep(
+            projectRoot: "/tmp/x", gitRoot: "/tmp/x", projectId: nil)
+        XCTAssertFalse(b)
+    }
+
     /// `projectId` is now a plain parameter (per the Task 9 review — the
     /// caller resolves it once alongside `resolved`, rather than this method
     /// re-reading `projectStore?.activeProject?.bundle.id` internally), so
