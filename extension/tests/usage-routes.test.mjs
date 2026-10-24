@@ -159,3 +159,37 @@ test('GET /kb/usage/resolve rejects an unknown provider with 400', async () => {
   await handleKB(makeReq({ method: 'GET', url: '/kb/usage/resolve?provider=nope', userId }), res);
   assert.equal(res.statusCode, 400);
 });
+
+test('POST /kb/usage/record stores optional token + turn counts', async () => {
+  resetDb();
+  const userId = await newUser('rectok');
+  const res = makeRes();
+  await handleKB(makeReq({
+    method: 'POST', url: '/kb/usage/record', userId,
+    body: { provider: 'anthropic', model: 'claude-opus-4-8', source: 'auto-task',
+      inputTokens: 10, outputTokens: 5, cacheReadTokens: 1000, cacheCreationTokens: 200, turns: 7,
+      stopReason: 'error_max_turns' },
+  }), res);
+  assert.equal(res.statusCode, 200);
+  const kb = await import('../kb/db.mjs');
+  const row = kb.getDb().prepare('SELECT * FROM usage_ledger WHERE user_id = ? ORDER BY id DESC LIMIT 1').get(userId);
+  assert.equal(row.input_tokens, 10);
+  assert.equal(row.output_tokens, 5);
+  assert.equal(row.cache_read_tokens, 1000);
+  assert.equal(row.cache_creation_tokens, 200);
+  assert.equal(row.turns, 7);
+  assert.equal(row.stop_reason, 'error_max_turns');
+});
+
+test('POST /kb/usage/record rejects negative or non-integer token counts with 400', async () => {
+  resetDb();
+  const userId = await newUser('badtok');
+  for (const body of [{ inputTokens: -1 }, { turns: 1.5 }, { cacheReadTokens: '5' }]) {
+    const res = makeRes();
+    await handleKB(makeReq({
+      method: 'POST', url: '/kb/usage/record', userId,
+      body: { provider: 'anthropic', model: 'claude-opus-4-8', ...body },
+    }), res);
+    assert.equal(res.statusCode, 400);
+  }
+});

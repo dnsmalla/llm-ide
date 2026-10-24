@@ -1030,6 +1030,16 @@ export async function handleKB(req, res) {
         sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'provider and model are required' } });
         return true;
       }
+      // Optional token/turn counts (the Auto Task CLI reports them from
+      // `claude -p --output-format json`). Absent/null = "not reported";
+      // anything else must be a non-negative integer.
+      for (const k of ['inputTokens', 'outputTokens', 'cacheReadTokens', 'cacheCreationTokens', 'turns']) {
+        const v = body[k];
+        if (v != null && !(Number.isInteger(v) && v >= 0)) {
+          sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: `${k} must be a non-negative integer` } });
+          return true;
+        }
+      }
       const id = recordUsage(kb.getDb(), {
         userId,
         provider: body.provider,
@@ -1038,6 +1048,10 @@ export async function handleKB(req, res) {
         endpoint: body.endpoint,
         inputTokens: body.inputTokens,
         outputTokens: body.outputTokens,
+        cacheReadTokens: body.cacheReadTokens,
+        cacheCreationTokens: body.cacheCreationTokens,
+        turns: body.turns,
+        stopReason: typeof body.stopReason === 'string' ? body.stopReason : null,
         runs: body.runs,
         requestId: body.requestId,
       });

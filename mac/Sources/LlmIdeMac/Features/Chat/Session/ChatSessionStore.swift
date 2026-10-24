@@ -16,8 +16,33 @@ enum ChatSessionStore {
     static var baseDirectoryOverride: URL?
 
     private static var baseDir: URL? {
-        if let override = baseDirectoryOverride { return override }
-        return AppIdentity.applicationSupportRoot()
+        resolveBaseDir(override: baseDirectoryOverride,
+                       underTests: isRunningUnderTests,
+                       real: { AppIdentity.applicationSupportRoot() })
+    }
+
+    /// True inside an XCTest / swift-testing host process.
+    static let isRunningUnderTests: Bool = {
+        let env = ProcessInfo.processInfo.environment
+        return env["XCTestConfigurationFilePath"] != nil
+            || env["XCTestBundlePath"] != nil
+            || NSClassFromString("XCTestCase") != nil
+    }()
+
+    /// Per-process scratch directory used when a test run reaches the store
+    /// without having set `baseDirectoryOverride`. Tests that build a
+    /// `ChatEngine` and run turns persist sessions as a side effect; before
+    /// this they landed in the user's REAL Application Support `sessions/`
+    /// (files titled "continue working"). Never the real directory under test.
+    static let testFallbackDirectory: URL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("llmide-chat-sessions-tests-\(ProcessInfo.processInfo.processIdentifier)",
+                                isDirectory: true)
+
+    /// Pure resolution rule: an explicit override wins; otherwise a test run
+    /// gets the scratch directory and only a real run gets Application Support.
+    static func resolveBaseDir(override: URL?, underTests: Bool, real: () -> URL) -> URL {
+        if let override { return override }
+        return underTests ? testFallbackDirectory : real()
     }
 
     private static var sessionsDir: URL? {

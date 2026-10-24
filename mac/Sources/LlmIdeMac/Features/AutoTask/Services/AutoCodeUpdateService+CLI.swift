@@ -478,13 +478,66 @@ extension AutoCodeUpdateService {
     }
 
     /// Record one Auto Task run against the global usage ledger (source
-    /// "auto-task", no tokens — the CLI can't report them). Best-effort.
-    func recordRun(model: String?, endpoint: String, tool: AICliTool? = nil) async {
+    /// "auto-task"). Claude Code runs are metered: `claudeResult` carries the
+    /// tokens/turns parsed from `--output-format json`; other CLIs (and an
+    /// unparseable Claude result) record the run with no tokens. Best-effort.
+    func recordRun(model: String?, endpoint: String, tool: AICliTool? = nil,
+                   claudeResult: ClaudeCLI.RunResult? = nil) async {
         guard let api else { return }
         let provider = (tool ?? AICliTool(rawValue: config.activeCLI) ?? .claudeCode).provider
         let m = (model?.isEmpty == false) ? model! : config.defaultModelId
         guard !m.isEmpty else { return }
-        _ = try? await api.recordUsage(provider: provider, model: m, source: "auto-task", endpoint: endpoint)
+        let u = claudeResult?.usage
+        _ = try? await api.recordUsage(provider: provider, model: m, source: "auto-task", endpoint: endpoint,
+                                       inputTokens: u?.inputTokens, outputTokens: u?.outputTokens,
+                                       cacheReadTokens: u?.cacheReadTokens,
+                                       cacheCreationTokens: u?.cacheCreationTokens,
+                                       turns: claudeResult?.numTurns, stopReason: claudeResult?.subtype)
+    }
+
+    /// stdout of a metered Claude run: a temp FILE rather than a pipe, so the
+    /// whole JSON result is on disk the moment the process exits (no EOF-vs-
+    /// termination race, nothing to drain, nothing to hang if launch fails).
+    struct MeteredOutput {
+        let url: URL
+        let handle: FileHandle
+
+        static func create() -> MeteredOutput? {
+            let url = FileManager.default.temporaryDirectory
+                .appendingPathComponent("llmide-autotask-\(UUID().uuidString).json")
+            guard FileManager.default.createFile(atPath: url.path, contents: nil),
+                  let handle = try? FileHandle(forWritingTo: url) else { return nil }
+            return MeteredOutput(url: url, handle: handle)
+        }
+
+        /// Close, read and delete the file; the run's raw stdout.
+        func finish() -> Data {
+            try? handle.close()
+            let data = (try? Data(contentsOf: url)) ?? Data()
+            try? FileManager.default.removeItem(at: url)
+            return data
+        }
+    }
+
+    /// Why a metered run did not complete even though the process may have
+    /// exited 0 — nil when the CLI reports success (or gave no parseable result).
+    nonisolated static func meteredFailureNote(_ r: ClaudeCLI.RunResult) -> String? {
+        if r.hitTurnCap {
+            return "Run stopped at the turn cap (--max-turns \(ClaudeCLI.autoTaskMaxTurns)) before finishing — treated as failed."
+        }
+        if r.reportedFailure {
+            return "The CLI reported an error (\(r.subtype ?? "is_error")) — treated as failed."
+        }
+        return nil
+    }
+
+    /// A run succeeded when the process exited 0 AND (for a metered Claude run)
+    /// the CLI's own result is not an error / turn-cap stop. An unparseable
+    /// result falls back to the exit status alone, as before.
+    nonisolated static func meteredRunSucceeded(processOK: Bool, claude: ClaudeCLI.RunResult?) -> Bool {
+        guard processOK else { return false }
+        guard let claude else { return true }
+        return !claude.reportedFailure
     }
 
     /// The CLI tool + model an Auto Task run is routed to by the `autoTasks`
@@ -747,6 +800,10 @@ extension AutoCodeUpdateService {
             _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
             return .skipped
         }
+        // Claude Code: metered + turn-capped (JSON result with usage). Flags go
+        // before the `-p <prompt>` pair.
+        let metered = cliTool == .claudeCode
+        if metered { args += ClaudeCLI.meteredRunArgs() }
         args += promptArgs
 
         process.arguments = args
@@ -761,9 +818,14 @@ extension AutoCodeUpdateService {
             logFileHandle = nil
         }
         defer { logFileHandle?.closeFile() }
+        // A metered (Claude) run's stdout is the JSON result, so it goes to a
+        // temp file and is written to the log as plain text afterwards.
+        let meteredOut = metered ? MeteredOutput.create() : nil
         if let fh = logFileHandle {
-            process.standardOutput = fh
+            process.standardOutput = meteredOut?.handle ?? fh
             process.standardError = fh
+        } else if let meteredOut {
+            process.standardOutput = meteredOut.handle
         }
         // Detach stdin so a stray permission prompt can never hang the run.
         process.standardInput = FileHandle.nullDevice
@@ -780,9 +842,22 @@ extension AutoCodeUpdateService {
         // below is exposed precisely so cancel() can terminate it), or
         // ResourceGuardService stops it under sustained critical memory pressure.
         activeProcess = process
-        let result = await awaitProcessExit(process, guardLabel: "auto task CLI")
+        let processOK = await awaitProcessExit(process, guardLabel: "auto task CLI")
         let wasCancelled = Task.isCancelled
         activeProcess = nil
+        // Metered: hand the reply text to the log exactly as stdout used to be;
+        // a turn-capped / errored run is NOT a success even on exit 0.
+        let claudeResult = meteredOut.map { ClaudeCLI.parseRunResult($0.finish()) }
+        if let claudeResult {
+            if !claudeResult.text.isEmpty {
+                try? logFileHandle?.write(contentsOf: Data((claudeResult.text + "\n").utf8))
+            }
+            if let note = Self.meteredFailureNote(claudeResult) {
+                try? logFileHandle?.write(contentsOf: Data((note + "\n").utf8))
+                logStore.append(.implementIssues, "Issue #\(issue.number): \(note)", level: .error)
+            }
+        }
+        let result = Self.meteredRunSucceeded(processOK: processOK, claude: claudeResult)
 
         // Did the CLI commit on the branch? Judged by the tip moving, in the
         // worktree — not by the user's HEAD, which this run never touches.
@@ -878,7 +953,7 @@ extension AutoCodeUpdateService {
             _ = await Task.detached { Self.branchDelete(branch, at: localPath) }.value
         }
         // The model was invoked (it ran, pass or fail) — count it.
-        await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)", tool: cliTool)
+        await recordRun(model: resolvedModel, endpoint: "auto-task:issue-\(issue.number)", tool: cliTool, claudeResult: claudeResult)
         return IssueRunOutcome(succeeded: result, committed: committed, branch: committed || keepWorktreeForRecovery ? keptBranchName : nil)
     }
 
@@ -1019,6 +1094,10 @@ extension AutoCodeUpdateService {
             if let implementBranch { _ = await Task.detached { Self.branchDelete(implementBranch, at: localPath) }.value }
             return false
         }
+        // Claude Code: metered + turn-capped (JSON result with usage); flags go
+        // before the `-p <prompt>` pair.
+        let metered = cliTool == .claudeCode
+        if metered { args += ClaudeCLI.meteredRunArgs() }
         args += promptArgs
 
         process.arguments = args
@@ -1037,7 +1116,11 @@ extension AutoCodeUpdateService {
             logFileHandle = nil
         }
         let pipe = Pipe()
-        process.standardOutput = pipe
+        // Metered (Claude) run: stdout is ONE JSON result, so it goes to a temp
+        // file and its reply text is replayed into the log/UI after the run;
+        // stderr still streams live through the pipe.
+        let meteredOut = metered ? MeteredOutput.create() : nil
+        process.standardOutput = meteredOut?.handle ?? pipe
         process.standardError = pipe
         let store = logStore
         // readabilityHandler is a @Sendable closure firing on a background
@@ -1074,8 +1157,28 @@ extension AutoCodeUpdateService {
         // No wall clock — same reasoning as the run above. Cancellation goes
         // through activeProcess; the machine is protected by ResourceGuardService.
         activeProcess = process
-        let result = await awaitProcessExit(process, guardLabel: "auto task CLI (stream)")
+        let processOK = await awaitProcessExit(process, guardLabel: "auto task CLI (stream)")
         let wasCancelled = Task.isCancelled
+        let claudeResult = meteredOut.map { ClaudeCLI.parseRunResult($0.finish()) }
+        if let claudeResult {
+            // Same lines the live stream used to deliver, now that the reply is
+            // known. The stderr handler owns/closes its own handle, so the log
+            // file is appended through a fresh one.
+            var replay = claudeResult.text
+            if let note = Self.meteredFailureNote(claudeResult) { replay += (replay.isEmpty ? "" : "\n") + note }
+            if !replay.isEmpty {
+                if let fh = try? FileHandle(forWritingTo: logURL) {
+                    _ = try? fh.seekToEnd()
+                    try? fh.write(contentsOf: Data((replay + "\n").utf8))
+                    try? fh.close()
+                }
+                for line in replay.components(separatedBy: "\n") { logStore.append(logStoreId, line) }
+            }
+            if Self.meteredFailureNote(claudeResult) != nil {
+                logStore.append(logStoreId, "Run did not complete (see above).", level: .error)
+            }
+        }
+        let result = Self.meteredRunSucceeded(processOK: processOK, claude: claudeResult)
 
         activeProcess = nil
         var emptyImplementBranch: String?
@@ -1150,7 +1253,7 @@ extension AutoCodeUpdateService {
                 logStore.append(logStoreId, "Run did not finish cleanly; could not park \(implementBranch) — review before review-merge publishes it.", level: .error)
             }
         }
-        await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)", tool: cliTool)
+        await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)", tool: cliTool, claudeResult: claudeResult)
         return result
     }
 }
