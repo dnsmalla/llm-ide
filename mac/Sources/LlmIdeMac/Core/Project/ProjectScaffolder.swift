@@ -300,6 +300,12 @@ enum ProjectScaffolder {
         return String(existing[..<existingStart]) + String(generated[generatedStart...])
     }
 
+    /// True when `readme` is LLM-IDE-managed (carries the auto marker), i.e.
+    /// the same test `mergedReadme` uses to decide a README is ours to edit.
+    static func isManagedReadme(_ readme: String) -> Bool {
+        markerStart(in: readme) != nil
+    }
+
     /// Start of the first marker that opens a LINE. An inline mention (notes
     /// that quote the marker text mid-sentence) must not truncate the README.
     private static func markerStart(in text: String) -> String.Index? {

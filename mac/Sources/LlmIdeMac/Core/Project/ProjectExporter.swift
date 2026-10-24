@@ -443,8 +443,12 @@ final class ProjectExporter {
 
     // MARK: - README badge
 
-    nonisolated private func updateReadme(at url: URL, meetings: Int) {
+    nonisolated func updateReadme(at url: URL, meetings: Int) {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return }
+        // A README without our marker is the user's (or an adopted repo's):
+        // ProjectScaffolder never touches it, so neither do we. The export
+        // time is already in system/sync.json.
+        guard ProjectScaffolder.isManagedReadme(content) else { return }
         let badge = "**Last exported:** \(nowISO()) — \(meetings) meeting(s)"
 
         let updated: String
