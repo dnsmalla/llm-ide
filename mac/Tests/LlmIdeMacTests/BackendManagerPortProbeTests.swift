@@ -1,6 +1,6 @@
 import XCTest
 import Darwin
-@testable import LlmIdeMac
+@testable import LlmIdeMacLib
 
 final class BackendManagerPortProbeTests: XCTestCase {
     /// Bind + listen on an ephemeral loopback port; returns (fd, port).
@@ -13,7 +13,7 @@ final class BackendManagerPortProbeTests: XCTestCase {
         addr.sin_port = 0
         let bound = withUnsafePointer(to: &addr) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
-                bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
+                Darwin.bind(fd, $0, socklen_t(MemoryLayout<sockaddr_in>.size))
             }
         }
         XCTAssertEqual(bound, 0)
