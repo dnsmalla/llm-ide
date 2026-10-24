@@ -75,7 +75,7 @@ async function withServer(features, fn) {
 test('/health with LLMIDE_FEATURES=agent_chat: features listed, pruned endpoints gone, Chrome endpoints kept', async () => {
   await withServer('agent_chat', (health, output) => {
     assert.deepEqual(health.features, ['agent_chat']);
-    assert.ok(health.apiVersion >= 74);
+    assert.ok(health.apiVersion >= 75);
     for (const pruned of ['/kb/loop/agent-run', '/kb/issue-schedule', '/kb/ingest-code-graph']) {
       assert.ok(!health.endpoints.includes(pruned), `${pruned} is not advertised`);
     }
