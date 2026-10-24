@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { conflictQuestions } from '../../lib/kb';
 import { MsgType } from '../../lib/messages';
@@ -10,6 +10,7 @@ export function useQuestions() {
   const [isGenerating, setIsGenerating] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const busyRef = useRef(false);
+  const abortRef = useRef<AbortController | null>(null);
 
   const generate = useCallback(
     async (transcript: string, participants: string[], types: QuestionType[], language?: string) => {
@@ -27,8 +28,14 @@ export function useQuestions() {
       setIsGenerating(true);
       setError(null);
 
+      abortRef.current?.abort();
       const controller = new AbortController();
-      const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+      abortRef.current = controller;
+      let timedOut = false;
+      const timeout = setTimeout(() => {
+        timedOut = true;
+        controller.abort();
+      }, REQUEST_TIMEOUT_MS);
 
       try {
         const serverUrl = await getServerUrl();
@@ -51,15 +58,18 @@ export function useQuestions() {
         if (typeof data?.questions !== 'string' || !data.questions.trim()) {
           throw new Error('Empty response from server');
         }
+        if (controller.signal.aborted) return;
         setQuestions(data.questions);
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') {
-          setError('Request timed out. Try again.');
+          // Cleared or unmounted mid-flight: stay silent. Only a timeout is an error.
+          if (timedOut) setError('Request timed out. Try again.');
         } else {
           setError(err instanceof Error ? err.message : 'Failed to generate questions');
         }
       } finally {
         clearTimeout(timeout);
+        if (abortRef.current === controller) abortRef.current = null;
         busyRef.current = false;
         setIsGenerating(false);
       }
@@ -87,8 +97,16 @@ export function useQuestions() {
   }, []);
 
   const clearQuestions = useCallback(() => {
+    abortRef.current?.abort();
     setQuestions('');
     setError(null);
+  }, []);
+
+  // Abort any in-flight generation when the hook unmounts.
+  useEffect(() => {
+    return () => {
+      abortRef.current?.abort();
+    };
   }, []);
 
   const postToChat = useCallback(async (text: string) => {
