@@ -18,6 +18,7 @@ enum PluginGitInstaller {
         case unsupportedScheme(String)
         case localHost
         case cloneFailed(String)
+        case redirected
         case zipFailed(String)
         case noGitCLI
 
@@ -29,6 +30,8 @@ enum PluginGitInstaller {
             case .localHost:
                 return "Local, private-network and link-local hosts are not supported."
             case .cloneFailed(let msg): return "Clone failed: \(msg)"
+            case .redirected:
+                return "The repository URL redirects elsewhere (it may have moved). Paste its current URL."
             case .zipFailed(let msg):   return "Could not package the cloned repo: \(msg)"
             case .noGitCLI:             return "Git is not installed or not on PATH."
             }
@@ -92,7 +95,9 @@ enum PluginGitInstaller {
         // The clone runs on THIS Mac, so a URL naming a loopback or private
         // address would let a pasted link probe services on the user's machine
         // or LAN. Checked by literal only — a public name that resolves to a
-        // private address (DNS rebinding) is not caught here.
+        // private address (DNS rebinding) is not caught here. Redirects are
+        // closed separately: `cloneArgs` turns off `http.followRedirects`, so a
+        // public URL cannot 302 to 127.0.0.1 or 169.254.169.254 after this check.
         if isDisallowedHost(host) { throw InstallError.localHost }
         return trimmed
     }
@@ -173,6 +178,37 @@ enum PluginGitInstaller {
         return false
     }
 
+    /// Git config placed BEFORE `clone` so no redirect can lead the clone to a
+    /// host the allow-list never saw: redirects are not followed and only https
+    /// and ssh (the `git@host:o/r` shorthand `normalize` accepts) may be used.
+    static let cloneConfigArgs = [
+        "-c", "http.followRedirects=false",
+        "-c", "protocol.allow=never",
+        "-c", "protocol.https.allow=always",
+        "-c", "protocol.ssh.allow=always",
+    ]
+
+    /// Full `git` argv for a shallow clone, shared by every clone so they stay in sync.
+    static func cloneArgs(url: String, ref: String?, destination: String) -> [String] {
+        var args = cloneConfigArgs + ["clone", "--depth", "1", "--single-branch"]
+        if let ref, !ref.isEmpty { args += ["--branch", ref] }
+        // `--` terminates option parsing — a URL starting with `-` can't be
+        // smuggled in as a git flag (arg-injection guard).
+        args += ["--", url, destination]
+        return args
+    }
+
+    /// Clones run with `http.followRedirects=false`, so a moved repo (301) fails
+    /// with git's raw "unable to update url base from redirection". Map that to
+    /// a message the user can act on; anything else stays a plain clone failure.
+    static func cloneError(stderr: String, code: Int32) -> InstallError {
+        let lower = stderr.lowercased()
+        if lower.contains("unable to update url base from redirection") || lower.contains("redirect") {
+            return .redirected
+        }
+        return .cloneFailed(stderr.isEmpty ? "git exited \(code)" : stderr)
+    }
+
     /// Clone shallowly, zip, return the zip URL. `ref` optional —
     /// branch or tag, default branch when nil.
     static func cloneAndZip(url rawURL: String, ref: String? = nil) async throws -> StagedPackage {
@@ -183,18 +219,14 @@ enum PluginGitInstaller {
         let zipURL    = stage.appendingPathComponent("plugin.zip")
 
         // Shallow clone — we don't need history for installing.
-        var args = ["clone", "--depth", "1", "--single-branch"]
-        if let ref, !ref.isEmpty { args += ["--branch", ref] }
-        // `--` terminates option parsing — a URL starting with `-` can't be
-        // smuggled in as a git flag (arg-injection guard).
-        args += ["--", normalizedURL, clonedDir.path]
+        let args = cloneArgs(url: normalizedURL, ref: ref, destination: clonedDir.path)
 
         let cloneRes = try await runProcess("/usr/bin/git", args: args)
         guard cloneRes.code == 0 else {
             // Strip the temp path from stderr so we don't leak it.
             let stderr = SecretRedactor.redact(cloneRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines))
             log.error("git clone failed: \(stderr, privacy: .public)")
-            throw InstallError.cloneFailed(stderr.isEmpty ? "git exited \(cloneRes.code)" : stderr)
+            throw cloneError(stderr: stderr, code: cloneRes.code)
         }
 
         // Read the commit while `.git` still exists — it is the install's provenance.
@@ -258,16 +290,14 @@ enum PluginGitInstaller {
         let stage = try makeTempDir(prefix: "llmide-marketplace-")
         let clonedDir = stage.appendingPathComponent("repo", isDirectory: true)
 
-        var args = ["clone", "--depth", "1", "--single-branch"]
-        if let ref, !ref.isEmpty { args += ["--branch", ref] }
-        args += ["--", normalizedURL, clonedDir.path]
+        let args = cloneArgs(url: normalizedURL, ref: ref, destination: clonedDir.path)
 
         let cloneRes = try await runProcess("/usr/bin/git", args: args, timeoutSec: timeoutSec)
         guard cloneRes.code == 0 else {
             try? FileManager.default.removeItem(at: stage)
             let stderr = cloneRes.stderr.trimmingCharacters(in: .whitespacesAndNewlines)
             log.error("git clone failed: \(stderr, privacy: .public)")
-            throw InstallError.cloneFailed(stderr.isEmpty ? "git exited \(cloneRes.code)" : stderr)
+            throw cloneError(stderr: stderr, code: cloneRes.code)
         }
         let cleanup: () -> Void = { try? FileManager.default.removeItem(at: stage) }
         let commit: String

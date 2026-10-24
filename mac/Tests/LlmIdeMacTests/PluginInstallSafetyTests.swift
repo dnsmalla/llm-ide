@@ -21,6 +21,27 @@ struct PluginInstallSafetyTests {
         #expect(args.suffix(2) == ["/tmp/x.zip", "."])
     }
 
+    @Test("clone disables redirects and non-https/ssh transports before the clone subcommand")
+    func cloneArgsHardenRedirects() throws {
+        let args = PluginGitInstaller.cloneArgs(url: "https://example.com/o/r.git", ref: "main", destination: "/tmp/d")
+        let cloneIdx = try #require(args.firstIndex(of: "clone"))
+        let head = Array(args[..<cloneIdx])
+        #expect(head.contains("http.followRedirects=false"))
+        #expect(head.contains("protocol.allow=never"))
+        #expect(head.contains("protocol.https.allow=always"))
+        #expect(head.contains("protocol.ssh.allow=always"))
+        #expect(args.suffix(3) == ["--", "https://example.com/o/r.git", "/tmp/d"])
+    }
+
+    @Test("a refused redirect is reported as a moved repository")
+    func redirectStderrMapsToFriendlyError() {
+        let moved = PluginGitInstaller.cloneError(
+            stderr: "fatal: unable to update url base from redirection:\n  asked for: https://x/y\n", code: 128)
+        guard case .redirected = moved else { Issue.record("expected .redirected, got \(moved)"); return }
+        let other = PluginGitInstaller.cloneError(stderr: "fatal: repository not found", code: 128)
+        guard case .cloneFailed = other else { Issue.record("expected .cloneFailed, got \(other)"); return }
+    }
+
     @Test("a plugin path that is a symlink out of the clone is refused")
     func resolveRefusesSymlinkEscape() throws {
         let root = try makeTempDir()
