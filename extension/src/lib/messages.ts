@@ -18,7 +18,7 @@ export enum MsgType {
 }
 
 export type Message =
-  | { type: MsgType.START_CAPTION_SCRAPING }
+  | { type: MsgType.START_CAPTION_SCRAPING; tabId?: number }
   | { type: MsgType.STOP_CAPTION_SCRAPING }
   | { type: MsgType.GET_CAPTION_STATUS }
   | { type: MsgType.PING }
