@@ -153,6 +153,38 @@ struct ChatEngineBackgroundSessionTests {
         }
     }
 
+    @Test("A chat running an approved legacy tool is parked, not re-pointed, on switch")
+    func runningLegacyToolIsParked() async {
+        await withTempStore {
+            let blocking = BlockingChatTransport()
+            let (registry, a, b) = makeFixture(transport: blocking)
+
+            let engineA = registry.engine(for: Self.scope, api: Self.api)
+            engineA.switchSession(to: a)
+            #expect(!engineA.isWorkOpen)
+
+            var settled = 0
+            engineA.hooks.onWorkSettled = { settled += 1 }
+            var engineB: ChatEngine?
+            await engineA.runningLegacyTool {
+                // The card was dropped and nothing is streaming: only the
+                // running-tool flag says this engine still has work.
+                #expect(engineA.agent.pendingTool == nil)
+                #expect(!engineA.busy)
+                #expect(engineA.isWorkOpen)
+                engineB = registry.switchDisplayedSession(scope: Self.scope, to: b, api: Self.api)
+            }
+            // Regression: the engine was re-pointed at `b`, so the result's
+            // session guard discarded the output and the agent chain died.
+            #expect(engineB !== engineA)
+            #expect(engineA.currentSessionIDString == a.uuidString)
+            #expect(!engineA.legacyToolRunning)
+            #expect(!engineA.isWorkOpen)
+            // The flag's clear is the work's end, so the hook must fire.
+            #expect(settled == 1)
+        }
+    }
+
     @Test("Sign-out forgets displayed AND parked chats, and nothing writes them back")
     func signOutForgetsLiveChats() async {
         await withTempStore {

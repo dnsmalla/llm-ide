@@ -1,4 +1,5 @@
 import Foundation
+import os
 
 /// The chat turn lifecycle — send / stop / stream / queue / auto-continue —
 /// lifted out of `CodeAssistantPanel` so it can be driven (and tested)
@@ -235,6 +236,38 @@ final class ChatEngine {
     /// approval expired after the turn ended).
     var isWorkOpen: Bool {
         busy || agent.agentIsAutonomous || agent.pendingTool != nil || pendingApproval != nil
+            || legacyToolRunning
+    }
+
+    /// True while a legacy tool card (bash / git op) the user approved is
+    /// executing. The card is dropped from `agent.pendingTool` before the run
+    /// starts and `busy` is false, so without this the engine looked idle and
+    /// `ChatEngineRegistry` re-pointed it at another session mid-run — the
+    /// result's session guard then discarded the result and the follow-up.
+    private(set) var legacyToolRunning = false
+    private var legacyToolRuns = 0
+
+    /// Run `body` with `legacyToolRunning` set, cleared on every exit path.
+    /// Counted, so overlapping runs keep the flag until the last one ends.
+    func runningLegacyTool<T>(_ body: () async -> T) async -> T {
+        legacyToolRuns += 1
+        legacyToolRunning = true
+        defer {
+            legacyToolRuns -= 1
+            legacyToolRunning = legacyToolRuns > 0
+            // The follow-up turn ran with the flag still set, so its turn-end
+            // check skipped `onWorkSettled`; this is the work's real end.
+            if !legacyToolRunning && !isWorkOpen { hooks.onWorkSettled() }
+        }
+        return await body()
+    }
+
+    /// Fallback for a legacy tool result that arrives after the engine was
+    /// re-pointed at another session. Should not happen now that a running
+    /// tool keeps the engine parked; logged so a regression is visible.
+    func logDroppedLegacyResult(_ what: String) {
+        Logger(subsystem: "com.llmide.macapp", category: "chat-session")
+            .error("dropped legacy \(what, privacy: .public) result: engine moved to another session")
     }
 
     /// True while this engine is running a turn with no view observing it —

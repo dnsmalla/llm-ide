@@ -14,6 +14,10 @@ extension CodeAssistantPanel {
     @MainActor
     func runBashCommand(_ args: BashArgs?) async {
         guard let args = args else { return }
+        await engine.runningLegacyTool { await runBashCommandBody(args) }
+    }
+
+    private func runBashCommandBody(_ args: BashArgs) async {
         // Pin the chat this command belongs to. `self.engine` is the panel's
         // CURRENT engine: switching chats while the command ran made the
         // result (and its forced follow-up turn) land in the other chat, and
@@ -64,7 +68,10 @@ extension CodeAssistantPanel {
 
         let result = await bashService.execute(args.command, workingDirectory: directory.path)
         // The engine itself may have been re-pointed at another session.
-        guard engine.currentSessionIDString == sessionID else { return }
+        guard engine.currentSessionIDString == sessionID else {
+            engine.logDroppedLegacyResult("bash")
+            return
+        }
 
         // The header line always carries the exit code so success and failure
         // render consistently; `command` is collapsed to a single line for

@@ -68,6 +68,10 @@ extension CodeAssistantPanel {
     /// Read-tier ops are auto-run from runTurn; write/destructive run after sheet confirm.
     @MainActor
     func runGitOpFlow(_ args: GitOpArgs) async {
+        await engine.runningLegacyTool { await runGitOpFlowBody(args) }
+    }
+
+    private func runGitOpFlowBody(_ args: GitOpArgs) async {
         // Pinned before any await, as in `runBashCommand`: the result belongs
         // to the chat that proposed the op, not whichever one is shown now.
         let engine = self.engine
@@ -107,7 +111,10 @@ extension CodeAssistantPanel {
         }
         do {
             let out = try await manager.runGitOp(args, at: repoURL, token: token, backend: backend)
-            guard engine.currentSessionIDString == sessionID else { return }
+            guard engine.currentSessionIDString == sessionID else {
+                engine.logDroppedLegacyResult("git")
+                return
+            }
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, summary: "(git \(args.op.rawValue) result)",
                 exitCode: nil, command: nil, output: String(out.prefix(4000)), url: nil, isFailure: false)
@@ -117,7 +124,10 @@ extension CodeAssistantPanel {
             // already false, so that's a benign no-op there.
             await engine.acknowledge(payload, followUp: .forceUnblock)
         } catch {
-            guard engine.currentSessionIDString == sessionID else { return }
+            guard engine.currentSessionIDString == sessionID else {
+                engine.logDroppedLegacyResult("git")
+                return
+            }
             let payload = ChatMessage.ToolResultPayload(
                 kind: .git, // Redacted: a failed push/fetch can echo the remote URL with its
                 // embedded credential, and this text is persisted AND replayed
