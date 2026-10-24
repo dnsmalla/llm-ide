@@ -91,6 +91,21 @@ test('approve: without any credential it reports CREDENTIAL_REQUIRED', async () 
   const a = await call('POST', '/kb/review/approve', { id: r.body.id });
   assert.equal(a.status, 422);
   assert.equal(a.body.error.code, 'CREDENTIAL_REQUIRED');
+  // Credential-only failure leaves the item pending so a retry can succeed.
+  assert.equal(db.getReview(U, r.body.id).status, 'pending');
+});
+
+test('approve: retry with a credential after CREDENTIAL_REQUIRED proceeds', async () => {
+  reset();
+  const r = await submit({ repo: 'a/b' });
+  const first = await call('POST', '/kb/review/approve', { id: r.body.id });
+  assert.equal(first.status, 422);
+  assert.equal(db.getReview(U, r.body.id).status, 'pending');
+  let a;
+  const calls = await withFetchStub(async () => { a = await call('POST', '/kb/review/approve', { id: r.body.id, config: { token: TOKEN } }); });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(a.body.status, 'executed');
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${TOKEN}`);
 });
 
 /** Stub globalThis.fetch for the duration of fn; returns the recorded calls. */

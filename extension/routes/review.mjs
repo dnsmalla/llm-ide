@@ -131,19 +131,28 @@ export async function handleReviewRoutes(req, res, ctx) {
     const evalPayload = withCreds(withAuthoritativeData(userId, item.kind, item.payload), creds);
     const guardrails = runGuardrails(item.kind, evalPayload);
     if (!guardrails.passed) {
+      const blocking = (guardrails.findings || []).filter((f) => f.severity === 'blocking');
+      const credOnly = blocking.length > 0 && blocking.every((f) => f.ruleId === 'dispatch.creds');
+      if (credOnly) {
+        // Only the credential is missing: leave the item pending (and keep any
+        // held secrets) so a retry with a credential, or after saving one to
+        // the vault, can proceed.
+        sendJSON(res, 422, {
+          error: {
+            code: 'CREDENTIAL_REQUIRED',
+            message: 'Credential required: store it in the vault (Settings) or send it with the approve request',
+          },
+          guardrails, item: redactReviewItem(item),
+        });
+        return true;
+      }
       const refreshed = kb.setReviewStatus(userId, body.id, {
         status: 'rejected',
         reviewerNote: 'Auto-rejected: guardrails fail at approval time.',
       });
       dropHeldSecrets(userId, body.id);
-      const credFail = guardrails.findings?.some((f) => f.ruleId === 'dispatch.creds');
       sendJSON(res, 422, {
-        error: {
-          code: credFail ? 'CREDENTIAL_REQUIRED' : 'GUARDRAILS_FAILED',
-          message: credFail
-            ? 'Credential required: store it in the vault (Settings) or send it with the approve request'
-            : 'Guardrails fail at approval time',
-        },
+        error: { code: 'GUARDRAILS_FAILED', message: 'Guardrails fail at approval time' },
         guardrails, item: redactReviewItem(refreshed),
       });
       return true;
@@ -179,8 +188,11 @@ export async function handleReviewRoutes(req, res, ctx) {
         });
         // Optional follow-on: open a draft PR with the just-applied
         // files committed onto a fresh branch. Triggered only when
-        // payload.pr is fully specified — a missing config means the
-        // reviewer chose "files only" and we stop after writing.
+        // payload.pr names a repo AND a token resolves for it. The token is
+        // filled in by resolveReviewCreds (approve body > held-from-submit >
+        // the user's vault github.token), so a vault token means a PR opens
+        // even when the stored payload carried none; with no repo or no
+        // resolvable token we stop after writing ("files only").
         let pr;
         if (evalPayload.pr && evalPayload.pr.ghRepo && evalPayload.pr.ghToken) {
           pr = await openPullRequest({
