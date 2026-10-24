@@ -202,6 +202,19 @@ export function runBashGate(command, cwd, { trustedRoots } = {}) {
   return 'auto';
 }
 
+/**
+ * True when a shell command names a sensitive path or carries unquoted
+ * expansion. runBashGate answers 'prompt' for these just like any unknown
+ * command, but a saved prefix rule (`cat`, `grep`, …) must NEVER skip the
+ * prompt for them — otherwise "always allow cat" runs `cat ~/.ssh/id_rsa`
+ * unasked — and "always allow" must not be offered for them either. The
+ * user can still approve each call individually.
+ */
+export function bashNeedsPerCallApproval(command, cwd) {
+  const cmd = typeof command === 'string' ? command : '';
+  return hasUnquotedExpansion(cmd) || namesSensitivePath(cmd, cwd);
+}
+
 export function autoGate() {
   return 'auto';
 }

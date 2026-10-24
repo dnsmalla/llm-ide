@@ -318,3 +318,23 @@ test('the buffered /code-assist close handler aborts the session\'s parked decis
   const outcome = await promise;
   assert.equal(outcome.action, 'aborted', 'a dropped buffered caller must unpark its approvals immediately');
 });
+
+test('a saved one-word rule never skips the prompt for a sensitive-path command (legacy)', async () => {
+  const { get } = await import('../llm_agent/tools/registry.mjs');
+  const { addRule } = await import('../kb/tool-permissions.mjs');
+  const entry = get('run-bash');
+  const user = registerUser(getDb(), { email: 'code-assist-decision-sens@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  addRule(user.id, process.cwd(), 'run-bash', 'cat');
+  const events = [];
+  const runPromise = entry.execute({ command: 'cat ~/.ssh/id_rsa' }, {
+    userId: user.id,
+    agentContext: { sessionId: 'legacy-sens', workspaceRoot: process.cwd() },
+    loopCtx: { emit: (e) => events.push(e) },
+  });
+  await new Promise((r) => setImmediate(r));
+  const req = events.find((e) => e.phase === 'approval_request');
+  assert.ok(req, 'the rule must not auto-allow a sensitive path');
+  assert.equal(req.suggestion, undefined, 'no always-allow offer for a sensitive command');
+  answerDecision({ requestId: req.requestId, sdkSessionId: 'legacy-sens', userId: user.id, action: 'deny' });
+  assert.ok((await runPromise).error);
+});

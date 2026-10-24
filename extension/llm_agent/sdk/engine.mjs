@@ -79,7 +79,7 @@ import {
   isAllowedByRule, suggestRule, addRule, grantSessionEdits, hasSessionEdits,
   NETWORK_TOOL, networkHost,
 } from '../../kb/tool-permissions.mjs';
-import { runBashGate, writePathGate } from '../tools/gates.mjs';
+import { runBashGate, writePathGate, bashNeedsPerCallApproval } from '../tools/gates.mjs';
 import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
 import { AGENT_SDK_PROVIDER, RESERVED_MCP_NAME } from './constants.mjs';
 import { resolveAnthropicKey, agentSdkHomeFor } from './auth.mjs';
@@ -1328,7 +1328,10 @@ export async function runAgentV2Turn(
   // A saved project rule short-circuits the prompt tier in every mode. (It
   // used to be ignored in 'manual' — the Mac's only asking mode — so
   // "Always Allow" was saved and then never honoured.)
-  const ruleAllows = (name, input) => isAllowedByRule(userId, workspaceRoot, name, input);
+  const ruleAllows = (name, input) => {
+    if ((name === 'Bash' || name === 'run-bash') && bashNeedsPerCallApproval(input?.command, workspaceRoot)) return false;
+    return isAllowedByRule(userId, workspaceRoot, name, input);
+  };
   const editsAllowed = () => allowAll || acceptEdits || hasSessionEdits(userId, chatSessionId);
   // What an "always allow" answer saves for this call. Edits are a CHAT
   // grant (Claude Code's "allow all edits during this session"); shell
@@ -1339,6 +1342,9 @@ export async function runAgentV2Turn(
       return chatSessionId ? { toolName: name, scope: 'session', label: 'all edits in this chat' } : null;
     }
     if (!workspaceRoot) return null;
+    // A sensitive-path / expanding shell command is approved per call only:
+    // a saved prefix rule must never cover it (see ruleAllowsShell).
+    if ((name === 'Bash' || name === 'run-bash') && bashNeedsPerCallApproval(input?.command, workspaceRoot)) return null;
     const rule = suggestRule(name, input);
     return rule ? { ...rule, scope: 'project' } : null;
   };
