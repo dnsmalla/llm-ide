@@ -19,6 +19,32 @@ struct IssueImplementWorktreeTests {
         #expect(AutoCodeUpdateService.isPipelineBranch(name))
     }
 
+    @Test func parkingFallsBackToAUniqueNameWhenTheTargetExists() throws {
+        let fm = FileManager.default
+        let repo = fm.temporaryDirectory.appendingPathComponent("park-\(UUID().uuidString)", isDirectory: true)
+        try fm.createDirectory(at: repo, withIntermediateDirectories: true)
+        defer { try? fm.removeItem(at: repo) }
+        func git(_ args: [String]) throws {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = ["-C", repo.path, "-c", "user.name=t", "-c", "user.email=t@t",
+                                 "-c", "commit.gpgsign=false"] + args
+            process.standardOutput = FileHandle.nullDevice
+            process.standardError = FileHandle.nullDevice
+            try process.run()
+            process.waitUntilExit()
+            #expect(process.terminationStatus == 0, "git \(args.joined(separator: " "))")
+        }
+        try git(["init", "-q", "-b", "main"])
+        try git(["commit", "-q", "--allow-empty", "-m", "init"])
+        try git(["branch", "fix/7-x"])
+        try git(["branch", "autotask-wip/fix/7-x"])   // a previous run already parked here
+        let parked = try #require(AutoCodeUpdateService.parkBranch("fix/7-x", at: repo.path))
+        #expect(parked.hasPrefix("autotask-wip/fix/7-x-"))
+        #expect(AutoCodeUpdateService.refSha("refs/heads/fix/7-x", at: repo.path) == nil)
+        #expect(AutoCodeUpdateService.refSha("refs/heads/\(parked)", at: repo.path) != nil)
+    }
+
     @Test func worktreeBranchLeavesTheUsersCheckoutUntouched() throws {
         let fm = FileManager.default
         let repo = fm.temporaryDirectory.appendingPathComponent("impl-wt-\(UUID().uuidString)", isDirectory: true)

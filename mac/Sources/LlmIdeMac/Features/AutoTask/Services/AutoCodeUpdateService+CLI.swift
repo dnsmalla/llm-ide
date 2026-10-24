@@ -319,6 +319,21 @@ extension AutoCodeUpdateService {
         git(["branch", "-m", old, new], at: localPath).code == 0
     }
 
+    /// Park a branch under `autotask-wip/` and return the name it now has, or nil
+    /// when both attempts failed. `git branch -m` refuses an existing target (a
+    /// retry of the same issue parks the same name twice), so the second try
+    /// appends the tip's short sha rather than leave a half-done `fix/` branch
+    /// that review-merge would publish.
+    nonisolated static func parkBranch(_ branch: String, at localPath: String) -> String? {
+        let parked = "autotask-wip/\(branch)"
+        if branchRename(branch, to: parked, at: localPath) { return parked }
+        let tip = git(["rev-parse", "--short", "refs/heads/\(branch)"], at: localPath)
+        let short = tip.out.trimmingCharacters(in: .whitespacesAndNewlines)
+        let suffix = (tip.code == 0 && !short.isEmpty) ? short : String(Int(Date().timeIntervalSince1970))
+        let unique = "\(parked)-\(suffix)"
+        return branchRename(branch, to: unique, at: localPath) ? unique : nil
+    }
+
     /// The branch tip review-merge last opened a merge request for, or nil.
     /// Kept in the repo's own git config (`branch.<name>.llmideMrSha`) so it
     /// survives relaunches and follows the branch through `git branch -m`.
@@ -849,10 +864,11 @@ extension AutoCodeUpdateService {
         // so one issue never ends up with two pushable branches.
         var keptBranchName = branch
         if (keepBranch || (committed && !result)) && !keepWorktreeForRecovery {
-            let parked = "autotask-wip/\(branch)"
-            if await Task.detached(operation: { Self.branchRename(branch, to: parked, at: localPath) }).value {
+            if let parked = await Task.detached(operation: { Self.parkBranch(branch, at: localPath) }).value {
                 keptBranchName = parked
                 logStore.append(.implementIssues, "Issue #\(issue.number): kept as \(parked) (not published).")
+            } else {
+                logStore.append(.implementIssues, "Issue #\(issue.number): could not park \(branch) — review before review-merge publishes it.", level: .error)
             }
         }
         // `git branch -D` refuses a branch a worktree still has checked out, so
@@ -1128,9 +1144,10 @@ extension AutoCodeUpdateService {
         // and opened as merge requests by review-merge, so half-done work from
         // a stopped or failed run moves under `autotask-wip/` instead.
         if let implementBranch, hasUnfinishedCommits, !keepWorktreeForRecovery {
-            let parked = "autotask-wip/\(implementBranch)"
-            if await Task.detached(operation: { Self.branchRename(implementBranch, to: parked, at: localPath) }).value {
+            if let parked = await Task.detached(operation: { Self.parkBranch(implementBranch, at: localPath) }).value {
                 logStore.append(logStoreId, "Run did not finish cleanly; kept as \(parked) (not published).")
+            } else {
+                logStore.append(logStoreId, "Run did not finish cleanly; could not park \(implementBranch) — review before review-merge publishes it.", level: .error)
             }
         }
         await recordRun(model: resolvedModel, endpoint: "auto-task:\(logSuffix)", tool: cliTool)
