@@ -129,6 +129,8 @@ export function mapSdkMessage(msg) {
       // Per-model token totals for the whole query — the SDK's documented
       // field for accounting (see the runner's usage handling).
       modelUsage: msg.modelUsage ?? null,
+      // Main-loop usage for this turn (snake_case, as the API reports it).
+      usage: msg.usage ?? null,
     }];
   }
 

@@ -176,22 +176,37 @@ extension LlmIdeAPIClient {
         return UsageLimits(chains: r.chains)
     }
 
-    /// Record one usage event. Auto Tasks pass source "auto-task" and no tokens
-    /// (the CLI can't report them) — the run still counts toward run-based caps.
+    /// Record one usage event. Token counts and turns are optional: Claude Code
+    /// Auto Task runs report them (from `--output-format json`); other CLIs
+    /// pass nil and the run still counts toward run-based caps. Nil fields are
+    /// omitted from the body, so an older server is unaffected.
     @discardableResult
     func recordUsage(provider: String, model: String, source: String,
-                     endpoint: String?, runs: Int = 1) async throws -> Bool {
+                     endpoint: String?, runs: Int = 1,
+                     inputTokens: Int? = nil, outputTokens: Int? = nil,
+                     cacheReadTokens: Int? = nil, cacheCreationTokens: Int? = nil,
+                     turns: Int? = nil, stopReason: String? = nil) async throws -> Bool {
         struct Req: Encodable {
             let provider: String
             let model: String
             let source: String
             let endpoint: String?
             let runs: Int
+            let inputTokens: Int?
+            let outputTokens: Int?
+            let cacheReadTokens: Int?
+            let cacheCreationTokens: Int?
+            let turns: Int?
+            let stopReason: String?
         }
         struct Resp: Decodable { let ok: Bool }
         let r: Resp = try await post("/kb/usage/record",
                                      body: Req(provider: provider, model: model, source: source,
-                                               endpoint: endpoint, runs: runs),
+                                               endpoint: endpoint, runs: runs,
+                                               inputTokens: inputTokens, outputTokens: outputTokens,
+                                               cacheReadTokens: cacheReadTokens,
+                                               cacheCreationTokens: cacheCreationTokens,
+                                               turns: turns, stopReason: stopReason),
                                      authenticated: true)
         return r.ok
     }

@@ -104,6 +104,17 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Changed
 
+- **Token usage bounded and metered (2026-10-24).** The live ledger showed 99.6% of recorded tokens in a
+  few long v2 chat turns (one Opus turn re-read 10.4M cached tokens) and Auto Tasks running the `claude`
+  CLI 15–47 times a day with no turn cap and no token metering. Now: a per-turn budget stops a chat turn
+  past 2M processed tokens (input + cache, subagents included) with a "say continue" notice
+  (`LLMIDE_V2_TURN_TOKEN_BUDGET`, 0 = off); auto-compaction defaults to 160k (200k on `[1m]` models;
+  `LLMIDE_V2_AUTOCOMPACT_WINDOW`, 0 = SDK default); the ledger now records real output tokens and API-call
+  counts (output came from `message_start`'s placeholder). Claude Code Auto Tasks run with
+  `--output-format json` and `--max-turns` (30 for review/doc/issues, 120 for implement) and record their
+  tokens; scheduled review-code/review-doc runs are skipped when HEAD and the composed prompt are unchanged
+  since the last successful run. Mac chat tests no longer write sessions into the real Application Support.
+
 - **Review credentials stay out of the database (API v75).** Tracker and GitHub tokens are stripped from
   review payloads before they are stored (migration 0042 scrubs existing rows) and resolved from the
   vault, a submit-time in-memory hold (24 h), or the approve request. A missing credential answers

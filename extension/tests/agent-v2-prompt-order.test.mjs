@@ -253,26 +253,32 @@ test('a fresh session gets the chat history once, as data; a resumed one never d
   assert.doesNotMatch(resumed.prompt, /Earlier in this conversation/);
 });
 
-// The auto-compact window is OPT-IN (review of 67b702f1): the SDK's default is
-// an "auto" value tuned per model, a fixed 120k wasted most of a 1M window and
-// could compact mid-turn on a read-heavy turn. LLMIDE_V2_AUTOCOMPACT_WINDOW sets
-// it, within the SDK's own accepted range (100k–1M) — the SDK silently drops a
-// value outside it, so an out-of-range one is rejected here, not passed on.
-test('the auto-compact window is set only from LLMIDE_V2_AUTOCOMPACT_WINDOW, within 100k–1M', () => {
-  const opts = () => buildEngineOptions(
-    { userId: 'u-ac', mode: 'execute', message: 'hi', delivered: null,
+// The auto-compact window defaults to 200k (every hop re-reads the whole
+// context, so an unbounded one made long agentic turns cost millions of cached
+// tokens). LLMIDE_V2_AUTOCOMPACT_WINDOW overrides within the SDK's accepted
+// range (100k–1M); 0 = pass nothing (the SDK's own per-model value); an
+// out-of-range value is rejected with a warning and the default applies.
+test('the auto-compact window defaults to 160k (200k for [1m] models), overridable within 100k–1M, 0 = SDK default', () => {
+  const opts = (model) => buildEngineOptions(
+    { userId: 'u-ac', model, mode: 'execute', message: 'hi', delivered: null,
       agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-ac' } },
     { ...deps, renderMemory: () => null }).queryOptions;
   const saved = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW;
   try {
     delete process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW;
-    assert.equal(opts().settings?.autoCompactWindow, undefined, 'default: the SDK\'s own per-model value');
+    assert.equal(opts().settings?.autoCompactWindow, 160_000, 'default');
+    assert.equal(opts('claude-opus-5[1m]').settings?.autoCompactWindow, 200_000, '[1m] default');
     process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = '150000';
     assert.equal(opts().settings?.autoCompactWindow, 150_000);
-    for (const bad of ['90000', '2000000', 'nonsense', '0']) {
-      process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = bad;
-      assert.equal(opts().settings?.autoCompactWindow, undefined, bad);
-    }
+    process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = '0';
+    assert.equal(opts().settings?.autoCompactWindow, undefined, '0 = the SDK default');
+    const warn = console.warn; console.warn = () => {};
+    try {
+      for (const bad of ['90000', '2000000', 'nonsense']) {
+        process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = bad;
+        assert.equal(opts().settings?.autoCompactWindow, 160_000, bad);
+      }
+    } finally { console.warn = warn; }
   } finally {
     if (saved === undefined) delete process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW; else process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = saved;
   }

@@ -724,12 +724,14 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
         // Only the Loop sweep can report "nothing started"; every other task
         // body runs to a terminal status by construction.
         var didStart = true
+        // Why a run was skipped on purpose (shown as the run's summary).
+        var skipSummary: String?
         defer {
             appendRunRecord(taskId: task.rawValue, label: task.label,
                             logSuffix: task.logSuffix, startedAt: startedAt,
                             trigger: trigger, projectId: projectId,
                             status: runStatus(forTaskId: task.rawValue, didStart: didStart),
-                            summary: taskErrors[task.rawValue])
+                            summary: skipSummary ?? taskErrors[task.rawValue])
         }
         logStore.append(task, "Running \(task.label)…")
         currentTask = task
@@ -761,26 +763,37 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
                     logStore.append(.reviewMerge, "Cleanup: \(note).")
                 }
                 await runReviewMerge(resolved: resolved)
-            case .reviewCode:
-                currentStep = "Running Review Code"
-                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
-                                                             ownPrompt: config.autoTaskTemplateReviewCode,
-                                                             projectRoot: resolved.projectRoot,
-                                                             writesFiles: false),
-                                      localPath: resolved.gitRoot, logSuffix: task.logSuffix,
+            case .reviewCode, .reviewDoc:
+                currentStep = task == .reviewCode ? "Running Review Code" : "Running Review Doc"
+                let template = task == .reviewCode ? config.autoTaskTemplateReviewCode
+                                                   : config.autoTaskTemplateReviewDoc
+                // Review runs read an isolated worktree of HEAD, so HEAD (plus
+                // the template, which steers the review) is the whole input:
+                // unchanged since the last SUCCESSFUL review → nothing to learn.
+                let gitRoot = resolved.gitRoot
+                let head = await Task.detached { Self.headSha(at: gitRoot) }.value
+                // The signature covers the EXACT prompt that will be sent (the
+                // approved template body + this task's config, composed), not
+                // just the built-in template text — editing either must re-run.
+                let prompt = composedPrompt(taskId: task.rawValue, ownPrompt: template,
+                                            projectRoot: resolved.projectRoot, writesFiles: false)
+                let signature = Self.reviewSignature(head: head, template: prompt)
+                let previous = Self.loadReviewSignature(taskId: task.rawValue, gitRoot: gitRoot)
+                if let reason = Self.reviewSkipReason(trigger: trigger, previous: previous, current: signature) {
+                    skipSummary = reason
+                    didStart = false
+                    taskErrors.removeValue(forKey: task.rawValue)
+                    logStore.append(task, "Skipped — \(reason).")
+                    return
+                }
+                let ok = await runCLI(prompt: prompt,
+                                      localPath: gitRoot, logSuffix: task.logSuffix,
                                       logDir: logDir, logStoreId: task.rawValue,
                                       purposeMode: "review")
                 finishPromptTask(task, ok: ok)
-            case .reviewDoc:
-                currentStep = "Running Review Doc"
-                let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,
-                                                             ownPrompt: config.autoTaskTemplateReviewDoc,
-                                                             projectRoot: resolved.projectRoot,
-                                                             writesFiles: false),
-                                      localPath: resolved.gitRoot, logSuffix: task.logSuffix,
-                                      logDir: logDir, logStoreId: task.rawValue,
-                                      purposeMode: "review")
-                finishPromptTask(task, ok: ok)
+                if ok, let signature {
+                    Self.saveReviewSignature(signature, taskId: task.rawValue, gitRoot: gitRoot)
+                }
             case .reviewConflicts:
                 currentStep = "Running Review Conflicts"
                 let ok = await runCLI(prompt: composedPrompt(taskId: task.rawValue,

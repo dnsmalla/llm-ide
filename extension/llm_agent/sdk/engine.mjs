@@ -207,20 +207,50 @@ const capAttachments = selectAttachments;
 // (PROJECT_MEMORY_TOOL_CHARS) serves the depth.
 const PROJECT_MEMORY_SUMMARY_CHARS = 2_500;
 
-// Context size (tokens) at which the SDK compacts a conversation — OPT-IN via
-// LLMIDE_V2_AUTOCOMPACT_WINDOW. Every hop re-reads the whole context, so a
-// smaller window bounds the cost of each hop of a long chat; but the SDK's
-// default is an "auto" value tuned per model, and a fixed one wastes a large
-// window or compacts mid-turn. The SDK accepts 100k–1M and silently DROPS
-// anything else, so an out-of-range value is rejected here with a warning.
+// Context size (tokens) at which the SDK compacts a conversation. Every hop of
+// a turn re-reads the whole context (live ledger: single agentic turns each
+// re-read 3-10M cached tokens), so an unbounded window makes a long chat's
+// every later hop more expensive. It therefore DEFAULTS to 200k for [1m] models (160k otherwise); set
+// LLMIDE_V2_AUTOCOMPACT_WINDOW to override, or to 0 to pass nothing and use the
+// SDK's own per-model "auto" value (which wastes little on a 1M window but lets
+// the context, and the per-hop cost, grow much larger). The SDK accepts 100k-1M
+// and silently DROPS anything else, so an out-of-range value is rejected here
+// with a warning and the default applies.
 const AUTOCOMPACT_MIN = 100_000;
 const AUTOCOMPACT_MAX = 1_000_000;
-function autoCompactWindow(raw = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW) {
-  if (raw === undefined || raw === '') return undefined;
+const AUTOCOMPACT_DEFAULT = 200_000;
+// Without a [1m] suffix the model's context may be only ~200k, where a 200k
+// window would never fire before prompt-too-long. No table here knows the
+// context size, so the suffix is the only reliable signal.
+const AUTOCOMPACT_DEFAULT_STANDARD_CONTEXT = 160_000;
+export function autoCompactWindow(raw = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW, model = '') {
+  const dflt = /\[1m\]$/i.test(String(model ?? '')) ? AUTOCOMPACT_DEFAULT : AUTOCOMPACT_DEFAULT_STANDARD_CONTEXT;
+  if (raw === undefined || raw === '') return dflt;
+  if (String(raw).trim() === '0') return undefined; // SDK default
   const n = Math.trunc(Number(raw));
   if (Number.isFinite(n) && n >= AUTOCOMPACT_MIN && n <= AUTOCOMPACT_MAX) return n;
-  if (raw !== '0') console.warn(`LLMIDE_V2_AUTOCOMPACT_WINDOW=${raw} ignored — must be ${AUTOCOMPACT_MIN}–${AUTOCOMPACT_MAX} tokens`);
-  return undefined;
+  console.warn(`LLMIDE_V2_AUTOCOMPACT_WINDOW=${raw} ignored — must be ${AUTOCOMPACT_MIN}–${AUTOCOMPACT_MAX} tokens (or 0 for the SDK default); using ${dflt}`);
+  return dflt;
+}
+
+// Per-turn token budget: the cumulative tokens PROCESSED by one chat turn
+// (input + cache read + cache creation, every API call incl. subagents). A
+// runaway agentic turn re-reads its whole context on every hop, so the cost
+// grows with hops x context, not with what the user typed. Past the budget the
+// turn is interrupted (same effect as Stop; the transcript is kept) and the
+// user told to say "continue". LLMIDE_V2_TURN_TOKEN_BUDGET: 0 = off; an invalid
+// value warns and uses the default.
+const TURN_TOKEN_BUDGET_DEFAULT = 2_000_000;
+export function turnTokenBudget(raw = process.env.LLMIDE_V2_TURN_TOKEN_BUDGET) {
+  if (raw === undefined || raw === '') return TURN_TOKEN_BUDGET_DEFAULT;
+  const n = Number(String(raw).trim());
+  if (Number.isFinite(n) && n >= 0) return Math.trunc(n);
+  console.warn(`LLMIDE_V2_TURN_TOKEN_BUDGET=${raw} ignored — must be a non-negative integer (0 = off); using ${TURN_TOKEN_BUDGET_DEFAULT}`);
+  return TURN_TOKEN_BUDGET_DEFAULT;
+}
+const fmtTokens = (n) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M` : `${Math.round(n / 1000)}k`);
+export function budgetNoticeText(processed, budget) {
+  return `Stopped: this turn processed ${fmtTokens(processed)} tokens (budget ${fmtTokens(budget)}). Say "continue" to keep going.`;
 }
 
 // Attachments are DATA: each wrapped in a <<<BEGIN>>>…<<<END>>> fence, with
@@ -786,7 +816,7 @@ export function buildEngineOptions(
   }
   // Bounded: a very long chat must not carry an ever-growing hash list.
   for (const key of ['attachments', 'images']) next[key] = next[key].slice(-400);
-  const compactWindow = autoCompactWindow();
+  const compactWindow = autoCompactWindow(undefined, typeof model === 'string' ? model : '');
   const turnEffort = resolveTurnEffort({
     requested: effort, mode: resolvedMode, message,
     modelLevels: effortLevels(userId, typeof model === 'string' && model ? model : null),
@@ -1666,6 +1696,59 @@ export async function runAgentV2Turn(
   const streamedUsage = new Map();
   // The SDK's raw init message: what it actually loaded (turn_composition).
   let sdkInit = null;
+  // Per-turn token budget (see turnTokenBudget). `budgetStop` is set once,
+  // when the turn's processed tokens first exceed it.
+  const tokenBudget = turnTokenBudget();
+  let budgetStop = null;
+  let budgetNoticeSent = false;
+  const emitBudgetNotice = () => {
+    if (!budgetStop || budgetNoticeSent) return;
+    budgetNoticeSent = true;
+    onEvent?.({ type: 'delta', text: `\n\n${budgetNoticeText(budgetStop.processed, tokenBudget)}` });
+  };
+  // Max-merge one API response's usage snapshot (the blocks of a response
+  // repeat it, and output grows as it streams), re-sum the turn, and enforce
+  // the budget.
+  const mergeStreamed = (id, u) => {
+    const prev = streamedUsage.get(id);
+    const m = (k) => Math.max(prev?.[k] ?? 0, u[k] ?? 0);
+    streamedUsage.set(id, {
+      inputTokens: m('inputTokens'), outputTokens: m('outputTokens'),
+      cacheReadTokens: m('cacheReadTokens'), cacheCreationTokens: m('cacheCreationTokens'),
+    });
+    sumInto(usageTotals, [...streamedUsage.values()]);
+    if (tokenBudget > 0 && !budgetStop) {
+      const processed = usageTotals.inputTokens + usageTotals.cacheReadTokens + usageTotals.cacheCreationTokens;
+      if (processed > tokenBudget) {
+        budgetStop = { processed };
+        // Same effect as Stop, but through the SDK's own interrupt so the
+        // session ends cleanly with a result and its transcript stays
+        // resumable; an abort is the fallback.
+        try {
+          if (typeof q.interrupt === 'function') void Promise.resolve(q.interrupt()).catch(() => {});
+          else abortController?.abort();
+        } catch { /* already ending */ }
+      }
+    }
+  };
+  // The assistant message's usage carries only message_start's PLACEHOLDER
+  // output_tokens (1-2); the real count arrives on the stream's message_delta.
+  // Track which response each stream is in (per subagent) to credit it.
+  const openStreamMsg = new Map();
+  const apiUsage = (u) => ({
+    inputTokens: u?.input_tokens ?? 0, outputTokens: u?.output_tokens ?? 0,
+    cacheReadTokens: u?.cache_read_input_tokens ?? 0, cacheCreationTokens: u?.cache_creation_input_tokens ?? 0,
+  });
+  const noteStreamEvent = (msg) => {
+    const ev = msg.event;
+    const key = msg.parent_tool_use_id ?? '';
+    if (ev?.type === 'message_start' && ev.message?.id) {
+      openStreamMsg.set(key, ev.message.id);
+      mergeStreamed(ev.message.id, apiUsage(ev.message.usage));
+    } else if (ev?.type === 'message_delta' && ev.usage && openStreamMsg.has(key)) {
+      mergeStreamed(openStreamMsg.get(key), apiUsage(ev.usage));
+    }
+  };
   // The client gets ONE usage event per turn (see the result branch). A turn
   // that never reaches its result — the user stopped it, or it failed after
   // real work — still spent tokens, so it reports what streamed (finally).
@@ -1701,6 +1784,7 @@ export async function runAgentV2Turn(
       if (msg?.session_id) currentSdkSessionId = msg.session_id;
       if (msg?.type === 'system' && msg?.subtype === 'compact_boundary') compacted = true;
       if (msg?.type === 'system' && msg?.subtype === 'init') sdkInit = msg;
+      if (msg?.type === 'stream_event') noteStreamEvent(msg);
       for (const ev of mapSdkMessage(msg)) {
         if (TURN_PROGRESS_EVENTS.has(ev.type)) progressed = true;
         if (ev.type === 'delta' && typeof ev.text === 'string') {
@@ -1715,17 +1799,10 @@ export async function runAgentV2Turn(
           // (largest of each field) — counting each as its own response was
           // the ~3× over-count this dedupe exists to remove.
           const id = ev.messageId || 'no-message-id';
-          const prev = streamedUsage.get(id);
-          streamedUsage.set(id, prev ? {
-            inputTokens: Math.max(prev.inputTokens, ev.inputTokens),
-            outputTokens: Math.max(prev.outputTokens, ev.outputTokens),
-            cacheReadTokens: Math.max(prev.cacheReadTokens, ev.cacheReadTokens),
-            cacheCreationTokens: Math.max(prev.cacheCreationTokens, ev.cacheCreationTokens ?? 0),
-          } : {
+          mergeStreamed(id, {
             inputTokens: ev.inputTokens, outputTokens: ev.outputTokens,
             cacheReadTokens: ev.cacheReadTokens, cacheCreationTokens: ev.cacheCreationTokens ?? 0,
           });
-          sumInto(usageTotals, [...streamedUsage.values()]);
         } else if (ev.type === 'result') {
           result = ev;
           // The result's per-model totals are the SDK's own accounting (main
@@ -1748,6 +1825,14 @@ export async function runAgentV2Turn(
             // total_cost_usd is a running total too; only a fresh session's is
             // this turn's alone.
             if (!resume) usageTotals.costUsd += ev.costUsd ?? 0;
+            // No usable running-total split: the streamed sums stand, but
+            // their output is only as good as the stream's message_delta. The
+            // result's own `usage` (main loop, per turn) is a floor for every
+            // field.
+            if (ev.usage && typeof ev.usage === 'object') {
+              const u = apiUsage(ev.usage);
+              for (const k of Object.keys(u)) usageTotals[k] = Math.max(usageTotals[k], u[k]);
+            }
           }
           if (running.length && (ev.sessionId || currentSdkSessionId)) {
             recordUsageBaseline(ev.sessionId || currentSdkSessionId, running, { previousSdkSessionId: resume });
@@ -1762,7 +1847,14 @@ export async function runAgentV2Turn(
           emitTurnUsage();
         }
         // Per-block usage snapshots stay server-side (see the result branch).
-        if (ev.type !== 'usage') onEvent?.(ev);
+        if (ev.type === 'result') emitBudgetNotice();
+        // The budget stop is a deliberate, notified pause ("Say continue"), not
+        // a failure: the SDK ends an interrupted query with an error subtype,
+        // which clients turn into an error banner. Forward it as a normal
+        // completion; the ledger still records stop_reason 'token_budget'.
+        if (ev.type !== 'usage') {
+          onEvent?.(ev.type === 'result' && budgetStop ? { ...ev, subtype: 'success' } : ev);
+        }
         if (ev.type === 'result') {
           // Read while the session is still open; a gateway's numbers would
           // describe a model this window math does not know.
@@ -1807,6 +1899,8 @@ export async function runAgentV2Turn(
     // input, or `for await` above would never finish.
     q.releaseInput?.();
     recordDelivery();
+    // An interrupt that ended the stream without a result still owes the notice.
+    try { emitBudgetNotice(); } catch { /* the stream may already be gone */ }
     if (!usageEmitted && streamedUsage.size > 0) {
       try { emitTurnUsage(); } catch { /* the stream may already be gone */ }
     }
@@ -1825,6 +1919,10 @@ export async function runAgentV2Turn(
   // Telemetry never breaks a turn that already streamed its result.
   let composition = null;
   try { composition = turnComposition(); } catch { composition = null; }
+  // Model round trips for the whole turn: the SDK's count, or the distinct API
+  // responses streamed (which include subagents) if that is larger.
+  usageTotals.turns = Math.max(usageTotals.numTurns, streamedUsage.size);
+  usageTotals.stopReason = budgetStop ? 'token_budget' : (result?.stopReason ?? null);
   return { result, usageTotals, composition };
 
   // Sizes, counts and names only (migration 0040) — never prompt or tool text.
