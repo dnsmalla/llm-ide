@@ -1008,6 +1008,18 @@ export function deleteUserCascade(userId) {
     // migration 0020 — per-user issue scheduling overlay (gantt). ON DELETE
     // CASCADE on the users FK; explicit delete keeps the receipt complete.
     counts.issue_schedule  = del('DELETE FROM issue_schedule WHERE user_id = ?');
+    // migrations 0025-0041 — per-user tables added without ON DELETE CASCADE:
+    // agent sessions + memory, the SCIP code graph, tool approvals/rules and
+    // per-turn telemetry. Without these the rows outlived the account.
+    // tests/user-delete-cascade.test.mjs enumerates every user_id table, so a
+    // future table missing here fails CI.
+    for (const t of [
+      'agent_sessions', 'session_memory', 'code_graph_nodes', 'code_graph_edges',
+      'code_graph_meta', 'tool_approvals', 'tool_permission_rules',
+      'turn_tool_events', 'turn_composition',
+    ]) {
+      counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
+    }
     // migration 0009 — rate_limit_buckets has no user_id column; the key
     // column stores "<profile>::<scope>" where scope == userId for
     // authenticated KB routes.  We match by suffix so all per-user
