@@ -93,23 +93,40 @@ test('approve: without any credential it reports CREDENTIAL_REQUIRED', async () 
   assert.equal(a.body.error.code, 'CREDENTIAL_REQUIRED');
 });
 
+/** Stub globalThis.fetch for the duration of fn; returns the recorded calls. */
+async function withFetchStub(fn) {
+  const orig = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return { ok: true, status: 201, json: async () => ({ html_url: 'x', number: 1 }) };
+  };
+  try { await fn(); } finally { globalThis.fetch = orig; }
+  return calls;
+}
+
 test('approve: resolves the credential from the vault and proceeds to dispatch', async () => {
   reset();
   setSecret(db.getDb(), U, 'github.token', TOKEN);
   const r = await submit({ repo: 'a/b' });
-  const a = await call('POST', '/kb/review/approve', { id: r.body.id });
-  // The dispatch itself may fail (no network in the sandbox) but it must get
-  // past guardrails and the "token required" check.
-  assert.notEqual(a.status, 422);
-  assert.ok(!/token required/i.test(JSON.stringify(a.body)), JSON.stringify(a.body));
+  let a;
+  const calls = await withFetchStub(async () => { a = await call('POST', '/kb/review/approve', { id: r.body.id }); });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(a.body.status, 'executed');
+  assert.ok(calls.length >= 1);
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${TOKEN}`);
   assert.ok(!JSON.stringify(a.body).includes(TOKEN));
+  assert.equal(db.getReview(U, r.body.id).status, 'executed');
 });
 
 test('approve: a credential on the approve request is accepted and not persisted', async () => {
   reset();
   const r = await submit({ repo: 'a/b' });
-  const a = await call('POST', '/kb/review/approve', { id: r.body.id, config: { token: TOKEN } });
-  assert.notEqual(a.status, 422);
+  let a;
+  const calls = await withFetchStub(async () => { a = await call('POST', '/kb/review/approve', { id: r.body.id, config: { token: TOKEN } }); });
+  assert.equal(a.status, 200, JSON.stringify(a.body));
+  assert.equal(a.body.status, 'executed');
+  assert.equal(calls[0].init.headers.Authorization, `Bearer ${TOKEN}`);
   const raw = db.getDb().prepare('SELECT payload, result FROM review_items WHERE id = ?').get(r.body.id);
   assert.ok(!`${raw.payload}${raw.result}`.includes(TOKEN));
 });

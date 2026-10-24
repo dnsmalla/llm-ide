@@ -178,7 +178,18 @@ test('/kb/dispatch: matching destination passes the config check (credentials ma
   reset();
   seedPlan([{ id: 't1', title: 'Fine' }]);
   const reviewId = approvedReview({ planId: 'plan1', target: 'github', config: { repo: 'a/b' } });
-  const r = await call('POST', '/kb/dispatch', { planId: 'plan1', target: 'github', reviewId, config: { repo: 'a/b', token: 'tok' } });
+  const orig = globalThis.fetch;
+  const calls = [];
+  globalThis.fetch = async (url, init) => {
+    calls.push({ url: String(url), init });
+    return { ok: true, status: 201, json: async () => ({ html_url: 'x', number: 1 }) };
+  };
+  let r;
+  try {
+    r = await call('POST', '/kb/dispatch', { planId: 'plan1', target: 'github', reviewId, config: { repo: 'a/b', token: 'tok' } });
+  } finally { globalThis.fetch = orig; }
   assert.notEqual(r.body?.error?.code, 'REVIEW_CONFIG_MISMATCH');
-  assert.notEqual(r.status, 409);
+  assert.equal(r.status, 200, JSON.stringify(r.body));
+  assert.ok(calls.length >= 1);
+  assert.equal(calls[0].init.headers.Authorization, 'Bearer tok');
 });
