@@ -521,9 +521,9 @@ extension AutoCodeUpdateService {
 
     /// Why a metered run did not complete even though the process may have
     /// exited 0 — nil when the CLI reports success (or gave no parseable result).
-    nonisolated static func meteredFailureNote(_ r: ClaudeCLI.RunResult) -> String? {
+    nonisolated static func meteredFailureNote(_ r: ClaudeCLI.RunResult, maxTurns: Int = ClaudeCLI.autoTaskMaxTurns) -> String? {
         if r.hitTurnCap {
-            return "Run stopped at the turn cap (--max-turns \(ClaudeCLI.autoTaskMaxTurns)) before finishing — treated as failed."
+            return "Run stopped at the turn cap (--max-turns \(maxTurns)) before finishing — treated as failed."
         }
         if r.reportedFailure {
             return "The CLI reported an error (\(r.subtype ?? "is_error")) — treated as failed."
@@ -803,7 +803,8 @@ extension AutoCodeUpdateService {
         // Claude Code: metered + turn-capped (JSON result with usage). Flags go
         // before the `-p <prompt>` pair.
         let metered = cliTool == .claudeCode
-        if metered { args += ClaudeCLI.meteredRunArgs() }
+        let maxTurns = ClaudeCLI.autoTaskMaxTurns(implement: true) // Implement Issues edits code
+        if metered { args += ClaudeCLI.meteredRunArgs(maxTurns: maxTurns) }
         args += promptArgs
 
         process.arguments = args
@@ -852,7 +853,7 @@ extension AutoCodeUpdateService {
             if !claudeResult.text.isEmpty {
                 try? logFileHandle?.write(contentsOf: Data((claudeResult.text + "\n").utf8))
             }
-            if let note = Self.meteredFailureNote(claudeResult) {
+            if let note = Self.meteredFailureNote(claudeResult, maxTurns: maxTurns) {
                 try? logFileHandle?.write(contentsOf: Data((note + "\n").utf8))
                 logStore.append(.implementIssues, "Issue #\(issue.number): \(note)", level: .error)
             }
@@ -1097,7 +1098,8 @@ extension AutoCodeUpdateService {
         // Claude Code: metered + turn-capped (JSON result with usage); flags go
         // before the `-p <prompt>` pair.
         let metered = cliTool == .claudeCode
-        if metered { args += ClaudeCLI.meteredRunArgs() }
+        let maxTurns = ClaudeCLI.autoTaskMaxTurns(implement: persistChanges)
+        if metered { args += ClaudeCLI.meteredRunArgs(maxTurns: maxTurns) }
         args += promptArgs
 
         process.arguments = args
@@ -1165,7 +1167,7 @@ extension AutoCodeUpdateService {
             // known. The stderr handler owns/closes its own handle, so the log
             // file is appended through a fresh one.
             var replay = claudeResult.text
-            if let note = Self.meteredFailureNote(claudeResult) { replay += (replay.isEmpty ? "" : "\n") + note }
+            if let note = Self.meteredFailureNote(claudeResult, maxTurns: maxTurns) { replay += (replay.isEmpty ? "" : "\n") + note }
             if !replay.isEmpty {
                 if let fh = try? FileHandle(forWritingTo: logURL) {
                     _ = try? fh.seekToEnd()
@@ -1174,7 +1176,7 @@ extension AutoCodeUpdateService {
                 }
                 for line in replay.components(separatedBy: "\n") { logStore.append(logStoreId, line) }
             }
-            if Self.meteredFailureNote(claudeResult) != nil {
+            if Self.meteredFailureNote(claudeResult, maxTurns: maxTurns) != nil {
                 logStore.append(logStoreId, "Run did not complete (see above).", level: .error)
             }
         }

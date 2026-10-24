@@ -76,6 +76,15 @@ final class AutoCodeUpdateServiceMeteringTests: XCTestCase {
         XCTAssertEqual(ClaudeCLI.meteredRunArgs(maxTurns: 5).last, "5")
     }
 
+    func testTurnCapIsPerPurpose() {
+        XCTAssertEqual(ClaudeCLI.autoTaskMaxTurns(implement: false), 30)
+        XCTAssertEqual(ClaudeCLI.autoTaskMaxTurns(implement: true), 120)
+        XCTAssertGreaterThan(ClaudeCLI.autoTaskImplementMaxTurns, ClaudeCLI.autoTaskMaxTurns)
+        XCTAssertEqual(ClaudeCLI.meteredRunArgs(maxTurns: ClaudeCLI.autoTaskMaxTurns(implement: true)).last, "120")
+        let capped = parse(#"{"type":"result","subtype":"error_max_turns","is_error":true,"result":"x"}"#)
+        XCTAssertTrue(try XCTUnwrap(AutoCodeUpdateService.meteredFailureNote(capped, maxTurns: 120)).contains("--max-turns 120"))
+    }
+
     func testMeteredOutputRoundTripsAndCleansUp() throws {
         let out = try XCTUnwrap(AutoCodeUpdateService.MeteredOutput.create())
         try out.handle.write(contentsOf: Data("{\"a\":1}".utf8))

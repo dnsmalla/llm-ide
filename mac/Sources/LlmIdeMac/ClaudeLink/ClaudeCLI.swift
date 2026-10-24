@@ -30,7 +30,16 @@ enum ClaudeCLI {
 
     /// Default `--max-turns` for an unattended Auto Task run. An uncapped agent
     /// run that wanders through a large repo is where the tokens go.
+    /// This is the cap for read-mostly runs (review, doc, update-issues).
     static let autoTaskMaxTurns = 30
+    /// Cap for runs that implement/edit code: a real change reads, edits,
+    /// builds and re-tests, which routinely needs far more than 30 turns.
+    static let autoTaskImplementMaxTurns = 120
+
+    /// The `--max-turns` for an Auto Task run, by whether it implements/edits.
+    static func autoTaskMaxTurns(implement: Bool) -> Int {
+        implement ? autoTaskImplementMaxTurns : autoTaskMaxTurns
+    }
 
     /// Extra args for a metered, capped headless run: `--output-format json`
     /// makes `claude -p` print ONE result object (text + usage) instead of the
