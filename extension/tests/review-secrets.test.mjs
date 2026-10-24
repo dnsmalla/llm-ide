@@ -173,3 +173,38 @@ test('held secrets expire after the TTL and are capped per user', async () => {
   assert.ok(m.takeHeldSecrets('u-cap', `r${m.HELD_MAX_PER_USER + 4}`, t0).config);
   assert.ok(m.takeHeldSecrets('u-other', 'keep', t0).config);
 });
+
+test('held secrets: dropped on review delete', async () => {
+  reset();
+  const m = await import('../server/review-secrets.mjs');
+  const r = await submit({ repo: 'a/b', token: TOKEN });
+  assert.ok(m.takeHeldSecrets(U, r.body.id).config, 'held after submit');
+  const d = await call('POST', '/kb/review/delete', { id: r.body.id });
+  assert.equal(d.status, 200);
+  assert.deepEqual(m.takeHeldSecrets(U, r.body.id), {});
+});
+
+test('held secrets: dropped after a successful /kb/dispatch of an approved review', async () => {
+  reset();
+  const m = await import('../server/review-secrets.mjs');
+  const r = await submit({ repo: 'a/b', token: TOKEN });
+  assert.ok(m.takeHeldSecrets(U, r.body.id).config);
+  db.setReviewStatus(U, r.body.id, { status: 'approved' });
+  let d;
+  await withFetchStub(async () => {
+    d = await call('POST', '/kb/dispatch', { planId: 'plan1', target: 'github', reviewId: r.body.id, config: { repo: 'a/b', token: TOKEN } });
+  });
+  assert.equal(d.status, 200, JSON.stringify(d.body));
+  assert.deepEqual(m.takeHeldSecrets(U, r.body.id), {});
+});
+
+test('dropAllHeldSecretsForUser drops only that user', async () => {
+  const m = await import('../server/review-secrets.mjs');
+  m.holdSecrets('u-a', 'r1', { config: { token: 'x' } });
+  m.holdSecrets('u-a', 'r2', { config: { token: 'x' } });
+  m.holdSecrets('u-b', 'r1', { config: { token: 'y' } });
+  m.dropAllHeldSecretsForUser('u-a');
+  assert.deepEqual(m.takeHeldSecrets('u-a', 'r1'), {});
+  assert.deepEqual(m.takeHeldSecrets('u-a', 'r2'), {});
+  assert.ok(m.takeHeldSecrets('u-b', 'r1').config);
+});

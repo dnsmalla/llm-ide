@@ -11,7 +11,7 @@
 //     false = not a planning route — caller continues dispatch
 
 import * as kb from '../kb/db.mjs';
-import { resolveReviewCreds } from '../server/review-secrets.mjs';
+import { resolveReviewCreds, dropHeldSecrets } from '../server/review-secrets.mjs';
 import { generatePlan } from '../agents/planner.mjs';
 import { analyzeRisks } from '../agents/risk.mjs';
 import { codeSync } from '../agents/code-sync.mjs';
@@ -300,6 +300,9 @@ export async function handlePlanningRoutes(req, res, ctx) {
           ...Object.fromEntries(Object.entries(dispatchConfig).filter(([, v]) => v != null && v !== '')),
         },
       });
+      // The approved review is consumed; its submit-time credentials are
+      // no longer needed in memory.
+      if (target !== 'preview' && body.reviewId) dropHeldSecrets(userId, String(body.reviewId));
       sendJSON(res, 200, result);
     } catch (err) {
       // Roll back the consumed review so the failure is visible and

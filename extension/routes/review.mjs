@@ -228,6 +228,7 @@ export async function handleReviewRoutes(req, res, ctx) {
     const body = parseJSON(await readBody(req));
     if (!body?.id) { sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing id' } }); return true; }
     kb.deleteReview(userId, body.id);
+    dropHeldSecrets(userId, body.id);
     sendJSON(res, 200, { ok: true });
     return true;
   }
