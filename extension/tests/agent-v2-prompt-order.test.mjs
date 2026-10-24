@@ -258,15 +258,16 @@ test('a fresh session gets the chat history once, as data; a resumed one never d
 // tokens). LLMIDE_V2_AUTOCOMPACT_WINDOW overrides within the SDK's accepted
 // range (100k–1M); 0 = pass nothing (the SDK's own per-model value); an
 // out-of-range value is rejected with a warning and the default applies.
-test('the auto-compact window defaults to 200k, overridable within 100k–1M, 0 = SDK default', () => {
-  const opts = () => buildEngineOptions(
-    { userId: 'u-ac', mode: 'execute', message: 'hi', delivered: null,
+test('the auto-compact window defaults to 160k (200k for [1m] models), overridable within 100k–1M, 0 = SDK default', () => {
+  const opts = (model) => buildEngineOptions(
+    { userId: 'u-ac', model, mode: 'execute', message: 'hi', delivered: null,
       agentContext: { workspaceRoot: process.cwd(), chatSessionId: 'chat-ac' } },
     { ...deps, renderMemory: () => null }).queryOptions;
   const saved = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW;
   try {
     delete process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW;
-    assert.equal(opts().settings?.autoCompactWindow, 200_000, 'default');
+    assert.equal(opts().settings?.autoCompactWindow, 160_000, 'default');
+    assert.equal(opts('claude-opus-5[1m]').settings?.autoCompactWindow, 200_000, '[1m] default');
     process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = '150000';
     assert.equal(opts().settings?.autoCompactWindow, 150_000);
     process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = '0';
@@ -275,7 +276,7 @@ test('the auto-compact window defaults to 200k, overridable within 100k–1M, 0 
     try {
       for (const bad of ['90000', '2000000', 'nonsense']) {
         process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW = bad;
-        assert.equal(opts().settings?.autoCompactWindow, 200_000, bad);
+        assert.equal(opts().settings?.autoCompactWindow, 160_000, bad);
       }
     } finally { console.warn = warn; }
   } finally {

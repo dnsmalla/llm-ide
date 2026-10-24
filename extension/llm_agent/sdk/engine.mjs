@@ -210,7 +210,7 @@ const PROJECT_MEMORY_SUMMARY_CHARS = 2_500;
 // Context size (tokens) at which the SDK compacts a conversation. Every hop of
 // a turn re-reads the whole context (live ledger: single agentic turns each
 // re-read 3-10M cached tokens), so an unbounded window makes a long chat's
-// every later hop more expensive. It therefore DEFAULTS to 200k; set
+// every later hop more expensive. It therefore DEFAULTS to 200k for [1m] models (160k otherwise); set
 // LLMIDE_V2_AUTOCOMPACT_WINDOW to override, or to 0 to pass nothing and use the
 // SDK's own per-model "auto" value (which wastes little on a 1M window but lets
 // the context, and the per-hop cost, grow much larger). The SDK accepts 100k-1M
@@ -219,13 +219,18 @@ const PROJECT_MEMORY_SUMMARY_CHARS = 2_500;
 const AUTOCOMPACT_MIN = 100_000;
 const AUTOCOMPACT_MAX = 1_000_000;
 const AUTOCOMPACT_DEFAULT = 200_000;
-function autoCompactWindow(raw = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW) {
-  if (raw === undefined || raw === '') return AUTOCOMPACT_DEFAULT;
+// Without a [1m] suffix the model's context may be only ~200k, where a 200k
+// window would never fire before prompt-too-long. No table here knows the
+// context size, so the suffix is the only reliable signal.
+const AUTOCOMPACT_DEFAULT_STANDARD_CONTEXT = 160_000;
+export function autoCompactWindow(raw = process.env.LLMIDE_V2_AUTOCOMPACT_WINDOW, model = '') {
+  const dflt = /\[1m\]$/i.test(String(model ?? '')) ? AUTOCOMPACT_DEFAULT : AUTOCOMPACT_DEFAULT_STANDARD_CONTEXT;
+  if (raw === undefined || raw === '') return dflt;
   if (String(raw).trim() === '0') return undefined; // SDK default
   const n = Math.trunc(Number(raw));
   if (Number.isFinite(n) && n >= AUTOCOMPACT_MIN && n <= AUTOCOMPACT_MAX) return n;
-  console.warn(`LLMIDE_V2_AUTOCOMPACT_WINDOW=${raw} ignored — must be ${AUTOCOMPACT_MIN}–${AUTOCOMPACT_MAX} tokens (or 0 for the SDK default); using ${AUTOCOMPACT_DEFAULT}`);
-  return AUTOCOMPACT_DEFAULT;
+  console.warn(`LLMIDE_V2_AUTOCOMPACT_WINDOW=${raw} ignored — must be ${AUTOCOMPACT_MIN}–${AUTOCOMPACT_MAX} tokens (or 0 for the SDK default); using ${dflt}`);
+  return dflt;
 }
 
 // Per-turn token budget: the cumulative tokens PROCESSED by one chat turn
@@ -811,7 +816,7 @@ export function buildEngineOptions(
   }
   // Bounded: a very long chat must not carry an ever-growing hash list.
   for (const key of ['attachments', 'images']) next[key] = next[key].slice(-400);
-  const compactWindow = autoCompactWindow();
+  const compactWindow = autoCompactWindow(undefined, typeof model === 'string' ? model : '');
   const turnEffort = resolveTurnEffort({
     requested: effort, mode: resolvedMode, message,
     modelLevels: effortLevels(userId, typeof model === 'string' && model ? model : null),
