@@ -84,7 +84,7 @@ When `NODE_ENV` is not `production` and either `LLMIDE_JWT_SECRET` or `LLMIDE_VA
 
 ### Loopback override
 
-`LLMIDE_ALLOW_REMOTE=1` is required to bind a non-loopback address. Without it, a non-loopback `LLMIDE_HOST` causes `process.exit(1)` at startup (`server.mjs:721–735`).
+`LLMIDE_ALLOW_REMOTE=1` is required to bind a non-loopback address. Without it, a non-loopback `LLMIDE_HOST` causes `process.exit(1)` at startup (`server.mjs:721–735`). Remote mode also closes registration unless `LLMIDE_ALLOW_REMOTE_REGISTRATION=1` (`core/config.mjs#computeRegistrationOpen`).
 
 Do not restate the full env-var table here — consult [`../reference/env-vars.md`](../reference/env-vars.md).
 
@@ -188,7 +188,7 @@ Detail: [`api-server.md` §2](api-server.md#2-request-pipeline) (API version and
 
 ### Append-only migrations
 
-Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0042` (`0042_scrub_review_secrets.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
+Migrations are numbered files applied exactly once and recorded in the `schema_migrations` table. The head migration is `0043` (`0043_scrub_review_secret_leaves.sql`). Migrations are never edited after they land; schema changes always add a new migration file.
 
 Source: `extension/kb/migrations.mjs:8`, `migrations.mjs:43`.
 

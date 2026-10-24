@@ -75,6 +75,16 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Fixed
 
+- **System review 2026-10-24 fixes.** Box re-index swaps rows in one transaction and pages the ingest
+  (a large folder no longer leaves the index empty); saved bash prefix rules never skip the prompt for
+  commands that name a sensitive path; the Loop agent-run rate limit can't be skipped with a query
+  string; account deletion removes agent sessions, code graph, session memory and tool-permission data;
+  `/kb/dispatch` is pinned to the approved destination (409 `REVIEW_CONFIG_MISMATCH`); the iPhone backs
+  off instead of reconnecting in a tight loop while the Mac throttles pairing; the editor keeps unsaved
+  edits when the file changed on disk; project export no longer stamps a foreign repo's README; a
+  superseded backend child's exit no longer disturbs its successor; caption capture starts only in the
+  active meeting tab, and Stop from a second panel window saves the transcript.
+
 - **`search-kb` no longer hides the open workspace's code.** Code hits were scoped to the workspace
   only after fetching the top 40 rows across every indexed repo, so other repos filled the window:
   on a real 5-repo index, 6 of 30 probe queries returned 0 code hits while matches existed. The
@@ -93,6 +103,13 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
   `decide` can be granted the same way (`allowed_tools: [decide]`).
 
 ### Changed
+
+- **Review credentials stay out of the database (API v75).** Tracker and GitHub tokens are stripped from
+  review payloads before they are stored (migration 0042 scrubs existing rows) and resolved from the
+  vault, a submit-time in-memory hold (24 h), or the approve request. A missing credential answers
+  422 `CREDENTIAL_REQUIRED` and leaves the item pending. A `codegen-apply` review with `pr.ghRepo` now
+  opens a draft PR whenever the vault holds `github.token`. Saved bash rules no longer cover commands
+  with an unquoted glob or `$`; those ask every time.
 
 - **Test loop follows the company test guideline (Mac).** TEST-MAP.md sorts untested files by the code
   classification matrix (Unit-test candidates, Integration-test candidates, Refactor first, Not tested by

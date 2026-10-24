@@ -61,6 +61,7 @@ function oauthCallbackHtml(res, msg, status = 200) {
   res.end(`<!doctype html><meta charset=utf-8><body style="font-family:system-ui;padding:2rem"><p>${escHtml(msg)}</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>`);
 }
 import { recordAudit } from './audit.mjs';
+import { dropAllHeldSecretsForUser } from './review-secrets.mjs';
 import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
 import { RESERVED_MCP_NAME } from '../llm_agent/sdk/constants.mjs';
 import { getUserPrefs, setUserPrefs, revokeJti } from '../kb/db.mjs';
@@ -805,6 +806,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       if (!valid) throw errAuth('Password confirmation failed');
       const { deleteUserCascade } = await import('../kb/db.mjs');
       const counts = deleteUserCascade(req.user.id);
+      dropAllHeldSecretsForUser(req.user.id);
       safeAudit(db, {
         userId: null,           // user is gone
         requestId, ip, userAgent: ua,

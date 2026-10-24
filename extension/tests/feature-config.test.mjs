@@ -73,3 +73,15 @@ test('FEATURE_KEYS matches the Mac AppFeature raw values', () => {
 test('config.features is parsed once from the environment (unset here → null)', () => {
   assert.equal(config.features, null);
 });
+
+const { computeRegistrationOpen } = await import('../core/config.mjs');
+
+test('registration: remote mode closes signup unless explicitly opted in', () => {
+  assert.equal(computeRegistrationOpen(false, {}), true);
+  assert.equal(computeRegistrationOpen(false, { LLMIDE_ALLOW_REMOTE: '1' }), false);
+  assert.equal(computeRegistrationOpen(false, { LLMIDE_ALLOW_REMOTE: '1', LLMIDE_ALLOW_REMOTE_REGISTRATION: '1' }), true);
+  assert.equal(computeRegistrationOpen(false, { LLMIDE_ALLOW_REMOTE: '1', LLMIDE_ALLOW_REMOTE_REGISTRATION: '1', LLMIDE_DISABLE_REGISTRATION: '1' }), false);
+  assert.equal(computeRegistrationOpen(true, {}), false);
+  assert.equal(computeRegistrationOpen(true, { LLMIDE_DISABLE_REGISTRATION: '0' }), true);
+  assert.equal(computeRegistrationOpen(true, { LLMIDE_DISABLE_REGISTRATION: '0', LLMIDE_ALLOW_REMOTE: '1' }), false);
+});

@@ -1128,6 +1128,14 @@ server.listen(PORT, HOST, () => {
         'Place a TLS-terminating reverse proxy (nginx, Caddy) in front before ' +
         'accepting external traffic. All tokens and vault data travel unencrypted otherwise.',
     });
+    if (config.registrationOpen) {
+      logger.warn('server_remote_registration_open', {
+        message:
+          'Remote mode AND open registration (LLMIDE_ALLOW_REMOTE_REGISTRATION=1): any network ' +
+          'peer can self-register and, since every user is an admin, run agents, MCP stdio ' +
+          'commands and plugin installs. Unset it unless you intend this.',
+      });
+    }
   }
 
   // Temp dirs a provider-CLI run left behind (crash / kill -9 before its

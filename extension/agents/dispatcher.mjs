@@ -368,6 +368,7 @@ function recordDispatchRetry(userId, taskId, target, error) {
       dispatchRetry: {
         ...(existing?.meta?.dispatchRetry || {}),
         gaveUp: true,
+        nextRetryAt: null,
         lastError: String(error).slice(0, 300),
         target,
       },
@@ -406,7 +407,7 @@ export async function retryFailedDispatches(userId, config = {}) {
   const now = Date.now();
   const due = tasks.filter((t) => {
     const retry = t.meta?.dispatchRetry;
-    if (!retry || !retry.nextRetryAt) return false;
+    if (!retry || !retry.nextRetryAt || retry.gaveUp) return false;
     return new Date(retry.nextRetryAt).getTime() <= now;
   });
 
@@ -428,6 +429,11 @@ export async function retryFailedDispatches(userId, config = {}) {
       if (target === 'linear')  results = await dispatchLinear(userId, { plan, tasks: [task], ...config });
       if (!results) return;
       const r = results[0];
+      if (r?.status === 'skipped') {
+        // Already dispatched / claimed by a concurrent dispatch: neutral —
+        // neither a failure nor a reason to bump the attempt count.
+        return;
+      }
       if (r?.status === 'ok') {
         clearDispatchRetry(userId, task.id);
         ok += 1;

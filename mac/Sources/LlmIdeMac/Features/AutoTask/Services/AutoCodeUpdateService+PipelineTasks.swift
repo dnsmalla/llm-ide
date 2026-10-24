@@ -850,15 +850,15 @@ extension AutoCodeUpdateService {
     ) async -> Bool {
         guard api != nil else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no API client wired."
-            return true
+            return false
         }
         guard !projectRoot.isEmpty else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no project root resolved."
-            return true
+            return false
         }
         guard !gitRoot.isEmpty else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no git working tree resolved."
-            return true
+            return false
         }
         // LoopEngineConfig is keyed by the stable llm-ide Project.id (see the
         // contract documented on LoopEngineConfig.load/save in Task 1) — NOT
@@ -870,7 +870,7 @@ extension AutoCodeUpdateService {
         // key here would silently split one project's config in two.
         guard let projectId else {
             taskErrors[AutoTask.loopEngineering.rawValue] = "Loop skipped — no active project."
-            return true
+            return false
         }
         let faultsRoot = URL(fileURLWithPath: projectRoot, isDirectory: true)
         let gitRootURL = URL(fileURLWithPath: gitRoot, isDirectory: true)

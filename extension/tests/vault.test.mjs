@@ -199,3 +199,27 @@ test('migrateLegacySecrets does not alter already-current-format blobs', () => {
   // The blob should be identical — current-format blobs are not rewritten.
   assert.equal(Buffer.compare(after, modern), 0, 'current-format blob must not be modified');
 });
+
+test('imap password is bound to a host; re-saving the password clears the binding', async () => {
+  const { checkImapHostBinding, bindImapHost } = await import('../server/vault.mjs');
+  const db = secretsDb();
+  setSecret(db, 'u1', 'email.imapPassword', 'pw');
+  assert.deepEqual(checkImapHostBinding(db, 'u1', 'imap.example.com'), { ok: true, bound: false });
+  bindImapHost(db, 'u1', 'IMAP.Example.com');
+  assert.deepEqual(checkImapHostBinding(db, 'u1', 'imap.example.com '), { ok: true, bound: true });
+  assert.equal(checkImapHostBinding(db, 'u1', 'evil.example.net').ok, false);
+  assert.equal(checkImapHostBinding(db, 'u2', 'evil.example.net').ok, true, 'other users unaffected');
+  setSecret(db, 'u1', 'email.imapPassword', 'pw2');
+  assert.equal(checkImapHostBinding(db, 'u1', 'evil.example.net').ok, true, 'new password rebinds on first use');
+});
+
+test('imap host binding is server-internal: not user-settable, not listed', async () => {
+  const { isUserSettableVaultKey, listSecretKeys, bindImapHost } = await import('../server/vault.mjs');
+  assert.equal(isUserSettableVaultKey('email.imapPasswordHost'), false);
+  assert.ok(!VAULT_KEYS.includes('email.imapPasswordHost'));
+  assert.equal(isUserSettableVaultKey('email.imapPassword'), true);
+  const db = secretsDb();
+  setSecret(db, 'u1', 'email.imapPassword', 'pw');
+  bindImapHost(db, 'u1', 'imap.example.com');
+  assert.deepEqual(listSecretKeys(db, 'u1').map((r) => r.secret_key), ['email.imapPassword']);
+});

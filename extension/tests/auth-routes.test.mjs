@@ -314,6 +314,19 @@ test('POST /auth/refresh: a token revoked by logout is never retry-eligible', as
   assert.equal(replay.statusCode, 401);
 });
 
+test('POST /auth/refresh: a logout-revoked token is a plain 401 and does NOT revoke other sessions', async () => {
+  const a = await registerAndLogin();
+  const login2 = await callAuth({ method: 'POST', url: '/auth/login', body: { email: a.email, password: PASSWORD } });
+  assert.equal(login2.statusCode, 200, login2._body);
+  const other = login2.json().refreshToken;
+  const { logout } = await import('../server/users.mjs');
+  logout(kb.getDb(), a.refreshToken);
+  const replay = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: a.refreshToken } });
+  assert.equal(replay.statusCode, 401);
+  const stillOk = await callAuth({ method: 'POST', url: '/auth/refresh', body: { refreshToken: other } });
+  assert.equal(stillOk.statusCode, 200, 'explicit logout of one device must not log out the others');
+});
+
 test('POST /auth/refresh response carries the user object (client session contract)', async () => {
   // The Mac app decodes this response as SessionResponse, whose `user`
   // field is required. When refresh omitted `user`, every refresh failed

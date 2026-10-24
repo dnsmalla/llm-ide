@@ -32,6 +32,19 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
         self.logStore = logStore
     }
 
+    /// Custom tasks of the ACTIVE project only (same scoping as
+    /// `AutoCodeUpdateService.dueCustomTasks`); no active project → none.
+    func scopedCustomTasks() -> [CustomAutoTask] {
+        Self.customTasks(activeProjectId: autoCode?.projectStore?.activeProject?.bundle.id,
+                         defaults: autoCode?.config.userDefaults ?? .standard)
+    }
+
+    static func customTasks(activeProjectId: String?, defaults: UserDefaults) -> [CustomAutoTask] {
+        guard let activeProjectId else { return [] }
+        CustomAutoTask.adoptLegacyTasks(into: activeProjectId, in: defaults)
+        return CustomAutoTask.loadAll(forProject: activeProjectId, from: defaults)
+    }
+
     // MARK: - MobileFeatureBridge
 
     /// Handle `auto_task_*` messages: list / toggle / run / stop / history for
@@ -77,9 +90,9 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                     settings?.setEnabled(m.enabled, task: t)
                     host?.logInfo("Auto-task toggle \(t.rawValue)=\(m.enabled)")
                 } else if let taskName = m.task,
-                          var custom = CustomAutoTask.loadAll().first(where: { $0.id == taskName }) {
+                          var custom = scopedCustomTasks().first(where: { $0.id == taskName }) {
                     custom.isEnabled = m.enabled
-                    custom.save()
+                    custom.save(in: autoCode?.config.userDefaults ?? .standard)
                     NotificationCenter.default.post(name: .customAutoTasksChanged, object: nil)
                     host?.logInfo("Custom auto-task toggle \(custom.name)=\(m.enabled)")
                 } else if m.task == nil {
@@ -129,7 +142,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                         host?.logInfo("Auto-task run single: \(t.rawValue)")
                     }
                 } else if let raw = m.task,
-                          let custom = CustomAutoTask.loadAll().first(where: { $0.id == raw }) {
+                          let custom = scopedCustomTasks().first(where: { $0.id == raw }) {
                     started = ac.runSingleCustom(custom, trigger: .phone)
                     if started {
                         host?.logInfo("Custom auto-task run: \(custom.name)")
@@ -408,7 +421,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
 
     /// True for a built-in task or a custom task that currently exists.
     private func isKnownAutoTaskId(_ id: String) -> Bool {
-        AutoTask(rawValue: id) != nil || CustomAutoTask.loadAll().contains { $0.id == id }
+        AutoTask(rawValue: id) != nil || scopedCustomTasks().contains { $0.id == id }
     }
 
     /// `.some(path)` when the value is a project-relative folder inside the
@@ -486,7 +499,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
                          enabled: s.isEnabled(task: t),
                          lastError: ac.taskErrors[t.rawValue] ?? ac.visibleTemplateWarning(for: t.rawValue))
         }
-        let customInfos = CustomAutoTask.loadAll().map { t in
+        let customInfos = scopedCustomTasks().map { t in
             MobileAutoTaskReply.TaskInfo(id: t.id, label: t.name, enabled: t.isEnabled,
                          lastError: ac.taskErrors[t.id] ?? ac.visibleTemplateWarning(for: t.id))
         }
@@ -533,7 +546,7 @@ final class MobileAutoTaskBridge: MobileFeatureBridge {
             }
             return MobileAutoTaskReply.TaskLogs(id: task.rawValue, label: task.label, lines: lines)
         }
-        let custom = CustomAutoTask.loadAll().map { task in
+        let custom = scopedCustomTasks().map { task in
             let lines = logStore.lines(for: task.id).map { line in
                 MobileAutoTaskReply.LogLine(id: line.id.uuidString,
                                             timestamp: line.timestamp.timeIntervalSince1970,

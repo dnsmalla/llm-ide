@@ -693,7 +693,8 @@ export function useTranscript() {
           // rapid Stop→Start sequence doesn't deliver a stale START after a STOP.
           for (const t of startRetryTimersRef.current) clearTimeout(t);
           startRetryTimersRef.current = [];
-          const sendStart = () => chrome.runtime.sendMessage({ type: MsgType.START_CAPTION_SCRAPING, tabId: tab?.id }).catch(() => {});
+          const sendStart = () =>
+            chrome.runtime.sendMessage({ type: MsgType.START_CAPTION_SCRAPING, tabId: tab?.id }).catch(() => {});
           sendStart();
           startRetryTimersRef.current.push(setTimeout(sendStart, 1000));
           startRetryTimersRef.current.push(setTimeout(sendStart, 3000));

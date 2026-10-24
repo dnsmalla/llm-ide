@@ -79,11 +79,19 @@ export function applyCodegen({ repoPath, taskId, files, tests, allowedRepos }) {
   }
   const safeTask = String(taskId || 'unknown').replace(/[^A-Za-z0-9_.-]+/g, '_').slice(0, 80);
   const baseDir = path.join(path.resolve(repoPath), SUBDIR, safeTask);
+  // Check BEFORE creating anything: a planted symlink at .llmide-auto or
+  // .llmide-auto/<task> would make mkdir create directories outside the repo.
+  assertNoSymlinkEscape(path.resolve(repoPath), baseDir);
   fs.mkdirSync(baseDir, { recursive: true });
+  assertNoSymlinkEscape(path.resolve(repoPath), baseDir);
 
   const written = [];
   for (const f of all) {
     const target = safeJoin(baseDir, f.path);
+    // Walk every existing component BEFORE mkdir (a symlinked component
+    // would otherwise make mkdir create dirs outside the repo), then again
+    // after to catch a swap in between.
+    assertNoSymlinkEscape(baseDir, target);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     assertNoSymlinkEscape(baseDir, target);
     // Defense-in-depth: lstat checks the current state.  The O_NOFOLLOW

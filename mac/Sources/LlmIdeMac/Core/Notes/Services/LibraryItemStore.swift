@@ -418,9 +418,15 @@ final class LibraryItemStore {
         do {
             try fm.createDirectory(
                 at: dest.deletingLastPathComponent(), withIntermediateDirectories: true)
-            // REPLACE on same-name conflict — the new file wins.
+            // REPLACE on same-name conflict — the new file wins. The old one
+            // goes to the Trash so it stays recoverable; only a volume with
+            // no Trash falls back to deleting it.
             if fm.fileExists(atPath: dest.path) {
-                try fm.removeItem(at: dest)
+                do {
+                    try fm.trashItem(at: dest, resultingItemURL: nil)
+                } catch {
+                    try fm.removeItem(at: dest)
+                }
             }
             try fm.copyItem(at: url, to: dest)
             return true

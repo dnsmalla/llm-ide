@@ -19,6 +19,10 @@ struct CustomAutoTask: Identifiable, Codable, Equatable {
     var mode: Mode = .review
     /// Cron schedule (nil = manual ▶ only). Parsed by `CronExpression`.
     var cron: String?
+    /// Project this task belongs to (`ProjectBundle.id`). nil only for tasks
+    /// saved before project scoping; `adoptLegacyTasks(into:)` stamps those
+    /// with the first project that loads them.
+    var projectId: String?
 
     enum Mode: String, Codable, CaseIterable {
         case review, implement
@@ -40,16 +44,16 @@ struct CustomAutoTask: Identifiable, Codable, Equatable {
 
     init(id: String = UUID().uuidString, name: String, template: String,
          isEnabled: Bool = true, createdAt: Date = Date(),
-         mode: Mode = .review, cron: String? = nil) {
+         mode: Mode = .review, cron: String? = nil, projectId: String? = nil) {
         self.id = id; self.name = name; self.template = template
         self.isEnabled = isEnabled; self.createdAt = createdAt
-        self.mode = mode; self.cron = cron
+        self.mode = mode; self.cron = cron; self.projectId = projectId
     }
 
     // MARK: Backward-compatible Codable (mode/cron predate existing payloads)
 
     enum CodingKeys: String, CodingKey {
-        case id, name, template, isEnabled, createdAt, mode, cron
+        case id, name, template, isEnabled, createdAt, mode, cron, projectId
     }
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -60,6 +64,7 @@ struct CustomAutoTask: Identifiable, Codable, Equatable {
         createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
         mode = try c.decodeIfPresent(Mode.self, forKey: .mode) ?? .review
         cron = try c.decodeIfPresent(String.self, forKey: .cron)
+        projectId = try c.decodeIfPresent(String.self, forKey: .projectId)
     }
     func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
@@ -67,6 +72,7 @@ struct CustomAutoTask: Identifiable, Codable, Equatable {
         try c.encode(template, forKey: .template); try c.encode(isEnabled, forKey: .isEnabled)
         try c.encode(createdAt, forKey: .createdAt); try c.encode(mode, forKey: .mode)
         try c.encodeIfPresent(cron, forKey: .cron)
+        try c.encodeIfPresent(projectId, forKey: .projectId)
     }
 }
 
@@ -91,6 +97,30 @@ extension CustomAutoTask {
         } catch {
             // Silent fail — validation happens in the UI (non-empty name/template).
         }
+    }
+
+    /// Tasks belonging to `projectId` (nil project → none).
+    static func loadAll(forProject projectId: String?,
+                        from defaults: UserDefaults = .standard) -> [CustomAutoTask] {
+        guard let projectId else { return [] }
+        return loadAll(from: defaults).filter { $0.projectId == projectId }
+    }
+
+    /// One-time upgrade step: stamp every task that predates project scoping
+    /// (nil `projectId`) with `projectId` and persist, so it neither vanishes
+    /// nor runs against every project. Idempotent — once stamped, later calls
+    /// find nothing to adopt. Returns how many tasks were adopted.
+    @discardableResult
+    static func adoptLegacyTasks(into projectId: String,
+                                 in defaults: UserDefaults = .standard) -> Int {
+        var all = loadAll(from: defaults)
+        var n = 0
+        for i in all.indices where all[i].projectId == nil {
+            all[i].projectId = projectId
+            n += 1
+        }
+        if n > 0 { saveAll(all, to: defaults) }
+        return n
     }
 
     func save(in defaults: UserDefaults = .standard) {

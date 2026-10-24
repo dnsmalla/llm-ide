@@ -6,6 +6,9 @@ final class PartialRecovery {
         let path: String
         let pid: Int32
         let startedAt: Date
+        /// Recorder's process start time (µs, `ProcessTree.startTime`). Guards
+        /// against PID reuse; nil on legacy records (pid-only liveness).
+        var pidStartTime: UInt64? = nil
     }
     let recoveryDir: URL
 
@@ -27,9 +30,11 @@ final class PartialRecovery {
     }
 
     func record(id: String, path: URL, pid: Int32 = ProcessInfo.processInfo.processIdentifier,
-                startedAt: Date) throws {
+                startedAt: Date,
+                pidStartTime: UInt64? = nil) throws {
         try FileManager.default.createDirectory(at: recoveryDir, withIntermediateDirectories: true)
-        let record = Orphan(id: id, path: path.path, pid: pid, startedAt: startedAt)
+        let record = Orphan(id: id, path: path.path, pid: pid, startedAt: startedAt,
+                            pidStartTime: pidStartTime ?? ProcessTree.startTime(of: pid))
         let data = try AppJSON.iso8601Encoder.encode(record)
         try data.write(to: recoveryDir.appendingPathComponent("\(id).json"), options: .atomic)
     }
@@ -50,14 +55,20 @@ final class PartialRecovery {
         for f in files where f.pathExtension == "json" {
             guard let data = try? Data(contentsOf: f),
                   let r = try? AppJSON.iso8601Decoder.decode(Orphan.self, from: data) else { continue }
-            if !isProcessAlive(r.pid) { out.append(r) }
+            if !Self.isOwnerAlive(pid: r.pid, startTime: r.pidStartTime) { out.append(r) }
         }
         return out
     }
 
-    private func isProcessAlive(_ pid: Int32) -> Bool {
-        // kill(pid, 0) returns 0 if signal could be sent (process exists)
-        // and -1 with errno=ESRCH if not.
-        return kill(pid, 0) == 0
+    /// The recorder is alive only if the pid exists AND (when a start time was
+    /// recorded) it is still the same process — a recycled pid has a different
+    /// start time. Legacy records without a start time keep pid-only behaviour.
+    static func isOwnerAlive(pid: Int32, startTime: UInt64?) -> Bool {
+        // kill(pid, 0) returns 0 if the process exists (EPERM also means it exists).
+        let exists = kill(pid, 0) == 0 || errno == EPERM
+        guard exists else { return false }
+        guard let startTime else { return true }
+        guard let current = ProcessTree.startTime(of: pid) else { return false }
+        return current == startTime
     }
 }

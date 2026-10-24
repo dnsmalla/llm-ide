@@ -34,6 +34,9 @@ if (!Number.isInteger(config.bcryptCost) ||
 // a dummy — the fast-path error would leak (via timing) that the account
 // does not exist. Hashing a random secret guarantees it never matches a
 // real password while keeping the compare cost identical to the real one.
+// replaced_by marker for a retry successor revoked unused; matches no token id.
+const KILLED_SUCCESSOR = 'killed-successor';
+
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync(
   crypto.randomBytes(32).toString('hex'),
   config.bcryptCost,
@@ -193,13 +196,15 @@ function rotateRefreshToken(db, row, userAgent) {
   `).get(`-${REFRESH_RETRY_GRACE_SEC} seconds`, row.id);
   if (!prior?.replaced_by || !prior.in_window || row.status !== 'active') return null;
   const successorId = prior.replaced_by;
-  // Revoke the unused successor. Its replaced_by stays NULL on purpose: a
-  // killed successor is NOT retry-eligible, so two holders cannot ping-pong
-  // the window forever (the next presentation of it is theft → logoutAll).
+  // Revoke the unused successor. Its replaced_by is KILLED_SUCCESSOR, a sentinel that matches no
+  // row: a killed successor is NOT retry-eligible (the retry's kill UPDATE
+  // finds nothing), so two holders cannot ping-pong the window forever, and
+  // the next presentation of it is theft → logoutAll (while NULL means an
+  // explicit logout, which refreshSession answers with a plain 401).
   const killed = db.prepare(
-    `UPDATE refresh_tokens SET revoked_at = datetime('now')
+    `UPDATE refresh_tokens SET revoked_at = datetime('now'), replaced_by = ?
      WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
-  ).run(successorId, row.user_id);
+  ).run(KILLED_SUCCESSOR, successorId, row.user_id);
   if (killed.changes !== 1) return null; // successor already used/revoked
   storeRefreshToken(db, row.user_id, fresh, userAgent, freshId);
   // Only the originally presented row is re-pointed; its window still counts
@@ -240,7 +245,15 @@ export function refreshSession(db, { refreshToken, userAgent }) {
   // is revoked and the request rejected.
   const newToken = db.transaction(() => rotateRefreshToken(db, row, userAgent))();
   if (newToken === null) {
-    try { logoutAll(db, row.user_id); } catch { /* never block the 401 */ }
+    // A row revoked by explicit logout has replaced_by NULL: a plain 401, not
+    // theft — don't sign out the user's other devices. A rotated row
+    // (replaced_by = successor id) or a killed retry successor
+    // (replaced_by = KILLED_SUCCESSOR) is a token-family reuse → logoutAll.
+    const fam = db.prepare('SELECT replaced_by FROM refresh_tokens WHERE id = ?').get(row.id);
+    const loggedOut = row.revoked_at && !fam?.replaced_by;
+    if (!loggedOut) {
+      try { logoutAll(db, row.user_id); } catch { /* never block the 401 */ }
+    }
     throw errAuth('Refresh token revoked');
   }
   const access = signAccessToken({ userId: row.user_id, role: row.role });

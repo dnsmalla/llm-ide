@@ -131,6 +131,10 @@ const ALLOWED_KEYS = new Set([
   // it here via /auth/me/secrets; the server reads it back when fetching
   // recent messages so the password never travels on the fetch request.
   'email.imapPassword',
+  // The IMAP host the saved password is bound to (trust on first use; cleared
+  // whenever the password is re-saved). Not a secret, but it must live next to
+  // the password it guards — see checkImapHostBinding.
+  'email.imapPasswordHost',
   // Per-user Anthropic API key.  When present, agent calls run with
   // ANTHROPIC_API_KEY=<this> so each user's LLM spend is attributed
   // to their own account instead of the operator's Claude CLI login.
@@ -178,6 +182,11 @@ const CUSTOM_PROVIDER_KEY_RE = /^custom\.[a-z0-9-]+\.apiKey$/;
 // registry's own SLUG_RE shape.
 const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
 
+// Server-internal keys: readable/writable through setSecret/getSecret, but never
+// settable by a client or listed to one (the IMAP host binding would otherwise
+// be defeatable by POSTing a host of the attacker's choosing).
+const INTERNAL_KEYS = new Set(['email.imapPasswordHost']);
+
 /**
  * Keys a user may set through the generic `POST /auth/me/secrets`: the fixed
  * list plus the per-provider `custom.<id>.apiKey` pattern (the Mac's custom
@@ -186,7 +195,8 @@ const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
  * writes them.
  */
 export function isUserSettableVaultKey(key) {
-  return typeof key === 'string' && (ALLOWED_KEYS.has(key) || CUSTOM_PROVIDER_KEY_RE.test(key));
+  if (typeof key !== 'string' || INTERNAL_KEYS.has(key)) return false;
+  return ALLOWED_KEYS.has(key) || CUSTOM_PROVIDER_KEY_RE.test(key);
 }
 
 function ensureAllowed(key) {
@@ -200,8 +210,30 @@ function ensureAllowed(key) {
   throw new Error(`Unknown vault key: ${key}`);
 }
 
+const normHost = (h) => String(h || '').trim().toLowerCase();
+
+/**
+ * The stored IMAP app password may only be sent to the host it was first used
+ * with, so a crafted /kb/email/fetch can't exfiltrate it to an arbitrary
+ * server. Returns { ok, bound }: ok=false means a different host is bound.
+ */
+export function checkImapHostBinding(db, userId, host) {
+  const bound = getSecret(db, userId, 'email.imapPasswordHost');
+  if (!bound) return { ok: true, bound: false };
+  return { ok: normHost(bound) === normHost(host), bound: true };
+}
+
+export function bindImapHost(db, userId, host) {
+  setSecret(db, userId, 'email.imapPasswordHost', normHost(host));
+}
+
 export function setSecret(db, userId, key, value) {
   ensureAllowed(key);
+  // A new/cleared password rebinds on its next successful use.
+  if (key === 'email.imapPassword') {
+    db.prepare('DELETE FROM user_secrets WHERE user_id = ? AND secret_key = ?')
+      .run(String(userId), 'email.imapPasswordHost');
+  }
   if (value == null || value === '') {
     db.prepare('DELETE FROM user_secrets WHERE user_id = ? AND secret_key = ?')
       .run(String(userId), key);
@@ -229,7 +261,7 @@ export function getSecret(db, userId, key) {
 export function listSecretKeys(db, userId) {
   return db.prepare(
     'SELECT secret_key, updated_at FROM user_secrets WHERE user_id = ?',
-  ).all(String(userId));
+  ).all(String(userId)).filter((r) => !INTERNAL_KEYS.has(r.secret_key));
 }
 
 // Fetch multiple secrets in one DB round-trip.  Returns a plain object
@@ -266,7 +298,7 @@ export function getSecrets(db, userId, keys) {
   return out;
 }
 
-export const VAULT_KEYS = Array.from(ALLOWED_KEYS);
+export const VAULT_KEYS = Array.from(ALLOWED_KEYS).filter((k) => !INTERNAL_KEYS.has(k));
 
 /**
  * Re-encrypt any secrets for `userId` that were stored without AAD

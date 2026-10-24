@@ -128,6 +128,8 @@ if autoTasksIncluded {
         "AgentLoopStageRepairerTests.swift",
         "ArtifactCheckSectionRulesTests.swift",
         "AutoCodeCustomSchedulingTests.swift",
+        "CustomAutoTaskProjectScopeTests.swift",
+        "MobileAutoTaskBridgeScopeTests.swift",
         "AutoCodeUpdateServiceCLITests.swift",
         "AutoCodeUpdateServiceComposedPromptTests.swift",
         "AutoCodeUpdateServiceCronTests.swift",

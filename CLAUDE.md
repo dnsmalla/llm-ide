@@ -69,7 +69,7 @@ LLM-IDE is a **local-first AI meeting intelligence system** comprising four surf
 - **Pure Node HTTP** — No framework (Express/Fastify); reduces dependency surface
 - **SQLite WAL+FTS5** — Single database per install, full-text search across meetings/code/tickets
 - **Per-user tenancy** — Every owned row carries `user_id`; FTS5 hits are hydrated with user-scoped queries
-- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0042)
+- **Append-only migrations** — Numbered SQL migrations under `extension/kb/migrations/` (0001–0043)
 - **Runtime feature set → server** — the Mac app writes the user's active features (active ∩ compiled, `agent_chat` always) into the backend child's env as `LLMIDE_FEATURES` (sorted `AppFeature` raw values; unset/empty → all, same as `mac/Package.swift`) via `BackendManager.featureKeysProvider`, which Shell installs in `LlmIdeMacApp.init`; an inherited `LLMIDE_FEATURES` is always dropped (`BackendManager.childEnvironment`). Disabled route groups answer 404 `feature_disabled`. A toggle applies on the NEXT backend start — never auto-restart the backend on a feature change (it kills in-flight Loop/agent work); an adopted external server keeps its own env.
 
 ## Project Structure
@@ -297,7 +297,7 @@ Cross-feature protocols belong in `Core/Contracts/`: `LoopRunning`, `TaskLogWrit
 
 ### Server (`extension/server.mjs`)
 - **CORS strict allowlist** — `chrome-extension://<id>` + `localhost` / `127.0.0.1`; echo `Origin`, never `*`
-- **Server binds to `127.0.0.1`** — Remote bind requires `LLMIDE_ALLOW_REMOTE=1`
+- **Server binds to `127.0.0.1`** — Remote bind requires `LLMIDE_ALLOW_REMOTE=1`; with it, self-registration is CLOSED unless `LLMIDE_ALLOW_REMOTE_REGISTRATION=1`
 - **`runClaude()` prefers user's stored `claude.apiKey`** — Falls back to operator's Claude CLI; never silent fallback
 - **8 MB request body limit** — DoS guard
 - **500 k-char prompt cap** — Keep within Claude CLI comfort zone
