@@ -34,6 +34,9 @@ if (!Number.isInteger(config.bcryptCost) ||
 // a dummy — the fast-path error would leak (via timing) that the account
 // does not exist. Hashing a random secret guarantees it never matches a
 // real password while keeping the compare cost identical to the real one.
+// replaced_by marker for a retry successor revoked unused; matches no token id.
+const KILLED_SUCCESSOR = 'killed-successor';
+
 const DUMMY_PASSWORD_HASH = bcrypt.hashSync(
   crypto.randomBytes(32).toString('hex'),
   config.bcryptCost,
@@ -193,15 +196,15 @@ function rotateRefreshToken(db, row, userAgent) {
   `).get(`-${REFRESH_RETRY_GRACE_SEC} seconds`, row.id);
   if (!prior?.replaced_by || !prior.in_window || row.status !== 'active') return null;
   const successorId = prior.replaced_by;
-  // Revoke the unused successor. Its replaced_by is a sentinel that matches no
+  // Revoke the unused successor. Its replaced_by is KILLED_SUCCESSOR, a sentinel that matches no
   // row: a killed successor is NOT retry-eligible (the retry's kill UPDATE
   // finds nothing), so two holders cannot ping-pong the window forever, and
   // the next presentation of it is theft → logoutAll (while NULL means an
   // explicit logout, which refreshSession answers with a plain 401).
   const killed = db.prepare(
-    `UPDATE refresh_tokens SET revoked_at = datetime('now'), replaced_by = 'killed-successor'
+    `UPDATE refresh_tokens SET revoked_at = datetime('now'), replaced_by = ?
      WHERE id = ? AND user_id = ? AND revoked_at IS NULL`,
-  ).run(successorId, row.user_id);
+  ).run(KILLED_SUCCESSOR, successorId, row.user_id);
   if (killed.changes !== 1) return null; // successor already used/revoked
   storeRefreshToken(db, row.user_id, fresh, userAgent, freshId);
   // Only the originally presented row is re-pointed; its window still counts
