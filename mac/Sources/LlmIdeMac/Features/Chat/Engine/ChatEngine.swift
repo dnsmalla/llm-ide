@@ -661,6 +661,17 @@ final class ChatEngine {
     /// cancellation, so the network request is actually aborted; both turn
     /// kinds treat that as a clean stop (no error bubble).
     func stop() {
+        stopRunning(reason: nil)
+    }
+
+    /// Why the in-flight turn is being stopped by the app rather than by the
+    /// user. Appended to the stopped turn's transcript by
+    /// `finishStreamingTurn`, then cleared.
+    var pendingStopNotice: String?
+
+    /// Stop with a visible reason (e.g. the background-chat limit sweep).
+    func stopRunning(reason: String?) {
+        if let reason { pendingStopNotice = reason }
         // A Stop also disarms the 0.8 s auto-continue timer a just-finished
         // turn may have scheduled: `busy` drops as soon as the cancelled task
         // unwinds, so without this the timer would find the engine idle and
@@ -1314,6 +1325,11 @@ final class ChatEngine {
             // streamed, and the marker is re-synthesized only on the way out
             // to the server (`ChatMessage.wireTurn()`).
             messages[idx].status = stopped ? .stopped : .done
+            if stopped, let notice = pendingStopNotice {
+                let base = messages[idx].content
+                messages[idx].content = (base.isEmpty ? "" : base + "\n\n") + "_\(notice)_"
+            }
+            pendingStopNotice = nil
             // A legacy turn sends no end event for its last tool: the turn
             // completing is that end. A stopped turn's open step stays open —
             // it did not finish, and the subagent chip says "stopped".

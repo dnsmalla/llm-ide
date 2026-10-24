@@ -581,7 +581,11 @@ final class AutoCodeUpdateService: ObservableObject, SessionScoped {
     /// constructed with, so tests stay isolated via their injected suite.
     func dueCustomTasks(now: Date = Date()) -> [CustomAutoTask] {
         guard autoTaskSettings.enabled else { return [] }
-        return CustomAutoTask.loadAll(from: config.userDefaults).filter { task in
+        // Scoped to the active project: a task runs only against the project
+        // it was created in. No active project → nothing runs.
+        guard let activeId = projectStore?.activeProject?.bundle.id else { return [] }
+        CustomAutoTask.adoptLegacyTasks(into: activeId, in: config.userDefaults)
+        return CustomAutoTask.loadAll(forProject: activeId, from: config.userDefaults).filter { task in
             guard task.isEnabled, task.cron != nil,
                   let next = autoTaskSettings.customNextFireAt(for: task.id) else { return false }
             return now >= next

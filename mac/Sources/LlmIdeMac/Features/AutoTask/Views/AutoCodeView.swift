@@ -58,11 +58,15 @@ struct AutoCodeView: View {
             }
         }
         .onAppear {
-            customTasks = CustomAutoTask.loadAll()
+            customTasks = loadProjectCustomTasks()
             autoCode.loadRunHistoryForDisplay()
         }
         .onReceive(NotificationCenter.default.publisher(for: .customAutoTasksChanged)) { _ in
-            customTasks = CustomAutoTask.loadAll()
+            customTasks = loadProjectCustomTasks()
+        }
+        .onChange(of: projectStore.activeProject?.bundle.id) { _, _ in
+            customTasks = loadProjectCustomTasks()
+            selectedCustomTaskId = nil
         }
         .onChange(of: autoCode.currentCustomTaskId) { _, newId in
             // Mirrors the built-in onChange above: during a custom task's
@@ -339,8 +343,14 @@ struct AutoCodeView: View {
     /// CustomAutoTask is a plain struct with no such observation, so this
     /// explicit push is the real mechanism for it (the "Refresh" button
     /// calls the same underlying method for a manual, visible re-sync).
+    private func loadProjectCustomTasks() -> [CustomAutoTask] {
+        guard let id = projectStore.activeProject?.bundle.id else { return [] }
+        CustomAutoTask.adoptLegacyTasks(into: id)
+        return CustomAutoTask.loadAll(forProject: id)
+    }
+
     private func persistCustomTasksChange() {
-        customTasks = CustomAutoTask.loadAll()
+        customTasks = loadProjectCustomTasks()
         autoCode.pushStateToMobile?()
     }
 
@@ -546,7 +556,8 @@ struct AutoCodeView: View {
         .sheet(isPresented: $showingAddCustomTask) {
             AddCustomAutoTaskSheet(
                 onConfirm: { name, template, mode, cron in
-                    let task = CustomAutoTask(name: name, template: template, mode: mode, cron: cron)
+                    let task = CustomAutoTask(name: name, template: template, mode: mode, cron: cron,
+                                              projectId: projectStore.activeProject?.bundle.id)
                     task.save()
                     if cron != nil {
                         autoCode.realignCustomNextFire(for: task, now: Date())
@@ -766,7 +777,7 @@ struct AutoCodeView: View {
                                                     var updated = task
                                                     updated.template = newValue
                                                     updated.save()
-                                                    customTasks = CustomAutoTask.loadAll()
+                                                    customTasks = loadProjectCustomTasks()
                                                 }
                                             ),
                                             ownPromptLabel: "This task's prompt",
