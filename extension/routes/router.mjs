@@ -40,7 +40,7 @@ import { listSdkModels } from '../llm_agent/sdk/models.mjs';
 import { sdkStatus, updateSdk } from '../llm_agent/sdk/updater.mjs';
 import { activeTurnCount } from './agent-v2.mjs';
 import { iterateUserMeetings } from '../kb/exporter.mjs';
-import { getSecret } from '../server/vault.mjs';
+import { getSecret, checkImapHostBinding, bindImapHost } from '../server/vault.mjs';
 import { testConnection, fetchRecentEmails, getGoogleAccessToken } from '../connectors/email-source.mjs';
 import { testConnection as slackTest, fetchChannelHistory, listUserConversations } from '../connectors/slack-source.mjs';
 import { testMcpConnection, fetchMcpItems, markMcpSeen } from '../connectors/mcp-client.mjs';
@@ -556,6 +556,7 @@ export async function handleKB(req, res) {
       const authMethod = body.authMethod === 'google' ? 'google' : 'password';
       let password;
       let accessToken;
+      let usingStoredPassword = false;
       if (authMethod === 'google') {
         try {
           accessToken = await getGoogleAccessToken(kb.getDb(), userId);
@@ -575,6 +576,15 @@ export async function handleKB(req, res) {
           sendJSON(res, 400, { error: { code: 'EMAIL_NO_PASSWORD', message: 'No app password saved for email. Save one first.' } });
           return true;
         }
+        // The saved password only goes to the host it is bound to (a typed
+        // /test password may go anywhere — the caller supplied it).
+        if (!typedPassword) {
+          usingStoredPassword = true;
+          if (!checkImapHostBinding(kb.getDb(), userId, host).ok) {
+            sendJSON(res, 400, { error: { code: 'EMAIL_HOST_MISMATCH', message: 'The saved app password belongs to a different mail server. Re-save the password to use this host.' } });
+            return true;
+          }
+        }
       }
 
       if (url === '/kb/email/test') {
@@ -583,6 +593,7 @@ export async function handleKB(req, res) {
             ? { host, port, secure, user, mailbox, accessToken }
             : { host, port, secure, user, mailbox, password };
           const r = await testConnection(args);
+          if (usingStoredPassword) bindImapHost(kb.getDb(), userId, host);
           logger.info('email_test', { userId, mailbox: r.mailbox, total: r.total });
           sendJSON(res, 200, r);
         } catch (e) {
@@ -615,6 +626,7 @@ export async function handleKB(req, res) {
           seenIds,
           markSeen: body.markRead === true,                 // mark fetched mail read (client opt-in)
         });
+        if (usingStoredPassword) bindImapHost(kb.getDb(), userId, host);
         const fetchCount = messages.length;
         logger.info('email_fetch', {
           userId, mailbox: mailbox || 'INBOX',
