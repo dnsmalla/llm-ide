@@ -87,6 +87,8 @@ final class ChatEngineRegistry {
     /// instead: evicting it is exactly the cancellation this type exists to
     /// avoid.
     static let backgroundLimit = 6
+    static let backgroundLimitStopNotice =
+        "Stopped: too many chats running in the background (limit \(backgroundLimit))."
 
     /// How a new engine is built. Production leaves this nil and goes
     /// through `ChatTransportFactory`; tests supply scripted transports so a
@@ -439,7 +441,7 @@ final class ChatEngineRegistry {
             backgroundOrder.removeAll { $0 == id }
         }
         while background.count > Self.backgroundLimit, let oldest = backgroundOrder.first {
-            background[oldest]?.stop()
+            background[oldest]?.stopRunning(reason: Self.backgroundLimitStopNotice)
             background.removeValue(forKey: oldest)
             backgroundOrder.removeFirst()
         }
