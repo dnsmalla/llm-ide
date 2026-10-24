@@ -179,12 +179,15 @@ export function ledgerRowsForTurn(meteredModel, usageTotals) {
     inputTokens: u?.inputTokens, outputTokens: u?.outputTokens,
     cacheReadTokens: u?.cacheReadTokens, cacheCreationTokens: u?.cacheCreationTokens,
   });
-  if (!byModel.length) return [row(usageTotals, meteredModel, '/agent/v2/stream')];
+  // Round trips and the stop reason describe the WHOLE turn, so they ride the
+  // main row only — never the :internal rows, or they would be counted twice.
+  const turnInfo = { turns: usageTotals?.turns ?? null, stopReason: usageTotals?.stopReason ?? null };
+  if (!byModel.length) return [{ ...row(usageTotals, meteredModel, '/agent/v2/stream'), ...turnInfo }];
   // The main entry: the metered model by name (the SDK may add a suffix such
   // as "[1m]"), else the entry that produced the most output.
   const main = pickMainModelRow(byModel, meteredModel);
   return [
-    row(main, meteredModel ?? main.model, '/agent/v2/stream'),
+    { ...row(main, meteredModel ?? main.model, '/agent/v2/stream'), ...turnInfo },
     ...byModel.filter((m) => m !== main).map((m) => row(m, m.model, '/agent/v2/stream:internal')),
   ];
 }
