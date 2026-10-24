@@ -503,6 +503,9 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
     /// The on-disk text the user was warned about. The next Save overwrites only
     /// while the disk still holds exactly this; a further external change warns again.
     @State private var acknowledgedDiskContent: String?
+    /// Shown when a restored draft was edited from an older version of the
+    /// file than the one now on disk. The draft is kept, never dropped.
+    @State private var draftDiskNotice: String?
     @State private var showSavedToast: Bool = false
     @State private var showRevertConfirm: Bool = false
     /// Monaco debounces its content posts; save() pulls the live text through this.
@@ -619,6 +622,9 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
             } else if !content.isEmpty {
                 Text("Saved").font(.caption).foregroundStyle(.secondary)
             }
+            if let notice = draftDiskNotice, saveError == nil {
+                Text(notice).font(.caption).foregroundStyle(theme.current.danger).lineLimit(1).truncationMode(.middle)
+            }
             if let err = saveError {
                 Text(err).font(.caption).foregroundStyle(theme.current.danger).lineLimit(1).truncationMode(.middle)
             }
@@ -671,6 +677,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
         oversizeBytes = nil
         saveError = nil
         acknowledgedDiskContent = nil
+        draftDiskNotice = nil
         // Checked BEFORE reading: the read alone of a multi-hundred-MB file
         // is slow, and Monaco then hangs on the buffer. `loadError` is set
         // too so Save, the draft mirror and the reveal all treat the pane as
@@ -702,7 +709,14 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
                 if draft.base == raw {
                     content = draft.content
                 } else {
-                    EditorDraftStore.shared.discard(fileURL)
+                    // The file changed on disk since the draft was started.
+                    // Keep the user's edits; `savedContent` stays the text the
+                    // draft was made from, so the pane shows dirty AND Save
+                    // sees disk != base and demands the explicit overwrite
+                    // confirmation. Revert (or a save) discards the draft.
+                    content = draft.content
+                    savedContent = draft.base
+                    draftDiskNotice = "This file changed on disk. Your unsaved edits are kept — Save to overwrite or Revert to reload."
                 }
             }
             // Applied here, after `content` is set, because a reveal against
@@ -754,6 +768,7 @@ struct EditableTextDetailView<Preview: View, Accessory: View>: View {
                 try TextFileWriter.write(text, to: target)
             }.value
             acknowledgedDiskContent = nil
+            draftDiskNotice = nil
             savedContent = content
             EditorDraftStore.shared.discard(url)
             await onSaved?()
