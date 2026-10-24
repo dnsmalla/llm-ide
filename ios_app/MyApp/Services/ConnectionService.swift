@@ -591,7 +591,11 @@ final class ConnectionService: ObservableObject {
                 // penalty, and the common "typo, then the right PIN" case heals
                 // itself instead of stranding the user on a message that says
                 // "try again" while nothing does.
-                reconnectAttempt = 0
+                // Never retry immediately (attempt 0 has zero delay): the Mac is
+                // refusing during a penalty window, so hammering it just spins.
+                // Floor at 1 so the 2 s / 1.5x (cap 30 s) schedule applies and
+                // keep growing across consecutive refusals.
+                reconnectAttempt = max(reconnectAttempt, 1)
                 invalidateSocket()
                 connectionStatus = .disconnected
                 scheduleReconnect()

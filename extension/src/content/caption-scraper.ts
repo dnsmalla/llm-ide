@@ -10,6 +10,7 @@
 
 import { MsgType, isMessage, type Message } from '../lib/messages';
 import { debug } from '../lib/config';
+import { makeSessionId } from '../lib/capture-target';
 import { detectPlatformFromUrl, type PlatformId } from '../lib/platforms';
 import {
   GROUP_ICON_RE,
@@ -62,6 +63,9 @@ interface SpeakerState {
 }
 const speakerState: Map<string, SpeakerState> = new Map();
 let sessionCounter = 0;
+// Per-injection nonce: sessionIds must be unique across tabs, because the
+// side panel merges captions by sessionId and every tab's counter restarts at 0.
+const SESSION_NONCE = Math.random().toString(36).slice(2, 10);
 
 function detectPlatform(): Platform {
   return detectPlatformFromUrl(window.location.href);
@@ -464,7 +468,7 @@ function scrape(): void {
 
     if (needsNewSession) {
       sessionCounter++;
-      const sessionId = `${speaker}-${sessionCounter}`;
+      const sessionId = makeSessionId(SESSION_NONCE, speaker, sessionCounter);
       speakerState.set(speaker, { sessionId, text, lastSeen: now });
       debug(`NEW ${speaker} [${sessionId}]:`, text.slice(0, 60));
       sendUpdate(speaker, text, sessionId);

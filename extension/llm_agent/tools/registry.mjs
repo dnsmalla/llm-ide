@@ -35,7 +35,7 @@ import { handleRunBash, resolveBashCwd } from '../runtime/handlers/run-bash.mjs'
 import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
 import { handleLoadSkill } from '../runtime/handlers/load-skill.mjs';
 import { handleDecide } from '../runtime/handlers/decide.mjs';
-import { runBashGate, autoGate } from './gates.mjs';
+import { runBashGate, autoGate, bashNeedsPerCallApproval } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { isAllowedByRule, suggestRule, addRule } from '../../kb/tool-permissions.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
@@ -231,7 +231,10 @@ const ENTRIES = [
       if (decision === 'blocked') return { error: 'Command blocked for safety. Confirm destructive operations with the user before running.' };
       if (decision === 'auto') return handleRunBash(args, bashCtx);
       // decision === 'prompt' — a saved project rule only matters here.
-      if (isAllowedByRule(ctx.userId, bashCtx.workspaceRoot, 'run-bash', args)) {
+      // ...but never for a sensitive-path / expanding command: those are
+      // approved per call, whatever rules are saved.
+      const perCall = bashNeedsPerCallApproval(args.command, resolvedCwd.cwd);
+      if (!perCall && isAllowedByRule(ctx.userId, bashCtx.workspaceRoot, 'run-bash', args)) {
         return handleRunBash(args, bashCtx);
       }
       // No live emit channel => no human can ever see this approval. That is
@@ -248,7 +251,7 @@ const ENTRIES = [
       const sessionKey = ctx.agentContext?.sessionId;
       // Same "always allow" offer as v2: a project-scoped command-prefix rule,
       // or none for a compound command (then the answer is only "once").
-      const rule = bashCtx.workspaceRoot ? suggestRule('run-bash', args) : null;
+      const rule = bashCtx.workspaceRoot && !perCall ? suggestRule('run-bash', args) : null;
       const suggestion = rule ? { ...rule, scope: 'project' } : null;
       const { requestId, promise } = registerDecision({ sdkSessionId: sessionKey, userId: ctx.userId, kind: 'ToolApproval' });
       try {

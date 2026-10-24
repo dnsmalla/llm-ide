@@ -72,7 +72,7 @@ test('buildNotFoundDetails includes restart hint and advertised endpoints', () =
 
 test('buildHealthPayload reports the enabled feature set (null = every feature)', () => {
   const base = {
-    dbOk: true, claude: { ok: true }, migration: { current: 7 }, apiVersion: 74,
+    dbOk: true, claude: { ok: true }, migration: { current: 7 }, apiVersion: 75,
     endpoints: ['/generate-notes'], serverStartedAt: Date.now(),
   };
   // Omitted → null, so a caller that predates LLMIDE_FEATURES reads "all".

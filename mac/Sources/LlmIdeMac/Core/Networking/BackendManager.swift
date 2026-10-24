@@ -524,6 +524,14 @@ final class BackendManager {
                 self.appendLines(stdOutLines.finish(), stream: .stdout)
                 self.appendLines(stdErrLines.finish(), stream: .stderr)
                 self.append("--- Server exited (code \(exitCode)) ---", stream: .info)
+                // A superseded child (e.g. the start-timeout victim still
+                // draining after the user pressed Start and spawned its
+                // successor) must not touch the successor's pid/pipes/status
+                // or consume its retry. Its own one-shot timeout flag dies here.
+                guard self.process === finished else {
+                    if self.startTimedOutPID == exitedPID { self.startTimedOutPID = nil }
+                    return
+                }
                 self.pid = nil
                 self.process = nil
                 self.stdoutPipe?.fileHandleForReading.readabilityHandler = nil

@@ -11,12 +11,17 @@
 //     false = not a planning route — caller continues dispatch
 
 import * as kb from '../kb/db.mjs';
+import { resolveReviewCreds } from '../server/review-secrets.mjs';
 import { generatePlan } from '../agents/planner.mjs';
 import { analyzeRisks } from '../agents/risk.mjs';
 import { codeSync } from '../agents/code-sync.mjs';
 import { dispatchPlan } from '../agents/dispatcher.mjs';
 import { generateCodeForTask } from '../agents/codegen.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+
+// Config keys that name WHERE a dispatch lands (github repo; backlog space +
+// project; linear team + project). Pinned to the approved review.
+const DISPATCH_DESTINATION_KEYS = ['repo', 'owner', 'space', 'teamId', 'projectId'];
 
 export async function handlePlanningRoutes(req, res, ctx) {
   const { userId, url } = ctx;
@@ -182,6 +187,7 @@ export async function handlePlanningRoutes(req, res, ctx) {
     }
     const target = body.target || 'preview';
     let taskIds = body.taskIds;
+    let dispatchConfig = body.config || {};
     // Guardrail gate: non-preview dispatch pushes tasks to external
     // systems (GitHub, Linear, Backlog) — require a pre-approved review
     // item so the user explicitly signs off before anything leaves the
@@ -239,6 +245,27 @@ export async function handlePlanningRoutes(req, res, ctx) {
         return true;
       }
       taskIds = approved.taskIds;
+      // Destination identity is bound to the approval too: the reviewer
+      // approved pushing to one repo/space/team/project. Credentials (token,
+      // apiKey, …) may still come from the request, so only these keys are
+      // pinned — a request naming a different destination is refused.
+      const approvedCfg = approved.config && typeof approved.config === 'object' ? approved.config : {};
+      const requestCfg = body.config && typeof body.config === 'object' ? body.config : {};
+      for (const key of DISPATCH_DESTINATION_KEYS) {
+        if (requestCfg[key] != null && String(requestCfg[key]) !== String(approvedCfg[key] ?? '')) {
+          sendJSON(res, 409, {
+            error: {
+              code: 'REVIEW_CONFIG_MISMATCH',
+              message: `config.${key} differs from the approved review's destination`,
+            },
+          });
+          return true;
+        }
+      }
+      dispatchConfig = { ...requestCfg };
+      for (const key of DISPATCH_DESTINATION_KEYS) {
+        if (approvedCfg[key] != null) dispatchConfig[key] = approvedCfg[key];
+      }
       // Atomically consume the review (CAS: 'approved' → 'executed') so
       // two concurrent /kb/dispatch calls — or a race between this route
       // and /kb/review/approve's own execution — cannot both fire a
@@ -264,7 +291,14 @@ export async function handlePlanningRoutes(req, res, ctx) {
         planId: body.planId,
         target,
         taskIds,
-        config: body.config || {},
+        // Vault credential underneath; the request's config (destination
+        // already pinned to the approval above) wins — but only its
+        // non-empty values, so `token: ''` can't blank the vault credential
+        // after the review was already consumed.
+        config: {
+          ...resolveReviewCreds(kb.getDb(), userId, { target }).config,
+          ...Object.fromEntries(Object.entries(dispatchConfig).filter(([, v]) => v != null && v !== '')),
+        },
       });
       sendJSON(res, 200, result);
     } catch (err) {

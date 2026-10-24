@@ -905,7 +905,7 @@ paths:
         '200': { description: ok }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '403': { description: Forbidden, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '409': { description: Conflict, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '409': { description: 'Conflict. Code REVIEW_CONFIG_MISMATCH (API v75+) when the request `config` names a destination (e.g. repo) different from the approved review; credentials in `config` are still accepted', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/issue-schedule:
     get:
@@ -1016,12 +1016,14 @@ paths:
               properties:
                 id:   { type: string }
                 note: { type: string }
+                config: { type: object, additionalProperties: true, description: 'API v75+. Credentials for the dispatch target (github token / backlog or linear apiKey); highest precedence, never persisted. Without one the server uses a value held from submit, then the per-user vault.' }
+                pr: { type: object, additionalProperties: true, description: 'API v75+. codegen-apply only: PR credentials (ghToken); same precedence as config.' }
       responses:
-        '200': { description: executed }
+        '200': { description: 'executed. API v75+: review payloads in all /kb/review/* responses are redacted (token/apiKey/secret/password leaves removed)' }
         '400': { description: Validation error, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '404': { description: Review item not found, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '409': { description: Conflict (e.g. already approved/rejected), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
-        '422': { description: 'GUARDRAIL_FAILED at approval time — auto-rejects' }
+        '409': { description: 'REVIEW_NOT_PENDING, or REVIEW_RACE when another request claimed the item', content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
+        '422': { description: 'GUARDRAILS_FAILED at approval time (auto-rejects the item), or CREDENTIAL_REQUIRED (API v75+) when the only failing check is the missing credential: the item stays pending so the approve can be retried with `config`/`pr` credentials or after saving one to the vault' }
         '500': { description: Approval execution failed, content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
 
   /kb/outcomes/refresh:

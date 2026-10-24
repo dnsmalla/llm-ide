@@ -1,6 +1,7 @@
 import { MsgType } from '../lib/messages';
 import { getServerUrl } from '../lib/config';
 import { isSupportedUrl } from '../lib/platforms';
+import { pickStartTarget } from '../lib/capture-target';
 
 // ── Mac-app deep link ─────────────────────────────────────────────────
 // We used to spawn a detached Chrome popup window of the side panel
@@ -140,7 +141,20 @@ chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
           ],
         });
         const results: Array<{ tabId: number; ok: boolean; error?: string }> = [];
-        for (const tab of tabs) {
+        // START goes to ONE meeting tab only — two tabs scraping at once
+        // would interleave into one transcript. STOP still reaches all of them.
+        let targets = tabs;
+        if (type === MsgType.START_CAPTION_SCRAPING) {
+          const requested = (message as { tabId?: unknown }).tabId;
+          const [active] = await chrome.tabs.query({ active: true, lastFocusedWindow: true });
+          const target = pickStartTarget(tabs, typeof requested === 'number' ? requested : undefined, active?.id);
+          if (!target) {
+            sendResponse({ ok: false, error: 'no_meeting_tab' });
+            return;
+          }
+          targets = [target];
+        }
+        for (const tab of targets) {
           if (!tab.id || !tab.url) continue;
           if (type === MsgType.START_CAPTION_SCRAPING) {
             const injected = await ensureContentScriptInjected(tab.id, tab.url);

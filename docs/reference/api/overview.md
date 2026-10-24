@@ -106,6 +106,12 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 | `POST` | `/kb/review/reject` | Reject with a reason |
 | `POST` | `/kb/review/delete` | Drop an item |
 
+Notes (API v75+):
+
+- `POST /kb/review/approve` accepts optional `config` (target credentials: `token` / `apiKey`) and `pr` (`ghToken`) objects. Precedence: approve body, then credentials held in memory from submit, then the per-user vault (`github.token`, `backlog.apiKey`, `linear.apiKey`). Credentials are never persisted and all `/kb/review/*` responses redact `token` / `apiKey` / `secret` / `password` leaves from `payload`.
+- `422 CREDENTIAL_REQUIRED` — the only failing guardrail is the missing credential. The item stays `pending`; retry with `config` / `pr` or save the credential to the vault. Any other guardrail failure is `422 GUARDRAILS_FAILED` and auto-rejects the item.
+- `409 REVIEW_CONFIG_MISMATCH` (also on `POST /kb/dispatch`) — the request `config` names a destination different from the approved review's.
+
 ### Outcomes
 
 | Method | Path | Purpose |
