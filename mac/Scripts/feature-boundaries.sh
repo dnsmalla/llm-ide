@@ -694,6 +694,19 @@ perl -e '
   }
 ' < "$ROOT/Package.swift" | sort -u > "$WORK/flag-excludes.txt"
 
+# Vacuous-pass guard for the libExcludes extraction at the top: that parser
+# knows three spellings only, so an entry written another way would silently
+# drop out and checks 3b and 4 would pass without looking at it. The flag
+# parser above reads the quoted `Features/...` strings of every
+# feature-flag else-body independently; each must have been captured.
+while IFS="$(printf '\t')" read -r kind _flag path; do
+  [ "$kind" = "L" ] || continue
+  grep -qxF "$path" "$WORK/libexcludes.txt" || {
+    echo "  ERROR libExcludes parser: $path not captured" >&2
+    status=1
+  }
+done < "$WORK/flag-excludes.txt"
+
 # One perl process for every Sources file (check 1 now strips in one pass too)
 # keeps this check to about a second. Rows of toplevel-all.txt:
 # name<TAB>path relative to Sources/<TAB>keyword. Check 6 uses the TYPE rows
