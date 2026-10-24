@@ -1843,7 +1843,13 @@ export async function runAgentV2Turn(
         }
         // Per-block usage snapshots stay server-side (see the result branch).
         if (ev.type === 'result') emitBudgetNotice();
-        if (ev.type !== 'usage') onEvent?.(ev);
+        // The budget stop is a deliberate, notified pause ("Say continue"), not
+        // a failure: the SDK ends an interrupted query with an error subtype,
+        // which clients turn into an error banner. Forward it as a normal
+        // completion; the ledger still records stop_reason 'token_budget'.
+        if (ev.type !== 'usage') {
+          onEvent?.(ev.type === 'result' && budgetStop ? { ...ev, subtype: 'success' } : ev);
+        }
         if (ev.type === 'result') {
           // Read while the session is still open; a gateway's numbers would
           // describe a model this window math does not know.

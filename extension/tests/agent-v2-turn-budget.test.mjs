@@ -88,6 +88,7 @@ test('a turn over the budget is interrupted, keeps its partial work, notifies, a
     assert.equal(state.interrupted, 1);
     assert.equal(usageTotals.stopReason, 'token_budget');
     assert.ok(result, 'the SDK result still arrives');
+    assert.equal(events.find((e) => e.type === 'result').subtype, 'success', 'budget stop is forwarded as a normal completion');
     const notice = events.find((e) => e.type === 'delta' && /Stopped: this turn processed/.test(e.text));
     assert.ok(notice, 'notice delta emitted');
     assert.match(notice.text, /\(budget 2M\)\. Say "continue" to keep going\./);
