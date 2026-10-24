@@ -292,8 +292,13 @@ export async function handlePlanningRoutes(req, res, ctx) {
         target,
         taskIds,
         // Vault credential underneath; the request's config (destination
-        // already pinned to the approval above) wins.
-        config: { ...resolveReviewCreds(kb.getDb(), userId, { target }).config, ...dispatchConfig },
+        // already pinned to the approval above) wins — but only its
+        // non-empty values, so `token: ''` can't blank the vault credential
+        // after the review was already consumed.
+        config: {
+          ...resolveReviewCreds(kb.getDb(), userId, { target }).config,
+          ...Object.fromEntries(Object.entries(dispatchConfig).filter(([, v]) => v != null && v !== '')),
+        },
       });
       sendJSON(res, 200, result);
     } catch (err) {
