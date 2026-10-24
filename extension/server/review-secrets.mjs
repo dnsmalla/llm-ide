@@ -9,7 +9,7 @@
 // keyed by user + review id — lost on restart, in which case approval needs
 // the vault or a credential on the approve body.
 
-import { getSecret } from '../server/vault.mjs';
+import { getSecret } from './vault.mjs';
 
 const SECRET_KEY_RE = /token|apikey|api_key|secret|password/i;
 

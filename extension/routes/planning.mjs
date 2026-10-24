@@ -11,7 +11,7 @@
 //     false = not a planning route — caller continues dispatch
 
 import * as kb from '../kb/db.mjs';
-import { resolveReviewCreds } from '../kb/review-secrets.mjs';
+import { resolveReviewCreds } from '../server/review-secrets.mjs';
 import { generatePlan } from '../agents/planner.mjs';
 import { analyzeRisks } from '../agents/risk.mjs';
 import { codeSync } from '../agents/code-sync.mjs';

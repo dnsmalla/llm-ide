@@ -1,6 +1,6 @@
 -- Review payloads used to store tracker / GitHub credentials verbatim
 -- (config.token, config.apiKey, pr.ghToken). Submit now strips them and
--- approval resolves them from the per-user vault (kb/review-secrets.mjs);
+-- approval resolves them from the per-user vault (server/review-secrets.mjs);
 -- this one-time pass scrubs rows written before that change.
 UPDATE review_items
    SET payload = json_remove(payload, '$.config.token', '$.config.apiKey', '$.pr.ghToken')

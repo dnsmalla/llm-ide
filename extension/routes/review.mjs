@@ -17,7 +17,7 @@ import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import {
   stripReviewSecrets, redactReviewItem, holdSecrets, takeHeldSecrets, dropHeldSecrets,
   resolveReviewCreds, withCreds,
-} from '../kb/review-secrets.mjs';
+} from '../server/review-secrets.mjs';
 
 // Replace every client-suppliable field the guardrail engine judges with
 // the server's own copy, so a client can't pass review with data that
