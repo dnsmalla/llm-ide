@@ -557,6 +557,7 @@ export async function handleKB(req, res) {
       let password;
       let accessToken;
       let usingStoredPassword = false;
+      let alreadyBound = false;
       if (authMethod === 'google') {
         try {
           accessToken = await getGoogleAccessToken(kb.getDb(), userId);
@@ -580,7 +581,9 @@ export async function handleKB(req, res) {
         // /test password may go anywhere — the caller supplied it).
         if (!typedPassword) {
           usingStoredPassword = true;
-          if (!checkImapHostBinding(kb.getDb(), userId, host).ok) {
+          const binding = checkImapHostBinding(kb.getDb(), userId, host);
+          alreadyBound = binding.bound;
+          if (!binding.ok) {
             sendJSON(res, 400, { error: { code: 'EMAIL_HOST_MISMATCH', message: 'The saved app password belongs to a different mail server. Re-save the password to use this host.' } });
             return true;
           }
@@ -593,7 +596,7 @@ export async function handleKB(req, res) {
             ? { host, port, secure, user, mailbox, accessToken }
             : { host, port, secure, user, mailbox, password };
           const r = await testConnection(args);
-          if (usingStoredPassword) bindImapHost(kb.getDb(), userId, host);
+          if (usingStoredPassword && !alreadyBound) bindImapHost(kb.getDb(), userId, host);
           logger.info('email_test', { userId, mailbox: r.mailbox, total: r.total });
           sendJSON(res, 200, r);
         } catch (e) {
@@ -626,7 +629,7 @@ export async function handleKB(req, res) {
           seenIds,
           markSeen: body.markRead === true,                 // mark fetched mail read (client opt-in)
         });
-        if (usingStoredPassword) bindImapHost(kb.getDb(), userId, host);
+        if (usingStoredPassword && !alreadyBound) bindImapHost(kb.getDb(), userId, host);
         const fetchCount = messages.length;
         logger.info('email_fetch', {
           userId, mailbox: mailbox || 'INBOX',
