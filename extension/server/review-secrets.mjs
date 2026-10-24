@@ -70,6 +70,10 @@ export function takeHeldSecrets(userId, id, now = Date.now()) {
   return e.secrets;
 }
 export function dropHeldSecrets(userId, id) { held.delete(holdKey(userId, id)); }
+/** Drop every held credential of one user (account deletion). */
+export function dropAllHeldSecretsForUser(userId) {
+  for (const [k, v] of held) if (v.userId === userId) held.delete(k);
+}
 
 function vaultGet(db, userId, key) {
   try { return getSecret(db, userId, key) || undefined; } catch { return undefined; }
