@@ -114,3 +114,35 @@ test('the CLI streaming reply path notes an unmetered call on the turn', async (
     if (prevKey !== undefined) process.env.ANTHROPIC_API_KEY = prevKey;
   }
 });
+
+test('the CLI streaming reply meters the result line\'s usage into the turn total and the ledger', async () => {
+  const prevKey = process.env.ANTHROPIC_API_KEY;
+  delete process.env.ANTHROPIC_API_KEY;   // keyless → CLI stream branch
+  try {
+    const totals = newTurnTokenTotals();
+    const text = await countTurnTokens(totals, () => streamModelReply('hi', {
+      provider: 'anthropic',
+      endpoint: '/code-assist',
+      _testSpawnCliStream: async (_provider, _prompt, opts) => {
+        opts.onChunk?.('streamed');
+        return {
+          stdoutText: 'streamed', stderr: '', bin: 'claude',
+          usage: [
+            { model: 'claude-sonnet-5', inputTokens: 10, outputTokens: 20, cacheReadTokens: 300, cacheCreationTokens: 4 },
+            { model: 'claude-haiku-5', inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0 },
+          ],
+        };
+      },
+    }));
+    assert.equal(text, 'streamed');
+    assert.equal(totals.calls, 1);
+    assert.equal(totals.unmeteredCalls, 0);
+    assert.deepEqual(
+      { i: totals.inputTokens, o: totals.outputTokens, r: totals.cacheReadTokens, c: totals.cacheCreationTokens },
+      { i: 11, o: 22, r: 300, c: 4 },
+    );
+    assert.notEqual(turnTokenUsageFields(totals), null);
+  } finally {
+    if (prevKey !== undefined) process.env.ANTHROPIC_API_KEY = prevKey;
+  }
+});

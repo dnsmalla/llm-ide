@@ -216,7 +216,8 @@ export function makeCodeAssistRunClaude({ userId, tierModel, composerProvider, s
     // runClaude. Every other call (intermediate delegate/tool-decision turns,
     // ask-internal, ask-subagent) is unaffected: opts.onChunk is absent.
     if (stream && typeof opts.onChunk === 'function') {
-      return stream(p, { ...callOpts, onChunk: opts.onChunk });
+      // endpoint labels the streamed reply's usage_ledger row.
+      return stream(p, { ...callOpts, onChunk: opts.onChunk, endpoint: '/code-assist' });
     }
     return run(p, callOpts);
   };
