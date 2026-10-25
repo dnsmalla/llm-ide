@@ -1,8 +1,10 @@
 mod core_host;
+mod pty;
 
 use std::sync::OnceLock;
 
 use core_host::CoreHost;
+use tauri::ipc::{Channel, Response};
 use tauri::{Manager, RunEvent};
 
 /// Process-wide handle so the panic hook can reach the spawned child.
@@ -95,6 +97,39 @@ fn section_override() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// Runs PTY work on the blocking pool: async commands never run on the main thread,
+/// and the work may block on pty I/O or a full output queue.
+async fn pty_blocking<T, F>(f: F) -> Result<T, String>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T, String> + Send + 'static,
+{
+    tauri::async_runtime::spawn_blocking(f)
+        .await
+        .map_err(|e| format!("pty task failed: {e}"))?
+}
+
+/// Starts `$SHELL -l` in a pty; output arrives on `on_data` as raw batches.
+#[tauri::command]
+async fn pty_spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<pty::Spawned, String> {
+    pty_blocking(move || pty::spawn(cols, rows, on_data)).await
+}
+
+#[tauri::command]
+async fn pty_write(id: u32, data: String) -> Result<(), String> {
+    pty_blocking(move || pty::write(id, &data)).await
+}
+
+#[tauri::command]
+async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
+    pty_blocking(move || pty::resize(id, cols, rows)).await
+}
+
+#[tauri::command]
+async fn pty_kill(id: u32) -> Result<(), String> {
+    pty_blocking(move || pty::kill(id)).await
+}
+
 /// Shows and focuses the main window, and activates the app on macOS.
 fn bring_to_front(app: &tauri::AppHandle) {
     if let Some(window) = app.get_webview_window("main") {
@@ -126,16 +161,29 @@ pub fn run() {
         if let Some(h) = CORE.get() {
             h.shutdown_from_panic();
         }
+        pty::kill_all_from_panic();
         previous_hook(info);
     }));
 
     let app = tauri::Builder::default()
         .manage(host)
+        // A reload drops the webview's terminal state; its shells must not outlive it.
+        .on_page_load(|_webview, payload| {
+            if payload.event() == tauri::webview::PageLoadEvent::Started {
+                pty::kill_all();
+            }
+        })
+        .on_window_event(|_window, event| {
+            if matches!(event, tauri::WindowEvent::Destroyed) {
+                pty::kill_all();
+            }
+        })
         .setup(move |_app| {
             // SIGTERM/SIGINT bypass Tauri's exit handlers; kill the child first.
             let signal_host = setup_host.clone();
             if let Err(e) = ctrlc::set_handler(move || {
                 signal_host.shutdown();
+                pty::kill_all();
                 std::process::exit(0);
             }) {
                 eprintln!("core: signal handler not installed: {e}");
@@ -152,7 +200,11 @@ pub fn run() {
             autobench_mode,
             graph_path_override,
             theme_override,
-            section_override
+            section_override,
+            pty_spawn,
+            pty_write,
+            pty_resize,
+            pty_kill
         ])
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");
@@ -164,6 +216,7 @@ pub fn run() {
         RunEvent::Ready if autobench_mode().is_some() => bring_to_front(app_handle),
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
             app_handle.state::<CoreHost>().shutdown();
+            pty::kill_all();
         }
         _ => {}
     });

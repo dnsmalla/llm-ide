@@ -335,7 +335,7 @@ fn health_ok(port: u16, timeout: Duration) -> bool {
 
 /// `LLMIDE_REPO_ROOT`, else the nearest ancestor of the executable that
 /// contains `extension/server.mjs`.
-fn repo_root() -> Result<PathBuf, String> {
+pub(crate) fn repo_root() -> Result<PathBuf, String> {
     if let Ok(root) = std::env::var("LLMIDE_REPO_ROOT") {
         let p = PathBuf::from(root);
         return if p.join("extension").join("server.mjs").is_file() {
