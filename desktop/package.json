@@ -5,13 +5,18 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc --noEmit && vite build",
-    "tauri": "tauri"
+    "build": "node scripts/gen-tokens.mjs --check && tsc --noEmit && vite build",
+    "tauri": "tauri",
+    "tokens": "node scripts/gen-tokens.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "2.11.1",
+    "graphology": "0.26.0",
+    "graphology-layout-forceatlas2": "0.10.1",
+    "graphology-types": "0.24.8",
     "react": "19.3.1",
-    "react-dom": "19.3.1"
+    "react-dom": "19.3.1",
+    "sigma": "3.0.3"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.11.5",

@@ -13,19 +13,23 @@
     "windows": [
       {
         "title": "LLM-IDE Desktop PoC",
-        "width": 1200,
-        "height": 800,
+        "width": 1600,
+        "height": 920,
         "minWidth": 800,
-        "minHeight": 500
+        "minHeight": 500,
+        "titleBarStyle": "Overlay",
+        "hiddenTitle": true
       }
     ],
     "security": {
-      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; connect-src 'self' http://127.0.0.1:3456 http://127.0.0.1:3457 ws://127.0.0.1:5173 http://127.0.0.1:5173"
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; worker-src 'self' blob:; img-src 'self' data: blob:; connect-src 'self' http://127.0.0.1:3456 http://127.0.0.1:3457 ws://127.0.0.1:5173 http://127.0.0.1:5173"
     }
   },
   "bundle": {
     "active": true,
-    "targets": ["app"],
+    "targets": [
+      "app"
+    ],
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

@@ -1,20 +1,8 @@
 :root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
 body { margin: 0; }
-.app { display: flex; flex-direction: column; height: 100vh; }
-.tabs { display: flex; gap: 4px; padding: 6px; border-bottom: 1px solid #8884; }
-.tab { padding: 4px 12px; border: 1px solid #8886; border-radius: 6px; background: transparent; color: inherit; cursor: pointer; }
-.tab.active { background: #4f7cff; color: #fff; border-color: #4f7cff; }
-.content { flex: 1; min-height: 0; }
-.placeholder { padding: 24px; opacity: 0.7; }
 
-.statusbar {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  padding: 4px 12px;
-  font: 12px ui-monospace, Menlo, monospace;
-  border-bottom: 1px solid #8884;
-}
-.statusbar[data-state="ready"] { color: #1a7f37; }
-.statusbar[data-state="failed"] { color: #cf222e; }
-.statusbar-error { color: #cf222e; overflow-wrap: anywhere; }
+
+.graph-view { display: flex; flex-direction: column; height: 100%; }
+.graph-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; font: 13px system-ui, sans-serif; }
+.graph-status { font: 12px ui-monospace, Menlo, monospace; opacity: 0.8; }
+.graph-canvas { flex: 1; min-height: 300px; position: relative; border-top: 1px solid #8884; }

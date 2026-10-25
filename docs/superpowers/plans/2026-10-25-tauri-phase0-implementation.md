@@ -67,6 +67,27 @@ runs off the main thread. **Never prune edges.** FPS meter during a scripted
 5 s pan/zoom.
 **Check:** `BENCH graph_fps_10k`, `BENCH graph_fps_50k`, `BENCH graph_layout_ms_10k`.
 
+### T3b — Design tokens + app shell matching the Mac app
+The new app must look like the current Mac app. Single source of truth for
+now: `mac/Sources/LlmIdeMac/Core/Platform/Theme.swift` (Dark / Light /
+Midnight named roles, `Spacing`, `Typography`, category/status colors).
+- `desktop/scripts/gen-tokens.mjs` parses Theme.swift and writes
+  `desktop/src/design/tokens.css` (CSS custom properties per theme:
+  `--body`, `--surface`, `--surface2`, `--text`, `--text-muted`, `--accent`…,
+  `--space-xs…`, font sizes/weights) — generated, never hand-edited, so the two
+  apps cannot drift. `npm run tokens` regenerates; a check fails when the CSS
+  is stale.
+- Font stack `-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI",
+  sans-serif` (SF on macOS, Segoe on Windows); monospace likewise.
+- React versions of the shared chrome, styled only with the tokens:
+  `SectionChromeBar`, `EditorTabBar`, `FileTreePanel` (rows), `SettingsSectionCard`,
+  `Chip`, `StatusBanner`, `ResizableDivider`.
+- App shell laid out like the Mac `AppShell`: left section rail, content
+  area, bottom status bar; theme switch (Dark / Light / Midnight) persisted.
+- T4–T8 views use these tokens and components only.
+**Check:** `npm run tokens -- --check` passes; screenshots of the shell in each
+theme next to the Mac app's (`desktop/parity/`), reviewed by eye.
+
 ### T4 — Editor view (Monaco)
 Monaco (exact version) opening a generated 10k-line TypeScript file. Scripted
 typing of 200 keystrokes; measure keystroke-to-paint latency
