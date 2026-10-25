@@ -86,6 +86,32 @@ fn theme_override() -> Option<String> {
         .filter(|v| !v.is_empty())
 }
 
+/// Value of `LLMIDE_POC_SECTION` (a section id such as `editor`), if set. Lets the
+/// parity screenshots open a section directly; the webview validates the id.
+#[tauri::command]
+fn section_override() -> Option<String> {
+    std::env::var("LLMIDE_POC_SECTION")
+        .ok()
+        .filter(|v| !v.is_empty())
+}
+
+/// Shows and focuses the main window, and activates the app on macOS.
+fn bring_to_front(app: &tauri::AppHandle) {
+    if let Some(window) = app.get_webview_window("main") {
+        let _ = window.show();
+        let _ = window.set_focus();
+    }
+    #[cfg(target_os = "macos")]
+    if let Some(mtm) = objc2::MainThreadMarker::new() {
+        let app_kit = objc2_app_kit::NSApplication::sharedApplication(mtm);
+        // Best effort: macOS refuses self-activation for a process the user did
+        // not launch (a terminal-started bench stays inactive ~30 s), so benches
+        // still activate it from outside. A Finder/Dock launch is frontmost anyway.
+        #[allow(deprecated)]
+        app_kit.activateIgnoringOtherApps(true);
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let host = CoreHost::new();
@@ -125,14 +151,20 @@ pub fn run() {
             bench_done,
             autobench_mode,
             graph_path_override,
-            theme_override
+            theme_override,
+            section_override
         ])
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");
 
-    app.run(|app_handle, event| {
-        if let RunEvent::ExitRequested { .. } | RunEvent::Exit = event {
+    app.run(|app_handle, event| match event {
+        // Autobench runs must be frontmost: WKWebView does not paint or run rAF/timers for a
+        // window that is not key, which stalls the benches. Done after launch so the
+        // activation takes effect; the bench needs no external activation step.
+        RunEvent::Ready if autobench_mode().is_some() => bring_to_front(app_handle),
+        RunEvent::ExitRequested { .. } | RunEvent::Exit => {
             app_handle.state::<CoreHost>().shutdown();
         }
+        _ => {}
     });
 }

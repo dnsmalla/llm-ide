@@ -36,15 +36,37 @@ async function launchTheme(): Promise<ThemeId | null> {
   return null;
 }
 
+/**
+ * Section for this launch. `LLMIDE_POC_AUTOBENCH=editor` opens the Editor (its bench
+ * needs it mounted); other autobench modes open the Code Graph; `LLMIDE_POC_SECTION`
+ * opens a named section for screenshots; otherwise the Code Graph.
+ */
+async function launchSection(): Promise<string> {
+  try {
+    const mode = await invoke<string | null>("autobench_mode");
+    // An autobench mode decides the section alone; LLMIDE_POC_SECTION is ignored.
+    if (mode) return mode === "editor" ? "editor" : "graph";
+    const override = await invoke<string | null>("section_override");
+    if (override && TABS.some((t) => t.id === override)) return override;
+  } catch {
+    // not running under Tauri (plain vite dev): default section
+  }
+  return "graph";
+}
+
 export function App() {
-  const [active, setActive] = useState<string>("graph");
+  // null until the launch section is known, so no view mounts (and benches) first.
+  const [active, setActive] = useState<string | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [theme, setTheme] = useState<ThemeId>(() => readStoredTheme());
   const { status, pollError } = useCoreStatus();
 
-  // Apply the env override once at launch; theme changes persist from the status bar.
+  // Apply the env overrides once at launch; theme changes persist from the status bar.
   useEffect(() => {
     let cancelled = false;
+    void launchSection().then((id) => {
+      if (!cancelled) setActive(id);
+    });
     void launchTheme().then((id) => {
       if (id && !cancelled) setTheme(id);
     });
@@ -64,8 +86,8 @@ export function App() {
     setTheme(id);
   };
 
-  const current = TABS.find((t) => t.id === active) ?? TABS[0];
-  const View = current.View;
+  const current = TABS.find((t) => t.id === active);
+  const View = current?.View ?? null;
 
   return (
     <div className="shell">
@@ -113,7 +135,7 @@ export function App() {
       </div>
       <div className="shell-body">
         {sidebarOpen && <LibrarySidebar />}
-        <main className="shell-content">{View ? <View /> : <SelectItemEmpty />}</main>
+        <main className="shell-content">{active === null ? null : View ? <View /> : <SelectItemEmpty />}</main>
       </div>
       <AppStatusBar
         status={status}
