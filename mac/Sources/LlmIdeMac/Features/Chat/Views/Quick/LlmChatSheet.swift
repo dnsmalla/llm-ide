@@ -470,7 +470,9 @@ struct LlmChatSheet: View {
         // must fail. Draft stays; never refuses while availability is unknown.
         if let message = ProviderAvailability.noProviderMessage(
             standard: TierRoutingConfig.load().tier(.standard),
-            available: ProviderAvailabilityStore.shared.available) {
+            available: ProviderAvailabilityStore.shared.available,
+            serverUsable: TierRoutingServerCache.shared.state.status?[RoutingTier.standard.rawValue]?.usable == true,
+            routeResolves: QuickChatContext.tierRoute(for: engine) != nil) {
             refusalDraft = draft
             sendRefusal = message
             return

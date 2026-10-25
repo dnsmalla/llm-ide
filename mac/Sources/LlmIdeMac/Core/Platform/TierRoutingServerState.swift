@@ -165,17 +165,22 @@ enum TierRoutingRefresh {
 
     /// Fire-and-forget `request` for lifecycle hooks; failures are logged.
     ///
-    /// - Parameter appConfig: when set, tiers are first reconciled against the
-    ///   providers that can run (`ProviderAvailabilityStore.reconcile`), so the
-    ///   table pushed below is the corrected one.
+    /// - Parameter appConfig: when set, tiers are reconciled against the
+    ///   providers that can run (`ProviderAvailabilityStore.reconcile`) AFTER
+    ///   the first request, so the server's own per-tier verdict (which sees
+    ///   env keys the Mac cannot) is in the cache first. When reconcile changed
+    ///   the table, a second request pushes the corrected one. A nil status
+    ///   (failed request, old server) leaves only the Mac-side judgement.
     static func requestInBackground(api: LlmIdeAPIClient, serverApiVersion: @escaping @MainActor () -> Int?,
                                     appConfig: AppConfig? = nil) {
         Task { @MainActor in
-            if let appConfig {
-                await ProviderAvailabilityStore.shared.reconcile(config: appConfig, api: api)
-            }
             if case .failed(let error) = await request(api: api, serverApiVersion: serverApiVersion) {
                 tierRoutingRefreshLogger.error("Tier routing refresh failed: \(error.localizedDescription, privacy: .public)")
+            }
+            guard let appConfig,
+                  await ProviderAvailabilityStore.shared.reconcile(config: appConfig, api: api) else { return }
+            if case .failed(let error) = await request(api: api, serverApiVersion: serverApiVersion) {
+                tierRoutingRefreshLogger.error("Tier routing re-push failed: \(error.localizedDescription, privacy: .public)")
             }
         }
     }

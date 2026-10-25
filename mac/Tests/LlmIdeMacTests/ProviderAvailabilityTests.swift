@@ -82,6 +82,14 @@ struct ProviderAvailabilityTests {
                     == ProviderAvailability.noProviderText)
     }
 
+    @Test func quickChatDoesNotRefuseWhenTheServerOrAResolvedRouteCanRun() {
+        let deepseek = TierRoute(provider: "deepseek", model: "m")
+        #expect(ProviderAvailability.noProviderMessage(standard: deepseek, available: [], serverUsable: true) == nil)
+        #expect(ProviderAvailability.noProviderMessage(standard: deepseek, available: [], routeResolves: true) == nil)
+        #expect(ProviderAvailability.noProviderMessage(standard: nil, available: [], serverUsable: true) == nil)
+        #expect(ProviderAvailability.noProviderMessage(standard: deepseek, available: []) != nil)
+    }
+
     // MARK: - reconcile
 
     private func models(_ provider: String) -> [AIModel] {

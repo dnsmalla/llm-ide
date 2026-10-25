@@ -37,16 +37,19 @@ extension CodeAssistantModelState {
     /// CLI login is the app's baseline) and another built-in once its key is
     /// in the vault. Either way, every enabled custom provider (when known,
     /// only those that can run) and whatever is selected now, so the chip's
-    /// provider is never missing from its own menu.
+    /// provider is never missing from its own menu. `serverUsableProvider` is
+    /// Standard's provider when the server reports Standard usable (it can run
+    /// providers via env keys the Mac cannot see): listed regardless.
     func composerProviderSections(capableProviders: Set<String>,
-                                  available: Set<String>? = nil) -> [ComposerProviderSection] {
+                                  available: Set<String>? = nil,
+                                  serverUsableProvider: String? = nil) -> [ComposerProviderSection] {
         var sections: [ComposerProviderSection] = []
         for tool in AICliTool.selectable {
             let isCurrent = tool.rawValue == selectedProvider
             let hasKey = tool.vaultKey.map { configuredSecretKeys?.contains($0) == true } ?? false
             let listed: Bool
             if let available, ProviderAvailability.judges(tool.provider) {
-                listed = available.contains(tool.provider)
+                listed = available.contains(tool.provider) || tool.provider == serverUsableProvider
             } else {
                 listed = tool == .claudeCode || hasKey
             }

@@ -32,7 +32,7 @@ Pure function over values, so it is unit-testable:
 | `google` | `google.apiKey` stored **or** `gemini` CLI installed |
 | `deepseek` | `deepseek.apiKey` stored (no CLI mode) |
 | `custom` (shared endpoint) | `custom.apiKey` stored |
-| `custom:<id>` | provider enabled **and** (its `apiKey` vault name stored **or** its base URL is loopback — `EndpointSecurity.isLoopbackURL`) |
+| `custom:<id>` | provider enabled **and** its `apiKey` vault name stored (the server has no keyless or loopback mode: `resolveCustomProviderDispatch` requires a key and its SSRF guard rejects loopback URLs) |
 | `jev` (decision-only) | never judged: Jev tiers are left untouched |
 
 Stored keys come from `api.configuredSecretKeys()` (vault names only).
@@ -47,8 +47,14 @@ must never wipe a user's tiers.
 Input: routing table, available set, a `models(provider) -> [AIModel]` lookup.
 For each of `strong`, `standard`, `cheap`, `image`:
 
-1. Skip Jev routes.
-2. Route's provider not available → remove the tier.
+1. Skip Jev routes, unjudged providers, and any tier the server reports
+   `usable` (it can run providers through env keys or CLI overrides the Mac
+   cannot see).
+2. Route's provider not available → replace the tier (steps 3-4). A tier is
+   never cleared without a replacement: when none can be produced yet (e.g.
+   Claude's live model list not loaded) the route is kept and the pass is
+   marked deferred, to re-run when the model list lands. Only when nothing
+   at all is available is the tier cleared to empty.
 3. Auto-fill a tier removed in step 2, and Standard whenever it is empty:
    - provider: Standard's provider if available, else `anthropic` if available,
      else the first available built-in (menu order), else the first available
@@ -57,8 +63,7 @@ For each of `strong`, `standard`, `cheap`, `image`:
    - model: for Claude, match the live list by family — strong → `opus`,
      standard → `sonnet`, cheap → `haiku` — falling back to the first model;
      other providers: their first model.
-   - no available provider, or no model known (Claude's live list not loaded
-     yet) → leave the tier empty; the next refresh fills it.
+   - no model known yet → keep the route (deferred, see step 2).
 4. Strong / Cheap / Image that the user left unset stay unset (only cleared
    tiers are refilled).
 
@@ -68,7 +73,8 @@ Output: new table + whether Standard changed.
 
 - Run `refresh → reconcile → save` on the existing refresh path
   (`TierRoutingRefresh`, called at login, on backend `.running`, on API-version
-  change) **before** the table is pushed to the server, and after
+  change) **after** the server status is fetched (so its `usable` verdict is
+  known), pushing the table again when reconcile changed it, and after
   Settings → Model Providers saves or deletes a key and on
   `.customProvidersChanged`.
 - Standard changed → `config.applyStandardTier(newStandard)` (existing

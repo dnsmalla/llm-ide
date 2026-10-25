@@ -63,8 +63,15 @@ enum ProviderAvailability {
 
     /// Standard's quick-chat verdict: the message to show instead of sending,
     /// or nil to send. Never refuses while availability is unknown.
-    static func noProviderMessage(standard: TierRoute?, available: Set<String>?) -> String? {
-        guard let available else { return nil }
+    ///
+    /// - Parameters:
+    ///   - serverUsable: the server reports Standard usable (it sees env keys
+    ///     the Mac cannot).
+    ///   - routeResolves: a tier route for the quick chat already resolved, so
+    ///     the send uses it instead of Standard's provider.
+    static func noProviderMessage(standard: TierRoute?, available: Set<String>?,
+                                  serverUsable: Bool = false, routeResolves: Bool = false) -> String? {
+        guard let available, !serverUsable, !routeResolves else { return nil }
         guard let standard else { return Self.noProviderText }
         if judges(standard.provider), !available.contains(standard.provider) { return Self.noProviderText }
         return nil

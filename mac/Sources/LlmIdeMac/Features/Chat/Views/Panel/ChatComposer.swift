@@ -564,7 +564,10 @@ extension CodeAssistantPanel {
                 let chatIsEmpty = engine.messages.isEmpty
                 let tagEngines = AgentV2Selection.toggleEnabled()
                 ForEach(modelState.composerProviderSections(capableProviders: capable,
-                                                                    available: ProviderAvailabilityStore.shared.available)) { section in
+                                                                    available: ProviderAvailabilityStore.shared.available,
+                                                                    serverUsableProvider: TierRoutingServerCache.shared.state
+                                                                        .status?[RoutingTier.standard.rawValue]?.usable == true
+                                                                        ? TierRoutingConfig.load().tier(.standard)?.provider : nil)) { section in
                     let pickable = CodeAssistantModelState.canPick(
                         section, chatIsEmpty: chatIsEmpty, chatRunsOnAgentEngine: engine.usesAgentV2Engine)
                     Section(Self.sectionTitle(section, tagEngines: tagEngines, pickable: pickable)) {
