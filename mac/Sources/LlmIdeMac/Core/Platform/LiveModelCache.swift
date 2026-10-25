@@ -61,6 +61,7 @@ enum LiveModelCache {
         if let data = try? JSONEncoder().encode(all) {
             defaults.set(data, forKey: defaultsKey)
         }
+        NotificationCenter.default.post(name: .liveModelsStored, object: nil)
     }
 
     /// Test seam: drop the in-memory copy so the next read goes to `defaults`.

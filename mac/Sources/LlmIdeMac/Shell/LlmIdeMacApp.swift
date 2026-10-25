@@ -427,7 +427,7 @@ public struct LlmIdeMacApp: App {
                             // Syncs custom providers (on every server version)
                             // and then tier routing's per-user server status.
                             TierRoutingRefresh.requestInBackground(
-                                api: api, serverApiVersion: { backend.serverApiVersion })
+                                api: api, serverApiVersion: { backend.serverApiVersion }, appConfig: config)
                         }
                         // Refresh the cached language pref here, not only when
                         // Settings → Preferences happens to be opened. That
@@ -461,7 +461,25 @@ public struct LlmIdeMacApp: App {
                 .onChange(of: backend.serverApiVersion) { _, _ in
                     if session.isAuthenticated {
                         TierRoutingRefresh.requestInBackground(
-                            api: api, serverApiVersion: { backend.serverApiVersion })
+                            api: api, serverApiVersion: { backend.serverApiVersion }, appConfig: config)
+                    }
+                }
+                // Keys or custom providers changed: re-check which providers
+                // can run and re-reconcile the tiers before the table is pushed.
+                .onReceive(NotificationCenter.default.publisher(for: .providerKeysChanged)) { _ in
+                    reconcileTiersAfterProviderChange()
+                }
+                .onReceive(NotificationCenter.default.publisher(for: .customProvidersChanged)) { _ in
+                    reconcileTiersAfterProviderChange()
+                }
+                // A model list landed (Claude's, usually): finish a reconcile
+                // that was deferred for want of a model. Gated on the store's
+                // deferred flag, so a store that changes nothing cannot loop.
+                .onReceive(NotificationCenter.default.publisher(for: .liveModelsStored)) { _ in
+                    Task { @MainActor in
+                        if ProviderAvailabilityStore.shared.shouldRetryWhenModelsLand {
+                            reconcileTiersAfterProviderChange()
+                        }
                     }
                 }
                 .onChange(of: backend.status) { _, newStatus in
@@ -472,7 +490,7 @@ public struct LlmIdeMacApp: App {
                         if session.isAuthenticated {
                             // Custom providers + tier routing status, as above.
                             TierRoutingRefresh.requestInBackground(
-                                api: api, serverApiVersion: { backend.serverApiVersion })
+                                api: api, serverApiVersion: { backend.serverApiVersion }, appConfig: config)
                         }
                         if config.mobileControlEnabled {
                             FeatureCatalog.notifyMobileBackendReady()
@@ -651,6 +669,17 @@ public struct LlmIdeMacApp: App {
             if await BackendManager.probeHealth() { return }
             try? await Task.sleep(nanoseconds: 200_000_000)
         }
+    }
+
+    /// Provider keys or custom providers changed: reconcile tiers against what
+    /// can run, then push the corrected table. Only while signed in with the
+    /// backend running — availability is unknown otherwise, and reconcile
+    /// never acts on unknown.
+    @MainActor
+    private func reconcileTiersAfterProviderChange() {
+        guard session.isAuthenticated, case .running = backend.status else { return }
+        TierRoutingRefresh.requestInBackground(
+            api: api, serverApiVersion: { backend.serverApiVersion }, appConfig: config)
     }
 
     /// Pull the server-synced LLM output language into `AppConfig`'s local

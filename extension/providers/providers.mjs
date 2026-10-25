@@ -634,9 +634,39 @@ const CLI_ARG_BUILDERS = {
 };
 
 /**
+ * Token usage off a CLI `result` object (`--output-format json`, or the final
+ * line of `stream-json`): `[{ model, inputTokens, outputTokens, cacheReadTokens,
+ * cacheCreationTokens }]`, per model from `modelUsage` when present, else one
+ * model-less row from `usage`. Empty when the object reports neither. Never throws.
+ */
+export function extractCliUsage(obj) {
+  const n = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
+  let usage = Object.entries(obj?.modelUsage && typeof obj.modelUsage === 'object' ? obj.modelUsage : {})
+    .filter(([, u]) => u && typeof u === 'object')
+    .map(([model, u]) => ({
+      model,
+      inputTokens: n(u.inputTokens),
+      outputTokens: n(u.outputTokens),
+      cacheReadTokens: n(u.cacheReadInputTokens),
+      cacheCreationTokens: n(u.cacheCreationInputTokens),
+    }));
+  if (!usage.length && obj?.usage && typeof obj.usage === 'object') {
+    usage = [{
+      model: null,
+      inputTokens: n(obj.usage.input_tokens),
+      outputTokens: n(obj.usage.output_tokens),
+      cacheReadTokens: n(obj.usage.cache_read_input_tokens),
+      cacheCreationTokens: n(obj.usage.cache_creation_input_tokens),
+    }];
+  }
+  return usage;
+}
+
+/**
  * Parse ONE line of `claude --output-format stream-json --include-partial-messages`
  * NDJSON output. Returns `{ delta: string }` for a text delta, `{ result: string,
- * isError: boolean }` for the terminal summary line, or `{}` for anything else
+ * isError: boolean, usage: [...] }` for the terminal summary line (`usage` in
+ * `extractCliUsage`'s shape, empty when the CLI reported none), or `{}` for anything else
  * (system/init, rate_limit_event, the full accumulated `assistant` message —
  * already covered by the deltas — content_block_start/stop, message_start/stop).
  * Never throws: a malformed or non-JSON line is silently ignored (the CLI's own
@@ -654,7 +684,7 @@ export function parseClaudeStreamJSON(line) {
     return { delta: obj.event.delta.text };
   }
   if (obj?.type === 'result' && typeof obj.result === 'string') {
-    return { result: obj.result, isError: obj.is_error === true };
+    return { result: obj.result, isError: obj.is_error === true, usage: extractCliUsage(obj) };
   }
   return {};
 }
@@ -910,7 +940,8 @@ const STREAM_ARG_EXTRAS = {
  * actually stream." Uses the same concurrency gate (`cliSemaphore`) as
  * `spawnCli` so streaming spawns count against the same cap.
  *
- * Returns `{ stdoutText, stderr, bin }` — for a caller that supplied
+ * Returns `{ stdoutText, stderr, bin, usage? }` (`usage` = the CLI's own token
+ * report from its terminal result line, when the parser yields one) — for a caller that supplied
  * `onChunk`, `stdoutText` is the sum of every delivered delta (the
  * streaming case — the whole point of this function). For a caller with NO
  * `onChunk` (rare), `stdoutText` is the parser's own authoritative final
@@ -1037,7 +1068,11 @@ export function spawnCliStream(provider, prompt, {
           // hand the whole buffered text to onChunk now, once.
           onChunk(stdoutText);
         }
-        resolve({ stdoutText, stderr: stderrBuf, bin: inv.bin });
+        resolve({
+          stdoutText, stderr: stderrBuf, bin: inv.bin,
+          // Only when the parser saw a terminal result line that carried tokens.
+          ...(parsedResult?.usage?.length ? { usage: parsedResult.usage } : {}),
+        });
       });
     });
   });

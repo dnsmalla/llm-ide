@@ -45,6 +45,34 @@ test('parseClaudeStreamJSON surfaces an error result', () => {
   assert.equal(parsed.isError, true);
 });
 
+test('parseClaudeStreamJSON returns the result line\'s token usage in parseCliJsonResult\'s shape', () => {
+  const line = JSON.stringify({
+    type: 'result', subtype: 'success', is_error: false, result: 'hi',
+    usage: { input_tokens: 3, output_tokens: 9, cache_read_input_tokens: 100, cache_creation_input_tokens: 7 },
+    modelUsage: { 'claude-sonnet-5': { inputTokens: 3, outputTokens: 9, cacheReadInputTokens: 100, cacheCreationInputTokens: 7, costUSD: 0.01 } },
+  });
+  assert.deepEqual(parseClaudeStreamJSON(line).usage, [
+    { model: 'claude-sonnet-5', inputTokens: 3, outputTokens: 9, cacheReadTokens: 100, cacheCreationTokens: 7 },
+  ]);
+  // No modelUsage: falls back to the flat usage object, model-less.
+  const flat = parseClaudeStreamJSON('{"type":"result","result":"x","usage":{"input_tokens":1,"output_tokens":2}}');
+  assert.deepEqual(flat.usage, [{ model: null, inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0 }]);
+  // Neither: empty, still never throws.
+  assert.deepEqual(parseClaudeStreamJSON('{"type":"result","result":"x"}').usage, []);
+});
+
+test('spawnCliStream resolves with the result line\'s usage, and omits it when there is none', async () => {
+  const run = (resultLine) => spawnCliStream('anthropic', 'ignored', {
+    binOverride: process.execPath,
+    argsOverride: ['-e', `console.log(${JSON.stringify(resultLine)})`],
+    onChunk: () => {},
+  });
+  const withUsage = await run('{"type":"result","is_error":false,"result":"ok","usage":{"input_tokens":4,"output_tokens":6}}');
+  assert.deepEqual(withUsage.usage, [{ model: null, inputTokens: 4, outputTokens: 6, cacheReadTokens: 0, cacheCreationTokens: 0 }]);
+  const without = await run('{"type":"result","is_error":false,"result":"ok"}');
+  assert.equal('usage' in without, false);
+});
+
 test('spawnCliStream delivers incremental chunks for a provider with a stream parser', async () => {
   // A fake "cli" that just echoes 3 pre-baked NDJSON lines to stdout, mimicking
   // claude --output-format stream-json --include-partial-messages.

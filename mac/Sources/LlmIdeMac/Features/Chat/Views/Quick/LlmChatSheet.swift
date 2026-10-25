@@ -181,12 +181,28 @@ struct LlmChatSheet: View {
         }
     }
 
+    /// The model a turn would use, as the send resolves it: a tier route, else
+    /// the picked / configured model (`QuickChatContext.modelLabel`).
+    private var modelInUse: String {
+        if let route = QuickChatContext.tierRoute(for: engine) { return route.model }
+        let tool = AICliTool(rawValue: config.activeCLI) ?? .claudeCode
+        let label = QuickChatContext.modelLabel(
+            modelId: engine.quickChatModelId,
+            defaultModelId: QuickChatContext.quickChatFallbackModel(config: config, tool: tool),
+            models: tool.models)
+        return "\(tool.displayName) · \(label)"
+    }
+
     private var header: some View {
         HStack {
             Image(systemName: "bubble.left.and.text.bubble.right")
                 .foregroundStyle(theme.current.accent)
             Text("llm-chat")
                 .font(.headline)
+            Text(modelInUse)
+                .font(.caption)
+                .foregroundStyle(theme.current.textMuted)
+                .lineLimit(1)
             if clearingHistory {
                 ProgressView().controlSize(.small)
             }
@@ -336,7 +352,9 @@ struct LlmChatSheet: View {
         // screen for no reason before the first chunk lands. The
         // "Thinking…" row below the list already covers this turn's
         // in-progress state.
-        if msg.status == .streaming && msg.content.isEmpty {
+        if (msg.status == .streaming || msg.status == .failed) && msg.content.isEmpty {
+            // A failed turn with no text shows its error below the list, not
+            // as an empty bubble.
             EmptyView()
         } else {
             HStack(alignment: .top, spacing: 8) {
@@ -446,6 +464,17 @@ struct LlmChatSheet: View {
         // emptiness. See `QuickChatSendPolicy` for why the busy check here
         // shows nothing while the one after the probe does.
         guard case .proceed(let text) = QuickChatSendPolicy().entryGate(draft: draft, busy: engine.busy) else {
+            return
+        }
+        // No provider can run Standard: say so rather than send a turn that
+        // must fail. Draft stays; never refuses while availability is unknown.
+        if let message = ProviderAvailability.noProviderMessage(
+            standard: TierRoutingConfig.load().tier(.standard),
+            available: ProviderAvailabilityStore.shared.available,
+            serverUsable: TierRoutingServerCache.shared.state.status?[RoutingTier.standard.rawValue]?.usable == true,
+            routeResolves: QuickChatContext.tierRoute(for: engine) != nil) {
+            refusalDraft = draft
+            sendRefusal = message
             return
         }
         draft = ""

@@ -8,7 +8,7 @@ import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { markRouteFailed, routeFailure, ROUTE_BROKEN_TTL_MS, ROUTE_TRANSIENT_TTL_MS } from './route-health.mjs';
-import { resolveProvider, assertChatProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs } from './providers.mjs';
+import { resolveProvider, assertChatProvider, providerApiKey, completeViaApi, runViaCli, cliModelId, customBaseUrl, PROVIDER_IDS, spawnCli, spawnCliStream, minimalCliEnv, formatCliSpawnError, resolveCustomProviderDispatch, DEFAULT_DEEPSEEK_BASE, buildAnthropicCliArgs, extractCliUsage } from './providers.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { recordUsage, flagQuota, resolveModel as resolveUsageModel, recordRateLimits, noteUnmeteredModelCall } from '../kb/usage.mjs';
 
@@ -107,25 +107,7 @@ export function parseCliJsonResult(stdout) {
   let obj;
   try { obj = JSON.parse(raw); } catch { return null; }
   if (!obj || obj.type !== 'result' || typeof obj.result !== 'string') return null;
-  const n = (v) => (Number.isFinite(v) && v >= 0 ? v : 0);
-  let usage = Object.entries(obj.modelUsage && typeof obj.modelUsage === 'object' ? obj.modelUsage : {})
-    .filter(([, u]) => u && typeof u === 'object')
-    .map(([model, u]) => ({
-      model,
-      inputTokens: n(u.inputTokens),
-      outputTokens: n(u.outputTokens),
-      cacheReadTokens: n(u.cacheReadInputTokens),
-      cacheCreationTokens: n(u.cacheCreationInputTokens),
-    }));
-  if (!usage.length && obj.usage && typeof obj.usage === 'object') {
-    usage = [{
-      model: null,
-      inputTokens: n(obj.usage.input_tokens),
-      outputTokens: n(obj.usage.output_tokens),
-      cacheReadTokens: n(obj.usage.cache_read_input_tokens),
-      cacheCreationTokens: n(obj.usage.cache_creation_input_tokens),
-    }];
-  }
+  const usage = extractCliUsage(obj);
   return { text: obj.result, usage };
 }
 
@@ -805,7 +787,7 @@ export async function runClaudeStream(prompt, { userId, model, maxTokens, cacheT
  */
 export async function streamModelReply(prompt, {
   userId, model, maxTokens, cacheTranscript, onChunk, signal,
-  provider: explicitProvider, images, tools, mcpConfig,
+  provider: explicitProvider, images, tools, mcpConfig, endpoint,
   _testSpawnCliStream, _testRunClaude,
 } = {}) {
   const runBuffered = _testRunClaude || runClaude;
@@ -817,7 +799,7 @@ export async function streamModelReply(prompt, {
     return text;
   }
 
-  const { provider, apiKey } = resolveClaudeCall({ userId, model, provider: explicitProvider });
+  const { provider, apiKey, resolvedModel } = resolveClaudeCall({ userId, model, provider: explicitProvider });
 
   if (provider === 'anthropic' && apiKey) {
     // Direct-API path already streams for real — unmodified. SP1: the
@@ -838,10 +820,23 @@ export async function streamModelReply(prompt, {
       // apiKey is never truthy here for the anthropic case — if it were, the
       // direct-API branch above would already have returned. No provider's
       // CLI needs ANTHROPIC_API_KEY injected via this path.
-      const { stdoutText } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk, argsOverride });
-      // The stream parsers yield text only, never usage — the turn total
+      const { stdoutText, usage } = await doSpawnCliStream(provider, prompt, { env: minimalCliEnv(), signal, onChunk: wrappedOnChunk, argsOverride });
+      // The claude stream's terminal result line reports the turn's tokens
+      // (the same numbers the buffered `--output-format json` path meters).
+      // The codex/gemini parsers yield text only, and a claude stream that
+      // ended without a result line has none either — then the turn total
       // must know a call went unmetered or it reports the side calls alone.
-      noteUnmeteredModelCall();
+      if (provider === 'anthropic' && usage?.length) {
+        meterUsage({
+          userId, provider: 'anthropic', model: resolvedModel, source: 'cli', endpoint,
+          inputTokens: usage.reduce((n, u) => n + u.inputTokens, 0),
+          outputTokens: usage.reduce((n, u) => n + u.outputTokens, 0),
+          cacheReadTokens: usage.reduce((n, u) => n + u.cacheReadTokens, 0),
+          cacheCreationTokens: usage.reduce((n, u) => n + u.cacheCreationTokens, 0),
+        });
+      } else {
+        noteUnmeteredModelCall();
+      }
       return stdoutText;
     } catch (err) {
       if (deliveredAnyChunk) {
