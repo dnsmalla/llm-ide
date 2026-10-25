@@ -7,7 +7,7 @@ import CryptoKit
 /// whole input; re-reviewing an identical commit just burns tokens.
 extension AutoCodeUpdateService {
 
-    static let reviewSkipReasonText = "no changes since last review"
+    nonisolated static let reviewSkipReasonText = "no changes since last review"
 
     /// A stable fingerprint of what a review would read: the HEAD commit and the
     /// template text. Nil when HEAD can't be read (then never skip).

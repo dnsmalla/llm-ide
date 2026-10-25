@@ -60,7 +60,7 @@ struct LoopTemplate: Identifiable, Codable, Equatable {
                 // Check Baseline / Check exist only when BOTH a test command
                 // AND a check command are detected (§3.3) — the same rule
                 // `LoopStageDetector.refactorStages` applies.
-                guard let detected, let detectedCheck else { return nil }
+                guard detected != nil, let detectedCheck else { return nil }
                 copy.command = detectedCheck
             }
             return copy

@@ -82,7 +82,7 @@ extension LoopEngineRunner {
 
     /// The start of a verify attempt's output when this build has no code graph.
     /// The run summary matches on it, so keep the two in step.
-    static let codeGraphUnverifiedPrefix = "code graph not available in this build; batch"
+    nonisolated static let codeGraphUnverifiedPrefix = "code graph not available in this build; batch"
 
     private func runGraphVerify(_ stage: LoopStage, startedAt: Date, runRoot: URL, mainRoot: URL) async -> StageDecision {
         if currentBatchSkipped {

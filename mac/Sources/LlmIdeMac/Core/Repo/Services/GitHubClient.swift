@@ -7,7 +7,7 @@ import Foundation
 /// are intentionally out of scope until a `RepoBackend` abstraction
 /// across GitLab and GitHub lands.
 @MainActor
-final class GitHubClient {
+final class GitHubClient: Sendable {
 
     enum GitHubError: LocalizedError {
         case notConfigured

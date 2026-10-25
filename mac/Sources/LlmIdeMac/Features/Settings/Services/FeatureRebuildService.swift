@@ -266,7 +266,7 @@ final class FeatureRebuildService: ObservableObject {
             let stderrSplitter = LineSplitter()
 
             func attach(_ handle: FileHandle, splitter: LineSplitter) {
-                handle.readabilityHandler = { fh in
+                handle.readabilityHandler = { [weak self] fh in
                     let data = fh.availableData
                     if data.isEmpty {
                         fh.readabilityHandler = nil

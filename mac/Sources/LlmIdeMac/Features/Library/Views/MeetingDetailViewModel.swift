@@ -24,9 +24,9 @@ final class MeetingDetailViewModel {
     var summarizing: Bool { summaries.isSummarizing(fileURL) }
 
     init(fileURL: URL, api: LlmIdeAPIClient?,
-         summaries: MeetingSummarizeTracker = .shared) {
+         summaries: MeetingSummarizeTracker? = nil) {
         self.fileURL = fileURL; self.api = api
-        self.summaries = summaries
+        self.summaries = summaries ?? .shared
     }
 
     func load() async throws {
