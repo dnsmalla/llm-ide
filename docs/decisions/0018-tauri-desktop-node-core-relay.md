@@ -6,7 +6,8 @@ date: 2026-10-24
 
 # ADR 0018: Tauri desktop shell over the Node core, with a relay for phone and extension
 
-**Status:** Proposed
+**Status:** Proposed — future direction, not scheduled. It becomes Accepted when
+Phase 0 of the plan passes its go/no-go criteria.
 **Date:** 2026-10-24
 
 ## Context

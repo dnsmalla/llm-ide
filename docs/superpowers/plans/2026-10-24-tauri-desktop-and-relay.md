@@ -1,6 +1,8 @@
 # Plan: Tauri desktop app + relay (multi-platform LLM-IDE)
 
-**Status:** Proposed — awaiting approval
+**Status:** Future plan — direction agreed, not scheduled. Work starts with Phase 0
+only when it is explicitly picked up; until then, current work continues on the
+existing Swift app and Node server.
 **Date:** 2026-10-24
 **Decision record:** [ADR 0018](../../decisions/0018-tauri-desktop-node-core-relay.md)
 
