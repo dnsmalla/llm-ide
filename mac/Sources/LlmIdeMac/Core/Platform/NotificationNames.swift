@@ -62,6 +62,19 @@ extension Notification.Name {
     /// every turn.
     static let customProvidersChanged = Notification.Name("customProvidersChanged")
 
+    /// Posted (main thread) by `ProviderAvailabilityStore.reconcile` after it
+    /// cleared / auto-filled tiers. Settings → Tiers & Roles reloads its table.
+    static let tierRoutingReconciled = Notification.Name("tierRoutingReconciled")
+
+    /// Posted by Settings → Model Providers after a provider key is saved or
+    /// cleared. The app shell re-checks availability and re-reconciles tiers.
+    static let providerKeysChanged = Notification.Name("providerKeysChanged")
+
+    /// Posted by `LiveModelCache.store` after it stores a model list (any
+    /// thread). Shell re-runs the tier reconcile when one was deferred for
+    /// want of a model.
+    static let liveModelsStored = Notification.Name("liveModelsStored")
+
     // MARK: - Library / meetings
 
     /// Posted by LibraryRow when the user requests an action on a

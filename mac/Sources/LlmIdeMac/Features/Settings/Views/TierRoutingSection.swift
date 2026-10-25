@@ -85,6 +85,15 @@ struct TierRoutingSection: View {
             customProviders = CustomProvider.loadAll()
             sync()   // the server's per-tier status depends on custom providers
         }
+        // Tiers were cleared / auto-filled against the available providers.
+        .onReceive(NotificationCenter.default.publisher(for: .tierRoutingReconciled)) { _ in
+            let reloaded = TierRoutingConfig.load()
+            // Only tiers whose stored route changed lose their pending pick.
+            for tier in RoutingTier.allCases where reloaded.tier(tier) != routing.tier(tier) {
+                pendingProviders[tier.rawValue] = nil
+            }
+            routing = reloaded
+        }
         // Every refresh (this card's or the app's, e.g. on a server version
         // change) lands here, so the notes follow the resolvers' cache.
         .onReceive(NotificationCenter.default.publisher(for: .tierRoutingServerStateChanged)) { _ in
@@ -100,6 +109,10 @@ struct TierRoutingSection: View {
             // cache that may predate a server restart (a change also triggers
             // the app-level refresh; the shared refresh path coalesces them).
             await backend.refreshServerApiVersion()
+            // Fresh availability before the menus are used; clears / fills
+            // tiers that name a provider that cannot run.
+            await ProviderAvailabilityStore.shared.reconcile(config: config, api: api)
+            routing = TierRoutingConfig.load()
             sync()   // the server's copy is per user; re-push like custom providers
             await loadLiveModels(for: ClaudeCLI.provider)
             // Jev's pinned versions; without a key (or below v73) the
@@ -138,18 +151,18 @@ struct TierRoutingSection: View {
                     }
                     if tier == .image {
                         // Image models only: the providers with an image endpoint.
-                        ForEach(ImageTierRouting.providers, id: \.wireId) { entry in
+                        ForEach(ImageTierRouting.providers.filter { isAvailable($0.wireId) }, id: \.wireId) { entry in
                             Text(entry.tool.displayName).tag(entry.wireId)
                         }
                     } else {
-                        ForEach(TierRouting.builtInProviders, id: \.wireId) { entry in
+                        ForEach(TierRouting.builtInProviders.filter { isAvailable($0.wireId) }, id: \.wireId) { entry in
                             Text(entry.tool.displayName).tag(entry.wireId)
                         }
                         // Decision-only: never Standard, which drives the chat composer.
                         if tier != .standard {
                             Text(TierRouting.decisionOnlyProviderName).tag(TierRouting.decisionOnlyProvider)
                         }
-                        ForEach(customProviders.filter(\.isEnabled)) { provider in
+                        ForEach(customProviders.filter { $0.isEnabled && isAvailable($0.wireId) }) { provider in
                             Text(provider.name).tag(provider.wireId)
                         }
                     }
@@ -182,6 +195,9 @@ struct TierRoutingSection: View {
                 Spacer()
             }
             if tier == .standard {
+                if route == nil, ProviderAvailability.nothingAvailable(ProviderAvailabilityStore.shared.available) {
+                    note("No provider set up — add one in Model Providers.")
+                }
                 standardNotes(route)
             } else if tier == .image {
                 // Mac-only, so no server status applies; the role row says
@@ -299,8 +315,16 @@ struct TierRoutingSection: View {
         if tier == .image { return ImageTierRouting.isImageProvider(provider) }
         // The menu offers Jev on Strong / Cheap only (never Standard).
         if TierRouting.isDecisionOnlyProvider(provider) { return tier != .standard }
+        guard isAvailable(provider) else { return false }
         return TierRouting.builtInProviders.contains { $0.wireId == provider }
             || customProviders.contains { $0.isEnabled && $0.wireId == provider }
+    }
+
+    /// Providers that can run (keys / CLIs / endpoints); all of them while
+    /// availability is unknown. Read from the observable store, so the menus
+    /// follow it.
+    private func isAvailable(_ provider: String) -> Bool {
+        ProviderAvailability.isListed(provider, available: ProviderAvailabilityStore.shared.available)
     }
 
     private func models(forProvider provider: String, tier: RoutingTier) -> [AIModel] {

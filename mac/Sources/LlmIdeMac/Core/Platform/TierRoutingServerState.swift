@@ -164,8 +164,16 @@ enum TierRoutingRefresh {
     }
 
     /// Fire-and-forget `request` for lifecycle hooks; failures are logged.
-    static func requestInBackground(api: LlmIdeAPIClient, serverApiVersion: @escaping @MainActor () -> Int?) {
+    ///
+    /// - Parameter appConfig: when set, tiers are first reconciled against the
+    ///   providers that can run (`ProviderAvailabilityStore.reconcile`), so the
+    ///   table pushed below is the corrected one.
+    static func requestInBackground(api: LlmIdeAPIClient, serverApiVersion: @escaping @MainActor () -> Int?,
+                                    appConfig: AppConfig? = nil) {
         Task { @MainActor in
+            if let appConfig {
+                await ProviderAvailabilityStore.shared.reconcile(config: appConfig, api: api)
+            }
             if case .failed(let error) = await request(api: api, serverApiVersion: serverApiVersion) {
                 tierRoutingRefreshLogger.error("Tier routing refresh failed: \(error.localizedDescription, privacy: .public)")
             }

@@ -846,6 +846,15 @@ struct MenuBarChatView: View {
             return
         }
 
+        // No provider can run Standard: say so rather than send a turn that
+        // must fail. Draft stays; never refuses while availability is unknown.
+        if let message = ProviderAvailability.noProviderMessage(
+            standard: TierRoutingConfig.load().tier(.standard),
+            available: ProviderAvailabilityStore.shared.available) {
+            refusalDraft = draft
+            sendRefusal = message
+            return
+        }
         draft = ""
         // Everything the composer is about to hand over, kept as it was
         // BEFORE the directives are folded into the text — a refused send

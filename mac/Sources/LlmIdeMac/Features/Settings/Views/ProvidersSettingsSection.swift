@@ -295,6 +295,8 @@ struct ProvidersSettingsSection: View {
             try await api.setSecret(key: p.vaultKey, value: key)
             configured.insert(p.vaultKey)
             drafts[p.id] = ""           // don't keep the secret in view state
+            // Availability changed: the app re-reconciles the tiers.
+            NotificationCenter.default.post(name: .providerKeysChanged, object: nil)
             if let base {
                 do {
                     try await api.setSecret(key: "custom.baseUrl", value: base)
@@ -324,6 +326,7 @@ struct ProvidersSettingsSection: View {
             try await api.setSecret(key: p.vaultKey, value: "")
             configured.remove(p.vaultKey)
             status[p.id] = (true, "Cleared.")
+            NotificationCenter.default.post(name: .providerKeysChanged, object: nil)
         } catch {
             status[p.id] = (false, error.localizedDescription)
         }
