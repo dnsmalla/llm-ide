@@ -88,6 +88,38 @@
             "string",
             "null"
           ]
+        },
+        "currentBranch": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The active repo's branch, capped at 200 characters."
+        },
+        "gitStatus": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Staged and unstaged file counts and the upstream position (the Mac's GitStatus). Rendered per turn as the Git state block.",
+          "properties": {
+            "staged": {
+              "type": "integer"
+            },
+            "unstaged": {
+              "type": "integer"
+            },
+            "ahead": {
+              "type": "integer"
+            },
+            "behind": {
+              "type": "integer"
+            },
+            "hasUpstream": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
         }
       }
     },

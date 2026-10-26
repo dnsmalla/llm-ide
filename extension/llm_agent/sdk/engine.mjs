@@ -44,7 +44,7 @@ import {
   readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
   buildUserPluginDelivery,
 } from '../skills/index.mjs';
-import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
+import { composeSystemContext, composeRecentContext, composeGitContext } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
 import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } from './compact-system-prompt.mjs';
@@ -720,6 +720,19 @@ export function buildEngineOptions(
       contextParts.push('## Recent issues and meetings\n(There are none now — the list shown earlier is out of date.)');
     }
     next.recentHash = recentHash;
+  }
+  // Active repo's branch and status: the same delivered-state rule as the
+  // recent list (sent when new or changed, not re-sent every turn). A request
+  // with neither key says nothing about the repo, so the record is kept.
+  if (agentContext && ('currentBranch' in agentContext || 'gitStatus' in agentContext)) {
+    const gitText = composeGitContext(agentContext);
+    const gitHash = gitText ? contentHash(gitText) : null;
+    if (gitText && gitHash !== prev?.gitHash) {
+      contextParts.push(prev?.gitHash ? `${gitText}\n\n(Updated since your last view of the repo state.)` : gitText);
+    } else if (!gitText && next.gitHash) {
+      contextParts.push('## Git state (the active repo)\n(No repo state is known now — the branch shown earlier is out of date.)');
+    }
+    next.gitHash = gitHash;
   }
   // Project memory summary: only the files that change rarely (repo.md, the
   // environment note, the graph overview) and no "(updated …)" age —

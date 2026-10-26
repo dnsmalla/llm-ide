@@ -143,6 +143,25 @@ export function buildEnrichedAgentContext(agentContext, recentMeetings) {
     // resolver always fell back to `sessionId`, so a chat's tasks were
     // keyed to whatever session id that turn happened to carry.
     chatSessionId: typeof agentContext.chatSessionId === 'string' ? agentContext.chatSessionId : null,
+    // Active repo's branch and git status (the Mac's AgentContext). Bounded
+    // here; rendered per turn by composeGitContext.
+    currentBranch: typeof agentContext.currentBranch === 'string'
+      ? agentContext.currentBranch.slice(0, 200) : null,
+    gitStatus: gitStatusForContext(agentContext.gitStatus),
+  };
+}
+
+/** gitStatus as the Mac sends it (counts), or a bounded string; anything else is dropped. */
+function gitStatusForContext(gs) {
+  if (typeof gs === 'string') return gs.slice(0, 2000);
+  if (!gs || typeof gs !== 'object' || Array.isArray(gs)) return null;
+  const count = (v) => (Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0);
+  return {
+    staged: count(gs.staged),
+    unstaged: count(gs.unstaged),
+    ahead: count(gs.ahead),
+    behind: count(gs.behind),
+    hasUpstream: gs.hasUpstream === true,
   };
 }
 

@@ -66,6 +66,39 @@ export function composeSystemContext(agentContext, userId, userMessage = '', { m
 // The recent issues + meetings on their own — the part of the system context
 // that changes during a chat. '' when there are none. Fence-neutralised for
 // the same reason the full block is.
+// The active repo's branch and status, for "what branch am I on" without a
+// git tool round trip. '' when neither is known. Bounded: the branch name is
+// capped at 200 characters and the whole block at GIT_CONTEXT_CHARS. The Mac
+// sends gitStatus as counts; a string form is accepted and truncated.
+export const GIT_CONTEXT_CHARS = 2000;
+
+function gitCount(v) {
+  return Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : null;
+}
+
+function renderGitStatus(gs) {
+  if (typeof gs === 'string') return gs.trim() ? `Status: ${gs.trim()}` : '';
+  if (!gs || typeof gs !== 'object') return '';
+  const staged = gitCount(gs.staged);
+  const unstaged = gitCount(gs.unstaged);
+  if (staged === null || unstaged === null) return '';
+  const upstream = gs.hasUpstream === true
+    ? `ahead ${gitCount(gs.ahead) ?? 0}, behind ${gitCount(gs.behind) ?? 0} of upstream`
+    : 'no upstream';
+  return `Staged: ${staged}, unstaged: ${unstaged}; ${upstream}`;
+}
+
+export function composeGitContext(agentContext) {
+  const branch = typeof agentContext?.currentBranch === 'string'
+    ? agentContext.currentBranch.trim().slice(0, 200) : '';
+  const status = renderGitStatus(agentContext?.gitStatus);
+  if (!branch && !status) return '';
+  const lines = ['## Git state (the active repo)'];
+  if (branch) lines.push(`Current branch: ${branch}`);
+  if (status) lines.push(status);
+  return redactFence(lines.join('\n')).slice(0, GIT_CONTEXT_CHARS);
+}
+
 export function composeRecentContext(agentContext) {
   const block = [renderRecentIssues(agentContext), renderRecentMeetings(agentContext)]
     .filter((s) => typeof s === 'string' && s.length > 0).join('\n\n');
