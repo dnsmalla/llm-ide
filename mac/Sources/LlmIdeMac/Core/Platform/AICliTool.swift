@@ -261,8 +261,8 @@ extension AICliTool {
     }
 }
 
-struct AIModel: Identifiable, Hashable, Codable {
-    let id: String
+public struct AIModel: Identifiable, Hashable, Codable {
+    public let id: String
     let displayName: String
     /// The Agent SDK's effort levels for this model (server apiVersion 63+);
     /// [] = no effort picker for it.
@@ -321,7 +321,7 @@ extension AIModel {
     private enum CodingKeys: String, CodingKey { case id, displayName, effortLevels }
 
     /// Lists persisted before effortLevels existed decode with [].
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decode(String.self, forKey: .id)
         displayName = try c.decode(String.self, forKey: .displayName)

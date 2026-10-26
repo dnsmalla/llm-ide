@@ -51,6 +51,7 @@ import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from '../kb/activity.mjs';
 import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from '../kb/usage.mjs';
+import { turnCompositionRecent } from '../kb/turn-composition.mjs';
 import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
 import { BUILTIN_ID } from '../llm-sources/registry.mjs';
@@ -155,9 +156,17 @@ export async function handleKB(req, res) {
         : undefined;
       // Custom (OpenAI-compatible) provider also needs a base URL — accept it
       // in the body (verify-before-save) or read the stored one.
-      const baseUrl = provider === 'custom'
-        ? ((typeof body.baseUrl === 'string' && body.baseUrl) ? body.baseUrl : customBaseUrl(userId))
-        : undefined;
+      // A stored base URL that fails the SSRF guard throws in customBaseUrl;
+      // answer with the documented 200 { ok:false, detail } shape, not a 500.
+      let baseUrl;
+      try {
+        baseUrl = provider === 'custom'
+          ? ((typeof body.baseUrl === 'string' && body.baseUrl) ? body.baseUrl : customBaseUrl(userId))
+          : undefined;
+      } catch (err) {
+        sendJSON(res, 200, { ok: false, detail: String(err?.message || err).slice(0, 200) });
+        return true;
+      }
       const result = await verifyProvider({ provider, mode, apiKey, baseUrl });
       sendJSON(res, 200, result);
       return true;
@@ -208,7 +217,14 @@ export async function handleKB(req, res) {
       }
       const key = providerApiKey(userId, provider);
       if (!key) { sendJSON(res, 200, { models: [], detail: sdkDetail || 'no API key configured' }); return true; }
-      const baseUrl = provider === 'custom' ? customBaseUrl(userId) : undefined;
+      let baseUrl;
+      try {
+        baseUrl = provider === 'custom' ? customBaseUrl(userId) : undefined;
+      } catch (err) {
+        // Stored base URL refused by the SSRF guard: same empty-list answer as
+        // the other "can't list" cases, with the reason in detail.
+        sendJSON(res, 200, { models: [], detail: String(err?.message || err).slice(0, 200) }); return true;
+      }
       if (provider === 'custom' && !baseUrl) {
         sendJSON(res, 200, { models: [], detail: 'no base URL configured' }); return true;
       }
@@ -336,6 +352,13 @@ export async function handleKB(req, res) {
       const m = kb.getMeeting(userId, id);
       if (!m) {
         sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
+        return true;
+      }
+      // Opt-in: the transcript is large and most callers only need the
+      // summary, so it is added only for `?include=transcript`.
+      const include = new URL(url, 'http://127.0.0.1').searchParams.get('include');
+      if (include === 'transcript') {
+        sendJSON(res, 200, { ...m, transcript: kb.getMeetingTranscript(userId, id) });
         return true;
       }
       sendJSON(res, 200, m);
@@ -1021,6 +1044,14 @@ export async function handleKB(req, res) {
       const u = new URL(url, 'http://127.0.0.1');
       const provider = u.searchParams.get('provider') || 'anthropic';
       sendJSON(res, 200, { ratelimits: getRateLimits(userId, provider) });
+      return true;
+    }
+
+    // Per-turn context split (turn_composition, migrations 0040/0044): the
+    // caller's own newest turns. Read-only, so no rate-limit bucket.
+    if (req.method === 'GET' && (url === '/kb/usage/turn-composition' || url.startsWith('/kb/usage/turn-composition?'))) {
+      const u = new URL(url, 'http://127.0.0.1');
+      sendJSON(res, 200, { turns: turnCompositionRecent(userId, { limit: u.searchParams.get('limit') }) });
       return true;
     }
 

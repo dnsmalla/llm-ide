@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/issue-schedule",
+  "status": 404,
+  "description": "Answers 404 feature_disabled when the Mac build has gantt_issues off.",
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "example/repo"
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "gantt_issues"
+  }
+}

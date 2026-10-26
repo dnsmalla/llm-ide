@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/generate-plan",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Sent without an access token.",
+  "request": {
+    "body": {
+      "meetingId": "mtg-plan-001",
+      "goal": "Ship the release on Friday",
+      "language": "en"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

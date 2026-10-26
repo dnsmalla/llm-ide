@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 400,
+  "request": {
+    "body": {
+      "repoRoot": "/example/repo"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "message is required"
+    }
+  }
+}

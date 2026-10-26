@@ -1,0 +1,39 @@
+{
+  "endpoint": "POST /agent/v2/stream",
+  "status": 200,
+  "description": "One chat turn through the bench fake engine (no model call): init, the mode_set the route injects after init, one delta, and the tasks event the route appends before the end.",
+  "request": {
+    "body": {
+      "message": "Say hello.",
+      "agentContext": {
+        "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+        "workspaceRoot": "/example/workspace"
+      },
+      "mode": "ask"
+    }
+  },
+  "response": [
+    {
+      "type": "init",
+      "sessionId": "bench-fake-ef6740db-1c90-4bc4-acfe-be05245663f5",
+      "claudeCodeVersion": "bench-fake",
+      "model": "bench-fake",
+      "tools": [],
+      "capabilities": [],
+      "mcpServers": []
+    },
+    {
+      "type": "mode_set",
+      "mode": "ask"
+    },
+    {
+      "type": "delta",
+      "text": "ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok ok "
+    },
+    {
+      "type": "tasks",
+      "tasks": [],
+      "continueNeeded": false
+    }
+  ]
+}

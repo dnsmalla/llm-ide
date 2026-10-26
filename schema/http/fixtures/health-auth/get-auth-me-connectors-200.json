@@ -1,0 +1,26 @@
+{
+  "endpoint": "GET /auth/me/connectors",
+  "status": 200,
+  "response": {
+    "connectors": [
+      {
+        "id": "box",
+        "name": "Box",
+        "description": "Index a Box folder into the searchable knowledge base.",
+        "icon": "externaldrive.fill",
+        "authKind": "box-ccg",
+        "docsUrl": "https://developer.box.com/guides/",
+        "pipelineReady": true
+      },
+      {
+        "id": "slack",
+        "name": "Slack",
+        "description": "Fetch channel history into llm-doc notes.",
+        "icon": "message.fill",
+        "authKind": "slack-oauth",
+        "docsUrl": "https://api.slack.com/authentication",
+        "pipelineReady": true
+      }
+    ]
+  }
+}

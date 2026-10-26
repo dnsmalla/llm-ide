@@ -1,0 +1,532 @@
+{
+  "description": "The /kb/review/* routes: the user-approval queue for guardrailed actions (dispatch to a tracker, codegen-apply into an allow-listed repo). Roster: all seven keys are literal entries of ALL_ENDPOINTS (extension/server.mjs): /kb/review/submit, /kb/review/list, /kb/review/get/:id, /kb/review/approve, /kb/review/reject, /kb/review/delete (DELETE and POST, both answered by one handler). Handler: extension/routes/review.mjs (reached from extension/routes/router.mjs); store: extension/kb/reviews.mjs; credential handling: extension/server/review-secrets.mjs. All routes are token-protected and on the core feature set (not feature-gated); every route is in the kbWrite rate bucket (429 declared on the POST routes that were captured). Request parts list exactly the keys the handler reads. Request bodies carry no required keys: the handler answers a missing key with 400 (VALIDATION_FAILED or REVIEW_SUBMIT_FAILED), and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md). Payload: the payload of a review item is kind-specific and is checked by the guardrail engine (extension/guardrails/rules.mjs), not by this schema, so it is declared as an open object and its keys are listed in the Payload description. Credentials: submit strips credential-looking keys (token, apiKey, secret, password) from payload.config and payload.pr before storing, holds them in memory for approval (never persisted), and every review response returns the stripped payload. Approve reads config and pr from its body as credentials for that approval only; they are never stored or echoed. The approve path resolves credentials from the user vault, then held-from-submit, then the approve body, and dispatches only when the guardrails pass. A dispatch to github, backlog or linear needs a tracker credential and reaches the network, so no fixture approves a dispatch item; the approve 200 is captured for codegen-apply only (files are written into the allow-listed repo; no PR, because no GitHub token is resolved). The CAS race answer (409 REVIEW_RACE) is not captured: it needs two concurrent approvals of one item. The 422 CREDENTIAL_REQUIRED and GUARDRAILS_FAILED answers share one body shape, declared once.",
+  "$defs": {
+    "Finding": {
+      "type": "object",
+      "description": "One guardrail finding (extension/guardrails/rules.mjs check()). severity is blocking (fails the gate), warning (shown, does not fail) or info. details, when present, carries the matched snippets of a secret or PII finding; snippets are redacted before they are stored.",
+      "required": [
+        "ruleId",
+        "severity",
+        "message"
+      ],
+      "properties": {
+        "ruleId": {
+          "type": "string"
+        },
+        "severity": {
+          "type": "string",
+          "enum": [
+            "blocking",
+            "warning",
+            "info"
+          ]
+        },
+        "message": {
+          "type": "string"
+        },
+        "details": {
+          "x-optional": true,
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        }
+      }
+    },
+    "Guardrails": {
+      "type": "object",
+      "description": "The guardrail report runGuardrails returns for the item, as stored at submit and re-run at approval time. passed is false when any finding has severity blocking. findings is the full list; the server also sends blocking, warnings and info, which are the same findings partitioned by severity (open keys, so not declared here).",
+      "required": [
+        "passed",
+        "findings"
+      ],
+      "properties": {
+        "passed": {
+          "type": "boolean"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Finding"
+          }
+        }
+      },
+      "additionalProperties": true
+    },
+    "Payload": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "The kind-specific payload, open because its shape depends on kind. Submit keeps only the keys listed for the kind (kb/review-payload.mjs REVIEW_PAYLOAD_KEYS) and removes credential-looking keys (token, apiKey, secret, password, credential, auth, bearer, authorization) at every depth; every review response returns the payload scrubbed the same way. dispatch: target (github, backlog or linear; preview never reaches review), planId, taskIds, config (tracker credentials and settings: repo, space, projectId, issueTypeId, teamId; credential keys are stripped), and items, which the server replaces with the plan's tasks at submit and approve (title, body). codegen-apply: repoPath, taskId, summary, files and tests (each {path, content}), pr (ghRepo, baseBranch; credential keys are stripped), and allowedRepos, which the server sets from the user's allow-list at submit and approve. The server never trusts a client-sent allowedRepos or items."
+    },
+    "ReviewItem": {
+      "type": "object",
+      "description": "A review item as the GET, submit, approve and reject routes send it (redactReviewItem: the payload has no credentials). result is {} while the item is undecided, the apply result after codegen-apply (baseDir, files, count), or {error} after a failed execution. decidedAt is null until the item is decided.",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "payload",
+        "guardrails",
+        "status",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "dispatch",
+            "codegen-apply"
+          ]
+        },
+        "planId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "payload": {
+          "$ref": "#/$defs/Payload"
+        },
+        "guardrails": {
+          "$ref": "#/$defs/Guardrails"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "executed",
+            "failed",
+            "expired"
+          ]
+        },
+        "reviewerNote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "result": {
+          "type": "object",
+          "additionalProperties": true
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "ReviewSummary": {
+      "type": "object",
+      "description": "One row of the list route: the item without payload, guardrails or result (kb.listReviews).",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "status",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "dispatch",
+            "codegen-apply"
+          ]
+        },
+        "planId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "taskId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "pending",
+            "approved",
+            "rejected",
+            "executed",
+            "failed",
+            "expired"
+          ]
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "decidedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "GuardrailRejection": {
+      "type": "object",
+      "description": "The 422 body of approve. CREDENTIAL_REQUIRED: the only blocking finding is dispatch.creds; the item stays pending and nothing is sent. GUARDRAILS_FAILED: the guardrails fail at approval time; the item is auto-rejected (item.status is rejected, with the reviewer note 'Auto-rejected: guardrails fail at approval time.').",
+      "required": [
+        "error",
+        "guardrails",
+        "item"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "CREDENTIAL_REQUIRED",
+                "GUARDRAILS_FAILED"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "guardrails": {
+          "$ref": "#/$defs/Guardrails"
+        },
+        "item": {
+          "$ref": "#/$defs/ReviewItem"
+        }
+      }
+    },
+    "ExecutionFailure": {
+      "type": "object",
+      "description": "The 500 body of approve when execution throws. The item is already marked failed, and result.error holds the message.",
+      "required": [
+        "error",
+        "item"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "message"
+          ],
+          "properties": {
+            "code": {
+              "type": "string",
+              "enum": [
+                "REVIEW_EXECUTION_FAILED"
+              ]
+            },
+            "message": {
+              "type": "string"
+            }
+          }
+        },
+        "item": {
+          "$ref": "#/$defs/ReviewItem"
+        }
+      }
+    },
+    "Ok": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "type": "boolean",
+          "const": true
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /kb/review/submit": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "kind and payload are both required by the handler (a missing one answers 400 VALIDATION_FAILED). kind is not checked here: an unknown kind answers 400 REVIEW_SUBMIT_FAILED from the store. taskId and planId are checked by the store to belong to the user; a plan or task that is not the user's answers 400 REVIEW_SUBMIT_FAILED ('Referenced plan not found or not owned').",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "dispatch or codegen-apply."
+            },
+            "planId": {
+              "type": "string"
+            },
+            "taskId": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string",
+              "description": "Stored up to 500 characters; defaults to '<kind> review'."
+            },
+            "payload": {
+              "$ref": "#/$defs/Payload"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ReviewItem"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/review/list": {
+      "request": {
+        "query": {
+          "type": "object",
+          "description": "Both optional. status is applied only when it is one of the six statuses; any other value lists every status. limit is clamped to 1-200 (default 50). Query values are strings on the wire.",
+          "properties": {
+            "status": {
+              "type": "string",
+              "enum": [
+                "pending",
+                "approved",
+                "rejected",
+                "executed",
+                "failed",
+                "expired"
+              ]
+            },
+            "limit": {
+              "type": "string",
+              "description": "Capped at 200; the default is 50."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "items",
+            "count"
+          ],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ReviewSummary"
+              }
+            },
+            "count": {
+              "type": "integer"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/review/get/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "The review item id (rev-…)."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ReviewItem"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/review/approve": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). config and pr carry credentials for this approval only (vault < held from submit < these); they are never stored or echoed. A dispatch item needs a tracker credential; without one the answer is 422 CREDENTIAL_REQUIRED.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string",
+              "description": "Stored as reviewerNote."
+            },
+            "config": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "API v75+. Credentials for the dispatch target (github token / backlog or linear apiKey); highest precedence, never persisted. Without one the server uses a value held from submit, then the per-user vault."
+            },
+            "pr": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "API v75+. codegen-apply only: PR credentials (ghToken); same precedence as config."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ReviewItem"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "422": {
+          "$ref": "#/$defs/GuardrailRejection"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "#/$defs/ExecutionFailure"
+        }
+      }
+    },
+    "POST /kb/review/reject": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). Rejecting drops any credentials held from submit. Only a pending item can be rejected (compare-and-swap on pending): any other status answers 409 REVIEW_NOT_PENDING with the stored status in the message, and an unknown id answers 404.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "note": {
+              "type": "string",
+              "description": "Stored as reviewerNote."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ReviewItem"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/review/delete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). An unknown id answers ok: the store deletes nothing and the handler does not check for a row.",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/review/delete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "Same handler as DELETE /kb/review/delete (the route accepts both methods).",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

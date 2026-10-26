@@ -1,0 +1,40 @@
+{
+  "endpoint": "GET /kb/live/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    },
+    "query": {
+      "since": "0"
+    }
+  },
+  "response": {
+    "captions": [
+      {
+        "seq": 1,
+        "speaker": "Alice Example",
+        "text": "Shall we start with the release checklist?",
+        "ts": 1767225600000,
+        "source": "meet"
+      },
+      {
+        "seq": 2,
+        "speaker": "Bob Example",
+        "text": "Yes, the checklist is in the shared folder.",
+        "ts": 1767225605000,
+        "source": "meet",
+        "meta": {
+          "planTaskId": "task-1",
+          "score": 0.9,
+          "reason": "matches the release plan"
+        }
+      }
+    ],
+    "sequence": 2,
+    "finalized": false,
+    "exists": true,
+    "meetingTitle": "Example standup",
+    "startedAt": 1792999164809
+  }
+}

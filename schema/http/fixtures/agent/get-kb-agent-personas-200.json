@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /kb/agent/personas",
+  "status": 200,
+  "response": {
+    "personas": [
+      {
+        "id": "default",
+        "name": "Capture Agent",
+        "promptSuffix": "Keep answers short.",
+        "autoDispatch": false,
+        "createdAt": "2026-10-26T07:11:41.688Z"
+      }
+    ],
+    "active": "default",
+    "count": 1
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /auth/me/mcp-plugins/codex-sources",
+  "status": 200,
+  "response": {
+    "servers": [
+      {
+        "name": "example",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "example-mcp"
+        ]
+      }
+    ]
+  }
+}

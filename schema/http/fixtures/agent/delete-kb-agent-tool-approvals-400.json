@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /kb/agent/tool-approvals",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "toolName or all:true required"
+    }
+  }
+}

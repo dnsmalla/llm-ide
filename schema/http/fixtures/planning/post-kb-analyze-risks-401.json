@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/analyze-risks",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Sent without an access token.",
+  "request": {
+    "body": {
+      "planId": "plan-mvov8l8f-fTXIGvBouNEzXX2v"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

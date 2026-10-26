@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/providers/verify",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. A custom base URL on a loopback address is refused by the SSRF guard before any fetch; the key is never sent.",
+  "request": {
+    "body": {
+      "provider": "custom",
+      "apiKey": "sk-example",
+      "baseUrl": "https://127.0.0.1/v1"
+    }
+  },
+  "response": {
+    "ok": false,
+    "detail": "SSRF guard: base URL resolves to a private/loopback IPv4 address (127.0.0.1)"
+  }
+}

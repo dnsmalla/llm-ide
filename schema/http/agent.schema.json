@@ -1,0 +1,1925 @@
+{
+  "description": "The agent and code-assist surface that is not streamed by the legacy route: the v2 chat engine's non-stream routes (/agent/v2/decision, /agent/v2/session, /agent/v2/cancel) and its SSE turn (/agent/v2/stream, whose events are in schema/agent-v2), the meeting-agent dispatch and its runs, feedback and personas, the agent catalogue and libraries (catalog, commands, generation and skill libraries), the per-user memory and tool-approval stores (project memory, session memory, tool approvals), the free-text ask and its history, and the unified chat sessions (/kb/chat/*). Rows: POST /agent/v2/stream, POST /agent/v2/decision, DELETE /agent/v2/session, POST /agent/v2/cancel, POST /kb/agent/dispatch, POST /kb/agent/stop, GET /kb/agent/runs, POST /kb/agent/feedback, GET /kb/agent/feedback/{stats,by-task}, GET and PUT /kb/agent/persona, GET and POST /kb/agent/personas, PUT /kb/agent/personas/active, PUT and DELETE /kb/agent/personas/:id, GET /kb/agent/{catalog,commands,generation-library,skill-library}, GET and DELETE /kb/agent/{project-memory,tool-approvals,session-memory}, POST /kb/agent/ask, GET and DELETE /kb/agent/ask/history, GET and POST /kb/chat/sessions, GET, PATCH and DELETE /kb/chat/sessions/:id, POST and DELETE /kb/chat/sessions/:id/messages. Not in this group: /chat and /code-assist (notes-generation and the legacy streams), /kb/loop/agent-run (loop), /kb/usage/summary and /kb/agent-sdk (providers), /kb/live/sessions (live), /kb/plan-task/update (planning), /kb/project/install-skills (kb-sources). Fixtures are captured from node server.mjs on a temp DB (127.0.0.1, seeded through the API and through the server's own kb/ helpers while the server was stopped). Model turns use the bench fake engine (LLMIDE_BENCH_FAKE=1 with --bench-fake: no model call) for /agent/v2/stream and the stub CLI (LLMIDE_ANTHROPIC_CLI, scrubbed to /example/stub-cli.mjs) for /kb/agent/ask, so no fixture carries a model's output. Repo paths are /example/repo and the workspace is /example/workspace. Exceptions, each stated on its response: POST /agent/v2/decision 200 is transcribed from the handler (a parked approval is needed to capture it); GET /kb/agent/commands 200 is x-unspecified (commands come from enabled plugins, and no plugin in the capture declares one). The catalog's plugin subagents are open: the entry shape is the plugin's own manifest and no capture plugin declares one, so the item is typed as an open object. Request fields the fixtures do not exercise are x-optional (the v2 stream's turn options and the decision's answer fields), not dropped. The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says.",
+  "$defs": {
+    "Ok": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      }
+    },
+    "LegacyPersona": {
+      "description": "The legacy single-persona surface (GET and PUT /kb/agent/persona): the stored fields only, no id.",
+      "type": "object",
+      "required": [
+        "name",
+        "promptSuffix",
+        "autoDispatch"
+      ],
+      "properties": {
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "promptSuffix": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "autoDispatch": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Persona": {
+      "description": "A row of the multi-persona registry (kb/personas.mjs). id 'default' is the migrated legacy persona.",
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "promptSuffix",
+        "autoDispatch",
+        "createdAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "promptSuffix": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "autoDispatch": {
+          "type": "boolean"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "ISO 8601 timestamp"
+        }
+      }
+    },
+    "PersonaList": {
+      "type": "object",
+      "required": [
+        "personas",
+        "active",
+        "count"
+      ],
+      "properties": {
+        "personas": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Persona"
+          }
+        },
+        "active": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "the active persona's id"
+        },
+        "count": {
+          "type": "integer"
+        }
+      }
+    },
+    "ChatSession": {
+      "description": "A unified chat session (kb/chat-sessions.mjs). createdAt and updatedAt are epoch seconds with a fraction.",
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "surface",
+        "mode",
+        "projectId",
+        "createdAt",
+        "updatedAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string",
+          "description": "mac, extension or any"
+        },
+        "mode": {
+          "type": "string",
+          "description": "ask, agent or transcript"
+        },
+        "projectId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "createdAt": {
+          "type": "number"
+        },
+        "updatedAt": {
+          "type": "number"
+        }
+      }
+    },
+    "ChatMessage": {
+      "type": "object",
+      "required": [
+        "seq",
+        "role",
+        "content",
+        "meta",
+        "createdAt"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "role": {
+          "type": "string",
+          "description": "user, assistant or system"
+        },
+        "content": {
+          "type": "string"
+        },
+        "meta": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Caller-supplied metadata stored as sent; the server does not interpret it."
+        },
+        "createdAt": {
+          "type": "number"
+        }
+      }
+    },
+    "AskMessage": {
+      "type": "object",
+      "required": [
+        "seq",
+        "role",
+        "content",
+        "created_at"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "role": {
+          "type": "string",
+          "description": "user or assistant"
+        },
+        "content": {
+          "type": "string"
+        },
+        "created_at": {
+          "type": "number",
+          "description": "epoch seconds with a fraction"
+        }
+      }
+    },
+    "SkillEntry": {
+      "type": "object",
+      "required": [
+        "name",
+        "kind",
+        "description"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "read",
+            "write"
+          ]
+        },
+        "description": {
+          "type": "string"
+        }
+      }
+    },
+    "LibraryEntry": {
+      "description": "A kit template or command (generation-library). surface divides the Doc Gen and Visual menus.",
+      "type": "object",
+      "required": [
+        "id",
+        "family",
+        "name",
+        "description",
+        "surface",
+        "body",
+        "path",
+        "sourceId",
+        "sourceName"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "<family>/<file-stem>"
+        },
+        "family": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "surface": {
+          "type": "string",
+          "enum": [
+            "doc",
+            "visual"
+          ]
+        },
+        "body": {
+          "type": "string",
+          "description": "the Markdown body the app seeds into the project"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceName": {
+          "type": "string"
+        }
+      }
+    },
+    "SkillLibraryEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "family",
+        "name",
+        "description",
+        "path",
+        "sourceId",
+        "sourceName"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "family": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "sourceId": {
+          "type": "string"
+        },
+        "sourceName": {
+          "type": "string"
+        }
+      }
+    },
+    "TaskFeedback": {
+      "type": "object",
+      "required": [
+        "planTaskId",
+        "total",
+        "byVerdict",
+        "usefulRate",
+        "avgScoreUseful",
+        "avgScoreNoise"
+      ],
+      "properties": {
+        "planTaskId": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "byVerdict": {
+          "$ref": "#/$defs/VerdictCounts"
+        },
+        "usefulRate": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "avgScoreUseful": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "avgScoreNoise": {
+          "type": [
+            "number",
+            "null"
+          ]
+        }
+      }
+    },
+    "VerdictCounts": {
+      "type": "object",
+      "required": [
+        "useful",
+        "noise",
+        "later"
+      ],
+      "properties": {
+        "useful": {
+          "type": "integer"
+        },
+        "noise": {
+          "type": "integer"
+        },
+        "later": {
+          "type": "integer"
+        }
+      }
+    },
+    "ToolRule": {
+      "type": "object",
+      "required": [
+        "projectRoot",
+        "toolName",
+        "pattern",
+        "grantedAt"
+      ],
+      "properties": {
+        "projectRoot": {
+          "type": "string",
+          "description": "Absolute workspace root the rule applies to"
+        },
+        "toolName": {
+          "type": "string",
+          "description": "`Bash`, `run-bash`, or an act tool name"
+        },
+        "pattern": {
+          "type": "string",
+          "description": "Command prefix for shell tools; empty = the whole tool"
+        },
+        "grantedAt": {
+          "type": "string",
+          "description": "ISO-8601 timestamp"
+        }
+      }
+    },
+    "ToolApprovalListing": {
+      "type": "object",
+      "required": [
+        "rules",
+        "approvals"
+      ],
+      "properties": {
+        "rules": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ToolRule"
+          }
+        },
+        "approvals": {
+          "type": "array",
+          "description": "pre-0034 global grants, no longer honoured by either engine, still listed and revocable",
+          "items": {
+            "$ref": "#/$defs/ApprovalGrant"
+          }
+        }
+      }
+    },
+    "ApprovalGrant": {
+      "type": "object",
+      "required": [
+        "toolName",
+        "grantedAt"
+      ],
+      "properties": {
+        "toolName": {
+          "type": "string"
+        },
+        "grantedAt": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /agent/v2/stream": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "message",
+            "agentContext"
+          ],
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "User message. Fence sentinels are neutralised, then capped at 120 000 chars; the message and attachments share one 150 000-char turn budget, message first. An over-cap message is truncated and the model is told so in-band, not rejected."
+            },
+            "agentContext": {
+              "type": "object",
+              "required": [
+                "chatSessionId",
+                "workspaceRoot"
+              ],
+              "properties": {
+                "chatSessionId": {
+                  "type": "string",
+                  "description": "Mac chat session id — the mapping key"
+                },
+                "workspaceRoot": {
+                  "type": "string",
+                  "description": "Workspace the engine roots its reads in"
+                }
+              }
+            },
+            "mode": {
+              "type": "string",
+              "description": "Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions"
+            },
+            "language": {
+              "type": "string",
+              "x-optional": true
+            },
+            "model": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Model id from the picker, passed to the SDK verbatim (an Anthropic id, or the custom provider's own id on a gateway turn); omitted = config default"
+            },
+            "provider": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Provider the turn runs on (server v43+): `anthropic` (default when omitted) or an Anthropic-compatible custom provider `custom:<uuid>` registered with an `anthropicBaseURL`. The engine points the Agent SDK at that endpoint with the provider's own key and meters the turn under this id. Any other value fails before the SDK spawns with a terminal error event coded `PROVIDER_NOT_AGENT_CAPABLE` (no Anthropic-compatible endpoint) or `PROVIDER_UNAVAILABLE` (unregistered / disabled / no key)."
+            },
+            "effort": {
+              "type": "string",
+              "x-optional": true
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true,
+              "description": "Invoked skill ids (max 5); bodies are prompt-injected"
+            },
+            "planExecute": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "Set only by the Mac saved-plan card's \"Execute plan\" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request."
+            },
+            "planWrite": {
+              "type": "boolean",
+              "x-optional": true
+            },
+            "permissionMode": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Claude Code's modes. `ask` (default; `manual` is its old spelling): prompt-tier calls park an approval unless a saved project rule covers them. `accept-edits`: in-workspace Edit/Write run unasked, shell still asks. `bypass`: nothing that would park asks. No mode lifts the blocklist or write containment."
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "x-optional": true,
+              "description": "File attachments (max 30 files, 80 000 chars each, 200 000 total)"
+            },
+            "fresh": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "Skip the recorded SDK session id and start a new one"
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "type": "object"
+              },
+              "x-optional": true,
+              "description": "read only when fresh is true"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "sse",
+          "x-events": "schema/agent-v2/agent-v2.schema.json"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /agent/v2/decision": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "requestId",
+            "sdkSessionId"
+          ],
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "description": "Id from the approval_request event"
+            },
+            "sdkSessionId": {
+              "type": "string"
+            },
+            "action": {
+              "type": "string",
+              "description": "allow, deny or answer; may be omitted when answers is sent (the server then answers)"
+            },
+            "answers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "x-optional": true,
+              "description": "question to answer (AskUserQuestion approval): question text to chosen answer"
+            },
+            "feedback": {
+              "type": "string",
+              "x-optional": true,
+              "description": "With `deny`: the user's instruction, handed to the model as the denial reason (max 2000 chars)"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /agent/v2/session": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "chatSessionId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "sdkSessionId"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "sdkSessionId": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the SDK session the chat was bound to, or null when it had none"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /agent/v2/cancel": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "chatSessionId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "cancelled"
+          ],
+          "properties": {
+            "cancelled": {
+              "type": "boolean",
+              "description": "false when no turn was in flight for the chat"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/agent/dispatch": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "planId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "persona": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meetingUrl": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "planId",
+            "attached"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "planId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "attached": {
+              "type": "boolean",
+              "description": "false when the session already had a loop attached"
+            },
+            "reason": {
+              "type": "string",
+              "x-optional": true,
+              "description": "set only when attached is false: already-attached"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/agent/stop": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "stopped"
+          ],
+          "properties": {
+            "stopped": {
+              "type": "boolean"
+            },
+            "reason": {
+              "type": "string",
+              "x-optional": true,
+              "description": "set only when stopped is false: unknown-session or forbidden"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/agent/runs": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "runs"
+          ],
+          "properties": {
+            "runs": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sessionId",
+                  "planId",
+                  "startedAt",
+                  "lastTickAt",
+                  "lastDecision"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "planId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "startedAt": {
+                    "type": "number",
+                    "description": "epoch milliseconds"
+                  },
+                  "lastTickAt": {
+                    "type": [
+                      "number",
+                      "null"
+                    ]
+                  },
+                  "lastDecision": {
+                    "type": [
+                      "object",
+                      "null"
+                    ],
+                    "description": "the loop's last candidate decision (agents/meeting-agent.mjs recordDecision); null until the loop has judged one",
+                    "properties": {
+                      "reason": {
+                        "type": "string"
+                      },
+                      "score": {
+                        "type": [
+                          "number",
+                          "null"
+                        ]
+                      },
+                      "asked": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "reason",
+                      "score",
+                      "asked"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/agent/feedback": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "captionSeq": {
+              "type": "integer"
+            },
+            "verdict": {
+              "type": "string",
+              "description": "useful, noise or later"
+            },
+            "planTaskId": {
+              "type": "string"
+            },
+            "score": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/agent/feedback/stats": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "sinceDays": {
+              "type": "string",
+              "description": "The window in days; the default is 30."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "total",
+            "byVerdict",
+            "usefulRate",
+            "avgScore",
+            "sinceDays"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer"
+            },
+            "byVerdict": {
+              "$ref": "#/$defs/VerdictCounts"
+            },
+            "usefulRate": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "avgScore": {
+              "type": "object",
+              "description": "mean score per verdict, keyed by verdict",
+              "additionalProperties": {
+                "type": [
+                  "number",
+                  "null"
+                ]
+              }
+            },
+            "sinceDays": {
+              "type": "number"
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/agent/feedback/by-task": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "sinceDays": {
+              "type": "string",
+              "description": "The window in days; the default is 30."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "tasks"
+          ],
+          "properties": {
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TaskFeedback"
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/agent/persona": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "persona"
+          ],
+          "properties": {
+            "persona": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "the stored persona, or null when none is set",
+              "properties": {
+                "name": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "promptSuffix": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "autoDispatch": {
+                  "type": "boolean"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "PUT /kb/agent/persona": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "promptSuffix": {
+              "type": "string"
+            },
+            "autoDispatch": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "persona"
+          ],
+          "properties": {
+            "persona": {
+              "$ref": "#/$defs/LegacyPersona"
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/agent/personas": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PersonaList"
+        }
+      }
+    },
+    "POST /kb/agent/personas": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "promptSuffix": {
+              "type": "string"
+            },
+            "autoDispatch": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "persona",
+            "personas",
+            "active",
+            "count"
+          ],
+          "properties": {
+            "persona": {
+              "$ref": "#/$defs/Persona"
+            },
+            "personas": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Persona"
+              }
+            },
+            "active": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "count": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "PUT /kb/agent/personas/active": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PersonaList"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /kb/agent/personas/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "promptSuffix": {
+              "type": "string"
+            },
+            "autoDispatch": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "persona"
+          ],
+          "properties": {
+            "persona": {
+              "$ref": "#/$defs/Persona"
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/agent/personas/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "removed",
+            "active"
+          ],
+          "properties": {
+            "removed": {
+              "type": "boolean"
+            },
+            "active": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/agent/catalog": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "skills",
+            "subagents"
+          ],
+          "properties": {
+            "skills": {
+              "type": "object",
+              "required": [
+                "global",
+                "internal",
+                "plugins"
+              ],
+              "properties": {
+                "global": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/SkillEntry"
+                  }
+                },
+                "internal": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/SkillEntry"
+                  }
+                },
+                "plugins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "pluginName",
+                      "pluginDisplayName",
+                      "skills"
+                    ],
+                    "properties": {
+                      "pluginName": {
+                        "type": "string"
+                      },
+                      "pluginDisplayName": {
+                        "type": "string"
+                      },
+                      "skills": {
+                        "type": "array",
+                        "items": {
+                          "$ref": "#/$defs/SkillEntry"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "subagents": {
+              "type": "object",
+              "required": [
+                "plugins"
+              ],
+              "properties": {
+                "plugins": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "one entry per enabled plugin that declares subagents; the entry is the plugin's own manifest data (pluginName, pluginDisplayName, subagents) and no capture plugin declares one, so it is not pinned"
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/agent/commands": {
+      "responses": {
+        "200": {
+          "x-unspecified": "commands come from enabled plugins that ship a slash command; the capture server has only the bundled claude-project-artifact plugin, which ships none, so the list is always empty offline. Pin it once a plugin with a command is part of the capture."
+        }
+      }
+    },
+    "GET /kb/agent/generation-library": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "repo",
+            "templates",
+            "commands"
+          ],
+          "properties": {
+            "repo": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Built-in skills repo path"
+            },
+            "templates": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LibraryEntry"
+              }
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LibraryEntry"
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/agent/skill-library": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "repo",
+            "skills"
+          ],
+          "properties": {
+            "repo": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Central skills repo path"
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SkillLibraryEntry"
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/agent/project-memory": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "description": "an indexed repo path; resolved against the allow-list"
+            },
+            "workspaceRoot": {
+              "type": "string",
+              "description": "the open workspace folder"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "facts",
+            "repo"
+          ],
+          "properties": {
+            "facts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "repo": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "the resolved absolute root, or null when no candidate is allow-listed"
+            }
+          }
+        }
+      }
+    },
+    "DELETE /kb/agent/project-memory": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "repo"
+          ],
+          "properties": {
+            "repo": {
+              "type": "string",
+              "description": "Absolute root from the GET above"
+            },
+            "workspaceRoot": {
+              "type": "string"
+            },
+            "fact": {
+              "type": "string",
+              "description": "one fact to remove, by its identity"
+            },
+            "all": {
+              "type": "boolean",
+              "description": "true clears every fact of the repo"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "facts"
+          ],
+          "properties": {
+            "facts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/agent/tool-approvals": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ToolApprovalListing"
+        }
+      }
+    },
+    "DELETE /kb/agent/tool-approvals": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "projectRoot": {
+              "type": "string",
+              "description": "with toolName and pattern: one project rule"
+            },
+            "toolName": {
+              "type": "string",
+              "description": "alone: one legacy global grant"
+            },
+            "pattern": {
+              "type": "string"
+            },
+            "all": {
+              "type": "boolean",
+              "description": "Revoke every rule and legacy grant"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "rules",
+            "approvals",
+            "removed"
+          ],
+          "properties": {
+            "rules": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ToolRule"
+              }
+            },
+            "approvals": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ApprovalGrant"
+              }
+            },
+            "removed": {
+              "type": "integer"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/agent/session-memory": {
+      "request": {
+        "query": {
+          "type": "object",
+          "required": [
+            "sessionId"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "the chat's id; a blank value answers 400"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "facts"
+          ],
+          "properties": {
+            "facts": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/agent/session-memory": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "sessionId"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string",
+              "description": "Chat session UUID (AgentContext.chatSessionId)"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "removed"
+          ],
+          "properties": {
+            "removed": {
+              "type": "integer"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/agent/ask": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "User message (max 8 000 chars after sanitization)"
+            },
+            "image": {
+              "type": "object",
+              "x-optional": true,
+              "description": "one base64 image, capped per image; not exercised offline"
+            },
+            "history": {
+              "type": "array",
+              "description": "the prior turns of this chat; only the last 10 are sent to the model",
+              "items": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "content"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "description": "user or assistant"
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "reply"
+          ],
+          "properties": {
+            "reply": {
+              "type": "string"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/agent/ask/history": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "description": "Returns the newest N messages, oldest first; the default is 50, and reads are capped at 500."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "messages"
+          ],
+          "properties": {
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AskMessage"
+              }
+            }
+          }
+        }
+      }
+    },
+    "DELETE /kb/agent/ask/history": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "removed"
+          ],
+          "properties": {
+            "removed": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/chat/sessions": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "surface": {
+              "type": "string",
+              "description": "mac, extension or any"
+            },
+            "mode": {
+              "type": "string",
+              "description": "ask, agent or transcript"
+            },
+            "limit": {
+              "type": "string",
+              "description": "The default is 50, with a minimum of 1 and a cap of 200."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessions"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ChatSession"
+              }
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/chat/sessions": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            },
+            "surface": {
+              "type": "string",
+              "description": "mac, extension or any; default any"
+            },
+            "mode": {
+              "type": "string",
+              "description": "ask, agent or transcript; default ask"
+            },
+            "projectId": {
+              "type": "string",
+              "x-optional": true,
+              "description": "the server also accepts project_id"
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "type": "object",
+          "required": [
+            "session"
+          ],
+          "properties": {
+            "session": {
+              "$ref": "#/$defs/ChatSession"
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/chat/sessions/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "description": "Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "session"
+          ],
+          "properties": {
+            "session": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "surface",
+                "mode",
+                "projectId",
+                "createdAt",
+                "updatedAt",
+                "messages"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "surface": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                },
+                "messages": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/ChatMessage"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PATCH /kb/chat/sessions/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "title": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/chat/sessions/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/chat/sessions/:id/messages": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "role": {
+              "type": "string",
+              "description": "user, assistant or system"
+            },
+            "content": {
+              "type": "string"
+            },
+            "meta": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "additionalProperties": true,
+              "description": "caller-supplied metadata, stored as sent"
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "type": "object",
+          "required": [
+            "seq",
+            "createdAt"
+          ],
+          "properties": {
+            "seq": {
+              "type": "integer"
+            },
+            "createdAt": {
+              "type": "number"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/chat/sessions/:id/messages": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "cleared"
+          ],
+          "properties": {
+            "cleared": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    }
+  }
+}

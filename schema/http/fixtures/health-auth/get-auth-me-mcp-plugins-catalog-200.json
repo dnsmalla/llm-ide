@@ -1,0 +1,210 @@
+{
+  "endpoint": "GET /auth/me/mcp-plugins/catalog",
+  "status": 200,
+  "response": {
+    "servers": [
+      {
+        "id": "filesystem",
+        "name": "Filesystem",
+        "description": "Read, write, and search files under directories you allow.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem"
+        ],
+        "requiresArg": {
+          "label": "Directory to expose",
+          "placeholder": "/Users/you/projects"
+        },
+        "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/filesystem",
+        "registered": true
+      },
+      {
+        "id": "git",
+        "name": "Git",
+        "description": "Read, search, and manipulate Git repositories.",
+        "transport": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-git"
+        ],
+        "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/git",
+        "registered": false
+      },
+      {
+        "id": "fetch",
+        "name": "Fetch",
+        "description": "Fetch a URL and convert it to markdown for the model.",
+        "transport": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-fetch"
+        ],
+        "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/fetch",
+        "registered": false
+      },
+      {
+        "id": "memory",
+        "name": "Memory",
+        "description": "Knowledge-graph-backed persistent memory across sessions.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-memory"
+        ],
+        "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/memory",
+        "registered": false
+      },
+      {
+        "id": "sequential-thinking",
+        "name": "Sequential Thinking",
+        "description": "Step-by-step reflective problem solving as a tool.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-sequential-thinking"
+        ],
+        "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/sequentialthinking",
+        "registered": false
+      },
+      {
+        "id": "time",
+        "name": "Time",
+        "description": "Current time and timezone conversion.",
+        "transport": "stdio",
+        "command": "uvx",
+        "args": [
+          "mcp-server-time"
+        ],
+        "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/time",
+        "registered": false
+      },
+      {
+        "id": "everything",
+        "name": "Everything (test server)",
+        "description": "Reference server exercising every MCP feature — useful for checking that wiring works.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-everything"
+        ],
+        "docsUrl": "https://github.com/modelcontextprotocol/servers/tree/main/src/everything",
+        "registered": false
+      },
+      {
+        "id": "playwright",
+        "name": "Playwright",
+        "description": "Drive a real browser — navigate, click, fill forms, screenshot.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@playwright/mcp@latest"
+        ],
+        "docsUrl": "https://code.claude.com/docs/en/mcp-quickstart",
+        "registered": false
+      },
+      {
+        "id": "dbhub",
+        "name": "Database (DBHub)",
+        "description": "Query Postgres, MySQL, SQLite and friends through one server.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@bytebase/dbhub",
+          "--dsn"
+        ],
+        "requiresArg": {
+          "label": "Connection string (DSN)",
+          "placeholder": "postgresql://readonly:pass@host:5432/db"
+        },
+        "docsUrl": "https://code.claude.com/docs/en/mcp",
+        "registered": false
+      },
+      {
+        "id": "airtable",
+        "name": "Airtable",
+        "description": "Read and write Airtable bases.",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "airtable-mcp-server"
+        ],
+        "credential": {
+          "vaultKey": "mcp.airtable.apiKey",
+          "target": "env",
+          "name": "AIRTABLE_API_KEY",
+          "label": "Airtable API key"
+        },
+        "docsUrl": "https://code.claude.com/docs/en/mcp",
+        "registered": false
+      },
+      {
+        "id": "github",
+        "name": "GitHub",
+        "description": "Issues, pull requests, code search and reviews on GitHub.",
+        "transport": "http",
+        "url": "https://api.githubcopilot.com/mcp/",
+        "credential": {
+          "vaultKey": "mcp.github.token",
+          "target": "header",
+          "name": "Authorization",
+          "template": "Bearer ${value}",
+          "label": "GitHub token (a PAT with the scopes you want exposed)"
+        },
+        "docsUrl": "https://code.claude.com/docs/en/agent-sdk/mcp",
+        "registered": false
+      },
+      {
+        "id": "sentry",
+        "name": "Sentry",
+        "description": "Errors, stack traces, and which deploy introduced them.",
+        "transport": "http",
+        "url": "https://mcp.sentry.dev/mcp",
+        "oauth": true,
+        "docsUrl": "https://code.claude.com/docs/en/mcp-quickstart",
+        "registered": false
+      },
+      {
+        "id": "notion",
+        "name": "Notion",
+        "description": "Search and edit Notion pages and databases.",
+        "transport": "http",
+        "url": "https://mcp.notion.com/mcp",
+        "oauth": true,
+        "docsUrl": "https://code.claude.com/docs/en/mcp",
+        "registered": false
+      },
+      {
+        "id": "context7",
+        "name": "Context7",
+        "description": "Up-to-date library and framework documentation, on demand.",
+        "transport": "http",
+        "url": "https://mcp.context7.com/mcp",
+        "credential": {
+          "vaultKey": "mcp.context7.apiKey",
+          "target": "header",
+          "name": "CONTEXT7_API_KEY",
+          "label": "Context7 API key"
+        },
+        "docsUrl": "https://context7.com",
+        "registered": false
+      },
+      {
+        "id": "claude-code-docs",
+        "name": "Claude Code docs",
+        "description": "Claude Code's own documentation, searchable as a tool.",
+        "transport": "http",
+        "url": "https://code.claude.com/docs/mcp",
+        "docsUrl": "https://code.claude.com/docs/en/mcp-quickstart",
+        "registered": false
+      }
+    ]
+  }
+}

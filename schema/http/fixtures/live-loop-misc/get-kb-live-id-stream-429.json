@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/live/:id/stream",
+  "status": 429,
+  "description": "A fifth concurrent stream for the same user is refused.",
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TOO_MANY_STREAMS",
+      "message": "Too many concurrent live streams"
+    }
+  }
+}

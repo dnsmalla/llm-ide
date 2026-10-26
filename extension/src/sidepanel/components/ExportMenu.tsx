@@ -1,6 +1,7 @@
 import React, { useState, useMemo } from 'react';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { getAvailableFormats, type ExportContext } from '../../lib/export-formats';
+import { errorText } from '../../lib/server-error';
 import type { TranscriptSegment } from '../hooks/useTranscript';
 
 interface Props {
@@ -91,13 +92,13 @@ export default function ExportMenu({
 
       if (!response.ok) {
         const err = await response.json().catch(() => ({}));
-        throw new Error(err.error || `Server error: ${response.status}`);
+        throw new Error(errorText(err, response.status));
       }
 
       const contentType = response.headers.get('content-type') || '';
       if (contentType.includes('application/json')) {
         const err = await response.json();
-        throw new Error(err.error || 'Failed to generate DOCX');
+        throw new Error(errorText(err, undefined, 'Failed to generate DOCX'));
       }
 
       const blob = await response.blob();

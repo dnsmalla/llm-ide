@@ -25,3 +25,19 @@ test('the existing fields are preserved', () => {
   const ctx = buildEnrichedAgentContext({ sessionId: 's', chatSessionId: 'c', activeProject: 'P' }, [{ id: 1 }]);
   assert.deepEqual([ctx.sessionId, ctx.chatSessionId, ctx.activeProject, ctx.recentMeetings], ['s', 'c', 'P', [{ id: 1 }]]);
 });
+
+test('forwards currentBranch and gitStatus counts; bounds and drops anything else', () => {
+  const ctx = buildEnrichedAgentContext({
+    currentBranch: 'feat/x'.padEnd(500, 'y'),
+    gitStatus: { staged: 2, unstaged: -1, ahead: 1.7, behind: 0, hasUpstream: true, extra: 'dropped' },
+  }, []);
+  assert.equal(ctx.currentBranch.length, 200);
+  assert.deepEqual(ctx.gitStatus, { staged: 2, unstaged: 0, ahead: 1, behind: 0, hasUpstream: true });
+
+  const junk = buildEnrichedAgentContext({ currentBranch: 42, gitStatus: ['not', 'an', 'object'] }, []);
+  assert.equal(junk.currentBranch, null);
+  assert.equal(junk.gitStatus, null);
+
+  const long = buildEnrichedAgentContext({ gitStatus: 'g'.repeat(5000) }, []);
+  assert.equal(long.gitStatus.length, 2000);
+});

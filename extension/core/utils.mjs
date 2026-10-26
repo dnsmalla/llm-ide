@@ -60,6 +60,26 @@ export function parseJSON(body) {
   }
 }
 
+/**
+ * Reads a JSON object body for a route that must refuse malformed input
+ * (SCHEMA.md "Malformed JSON bodies"). An unparseable body answers
+ * 400 VALIDATION_FAILED here and resolves to null: the caller returns after
+ * the response is written. A body that parses but is not an object (null,
+ * an array, a number) reads as {}, so the route's own "unknown" answer
+ * applies. An over-limit body still rejects inside readBody, as before.
+ */
+export async function readJsonObjectOr400(req, res, limit) {
+  const raw = await readBody(req, limit);
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Body must be valid JSON' } });
+    return null;
+  }
+  return parsed && typeof parsed === 'object' ? parsed : {};
+}
+
 // Fence-marker regex compiled once.  The server wraps user-supplied
 // content in <<<BEGIN>>>…<<<END>>> delimiters in every LLM prompt so
 // the model knows where the safe zone ends.  If the content itself

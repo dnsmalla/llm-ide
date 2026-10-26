@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/agent/persona",
+  "status": 200,
+  "response": {
+    "persona": {
+      "name": "Capture Agent",
+      "promptSuffix": "Keep answers short.",
+      "autoDispatch": false
+    }
+  }
+}

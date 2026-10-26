@@ -10,7 +10,7 @@ extension LlmIdeAPIClient {
                                     // server launches a real bot
     }
 
-    struct AgentDispatchResponse: Decodable {
+    public struct AgentDispatchResponse: Decodable {
         let sessionId: String
         let planId: String?
         let attached: Bool
@@ -26,7 +26,7 @@ extension LlmIdeAPIClient {
         let sessionId: String
     }
 
-    struct AgentStopResponse: Decodable {
+    public struct AgentStopResponse: Decodable {
         let stopped: Bool
         let reason: String?
     }
@@ -37,18 +37,18 @@ extension LlmIdeAPIClient {
         let asked: Bool?
     }
 
-    struct AgentRun: Decodable, Identifiable {
+    public struct AgentRun: Decodable, Identifiable {
         let sessionId: String
         let planId: String?
         let startedAt: Double
         let lastTickAt: Double?
         let lastDecision: AgentDecision?
-        var id: String { sessionId }
+        public var id: String { sessionId }
     }
 
     /// Active persona fields that shape conversational LLM surfaces
     /// (/chat, /code-assist, /kb/agent/ask, the in-meeting agent loop).
-    struct AgentPersona: Codable, Equatable {
+    public struct AgentPersona: Codable, Equatable {
         let name: String?
         let promptSuffix: String?
         /// Whether to dispatch the meeting agent automatically when
@@ -67,21 +67,21 @@ extension LlmIdeAPIClient {
             case name, promptSuffix, autoDispatch
         }
 
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             self.name = try c.decodeIfPresent(String.self, forKey: .name)
             self.promptSuffix = try c.decodeIfPresent(String.self, forKey: .promptSuffix)
             self.autoDispatch = (try? c.decodeIfPresent(Bool.self, forKey: .autoDispatch)) ?? false
         }
 
-        func encode(to encoder: Encoder) throws {
+        public func encode(to encoder: Encoder) throws {
             var c = encoder.container(keyedBy: CodingKeys.self)
             try c.encodeIfPresent(name, forKey: .name)
             try c.encodeIfPresent(promptSuffix, forKey: .promptSuffix)
             try c.encode(autoDispatch, forKey: .autoDispatch)
         }
     }
-    struct AgentPersonaWrap: Codable { let persona: AgentPersona? }
+    public struct AgentPersonaWrap: Codable { let persona: AgentPersona? }
 
     // --- Agent methods -----------------------------------------------
 
@@ -162,7 +162,7 @@ extension LlmIdeAPIClient {
 
     /// Combined catalog: executable skills + plugin subagents — used by
     /// the Code Assistant "/" autocomplete (CompletionController).
-    struct AgentSkillCatalog: Decodable {
+    public struct AgentSkillCatalog: Decodable {
         let skills: SkillsCatalog
         let subagents: SubagentsCatalog
 

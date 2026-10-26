@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/email/fetch",
+  "status": 502,
+  "request": {
+    "body": {
+      "host": "127.0.0.1",
+      "port": 1,
+      "secure": false,
+      "user": "example-user@example.com"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "EMAIL_FETCH_FAILED",
+      "message": "Refusing to connect to a private or local address"
+    }
+  }
+}

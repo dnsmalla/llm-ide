@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/review/approve",
+  "status": 409,
+  "request": {
+    "body": {
+      "id": "rev-mvov51y7-SsK--GOXoReRh0nN"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REVIEW_NOT_PENDING",
+      "message": "Item already rejected"
+    }
+  }
+}

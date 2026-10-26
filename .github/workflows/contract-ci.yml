@@ -1,0 +1,53 @@
+name: contract-ci
+
+# The HTTP contract gate (Phase 1 P16): schema conformance of every fixture,
+# and the generated outputs (client types, openapi.yaml, endpoint inventory,
+# design tokens) checked against their sources. Node only, ~1 s once deps are
+# installed. Its inputs span the repo, so it triggers on all of them; a
+# schema-only commit otherwise reached main with no check at all.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'schema/**'
+      - 'scripts/**'
+      - 'extension/**'
+      - 'mac/Sources/**'
+      - 'docs/reference/api/**'
+      - 'Makefile'
+      - '.github/workflows/contract-ci.yml'
+  pull_request:
+    paths:
+      - 'schema/**'
+      - 'scripts/**'
+      - 'extension/**'
+      - 'mac/Sources/**'
+      - 'docs/reference/api/**'
+      - 'Makefile'
+      - '.github/workflows/contract-ci.yml'
+
+concurrency:
+  group: contract-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-gates:
+    name: Contract gates
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci --no-audit --no-fund
+
+      - name: make contract-gates
+        run: make contract-gates

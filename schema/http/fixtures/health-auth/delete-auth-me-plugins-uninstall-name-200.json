@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /auth/me/plugins/uninstall/:name",
+  "status": 200,
+  "request": {
+    "params": {
+      "name": "nope"
+    }
+  },
+  "response": {
+    "ok": true,
+    "removed": false
+  }
+}

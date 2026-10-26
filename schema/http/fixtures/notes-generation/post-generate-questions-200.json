@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /generate-questions",
+  "status": 200,
+  "description": "Captured from the real handler on a temp-DB server (node extension/server.mjs). The model's text is a canned local stub (CAPTURE_CLI), so no model call; the response construction is the server's.",
+  "request": {
+    "body": {
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "participants": [
+        "Alice",
+        "Bob"
+      ],
+      "types": [
+        "conflict",
+        "confirm"
+      ],
+      "language": "en"
+    }
+  },
+  "response": {
+    "questions": "## Conflicts\n1. **Alice:** Who confirms the Friday date?\n\n## Needs confirmation\n1. **Bob:** Is Thursday still realistic for the notes?"
+  }
+}

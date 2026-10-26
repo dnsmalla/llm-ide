@@ -1,0 +1,1904 @@
+{
+  "description": "Planning and outcome routes: plan generation, risk and code-sync passes, the plan CRUD surface, task updates, codegen, dispatch (preview and the guardrail gate), outcome polling and stats, Slack notifications, the transcript summary and conflict questions. Roster: each key is in ALL_ENDPOINTS (extension/server.mjs); handlers are extension/routes/planning.mjs (generate-plan, analyze-risks, code-sync, plans, plan, plan/save, plan/delete, plan-task/update, dispatch, generate-code) and extension/routes/router.mjs (summarize, conflict-questions, outcomes/*, notify/slack). Every route here is token-protected. Malformed JSON answers 400 (SCHEMA.md), not declared per route. Model routes answer from the stub CLI in the capture; their 200 bodies are the handler's construction of the parsed model output. Not declared, with reasons: 409 on /kb/dispatch (needs an approved review, and approving one runs the external dispatch); the non-preview 200 of /kb/dispatch (same); 500 on /kb/code-sync, /kb/outcomes/refresh and /kb/outcomes/retry-failed (no offline trigger); 504 on /kb/summarize (3-minute ceiling); 413 (the body limit). Rate limits: /kb/generate-plan, /kb/analyze-risks, /kb/generate-code, /kb/summarize, /kb/conflict-questions share the llm bucket; /kb/dispatch and /kb/notify/slack the dispatch bucket; /kb/outcomes/refresh the outcomePoll bucket; the other routes are not rate-limited.",
+  "$defs": {
+    "Task": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "status"
+      ],
+      "description": "A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "planId": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "milestone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "estimateDays": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "type": "string"
+        },
+        "risk": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "riskReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "x-optional": true
+              },
+              "title": {
+                "type": "string",
+                "x-optional": true
+              },
+              "bodyExcerpt": {
+                "type": "string",
+                "x-optional": true
+              },
+              "rank": {
+                "type": "number",
+                "x-optional": true
+              }
+            }
+          }
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A code-graph symbol row (kb/code-graph.mjs hydrateSymbols). Not exercised offline: no SCIP index in the temp DB.",
+            "properties": {
+              "symbol_id": {
+                "type": "string",
+                "x-optional": true
+              },
+              "title": {
+                "type": "string",
+                "x-optional": true
+              },
+              "kind": {
+                "type": "string",
+                "x-optional": true
+              },
+              "repo_id": {
+                "type": "string",
+                "x-optional": true
+              },
+              "source_file": {
+                "type": "string",
+                "x-optional": true
+              },
+              "line": {
+                "type": "integer",
+                "x-optional": true
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots)."
+        }
+      }
+    },
+    "CodeFile": {
+      "type": "object",
+      "required": [
+        "path",
+        "kind",
+        "content"
+      ],
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "create",
+            "modify"
+          ]
+        },
+        "language": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "PlanTask": {
+      "type": "object",
+      "required": [
+        "id",
+        "planId",
+        "position",
+        "title",
+        "status",
+        "dependsOn",
+        "risk",
+        "files",
+        "symbols"
+      ],
+      "description": "A stored plan task, as getPlan and getTaskById return it: every column, always present (null when unset). Status is one of ALLOWED_TASK_STATUS (kb/plans.mjs); risk is low|med|high or null. Drafts from analyze-risks and code-sync use the looser Task def.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "planId": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "milestone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "estimateDays": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "in_progress",
+            "done",
+            "blocked",
+            "cancelled"
+          ]
+        },
+        "risk": {
+          "enum": [
+            "low",
+            "med",
+            "high",
+            null
+          ]
+        },
+        "riskReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "x-optional": true
+              },
+              "title": {
+                "type": "string",
+                "x-optional": true
+              },
+              "bodyExcerpt": {
+                "type": "string",
+                "x-optional": true
+              },
+              "rank": {
+                "type": "number",
+                "x-optional": true
+              }
+            }
+          }
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A code-graph symbol row (kb/code-graph.mjs hydrateSymbols). Not exercised offline: no SCIP index in the temp DB.",
+            "properties": {
+              "symbol_id": {
+                "type": "string",
+                "x-optional": true
+              },
+              "title": {
+                "type": "string",
+                "x-optional": true
+              },
+              "kind": {
+                "type": "string",
+                "x-optional": true
+              },
+              "repo_id": {
+                "type": "string",
+                "x-optional": true
+              },
+              "source_file": {
+                "type": "string",
+                "x-optional": true
+              },
+              "line": {
+                "type": "integer",
+                "x-optional": true
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots), or null."
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /kb/generate-plan": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "meetingId names a meeting in the KB. skipRisk and skipCodeSync skip those passes (escape valves for a structure-only plan; not exercised by the capture).",
+          "properties": {
+            "meetingId": {
+              "type": "string"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "skipRisk": {
+              "type": "boolean",
+              "x-optional": true
+            },
+            "skipCodeSync": {
+              "type": "boolean",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "createdAt",
+            "updatedAt",
+            "tasks",
+            "meta"
+          ],
+          "description": "A stored plan, as getPlan returns it.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "goal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update."
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Task"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/analyze-risks": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "Exactly one of planId or plan is read (planId wins). planId persists the result; plan returns it without saving.",
+          "properties": {
+            "planId": {
+              "type": "string"
+            },
+            "plan": {
+              "type": "object",
+              "description": "A client-supplied plan draft. The server reads title, goal, language, meetingId and each task's id, title, description, owner, estimateDays, dependsOn, status.",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "goal": {
+                  "type": "string"
+                },
+                "language": {
+                  "type": "string"
+                },
+                "meetingId": {
+                  "type": "string"
+                },
+                "tasks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "owner": {
+                        "type": "string"
+                      },
+                      "estimateDays": {
+                        "type": "number"
+                      },
+                      "dependsOn": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "status": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "language": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "tasks"
+          ],
+          "description": "A plan body from the risk or code-sync routes. With planId the stored plan is returned (SavedPlan shape); with a plan body the result is the sent plan with the pass applied, so id and timestamps may be absent.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "goal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update."
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Task"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/code-sync": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "Exactly one of planId or plan is read (planId wins). Deterministic, no model call.",
+          "properties": {
+            "planId": {
+              "type": "string",
+              "description": "ID of a stored plan — persists result"
+            },
+            "plan": {
+              "type": "object",
+              "description": "A client-supplied plan draft. The server reads title, goal, language, meetingId and each task's id, title, description, owner, estimateDays, dependsOn, status.",
+              "properties": {
+                "title": {
+                  "type": "string"
+                },
+                "goal": {
+                  "type": "string"
+                },
+                "language": {
+                  "type": "string"
+                },
+                "meetingId": {
+                  "type": "string"
+                },
+                "tasks": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "description": {
+                        "type": "string"
+                      },
+                      "owner": {
+                        "type": "string"
+                      },
+                      "estimateDays": {
+                        "type": "number"
+                      },
+                      "dependsOn": {
+                        "type": "array",
+                        "items": {
+                          "type": "string"
+                        }
+                      },
+                      "status": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "tasks"
+          ],
+          "description": "A plan body from the risk or code-sync routes. With planId the stored plan is returned (SavedPlan shape); with a plan body the result is the sent plan with the pass applied, so id and timestamps may be absent.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "goal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update."
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Task"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/plans": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Capped at 200; the default is 50."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "plans",
+            "count"
+          ],
+          "properties": {
+            "plans": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "meetingId": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string"
+                  },
+                  "updatedAt": {
+                    "type": "string"
+                  },
+                  "taskCount": {
+                    "type": "integer"
+                  }
+                }
+              }
+            },
+            "count": {
+              "type": "integer"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/plan/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "createdAt",
+            "updatedAt",
+            "tasks",
+            "meta"
+          ],
+          "description": "A stored plan, as getPlan returns it.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "goal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update."
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PlanTask"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/plan/save": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "savePlan input. id is optional (generated when absent). Tasks are replaced wholesale on every save.",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "Omit to create a new plan"
+            },
+            "title": {
+              "type": "string"
+            },
+            "goal": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": "string"
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Stored as plan meta."
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "owner": {
+                    "type": "string"
+                  },
+                  "due": {
+                    "type": "string"
+                  },
+                  "estimateDays": {
+                    "type": "number"
+                  },
+                  "dependsOn": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "risk": {
+                    "type": "string"
+                  },
+                  "riskReason": {
+                    "type": "string"
+                  },
+                  "milestone": {
+                    "type": "string"
+                  },
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
+                      "properties": {
+                        "ref": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "title": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "bodyExcerpt": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "rank": {
+                          "type": "number",
+                          "x-optional": true
+                        }
+                      }
+                    }
+                  },
+                  "symbols": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "description": "A code-graph symbol row (kb/code-graph.mjs hydrateSymbols). Not exercised offline: no SCIP index in the temp DB.",
+                      "properties": {
+                        "symbol_id": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "title": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "kind": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "repo_id": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "source_file": {
+                          "type": "string",
+                          "x-optional": true
+                        },
+                        "line": {
+                          "type": "integer",
+                          "x-optional": true
+                        }
+                      }
+                    }
+                  },
+                  "meta": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Stored task meta."
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "id",
+            "title",
+            "createdAt",
+            "updatedAt",
+            "tasks",
+            "meta"
+          ],
+          "description": "A stored plan, as getPlan returns it.",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "title": {
+              "type": "string"
+            },
+            "goal": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "language": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "meta": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update."
+            },
+            "createdAt": {
+              "type": "string"
+            },
+            "updatedAt": {
+              "type": "string"
+            },
+            "tasks": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/PlanTask"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/plan/delete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/plan/delete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PATCH /kb/plan-task/update": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "patch": {
+              "type": "object",
+              "description": "Only the keys present change; an explicit null clears a field.",
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "risk": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "riskReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "owner": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "due": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
+                    "properties": {
+                      "ref": {
+                        "type": "string",
+                        "x-optional": true
+                      },
+                      "title": {
+                        "type": "string",
+                        "x-optional": true
+                      },
+                      "bodyExcerpt": {
+                        "type": "string",
+                        "x-optional": true
+                      },
+                      "rank": {
+                        "type": "number",
+                        "x-optional": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PlanTask"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/plan-task/update": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "patch": {
+              "type": "object",
+              "description": "Only the keys present change; an explicit null clears a field.",
+              "properties": {
+                "status": {
+                  "type": "string"
+                },
+                "risk": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "riskReason": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "owner": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "due": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "files": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
+                    "properties": {
+                      "ref": {
+                        "type": "string",
+                        "x-optional": true
+                      },
+                      "title": {
+                        "type": "string",
+                        "x-optional": true
+                      },
+                      "bodyExcerpt": {
+                        "type": "string",
+                        "x-optional": true
+                      },
+                      "rank": {
+                        "type": "number",
+                        "x-optional": true
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PlanTask"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/dispatch": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "target preview builds the bodies a dispatch would send, without any external call. A non-preview target requires reviewId of an approved dispatch review for the same plan, target and destination; the review is consumed.",
+          "properties": {
+            "planId": {
+              "type": "string"
+            },
+            "target": {
+              "type": "string",
+              "enum": [
+                "preview",
+                "github",
+                "backlog",
+                "linear"
+              ]
+            },
+            "taskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "reviewId": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Required when target != preview"
+            },
+            "config": {
+              "type": "object",
+              "description": "Destination and credential keys for the target (repo/owner for github, space/projectId for backlog, teamId/projectId for linear). Credentials come from the vault unless sent here. Open: the keys are per target.",
+              "additionalProperties": true,
+              "properties": {
+                "repo": {
+                  "type": "string",
+                  "x-optional": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "target",
+            "plan",
+            "results"
+          ],
+          "description": "Preview form verified. Non-preview results carry provider fields (url, number, error) that the offline capture cannot produce.",
+          "properties": {
+            "target": {
+              "type": "string"
+            },
+            "plan": {
+              "type": "object",
+              "required": [
+                "id",
+                "title"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                }
+              }
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "taskId",
+                  "status"
+                ],
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string",
+                    "x-optional": true
+                  },
+                  "body": {
+                    "type": "string",
+                    "x-optional": true
+                  },
+                  "labels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "x-optional": true
+                  },
+                  "assignees": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    },
+                    "x-optional": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/generate-code": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "includeFileContext": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "taskId",
+            "summary",
+            "files",
+            "tests",
+            "notes",
+            "rejected"
+          ],
+          "description": "Generated files are returned, never stored. A modify of a file the model was not shown in full is dropped and listed in rejected.",
+          "properties": {
+            "taskId": {
+              "type": "string"
+            },
+            "summary": {
+              "type": "string"
+            },
+            "files": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CodeFile"
+              }
+            },
+            "tests": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CodeFile"
+              }
+            },
+            "notes": {
+              "type": "string"
+            },
+            "rejected": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/summarize": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "transcript": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "started_at": {
+              "type": "string"
+            },
+            "duration_seconds": {
+              "type": "integer"
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "gist",
+            "tldr",
+            "full",
+            "actions",
+            "decisions",
+            "blockers",
+            "generated_at"
+          ],
+          "properties": {
+            "gist": {
+              "type": "string"
+            },
+            "tldr": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "full": {
+              "type": "string"
+            },
+            "actions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "owner": {
+                    "type": "string",
+                    "x-optional": true
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "due": {
+                    "type": "string",
+                    "x-optional": true
+                  }
+                }
+              }
+            },
+            "decisions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "blockers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "text"
+                ],
+                "properties": {
+                  "text": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "model": {
+              "type": "string"
+            },
+            "generated_at": {
+              "type": "integer"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/conflict-questions": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "transcript": {
+              "type": "string",
+              "description": "Current meeting transcript (max 40 000 chars)"
+            },
+            "fileContext": {
+              "type": "string",
+              "description": "Attached code or notes (max 20 000 chars)"
+            },
+            "language": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "questions"
+          ],
+          "properties": {
+            "questions": {
+              "type": "string"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/notify/slack": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "webhookUrl": {
+              "type": "string",
+              "description": "Optional — vault key slack.webhookUrl is preferred"
+            },
+            "planId": {
+              "type": "string"
+            },
+            "payload": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Per kind: a plan, a dispatch result, a review, or {text} for custom."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "A successful send POSTs to a Slack incoming webhook (external). The capture covers the local refusals only: missing kind, no webhook, unknown kind, a secret-shaped custom message, a missing plan and rate limiting."
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/outcomes/refresh": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "taskIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "creds": {
+              "type": "object",
+              "description": "Inline credentials, merged over the vault values; not echoed back.",
+              "additionalProperties": true,
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "pollErroredCount",
+            "pollCount",
+            "changedCount",
+            "durationMs",
+            "byState",
+            "polled"
+          ],
+          "properties": {
+            "pollErroredCount": {
+              "type": "integer"
+            },
+            "pollCount": {
+              "type": "integer"
+            },
+            "changedCount": {
+              "type": "integer"
+            },
+            "durationMs": {
+              "type": "integer"
+            },
+            "byState": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            },
+            "polled": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "taskId",
+                  "state",
+                  "changed"
+                ],
+                "properties": {
+                  "taskId": {
+                    "type": "string"
+                  },
+                  "planId": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "meta": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Poll detail (error, or the provider's status)."
+                  },
+                  "changed": {
+                    "type": "boolean"
+                  },
+                  "circuitOpen": {
+                    "type": "boolean",
+                    "x-optional": true
+                  }
+                }
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/outcomes/retry-failed": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "config": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "Credentials and destination for the retry targets (as /kb/dispatch config)."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "retried",
+            "ok",
+            "failed",
+            "deferred"
+          ],
+          "properties": {
+            "retried": {
+              "type": "integer"
+            },
+            "ok": {
+              "type": "integer"
+            },
+            "failed": {
+              "type": "integer"
+            },
+            "deferred": {
+              "type": "integer"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/outcomes/task/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "outcomes"
+          ],
+          "properties": {
+            "outcomes": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id",
+                  "provider",
+                  "state",
+                  "isTerminal",
+                  "observedAt"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "integer"
+                  },
+                  "provider": {
+                    "type": "string"
+                  },
+                  "ref": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "state": {
+                    "type": "string"
+                  },
+                  "isTerminal": {
+                    "type": "boolean"
+                  },
+                  "meta": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "Outcome detail."
+                  },
+                  "observedAt": {
+                    "type": "string"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/outcomes/stats": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "total",
+            "byState"
+          ],
+          "properties": {
+            "total": {
+              "type": "integer"
+            },
+            "byState": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

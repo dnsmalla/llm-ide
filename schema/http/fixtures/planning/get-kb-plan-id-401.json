@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/plan/:id",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Sent without an access token.",
+  "request": {
+    "params": {
+      "id": "plan-mvov8l8f-fTXIGvBouNEzXX2v"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

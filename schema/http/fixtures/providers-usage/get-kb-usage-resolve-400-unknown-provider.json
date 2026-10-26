@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/usage/resolve",
+  "status": 400,
+  "request": {
+    "query": {
+      "provider": "jev"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Unknown provider (allowed: anthropic, openai, google, custom)"
+    }
+  }
+}

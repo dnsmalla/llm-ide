@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/login",
+  "status": 429,
+  "request": {
+    "body": {
+      "email": "capture-user@example.com",
+      "password": "wrong-password-xx"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests"
+    }
+  }
+}

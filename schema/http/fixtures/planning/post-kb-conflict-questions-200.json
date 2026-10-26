@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/conflict-questions",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The model text is a canned local stub (LLMIDE_ANTHROPIC_CLI, a script that prints the CLI result object), so no model call is made. The questions text is the stub reply, trimmed. Past decisions, blockers and actions come from the KB search.",
+  "request": {
+    "body": {
+      "transcript": "Bob: The notes are late. Alice: Ship it on Friday anyway.",
+      "fileContext": "export function ship() { return true; }",
+      "language": "en"
+    }
+  },
+  "response": {
+    "questions": "- **Undecided** Who signs off the release? Past meeting: \"Ship the release on Friday\" has no named approver."
+  }
+}

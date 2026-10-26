@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/search",
+  "status": 200,
+  "request": {
+    "query": {
+      "q": "search",
+      "projectId": "example-project",
+      "limit": "5"
+    }
+  },
+  "response": {
+    "results": []
+  }
+}

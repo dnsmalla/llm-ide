@@ -1,0 +1,1683 @@
+{
+  "description": "Model provider verification and models, the Claude Agent SDK status and update, custom providers, tier routing and the usage ledger (limits, summary, resolve, record, rate-limit snapshot, turn composition). Roster: all 14 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/router.mjs (the /kb/providers/*, /kb/agent-sdk*, /kb/custom-providers, /kb/routing-tiers and /kb/usage/* branches) and extension/server/tier-routing.mjs / custom-providers.mjs / providers/tier-routing.mjs / kb/usage.mjs. All are token-protected and on the core feature set. Request parts list exactly the keys each handler reads; every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: POST /kb/providers/verify and /kb/providers/models share llmFast (429 declared); POST /kb/usage/record and PUT /kb/usage/limits share kbWrite (429 declared). POST /kb/agent-sdk/update has no request body. Not captured: the Claude SDK model listing (needs the local Claude CLI login), an ok:true verify (a live provider listing), an install through POST /kb/agent-sdk/update, and an Anthropic rate-limit snapshot; the schema says so where it matters, and x-optional marks the unfixtured properties. The two Agent SDK fixtures are produced in-process by calling llm_agent/sdk/updater.mjs (its registry fetch stubbed offline, the install refused) because the route itself would reach the npm registry; the bodies are the functions' return values, which the route sends verbatim.",
+  "$defs": {
+    "ModelLimit": {
+      "type": "object",
+      "required": [
+        "provider",
+        "model",
+        "label",
+        "priority",
+        "enabled",
+        "limit_value",
+        "unit",
+        "window_kind",
+        "threshold_pct",
+        "custom"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "limit_value": {
+          "type": "integer"
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "runs",
+            "tokens"
+          ]
+        },
+        "window_kind": {
+          "type": "string",
+          "enum": [
+            "daily",
+            "monthly"
+          ]
+        },
+        "threshold_pct": {
+          "type": "integer"
+        },
+        "custom": {
+          "type": "boolean"
+        }
+      }
+    },
+    "Resolution": {
+      "type": "object",
+      "required": [
+        "provider",
+        "model",
+        "status",
+        "resetAt",
+        "reason",
+        "engaged"
+      ],
+      "description": "The resolver verdict (kb/usage.mjs resolveModel). used, limit, pct and unit are present only when a model was picked (ok or degraded); a paused or unconfigured verdict has no pick.",
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "null when paused or unconfigured"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "degraded",
+            "paused",
+            "unconfigured"
+          ]
+        },
+        "resetAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ISO-8601 window reset; null when there is no chain"
+        },
+        "reason": {
+          "type": "string"
+        },
+        "used": {
+          "type": "number"
+        },
+        "limit": {
+          "type": "number"
+        },
+        "pct": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "engaged": {
+          "type": "boolean"
+        }
+      }
+    },
+    "ModelStat": {
+      "type": "object",
+      "required": [
+        "model",
+        "label",
+        "enabled",
+        "custom",
+        "priority",
+        "unit",
+        "window_kind",
+        "limit",
+        "threshold_pct",
+        "used",
+        "pct",
+        "state",
+        "quota",
+        "tokens",
+        "resetAt"
+      ],
+      "properties": {
+        "model": {
+          "type": "string"
+        },
+        "label": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "custom": {
+          "type": "boolean"
+        },
+        "priority": {
+          "type": "integer"
+        },
+        "unit": {
+          "type": "string"
+        },
+        "window_kind": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer"
+        },
+        "threshold_pct": {
+          "type": "integer"
+        },
+        "used": {
+          "type": "number"
+        },
+        "pct": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "state": {
+          "type": "string",
+          "enum": [
+            "ok",
+            "warning",
+            "exhausted"
+          ]
+        },
+        "quota": {
+          "type": "boolean"
+        },
+        "tokens": {
+          "type": "object",
+          "required": [
+            "input",
+            "output",
+            "cacheRead",
+            "cacheCreation",
+            "totalInput",
+            "cacheHitPct",
+            "unknownRows"
+          ],
+          "properties": {
+            "input": {
+              "type": "integer"
+            },
+            "output": {
+              "type": "integer"
+            },
+            "cacheRead": {
+              "type": "integer"
+            },
+            "cacheCreation": {
+              "type": "integer"
+            },
+            "totalInput": {
+              "type": "integer"
+            },
+            "cacheHitPct": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "unknownRows": {
+              "type": "integer"
+            }
+          }
+        },
+        "resetAt": {
+          "type": "string"
+        }
+      }
+    },
+    "TokenBreakdown": {
+      "type": "object",
+      "required": [
+        "input",
+        "output",
+        "cacheRead",
+        "cacheCreation",
+        "totalInput",
+        "cacheHitPct",
+        "unknownRows"
+      ],
+      "properties": {
+        "input": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "cacheRead": {
+          "type": "integer"
+        },
+        "cacheCreation": {
+          "type": "integer"
+        },
+        "totalInput": {
+          "type": "integer"
+        },
+        "cacheHitPct": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "unknownRows": {
+          "type": "integer"
+        }
+      }
+    },
+    "RouteRef": {
+      "type": "object",
+      "required": [
+        "provider",
+        "model"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "anthropic | openai | google | deepseek | jev | custom:<id>"
+        },
+        "model": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /kb/providers/verify": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "provider is required (an unknown or empty one answers 400). mode 'cli' checks the provider's CLI binary; any other value is the key mode. apiKey, when absent, is the stored key. baseUrl is read only for provider custom.",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "Provider ID (e.g. anthropic, openai, custom)"
+            },
+            "mode": {
+              "type": "string",
+              "description": "key | cli"
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "placeholder in fixtures; never a real key"
+            },
+            "baseUrl": {
+              "type": "string",
+              "description": "Required for provider=custom"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "detail"
+          ],
+          "description": "Always 200 unless the request is invalid. ok true is answered only after a live model listing, which the capture does not reach (no external network); the true shape is the same.",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "detail": {
+              "type": "string"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/providers/models": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "models"
+          ],
+          "description": "The live chat models for a provider, or [] with a detail. entries and source are the Claude SDK variant (anthropic only, server API v57+ / v63+): entries carries display names and effort levels. The SDK variant is not captured (it needs the local Claude CLI login), so entries and source are optional and not covered by a fixture.",
+          "properties": {
+            "models": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "detail": {
+              "type": "string",
+              "description": "Human-readable reason when models is empty"
+            },
+            "entries": {
+              "x-optional": true,
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "id"
+                ],
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "displayName": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "effortLevels": {
+                    "type": "array",
+                    "items": {
+                      "type": "string"
+                    }
+                  }
+                }
+              },
+              "description": "anthropic via the Agent SDK only"
+            },
+            "source": {
+              "x-optional": true,
+              "const": "sdk",
+              "description": "Present when the list came from the Agent SDK"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/agent-sdk": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "force": {
+              "type": "string",
+              "description": "1 bypasses the one-hour registry cache"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "package",
+            "running",
+            "installed",
+            "declared",
+            "restartNeeded",
+            "latest",
+            "updateAvailable",
+            "updating",
+            "canUpdate",
+            "error"
+          ],
+          "description": "Claude Agent SDK version status (llm_agent/sdk/updater.mjs sdkStatus). The 200 fixture is produced in-process with an offline registry stub; the route itself reads the npm registry.",
+          "properties": {
+            "package": {
+              "type": "string"
+            },
+            "running": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "installed": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "declared": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "restartNeeded": {
+              "type": "boolean"
+            },
+            "latest": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "updateAvailable": {
+              "type": "boolean"
+            },
+            "updating": {
+              "type": "boolean"
+            },
+            "canUpdate": {
+              "type": "boolean"
+            },
+            "error": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "Why the registry could not be checked"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/agent-sdk/update": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "from",
+            "to",
+            "rolledBack",
+            "restartNeeded",
+            "log"
+          ],
+          "description": "Always 200: ok says whether the SDK was updated; a refusal or rollback is a normal answer. The 200 fixture is a refusal (a chat turn running), produced in-process; an install would run npm in the server checkout and reach the registry, so no install is captured.",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "from": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "to": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "rolledBack": {
+              "type": "boolean"
+            },
+            "restartNeeded": {
+              "type": "boolean"
+            },
+            "log": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/custom-providers": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "providers": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "A custom provider as the Mac app sends it (Core/Platform/CustomProvider.swift). The server keeps id, name, baseURL, models, isOpenAICompatible, isEnabled and anthropicBaseURL; apiKey is the vault key path (for example custom.<id>.apiKey), never the key itself. Invalid entries (no http(s) baseURL, no name) are dropped; at most 50 are stored.",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "baseURL": {
+                    "type": "string"
+                  },
+                  "apiKey": {
+                    "type": "string",
+                    "description": "vault key path"
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "additionalProperties": true,
+                      "required": [
+                        "id"
+                      ],
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "displayName": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  },
+                  "isOpenAICompatible": {
+                    "type": "boolean"
+                  },
+                  "isEnabled": {
+                    "type": "boolean"
+                  },
+                  "anthropicBaseURL": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "Anthropic-format endpoint for the Agent engine; null when absent"
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "success",
+            "count"
+          ],
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "count": {
+              "type": "integer"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/routing-tiers": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "tiers",
+            "features",
+            "status",
+            "featureStatus"
+          ],
+          "description": "The stored tier routing (tiers, features) plus each tier's usability by the server's own resolver (status) and each configured role's (featureStatus). A keyless openai or google tier answers after a short CLI health probe.",
+          "properties": {
+            "tiers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "description": "anthropic | openai | google | deepseek | jev | custom:<id>"
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "Keys strong | standard | cheap."
+            },
+            "features": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string",
+                "description": "strong | standard | cheap"
+              },
+              "description": "Role -> tier."
+            },
+            "status": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "usable",
+                  "agentCapable"
+                ],
+                "properties": {
+                  "usable": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "unset | not_found | disabled | no_key | no_key_or_cli (OpenAI/Google, v68+) | cli_unverified (CLI health probe not run yet, v69+) | cli_failed / route_failed (the route failed at runtime in the last ~10 min, v69+) | error (only when usable is false)"
+                  },
+                  "agentCapable": {
+                    "type": "boolean"
+                  },
+                  "agentReason": {
+                    "type": "string",
+                    "description": "why the Agent engine cannot run a usable tier, e.g. not_agent_capable"
+                  },
+                  "via": {
+                    "type": "string",
+                    "enum": [
+                      "key",
+                      "cli"
+                    ],
+                    "description": "API v68+, only when usable. `key` = runs on an API key (user vault or operator env; custom providers always), `cli` = runs on the provider's logged-in CLI subscription (claude / codex / gemini). A key wins when both exist."
+                  }
+                }
+              },
+              "description": "Keys: configured tiers, plus unset ones (reason unset) when a tier is absent."
+            },
+            "featureStatus": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "usable"
+                ],
+                "properties": {
+                  "usable": {
+                    "type": "boolean"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "description": "set when unusable: a tier reason, cli_untrusted_input, or decision_only"
+                  }
+                }
+              },
+              "description": "API v69+. One entry per CONFIGURED feature. `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`."
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/routing-tiers": {
+      "request": {
+        "body": {
+          "description": "The whole routing table; the server replaces the user's table. Invalid entries are dropped, not rejected (see dropped). A body that is not a JSON object answers 400 (no type is declared so that refusal can be exemplified).",
+          "properties": {
+            "tiers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "provider",
+                  "model"
+                ],
+                "properties": {
+                  "provider": {
+                    "type": "string",
+                    "description": "anthropic | openai | google | deepseek | jev | custom:<id>"
+                  },
+                  "model": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "Keys strong | standard | cheap"
+            },
+            "features": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "Keys subagents | loop | autoTasks | quickChat | pipeline | internal | decisions (API v73+); values a tier name"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "success",
+            "dropped"
+          ],
+          "properties": {
+            "success": {
+              "type": "boolean"
+            },
+            "dropped": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "entry",
+                  "reason"
+                ],
+                "properties": {
+                  "entry": {
+                    "type": "string",
+                    "description": "tiers.<name> or features.<name>"
+                  },
+                  "reason": {
+                    "type": "string",
+                    "enum": [
+                      "invalid_shape",
+                      "invalid_provider",
+                      "invalid_model",
+                      "unknown_tier",
+                      "unknown_feature"
+                    ]
+                  }
+                }
+              },
+              "description": "Entries that were not stored (API v67+)"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/usage/limits": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "anthropic | openai | google | custom; restricts chains to that provider"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "chains"
+          ],
+          "properties": {
+            "chains": {
+              "type": "object",
+              "description": "Per provider, the chain of models with their caps. GET lists the built-in chain merged with the user's overrides, sorted by priority.",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "provider",
+                    "model",
+                    "label",
+                    "priority",
+                    "enabled",
+                    "limit_value",
+                    "unit",
+                    "window_kind",
+                    "threshold_pct",
+                    "custom"
+                  ],
+                  "properties": {
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "limit_value": {
+                      "type": "integer"
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "runs",
+                        "tokens"
+                      ]
+                    },
+                    "window_kind": {
+                      "type": "string",
+                      "enum": [
+                        "daily",
+                        "monthly"
+                      ]
+                    },
+                    "threshold_pct": {
+                      "type": "integer"
+                    },
+                    "custom": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /kb/usage/limits": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "chains is required (400 otherwise). Only the providers present are replaced. Each entry reads model, priority, enabled, limit_value, unit, window_kind and threshold_pct; the server ignores the read-only label and custom the Mac also sends.",
+          "properties": {
+            "chains": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "model": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "limit_value": {
+                      "type": "integer"
+                    },
+                    "unit": {
+                      "type": "string"
+                    },
+                    "window_kind": {
+                      "type": "string"
+                    },
+                    "threshold_pct": {
+                      "type": "integer"
+                    }
+                  }
+                }
+              },
+              "description": "{ provider: [ { model, priority, enabled, limit_value, unit, window_kind, threshold_pct } ] }"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "chains"
+          ],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "chains": {
+              "type": "object",
+              "description": "Per provider, the chain of models with their caps. GET lists the built-in chain merged with the user's overrides, sorted by priority.",
+              "additionalProperties": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "required": [
+                    "provider",
+                    "model",
+                    "label",
+                    "priority",
+                    "enabled",
+                    "limit_value",
+                    "unit",
+                    "window_kind",
+                    "threshold_pct",
+                    "custom"
+                  ],
+                  "properties": {
+                    "provider": {
+                      "type": "string"
+                    },
+                    "model": {
+                      "type": "string"
+                    },
+                    "label": {
+                      "type": "string"
+                    },
+                    "priority": {
+                      "type": "integer"
+                    },
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "limit_value": {
+                      "type": "integer"
+                    },
+                    "unit": {
+                      "type": "string",
+                      "enum": [
+                        "runs",
+                        "tokens"
+                      ]
+                    },
+                    "window_kind": {
+                      "type": "string",
+                      "enum": [
+                        "daily",
+                        "monthly"
+                      ]
+                    },
+                    "threshold_pct": {
+                      "type": "integer"
+                    },
+                    "custom": {
+                      "type": "boolean"
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/usage/summary": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "restricts providers to one"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "providers"
+          ],
+          "properties": {
+            "providers": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "object",
+                "required": [
+                  "active",
+                  "models"
+                ],
+                "properties": {
+                  "active": {
+                    "type": "object",
+                    "required": [
+                      "provider",
+                      "model",
+                      "status",
+                      "resetAt",
+                      "reason",
+                      "engaged"
+                    ],
+                    "description": "The resolver verdict (kb/usage.mjs resolveModel). used, limit, pct and unit are present only when a model was picked (ok or degraded); a paused or unconfigured verdict has no pick.",
+                    "properties": {
+                      "provider": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "null when paused or unconfigured"
+                      },
+                      "status": {
+                        "type": "string",
+                        "enum": [
+                          "ok",
+                          "degraded",
+                          "paused",
+                          "unconfigured"
+                        ]
+                      },
+                      "resetAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "ISO-8601 window reset; null when there is no chain"
+                      },
+                      "reason": {
+                        "type": "string"
+                      },
+                      "used": {
+                        "type": "number"
+                      },
+                      "limit": {
+                        "type": "number"
+                      },
+                      "pct": {
+                        "type": "number"
+                      },
+                      "unit": {
+                        "type": "string"
+                      },
+                      "engaged": {
+                        "type": "boolean"
+                      }
+                    }
+                  },
+                  "models": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": [
+                        "model",
+                        "label",
+                        "enabled",
+                        "custom",
+                        "priority",
+                        "unit",
+                        "window_kind",
+                        "limit",
+                        "threshold_pct",
+                        "used",
+                        "pct",
+                        "state",
+                        "quota",
+                        "tokens",
+                        "resetAt"
+                      ],
+                      "properties": {
+                        "model": {
+                          "type": "string"
+                        },
+                        "label": {
+                          "type": "string"
+                        },
+                        "enabled": {
+                          "type": "boolean"
+                        },
+                        "custom": {
+                          "type": "boolean"
+                        },
+                        "priority": {
+                          "type": "integer"
+                        },
+                        "unit": {
+                          "type": "string"
+                        },
+                        "window_kind": {
+                          "type": "string"
+                        },
+                        "limit": {
+                          "type": "integer"
+                        },
+                        "threshold_pct": {
+                          "type": "integer"
+                        },
+                        "used": {
+                          "type": "number"
+                        },
+                        "pct": {
+                          "type": [
+                            "number",
+                            "null"
+                          ]
+                        },
+                        "state": {
+                          "type": "string",
+                          "enum": [
+                            "ok",
+                            "warning",
+                            "exhausted"
+                          ]
+                        },
+                        "quota": {
+                          "type": "boolean"
+                        },
+                        "tokens": {
+                          "type": "object",
+                          "required": [
+                            "input",
+                            "output",
+                            "cacheRead",
+                            "cacheCreation",
+                            "totalInput",
+                            "cacheHitPct",
+                            "unknownRows"
+                          ],
+                          "properties": {
+                            "input": {
+                              "type": "integer"
+                            },
+                            "output": {
+                              "type": "integer"
+                            },
+                            "cacheRead": {
+                              "type": "integer"
+                            },
+                            "cacheCreation": {
+                              "type": "integer"
+                            },
+                            "totalInput": {
+                              "type": "integer"
+                            },
+                            "cacheHitPct": {
+                              "type": [
+                                "integer",
+                                "null"
+                              ]
+                            },
+                            "unknownRows": {
+                              "type": "integer"
+                            }
+                          }
+                        },
+                        "resetAt": {
+                          "type": "string"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/usage/resolve": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "anthropic | openai | google | custom; default anthropic"
+            },
+            "prefer": {
+              "type": "string",
+              "description": "the caller's desired model, kept when healthy"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Resolution"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/usage/ratelimits": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "default anthropic"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ratelimits"
+          ],
+          "properties": {
+            "ratelimits": {
+              "x-optional": true,
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "The latest Anthropic/OpenAI-compatible rate-limit snapshot from a live response's headers (in-memory, per server run). null when only the CLI path ran, which is always the case offline. The object shape (capturedAt, provider, model, requests, tokens, inputTokens, outputTokens; each bucket limit/remaining/reset) is described but not covered: no live response is captured.",
+              "properties": {
+                "capturedAt": {
+                  "type": "string"
+                },
+                "provider": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "requests": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "tokens": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "inputTokens": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                },
+                "outputTokens": {
+                  "type": [
+                    "object",
+                    "null"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/usage/turn-composition": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "description": "Clamped to 1-200; the default is 50."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "turns"
+          ],
+          "properties": {
+            "turns": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "turnId",
+                  "createdAt"
+                ],
+                "description": "One row of turn_composition (migration 0040, 0044), columns camelCased, user_id and id omitted. *Tokens are chars/4 estimates of LLM-IDE text; sdk* are the SDK's own end-of-turn categories. sdkCategories is a 'name:kind=tokens;...' string. resumed is 0 or 1.",
+                "properties": {
+                  "turnId": {
+                    "type": "string"
+                  },
+                  "mode": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "model": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "resumed": {
+                    "type": "integer",
+                    "enum": [
+                      0,
+                      1
+                    ]
+                  },
+                  "systemPromptKind": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "systemChars": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "promptChars": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "attachedFiles": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "attachmentChars": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "images": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "tools": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "mcpTools": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "mcpServers": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "description": "comma-separated server names"
+                  },
+                  "agents": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "skills": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "slashCommands": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "claudeCodeVersion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "apiCalls": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "firstCallPromptTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "firstCallCacheReadTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "firstCallCacheCreationTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "createdAt": {
+                    "type": "string",
+                    "description": "SQLite-stored ISO timestamp"
+                  },
+                  "systemPromptTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "skillsAppendTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "llmideToolTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "userMcpServers": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "contextFenceTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "memoryFenceTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "skillsFenceTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "toolResultChars": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "toolResultTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkContextTotalTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkSystemPromptTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkSystemToolsTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkMcpToolsTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkMemoryTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkMessagesTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkDeferredToolsTokens": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ]
+                  },
+                  "sdkCategories": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  }
+                }
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/usage/record": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "Read by POST /kb/usage/record. provider and model are required (400 otherwise). Token and turn counts are optional non-negative integers; absent or null means not reported. source is api | cli | auto-task (any other value is stored as api).",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string",
+              "description": "api|cli|auto-task"
+            },
+            "endpoint": {
+              "type": "string"
+            },
+            "runs": {
+              "type": "integer"
+            },
+            "inputTokens": {
+              "type": "integer"
+            },
+            "outputTokens": {
+              "type": "integer"
+            },
+            "cacheReadTokens": {
+              "type": "integer"
+            },
+            "cacheCreationTokens": {
+              "type": "integer"
+            },
+            "turns": {
+              "type": "integer"
+            },
+            "stopReason": {
+              "type": "string"
+            },
+            "requestId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "id"
+          ],
+          "description": "ok is false and id null when the ledger write failed (best effort).",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "id": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

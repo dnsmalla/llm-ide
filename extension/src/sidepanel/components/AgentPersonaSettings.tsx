@@ -5,15 +5,11 @@
 // state.  Save → PUT /kb/agent/persona.  Reset clears the stored
 // flag so the agent falls back to built-in defaults.
 
+import type { GetKbAgentPersonaResponse200 } from '../../lib/api-types';
 import type { JSX } from 'react';
 import React, { useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 import AgentStatsBadge from './AgentStatsBadge';
-
-interface Persona {
-  name: string | null;
-  promptSuffix: string | null;
-}
 
 export default function AgentPersonaSettings(): JSX.Element {
   const [name, setName] = useState('');
@@ -59,7 +55,7 @@ export default function AgentPersonaSettings(): JSX.Element {
         body: JSON.stringify({ name, promptSuffix }),
       });
       if (!r.ok) throw new Error(`PUT failed: ${r.status}`);
-      const j: { persona: Persona | null } = await r.json();
+      const j: GetKbAgentPersonaResponse200 = await r.json();
       if (!j.persona) {
         setStatus('Reset to defaults.');
       } else {

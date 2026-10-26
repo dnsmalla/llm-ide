@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/agent/session-memory",
+  "status": 200,
+  "request": {
+    "query": {
+      "sessionId": "p9-memory-session"
+    }
+  },
+  "response": {
+    "facts": [
+      "The user prefers short answers."
+    ]
+  }
+}

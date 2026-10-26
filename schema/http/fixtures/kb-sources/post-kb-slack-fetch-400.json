@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/slack/fetch",
+  "status": 400,
+  "request": {
+    "body": {
+      "channelId": "C0EXAMPLE"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SLACK_NO_TOKEN",
+      "message": "No Slack connection saved. Connect Slack first."
+    }
+  }
+}

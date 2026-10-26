@@ -4,6 +4,8 @@
 # Runs the relevant test suite before a push, scoped to what changed:
 #   - changes under mac/        → `make regression` (Swift build + tests)
 #   - changes under extension/  → `make test`       (backend node --test)
+#   - HTTP contract changes     → `make contract-gates` (schema/http fixtures,
+#                                 generated api-types.ts; skipped otherwise)
 # so a broken build or a regressed test never reaches the remote. A push
 # that touches neither tree skips the gate and returns immediately.
 #
@@ -32,6 +34,7 @@ mac_build_busy() {
 
 zero=0000000000000000000000000000000000000000
 mac_changed=0
+contract_changed=0
 ext_changed=0
 ios_changed=0
 
@@ -56,6 +59,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # that exists to catch it.
     if printf '%s\n' "$files" | grep -qE '^(mac/|schema/|scripts/conformance-)'; then
         mac_changed=1
+    fi
+    # The HTTP contract gate (~1 s, no Swift): its inputs are spread wide — the
+    # schemas and fixtures, every generator, the OpenAPI overlay, server.mjs
+    # (SERVER_API_VERSION), and the mac/ + extension/ trees the inventory walks —
+    # so run it whenever any of them changed rather than list each path.
+    if printf '%s\n' "$files" | grep -qE '^(mac/|extension/|schema/|scripts/|docs/reference/api/)'; then
+        contract_changed=1
     fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then
         ext_changed=1
@@ -111,6 +121,15 @@ if [ "$mac_changed" -eq 1 ]; then
         exit 1
     fi
     rm -f "$gate_log"
+fi
+
+if [ "$contract_changed" -eq 1 ]; then
+    echo "pre-push: HTTP contract changed — running contract gates (make contract-gates)…"
+    if ! make contract-gates; then
+        echo "pre-push: contract gate FAILED — push aborted." >&2
+        echo "          Fix the failure, or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
 fi
 
 if [ "$ext_changed" -eq 1 ]; then

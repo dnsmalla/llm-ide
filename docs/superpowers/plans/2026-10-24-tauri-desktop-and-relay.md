@@ -91,6 +91,14 @@ neither, it is TypeScript.
 | Relay | TypeScript service (Node on a small VPS, or Cloudflare Workers + R2) | Swift `MobileWebSocketServer` on :3006 |
 | Phone | **PWA** served by the relay | Native iOS app (kept until PWA parity, then optional) |
 
+### UI parity requirement
+
+The new desktop app keeps the current Mac app's look: same three themes,
+colors, spacing, type scale, layout and components. The design tokens are
+generated from `Core/Platform/Theme.swift` (later moved to a shared JSON file
+both apps read), and every ported screen is checked side by side against the
+Swift app's screenshot before the Swift screen is retired.
+
 ## 5. LLM billing: one bill for everyone
 
 - **Use one company API key** (Claude Console workspace), stored in the desktop vault.

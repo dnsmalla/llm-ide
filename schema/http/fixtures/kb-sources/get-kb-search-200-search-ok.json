@@ -1,0 +1,57 @@
+{
+  "endpoint": "GET /kb/search",
+  "status": 200,
+  "request": {
+    "query": {
+      "q": "search",
+      "limit": "5"
+    }
+  },
+  "response": {
+    "results": [
+      {
+        "kind": "ticket",
+        "meetingId": null,
+        "entityId": "18",
+        "title": "Example search bug",
+        "body": "Search returns nothing for short queries.",
+        "rank": -0.31933663955996144,
+        "ref": "https://example.invalid/issues/1",
+        "meta": {
+          "provider": "github",
+          "repo": "example/repo",
+          "state": "open",
+          "number": 1,
+          "labels": [
+            "bug"
+          ],
+          "author": "example-user",
+          "createdAt": "2026-10-25T00:00:00Z",
+          "updatedAt": "2026-10-25T00:00:00Z",
+          "isPR": false
+        },
+        "date": "2026-10-26 05:34:34"
+      },
+      {
+        "kind": "decision",
+        "meetingId": "example-meeting-1",
+        "entityId": "example-entity-1",
+        "title": "Ship the search fix on Friday",
+        "body": "we decided to ship the search fix on Friday",
+        "rank": -0.2958551610360246,
+        "meetingTitle": "Example planning meeting",
+        "date": "2026-10-26"
+      },
+      {
+        "kind": "meeting",
+        "meetingId": "example-meeting-1",
+        "entityId": null,
+        "title": "Example planning meeting",
+        "body": "Alice: we decided to ship the search fix on Friday.",
+        "rank": -0.19739036681557695,
+        "meetingTitle": "Example planning meeting",
+        "date": "2026-10-26"
+      }
+    ]
+  }
+}

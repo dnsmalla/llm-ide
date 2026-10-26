@@ -1,0 +1,30 @@
+{
+  "endpoint": "POST /kb/custom-providers",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. One example custom provider; the apiKey is a vault key path, not a key.",
+  "request": {
+    "body": {
+      "providers": [
+        {
+          "id": "example-glm",
+          "name": "Example GLM",
+          "baseURL": "https://models.example.test/v1",
+          "apiKey": "custom.example-glm.apiKey",
+          "models": [
+            {
+              "id": "example-model",
+              "displayName": "Example model"
+            }
+          ],
+          "isOpenAICompatible": true,
+          "isEnabled": true,
+          "anthropicBaseURL": null
+        }
+      ]
+    }
+  },
+  "response": {
+    "success": true,
+    "count": 1
+  }
+}

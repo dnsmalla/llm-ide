@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /auth/me/llm-sources/:id/discovery",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

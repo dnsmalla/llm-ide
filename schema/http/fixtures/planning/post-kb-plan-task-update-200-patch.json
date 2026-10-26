@@ -1,0 +1,36 @@
+{
+  "endpoint": "POST /kb/plan-task/update",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR), replayed over HTTP and seeded through the API. No model call and no external call. The same handler as PATCH, with every patch field set.",
+  "request": {
+    "body": {
+      "taskId": "pp-1",
+      "patch": {
+        "status": "blocked",
+        "owner": "Alice",
+        "risk": "high",
+        "riskReason": "Waiting on sign-off.",
+        "due": "2026-11-13",
+        "files": []
+      }
+    }
+  },
+  "response": {
+    "id": "pp-1",
+    "planId": "plan-mvowq6ke-YeRJHanDZBIasdhe",
+    "position": 0,
+    "milestone": null,
+    "title": "Patch target",
+    "description": null,
+    "owner": "Alice",
+    "due": "2026-11-13",
+    "estimateDays": null,
+    "dependsOn": [],
+    "status": "blocked",
+    "risk": "high",
+    "riskReason": "Waiting on sign-off.",
+    "files": [],
+    "symbols": [],
+    "meta": {}
+  }
+}

@@ -1,0 +1,28 @@
+{
+  "endpoint": "POST /code-assist",
+  "status": 200,
+  "description": "Captured from the real handler on a temp-DB server (node extension/server.mjs). The model's text is a canned local stub (CAPTURE_CLI), so no model call; the response construction is the server's.",
+  "request": {
+    "body": {
+      "message": "Review this file.",
+      "attachments": [
+        {
+          "path": "src/app.ts",
+          "content": "export const x = 1;\n"
+        }
+      ],
+      "language": "en"
+    }
+  },
+  "response": {
+    "reply": "The file exports a constant `x`. No issues found.",
+    "usage": {
+      "attachmentCount": 1,
+      "attachmentChars": 20,
+      "paths": [
+        "src/app.ts"
+      ],
+      "truncatedPaths": []
+    }
+  }
+}

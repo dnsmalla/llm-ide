@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
-import type { ChatMessage } from '../hooks/useChat';
+import type { ChatViewMessage } from '../hooks/useChat';
 import { isBuiltinClearCommand } from '../chat-commands';
 
 interface Props {
-  messages: ChatMessage[];
+  messages: ChatViewMessage[];
   isLoading: boolean;
   error: string | null;
   quotaWarning?: string | null;

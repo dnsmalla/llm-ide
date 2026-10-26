@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/delete",
+  "status": 401,
+  "description": "A wrong password confirmation is refused and audited; nothing is deleted.",
+  "request": {
+    "body": {
+      "password": "not-the-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Password confirmation failed"
+    }
+  }
+}

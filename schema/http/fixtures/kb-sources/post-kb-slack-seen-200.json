@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/slack/seen",
+  "status": 200,
+  "request": {
+    "body": {
+      "channelId": "C0EXAMPLE",
+      "messageTs": [
+        "1718900000.000100"
+      ],
+      "lastTs": "1718900000.000100"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

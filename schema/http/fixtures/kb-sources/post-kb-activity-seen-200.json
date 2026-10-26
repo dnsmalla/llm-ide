@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/activity/seen",
+  "status": 200,
+  "request": {
+    "body": {
+      "uptoId": 0
+    }
+  },
+  "response": {
+    "ok": true,
+    "unread": 10
+  }
+}

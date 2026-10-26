@@ -1,0 +1,23 @@
+{
+  "endpoint": "PUT /kb/issue-schedule",
+  "status": 404,
+  "description": "Answers 404 feature_disabled when the Mac build has gantt_issues off.",
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "example/repo",
+      "issueNumber": 12,
+      "startDate": "2026-11-02",
+      "dueDate": "2026-11-06",
+      "estimateDays": 3,
+      "dependsOn": [
+        10,
+        11
+      ]
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "gantt_issues"
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/agent/feedback",
+  "status": 400,
+  "request": {
+    "body": {
+      "sessionId": "s1",
+      "captionSeq": 1,
+      "verdict": "bogus"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "FEEDBACK_FAILED",
+      "message": "invalid verdict: bogus"
+    }
+  }
+}

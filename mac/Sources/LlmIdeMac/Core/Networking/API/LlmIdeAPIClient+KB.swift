@@ -29,7 +29,7 @@ extension LlmIdeAPIClient {
         let meta: [String: String]
     }
 
-    struct SearchHit: Codable, Identifiable {
+    public struct SearchHit: Codable, Identifiable {
         let kind: String
         let meetingId: String?
         let entityId: String?
@@ -39,10 +39,10 @@ extension LlmIdeAPIClient {
         let meetingTitle: String?
         let ref: String?
         let rank: Double?
-        var id: String { "\(kind)-\(entityId ?? meetingId ?? title)" }
+        public var id: String { "\(kind)-\(entityId ?? meetingId ?? title)" }
     }
 
-    struct MeetingDetail: Codable {
+    public struct MeetingDetail: Codable {
         let id: String
         let title: String
         let date: String?
@@ -104,8 +104,11 @@ extension LlmIdeAPIClient {
         return r.results
     }
 
-    func getMeeting(id: String) async throws -> MeetingDetail {
-        try await get("/kb/meeting/\(percentEncoded(id))", authenticated: true)
+    /// `includeTranscript` adds `transcript` (server `?include=transcript`).
+    /// Only Doc Gen needs it; the default response omits the transcript.
+    func getMeeting(id: String, includeTranscript: Bool = false) async throws -> MeetingDetail {
+        let query = includeTranscript ? "?include=transcript" : ""
+        return try await get("/kb/meeting/\(percentEncoded(id))\(query)", authenticated: true)
     }
 
     // MARK: - Project export

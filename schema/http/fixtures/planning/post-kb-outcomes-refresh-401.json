@@ -1,0 +1,23 @@
+{
+  "endpoint": "POST /kb/outcomes/refresh",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: Sent without an access token.",
+  "request": {
+    "body": {
+      "taskIds": [
+        "o-1"
+      ],
+      "creds": {
+        "github": {
+          "token": "placeholder-token"
+        }
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /kb/agent/session-memory",
+  "status": 400,
+  "request": {
+    "body": {
+      "sessionId": " "
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SESSION_ID_REQUIRED",
+      "message": "sessionId is required"
+    }
+  }
+}

@@ -109,3 +109,26 @@ test('POST /kb/providers/models rejects an unknown provider with 400', async () 
   assert.equal(await handleKB(req, res), true);
   assert.equal(res.statusCode, 400);
 });
+
+test('stored custom base URL refused by the SSRF guard answers 200, not 500 (models + verify)', async () => {
+  resetDb();
+  const { setSecret } = await import('../server/vault.mjs');
+  const conn = db.getDb();
+  conn.prepare("INSERT OR IGNORE INTO users (id, email, display_name, password_hash, role) VALUES ('u1','u1@x','u1','x','user')").run();
+  setSecret(conn, 'u1', 'custom.apiKey', 'sk-stored');
+  setSecret(conn, 'u1', 'custom.baseUrl', 'http://127.0.0.1:9/v1');
+
+  const models = makeRes();
+  assert.equal(await handleKB(makeReq({ method: 'POST', url: '/kb/providers/models', body: { provider: 'custom' }, userId: 'u1' }), models), true);
+  assert.equal(models.statusCode, 200);
+  const mBody = JSON.parse(models._body);
+  assert.deepEqual(mBody.models, []);
+  assert.match(mBody.detail, /SSRF guard/);
+
+  const verify = makeRes();
+  assert.equal(await handleKB(makeReq({ method: 'POST', url: '/kb/providers/verify', body: { provider: 'custom', mode: 'key' }, userId: 'u1' }), verify), true);
+  assert.equal(verify.statusCode, 200);
+  const vBody = JSON.parse(verify._body);
+  assert.equal(vBody.ok, false);
+  assert.match(vBody.detail, /SSRF guard/);
+});

@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/refresh",
+  "status": 429,
+  "request": {
+    "body": {
+      "refreshToken": "example-invalid-refresh-token"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests"
+    }
+  }
+}

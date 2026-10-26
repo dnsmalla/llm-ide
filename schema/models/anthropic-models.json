@@ -3,61 +3,63 @@
     "The single source for Anthropic model ids. Before this file there were three",
     "lists that disagreed: ClaudeLink/ClaudeCLI.swift (picker + retired map),",
     "extension/kb/usage.mjs (fallback chain), and extension/providers/runtime.mjs",
-    "(DEFAULT_MODEL). Node reads this file; Swift keeps a literal list and",
-    "scripts/conformance-agent-v2.mjs asserts the two agree.",
+    "(DEFAULT_MODEL). Node reads this file; the Mac keeps no literal list (the",
+    "live list comes from the backend) and scripts/conformance-agent-v2.mjs",
+    "asserts it does not grow one back.",
     "",
-    "`models` is the PICKER (what a user may choose, Mac-side). `chain` is the",
-    "server's metering fallback order. They are different concerns and need not",
-    "be equal -- but see the OPEN DECISION below.",
+    "`models` is the PICKER fallback (what a user may choose when the live list is",
+    "unavailable). `chain` is the server's metering fallback order. They are",
+    "different concerns, but every `chain` id is a live model: `default` is always",
+    "a `chain` entry, and `chain` never names a key of `retired`.",
     "",
-    "OPEN DECISION: two of the three `chain` entries are keys in `retired`, i.e.",
-    "the server calls models the Mac coerces away, and `default` is one of them.",
-    "Values are left AS THE SERVER HAS THEM so this change is behaviour-neutral;",
-    "the gate REPORTS the condition rather than silently picking. Flipping the",
-    "chain to the picker's ids is a 3-line edit here plus ~12 test updates."
+    "`retired` maps every id that is no longer listed (the pre-5.5 ids that used to",
+    "sit in default/chain/models) to its 5.5-family successor. Successors are never",
+    "themselves retired keys, so no mapping chains. The OPEN DECISION about chain",
+    "entries being retired keys is resolved: the chain now uses the live ids."
   ],
-  "default": "claude-sonnet-4-6",
+  "default": "claude-sonnet-5-5",
   "models": [
     {
-      "id": "claude-opus-5",
-      "label": "Opus 5"
+      "id": "claude-opus-5-5",
+      "label": "Opus 5.5"
     },
     {
-      "id": "claude-sonnet-5",
-      "label": "Sonnet 5"
+      "id": "claude-fable-5-1",
+      "label": "Fable 5.1"
     },
     {
-      "id": "claude-haiku-4-5",
-      "label": "Haiku 4.5",
+      "id": "claude-sonnet-5-5",
+      "label": "Sonnet 5.5"
+    },
+    {
+      "id": "claude-haiku-5-5",
+      "label": "Haiku 5.5",
       "fast": true
-    },
-    {
-      "id": "claude-fable-5",
-      "label": "Fable 5"
-    },
-    {
-      "id": "claude-opus-4-8",
-      "label": "Opus 4.8"
     }
   ],
   "chain": [
     {
-      "id": "claude-opus-4-8",
-      "label": "Opus 4.8"
+      "id": "claude-opus-5-5",
+      "label": "Opus 5.5"
     },
     {
-      "id": "claude-sonnet-4-6",
-      "label": "Sonnet 4.6"
+      "id": "claude-sonnet-5-5",
+      "label": "Sonnet 5.5"
     },
     {
-      "id": "claude-haiku-4-5-20251001",
-      "label": "Haiku 4.5",
+      "id": "claude-haiku-5-5",
+      "label": "Haiku 5.5",
       "fast": true
     }
   ],
   "retired": {
-    "claude-opus-4-7": "claude-opus-4-8",
-    "claude-sonnet-4-6": "claude-sonnet-5",
-    "claude-haiku-4-5-20251001": "claude-haiku-4-5"
+    "claude-opus-4-7": "claude-opus-5-5",
+    "claude-opus-4-8": "claude-opus-5-5",
+    "claude-opus-5": "claude-opus-5-5",
+    "claude-sonnet-4-6": "claude-sonnet-5-5",
+    "claude-sonnet-5": "claude-sonnet-5-5",
+    "claude-haiku-4-5": "claude-haiku-5-5",
+    "claude-haiku-4-5-20251001": "claude-haiku-5-5",
+    "claude-fable-5": "claude-fable-5-1"
   }
 }

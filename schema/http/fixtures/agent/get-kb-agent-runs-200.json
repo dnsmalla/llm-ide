@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/agent/runs",
+  "status": 200,
+  "response": {
+    "runs": [
+      {
+        "sessionId": "capture-live-session",
+        "planId": "plan-1",
+        "startedAt": 1792998701670,
+        "lastTickAt": null,
+        "lastDecision": null
+      }
+    ]
+  }
+}

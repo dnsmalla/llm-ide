@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/me/claude-plugins/update",
+  "status": 401,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,40 @@
+{
+  "endpoint": "POST /kb/outcomes/refresh",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: The task was dispatched to a provider with no poller in this build (provider \"capture\"), so the poll records an unknown state without any network call. The creds are a placeholder; they are not used for this provider.",
+  "request": {
+    "body": {
+      "taskIds": [
+        "o-1"
+      ],
+      "creds": {
+        "github": {
+          "token": "placeholder-token"
+        }
+      }
+    }
+  },
+  "response": {
+    "pollErroredCount": 1,
+    "pollCount": 1,
+    "changedCount": 1,
+    "durationMs": 1,
+    "byState": {
+      "unknown": 1
+    },
+    "polled": [
+      {
+        "taskId": "o-1",
+        "planId": "plan-outcomes",
+        "title": "Dispatched release task",
+        "provider": "capture",
+        "url": "local://capture/1",
+        "state": "unknown",
+        "meta": {
+          "error": "No poller for provider: capture"
+        },
+        "changed": true
+      }
+    ]
+  }
+}

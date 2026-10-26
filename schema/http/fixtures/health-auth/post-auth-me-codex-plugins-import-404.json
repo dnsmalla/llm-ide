@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/codex-plugins/import",
+  "status": 404,
+  "request": {
+    "body": {
+      "name": "nope",
+      "source": "marketplace"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Plugin 'nope' not found in Codex marketplace directory"
+    }
+  }
+}

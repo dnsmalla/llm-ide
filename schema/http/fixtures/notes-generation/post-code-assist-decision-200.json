@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /code-assist/decision",
+  "status": 200,
+  "description": "Captured from the real handler (server/ai-routes.mjs handleAIRoutes) in-process on a temp DB: the server's own route code, with a loopback http wrapper and no auth middleware. The CLI is a local stub (no model call).",
+  "request": {
+    "body": {
+      "requestId": "6440ee0a-8589-4720-ab2a-900dda6ab54b",
+      "sdkSessionId": "legacy-session-1",
+      "action": "deny",
+      "feedback": "Use the other file.",
+      "answers": {
+        "Which file?": "app.ts"
+      }
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

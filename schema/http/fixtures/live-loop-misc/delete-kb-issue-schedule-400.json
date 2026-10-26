@@ -1,0 +1,17 @@
+{
+  "endpoint": "DELETE /kb/issue-schedule",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "example/repo",
+      "issueNumber": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "issueNumber must be a positive integer"
+    }
+  }
+}

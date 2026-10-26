@@ -1,0 +1,19 @@
+{
+  "endpoint": "GET /kb/live/:id",
+  "status": 200,
+  "description": "Unknown session: exists false, no captions.",
+  "request": {
+    "params": {
+      "id": "sess-unknown-1"
+    },
+    "query": {
+      "since": "0"
+    }
+  },
+  "response": {
+    "captions": [],
+    "sequence": 0,
+    "finalized": false,
+    "exists": false
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /code-assist/decision",
+  "status": 404,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR), replayed over HTTP. No model call: the Claude CLI path points at a missing binary. Handler: code-assist-decision.",
+  "request": {
+    "body": {
+      "requestId": "req-not-parked-0001",
+      "sdkSessionId": "legacy-session-1",
+      "action": "answer",
+      "answers": {
+        "Which file?": "app.ts"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "DECISION_UNKNOWN",
+      "message": "No pending decision for this requestId (unknown)"
+    }
+  }
+}

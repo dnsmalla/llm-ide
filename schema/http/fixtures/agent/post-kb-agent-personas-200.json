@@ -1,0 +1,38 @@
+{
+  "endpoint": "POST /kb/agent/personas",
+  "status": 200,
+  "request": {
+    "body": {
+      "name": "Second persona",
+      "promptSuffix": "Be formal.",
+      "autoDispatch": false
+    }
+  },
+  "response": {
+    "persona": {
+      "id": "698631d09e657840e45b27f1",
+      "name": "Second persona",
+      "promptSuffix": "Be formal.",
+      "autoDispatch": false,
+      "createdAt": "2026-10-26T07:11:41.692Z"
+    },
+    "personas": [
+      {
+        "id": "default",
+        "name": "Capture Agent",
+        "promptSuffix": "Keep answers short.",
+        "autoDispatch": false,
+        "createdAt": "2026-10-26T07:11:41.688Z"
+      },
+      {
+        "id": "698631d09e657840e45b27f1",
+        "name": "Second persona",
+        "promptSuffix": "Be formal.",
+        "autoDispatch": false,
+        "createdAt": "2026-10-26T07:11:41.692Z"
+      }
+    ],
+    "active": "default",
+    "count": 2
+  }
+}

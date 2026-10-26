@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /auth/me/plugins/uninstall/:name",
+  "status": 401,
+  "request": {
+    "params": {
+      "name": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

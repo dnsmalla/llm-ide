@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/llm-sources/toggle",
+  "status": 400,
+  "request": {
+    "body": {
+      "id": "nope",
+      "enabled": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "source 'nope' is not registered"
+    }
+  }
+}

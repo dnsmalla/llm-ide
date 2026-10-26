@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/me/plugins/reload",
+  "status": 401,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

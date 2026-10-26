@@ -1,0 +1,19 @@
+{
+  "endpoint": "GET /kb/agent/runs",
+  "status": 200,
+  "response": {
+    "runs": [
+      {
+        "sessionId": "example-session-1",
+        "planId": null,
+        "startedAt": 1792998701670,
+        "lastTickAt": 1792998731670,
+        "lastDecision": {
+          "reason": "no question is pending in the window",
+          "score": 0.12,
+          "asked": false
+        }
+      }
+    ]
+  }
+}

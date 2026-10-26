@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/consent",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "filesystem",
+      "consented": true
+    }
+  },
+  "response": {
+    "ok": true,
+    "consented": true
+  }
+}

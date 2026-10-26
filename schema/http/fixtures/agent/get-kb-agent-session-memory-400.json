@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/agent/session-memory",
+  "status": 400,
+  "request": {
+    "query": {
+      "sessionId": "  "
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SESSION_ID_REQUIRED",
+      "message": "sessionId is required"
+    }
+  }
+}

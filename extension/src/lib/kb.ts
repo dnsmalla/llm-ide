@@ -1,11 +1,23 @@
 // Phase 2 client — talks to /kb/* on the local server.  Kept dependency-free
 // so it can be used from hooks, exporters, and (later) the connectors UI.
 
+import type {
+  GetKbIssuesResponse200,
+  GetKbStatsResponse200,
+  Issue,
+  PostKbConflictQuestionsResponse200,
+  PostKbConnectGitResponse200,
+  PostKbConnectQaResponse200,
+} from './api-types';
 import { authFetch, getServerUrl, parseJsonResponse, REQUEST_TIMEOUT_MS } from './config';
 
+/** The kinds the search filter offers. The server answers any kind in its list, so a hit's kind is typed as string. */
+export type KBSearchKind = 'meeting' | 'action' | 'decision' | 'blocker';
+
 export interface KBSearchHit {
-  kind: 'meeting' | 'action' | 'decision' | 'blocker';
-  meetingId: string;
+  kind: string;
+  /** null for hits that are not tied to a meeting (tickets, plans, outcomes). */
+  meetingId: string | null;
   entityId: string | null;
   title: string;
   body: string;
@@ -14,17 +26,6 @@ export interface KBSearchHit {
   durationSec?: number;
   rank?: number;
   meta?: Record<string, unknown>;
-}
-
-export interface KBStats {
-  meetings: number;
-  entities: number;
-  sources?: {
-    code: number;
-    ticket: number;
-    qa: number;
-    lastIndexed?: Record<string, string>;
-  };
 }
 
 export interface ConnectorResult {
@@ -54,8 +55,8 @@ async function postJSON<T>(path: string, body: unknown, timeoutMs = REQUEST_TIME
 
 // Walk a local directory and ingest every text file as `code` rows.
 // `path` must be an absolute path on the host machine.  Long-running.
-export async function connectGitRepo(repoPath: string): Promise<ConnectorResult> {
-  return postJSON('/kb/connect-git', { path: repoPath }, 5 * 60_000);
+export async function connectGitRepo(repoPath: string): Promise<PostKbConnectGitResponse200> {
+  return postJSON<PostKbConnectGitResponse200>('/kb/connect-git', { path: repoPath }, 5 * 60_000);
 }
 
 export async function connectGithubIssues(opts: {
@@ -66,8 +67,8 @@ export async function connectGithubIssues(opts: {
   return postJSON('/kb/connect-github-issues', opts, 5 * 60_000);
 }
 
-export async function connectQA(opts: { xml: string; source?: string }): Promise<ConnectorResult> {
-  return postJSON('/kb/connect-qa', opts, 60_000);
+export async function connectQA(opts: { xml: string; source?: string }): Promise<PostKbConnectQaResponse200> {
+  return postJSON<PostKbConnectQaResponse200>('/kb/connect-qa', opts, 60_000);
 }
 
 // ---- Plan stub (extension agent toggle bar only) -----------------------
@@ -85,11 +86,7 @@ export async function savePlan(opts: {
   return postJSON('/kb/plan/save', opts, 10_000);
 }
 
-export async function searchKB(opts: {
-  q?: string;
-  kind?: KBSearchHit['kind'];
-  limit?: number;
-}): Promise<KBSearchHit[]> {
+export async function searchKB(opts: { q?: string; kind?: KBSearchKind; limit?: number }): Promise<KBSearchHit[]> {
   const serverUrl = await getServerUrl();
   const params = new URLSearchParams();
   if (opts.q) params.set('q', opts.q);
@@ -119,7 +116,7 @@ export async function conflictQuestions(opts: {
   fileContext?: string;
   language?: string;
 }): Promise<string> {
-  const data = await postJSON<{ questions: string }>(
+  const data = await postJSON<PostKbConflictQuestionsResponse200>(
     '/kb/conflict-questions',
     { transcript: opts.transcript ?? '', fileContext: opts.fileContext ?? '', language: opts.language ?? 'en' },
     3 * 60_000,
@@ -128,7 +125,7 @@ export async function conflictQuestions(opts: {
   return data.questions;
 }
 
-export async function getKBStats(): Promise<KBStats | null> {
+export async function getKBStats(): Promise<GetKbStatsResponse200 | null> {
   try {
     const serverUrl = await getServerUrl();
     const r = await authFetch(`${serverUrl}/kb/stats`);
@@ -137,22 +134,6 @@ export async function getKBStats(): Promise<KBStats | null> {
   } catch {
     return null;
   }
-}
-
-export interface Issue {
-  id: string;
-  title: string;
-  body: string;
-  url: string;
-  provider: string;
-  repo?: string;
-  number?: number;
-  state?: string;
-  labels?: string[];
-  author?: string;
-  createdAt?: string;
-  updatedAt?: string;
-  isPR?: boolean;
 }
 
 export async function listIssues(opts?: {
@@ -179,7 +160,7 @@ export async function listIssues(opts?: {
       }
       throw new Error('Issues listing is temporarily unavailable. Please try again.');
     }
-    const data = await response.json();
+    const data: GetKbIssuesResponse200 = await response.json();
     return Array.isArray(data?.issues) ? data.issues : [];
   } finally {
     clearTimeout(timeout);

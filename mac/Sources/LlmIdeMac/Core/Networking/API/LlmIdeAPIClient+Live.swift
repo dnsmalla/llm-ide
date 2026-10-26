@@ -4,14 +4,14 @@ extension LlmIdeAPIClient {
 
     // --- Live session stream (cross-client) ---------------------------
 
-    struct LiveSessionInfo: Codable, Identifiable {
+    public struct LiveSessionInfo: Codable, Identifiable {
         let sessionId: String
         let meetingTitle: String?
         let startedAt: Double
         let lastWrite: Double
         let captionCount: Int
         let sequence: Int
-        var id: String { sessionId }
+        public var id: String { sessionId }
     }
 
     struct LiveCaption: Codable, Identifiable {
@@ -33,7 +33,7 @@ extension LlmIdeAPIClient {
         let reason: String?
     }
 
-    struct LiveCaptionsResponse: Codable {
+    public struct LiveCaptionsResponse: Codable {
         let captions: [LiveCaption]
         let sequence: Int
         let finalized: Bool

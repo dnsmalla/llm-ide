@@ -1,0 +1,56 @@
+{
+  "endpoint": "GET /kb/routing-tiers",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. Anthropic usable via the logged-in CLI (no key stored); the custom tier usable via its vault key but not agent-capable (no anthropicBaseURL); deepseek unusable without a key.",
+  "response": {
+    "tiers": {
+      "strong": {
+        "provider": "anthropic",
+        "model": "claude-sonnet-5-5"
+      },
+      "standard": {
+        "provider": "custom:example-glm",
+        "model": "example-model"
+      },
+      "cheap": {
+        "provider": "deepseek",
+        "model": "deepseek-chat"
+      }
+    },
+    "features": {
+      "subagents": "strong",
+      "internal": "standard",
+      "loop": "cheap"
+    },
+    "status": {
+      "strong": {
+        "usable": true,
+        "agentCapable": true,
+        "via": "cli"
+      },
+      "standard": {
+        "usable": true,
+        "agentCapable": false,
+        "agentReason": "not_agent_capable",
+        "via": "key"
+      },
+      "cheap": {
+        "usable": false,
+        "reason": "no_key",
+        "agentCapable": false
+      }
+    },
+    "featureStatus": {
+      "subagents": {
+        "usable": true
+      },
+      "internal": {
+        "usable": true
+      },
+      "loop": {
+        "usable": false,
+        "reason": "no_key"
+      }
+    }
+  }
+}

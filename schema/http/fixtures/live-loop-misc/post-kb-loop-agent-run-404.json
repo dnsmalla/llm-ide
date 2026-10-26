@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 404,
+  "description": "Answers 404 feature_disabled when the Mac build has auto_tasks off.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000
+    }
+  },
+  "response": {
+    "error": "feature_disabled",
+    "feature": "auto_tasks"
+  }
+}

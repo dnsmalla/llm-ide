@@ -1,0 +1,12 @@
+-- Recursive scrub of review_items.payload and .result for credential keys.
+--
+-- 0042 and 0043 scrubbed only the top level of config and pr. Submit now also
+-- whitelists payload keys per kind and strips credential-looking keys at every
+-- depth (kb/review-payload.mjs: scrubSecretKeysDeep, REVIEW_SECRET_KEY_RE).
+-- SQLite's json functions cannot rebuild an arbitrary nested tree, so the data
+-- step is JavaScript: scrubReviewPayloadRows, registered for version 45 in
+-- JS_MIGRATIONS (kb/migrations.mjs). It runs in this migration's transaction,
+-- after this file, and is idempotent (rows change only when a key is removed).
+--
+-- The statement below is a no-op; the file exists to record version 45.
+SELECT 1;

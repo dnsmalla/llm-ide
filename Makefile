@@ -104,7 +104,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates
+regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
 
 .PHONY: feature-gates
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
@@ -147,6 +147,12 @@ graph-gates: graph-kit-checkout
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-engine-lab
 	cd mac/LocalPackages/graph-kit && node scripts/conformance-memory.mjs
 
+.PHONY: api-gates
+# Decodes every 2xx HTTP contract fixture with the Mac's Codable models and
+# fails on a decode error or an unallowlisted dropped key (Phase 1 P12).
+api-gates:
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run api-contract-lab
+
 # The Chat slice's assertion gate. An executable for the same reason the graph
 # labs are: this toolchain has no XCTest, so `test-mac` above skips `swift test`
 # entirely — pure logic lifted out of ChatEngine would otherwise have no gate at
@@ -155,6 +161,36 @@ graph-gates: graph-kit-checkout
 chat-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab
 	node scripts/conformance-agent-v2.mjs
+
+# HTTP endpoint contract (schema/http): request and response shapes per route
+# group, checked against the roster. Deliberately NOT in `regression` yet: the
+# route-group specs land in P3-P10 of the Phase 1 plan, and P16 wires this in.
+.PHONY: contract-gates
+contract-gates:
+	node scripts/conformance-http.mjs
+	node scripts/gen-api-types.mjs --check
+	node scripts/gen-openapi.mjs --check
+	node scripts/http-inventory.mjs --check
+	node scripts/gen-design-tokens.mjs --check
+
+# Design tokens: schema/design/tokens.json -> Mac ThemeTokens.swift and schema/design/tokens.css.
+# Regenerate after editing tokens.json; `contract-gates` fails while the outputs are stale.
+.PHONY: design-tokens
+design-tokens:
+	node scripts/gen-design-tokens.mjs
+
+# Generated TypeScript types for the HTTP contract (extension/src/lib/api-types.ts).
+# Regenerate after changing schema/http; `contract-gates` fails while it is stale.
+.PHONY: api-types
+api-types:
+	node scripts/gen-api-types.mjs
+
+# Generated OpenAPI 3.1 document (docs/reference/api/openapi.yaml) from schema/http,
+# merged with docs/reference/api/openapi.overlay.json. Regenerate after changing
+# schema/http or the overlay; `contract-gates` fails while it is stale.
+.PHONY: openapi
+openapi:
+	node scripts/gen-openapi.mjs
 
 # Doc Gen / Visual: the template-surface marker, which decides which menu a
 # user's template appears in and round-trips through a file on their disk.
@@ -169,6 +205,17 @@ generation-gates:
 .PHONY: loop-gates
 loop-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run loop-contract-lab
+
+# Token & speed gate (Phase 1 P17). NOT in `regression`: a real run spends
+# tokens (one short turn per scenario on the cheapest model). Run on demand or
+# nightly; `token-bench-fake` exercises the same pipeline with no model calls.
+# See docs/how-to/run-the-token-bench.md.
+.PHONY: token-bench token-bench-fake
+token-bench:
+	node scripts/token-bench.mjs
+
+token-bench-fake:
+	node scripts/token-bench.mjs --fake
 
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.

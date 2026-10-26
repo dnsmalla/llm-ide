@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /agent/v2/cancel",
+  "status": 200,
+  "request": {
+    "body": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273"
+    }
+  },
+  "response": {
+    "cancelled": false
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/:id/update",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "filesystem"
+    }
+  },
+  "response": {
+    "ok": true,
+    "from": "2.0.1",
+    "to": "2.0.1"
+  }
+}

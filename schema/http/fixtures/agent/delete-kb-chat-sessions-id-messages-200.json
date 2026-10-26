@@ -1,0 +1,12 @@
+{
+  "endpoint": "DELETE /kb/chat/sessions/:id/messages",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f"
+    }
+  },
+  "response": {
+    "cleared": 2
+  }
+}

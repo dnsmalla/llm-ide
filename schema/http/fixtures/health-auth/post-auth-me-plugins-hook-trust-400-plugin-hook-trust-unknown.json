@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/plugins/hook-trust",
+  "status": 400,
+  "request": {
+    "body": {
+      "name": "nope"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "trusted must be a boolean"
+    }
+  }
+}

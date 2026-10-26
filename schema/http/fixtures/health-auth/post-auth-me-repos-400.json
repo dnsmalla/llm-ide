@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/me/repos",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "path is required"
+    }
+  }
+}

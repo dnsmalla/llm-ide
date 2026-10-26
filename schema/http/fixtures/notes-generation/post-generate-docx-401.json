@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /generate-docx",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR), replayed over HTTP. No model call: the Claude CLI path points at a missing binary. Handler: generate-docx.",
+  "request": {
+    "body": {
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "meetingTitle": "Weekly sync",
+      "meetingId": "mtg-001",
+      "language": "en"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

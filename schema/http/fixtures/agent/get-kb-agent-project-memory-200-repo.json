@@ -1,0 +1,13 @@
+{
+  "endpoint": "GET /kb/agent/project-memory",
+  "status": 200,
+  "request": {
+    "query": {
+      "repo": "/example/workspace"
+    }
+  },
+  "response": {
+    "facts": [],
+    "repo": null
+  }
+}

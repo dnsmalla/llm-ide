@@ -5,7 +5,7 @@ import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { handleKB, initFeatureRoutes } from './routes/router.mjs';
-import { prewarmAgentEngine } from './routes/agent-v2.mjs';
+import { prewarmAgentEngine, benchFakeEngineEnabled } from './routes/agent-v2.mjs';
 import { enabledEndpoints } from './routes/feature-routes.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
@@ -270,7 +270,10 @@ const HOST = config.host;
 //   v72 — the classic /code-assist `usage` (JSON body and the SSE `done` event) gains the turn's summed model tokens: `inputTokens`, `outputTokens`, optional `cacheReadTokens` / `cacheCreationTokens`, and `modelCalls` (calls that reported tokens) — omitted when none did. Covers the native tool loop (now also metered into the usage ledger), the Anthropic HTTP stream, and every other metered call; a reply streamed through a provider CLI prints no usage and is not counted.
 //   v73 — decisions: new decision-only provider `jev` (vault `jev.apiKey`, env JEV_AI_API_KEY; /kb/providers/verify lists its models, /kb/providers/models lists them) — every chat/completion path refuses it (400 PROVIDER_UNAVAILABLE "Jev is a decision provider…"). Tier routing: `jev` is a valid tier provider and `decisions` a new feature; a jev tier serves `decisions` only — featureStatus reports `decision_only` for any other feature and routes it to its default. New agent tool `decide` (kind read, both engines; plugin subagents opt in via `allowed_tools`) → { engine: 'jev'|'llm', model, answers, fallback? }; tool schemas may declare `type: object`.
 //   v74 — LLMIDE_FEATURES (comma-separated ENABLED feature keys, the Mac's AppFeature raw values; unset/empty = all) is honoured: a disabled feature's route group (auto_tasks → /kb/loop/*, gantt_issues → /kb/issue-schedule, code_graph_3d → /kb/ingest-code-graph) is never loaded and answers 404 { error: 'feature_disabled', feature }; /health gains `features` (null = all, else the sorted enabled keys) and its `endpoints` omit the disabled groups' paths.
-const SERVER_API_VERSION = 75;
+//   v76 — ALL_ENDPOINTS now lists /kb/issues, /kb/export-all, /kb/live/:id/stream and /kb/email/classify (already served by routes/router.mjs and routes/live.mjs; /health ENDPOINTS advertises them). No request or response shape change.
+//   v77 — GET /kb/usage/turn-composition?limit= → { turns: [...] }: the caller's newest v2 chat turns' measured context split (migration 0044): LLM-IDE parts as approximate tokens (chars/4), the SDK's own end-of-turn categories (sdk_*), tool-result size and user MCP server count. Additive; read-only.
+//   v78 — GET /kb/meeting/:id?include=transcript adds `transcript` (the stored transcript text) to the record; the default response is unchanged (no transcript). Used by the Mac's Doc Gen.
+const SERVER_API_VERSION = 78;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -290,11 +293,13 @@ const ALL_ENDPOINTS = [
   '/extract-entities',
   '/kb/ingest',
   '/kb/search',
+  '/kb/issues',
   '/kb/meeting/:id',
   '/kb/entity/:id',
   '/kb/project/:id/export',
   '/kb/project/install-skills',
   '/kb/stats',
+  '/kb/export-all',
   '/kb/system/status',
   '/kb/delete',
   '/kb/connect-git',
@@ -306,6 +311,7 @@ const ALL_ENDPOINTS = [
   '/kb/email/test',
   '/kb/email/fetch',
   '/kb/email/seen',
+  '/kb/email/classify',
   '/kb/slack/test',
   '/kb/slack/fetch',
   '/kb/slack/seen',
@@ -323,6 +329,7 @@ const ALL_ENDPOINTS = [
   '/kb/usage/resolve',
   '/kb/usage/record',
   '/kb/usage/ratelimits',
+  '/kb/usage/turn-composition',
   '/kb/generate-plan',
   '/kb/analyze-risks',
   '/kb/summarize',
@@ -357,6 +364,7 @@ const ALL_ENDPOINTS = [
   '/kb/live/:id',
   '/kb/live/:id/append',
   '/kb/live/:id/finalize',
+  '/kb/live/:id/stream',
   '/kb/agent/dispatch',
   '/kb/agent/stop',
   '/kb/agent/runs',
@@ -1212,6 +1220,12 @@ server.listen(PORT, HOST, () => {
     pid: process.pid,
     config: configSummary(),
   });
+  // Token-bench fake engine (scripts/token-bench.mjs --fake): make it loud.
+  // Every chat turn on this server is synthetic while it is active.
+  if (benchFakeEngineEnabled()) {
+    const bar = '!'.repeat(72);
+    process.stderr.write(`\n${bar}\n!! LLMIDE BENCH FAKE ENGINE ACTIVE: chat turns are SYNTHETIC, no model is called.\n!! Started with LLMIDE_BENCH_FAKE=1 and --bench-fake. Never run a user server this way.\n${bar}\n\n`);
+  }
   // The v2 chat engine + Agent SDK are not on the boot path (routes/agent-v2.mjs
   // loads them lazily), so /health answers ~200 ms sooner. Import them now,
   // off the listen callback, so the first chat turn does not pay that cost

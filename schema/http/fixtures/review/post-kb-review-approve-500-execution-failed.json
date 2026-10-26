@@ -1,0 +1,64 @@
+{
+  "endpoint": "POST /kb/review/approve",
+  "status": 500,
+  "description": "Execution refused: the repo contains a symlink at the apply directory that points outside the repo.",
+  "request": {
+    "body": {
+      "id": "rev-mvov51ya-t24F7csbY4AkiPX7"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REVIEW_EXECUTION_FAILED",
+      "message": "Refusing write: symlink in path under .llmide-auto/: /example/repo2/.llmide-auto"
+    },
+    "item": {
+      "id": "rev-mvov51ya-t24F7csbY4AkiPX7",
+      "kind": "codegen-apply",
+      "planId": null,
+      "taskId": "task-1",
+      "title": "Example symlink refusal",
+      "payload": {
+        "repoPath": "/example/repo2",
+        "taskId": "task-1",
+        "summary": "Example",
+        "files": [
+          {
+            "path": "docs/symlink.md",
+            "content": "Example.\n"
+          }
+        ],
+        "allowedRepos": [
+          "/example/repo",
+          "/example/repo2"
+        ]
+      },
+      "guardrails": {
+        "passed": true,
+        "blocking": [],
+        "warnings": [],
+        "info": [
+          {
+            "ruleId": "codegen.summary",
+            "severity": "info",
+            "message": "Will write 1 file + 0 tests under /example/repo2."
+          }
+        ],
+        "findings": [
+          {
+            "ruleId": "codegen.summary",
+            "severity": "info",
+            "message": "Will write 1 file + 0 tests under /example/repo2."
+          }
+        ]
+      },
+      "status": "failed",
+      "reviewerNote": null,
+      "result": {
+        "error": "Refusing write: symlink in path under .llmide-auto/: /example/repo2/.llmide-auto"
+      },
+      "createdAt": "2026-10-26 06:15:54",
+      "decidedAt": "2026-10-26 06:15:54"
+    }
+  }
+}

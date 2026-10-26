@@ -44,7 +44,7 @@ import {
   readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
   buildUserPluginDelivery,
 } from '../skills/index.mjs';
-import { composeSystemContext, composeRecentContext } from '../internal/context/compose.mjs';
+import { composeSystemContext, composeRecentContext, composeGitContext, gitStateKey } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
 import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } from './compact-system-prompt.mjs';
@@ -72,7 +72,7 @@ import { resolveCustomProviderDispatch, isDecisionOnlyProvider, DECISION_ONLY_ME
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage, mapContextUsage } from './events.mjs';
 import { cachedEffortLevels } from './models.mjs';
-import { buildLlmIdeServer } from './tools.mjs';
+import { buildLlmIdeServer, v2ToolDefinitionChars } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
 import { get as registryGet, entries as registryEntries } from '../tools/registry.mjs';
 import {
@@ -685,6 +685,9 @@ export function buildEngineOptions(
     ? { ...prev, attachments: [...prev.attachments], images: [...prev.images] }
     : emptyDelivered();
   const contextParts = [];
+  // Sizes for turn_composition (migration 0044), chars only: the memory
+  // summary's part of the fence, set below when it is included.
+  let memoryChars = 0;
   // A fresh SDK session has no transcript of this chat — the client's retry
   // after SESSION_UNRESUMABLE sends the app's own record (routes/agent-v2.mjs
   // freshTurnHistory). Delivered once, before everything else, as data:
@@ -718,6 +721,25 @@ export function buildEngineOptions(
     }
     next.recentHash = recentHash;
   }
+  // Active repo's branch and status: the same delivered-state rule as the
+  // recent list (sent when new or changed, not re-sent every turn).
+  const carriesGit = !!agentContext && ('currentBranch' in agentContext || 'gitStatus' in agentContext);
+  if (carriesGit) {
+    const gitText = composeGitContext(agentContext);
+    const gitHash = gitText ? contentHash(gitStateKey(agentContext)) : null;
+    if (gitText && gitHash !== prev?.gitHash) {
+      contextParts.push(prev?.gitHash ? `${gitText}\n\n(Updated since your last view of the repo state.)` : gitText);
+    } else if (!gitText && next.gitHash) {
+      contextParts.push(GIT_UNKNOWN_NOTE);
+      next.gitHash = null;
+    }
+    next.gitHash = gitHash;
+  } else if (next.gitHash) {
+    // The request no longer says anything about the repo (the Mac omits
+    // nil optionals), so a branch shown earlier may be stale. Say so once.
+    contextParts.push(GIT_UNKNOWN_NOTE);
+    next.gitHash = null;
+  }
   // Project memory summary: only the files that change rarely (repo.md, the
   // environment note, the graph overview) and no "(updated …)" age —
   // stableOnly — so its text, and hash, change only when one of them does.
@@ -736,6 +758,7 @@ export function buildEngineOptions(
     const memoryHash = memoryText ? contentHash(memoryText) : null;
     if (memoryText && memoryHash !== next.memoryHash) {
       contextParts.push(prev?.memoryHash ? `${memoryText}\n(Updated since you last saw it.)` : memoryText);
+      memoryChars = memoryText.length;
     }
     next.memoryHash = memoryHash;
   } catch { /* memory is best-effort — keep the turn without it */ }
@@ -904,6 +927,15 @@ export function buildEngineOptions(
       // prompt carries beyond the user's text.
       attachedFiles: newFiles.length,
       attachmentChars: attachmentsText.length,
+      // Chars of LLM-IDE text by place (turn_composition, migration 0044):
+      // the skill text in the system append, and the fenced context blocks
+      // (memory, invoked skills, all of them together).
+      sizes: {
+        skillsAppendChars: pipelineSkillsText.length,
+        memoryChars,
+        skillsFenceChars: skillsText ? skillsText.length : 0,
+        contextChars: contextParts.join('\n\n').length,
+      },
       newImages: newImages.length,
       model: typeof model === 'string' && model ? model : null,
       truncatedPaths,
@@ -917,6 +949,8 @@ export function buildEngineOptions(
     },
   };
 }
+
+const GIT_UNKNOWN_NOTE = '## Git state (the active repo)\n(Git state is unknown now; any branch shown earlier is out of date.)';
 
 // The turn's context blocks ahead of what the user typed, fenced so the model
 // can tell app-supplied context from the user's words. The user's message
@@ -992,7 +1026,7 @@ const CONTEXT_USAGE_TIMEOUT_MS = 2000;
  * per-category token-count API calls. Best-effort — a missing method (fake
  * or older query), a failure or a slow answer must never hold up the turn.
  */
-export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS } = {}) {
+export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS, onRaw } = {}) {
   if (typeof q?.getContextUsage !== 'function') return null;
   let timer;
   try {
@@ -1000,6 +1034,9 @@ export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS
       q.getContextUsage({ detail: 'summary' }),
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs); }),
     ]);
+    // The raw response (with each category's isDeferred, which the wire event
+    // does not carry) goes to the composition recorder, not to the client.
+    try { onRaw?.(response); } catch { /* telemetry only */ }
     return mapContextUsage(response);
   } catch (err) {
     console.warn(`context usage unavailable: ${String(err?.message ?? err).slice(0, 200)}`);
@@ -1592,6 +1629,17 @@ export async function runAgentV2Turn(
   // server, with their server-level specs appended to the allowlist composed
   // by buildEngineOptions.
   const userMcp = buildUserMcpServers(userId, mode);
+  // Size of the llmide tool definitions this turn mounts — the same filter
+  // buildLlmIdeServer applies below (turn_composition, migration 0044).
+  // Estimate only; never allowed to break the turn.
+  let llmideToolChars = null;
+  try {
+    llmideToolChars = v2ToolDefinitionChars({
+      gateway: Boolean(gatewayBaseUrl),
+      mode: meta.mode,
+      hasSubagents: userSubagents ? (userSubagents.size ?? Object.keys(userSubagents).length) > 0 : undefined,
+    });
+  } catch { llmideToolChars = null; }
   // How this user's enabled plugins reach the SDK. By default a Claude-format
   // package is handed over whole (`plugins`) so the SDK loads it and runs its
   // hooks with full fidelity; the `nativePlugins` pref turns that off and falls
@@ -1688,6 +1736,8 @@ export async function runAgentV2Turn(
   // The context-usage read happens at most once per turn, even if the SDK
   // emits a second `result` (the session is released after the first).
   let contextUsageRead = false;
+  // The mapped context_usage event (SDK categories), kept for turn_composition.
+  let contextUsageRaw = null;
   const usageTotals = {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
     costUsd: 0, numTurns: 0, durationMs: 0,
@@ -1860,7 +1910,7 @@ export async function runAgentV2Turn(
           // describe a model this window math does not know.
           if (!gatewayBaseUrl && !contextUsageRead) {
             contextUsageRead = true;
-            const contextUsage = await readContextUsage(q);
+            const contextUsage = await readContextUsage(q, { onRaw: (raw) => { contextUsageRaw = raw; } });
             if (contextUsage) onEvent?.(contextUsage);
           }
           q.releaseInput?.();
@@ -1958,6 +2008,18 @@ export async function runAgentV2Turn(
       firstCall: first ? {
         inputTokens: first.inputTokens, cacheCreationTokens: first.cacheCreationTokens, cacheReadTokens: first.cacheReadTokens,
       } : null,
+      // The split (migration 0044). LLM-IDE parts are chars, sized here with
+      // no model call; the SDK categories are its own end-of-turn estimate
+      // (summary detail, read once after `result`), null when not read.
+      skillsAppendChars: meta.sizes?.skillsAppendChars ?? 0,
+      memoryChars: meta.sizes?.memoryChars ?? 0,
+      skillsFenceChars: meta.sizes?.skillsFenceChars ?? 0,
+      contextChars: meta.sizes?.contextChars ?? 0,
+      llmideToolChars,
+      userMcpServers: userMcp?.servers ? Object.keys(userMcp.servers).length : 0,
+      sdkContextTotalTokens: Number.isFinite(contextUsageRaw?.totalTokens) ? Math.round(contextUsageRaw.totalTokens) : null,
+      // The SDK's categories as returned (kind and isDeferred intact).
+      sdkCategories: Array.isArray(contextUsageRaw?.categories) ? contextUsageRaw.categories : null,
     };
   }
 }

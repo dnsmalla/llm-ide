@@ -1,0 +1,25 @@
+{
+  "endpoint": "GET /auth/me/audit",
+  "status": 200,
+  "description": "Filtered to one action.",
+  "request": {
+    "query": {
+      "limit": "5",
+      "action": "auth.login"
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": 2,
+        "action": "auth.login",
+        "resource": null,
+        "outcome": "success",
+        "detail": null,
+        "createdAt": "2026-10-26 07:19:23",
+        "ip": "127.0.0.1",
+        "userAgent": "node"
+      }
+    ]
+  }
+}

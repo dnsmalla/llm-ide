@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/entity/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "missing-entity-1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Not found"
+    }
+  }
+}

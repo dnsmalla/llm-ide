@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /auth/slack/status",
+  "status": 401,
+  "request": {
+    "query": {
+      "state": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

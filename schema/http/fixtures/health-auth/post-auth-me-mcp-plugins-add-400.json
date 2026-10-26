@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/add",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "ADD_FAILED",
+      "message": "command is required"
+    }
+  }
+}

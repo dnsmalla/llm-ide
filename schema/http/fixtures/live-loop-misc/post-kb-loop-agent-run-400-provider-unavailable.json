@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 400,
+  "description": "The engine refused the requested provider; the route answers 400 with the engine code kept.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000,
+      "provider": "custom:example-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROVIDER_UNAVAILABLE",
+      "message": "Provider custom:example-missing is not configured"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /kb/agent/personas/:id",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "default"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PERSONA_DELETE_FAILED",
+      "message": "cannot delete the only persona; use setAgentPersona with empty fields to reset to defaults"
+    }
+  }
+}

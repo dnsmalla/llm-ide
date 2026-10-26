@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 503,
+  "description": "The engine found no usable credential for the run.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NO_KEY",
+      "message": "No Claude API key is configured for this user."
+    }
+  }
+}

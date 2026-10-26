@@ -1,0 +1,356 @@
+{
+  "schema": "token-bench/2",
+  "generatedAt": "2026-10-26T09:53:03.991Z",
+  "fake": false,
+  "model": "claude-haiku-5-5",
+  "repeat": 3,
+  "scenariosVersion": 2,
+  "weights": {
+    "cacheRead": 0.1,
+    "cacheWrite": 1.25
+  },
+  "scenarios": [
+    {
+      "id": "greeting",
+      "mode": "ask",
+      "expectTools": false,
+      "turns": 1,
+      "n": 3,
+      "billableTokens": 2315,
+      "totalMs": 4833,
+      "ttftMs": 1328,
+      "hops": 1,
+      "raw": {
+        "input": 2,
+        "output": 112,
+        "cacheRead": 12860,
+        "cacheWrite": 721
+      },
+      "billableSamples": [
+        6334,
+        2315,
+        2273
+      ],
+      "perTurn": [
+        {
+          "hops": 1,
+          "billable": 2315,
+          "input": 2,
+          "output": 126,
+          "cacheRead": 12860,
+          "cacheWrite": 721
+        }
+      ],
+      "contextSplit": {
+        "firstCallPromptTokens": 13583,
+        "systemPromptTokens": 644,
+        "llmideToolTokens": 2193,
+        "skillsAppendTokens": 0,
+        "contextFenceTokens": 0,
+        "memoryFenceTokens": 0,
+        "toolResultTokens": 0,
+        "sdkContextTotalTokens": 16161
+      }
+    },
+    {
+      "id": "explain-file",
+      "mode": "ask",
+      "expectTools": true,
+      "turns": 1,
+      "n": 3,
+      "billableTokens": 12968,
+      "totalMs": 5826,
+      "ttftMs": 2430,
+      "hops": 2,
+      "raw": {
+        "input": 1188,
+        "output": 310,
+        "cacheRead": 26473,
+        "cacheWrite": 7046
+      },
+      "billableSamples": [
+        13261,
+        12953,
+        12968
+      ],
+      "perTurn": [
+        {
+          "hops": 2,
+          "billable": 12968,
+          "input": 1188,
+          "output": 326,
+          "cacheRead": 26473,
+          "cacheWrite": 7045
+        }
+      ],
+      "contextSplit": {
+        "firstCallPromptTokens": 13597,
+        "systemPromptTokens": 644,
+        "llmideToolTokens": 2193,
+        "skillsAppendTokens": 0,
+        "contextFenceTokens": 0,
+        "memoryFenceTokens": 0,
+        "toolResultTokens": 4522,
+        "sdkContextTotalTokens": 20086
+      }
+    },
+    {
+      "id": "small-edit",
+      "mode": "execute",
+      "expectTools": true,
+      "turns": 1,
+      "n": 3,
+      "billableTokens": 26582,
+      "totalMs": 10412,
+      "ttftMs": 7595,
+      "hops": 5,
+      "raw": {
+        "input": 1206,
+        "output": 938,
+        "cacheRead": 105597,
+        "cacheWrite": 11103
+      },
+      "billableSamples": [
+        37402,
+        26582,
+        23135
+      ],
+      "perTurn": [
+        {
+          "hops": 5,
+          "billable": 26582,
+          "input": 1206,
+          "output": 938,
+          "cacheRead": 105597,
+          "cacheWrite": 11103
+        }
+      ],
+      "contextSplit": {
+        "firstCallPromptTokens": 19207,
+        "systemPromptTokens": 932,
+        "llmideToolTokens": 2057,
+        "skillsAppendTokens": 0,
+        "contextFenceTokens": 0,
+        "memoryFenceTokens": 0,
+        "toolResultTokens": 4600,
+        "sdkContextTotalTokens": 26462
+      }
+    },
+    {
+      "id": "plan-step",
+      "mode": "plan",
+      "expectTools": false,
+      "turns": 1,
+      "n": 3,
+      "billableTokens": 46596,
+      "totalMs": 31831,
+      "ttftMs": 27260,
+      "hops": 5,
+      "raw": {
+        "input": 1199,
+        "output": 5568,
+        "cacheRead": 115067,
+        "cacheWrite": 18137
+      },
+      "billableSamples": [
+        51239,
+        46596,
+        36373
+      ],
+      "perTurn": [
+        {
+          "hops": 6,
+          "billable": 46596,
+          "input": 1201,
+          "output": 7210,
+          "cacheRead": 155137,
+          "cacheWrite": 18137
+        }
+      ],
+      "contextSplit": {
+        "firstCallPromptTokens": 21756,
+        "systemPromptTokens": 5330,
+        "llmideToolTokens": 2193,
+        "skillsAppendTokens": 3938,
+        "contextFenceTokens": 0,
+        "memoryFenceTokens": 0,
+        "toolResultTokens": 6432,
+        "sdkContextTotalTokens": 37247
+      }
+    },
+    {
+      "id": "two-turn-reuse",
+      "mode": "ask",
+      "expectTools": false,
+      "turns": 2,
+      "n": 3,
+      "billableTokens": 5642,
+      "totalMs": 9106,
+      "ttftMs": 1699,
+      "hops": 2,
+      "raw": {
+        "input": 1189,
+        "output": 23,
+        "cacheRead": 25758,
+        "cacheWrite": 1484
+      },
+      "billableSamples": [
+        5358,
+        5650,
+        5642
+      ],
+      "perTurn": [
+        {
+          "hops": 1,
+          "billable": 3389,
+          "input": 1187,
+          "output": 18,
+          "cacheRead": 12879,
+          "cacheWrite": 717
+        },
+        {
+          "hops": 1,
+          "billable": 2253,
+          "input": 2,
+          "output": 4,
+          "cacheRead": 12879,
+          "cacheWrite": 767
+        }
+      ],
+      "contextSplit": {
+        "firstCallPromptTokens": 13648,
+        "systemPromptTokens": 644,
+        "llmideToolTokens": 2193,
+        "skillsAppendTokens": 0,
+        "contextFenceTokens": 0,
+        "memoryFenceTokens": 0,
+        "toolResultTokens": 0,
+        "sdkContextTotalTokens": 16161
+      }
+    },
+    {
+      "id": "long-tool-results",
+      "mode": "ask",
+      "expectTools": true,
+      "turns": 2,
+      "n": 3,
+      "billableTokens": 15339,
+      "totalMs": 12536,
+      "ttftMs": 3527,
+      "hops": 4,
+      "raw": {
+        "input": 1211,
+        "output": 875,
+        "cacheRead": 61793,
+        "cacheWrite": 5659
+      },
+      "billableSamples": [
+        15339,
+        32733,
+        15141
+      ],
+      "perTurn": [
+        {
+          "hops": 2,
+          "billable": 10742,
+          "input": 1207,
+          "output": 567,
+          "cacheRead": 26221,
+          "cacheWrite": 5077
+        },
+        {
+          "hops": 2,
+          "billable": 4597,
+          "input": 4,
+          "output": 308,
+          "cacheRead": 35572,
+          "cacheWrite": 582
+        }
+      ],
+      "contextSplit": {
+        "firstCallPromptTokens": 17891,
+        "systemPromptTokens": 644,
+        "llmideToolTokens": 2193,
+        "skillsAppendTokens": 0,
+        "contextFenceTokens": 0,
+        "memoryFenceTokens": 0,
+        "toolResultTokens": 26,
+        "sdkContextTotalTokens": 18267
+      }
+    },
+    {
+      "id": "cache-slope",
+      "mode": "ask",
+      "expectTools": false,
+      "turns": 5,
+      "n": 3,
+      "billableTokens": 8803,
+      "totalMs": 23778,
+      "ttftMs": 1851,
+      "hops": 5,
+      "raw": {
+        "input": 10,
+        "output": 33,
+        "cacheRead": 66725,
+        "cacheWrite": 1682
+      },
+      "billableSamples": [
+        10325,
+        8009,
+        8803
+      ],
+      "perTurn": [
+        {
+          "hops": 1,
+          "billable": 2190,
+          "input": 2,
+          "output": 4,
+          "cacheRead": 12880,
+          "cacheWrite": 717
+        },
+        {
+          "hops": 1,
+          "billable": 2242,
+          "input": 2,
+          "output": 3,
+          "cacheRead": 12880,
+          "cacheWrite": 759
+        },
+        {
+          "hops": 1,
+          "billable": 1449,
+          "input": 2,
+          "output": 3,
+          "cacheRead": 13614,
+          "cacheWrite": 66
+        },
+        {
+          "hops": 1,
+          "billable": 1453,
+          "input": 2,
+          "output": 3,
+          "cacheRead": 13655,
+          "cacheWrite": 66
+        },
+        {
+          "hops": 1,
+          "billable": 1469,
+          "input": 2,
+          "output": 5,
+          "cacheRead": 13696,
+          "cacheWrite": 74
+        }
+      ],
+      "contextSplit": {
+        "firstCallPromptTokens": 13772,
+        "systemPromptTokens": 644,
+        "llmideToolTokens": 2193,
+        "skillsAppendTokens": 0,
+        "contextFenceTokens": 0,
+        "memoryFenceTokens": 0,
+        "toolResultTokens": 0,
+        "sdkContextTotalTokens": 16161
+      }
+    }
+  ]
+}

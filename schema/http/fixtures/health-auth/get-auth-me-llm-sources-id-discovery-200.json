@@ -1,0 +1,630 @@
+{
+  "endpoint": "GET /auth/me/llm-sources/:id/discovery",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "builtin"
+    }
+  },
+  "response": {
+    "skills": [
+      {
+        "name": "app-council",
+        "description": "Use when an app idea has research and needs a feature set and design decided — runs a persona council (PM, Architect, UX, Security, QA, Skeptic, simulated users, Moderator) that argues from the resear",
+        "path": "/example/repo/.skills/skills/app-council/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "app-forge",
+        "description": "Use when the user wants a whole new app generated from an idea — runs a MiroFish-style staged pipeline (intake → web research → persona council → spec → plan → build → verify → report) with two approv",
+        "path": "/example/repo/.skills/skills/app-forge/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "app-research",
+        "description": "Use when an app idea needs grounding before design — researches users, competitors, libraries, stack fit, and risks on the web within a fixed budget and writes a citable research graph (.forge/researc",
+        "path": "/example/repo/.skills/skills/app-research/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "app-stack-menu",
+        "description": "Use when choosing, scaffolding, testing, or launch-checking the tech stack for a newly generated app — the curated menu app-forge's Architect picks from, each stack with exact scaffold, install, test,",
+        "path": "/example/repo/.skills/skills/app-stack-menu/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "assist-plan",
+        "description": "Use when the user wants to build a plan collaboratively over several turns — rounds of clarifying questions with recommended answers, then a written plan — rather than a one-shot proposal. The grillin",
+        "path": "/example/repo/.skills/skills/assist-plan/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "brainstorming",
+        "description": "You MUST use this before any creative work - creating features, building components, adding functionality, or modifying behavior. Explores user intent, requirements and design before implementation.",
+        "path": "/example/repo/.skills/skills/brainstorming/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "code-review",
+        "description": "Token-efficient code review using memory-cached project context. Reviews current diff or a PR for bugs, security, and convention compliance.",
+        "path": "/example/repo/.skills/skills/code-review/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "dispatching-parallel-agents",
+        "description": "Use when facing 2+ independent tasks that can be worked on without shared state or sequential dependencies",
+        "path": "/example/repo/.skills/skills/dispatching-parallel-agents/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "doc-structure-index",
+        "description": "Use when a generated documentation tree needs a current index — before writing docs, after the code layout changed, or when the doc directory has no INDEX.md yet. Maps codebase areas to doc pages and ",
+        "path": "/example/repo/.skills/skills/doc-structure-index/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "doc-writer",
+        "description": "Use when the generated documentation pages listed in a doc index are missing or have drifted from the code. Writes or updates each page — purpose, logic step by step, key files and functions, invarian",
+        "path": "/example/repo/.skills/skills/doc-writer/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "docstrings",
+        "description": "Use when writing or reviewing Python functions that lack docstrings, or when asked to add or fix docstrings — Google style (Args/Returns/Raises) per GRID standards",
+        "path": "/example/repo/.skills/skills/docstrings/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "error-handling",
+        "description": "Use when adding or reviewing Python error handling — choosing specific exception types, logging failures, avoiding bare except — per GRID standards",
+        "path": "/example/repo/.skills/skills/error-handling/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "excel-diff-extractor",
+        "description": "Compare two Excel (.xlsx/.xls/.xlsm) or CSV (.csv/.tsv) files or folders, cell-by-cell, and report differences as a bilingual (Japanese + English) summary plus a highlighted diff Excel. Trigger on: \"c",
+        "path": "/example/repo/.skills/skills/excel-diff-extractor/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "excel-io",
+        "description": "Use when reading or writing Excel files from Python (pandas + openpyxl), especially with Japanese text or encodings (UTF-8, CP932) or multi-sheet workbooks",
+        "path": "/example/repo/.skills/skills/excel-io/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "executing-plans",
+        "description": "Use when you have a written implementation plan to execute in a separate session with review checkpoints",
+        "path": "/example/repo/.skills/skills/executing-plans/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "finishing-a-development-branch",
+        "description": "Use when implementation is complete, all tests pass, and you need to decide how to integrate the work - guides completion of development work by presenting structured options for merge, PR, or cleanup",
+        "path": "/example/repo/.skills/skills/finishing-a-development-branch/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "grid-pptx",
+        "description": "Create GRID-branded PowerPoint presentations: (1) new decks from scratch, (2) converting existing .pptx to GRID format. Trigger on: user asks for \"slides\", \"deck\", \"pitch\", \"presentation\", a \".pptx\" f",
+        "path": "/example/repo/.skills/skills/grid-pptx/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "grilling",
+        "description": "Grill the user relentlessly about a plan, decision, or idea. Use when the user wants to stress-test their thinking, or uses any 'grill' trigger phrases.",
+        "path": "/example/repo/.skills/skills/grilling/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "gurobi-params",
+        "description": "Use when configuring or tuning Gurobi solver parameters — TimeLimit, MIPGap, Threads, IIS computation — e.g. the solver is slow, hits its time limit, or a MIP run must be reproducible",
+        "path": "/example/repo/.skills/skills/gurobi-params/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "html-slides",
+        "description": "Use when asked to build, change, or extend a slide deck, presentation, talk, pitch, or design review as a web page — \"make slides\", \"スライドを作って\", turning a document or README into a deck, changing or ad",
+        "path": "/example/repo/.skills/skills/html-slides/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "iis-summarization",
+        "description": "Diagnose an infeasible Gurobi .lp / .mps / .ilp model and produce a plain-language report (English or Japanese) naming constraints that conflict and what input changes restore feasibility. Trigger on:",
+        "path": "/example/repo/.skills/skills/iis-summarization/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "lp-compare",
+        "description": "Compare two LP (Linear Programming) files to find differences in objectives and constraints. Trigger on: \"compare these LP files\", \"diff the LP\", \"what changed between these .lp files\", \"check if LP f",
+        "path": "/example/repo/.skills/skills/lp-compare/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "math-olympiad",
+        "description": "Solve competition math problems (IMO, Putnam, USAMO, AIME) with adversarial verification. Activates when asked to 'solve this IMO problem', 'prove this olympiad inequality', 'verify this competition p",
+        "path": "/example/repo/.skills/skills/math-olympiad/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "mirror-web-to-native",
+        "description": "Use when porting a web feature to iOS and Android, or ensuring feature parity across platforms. Choose this for mirroring, cascade, or multi-platform parity.",
+        "path": "/example/repo/.skills/skills/mirror-web-to-native/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "optimization-advisor",
+        "description": "Expert advisor for mathematical optimization — formulation, solver selection, parameter tuning, decomposition, and anti-pattern detection. Covers LP, MIP, MILP, CP, CP-SAT, QP, SOCP, SDP, MINLP, TSP, ",
+        "path": "/example/repo/.skills/skills/optimization-advisor/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "performance-budget",
+        "description": "Set and enforce production performance budgets — LCP/CLS/INP for web, cold-start and memory for native, API p50/p95/p99, DB query timing, bundle size. Use when the user says \"perf budget\", \"our site i",
+        "path": "/example/repo/.skills/skills/performance-budget/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "plan-director",
+        "description": "Use when plans have piled up unlinked in the plans directory, when a collected plan needs consolidating into the master plan, or when a project needs a first master plan derived from code alone. Maint",
+        "path": "/example/repo/.skills/skills/plan-director/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "plan-structure-index",
+        "description": "Use when plans need a current structure index — before consolidating plans, after files or folders changed, or when the plans directory has no INDEX.md yet. Maintains the folder/file/function indexes ",
+        "path": "/example/repo/.skills/skills/plan-structure-index/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "receiving-code-review",
+        "description": "Use when receiving code review feedback, before implementing suggestions, especially if feedback seems unclear or technically questionable - requires technical rigor and verification, not performative",
+        "path": "/example/repo/.skills/skills/receiving-code-review/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "refactor-apply",
+        "description": "Use when a refactor plan exists and the next batch should be applied — picks the first todo batch, applies it behaviour-preservingly, and marks it done or skipped. One batch per run, never commits.",
+        "path": "/example/repo/.skills/skills/refactor-apply/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "refactor-conform",
+        "description": "Use after a refactor batch has been applied, as a second look that fixes any RULES.md violation the batch introduced — behaviour-preservingly, scoped to exactly that batch's files. Optional — a repo w",
+        "path": "/example/repo/.skills/skills/refactor-conform/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "refactor-planner",
+        "description": "Use when a codebase needs a professional, AI-friendly restructuring plan — oversized files, duplicated logic, inconsistent naming, unclear module boundaries, or no CLAUDE.md/AGENTS.md. Surveys the rep",
+        "path": "/example/repo/.skills/skills/refactor-planner/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "requesting-code-review",
+        "description": "Use when completing tasks, implementing major features, or before merging to verify work meets requirements",
+        "path": "/example/repo/.skills/skills/requesting-code-review/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "result-explanation",
+        "description": "Explain WHY a finished optimization run produced its result. Given the solved .lp / .mps model plus input/output Excel files (or .sol), find binding constraints, trace inputs that pin each output, bre",
+        "path": "/example/repo/.skills/skills/result-explanation/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "reviewer",
+        "description": "Multi-agent PR code review. Launches 5 parallel agents to independently review changes for bugs, CLAUDE.md compliance, and historical context. Confidence-scored findings (threshold 80+) are posted as ",
+        "path": "/example/repo/.skills/skills/reviewer/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "solve-tuning",
+        "description": "Explain a Gurobi solver log in plain language and recommend parameter or formulation changes to make a model solve faster, prove optimality, or behave numerically. A Python engine parses the log (no s",
+        "path": "/example/repo/.skills/skills/solve-tuning/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "subagent-driven-development",
+        "description": "Use when executing implementation plans with independent tasks in the current session",
+        "path": "/example/repo/.skills/skills/subagent-driven-development/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "systematic-debugging",
+        "description": "Use when encountering any bug, test failure, or unexpected behavior, before proposing fixes",
+        "path": "/example/repo/.skills/skills/systematic-debugging/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "test-driven-development",
+        "description": "Use when implementing any feature or bugfix, before writing implementation code",
+        "path": "/example/repo/.skills/skills/test-driven-development/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "test-gap-writer",
+        "description": "Use when a Test loop stage should add real tests for ONE unit-test candidate file per run from TEST-MAP.md, or for every file a refactor batch (NEXT-BATCH.md) marks as missing tests — reads TEST-MAP.m",
+        "path": "/example/repo/.skills/skills/test-gap-writer/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "test-structure-setup",
+        "description": "Use when a repo has no test folder or no runnable test command — reads the Loop's TEST-STRUCTURE.md (status: missing) and creates the smallest working test layout for the languages present, one packag",
+        "path": "/example/repo/.skills/skills/test-structure-setup/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "type-hints",
+        "description": "Use when adding type hints to Python function signatures or fixing mypy/type-check errors, per GRID standards",
+        "path": "/example/repo/.skills/skills/type-hints/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "using-git-worktrees",
+        "description": "Use when starting feature work that needs isolation from current workspace or before executing implementation plans - ensures an isolated workspace exists via native tools or git worktree fallback",
+        "path": "/example/repo/.skills/skills/using-git-worktrees/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "using-superpowers",
+        "description": "Use when starting any conversation - establishes how to find and use skills, requiring Skill tool invocation before ANY response including clarifying questions",
+        "path": "/example/repo/.skills/skills/using-superpowers/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "verification-before-completion",
+        "description": "Use when about to claim work is complete, fixed, or passing, before committing or creating PRs - requires running verification commands and confirming output before making any success claims; evidence",
+        "path": "/example/repo/.skills/skills/verification-before-completion/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "writing-plans",
+        "description": "Use when you have a spec or requirements for a multi-step task, before touching code",
+        "path": "/example/repo/.skills/skills/writing-plans/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "writing-skills",
+        "description": "Use when creating new skills, editing existing skills, or verifying skills work before deployment",
+        "path": "/example/repo/.skills/skills/writing-skills/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "answer-question",
+        "description": "Answers a user question using a curated set of notes loaded from the vault.",
+        "path": "/example/repo/.skills/runtime/answer-question/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "atomize-text",
+        "description": "Splits a chunk of extracted text into atomic units, each one self-contained and 50–300 lines.",
+        "path": "/example/repo/.skills/runtime/atomize-text/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "classify-node",
+        "description": "Assigns one of 16 node types to an atomic unit, with a confidence score and rationale.",
+        "path": "/example/repo/.skills/runtime/classify-node/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "draft-document",
+        "description": "Synthesizes multiple notes into a structured document based on a template (e.g. Scientific Paper).",
+        "path": "/example/repo/.skills/runtime/draft-document/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "draft-section",
+        "description": "Writes a specific section of a document using provided notes and instructions.",
+        "path": "/example/repo/.skills/runtime/draft-section/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "identify-missing-context",
+        "description": "Analyzes retrieved context against a question and identifies missing entities, follow-up note ids, and search keywords for a deeper research pass.",
+        "path": "/example/repo/.skills/runtime/identify-missing-context/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "improve-note",
+        "description": "Rewrites an existing note in place, merging new information from a candidate while preserving identity.",
+        "path": "/example/repo/.skills/runtime/improve-note/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "infer-edges",
+        "description": "For a new note, identifies semantic edges to existing notes using the 10 edge types.",
+        "path": "/example/repo/.skills/runtime/infer-edges/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "plan-draft-outline",
+        "description": "Creates a formal document structure (headers) based on a topic and template.",
+        "path": "/example/repo/.skills/runtime/plan-draft-outline/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "process-unit",
+        "description": "Combines classification and summarization into a single pass to reduce latency and cost.",
+        "path": "/example/repo/.skills/runtime/process-unit/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "reconcile-note",
+        "description": "Decides whether a candidate unit is a duplicate, an improvement, or genuinely new.",
+        "path": "/example/repo/.skills/runtime/reconcile-note/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "select-notes-for-question",
+        "description": "Pass 1 of two-pass retrieval — pick which note bodies to load before answering a question.",
+        "path": "/example/repo/.skills/runtime/select-notes-for-question/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "summarize-note",
+        "description": "Writes a single-sentence ≤50-token summary used for cheap retrieval.",
+        "path": "/example/repo/.skills/runtime/summarize-note/SKILL.md",
+        "enabled": true,
+        "isNew": false
+      }
+    ],
+    "agents": [
+      {
+        "name": "reviewer",
+        "description": "Illustrative example of the new agents/*.md subagent-definition convention. A code-review-focused subagent persona that checks a diff for bugs, security issues, and convention compliance before merge.",
+        "path": "/example/repo/.skills/agents/reviewer.md",
+        "enabled": true,
+        "isNew": false
+      }
+    ],
+    "commands": [
+      {
+        "name": "app-forge",
+        "description": "Generate a whole app from an idea through the app-forge pipeline — web research, persona council, spec, plan, build, verify, report — with two approval gates. Resumes a run when given an app directory",
+        "path": "/example/repo/.skills/commands/cli/app-forge.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "excel-diff-extractor",
+        "description": "Compare two Excel or CSV files (or folders of them) cell-by-cell and report a bilingual diff plus a highlighted diff workbook, via the excel-diff-extractor skill.",
+        "path": "/example/repo/.skills/commands/cli/excel-diff-extractor.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "html-slides",
+        "description": "Build, change, or extend a slide deck, presentation, talk, pitch, or design review as one self-contained HTML page; also converts to and from .pptx. Manual only — run /html-slides instead of relying o",
+        "path": "/example/repo/.skills/commands/cli/html-slides.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "iis-summarization",
+        "description": "Diagnose an infeasible Gurobi model and report which constraints conflict and what input changes restore feasibility, via the iis-summarization skill.",
+        "path": "/example/repo/.skills/commands/cli/iis-summarization.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "lp-compare",
+        "description": "Compare two LP files and report differences in objectives and constraints, via the lp-compare skill.",
+        "path": "/example/repo/.skills/commands/cli/lp-compare.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "optimization-advisor",
+        "description": "Expert advice on formulation, solver selection, parameter tuning, decomposition, and anti-pattern detection for a mathematical optimization problem, via the optimization-advisor skill.",
+        "path": "/example/repo/.skills/commands/cli/optimization-advisor.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "result-explanation",
+        "description": "Explain why a finished optimization run produced its result — binding constraints, which inputs pin each output, objective breakdown — via the result-explanation skill.",
+        "path": "/example/repo/.skills/commands/cli/result-explanation.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "solve-tuning",
+        "description": "Explain a Gurobi solver log and recommend parameter or formulation changes to solve faster, prove optimality, or fix numerical trouble, via the solve-tuning skill.",
+        "path": "/example/repo/.skills/commands/cli/solve-tuning.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "explain-code",
+        "description": "Explain the selected code for someone new to the codebase.",
+        "path": "/example/repo/.skills/commands/doc/explain-code.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "release-notes",
+        "description": "Turn the selected sources into user-facing release notes.",
+        "path": "/example/repo/.skills/commands/doc/release-notes.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "ship-it",
+        "description": "A release checklist prompt that walks through pre-ship verification steps.",
+        "path": "/example/repo/.skills/commands/doc/ship-it.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "summarize",
+        "description": "Summarise the selected sources, most important point first.",
+        "path": "/example/repo/.skills/commands/doc/summarize.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "describe-image",
+        "description": "Describe what an image shows, concretely and in reading order.",
+        "path": "/example/repo/.skills/commands/vis/describe-image.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "extract-text",
+        "description": "Transcribe every piece of text visible in an image.",
+        "path": "/example/repo/.skills/commands/vis/extract-text.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "read-chart",
+        "description": "Read a chart or diagram and report what its data says.",
+        "path": "/example/repo/.skills/commands/vis/read-chart.md",
+        "enabled": true,
+        "isNew": false
+      }
+    ],
+    "templates": [
+      {
+        "name": "action-plan",
+        "description": "Structure for a plan of action: the objective, the steps, who owns them, and how success is judged.",
+        "path": "/example/repo/.skills/templates/doc/action-plan.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "decision-log",
+        "description": "Structure for recording one decision: what was chosen, why, and what was rejected.",
+        "path": "/example/repo/.skills/templates/doc/decision-log.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "incident-report",
+        "description": "A fill-in-the-blanks incident report structure for post-incident writeups.",
+        "path": "/example/repo/.skills/templates/doc/incident-report.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "meeting-summary",
+        "description": "Structure for a meeting write-up: what was decided, what happens next, and what is blocked.",
+        "path": "/example/repo/.skills/templates/doc/meeting-summary.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "sprint-review",
+        "description": "Structure for an end-of-sprint review: goal, what landed, what carried over, and what is at risk.",
+        "path": "/example/repo/.skills/templates/doc/sprint-review.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "status-update",
+        "description": "Structure for a periodic status report: done, in flight, at risk, and next.",
+        "path": "/example/repo/.skills/templates/doc/status-update.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "design-feedback",
+        "description": "Structure for critiquing a design: first impression, layout, accessibility, and concrete fixes.",
+        "path": "/example/repo/.skills/templates/vis/design-feedback.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "image-analysis",
+        "description": "Structure for reading an image: what it shows, what is worth noting, and what it leaves open.",
+        "path": "/example/repo/.skills/templates/vis/image-analysis.md",
+        "enabled": true,
+        "isNew": false
+      },
+      {
+        "name": "screenshot-review",
+        "description": "Structure for reviewing a UI screenshot: what the screen does, what is wrong with it, and what to change.",
+        "path": "/example/repo/.skills/templates/vis/screenshot-review.md",
+        "enabled": true,
+        "isNew": false
+      }
+    ],
+    "hooks": [
+      {
+        "event": "SessionStart",
+        "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/load-memory.sh"
+      },
+      {
+        "event": "PreToolUse",
+        "matcher": "Write|Edit",
+        "command": "${CLAUDE_PROJECT_DIR}/.claude/hooks/tier-a-check.sh"
+      },
+      {
+        "event": "SessionStart",
+        "command": "echo 'session started'"
+      }
+    ],
+    "mcpServers": []
+  }
+}

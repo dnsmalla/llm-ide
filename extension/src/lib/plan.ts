@@ -2,7 +2,7 @@
 // /kb/generate-plan, /kb/analyze-risks, /kb/code-sync, and /kb/plan/:id.
 // Keep in sync with savePlan/getPlan in kb/db.mjs.
 
-export type TaskStatus = 'planned' | 'in_progress' | 'done' | 'blocked';
+export type TaskStatus = 'planned' | 'in_progress' | 'done' | 'blocked' | 'cancelled';
 export type RiskLevel = 'low' | 'med' | 'high';
 
 export interface CodeRef {

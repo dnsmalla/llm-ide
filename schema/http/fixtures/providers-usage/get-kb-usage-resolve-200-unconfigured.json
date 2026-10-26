@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /kb/usage/resolve",
+  "status": 200,
+  "request": {
+    "query": {
+      "provider": "custom"
+    }
+  },
+  "response": {
+    "provider": "custom",
+    "model": null,
+    "status": "unconfigured",
+    "resetAt": null,
+    "reason": "No fallback chain configured.",
+    "engaged": false
+  }
+}

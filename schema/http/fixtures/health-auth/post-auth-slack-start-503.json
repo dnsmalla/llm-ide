@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/slack/start",
+  "status": 503,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "CONFIG_MISSING",
+      "message": "Slack connect isn't set up on this server yet."
+    }
+  }
+}

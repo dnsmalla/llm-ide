@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /kb/review/delete",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "rev-mvov51y7-SsK--GOXoReRh0nN"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

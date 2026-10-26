@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/review/submit",
+  "status": 400,
+  "request": {
+    "body": {
+      "kind": "codegen-apply"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "kind and payload required"
+    }
+  }
+}

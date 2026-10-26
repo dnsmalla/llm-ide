@@ -1,0 +1,80 @@
+{
+  "endpoint": "POST /kb/review/submit",
+  "status": 200,
+  "description": "Codegen-apply item for a repo that is not on the allow-list: guardrails carry a blocking codegen.allowlist finding. Submit still queues the item.",
+  "request": {
+    "body": {
+      "kind": "codegen-apply",
+      "title": "Example outside allow-list",
+      "taskId": "task-1",
+      "payload": {
+        "repoPath": "/example/outside-allowlist",
+        "taskId": "task-1",
+        "summary": "Example",
+        "files": [
+          {
+            "path": "docs/outside.md",
+            "content": "Example.\n"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "id": "rev-mvov51y7-SsK--GOXoReRh0nN",
+    "kind": "codegen-apply",
+    "planId": null,
+    "taskId": "task-1",
+    "title": "Example outside allow-list",
+    "payload": {
+      "repoPath": "/example/outside-allowlist",
+      "taskId": "task-1",
+      "summary": "Example",
+      "files": [
+        {
+          "path": "docs/outside.md",
+          "content": "Example.\n"
+        }
+      ],
+      "allowedRepos": [
+        "/example/repo",
+        "/example/repo2"
+      ]
+    },
+    "guardrails": {
+      "passed": false,
+      "blocking": [
+        {
+          "ruleId": "codegen.allowlist",
+          "severity": "blocking",
+          "message": "Repo path is not in the allow-list. Allowed: /example/repo, /example/repo2."
+        }
+      ],
+      "warnings": [],
+      "info": [
+        {
+          "ruleId": "codegen.summary",
+          "severity": "info",
+          "message": "Will write 1 file + 0 tests under /example/outside-allowlist."
+        }
+      ],
+      "findings": [
+        {
+          "ruleId": "codegen.allowlist",
+          "severity": "blocking",
+          "message": "Repo path is not in the allow-list. Allowed: /example/repo, /example/repo2."
+        },
+        {
+          "ruleId": "codegen.summary",
+          "severity": "info",
+          "message": "Will write 1 file + 0 tests under /example/outside-allowlist."
+        }
+      ]
+    },
+    "status": "pending",
+    "reviewerNote": null,
+    "result": {},
+    "createdAt": "2026-10-26 06:15:54",
+    "decidedAt": null
+  }
+}

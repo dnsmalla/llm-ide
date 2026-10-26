@@ -1,0 +1,25 @@
+{
+  "endpoint": "GET /kb/agent/feedback/by-task",
+  "status": 200,
+  "request": {
+    "query": {
+      "sinceDays": "30"
+    }
+  },
+  "response": {
+    "tasks": [
+      {
+        "planTaskId": "task-1",
+        "total": 1,
+        "byVerdict": {
+          "useful": 1,
+          "noise": 0,
+          "later": 0
+        },
+        "usefulRate": 1,
+        "avgScoreUseful": 1,
+        "avgScoreNoise": null
+      }
+    ]
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "endpoint": "PATCH /kb/chat/sessions/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "nope"
+    },
+    "body": {
+      "title": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "session not found"
+    }
+  }
+}

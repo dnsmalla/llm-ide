@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/usage/resolve",
+  "status": 401,
+  "request": {
+    "query": {
+      "provider": "anthropic"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

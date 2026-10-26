@@ -1,0 +1,16 @@
+{
+  "endpoint": "DELETE /kb/agent/project-memory",
+  "status": 404,
+  "request": {
+    "body": {
+      "repo": "/nope",
+      "fact": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REPO_NOT_ALLOWED",
+      "message": "repo not in allow-list"
+    }
+  }
+}

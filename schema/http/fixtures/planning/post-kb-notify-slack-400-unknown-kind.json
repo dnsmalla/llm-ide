@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/notify/slack",
+  "status": 400,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: An unknown kind throws in notifySlack before the webhook is contacted.",
+  "request": {
+    "body": {
+      "webhookUrl": "https://hooks.slack.com/services/EXAMPLE/EXAMPLE/EXAMPLE",
+      "kind": "digest",
+      "payload": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SLACK_NOTIFY_FAILED",
+      "message": "Unknown Slack message kind: digest"
+    }
+  }
+}

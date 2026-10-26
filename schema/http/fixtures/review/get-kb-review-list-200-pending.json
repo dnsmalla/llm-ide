@@ -1,0 +1,65 @@
+{
+  "endpoint": "GET /kb/review/list",
+  "status": 200,
+  "request": {
+    "query": {
+      "status": "pending",
+      "limit": "5"
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": "rev-mvov51xz-TX5ZST_g84UKFP6V",
+        "kind": "codegen-apply",
+        "planId": null,
+        "taskId": "task-1",
+        "title": "Example codegen note",
+        "status": "pending",
+        "createdAt": "2026-10-26 06:15:54",
+        "decidedAt": null
+      },
+      {
+        "id": "rev-mvov51y3-DqsyMVmX6z2FaXBz",
+        "kind": "dispatch",
+        "planId": "plan-mvov51xa-s8lhXUS-1GQQVQuA",
+        "taskId": null,
+        "title": "Example dispatch with token placeholder",
+        "status": "pending",
+        "createdAt": "2026-10-26 06:15:54",
+        "decidedAt": null
+      },
+      {
+        "id": "rev-mvov51y5-BgFjA-1ETYAzQMMy",
+        "kind": "dispatch",
+        "planId": "plan-mvov51xa-s8lhXUS-1GQQVQuA",
+        "taskId": null,
+        "title": "Example dispatch without credential",
+        "status": "pending",
+        "createdAt": "2026-10-26 06:15:54",
+        "decidedAt": null
+      },
+      {
+        "id": "rev-mvov51y7-SsK--GOXoReRh0nN",
+        "kind": "codegen-apply",
+        "planId": null,
+        "taskId": "task-1",
+        "title": "Example outside allow-list",
+        "status": "pending",
+        "createdAt": "2026-10-26 06:15:54",
+        "decidedAt": null
+      },
+      {
+        "id": "rev-mvov51ya-t24F7csbY4AkiPX7",
+        "kind": "codegen-apply",
+        "planId": null,
+        "taskId": "task-1",
+        "title": "Example symlink refusal",
+        "status": "pending",
+        "createdAt": "2026-10-26 06:15:54",
+        "decidedAt": null
+      }
+    ],
+    "count": 5
+  }
+}

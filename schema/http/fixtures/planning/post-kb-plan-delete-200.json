@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/plan/delete",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Deletes one of the user's plans; no model call.",
+  "request": {
+    "body": {
+      "id": "plan-mvovbu02-wQLSrrCz4cZ2rFEY"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

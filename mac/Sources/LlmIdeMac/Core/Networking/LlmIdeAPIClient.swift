@@ -78,7 +78,7 @@ struct RegisterRequest: Encodable {
     let displayName: String?
 }
 
-struct SessionResponse: Decodable {
+public struct SessionResponse: Decodable {
     /// Optional because older servers omit `user` on /auth/refresh (login
     /// always sends it). Treating it as required made the refresh response
     /// undecodable, which dropped the just-rotated refresh token on the
@@ -93,7 +93,7 @@ struct SessionResponse: Decodable {
         case user, accessToken, refreshToken, accessTokenTTLSec
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         // `try?` so a present-but-malformed `user` (server drift) degrades
         // to the keep-current-user path instead of failing the whole
@@ -111,8 +111,8 @@ struct RefreshRequest: Encodable {
     let refreshToken: String
 }
 
-struct UserInfo: Codable, Identifiable, Equatable {
-    let id: String
+public struct UserInfo: Codable, Identifiable, Equatable {
+    public let id: String
     let email: String
     let displayName: String
     let role: String
@@ -180,7 +180,7 @@ extension LlmIdeAPIClient {
 /// Single-tenant client paired with the `SessionStore`.  Reads its
 /// access token from the store on every call so token rotation
 /// (background refresh) is transparent to call sites.
-final class LlmIdeAPIClient: @unchecked Sendable {
+public final class LlmIdeAPIClient: @unchecked Sendable {
     let baseURL: String
     /// Short-timeout session for `/auth/*` — login, refresh, register,
     /// prefs, secrets. These are cheap server-side; a 240 s timeout

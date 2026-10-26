@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/usage/record",
+  "status": 401,
+  "request": {
+    "body": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

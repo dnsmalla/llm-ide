@@ -1,0 +1,30 @@
+{
+  "endpoint": "GET /kb/meeting/:id",
+  "status": 200,
+  "request": {
+    "query": {},
+    "params": {
+      "id": "example-meeting-1"
+    }
+  },
+  "response": {
+    "id": "example-meeting-1",
+    "title": "Example planning meeting",
+    "date": "2026-10-26",
+    "durationSec": 1800,
+    "language": "en",
+    "participants": [
+      "Alice",
+      "Bob"
+    ],
+    "entities": [
+      {
+        "id": "example-entity-1",
+        "kind": "decision",
+        "text": "Ship the search fix on Friday",
+        "quote": "we decided to ship the search fix on Friday",
+        "meta": {}
+      }
+    ]
+  }
+}

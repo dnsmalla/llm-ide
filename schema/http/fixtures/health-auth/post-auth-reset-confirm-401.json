@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/reset-confirm",
+  "status": 401,
+  "request": {
+    "body": {
+      "token": "short",
+      "newPassword": "example-new-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Invalid or expired reset token"
+    }
+  }
+}

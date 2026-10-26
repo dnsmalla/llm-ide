@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/reset-confirm",
+  "status": 200,
+  "request": {
+    "body": {
+      "token": "example-reset-token",
+      "newPassword": "example-new-password"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

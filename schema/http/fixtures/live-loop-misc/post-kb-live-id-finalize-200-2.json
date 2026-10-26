@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/live/:id/finalize",
+  "status": 200,
+  "description": "Finalize an id that was never seen: the route answers the empty summary.",
+  "request": {
+    "params": {
+      "id": "sess-unknown-2"
+    }
+  },
+  "response": {
+    "sessionId": "sess-unknown-2",
+    "finalized": true,
+    "captionCount": 0
+  }
+}

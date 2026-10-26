@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/issue-schedule",
+  "status": 200,
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "example/repo"
+    }
+  },
+  "response": {
+    "schedules": [],
+    "count": 0
+  }
+}

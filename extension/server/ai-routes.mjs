@@ -1,5 +1,5 @@
 import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../providers/runtime.mjs';
-import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON, onClientDisconnect } from '../core/utils.mjs';
+import { readBody, parseJSON, readJsonObjectOr400, sanitizeForPrompt, sanitizeLine, sendJSON, onClientDisconnect } from '../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
@@ -143,6 +143,25 @@ export function buildEnrichedAgentContext(agentContext, recentMeetings) {
     // resolver always fell back to `sessionId`, so a chat's tasks were
     // keyed to whatever session id that turn happened to carry.
     chatSessionId: typeof agentContext.chatSessionId === 'string' ? agentContext.chatSessionId : null,
+    // Active repo's branch and git status (the Mac's AgentContext). Bounded
+    // here; rendered per turn by composeGitContext.
+    currentBranch: typeof agentContext.currentBranch === 'string'
+      ? agentContext.currentBranch.slice(0, 200) : null,
+    gitStatus: gitStatusForContext(agentContext.gitStatus),
+  };
+}
+
+/** gitStatus as the Mac sends it (counts), or a bounded string; anything else is dropped. */
+function gitStatusForContext(gs) {
+  if (typeof gs === 'string') return gs.slice(0, 2000);
+  if (!gs || typeof gs !== 'object' || Array.isArray(gs)) return null;
+  const count = (v) => (Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : 0);
+  return {
+    staged: count(gs.staged),
+    unstaged: count(gs.unstaged),
+    ahead: count(gs.ahead),
+    behind: count(gs.behind),
+    hasUpstream: gs.hasUpstream === true,
   };
 }
 
@@ -745,7 +764,8 @@ export async function handleAIRoutes(req, res) {
   // shape: the registry owns tenancy (deciding user AND session — here
   // the legacy chat's agentContext.sessionId — must match the parked entry).
   if (req.method === 'POST' && req.url === '/code-assist/decision') {
-    const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+    const body = await readJsonObjectOr400(req, res, 64 * 1024);
+    if (body === null) return true;
     const out = answerDecision({
       requestId: body.requestId,
       sdkSessionId: body.sdkSessionId,

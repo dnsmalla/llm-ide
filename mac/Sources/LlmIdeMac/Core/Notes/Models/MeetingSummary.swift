@@ -1,6 +1,6 @@
 import Foundation
 
-struct MeetingSummary: Codable, Equatable {
+public struct MeetingSummary: Codable, Equatable {
     struct Action: Codable, Equatable {
         let owner: String?
         let text: String

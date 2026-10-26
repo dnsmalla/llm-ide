@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/entity/:id",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "example-entity-1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

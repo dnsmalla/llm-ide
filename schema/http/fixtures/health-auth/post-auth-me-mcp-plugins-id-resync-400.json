@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/:id/resync",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "filesystem"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_MANAGED",
+      "message": "this server has no Claude Code / Codex source to re-sync from"
+    }
+  }
+}

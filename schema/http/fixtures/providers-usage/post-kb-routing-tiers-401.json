@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/routing-tiers",
+  "status": 401,
+  "request": {
+    "body": {
+      "tiers": {},
+      "features": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/dispatch",
+  "status": 403,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: A non-preview target without reviewId is refused before any external call.",
+  "request": {
+    "body": {
+      "planId": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+      "target": "github"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REVIEW_REQUIRED",
+      "message": "Non-preview dispatch requires a guardrail reviewId. Submit /kb/review/submit (kind=\"dispatch\") first, get it approved, then include reviewId in this request."
+    }
+  }
+}

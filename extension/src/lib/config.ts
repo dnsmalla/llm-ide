@@ -1,3 +1,4 @@
+import type { GetAuthWellKnownResponse200, PostAuthLoginResponse200, PostAuthRegisterResponse201 } from './api-types';
 /**
  * Centralized configuration for the extension.
  * All tunable values live here — no magic numbers scattered in the code.
@@ -363,14 +364,7 @@ export async function authFetch(input: string, init: AuthFetchInit = {}): Promis
 
 // ---- Auth API helpers ------------------------------------------------
 
-interface LoginResponse {
-  user: { id: string; email: string; displayName: string; role: string };
-  accessToken: string;
-  refreshToken: string;
-  accessTokenTTLSec: number;
-}
-
-export async function apiLogin(email: string, password: string): Promise<LoginResponse> {
+export async function apiLogin(email: string, password: string): Promise<PostAuthLoginResponse200> {
   const url = await getServerUrl();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), AUTH_FETCH_TIMEOUT_MS);
@@ -381,7 +375,7 @@ export async function apiLogin(email: string, password: string): Promise<LoginRe
       body: JSON.stringify({ email, password }),
       signal: ctrl.signal,
     });
-    return parseJsonResponse<LoginResponse>(r);
+    return parseJsonResponse<PostAuthLoginResponse200>(r);
   } finally {
     clearTimeout(timer);
   }
@@ -391,7 +385,7 @@ export async function apiRegister(
   email: string,
   password: string,
   displayName?: string,
-): Promise<{ user: LoginResponse['user'] }> {
+): Promise<{ user: PostAuthRegisterResponse201['user'] }> {
   const url = await getServerUrl();
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), AUTH_FETCH_TIMEOUT_MS);
@@ -421,10 +415,10 @@ export async function apiLogout(allDevices = false): Promise<void> {
   clearSession();
 }
 
-export async function apiWellKnown(): Promise<{ registrationOpen: boolean; vaultKeys: string[] }> {
+export async function apiWellKnown(): Promise<GetAuthWellKnownResponse200> {
   const url = await getServerUrl();
   const r = await fetch(`${url}/auth/well-known`);
-  return parseJsonResponse(r);
+  return parseJsonResponse<GetAuthWellKnownResponse200>(r);
 }
 
 // Parse a fetch Response that may carry the new error envelope or the

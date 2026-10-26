@@ -1,0 +1,99 @@
+{
+  "endpoint": "GET /kb/plan/:id",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The plan as stored after the risk pass.",
+  "request": {
+    "params": {
+      "id": "plan-mvov8l8f-fTXIGvBouNEzXX2v"
+    }
+  },
+  "response": {
+    "id": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+    "meetingId": "mtg-plan-001",
+    "title": "Release plan",
+    "goal": "Ship the release on Friday",
+    "language": "English",
+    "meta": {
+      "snapshots": [
+        {
+          "savedAt": "2026-10-26T06:21:10.911Z",
+          "taskCount": 2,
+          "tasks": [
+            {
+              "id": "t-mvov8l6w-0-4nvf",
+              "title": "Update the release notes",
+              "status": "planned",
+              "risk": "low"
+            },
+            {
+              "id": "t-mvov8l6w-1-3w4a",
+              "title": "Ship the release",
+              "status": "planned",
+              "risk": "med"
+            }
+          ]
+        },
+        {
+          "savedAt": "2026-10-26T06:19:11.219Z",
+          "taskCount": 2,
+          "tasks": [
+            {
+              "id": "t-mvov8l6w-0-4nvf",
+              "title": "Update the release notes",
+              "status": "planned",
+              "risk": "low"
+            },
+            {
+              "id": "t-mvov8l6w-1-3w4a",
+              "title": "Ship the release",
+              "status": "planned",
+              "risk": "med"
+            }
+          ]
+        }
+      ]
+    },
+    "createdAt": "2026-10-26 06:18:39",
+    "updatedAt": "2026-10-26 06:21:10",
+    "tasks": [
+      {
+        "id": "t-mvov8l6w-0-4nvf",
+        "planId": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+        "position": 0,
+        "milestone": "Release",
+        "title": "Update the release notes",
+        "description": "Bob updates the notes before Thursday.",
+        "owner": "Bob",
+        "due": null,
+        "estimateDays": 1,
+        "dependsOn": [],
+        "status": "planned",
+        "risk": "low",
+        "riskReason": "Small, well-scoped documentation update.",
+        "files": [],
+        "symbols": [],
+        "meta": {}
+      },
+      {
+        "id": "t-mvov8l6w-1-3w4a",
+        "planId": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+        "position": 1,
+        "milestone": "Release",
+        "title": "Ship the release",
+        "description": "Ship on Friday once the notes are ready.",
+        "owner": "Alice",
+        "due": null,
+        "estimateDays": 1,
+        "dependsOn": [
+          "t-mvov8l6w-0-4nvf"
+        ],
+        "status": "planned",
+        "risk": "med",
+        "riskReason": "Depends on the notes being finished first.",
+        "files": [],
+        "symbols": [],
+        "meta": {}
+      }
+    ]
+  }
+}

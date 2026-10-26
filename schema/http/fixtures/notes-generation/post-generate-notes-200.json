@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /generate-notes",
+  "status": 200,
+  "description": "Captured from the real handler on a temp-DB server (node extension/server.mjs). The model's text is a canned local stub (CAPTURE_CLI), so no model call; the response construction is the server's.",
+  "request": {
+    "body": {
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "meetingTitle": "Weekly sync",
+      "meetingId": "mtg-001",
+      "language": "en"
+    }
+  },
+  "response": {
+    "notes": "## Summary\nThe team agreed to ship on Friday.\n\n## Action Items\n- [ ] Bob: update the release notes by Thursday"
+  }
+}

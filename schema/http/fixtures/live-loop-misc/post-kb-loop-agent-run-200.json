@@ -1,0 +1,50 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 200,
+  "description": "Route response built from the engine result (engine stubbed in-process; no model call). usage is the run total for the primary model.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000
+    }
+  },
+  "response": {
+    "reply": "All regression checks passed.",
+    "changedPaths": [
+      "src/app.ts",
+      "src/new.ts"
+    ],
+    "changedExtraPaths": [
+      "/example/extra/notes.md"
+    ],
+    "createdPaths": [
+      "src/new.ts"
+    ],
+    "usage": {
+      "inputTokens": 1234,
+      "outputTokens": 321,
+      "cacheReadTokens": 800,
+      "cacheCreationTokens": 0,
+      "costUsd": 0.0123,
+      "numTurns": 4,
+      "durationMs": 9100
+    },
+    "resolvedSkills": [
+      "regression"
+    ],
+    "unresolvedSkills": [],
+    "truncatedSkills": [],
+    "ran": true,
+    "resultSubtype": "success",
+    "denied": [
+      {
+        "toolName": "Bash",
+        "reason": "command is not on the Loop allow-list"
+      }
+    ]
+  }
+}

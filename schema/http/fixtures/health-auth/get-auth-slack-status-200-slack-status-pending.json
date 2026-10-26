@@ -1,0 +1,12 @@
+{
+  "endpoint": "GET /auth/slack/status",
+  "status": 200,
+  "request": {
+    "query": {
+      "state": "example-state"
+    }
+  },
+  "response": {
+    "status": "pending"
+  }
+}

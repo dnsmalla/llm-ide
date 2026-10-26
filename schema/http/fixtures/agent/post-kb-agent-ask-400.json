@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/agent/ask",
+  "status": 400,
+  "request": {
+    "body": {
+      "message": "   "
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "message or image is required"
+    }
+  }
+}

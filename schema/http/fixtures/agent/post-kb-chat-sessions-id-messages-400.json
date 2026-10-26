@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/messages",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f"
+    },
+    "body": {
+      "role": "tool",
+      "content": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "role required"
+    }
+  }
+}

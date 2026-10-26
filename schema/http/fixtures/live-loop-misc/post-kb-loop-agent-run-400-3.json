@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 400,
+  "description": "The repo is not on this user's allow-list, so no run starts.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REPO_ROOT_NOT_ALLOWED",
+      "message": "repoRoot does not exist"
+    }
+  }
+}

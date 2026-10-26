@@ -1,0 +1,28 @@
+{
+  "endpoint": "DELETE /kb/agent/tool-approvals",
+  "status": 200,
+  "request": {
+    "body": {
+      "projectRoot": "/example/workspace",
+      "toolName": "Bash",
+      "pattern": "git status"
+    }
+  },
+  "response": {
+    "rules": [
+      {
+        "projectRoot": "/example/workspace",
+        "toolName": "Bash",
+        "pattern": "git log",
+        "grantedAt": "2026-10-26T07:11:40.857Z"
+      }
+    ],
+    "approvals": [
+      {
+        "toolName": "WebSearch",
+        "grantedAt": "2026-10-26T07:11:40.857Z"
+      }
+    ],
+    "removed": 1
+  }
+}

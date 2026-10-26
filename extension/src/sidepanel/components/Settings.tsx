@@ -4,7 +4,8 @@ import type { Diagnostics } from '../hooks/useTranscript';
 import ConnectorsSettings from './ConnectorsSettings';
 import AgentPersonaSettings from './AgentPersonaSettings';
 import UserAccountSettings from './UserAccountSettings';
-import { searchKB, getKBStats, type KBSearchHit, type KBStats } from '../../lib/kb';
+import { searchKB, getKBStats, type KBSearchHit, type KBSearchKind } from '../../lib/kb';
+import type { GetKbStatsResponse200 } from '../../lib/api-types';
 
 interface Props {
   devices: AudioDevice[];
@@ -142,9 +143,9 @@ export default function Settings({
 
 function KBSearchPanel() {
   const [q, setQ] = useState('');
-  const [kind, setKind] = useState<'all' | KBSearchHit['kind']>('all');
+  const [kind, setKind] = useState<'all' | KBSearchKind>('all');
   const [results, setResults] = useState<KBSearchHit[]>([]);
-  const [stats, setStats] = useState<KBStats | null>(null);
+  const [stats, setStats] = useState<GetKbStatsResponse200 | null>(null);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 

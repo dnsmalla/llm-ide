@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/register",
+  "status": 429,
+  "request": {
+    "body": {
+      "email": "other@example.com",
+      "password": "example-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests"
+    }
+  }
+}

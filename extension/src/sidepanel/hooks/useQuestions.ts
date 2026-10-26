@@ -1,7 +1,9 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import type { PostGenerateQuestionsResponse200 } from '../../lib/api-types';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { conflictQuestions } from '../../lib/kb';
 import { MsgType } from '../../lib/messages';
+import { errorText } from '../../lib/server-error';
 
 export type QuestionType = 'conflict' | 'confirm' | 'explain';
 
@@ -51,10 +53,10 @@ export function useQuestions() {
           if (response.status === 404) {
             throw new Error('This feature requires a newer server version. Please restart the server and try again.');
           }
-          throw new Error(err.error || 'Failed to generate questions. Please try again.');
+          throw new Error(errorText(err, response.status, 'Failed to generate questions. Please try again.'));
         }
 
-        const data = await response.json();
+        const data: PostGenerateQuestionsResponse200 = await response.json();
         if (typeof data?.questions !== 'string' || !data.questions.trim()) {
           throw new Error('Empty response from server');
         }

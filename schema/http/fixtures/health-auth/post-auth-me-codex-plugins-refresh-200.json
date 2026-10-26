@@ -1,0 +1,11 @@
+{
+  "endpoint": "POST /auth/me/codex-plugins/refresh",
+  "status": 200,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "installed": 0,
+    "marketplace": 0
+  }
+}

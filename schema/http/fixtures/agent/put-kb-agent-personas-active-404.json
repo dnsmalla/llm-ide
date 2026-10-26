@@ -1,0 +1,15 @@
+{
+  "endpoint": "PUT /kb/agent/personas/active",
+  "status": 404,
+  "request": {
+    "body": {
+      "id": "no-such-persona"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "persona not found"
+    }
+  }
+}

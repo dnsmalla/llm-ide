@@ -1,0 +1,36 @@
+{
+  "endpoint": "PATCH /kb/plan-task/update",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Updates one task of a plan; the response is the stored task.",
+  "request": {
+    "body": {
+      "taskId": "t-mvov8l6w-0-4nvf",
+      "patch": {
+        "status": "in_progress",
+        "owner": "Bob",
+        "risk": "low",
+        "riskReason": "Small, well-scoped documentation update.",
+        "due": "2026-11-06",
+        "files": []
+      }
+    }
+  },
+  "response": {
+    "id": "t-mvov8l6w-0-4nvf",
+    "planId": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+    "position": 0,
+    "milestone": "Release",
+    "title": "Update the release notes",
+    "description": "Bob updates the notes before Thursday.",
+    "owner": "Bob",
+    "due": "2026-11-06",
+    "estimateDays": 1,
+    "dependsOn": [],
+    "status": "in_progress",
+    "risk": "low",
+    "riskReason": "Small, well-scoped documentation update.",
+    "files": [],
+    "symbols": [],
+    "meta": {}
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/plan/save",
+  "status": 500,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Another user sends an existing plan id; the ownership check inside savePlan throws and the route answers 500 SAVE_FAILED.",
+  "request": {
+    "body": {
+      "id": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+      "title": "Takeover attempt"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SAVE_FAILED",
+      "message": "Plan id is owned by another user"
+    }
+  }
+}

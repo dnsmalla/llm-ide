@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /auth/me/llm-sources/:id",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "builtin"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REMOVE_FAILED",
+      "message": "builtin source cannot be removed"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/connect-tickets-json",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "manual"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "tickets must be an array"
+    }
+  }
+}

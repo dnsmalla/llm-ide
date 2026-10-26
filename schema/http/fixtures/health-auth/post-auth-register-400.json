@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/register",
+  "status": 400,
+  "request": {
+    "body": {
+      "email": "not-an-email",
+      "password": "example-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Invalid email"
+    }
+  }
+}

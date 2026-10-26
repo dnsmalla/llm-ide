@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/review/get/:id",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "example-review-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

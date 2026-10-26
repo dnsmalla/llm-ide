@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/me/llm-sources/add",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "ADD_FAILED",
+      "message": "provide either url or path"
+    }
+  }
+}

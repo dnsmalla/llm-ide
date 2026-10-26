@@ -4,7 +4,7 @@ import Foundation
 // Keys are stored via the generic `setSecret` (vault key `<provider>.apiKey`);
 // these helpers verify a key works and list which providers are configured.
 extension LlmIdeAPIClient {
-    struct ProviderVerifyResult: Decodable {
+    public struct ProviderVerifyResult: Decodable {
         let ok: Bool
         let detail: String?
     }

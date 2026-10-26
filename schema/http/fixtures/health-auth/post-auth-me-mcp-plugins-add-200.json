@@ -1,0 +1,27 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/add",
+  "status": 200,
+  "request": {
+    "body": {
+      "catalogId": "filesystem",
+      "arg": "/tmp"
+    }
+  },
+  "response": {
+    "plugin": {
+      "id": "filesystem",
+      "name": "Filesystem",
+      "source": "catalog",
+      "transport": "stdio",
+      "command": "npx",
+      "args": [
+        "-y",
+        "@modelcontextprotocol/server-filesystem@2.0.1",
+        "/tmp"
+      ],
+      "catalogId": "filesystem",
+      "builtin": false
+    },
+    "pinned": true
+  }
+}

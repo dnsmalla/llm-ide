@@ -14,6 +14,9 @@ import { applyCodegen } from '../agents/codegen-apply.mjs';
 import { openPullRequest } from '../agents/github-pr.mjs';
 import { runGuardrails } from '../guardrails/rules.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { redactSecrets } from '../core/redact-secrets.mjs';
+import { pickReviewPayload } from '../kb/review-payload.mjs';
+import { logger } from '../core/logger.mjs';
 import {
   stripReviewSecrets, redactReviewItem, holdSecrets, takeHeldSecrets, dropHeldSecrets,
   resolveReviewCreds, withCreds,
@@ -36,6 +39,14 @@ function withAuthoritativeData(userId, kind, payload) {
   return out;
 }
 
+// A status write that lost its compare-and-swap: the stored row is the truth.
+// Missing → 404; present → 409 with its current status (approve's shape).
+function sendNotPending(res, userId, id) {
+  const cur = kb.getReview(userId, id);
+  if (!cur) { sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } }); return; }
+  sendJSON(res, 409, { error: { code: 'REVIEW_NOT_PENDING', message: `Item already ${cur.status}` } });
+}
+
 export async function handleReviewRoutes(req, res, ctx) {
   const { userId, url } = ctx;
   if (!url.startsWith('/kb/review')) return false;
@@ -52,7 +63,9 @@ export async function handleReviewRoutes(req, res, ctx) {
     // Credentials never reach the DB: strip them, judge guardrails with the
     // credentials this item would execute with (vault + any supplied now),
     // persist only the stripped payload.
-    const { payload: stripped, secrets } = stripReviewSecrets(body.payload);
+    // Only the keys this kind's consumers read are kept (pickReviewPayload);
+    // then credentials are removed at every depth and held for approval.
+    const { payload: stripped, secrets } = stripReviewSecrets(pickReviewPayload(body.kind, body.payload));
     const payload = withAuthoritativeData(userId, body.kind, stripped);
     const creds = resolveReviewCreds(kb.getDb(), userId, payload, { held: secrets });
     const guardrails = runGuardrails(body.kind, withCreds(payload, creds));
@@ -98,8 +111,9 @@ export async function handleReviewRoutes(req, res, ctx) {
     const updated = kb.setReviewStatus(userId, body.id, {
       status: 'rejected',
       reviewerNote: body.note,
+      expectedStatus: 'pending',
     });
-    if (!updated) { sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } }); return true; }
+    if (!updated) { sendNotPending(res, userId, body.id); return true; }
     dropHeldSecrets(userId, body.id);
     sendJSON(res, 200, redactReviewItem(updated));
     return true;
@@ -149,7 +163,9 @@ export async function handleReviewRoutes(req, res, ctx) {
       const refreshed = kb.setReviewStatus(userId, body.id, {
         status: 'rejected',
         reviewerNote: 'Auto-rejected: guardrails fail at approval time.',
+        expectedStatus: 'pending',
       });
+      if (!refreshed) { sendNotPending(res, userId, body.id); return true; }
       dropHeldSecrets(userId, body.id);
       sendJSON(res, 422, {
         error: { code: 'GUARDRAILS_FAILED', message: 'Guardrails fail at approval time' },
@@ -210,16 +226,30 @@ export async function handleReviewRoutes(req, res, ctx) {
       } else {
         throw new Error(`Unknown review kind: ${item.kind}`);
       }
-      const finished = kb.setReviewStatus(userId, body.id, { status: 'executed', result });
+      // CAS on 'approved': if the claim was lost (e.g. the row was changed
+      // underneath us) keep the stored status rather than overwrite it.
+      const finished = kb.setReviewStatus(userId, body.id, { status: 'executed', result, expectedStatus: 'approved' });
       dropHeldSecrets(userId, body.id);
+      if (!finished) {
+        logger.warn('review_cas_lost', { id: body.id, to: 'executed' });
+        const cur = kb.getReview(userId, body.id);
+        sendJSON(res, 200, redactReviewItem(cur));
+        return true;
+      }
       sendJSON(res, 200, redactReviewItem(finished));
     } catch (err) {
+      const message = redactSecrets(err.message || 'execution failed');
       const finished = kb.setReviewStatus(userId, body.id, {
         status: 'failed',
-        result: { error: err.message || 'execution failed' },
+        result: { error: message },
+        expectedStatus: 'approved',
       });
       dropHeldSecrets(userId, body.id);
-      sendJSON(res, 500, { error: { code: 'REVIEW_EXECUTION_FAILED', message: err.message || 'execution failed' }, item: redactReviewItem(finished) });
+      if (!finished) {
+        logger.warn('review_cas_lost', { id: body.id, to: 'failed' });
+      }
+      const cur = finished || kb.getReview(userId, body.id);
+      sendJSON(res, 500, { error: { code: 'REVIEW_EXECUTION_FAILED', message }, item: redactReviewItem(cur) });
     }
     return true;
   }

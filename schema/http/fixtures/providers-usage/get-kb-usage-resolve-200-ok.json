@@ -1,0 +1,21 @@
+{
+  "endpoint": "GET /kb/usage/resolve",
+  "status": 200,
+  "request": {
+    "query": {
+      "provider": "anthropic"
+    }
+  },
+  "response": {
+    "provider": "anthropic",
+    "model": "claude-opus-4-8",
+    "status": "ok",
+    "resetAt": "2026-10-26T15:00:00.000Z",
+    "reason": "Opus 4.8",
+    "used": 0,
+    "limit": 0,
+    "pct": 0,
+    "unit": "runs",
+    "engaged": true
+  }
+}

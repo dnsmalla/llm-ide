@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /auth/me/plugins/hook-trust",
+  "status": 400,
+  "request": {
+    "body": {
+      "name": "nope",
+      "trusted": true,
+      "kinds": [
+        "command"
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "plugin 'nope' is not installed"
+    }
+  }
+}

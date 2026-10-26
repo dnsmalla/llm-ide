@@ -1,0 +1,1844 @@
+{
+  "description": "KB search, the meeting/entity/project reads, stats and system status, the connector and source ingest endpoints (local git and SCIP index, GitHub issues, tickets JSON, JUnit QA, IMAP email, Slack, Box, MCP-backed connectors), the activity feed, and the meeting/source delete. Rows: GET /kb/search, GET /kb/issues, GET /kb/meeting/:id, GET /kb/entity/:id, GET /kb/project/:id/export, POST /kb/project/install-skills, GET /kb/stats, GET /kb/system/status, GET /kb/export-all, POST and DELETE /kb/delete, POST /kb/ingest, POST /kb/connect-git, POST /kb/ingest-scip, POST /kb/connect-github-issues, POST /kb/connect-tickets-json, POST /kb/connect-qa, POST /kb/email/{test,fetch,seen,classify}, POST /kb/slack/{test,fetch,seen}, GET /kb/slack/conversations, POST /kb/box/test, POST /kb/connect-box, POST /kb/mcp-connector/{test,fetch,seen,classify}, GET and POST /kb/activity, POST /kb/activity/seen. Fixtures are real responses from `node server.mjs` on a temp DB (127.0.0.1, seeded through the API); tokens and secrets are placeholders, repo paths are /example/repo. Not captured offline, so their 2xx responses are x-unspecified with a reason: anything that reaches IMAP, Slack, Box, GitHub, a remote MCP server or a model (email/test and email/fetch success, email/classify success, slack test/fetch/conversations success, box success, connect-github-issues success, mcp test/fetch/classify success) and the install and SCIP indexers. The loopback guard refuses private addresses, so the IMAP 502 fixtures carry the real 'Refusing to connect' envelope. Request fields a fixture cannot exercise offline (IMAP options, Box subject fields, Slack lookback, the connector classify fields) are x-optional, not hidden. The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says. Not in this group: POST /kb/notify/slack (outcomes notifications, P6) and /kb/ingest-code-graph (code_graph_3d).",
+  "$defs": {
+    "Ok": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      }
+    },
+    "Entity": {
+      "type": "object",
+      "required": [
+        "id",
+        "meetingId",
+        "meetingTitle",
+        "date",
+        "kind",
+        "text",
+        "quote",
+        "meta"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "meetingId": {
+          "type": "string"
+        },
+        "meetingTitle": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "null when the parent meeting row is gone"
+        },
+        "date": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "meeting date (YYYY-MM-DD as stored)"
+        },
+        "kind": {
+          "type": "string",
+          "description": "decision | action | blocker | ..."
+        },
+        "text": {
+          "type": "string"
+        },
+        "quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "kind-specific metadata; open set (owner, due, ...)"
+        }
+      },
+      "description": "Entity with kind, title, body, metadata"
+    },
+    "MeetingEntity": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "text",
+        "quote",
+        "meta"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "quote": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "kind-specific metadata; open set"
+        }
+      }
+    },
+    "Meeting": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "date",
+        "durationSec",
+        "language",
+        "participants",
+        "entities"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string"
+        },
+        "durationSec": {
+          "type": "integer"
+        },
+        "language": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "entities": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/MeetingEntity"
+          }
+        },
+        "transcript": {
+          "type": "string",
+          "x-optional": true,
+          "description": "present only with ?include=transcript"
+        }
+      },
+      "description": "Meeting with entities, transcript, metadata"
+    },
+    "SearchHit": {
+      "type": "object",
+      "required": [
+        "kind",
+        "meetingId",
+        "entityId",
+        "title",
+        "body"
+      ],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "description": "meeting | decision | action | blocker | code | ticket | qa | doc | plan | task | outcome"
+        },
+        "meetingId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "entityId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "rank": {
+          "type": "number",
+          "x-optional": true,
+          "description": "FTS5 bm25 rank (lower is a better match); set on full-text hits only, absent on the empty-query listing and the entity/outcome fallbacks"
+        },
+        "ref": {
+          "type": "string",
+          "x-optional": true,
+          "description": "tickets: the source URL or id"
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true,
+          "x-optional": true,
+          "description": "tickets: provider, repo, state, number, labels, author, dates, isPR"
+        },
+        "meetingTitle": {
+          "type": "string",
+          "x-optional": true,
+          "description": "meeting-linked hits"
+        },
+        "date": {
+          "type": "string",
+          "x-optional": true,
+          "description": "meeting date, or the index time for tickets"
+        },
+        "durationSec": {
+          "type": "number",
+          "x-optional": true,
+          "description": "meetings, empty-query listing only"
+        }
+      }
+    },
+    "Issue": {
+      "type": "object",
+      "required": [
+        "id",
+        "title",
+        "body",
+        "url",
+        "provider",
+        "labels"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "body": {
+          "type": "string"
+        },
+        "url": {
+          "type": "string",
+          "description": "empty when the ticket had no ref"
+        },
+        "provider": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string",
+          "x-optional": true
+        },
+        "number": {
+          "type": "integer",
+          "x-optional": true
+        },
+        "state": {
+          "type": "string",
+          "x-optional": true
+        },
+        "labels": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "author": {
+          "type": "string",
+          "x-optional": true
+        },
+        "createdAt": {
+          "type": "string",
+          "x-optional": true
+        },
+        "updatedAt": {
+          "type": "string",
+          "x-optional": true
+        },
+        "isPR": {
+          "type": "boolean",
+          "x-optional": true
+        }
+      }
+    },
+    "ProjectExport": {
+      "type": "object",
+      "required": [
+        "projectId",
+        "exportedAt",
+        "meetingCount",
+        "planCount",
+        "meetings",
+        "plans"
+      ],
+      "properties": {
+        "projectId": {
+          "type": "string"
+        },
+        "exportedAt": {
+          "type": "string",
+          "description": "ISO 8601 UTC"
+        },
+        "meetingCount": {
+          "type": "integer"
+        },
+        "planCount": {
+          "type": "integer"
+        },
+        "meetings": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "one exported meeting; the item shape is not pinned because the captured project has no meetings"
+          }
+        },
+        "plans": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "one exported plan; not pinned, the captured project has no plans"
+          }
+        }
+      }
+    },
+    "Reviews": {
+      "type": "object",
+      "required": [
+        "pending",
+        "approved",
+        "rejected",
+        "executed",
+        "failed",
+        "expired"
+      ],
+      "properties": {
+        "pending": {
+          "type": "integer"
+        },
+        "approved": {
+          "type": "integer"
+        },
+        "rejected": {
+          "type": "integer"
+        },
+        "executed": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "integer"
+        },
+        "expired": {
+          "type": "integer"
+        }
+      }
+    },
+    "Stats": {
+      "type": "object",
+      "required": [
+        "meetings",
+        "entities",
+        "sources",
+        "plans",
+        "tasks",
+        "reviews",
+        "outcomes"
+      ],
+      "properties": {
+        "meetings": {
+          "type": "integer"
+        },
+        "entities": {
+          "type": "integer"
+        },
+        "sources": {
+          "type": "object",
+          "required": [
+            "code",
+            "ticket",
+            "qa",
+            "lastIndexed"
+          ],
+          "additionalProperties": true,
+          "description": "one count per indexed source kind; the open set includes code, ticket and qa and any kind added later",
+          "properties": {
+            "code": {
+              "type": "integer"
+            },
+            "ticket": {
+              "type": "integer"
+            },
+            "qa": {
+              "type": "integer"
+            },
+            "lastIndexed": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "last index time per kind, SQLite datetime (UTC)"
+            }
+          }
+        },
+        "plans": {
+          "type": "integer"
+        },
+        "tasks": {
+          "type": "integer"
+        },
+        "reviews": {
+          "$ref": "#/$defs/Reviews"
+        },
+        "outcomes": {
+          "$ref": "#/$defs/Outcomes"
+        }
+      }
+    },
+    "SystemStatus": {
+      "type": "object",
+      "required": [
+        "stats",
+        "flow"
+      ],
+      "properties": {
+        "stats": {
+          "$ref": "#/$defs/Stats"
+        },
+        "flow": {
+          "type": "object",
+          "required": [
+            "capture",
+            "agent",
+            "review",
+            "outcomes"
+          ],
+          "properties": {
+            "capture": {
+              "type": "object",
+              "required": [
+                "activeCount",
+                "sessions"
+              ],
+              "properties": {
+                "activeCount": {
+                  "type": "integer"
+                },
+                "sessions": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "one active capture session; not pinned, none was active when captured"
+                  }
+                }
+              }
+            },
+            "agent": {
+              "type": "object",
+              "required": [
+                "activeCount",
+                "runs"
+              ],
+              "properties": {
+                "activeCount": {
+                  "type": "integer"
+                },
+                "runs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "one agent run; not pinned, none was active when captured"
+                  }
+                }
+              }
+            },
+            "review": {
+              "type": "object",
+              "required": [
+                "pendingCount",
+                "byStatus",
+                "pendingItems"
+              ],
+              "properties": {
+                "pendingCount": {
+                  "type": "integer"
+                },
+                "byStatus": {
+                  "$ref": "#/$defs/Reviews"
+                },
+                "pendingItems": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "one pending review item; not pinned, none was pending when captured"
+                  }
+                }
+              }
+            },
+            "outcomes": {
+              "$ref": "#/$defs/Outcomes"
+            }
+          }
+        }
+      }
+    },
+    "IngestResult": {
+      "type": "object",
+      "required": [
+        "ok",
+        "meetingId",
+        "entityCount"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "meetingId": {
+          "type": "string"
+        },
+        "entityCount": {
+          "type": "integer",
+          "description": "entities in the request, before the allowed-kind filter"
+        }
+      }
+    },
+    "GitIndex": {
+      "type": "object",
+      "required": [
+        "ok",
+        "repo",
+        "filesScanned",
+        "filesIndexed",
+        "filesWritten",
+        "unchanged",
+        "removed",
+        "chunks"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "repo": {
+          "type": "string"
+        },
+        "filesScanned": {
+          "type": "integer"
+        },
+        "filesIndexed": {
+          "type": "integer"
+        },
+        "filesWritten": {
+          "type": "integer"
+        },
+        "unchanged": {
+          "type": "integer"
+        },
+        "removed": {
+          "type": "integer"
+        },
+        "chunks": {
+          "type": "integer"
+        }
+      }
+    },
+    "TicketIndex": {
+      "type": "object",
+      "required": [
+        "ok",
+        "count",
+        "chunks"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "count": {
+          "type": "integer"
+        },
+        "chunks": {
+          "type": "integer"
+        }
+      }
+    },
+    "QaIndex": {
+      "type": "object",
+      "required": [
+        "ok",
+        "source",
+        "total",
+        "failed",
+        "chunks"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        },
+        "source": {
+          "type": "string"
+        },
+        "total": {
+          "type": "integer"
+        },
+        "failed": {
+          "type": "integer"
+        },
+        "chunks": {
+          "type": "integer"
+        }
+      }
+    },
+    "ActivityItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "kind",
+        "title",
+        "detail",
+        "link",
+        "created_at"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "detail": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "kind-specific detail; open set"
+        },
+        "link": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "created_at": {
+          "type": "string",
+          "description": "SQLite datetime (UTC)"
+        }
+      }
+    },
+    "Outcomes": {
+      "type": "object",
+      "required": [
+        "total",
+        "byState"
+      ],
+      "properties": {
+        "total": {
+          "type": "integer"
+        },
+        "byState": {
+          "type": "object",
+          "additionalProperties": true,
+          "description": "outcome count per state; open set, empty when no outcomes exist"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /kb/search": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "q": {
+              "type": "string"
+            },
+            "kind": {
+              "type": "string",
+              "description": "One of meeting, action, decision, blocker, code, ticket, qa, doc, plan, task or outcome; any other value searches every kind."
+            },
+            "limit": {
+              "type": "string",
+              "description": "Capped at 100; zero, negative or non-numeric values give the default 20."
+            },
+            "projectId": {
+              "type": "string",
+              "description": "Ignored unless it is a safe id (1-128 letters, digits, underscores or hyphens)."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "results"
+          ],
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/SearchHit"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/issues": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "description": "Defaults to open; all disables the filter."
+            },
+            "provider": {
+              "type": "string",
+              "description": "Defaults to github."
+            },
+            "limit": {
+              "type": "string",
+              "description": "Capped at 100; zero, negative or non-numeric values give the default 20."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "issues"
+          ],
+          "properties": {
+            "issues": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Issue"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/meeting/:id": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "include": {
+              "type": "string",
+              "enum": [
+                "transcript"
+              ],
+              "description": "Opt-in extras: `transcript` adds the stored transcript text as `transcript`. Any other value is ignored (the handler checks equality only)."
+            }
+          }
+        },
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Meeting"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/entity/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Entity"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/project/:id/export": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ProjectExport"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/project/install-skills": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "absolute project folder (must hold system/project.json)"
+            },
+            "language": {
+              "type": "string",
+              "x-optional": true
+            },
+            "stacks": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "returns the central-kit install.sh result (linked skill, rule and command counts); the kit is a checkout outside this repo's fixtures, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/stats": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Stats"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/system/status": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/SystemStatus"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/export-all": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "cursor": {
+              "type": "string",
+              "description": "meeting id to resume after"
+            },
+            "limit": {
+              "type": "string",
+              "description": "Capped at 500; an absent value gives 100, and 0 or a non-numeric value is not replaced by the default."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "text",
+          "type": "string",
+          "description": "application/x-ndjson: one JSON record per line (meeting with its entities), then a final {done, next_cursor} line; next_cursor is null on the last page"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/delete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "meeting id"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/delete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "meeting id"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/ingest": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "title": {
+              "type": "string"
+            },
+            "date": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "duration": {
+              "type": "number",
+              "description": "seconds"
+            },
+            "transcript": {
+              "type": "string"
+            },
+            "entities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "quote": {
+                    "type": "string"
+                  },
+                  "meta": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "x-optional": true,
+                    "description": "kind-specific metadata, stored as given"
+                  }
+                }
+              }
+            },
+            "projectId": {
+              "type": "string",
+              "x-optional": true,
+              "description": "stored as meta.projectId; scopes search and project export"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/IngestResult"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/connect-git": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "Absolute path to the repo root (must be on user allow-list)"
+            },
+            "replace": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "Replace existing code chunks for this repo; default true."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/GitIndex"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/ingest-scip": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "repoPath": {
+              "type": "string",
+              "description": "must be on the user's repo allow-list"
+            },
+            "scipPath": {
+              "type": "string",
+              "description": "Path to the SCIP index file"
+            },
+            "replace": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "Replace the repo's existing graph rows; default true."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "indexes a SCIP index file produced by an external indexer; no SCIP fixture is available offline, so the success body is not pinned"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/connect-github-issues": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "repo": {
+              "type": "string",
+              "description": "owner/name"
+            },
+            "token": {
+              "type": "string",
+              "x-optional": true,
+              "description": "GitHub PAT (optional — vault github.token used otherwise)"
+            },
+            "state": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "fetches the repo's issues from api.github.com; the success needs the network, so it is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/connect-tickets-json": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "Source label stored on each ticket entity; default manual."
+            },
+            "tickets": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "title": {
+                    "type": "string"
+                  },
+                  "body": {
+                    "type": "string"
+                  },
+                  "url": {
+                    "type": "string"
+                  },
+                  "meta": {
+                    "type": "object",
+                    "additionalProperties": true,
+                    "description": "provider-specific ticket fields, merged into the stored meta"
+                  }
+                }
+              },
+              "description": "Array of ticket objects (max 8 MB body)"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/TicketIndex"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/connect-qa": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "xml": {
+              "type": "string",
+              "description": "JUnit XML string"
+            },
+            "source": {
+              "type": "string",
+              "description": "Optional label for the test run source"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/QaIndex"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/email/test": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "secure": {
+              "type": "boolean"
+            },
+            "user": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string",
+              "description": "typed app password, probed without saving it"
+            },
+            "mailbox": {
+              "type": "string",
+              "x-optional": true
+            },
+            "authMethod": {
+              "type": "string",
+              "x-optional": true,
+              "description": "password | google"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "connects to the IMAP server and lists the mailbox; needs a reachable IMAP server, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/email/fetch": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "host": {
+              "type": "string"
+            },
+            "port": {
+              "type": "integer"
+            },
+            "secure": {
+              "type": "boolean"
+            },
+            "user": {
+              "type": "string"
+            },
+            "mailbox": {
+              "type": "string",
+              "x-optional": true
+            },
+            "authMethod": {
+              "type": "string",
+              "x-optional": true,
+              "description": "password | google"
+            },
+            "lookbackDays": {
+              "type": "number",
+              "x-optional": true,
+              "description": "How many days back to look"
+            },
+            "unreadOnly": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "default true"
+            },
+            "fromFilter": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Filter by sender address substring"
+            },
+            "markRead": {
+              "type": "boolean",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "fetches new messages from the IMAP server; needs a reachable server, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/email/seen": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "messageIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "IMAP message IDs to mark as seen"
+            },
+            "lastFetchedAt": {
+              "type": "string",
+              "description": "advances the forward-only high-water mark when it parses as a date"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/email/classify": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "subject": {
+              "type": "string"
+            },
+            "body": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "classifies one message with the model (a paid model call), so the success is not captured offline"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/slack/test": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string",
+              "x-optional": true,
+              "description": "typed Slack token, probed without saving it; the probe needs the network"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "calls the Slack auth.test API; needs the network, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from the remote service (Slack, Box or the MCP server); producing it needs that service, so the body is not captured offline"
+        }
+      }
+    },
+    "POST /kb/slack/fetch": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "lookbackDays": {
+              "type": "number",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "reads channel history from the Slack API; needs the network, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from the remote service (Slack, Box or the MCP server); producing it needs that service, so the body is not captured offline"
+        }
+      }
+    },
+    "POST /kb/slack/seen": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "channelId": {
+              "type": "string"
+            },
+            "messageTs": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "lastTs": {
+              "type": "string",
+              "description": "Slack timestamp; advances the channel high-water mark when it is a positive number"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/slack/conversations": {
+      "responses": {
+        "200": {
+          "x-unspecified": "lists the user's Slack conversations from the Slack API; needs the network, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/box/test": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "clientId": {
+              "type": "string"
+            },
+            "subjectType": {
+              "type": "string",
+              "x-optional": true,
+              "description": "user | enterprise (default enterprise)"
+            },
+            "subjectId": {
+              "type": "string",
+              "x-optional": true
+            },
+            "folderId": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "authenticates against the Box API and reads the folder; needs the network, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from the remote service (Slack, Box or the MCP server); producing it needs that service, so the body is not captured offline"
+        }
+      }
+    },
+    "POST /kb/connect-box": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "clientId": {
+              "type": "string"
+            },
+            "subjectType": {
+              "type": "string",
+              "x-optional": true,
+              "description": "user | enterprise (default enterprise)"
+            },
+            "subjectId": {
+              "type": "string",
+              "x-optional": true
+            },
+            "folderId": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "indexes the Box folder (Pattern A: rows in sources); needs the Box API, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from the remote service (Slack, Box or the MCP server); producing it needs that service, so the body is not captured offline"
+        }
+      }
+    },
+    "POST /kb/mcp-connector/test": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "connector id from mcp-connector-defs (for example miro)"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "lists the remote MCP server's tools; needs a connected remote MCP server, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from the remote service (Slack, Box or the MCP server); producing it needs that service, so the body is not captured offline"
+        }
+      }
+    },
+    "POST /kb/mcp-connector/fetch": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "limit": {
+              "type": "integer",
+              "description": "1 to 200"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "reads items from the connected remote MCP server; needs a connected server, so the success is not captured"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from the remote service (Slack, Box or the MCP server); producing it needs that service, so the body is not captured offline"
+        }
+      }
+    },
+    "POST /kb/mcp-connector/seen": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "itemIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "marked"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "marked": {
+              "type": "integer",
+              "description": "Rows actually inserted; re-marking is a no-op"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/mcp-connector/classify": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "body": {
+              "type": "object",
+              "properties": {
+                "connectorId": {
+                  "type": "string",
+                  "x-optional": true
+                },
+                "title": {
+                  "type": "string",
+                  "x-optional": true
+                },
+                "date": {
+                  "type": "string",
+                  "x-optional": true
+                },
+                "text": {
+                  "type": "string",
+                  "x-optional": true
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "classifies one connector item with the model (a paid model call), so the success is not captured offline"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "upstream failure from the remote service (Slack, Box or the MCP server); producing it needs that service, so the body is not captured offline"
+        }
+      }
+    },
+    "GET /kb/activity": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "since": {
+              "type": "string",
+              "description": "Returns items with an id greater than this value; an absent or non-numeric value means 0."
+            },
+            "limit": {
+              "type": "string",
+              "description": "Clamped to 1-200; the default is 100 when absent or zero."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "items",
+            "unread",
+            "lastId"
+          ],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ActivityItem"
+              }
+            },
+            "unread": {
+              "type": "integer"
+            },
+            "lastId": {
+              "type": "integer"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/activity": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string",
+              "description": "must be one of ACTIVITY_KINDS (kb/activity.mjs)"
+            },
+            "title": {
+              "type": "string"
+            },
+            "detail": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "kind-specific detail"
+            },
+            "link": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "id"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "id": {
+              "type": "integer"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/activity/seen": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "uptoId": {
+              "type": "integer",
+              "description": "mark every activity item up to this id as seen"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "unread"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "unread": {
+              "type": "integer"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

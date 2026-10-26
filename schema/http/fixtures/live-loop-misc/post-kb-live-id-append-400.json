@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/live/:id/append",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    },
+    "body": {
+      "meetingTitle": "no captions"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "sessionId and captions[] required"
+    }
+  }
+}

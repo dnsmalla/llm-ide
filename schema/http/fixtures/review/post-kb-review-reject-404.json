@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/review/reject",
+  "status": 404,
+  "request": {
+    "body": {
+      "id": "example-review-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Not found"
+    }
+  }
+}

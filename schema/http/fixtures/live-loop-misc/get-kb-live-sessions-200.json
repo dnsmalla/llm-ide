@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/live/sessions",
+  "status": 200,
+  "response": {
+    "sessions": [
+      {
+        "sessionId": "sess-example-1",
+        "meetingTitle": "Example standup",
+        "startedAt": 1792999164809,
+        "lastWrite": 1792999164809,
+        "captionCount": 2,
+        "sequence": 2
+      }
+    ]
+  }
+}

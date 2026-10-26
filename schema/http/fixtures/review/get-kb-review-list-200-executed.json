@@ -1,0 +1,25 @@
+{
+  "endpoint": "GET /kb/review/list",
+  "status": 200,
+  "request": {
+    "query": {
+      "status": "executed",
+      "limit": "5"
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": "rev-mvov51xz-TX5ZST_g84UKFP6V",
+        "kind": "codegen-apply",
+        "planId": null,
+        "taskId": "task-1",
+        "title": "Example codegen note",
+        "status": "executed",
+        "createdAt": "2026-10-26 06:15:54",
+        "decidedAt": "2026-10-26 06:15:54"
+      }
+    ],
+    "count": 1
+  }
+}

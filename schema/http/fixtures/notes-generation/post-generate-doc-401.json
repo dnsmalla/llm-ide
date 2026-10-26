@@ -1,0 +1,28 @@
+{
+  "endpoint": "POST /generate-doc",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR), replayed over HTTP. No model call: the Claude CLI path points at a missing binary. Handler: generate-doc.",
+  "request": {
+    "body": {
+      "templateName": "Meeting notes",
+      "sections": [
+        "Summary",
+        "Decisions"
+      ],
+      "command": "Summarise the discussion",
+      "prompt": "Keep it short",
+      "sources": [
+        {
+          "name": "notes.md",
+          "content": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday."
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

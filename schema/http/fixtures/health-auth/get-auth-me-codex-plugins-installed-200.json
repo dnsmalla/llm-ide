@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /auth/me/codex-plugins/installed",
+  "status": 200,
+  "response": {
+    "plugins": []
+  }
+}

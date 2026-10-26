@@ -37,7 +37,7 @@ import { recordToolEvents } from '../kb/tool-events.mjs';
 import { recordTurnComposition } from '../kb/turn-composition.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { isPluginUpdating } from '../plugins/claude-update.mjs';
-import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, readJsonObjectOr400, onClientDisconnect } from '../core/utils.mjs';
 import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
 
@@ -76,7 +76,24 @@ export function __setEngineImporterForTest(fn) {
 // The production `runTurn`. It awaits the import INSIDE the route's turn
 // try/catch, so an import failure ends the stream with the same terminal
 // ENGINE_ERROR event as any other engine failure.
+//
+// Test seam for the token bench (scripts/token-bench.mjs --fake): with
+// LLMIDE_BENCH_FAKE=1 a turn goes to llm_agent/sdk/bench-fake-engine.mjs, which
+// makes no model call and never loads the SDK. The switch needs BOTH the env
+// var AND the `--bench-fake` argv flag (the Mac app never passes the flag, and
+// it also strips LLMIDE_BENCH_FAKE from the child env), and it is refused under
+// NODE_ENV=production.
+export function benchFakeEngineEnabled(env = process.env, argv = process.argv) {
+  return env.LLMIDE_BENCH_FAKE === '1'
+    && argv.includes('--bench-fake')
+    && env.NODE_ENV !== 'production';
+}
+
 export async function runEngineTurn(args) {
+  if (benchFakeEngineEnabled()) {
+    const { runBenchFakeTurn } = await import('../llm_agent/sdk/bench-fake-engine.mjs');
+    return runBenchFakeTurn(args);
+  }
   const { runAgentV2Turn } = await loadAgentEngine();
   return runAgentV2Turn(args);
 }
@@ -603,8 +620,14 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   }
   // Every exit path — success, Stop, failure: a stopped turn's tool calls
   // still cost tokens and are exactly the data the report needs.
-  recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolAccounting.events() });
-  if (turnComposition) recordTurnComposition(userId, { ...turnComposition, turnId });
+  const toolEvents = toolAccounting.events();
+  recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolEvents });
+  // Tool-result text this turn put into the transcript (turn_composition,
+  // migration 0044): the same resultChars turn_tool_events keeps per call.
+  if (turnComposition) {
+    const toolResultChars = toolEvents.reduce((n, e) => n + (Number(e?.resultChars) || 0), 0);
+    recordTurnComposition(userId, { ...turnComposition, turnId, toolResultChars });
+  }
   const totalMs = Date.now() - turnStartedAt;
   recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
   log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });
@@ -644,7 +667,8 @@ async function handleV2Cancel(req, res, userId) {
 }
 
 async function handleV2Decision(req, res, userId) {
-  const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+  const body = await readJsonObjectOr400(req, res, 64 * 1024);
+  if (body === null) return true;
   const out = answerDecision({
     requestId: body.requestId,
     sdkSessionId: body.sdkSessionId,

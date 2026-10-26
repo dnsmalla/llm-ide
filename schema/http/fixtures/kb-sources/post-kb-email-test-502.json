@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/email/test",
+  "status": 502,
+  "request": {
+    "body": {
+      "host": "127.0.0.1",
+      "port": 1,
+      "secure": false,
+      "user": "example-user@example.com",
+      "password": "example-typed-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "EMAIL_CONNECT_FAILED",
+      "message": "Refusing to connect to a private or local address"
+    }
+  }
+}

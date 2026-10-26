@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/outcomes/retry-failed",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: No dispatch is due for retry in the temp DB, so the sweep makes no external call.",
+  "request": {
+    "body": {
+      "config": {}
+    }
+  },
+  "response": {
+    "retried": 0,
+    "ok": 0,
+    "failed": 0,
+    "deferred": 0
+  }
+}

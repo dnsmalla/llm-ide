@@ -1,0 +1,34 @@
+{
+  "endpoint": "POST /kb/generate-code",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The model text is a canned local stub (LLMIDE_ANTHROPIC_CLI, a script that prints the CLI result object), so no model call is made. includeFileContext is false, so no repo file is read; the stub returns one created file and one created test.",
+  "request": {
+    "body": {
+      "taskId": "t-mvov8l6w-0-4nvf",
+      "language": "en",
+      "includeFileContext": false
+    }
+  },
+  "response": {
+    "taskId": "t-mvov8l6w-0-4nvf",
+    "summary": "Add the release notes entry.",
+    "files": [
+      {
+        "path": "docs/release-notes.md",
+        "kind": "create",
+        "language": "markdown",
+        "content": "# Release notes\n\n- Ship on Friday.\n"
+      }
+    ],
+    "tests": [
+      {
+        "path": "test/release-notes.test.mjs",
+        "kind": "create",
+        "language": "javascript",
+        "content": "import test from 'node:test';\ntest('notes exist', () => {});\n"
+      }
+    ],
+    "notes": "Stub reply.",
+    "rejected": []
+  }
+}

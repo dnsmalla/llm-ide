@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/register",
+  "status": 409,
+  "request": {
+    "body": {
+      "email": "capture-user@example.com",
+      "password": "example-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "CONFLICT",
+      "message": "Email is already registered"
+    }
+  }
+}

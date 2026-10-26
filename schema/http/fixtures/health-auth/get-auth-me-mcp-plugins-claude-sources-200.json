@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /auth/me/mcp-plugins/claude-sources",
+  "status": 200,
+  "response": {
+    "servers": [
+      {
+        "name": "example",
+        "transport": "http",
+        "url": "https://mcp.example.com/mcp",
+        "headers": {
+          "EXAMPLE_API_KEY": "••••"
+        }
+      }
+    ]
+  }
+}

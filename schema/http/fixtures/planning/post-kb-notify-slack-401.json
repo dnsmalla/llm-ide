@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/notify/slack",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: Sent without an access token.",
+  "request": {
+    "body": {
+      "webhookUrl": "https://hooks.slack.com/services/EXAMPLE/EXAMPLE/EXAMPLE",
+      "kind": "digest",
+      "payload": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /auth/me/claude-plugins/update",
+  "status": 404,
+  "request": {
+    "body": {
+      "name": "nope"
+    }
+  },
+  "response": {
+    "code": "NOT_FOUND"
+  }
+}

@@ -61,7 +61,7 @@ test('GET /kb/usage/limits returns the built-in chains by default', async () => 
   const body = res.json();
   assert.ok(body.chains.anthropic.length >= 3);
   // Read from the one source rather than restating an id here: the previous
-  // hard-coded 'claude-opus-4-8' was one of the three divergent lists this
+  // hard-coded default id was one of the three divergent lists this
   // file is now the client of. See schema/models/anthropic-models.json.
   const anthropicModels = JSON.parse(
     fs.readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
@@ -79,7 +79,7 @@ test('PUT /kb/usage/limits saves caps; GET reflects them', async () => {
   await handleKB(makeReq({
     method: 'PUT', url: '/kb/usage/limits', userId,
     body: { chains: { anthropic: [
-      { model: 'claude-opus-4-8', priority: 0, limit_value: 25, unit: 'runs', window_kind: 'daily', threshold_pct: 75 },
+      { model: 'claude-opus-5-5', priority: 0, limit_value: 25, unit: 'runs', window_kind: 'daily', threshold_pct: 75 },
     ] } },
   }), res);
   assert.equal(res.statusCode, 200);
@@ -87,7 +87,7 @@ test('PUT /kb/usage/limits saves caps; GET reflects them', async () => {
 
   res = makeRes();
   await handleKB(makeReq({ method: 'GET', url: '/kb/usage/limits?provider=anthropic', userId }), res);
-  const opus = res.json().chains.anthropic.find((m) => m.model === 'claude-opus-4-8');
+  const opus = res.json().chains.anthropic.find((m) => m.model === 'claude-opus-5-5');
   assert.equal(opus.limit_value, 25);
   assert.equal(opus.threshold_pct, 75);
 });
@@ -106,14 +106,14 @@ test('POST /kb/usage/record then GET /kb/usage/summary shows the usage', async (
   let res = makeRes();
   await handleKB(makeReq({
     method: 'POST', url: '/kb/usage/record', userId,
-    body: { provider: 'anthropic', model: 'claude-opus-4-8', source: 'auto-task', endpoint: 'auto-task:reviewCode' },
+    body: { provider: 'anthropic', model: 'claude-opus-5-5', source: 'auto-task', endpoint: 'auto-task:reviewCode' },
   }), res);
   assert.equal(res.statusCode, 200);
   assert.equal(res.json().ok, true);
 
   res = makeRes();
   await handleKB(makeReq({ method: 'GET', url: '/kb/usage/summary?provider=anthropic', userId }), res);
-  const opus = res.json().providers.anthropic.models.find((m) => m.model === 'claude-opus-4-8');
+  const opus = res.json().providers.anthropic.models.find((m) => m.model === 'claude-opus-5-5');
   assert.equal(opus.used, 1);
 });
 
@@ -132,24 +132,24 @@ test('GET /kb/usage/resolve returns the active model; switches after caps fill',
   await handleKB(makeReq({
     method: 'PUT', url: '/kb/usage/limits', userId,
     body: { chains: { anthropic: [
-      { model: 'claude-opus-4-8',   priority: 0, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
-      { model: 'claude-sonnet-4-6', priority: 1, limit_value: 100, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-opus-5-5',   priority: 0, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-sonnet-5-5', priority: 1, limit_value: 100, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
     ] } },
   }), makeRes());
 
   let res = makeRes();
   await handleKB(makeReq({ method: 'GET', url: '/kb/usage/resolve?provider=anthropic', userId }), res);
-  assert.equal(res.json().model, 'claude-opus-4-8'); // healthy
+  assert.equal(res.json().model, 'claude-opus-5-5'); // healthy
 
   for (let i = 0; i < 2; i++) {
     await handleKB(makeReq({
       method: 'POST', url: '/kb/usage/record', userId,
-      body: { provider: 'anthropic', model: 'claude-opus-4-8' },
+      body: { provider: 'anthropic', model: 'claude-opus-5-5' },
     }), makeRes());
   }
   res = makeRes();
   await handleKB(makeReq({ method: 'GET', url: '/kb/usage/resolve?provider=anthropic', userId }), res);
-  assert.equal(res.json().model, 'claude-sonnet-4-6'); // switched
+  assert.equal(res.json().model, 'claude-sonnet-5-5'); // switched
 });
 
 test('GET /kb/usage/resolve rejects an unknown provider with 400', async () => {
@@ -166,7 +166,7 @@ test('POST /kb/usage/record stores optional token + turn counts', async () => {
   const res = makeRes();
   await handleKB(makeReq({
     method: 'POST', url: '/kb/usage/record', userId,
-    body: { provider: 'anthropic', model: 'claude-opus-4-8', source: 'auto-task',
+    body: { provider: 'anthropic', model: 'claude-opus-5-5', source: 'auto-task',
       inputTokens: 10, outputTokens: 5, cacheReadTokens: 1000, cacheCreationTokens: 200, turns: 7,
       stopReason: 'error_max_turns' },
   }), res);
@@ -188,7 +188,7 @@ test('POST /kb/usage/record rejects negative or non-integer token counts with 40
     const res = makeRes();
     await handleKB(makeReq({
       method: 'POST', url: '/kb/usage/record', userId,
-      body: { provider: 'anthropic', model: 'claude-opus-4-8', ...body },
+      body: { provider: 'anthropic', model: 'claude-opus-5-5', ...body },
     }), res);
     assert.equal(res.statusCode, 400);
   }

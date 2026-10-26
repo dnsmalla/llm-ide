@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/connect-tickets-json",
+  "status": 200,
+  "request": {
+    "body": {
+      "provider": "manual",
+      "tickets": [
+        {
+          "id": "example-ticket-2",
+          "title": "Second example ticket",
+          "body": "Body text."
+        }
+      ]
+    }
+  },
+  "response": {
+    "ok": true,
+    "count": 1,
+    "chunks": 1
+  }
+}

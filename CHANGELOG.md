@@ -5,8 +5,25 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Security
+
+- **Review items keep only the fields their kind uses, and no credentials at any depth.** `POST /kb/review/submit`
+  now stores a per-kind whitelist of payload keys (dispatch: target, planId, taskIds, config, items; codegen-apply:
+  repoPath, taskId, files, tests, summary, pr, allowedRepos) and strips token / apiKey / secret / password /
+  credential / auth / bearer keys recursively; unknown payload keys are no longer stored or echoed. Migration 0045
+  scrubs existing rows. Rejecting a review item now requires it to be pending (409 `REVIEW_NOT_PENDING` otherwise).
+
 ### Added
 
+- **API v78: `GET /kb/meeting/:id?include=transcript`.** The meeting record gains an opt-in `transcript` field. The default response is unchanged. The Mac's Doc Gen uses it to read the transcript; `SERVER_API_VERSION` 77 → 78.
+
+- **API v76: four served routes added to the endpoint roster.** `/kb/issues`, `/kb/export-all`, `/kb/live/:id/stream` and `/kb/email/classify` were answered by the server and called by clients but missing from `ALL_ENDPOINTS`, so `/health` did not advertise them. No request or response change; `SERVER_API_VERSION` 75 → 76.
+
+- **Measured context split per v2 chat turn (API v77, migration 0044).** `turn_composition` now records the
+  approximate tokens (chars / 4) of the system append, skill text, llmide tool definitions, the
+  `<<<LLMIDE_CONTEXT>>>` fence (memory and skills parts), and this turn's tool-result text, plus the SDK's own
+  end-of-turn context categories (system prompt, system tools, MCP tools, memory, messages). Read it per user
+  with `GET /kb/usage/turn-composition?limit=`. Read-only; no model calls.
 - **Warm CLI pool for the chat mode classifier.** On subscription (CLI) installs the auto-mode classifier
   no longer pays a cold `claude` start on every turn: one idle `claude -p --input-format stream-json`
   child is kept for the classifier's exact argv, user and env, answers one prompt, and is replaced

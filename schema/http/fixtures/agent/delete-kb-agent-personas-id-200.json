@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /kb/agent/personas/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "698631d09e657840e45b27f1"
+    }
+  },
+  "response": {
+    "removed": true,
+    "active": "default"
+  }
+}

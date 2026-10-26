@@ -1,0 +1,11 @@
+{
+  "endpoint": "POST /auth/slack/start",
+  "status": 200,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "authUrl": "https://slack.com/oauth/v2/authorize?client_id=example-slack-client-id&redirect_uri=http%3A%2F%2F127.0.0.1%3A65098%2Fauth%2Fslack%2Fcallback&user_scope=channels%3Ahistory%2Cgroups%3Ahistory%2Cchannels%3Aread%2Cgroups%3Aread%2Cusers%3Aread&state=PeDbmzKFJq8gUIRG3hO6rEtj1g4jVjQ1",
+    "state": "PeDbmzKFJq8gUIRG3hO6rEtj1g4jVjQ1"
+  }
+}

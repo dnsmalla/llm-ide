@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /auth/logout",
+  "status": 200,
+  "request": {
+    "body": {
+      "refreshToken": "example-refresh-token"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

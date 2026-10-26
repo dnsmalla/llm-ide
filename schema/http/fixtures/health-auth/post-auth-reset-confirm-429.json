@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/reset-confirm",
+  "status": 429,
+  "request": {
+    "body": {
+      "token": "example-reset-token",
+      "newPassword": "example-new-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests"
+    }
+  }
+}

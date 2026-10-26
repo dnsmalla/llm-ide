@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/generate-plan",
+  "status": 400,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Handler: planning.mjs. The body has no meetingId.",
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Missing meetingId"
+    }
+  }
+}

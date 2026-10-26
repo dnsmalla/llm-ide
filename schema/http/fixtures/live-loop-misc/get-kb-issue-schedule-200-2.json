@@ -1,0 +1,29 @@
+{
+  "endpoint": "GET /kb/issue-schedule",
+  "status": 200,
+  "description": "After one schedule is saved.",
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "example/repo"
+    }
+  },
+  "response": {
+    "schedules": [
+      {
+        "provider": "github",
+        "repo": "example/repo",
+        "issueNumber": 12,
+        "startDate": "2026-11-02",
+        "dueDate": "2026-11-06",
+        "estimateDays": 3,
+        "dependsOn": [
+          10,
+          11
+        ],
+        "updatedAt": "2026-10-26 16:19:25"
+      }
+    ],
+    "count": 1
+  }
+}

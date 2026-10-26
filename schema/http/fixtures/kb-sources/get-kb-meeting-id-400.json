@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/meeting/:id",
+  "status": 400,
+  "request": {
+    "query": {},
+    "params": {
+      "id": "bad.id"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_ID",
+      "message": "id must be 1–128 alphanumeric / _ / - characters"
+    }
+  }
+}

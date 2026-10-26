@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/email/classify",
+  "status": 400,
+  "request": {
+    "body": {
+      "subject": "only subject"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "subject and body (strings) required"
+    }
+  }
+}

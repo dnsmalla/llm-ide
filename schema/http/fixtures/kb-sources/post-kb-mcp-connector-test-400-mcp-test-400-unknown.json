@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/mcp-connector/test",
+  "status": 400,
+  "request": {
+    "body": {
+      "id": "no-such-connector"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Unknown MCP connector id"
+    }
+  }
+}

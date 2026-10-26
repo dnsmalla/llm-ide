@@ -1,0 +1,902 @@
+{
+  "description": "Notes and generation routes: the single-shot model calls the side panel, the Mac app's Doc Gen and the Code Assistant make (/generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx, /chat), the legacy Code Assistant turn (/code-assist), its run-bash approval resolver (/code-assist/decision), and the temporary Agent SDK spike (/agent-sdk/spike). Roster: all are POST paths in ALL_ENDPOINTS (extension/server.mjs), handled by extension/server/ai-routes.mjs and extension/server/export-routes.mjs; all are token-protected and on the core feature set (not feature-gated). Request parts list exactly the keys each handler reads from the parsed JSON body; unknown keys are ignored by the server and are not declared. No request part is required: the server answers a missing key with 400, and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md), including /code-assist/decision (an unparseable body is refused there too, not treated as {}). Not declared: 413 (the body limit: readBody answers 413 before the handler runs, and a fixture cannot carry an over-limit body). Rate limits: /generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx and /chat share the llmFast bucket (429 declared); /code-assist uses agentTurn (429 declared); /code-assist/decision and /agent-sdk/spike are not rate-limited. Provider failures: a model call that throws answers the generic 500 INTERNAL_ERROR on the routes that call runClaude directly (its message is not sent, sendError maps a non-AppError to INTERNAL_ERROR), and 502 INTERNAL_ERROR on /code-assist (codeAssistErrorResponse); a PROVIDER_UNAVAILABLE refusal answers 400 on /code-assist. The 200 bodies of the model routes are the parsed model output, so the fixtures for them are built from the handler's response construction and the existing tests, not captured from a model; those fixtures say so in their description. Streams: /generate-notes and /code-assist answer an SSE stream instead of the JSON 200 when the request sends Accept: text/event-stream. The JSON form is specified on the 200; a status key can hold only one form and no event schema exists for the stream, so the stream form is not specified here. /agent-sdk/spike always streams and is x-unspecified.",
+  "$defs": {
+    "Turn": {
+      "type": "object",
+      "description": "One prior chat turn. role is 'user' or 'assistant'; the server maps any other role to 'Assistant' in the /chat prompt.",
+      "properties": {
+        "role": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "Source": {
+      "type": "object",
+      "description": "One selected source for /generate-doc. name is the display name (sanitized to one line, 80 chars); content is the source text, budgeted by packSources.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "Attachment": {
+      "type": "object",
+      "description": "One file attached to a Code Assistant turn. A content starting with '[binary:<media type>]' followed by a newline marks a binary file; an image media type is replaced by a one-line note on the legacy engine.",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "content": {
+          "type": "string"
+        }
+      }
+    },
+    "AgentContext": {
+      "type": "object",
+      "description": "The Mac client's agent context. The server forwards only these keys (buildEnrichedAgentContext, extension/server/ai-routes.mjs); any other key is dropped. activeProject, indexedRepos entries and recentIssues entries are opaque to this route, so they are open objects.",
+      "properties": {
+        "sessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "chatSessionId": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "activeProject": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "The active project as the Mac sends it; opaque here and forwarded unchanged."
+        },
+        "indexedRepos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "An indexed repo as the Mac sends it; opaque here."
+          }
+        },
+        "recentIssues": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": true,
+            "description": "A recent issue as the Mac sends it; opaque here."
+          }
+        },
+        "workspaceRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "activeRepoRoot": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currentBranch": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The active repo's branch, capped at 200 characters."
+        },
+        "gitStatus": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "Staged and unstaged file counts and the upstream position (the Mac's GitStatus). Rendered per turn as the Git state block.",
+          "properties": {
+            "staged": {
+              "type": "integer"
+            },
+            "unstaged": {
+              "type": "integer"
+            },
+            "ahead": {
+              "type": "integer"
+            },
+            "behind": {
+              "type": "integer"
+            },
+            "hasUpstream": {
+              "type": "boolean"
+            }
+          },
+          "additionalProperties": false
+        }
+      }
+    },
+    "Task": {
+      "type": "object",
+      "description": "A session task (llm_agent/runtime/handlers/session-tasks.mjs). status is one of pending, in_progress, completed, skipped, failed; a model-written status is stored as given, so it is typed as a string.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "integer",
+          "description": "Epoch milliseconds (Date.now())."
+        }
+      }
+    },
+    "LegacyUsage": {
+      "type": "object",
+      "description": "usage of the legacy (no agentContext) /code-assist reply, and the attachment accounting of every /code-assist reply.",
+      "properties": {
+        "attachmentCount": {
+          "type": "integer"
+        },
+        "attachmentChars": {
+          "type": "integer"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "truncatedPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "AgentUsage": {
+      "type": "object",
+      "description": "usage of an agent-path /code-assist reply: LegacyUsage plus the memory block size (route.mjs memoryUsage) and, when every model call of the turn reported tokens, the summed turn tokens (kb/usage.mjs turnTokenUsageFields). The memory fields and the token fields are absent in some turns, so they are x-optional.",
+      "properties": {
+        "attachmentCount": {
+          "type": "integer"
+        },
+        "attachmentChars": {
+          "type": "integer"
+        },
+        "paths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "truncatedPaths": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "memoryChars": {
+          "type": "integer",
+          "x-optional": true
+        },
+        "memoryApproxTokens": {
+          "type": "integer",
+          "x-optional": true
+        },
+        "memoryHasChatMemory": {
+          "type": "boolean",
+          "x-optional": true
+        },
+        "inputTokens": {
+          "type": "integer",
+          "x-optional": true
+        },
+        "outputTokens": {
+          "type": "integer",
+          "x-optional": true
+        },
+        "cacheReadTokens": {
+          "type": "integer",
+          "x-optional": true
+        },
+        "cacheCreationTokens": {
+          "type": "integer",
+          "x-optional": true
+        },
+        "modelCalls": {
+          "type": "integer",
+          "x-optional": true
+        }
+      }
+    },
+    "EntityAction": {
+      "type": "object",
+      "required": [
+        "text",
+        "owner",
+        "due",
+        "quote"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "description": "Sanitized to one line, 500 chars."
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Sanitized to one line, 50 chars; null when unknown."
+        },
+        "due": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "YYYY-MM-DD, or null (the server checks the shape with a regex; the keyword is not supported here)."
+        },
+        "quote": {
+          "type": "string",
+          "description": "Verbatim phrase from the transcript, 200 chars."
+        }
+      }
+    },
+    "EntityDecision": {
+      "type": "object",
+      "required": [
+        "text",
+        "participants",
+        "quote"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "quote": {
+          "type": "string"
+        }
+      }
+    },
+    "EntityBlocker": {
+      "type": "object",
+      "required": [
+        "text",
+        "severity",
+        "quote"
+      ],
+      "properties": {
+        "text": {
+          "type": "string"
+        },
+        "severity": {
+          "enum": [
+            "low",
+            "med",
+            "high"
+          ],
+          "description": "Any other model value is coerced to med."
+        },
+        "quote": {
+          "type": "string"
+        }
+      }
+    },
+    "Ok": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /generate-notes": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "transcript is required in effect (400 when missing or empty after sanitization). meetingId, when present, names the KB ingest ref (notes:<meetingId>). language: a language code (resolveLanguage); unknown codes are ignored. participants is sent by the side panel but never read by this route.",
+          "properties": {
+            "transcript": {
+              "type": "string",
+              "description": "Raw meeting transcript text"
+            },
+            "meetingTitle": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": "string",
+              "description": "Optional — used to scope KB ingest ref"
+            },
+            "language": {
+              "type": "string",
+              "description": "BCP-47 locale or display name (e.g. \"ja\", \"Japanese\")"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "notes"
+          ],
+          "description": "The JSON form (no Accept: text/event-stream). The stream form is not specified: its events are chunk and done, carrying the same text, then error on failure, and it is not covered by this schema.",
+          "properties": {
+            "notes": {
+              "type": "string",
+              "description": "Markdown meeting notes."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /generate-questions": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "transcript is required in effect (400 when missing or empty after sanitization). types: any of conflict, confirm, explain; other values are dropped, and 400 when none is left. participants: at most 20 names, each sanitized to one line.",
+          "properties": {
+            "transcript": {
+              "type": "string"
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Names to target; empty = any participant"
+            },
+            "types": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "At least one type required"
+            },
+            "language": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "questions"
+          ],
+          "properties": {
+            "questions": {
+              "type": "string",
+              "description": "Markdown: one H2 section per category used, each a numbered list."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /extract-entities": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "transcript is required in effect (400 when missing or empty after sanitization). participants: at most 30 names, each sanitized to one line; they constrain owner resolution.",
+          "properties": {
+            "transcript": {
+              "type": "string"
+            },
+            "participants": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "meetingTitle": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "actions",
+            "decisions",
+            "blockers"
+          ],
+          "description": "The model's JSON after validation (ai-routes.mjs validate): each array is capped at 30 items and an item without text is dropped. Every key is always present.",
+          "properties": {
+            "actions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EntityAction"
+              }
+            },
+            "decisions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EntityDecision"
+              }
+            },
+            "blockers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/EntityBlocker"
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error",
+          "description": "The fixture is INTERNAL_ERROR (a runClaude failure, sendError maps it generically). The handler also answers 500 AI_PARSE_FAILED when the model's JSON is unparseable after the retry (ai-routes.mjs, the 'Failed to parse entity JSON' branch); that body is not captured here because it needs a model reply."
+        }
+      }
+    },
+    "POST /generate-doc": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "Gate (validateDocRequest): a template (templateName plus a non-empty sections array) or a non-empty command, and a non-empty sources array; otherwise 400. The total source budget is 400 000 rendered characters (packSources); sections are capped at 30, the prompt field at 2 000 characters, the command at 10 000. Sources not fitting the budget are listed in omitted, and shortened ones in truncated.",
+          "properties": {
+            "templateName": {
+              "type": "string",
+              "description": "Document title / template identifier"
+            },
+            "sections": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Ordered list of section headings (max 30); required together with templateName"
+            },
+            "command": {
+              "type": "string",
+              "description": "Reusable instruction text from a Doc Gen \"command\" .md file; alone satisfies the templateName+sections requirement"
+            },
+            "prompt": {
+              "type": "string",
+              "description": "Freeform one-off instructions from the prompt bar; combined with template/command, never required on its own"
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Source"
+              },
+              "description": "Source material; non-empty is required, not just present. No item-count limit — sources are capped at 50 000 chars each and the RENDERED source block (headings included) is fitted to a 400 000-char total budget by equal-share water-filling; anything shortened is named in the response's truncated array, and anything that could not be given at least 200 chars is named in omitted"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "content",
+            "truncated",
+            "truncatedCount",
+            "omitted",
+            "omittedCount"
+          ],
+          "description": "The generated Markdown and what the source budget could not give the model: names are capped at 50 per list, the counts are exact. The Mac client reads truncated and omitted; their absence would mean an older server.",
+          "properties": {
+            "content": {
+              "type": "string",
+              "description": "Full markdown document"
+            },
+            "truncated": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Names of the sources the total-character budget forced short, capped at 50 entries (server API v52; absent on older servers, which silently kept only the first 20 sources)"
+            },
+            "truncatedCount": {
+              "type": "integer",
+              "description": "Exact number of shortened sources; never capped, so it can exceed truncated.length"
+            },
+            "omitted": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Names of the sources that did not fit the budget at all and were not sent, capped at 50 entries (server API v52). Dropped from the end of the request array, so the client decides what survives by the order it sends"
+            },
+            "omittedCount": {
+              "type": "integer",
+              "description": "Exact number of omitted sources; never capped, so it can exceed omitted.length"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /generate-docx": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "transcript is required in effect (400 when missing or empty after sanitization). meetingTitle defaults to 'Meeting'. meetingId, when present, names the KB ingest ref (docx:<meetingId>).",
+          "properties": {
+            "transcript": {
+              "type": "string"
+            },
+            "meetingTitle": {
+              "type": "string"
+            },
+            "meetingId": {
+              "type": "string"
+            },
+            "language": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "binary",
+          "description": "A .docx attachment named meeting-notes-<YYYY-MM-DD>.docx (Content-Disposition attachment). The body is the Word package bytes and is not described further here."
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error",
+          "description": "Two bodies: INTERNAL_ERROR (a runClaude failure, captured) and AI_PARSE_FAILED when the model's JSON cannot be parsed, and INTERNAL_ERROR with 'Failed to build DOCX: ...' when the docx build throws (export-routes.mjs). Only the first is captured; the others need a model reply or a broken build."
+        }
+      }
+    },
+    "POST /chat": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "message and transcript are required in effect (400 when either is missing, or empty after sanitization). message is capped at 10 000 characters; history uses the last 10 turns, each capped at 5 000 characters. The user's Meeting-agent persona, when set, prefixes the prompt.",
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "User message (max 10 000 chars after sanitization)"
+            },
+            "transcript": {
+              "type": "string"
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Turn"
+              },
+              "description": "Prior turns (last 10 used); each item has role and content"
+            },
+            "language": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "reply"
+          ],
+          "properties": {
+            "reply": {
+              "type": "string",
+              "description": "The model's reply, trimmed."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "500": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /code-assist": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "message is required in effect (400 when missing or empty after sanitization). message is capped at 20 000 characters; attachments are budgeted by selectAttachments (30 files, 80 000 characters each, 200 000 in total). history is windowed to the context budget. skills are ids read from the local skills library; unknown ids are ignored. tier 'subagent' selects LLMIDE_SUBAGENT_MODEL when model is absent. With agentContext the agent loop runs (agent path); without it, one model call runs (legacy path). 8 MB body limit (readBody). The SSE form (Accept: text/event-stream) is not specified here: its events are progress, chunk, done (reply, pendingTool, usage, mode), tasks (tasks, continueNeeded) and error (error, optional code), and no event schema exists for them.",
+          "properties": {
+            "message": {
+              "type": "string",
+              "description": "User message (max 20 000 chars after sanitization)"
+            },
+            "history": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Turn"
+              }
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Attachment"
+              },
+              "description": "File attachments (max 30 files, 80 000 chars each, 200 000 total)"
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "language": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string",
+              "description": "A provider id, or custom:<uuid>. A provider without a configured key answers 400 PROVIDER_UNAVAILABLE."
+            },
+            "tier": {
+              "type": "string",
+              "description": "'subagent' or absent."
+            },
+            "mode": {
+              "type": "string",
+              "description": "Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions"
+            },
+            "planExecute": {
+              "type": "boolean",
+              "description": "Set only by the Mac saved-plan card's \"Execute plan\" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request."
+            },
+            "planWrite": {
+              "type": "boolean"
+            },
+            "clientCaps": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "agentContext": {
+              "$ref": "#/$defs/AgentContext"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "One of two JSON bodies, chosen by whether the request carried agentContext: the agent path (with continueNeeded, tasks and mode) or the legacy path (reply and usage only). Each variant has its own fixture.",
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "reply",
+                "usage",
+                "continueNeeded",
+                "tasks",
+                "mode"
+              ],
+              "description": "Agent path (route.mjs handleCodeAssist result, plus memoryUsage merged into usage and the task state).",
+              "properties": {
+                "reply": {
+                  "type": "string"
+                },
+                "pendingTool": {
+                  "type": [
+                    "object",
+                    "null"
+                  ],
+                  "additionalProperties": true,
+                  "description": "A tool call waiting for the user's approval, or null. Its keys come from the model's tool call, so the object is open."
+                },
+                "usage": {
+                  "$ref": "#/$defs/AgentUsage"
+                },
+                "continueNeeded": {
+                  "type": "boolean"
+                },
+                "tasks": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Task"
+                  }
+                },
+                "mode": {
+                  "type": "string",
+                  "description": "The resolved mode of the turn."
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "reply",
+                "usage"
+              ],
+              "description": "Legacy path: one model call, no tools.",
+              "properties": {
+                "reply": {
+                  "type": "string",
+                  "description": "The model's reply, trimmed."
+                },
+                "usage": {
+                  "$ref": "#/$defs/LegacyUsage"
+                }
+              }
+            }
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error",
+          "description": "VALIDATION_FAILED (missing or empty message), or PROVIDER_UNAVAILABLE (the named provider has no key or base URL; the Mac retries once without its tier route on this code)."
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error",
+          "description": "INTERNAL_ERROR with the fixed message 'The assistant is temporarily unavailable. Please try again.' (codeAssistErrorResponse, ai-routes.mjs). The provider detail is logged server-side only."
+        }
+      }
+    },
+    "POST /code-assist/decision": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "Resolves a run-bash approval parked by the legacy engine (llm_agent/sdk/decisions.mjs answerDecision). action defaults to 'answer' when answers is present. An unknown action, or an unparseable body (treated as {}), answers 404 DECISION_UNKNOWN. 64 KB body limit (not declared, see the group description).",
+          "properties": {
+            "requestId": {
+              "type": "string",
+              "description": "Id from the approval_request progress event"
+            },
+            "sdkSessionId": {
+              "type": "string",
+              "description": "The legacy chat's agentContext.sessionId."
+            },
+            "action": {
+              "enum": [
+                "answer",
+                "allow",
+                "deny",
+                "always-allow"
+              ],
+              "description": "'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once."
+            },
+            "feedback": {
+              "type": "string",
+              "description": "With `deny` only: the user's instruction (\"No, and do this instead\"), handed to the model as the denial reason. Max 2000 chars."
+            },
+            "answers": {
+              "type": "object",
+              "additionalProperties": true,
+              "description": "AskUserQuestion answers, forwarded to the engine unchanged."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /agent-sdk/spike": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "prompt is trimmed and capped at 4 000 characters; 400 when empty. resume names an SDK session to continue. 1 MB body limit.",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "Raw prompt (max 4 000 chars)"
+            },
+            "resume": {
+              "type": "string",
+              "description": "SDK session id to resume"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "Temporary P0 spike (ai-routes.mjs, the comment says its successor is /agent/v2/*). The SSE stream is spike_start, then mapped engine events, then spike_done (sessionId, result, keySource) or error (error). Its event types are not in the agent-v2 event schema, so it is not specified here."
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,66 @@
+{
+  "endpoint": "POST /kb/plan/save",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Saves a plan with no model call. The id is generated because none was sent.",
+  "request": {
+    "body": {
+      "title": "Saved stub plan",
+      "goal": "Stub goal",
+      "language": "en",
+      "meetingId": "mtg-plan-001",
+      "meta": {
+        "source": "capture"
+      },
+      "tasks": [
+        {
+          "id": "s-1",
+          "title": "Stub task",
+          "description": "Stub description",
+          "owner": "Alice",
+          "due": "2026-11-06",
+          "estimateDays": 2,
+          "dependsOn": [],
+          "status": "planned",
+          "risk": "low",
+          "riskReason": "Small change.",
+          "milestone": "Release",
+          "files": [],
+          "symbols": [],
+          "meta": {}
+        }
+      ]
+    }
+  },
+  "response": {
+    "id": "plan-mvovbtzo-Wq8kTRCd_bbAqsz2",
+    "meetingId": "mtg-plan-001",
+    "title": "Saved stub plan",
+    "goal": "Stub goal",
+    "language": "en",
+    "meta": {
+      "source": "capture"
+    },
+    "createdAt": "2026-10-26 06:21:10",
+    "updatedAt": "2026-10-26 06:21:10",
+    "tasks": [
+      {
+        "id": "s-1",
+        "planId": "plan-mvovbtzo-Wq8kTRCd_bbAqsz2",
+        "position": 0,
+        "milestone": "Release",
+        "title": "Stub task",
+        "description": "Stub description",
+        "owner": "Alice",
+        "due": "2026-11-06",
+        "estimateDays": 2,
+        "dependsOn": [],
+        "status": "planned",
+        "risk": "low",
+        "riskReason": "Small change.",
+        "files": [],
+        "symbols": [],
+        "meta": {}
+      }
+    ]
+  }
+}

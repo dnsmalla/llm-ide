@@ -1,0 +1,10 @@
+{
+  "endpoint": "GET /auth/me/codex-plugins/updates",
+  "status": 401,
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

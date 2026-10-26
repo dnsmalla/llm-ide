@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/notify/slack",
+  "status": 429,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: The dispatch bucket is exhausted by a fresh user; the next call answers 429.",
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests",
+      "details": {
+        "retryAfterSec": 10
+      }
+    }
+  }
+}

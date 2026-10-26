@@ -66,6 +66,68 @@ export function composeSystemContext(agentContext, userId, userMessage = '', { m
 // The recent issues + meetings on their own — the part of the system context
 // that changes during a chat. '' when there are none. Fence-neutralised for
 // the same reason the full block is.
+// The active repo's branch and status, for "what branch am I on" without a
+// git tool round trip. '' when neither is known. Bounded: the branch name is
+// capped at 200 characters and the whole block at GIT_CONTEXT_CHARS. The Mac
+// sends gitStatus as counts; a string form is accepted and truncated.
+export const GIT_CONTEXT_CHARS = 2000;
+
+function gitCount(v) {
+  return Number.isFinite(v) ? Math.max(0, Math.trunc(v)) : null;
+}
+
+function renderGitStatus(gs) {
+  if (typeof gs === 'string') return oneLine(gs) ? `Status: ${oneLine(gs).slice(0, GIT_CONTEXT_CHARS)}` : '';
+  if (!gs || typeof gs !== 'object') return '';
+  const staged = gitCount(gs.staged);
+  const unstaged = gitCount(gs.unstaged);
+  if (staged === null || unstaged === null) return '';
+  const upstream = gs.hasUpstream === true
+    ? `ahead ${gitCount(gs.ahead) ?? 0}, behind ${gitCount(gs.behind) ?? 0} of upstream`
+    : 'no upstream';
+  return `Staged: ${staged}, unstaged: ${unstaged}; ${upstream}`;
+}
+
+// Git-supplied text is one line: a branch or status with newlines would let
+// a line start with a markdown heading or a fake instruction inside the fence.
+function oneLine(s) {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
+function gitBranch(agentContext) {
+  return typeof agentContext?.currentBranch === 'string'
+    ? oneLine(agentContext.currentBranch).slice(0, 200) : '';
+}
+
+/**
+ * What decides whether the git block is re-sent: the branch and whether the
+ * tree is dirty. Raw counts are left out on purpose: the agent's own file
+ * edits move them every turn, and resending the block each time would bloat
+ * the transcript. A sent block still shows the counts it had at that time.
+ */
+export function gitStateKey(agentContext) {
+  const gs = agentContext?.gitStatus;
+  let dirty = 'unknown';
+  if (typeof gs === 'string') dirty = `text:${oneLine(gs)}`;
+  else if (gs && typeof gs === 'object') {
+    const counts = [gs.staged, gs.unstaged, gs.untracked].map(gitCount);
+    if (counts[0] !== null && counts[1] !== null) {
+      dirty = counts.some((n) => n !== null && n > 0);
+    }
+  }
+  return JSON.stringify({ branch: gitBranch(agentContext), dirty });
+}
+
+export function composeGitContext(agentContext) {
+  const branch = gitBranch(agentContext);
+  const status = renderGitStatus(agentContext?.gitStatus);
+  if (!branch && !status) return '';
+  const lines = ['## Git state (the active repo)'];
+  if (branch) lines.push(`Current branch: ${branch}`);
+  if (status) lines.push(status);
+  return redactFence(lines.join('\n')).slice(0, GIT_CONTEXT_CHARS);
+}
+
 export function composeRecentContext(agentContext) {
   const block = [renderRecentIssues(agentContext), renderRecentMeetings(agentContext)]
     .filter((s) => typeof s === 'string' && s.length > 0).join('\n\n');

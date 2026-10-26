@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/summarize",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Sent without an access token.",
+  "request": {
+    "body": {
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "title": "Weekly sync",
+      "language": "en",
+      "started_at": "2026-10-20T09:00:00.000Z",
+      "duration_seconds": 1800,
+      "participants": [
+        "Alice",
+        "Bob"
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

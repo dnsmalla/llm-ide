@@ -1,0 +1,226 @@
+{
+  "endpoint": "POST /agent/v2/stream",
+  "status": 200,
+  "description": "Every agent-v2 event variant in turn order, copied from schema/agent-v2/fixtures (validated there); a turn that the real engine would emit, not one this route produced offline.",
+  "request": {
+    "body": {
+      "message": "Read the planner and edit it.",
+      "agentContext": {
+        "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+        "workspaceRoot": "/example/workspace"
+      },
+      "mode": "execute"
+    }
+  },
+  "response": [
+    {
+      "type": "init",
+      "sessionId": "3f9a1c2e-7b40-4d11-9c33-8a2f6b5e0d17",
+      "claudeCodeVersion": "0.3.245",
+      "model": "claude-sonnet-5",
+      "tools": [
+        "Read",
+        "Glob",
+        "Grep",
+        "mcp__llmide__read-file"
+      ],
+      "capabilities": [
+        "streaming"
+      ],
+      "mcpServers": [
+        {
+          "name": "llmide",
+          "status": "connected"
+        }
+      ]
+    },
+    {
+      "type": "mode_set",
+      "mode": "execute"
+    },
+    {
+      "type": "delta",
+      "text": "Reading the file now"
+    },
+    {
+      "type": "tool_use_start",
+      "index": 0,
+      "id": "toolu_01ABCdefGHIjklMNOpqrs",
+      "name": "Read"
+    },
+    {
+      "type": "tool_args_delta",
+      "index": 0,
+      "partialJson": "{\"file_path\":\"/repo/mac/Sour"
+    },
+    {
+      "type": "tool_result",
+      "toolUseId": "toolu_01ABCdefGHIjklMNOpqrs",
+      "isError": false,
+      "text": "import SwiftUI\n\nstruct Foo: View {}\n",
+      "truncated": false
+    },
+    {
+      "type": "usage",
+      "inputTokens": 10,
+      "outputTokens": 5,
+      "cacheReadTokens": 40000,
+      "cacheCreationTokens": 8000
+    },
+    {
+      "type": "memory",
+      "sessionFacts": 2,
+      "chars": 96,
+      "approxTokens": 24
+    },
+    {
+      "type": "context_usage",
+      "totalTokens": 10460,
+      "maxTokens": 1000000,
+      "percentage": 1,
+      "categories": [
+        {
+          "name": "System tools",
+          "kind": "used",
+          "tokens": 1809
+        },
+        {
+          "name": "Messages",
+          "kind": "used",
+          "tokens": 2078
+        },
+        {
+          "name": "Autocompact buffer",
+          "kind": "buffer",
+          "tokens": 33000
+        },
+        {
+          "name": "Free space",
+          "kind": "free",
+          "tokens": 956540
+        }
+      ]
+    },
+    {
+      "type": "result",
+      "subtype": "success",
+      "costUsd": 0.0417,
+      "numTurns": 3,
+      "durationMs": 18422,
+      "sessionId": "3f9a1c2e-7b40-4d11-9c33-8a2f6b5e0d17",
+      "stopReason": "end_turn"
+    },
+    {
+      "type": "sdk",
+      "sdkType": "compact_boundary",
+      "subtype": "auto",
+      "raw": {
+        "type": "compact_boundary",
+        "subtype": "auto",
+        "pre_tokens": 180000
+      }
+    },
+    {
+      "type": "approval_request",
+      "requestId": "7c1e4a90-2b6d-4f83-a55c-91e0d3f7b248",
+      "kind": "ToolApproval",
+      "toolName": "Edit",
+      "argsSummary": "mac/Sources/LlmIdeMac/Chat/Engine/ChatEngine.swift",
+      "args": {
+        "filePath": "/repo/mac/Sources/LlmIdeMac/Chat/Engine/ChatEngine.swift",
+        "oldString": "var busy = false",
+        "newString": "var busy = true",
+        "replaceAll": false
+      }
+    },
+    {
+      "type": "approval_request",
+      "requestId": "1a5f3b78-4c92-4e01-8d6a-2b7c9e04f513",
+      "kind": "ToolApproval",
+      "toolName": "Bash",
+      "argsSummary": "swift build --product LlmIdeMac",
+      "args": {
+        "command": "swift build --product LlmIdeMac",
+        "truncated": false
+      }
+    },
+    {
+      "type": "approval_request",
+      "requestId": "9e8d7c6b-5a41-4302-b1f0-3d2c1b0a9f88",
+      "kind": "ToolApproval",
+      "toolName": "Write",
+      "argsSummary": "schema/agent-v2/SCHEMA.md",
+      "args": {
+        "filePath": "/repo/schema/agent-v2/SCHEMA.md",
+        "contentPreview": "# agent/v2 wire contract\n",
+        "totalChars": 4127,
+        "exists": false
+      }
+    },
+    {
+      "type": "approval_request",
+      "requestId": "b2d90f14-8e37-4a62-bc51-6f0a7d29e435",
+      "kind": "AskUserQuestion",
+      "questions": [
+        {
+          "question": "Which approach should I take?",
+          "header": "Approach",
+          "multiSelect": false,
+          "options": [
+            {
+              "label": "Widen AgentProgress",
+              "description": "Add optional fields to the existing struct",
+              "preview": "struct AgentProgress {\n  let args: String?\n}"
+            },
+            {
+              "label": "New channel",
+              "description": "Add onToolEvent to ChatTransport"
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "type": "approval_resolved",
+      "requestId": "7c1e4a90-2b6d-4f83-a55c-91e0d3f7b248",
+      "outcome": "allow"
+    },
+    {
+      "type": "tasks",
+      "tasks": [
+        {
+          "id": "t1",
+          "title": "Widen AgentProgress",
+          "status": "completed"
+        },
+        {
+          "id": "t2",
+          "title": "Rewire AgentV2Transport",
+          "status": "in_progress"
+        }
+      ],
+      "continueNeeded": true
+    },
+    {
+      "type": "tasks_progress",
+      "tasks": [
+        {
+          "id": "t1",
+          "title": "Widen AgentProgress",
+          "status": "completed"
+        },
+        {
+          "id": "t2",
+          "title": "Rewire AgentV2Transport",
+          "status": "pending"
+        }
+      ]
+    },
+    {
+      "type": "error",
+      "code": "SESSION_UNRESUMABLE",
+      "message": "SDK session is no longer resumable",
+      "retryable": true
+    }
+  ]
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/toggle",
+  "status": 409,
+  "request": {
+    "body": {
+      "id": "nope",
+      "enabled": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "CONSENT_REQUIRED",
+      "message": "consent required before enabling"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/agent/project-memory",
+  "status": 200,
+  "request": {
+    "query": {
+      "workspaceRoot": "/example/workspace"
+    }
+  },
+  "response": {
+    "facts": [
+      "[db|engine] The project stores data in SQLite.",
+      "[perf|store] The project keeps its cache in memory."
+    ],
+    "repo": "/example/workspace"
+  }
+}

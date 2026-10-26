@@ -1,0 +1,10 @@
+{
+  "endpoint": "GET /auth/me/connectors/catalog",
+  "status": 401,
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,29 @@
+{
+  "endpoint": "PUT /kb/agent/personas/active",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "698631d09e657840e45b27f1"
+    }
+  },
+  "response": {
+    "personas": [
+      {
+        "id": "default",
+        "name": "Capture Agent",
+        "promptSuffix": "Keep answers short.",
+        "autoDispatch": false,
+        "createdAt": "2026-10-26T07:11:41.688Z"
+      },
+      {
+        "id": "698631d09e657840e45b27f1",
+        "name": "Second persona",
+        "promptSuffix": "Be formal.",
+        "autoDispatch": false,
+        "createdAt": "2026-10-26T07:11:41.692Z"
+      }
+    ],
+    "active": "698631d09e657840e45b27f1",
+    "count": 2
+  }
+}

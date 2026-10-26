@@ -1,0 +1,51 @@
+{
+  "endpoint": "GET /kb/usage/limits",
+  "status": 200,
+  "request": {
+    "query": {
+      "provider": "openai"
+    }
+  },
+  "response": {
+    "chains": {
+      "openai": [
+        {
+          "provider": "openai",
+          "model": "gpt-4o",
+          "label": "GPT-4o",
+          "priority": 0,
+          "enabled": true,
+          "limit_value": 0,
+          "unit": "runs",
+          "window_kind": "daily",
+          "threshold_pct": 90,
+          "custom": false
+        },
+        {
+          "provider": "openai",
+          "model": "gpt-4o-mini",
+          "label": "GPT-4o mini",
+          "priority": 1,
+          "enabled": true,
+          "limit_value": 0,
+          "unit": "runs",
+          "window_kind": "daily",
+          "threshold_pct": 90,
+          "custom": false
+        },
+        {
+          "provider": "openai",
+          "model": "o3-mini",
+          "label": "o3-mini",
+          "priority": 2,
+          "enabled": true,
+          "limit_value": 0,
+          "unit": "runs",
+          "window_kind": "daily",
+          "threshold_pct": 90,
+          "custom": false
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /kb/delete",
+  "status": 401,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

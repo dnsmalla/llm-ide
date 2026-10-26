@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /auth/mcp-connector/status",
+  "status": 401,
+  "request": {
+    "query": {
+      "id": "miro"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "PATCH /kb/plan-task/update",
+  "status": 404,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No such task for this user.",
+  "request": {
+    "body": {
+      "taskId": "t-missing",
+      "patch": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Task not found"
+    }
+  }
+}
