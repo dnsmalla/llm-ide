@@ -7,6 +7,8 @@
 //                                                           block per theme (Tauri)
 //   extension/src/styles/tokens.generated.css              the same CSS, bundled by the
 //                                                           side panel (Vite)
+//   ui/os-view/src/tokens.generated.css                    the same CSS, bundled by the
+//                                                           System view (Vite)
 //
 //   node scripts/gen-design-tokens.mjs           write the files
 //   node scripts/gen-design-tokens.mjs --check   exit 1 when a file is stale, or when
@@ -24,6 +26,7 @@ const SOURCE = join(ROOT, 'schema/design/tokens.json');
 const SWIFT_OUT = join(ROOT, 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift');
 const CSS_OUT = join(ROOT, 'schema/design/tokens.css');
 const EXT_CSS_OUT = join(ROOT, 'extension/src/styles/tokens.generated.css');
+const UI_CSS_OUT = join(ROOT, 'ui/os-view/src/tokens.generated.css');
 const CHECK = process.argv.includes('--check');
 
 // The colour roles every theme must define, in the order the Swift Palette lists them.
@@ -324,6 +327,7 @@ const outputs = [
   { file: SWIFT_OUT, text: generateSwift(src) },
   { file: CSS_OUT, text: generateCss(src) },
   { file: EXT_CSS_OUT, text: generateCss(src) },
+  { file: UI_CSS_OUT, text: generateCss(src) },
 ];
 
 if (CHECK) {
