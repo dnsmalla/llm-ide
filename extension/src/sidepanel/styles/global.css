@@ -16,7 +16,7 @@
   --color-success: var(--tok-color-accent3);
   --color-success-dim: color-mix(in srgb, var(--tok-color-accent3) 15%, transparent);
   --color-danger: var(--tok-color-danger);
-  --color-danger-bright: var(--tok-color-danger);
+  --color-danger-bright: color-mix(in srgb, var(--tok-color-danger), black 12%);
   --color-danger-dim: color-mix(in srgb, var(--tok-color-danger) 15%, transparent);
   --color-danger-border: color-mix(in srgb, var(--tok-color-danger) 35%, transparent);
   --color-warning: var(--tok-color-accent4);
@@ -301,7 +301,8 @@ a:focus-visible {
   cursor: pointer;
   transition: background var(--transition-fast);
   background: var(--color-danger-bright);
-  color: var(--color-text);
+  /* dark text on the light danger fill (white on it is ~2.3:1) */
+  color: var(--color-bg);
 }
 .btn-stop:hover:not(:disabled) {
   background: var(--color-danger);
@@ -1139,7 +1140,7 @@ a:focus-visible {
 
 .chat-btn-delete:hover:not(:disabled) {
   background: var(--color-danger);
-  color: white;
+  color: var(--color-bg);
 }
 
 .chat-btn-delete:disabled {
