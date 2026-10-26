@@ -10,10 +10,13 @@ import Combine
 /// navigation delegate allows only file URLs inside the bundled page's own
 /// directory, and the view opens no windows.
 ///
-/// Bridge (contract in `SystemBridgeInbound`): the page posts to the `llmide`
-/// handler; Swift answers by evaluating `window.llmideConfigure({...})`. The
-/// access token travels only as a JSON-encoded argument to
-/// `evaluateJavaScript`. It is never placed in a URL, a file, or a log.
+/// The page has no network access of its own. Its origin is file://, which the
+/// server refuses, and the token never enters JavaScript. Every server call goes
+/// through the bridge: native checks it against `SystemAllowedCall`, makes it with
+/// the authenticated `LlmIdeAPIClient`, and answers. The change feed is opened
+/// here too, on the page's `subscribe`, and its events are forwarded to the page.
+///
+/// Bridge contract: see `SystemBridgeInbound` and the header of `ui/os-view/src/bridge.ts`.
 struct SystemWebView: NSViewRepresentable {
     static let messageHandlerName = "llmide"
 
@@ -56,15 +59,22 @@ struct SystemWebView: NSViewRepresentable {
     /// main thread, and anything that touches the session or the web view is
     /// main-actor code reached through `Task { @MainActor in … }`.
     final class Coordinator: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
+        /// Timeout for one bridged call. Kept under the page's own 15 s, so a
+        /// slow call fails here with a reply rather than on the page's timer.
+        private static let requestTimeout: TimeInterval = 12
+
         private var parent: SystemWebView
         private weak var webView: WKWebView?
         private var indexURL: URL?
         /// The page has posted `ready` (and has not since reloaded).
         private var pageReady = false
-        /// The configuration last handed to the page. Re-sent only when it
-        /// changes (theme, project, or token rotation).
+        /// The configuration last handed to the page. Re-sent only when it changes.
         private var lastConfig: SystemBridgeConfig?
-        private var tokenCancellable: AnyCancellable?
+        private var sessionCancellable: AnyCancellable?
+        /// Whether a session was present at the last check. A change restarts or stops the feed.
+        private var hadSession = false
+        /// The change feed, present while the page is subscribed (one per view).
+        private var feed: SystemEventStream?
 
         init(_ parent: SystemWebView) {
             self.parent = parent
@@ -74,35 +84,56 @@ struct SystemWebView: NSViewRepresentable {
         fileprivate func attach(_ web: WKWebView, indexURL: URL?) {
             webView = web
             self.indexURL = indexURL
-            // Re-send when the session token rotates. The published value is
-            // emitted before it is stored, so the push is deferred one main-actor
-            // hop, which then reads the stored value.
-            tokenCancellable = parent.session.$accessToken.dropFirst().sink { [weak self] _ in
-                Task { @MainActor in self?.pushConfigure() }
+            hadSession = parent.session.accessToken != nil
+            // The published value is emitted before it is stored, so the check is
+            // deferred one main-actor hop, which then reads the stored value.
+            sessionCancellable = parent.session.$accessToken.dropFirst().sink { [weak self] _ in
+                Task { @MainActor in self?.sessionChanged() }
             }
             loadPage()
         }
 
         @MainActor
         fileprivate func detach() {
-            tokenCancellable = nil
+            feed?.stop()
+            feed = nil
+            sessionCancellable = nil
             webView = nil
         }
 
         /// Called from `updateNSView` on every SwiftUI pass: picks up a new
-        /// theme or project name and pushes it if it changed.
+        /// theme or project name and pushes it if it changed. A project change
+        /// restarts the change feed.
         @MainActor
         fileprivate func update(_ newParent: SystemWebView) {
+            let projectChanged = newParent.projectName != parent.projectName
             parent = newParent
             pushConfigure()
+            if projectChanged { feed?.restart() }
         }
 
         @MainActor
         private func loadPage() {
             guard let web = webView, let indexURL else { return }
+            feed?.stop()
+            feed = nil
             pageReady = false
             lastConfig = nil
             web.loadFileURL(indexURL, allowingReadAccessTo: indexURL.deletingLastPathComponent())
+        }
+
+        /// Signing in restarts the feed with the new session; signing out stops it.
+        @MainActor
+        private func sessionChanged() {
+            let signedIn = parent.session.accessToken != nil
+            guard signedIn != hadSession else { return }
+            hadSession = signedIn
+            if signedIn {
+                feed?.restart()
+            } else {
+                feed?.stop()
+                sendStatus("stopped", "Sign in to LLM-IDE again")
+            }
         }
 
         /// Builds the config from the current app state and evaluates it in the
@@ -111,11 +142,7 @@ struct SystemWebView: NSViewRepresentable {
         @MainActor
         private func pushConfigure(force: Bool = false) {
             guard pageReady, let web = webView else { return }
-            let config = SystemBridgeConfig(
-                baseURL: parent.api.baseURL,
-                token: parent.session.accessToken,
-                theme: parent.theme.id,
-                projectName: parent.projectName)
+            let config = SystemBridgeConfig(theme: parent.theme.id, projectName: parent.projectName)
             if !force, config == lastConfig { return }
             guard let script = SystemBridge.configureScript(config) else { return }
             lastConfig = config
@@ -129,19 +156,67 @@ struct SystemWebView: NSViewRepresentable {
                 pageReady = true
                 lastConfig = nil
                 pushConfigure(force: true)
-            case .needToken:
-                let api = parent.api
-                let session = parent.session
-                Task { @MainActor [weak self] in
-                    if session.accessToken == nil {
-                        _ = await session.attemptRefresh(via: api)
-                    }
-                    self?.pushConfigure(force: true)
-                }
             case .open(let target):
                 guard let section = SystemBridge.section(forOpenTarget: target) else { return }
                 parent.onOpen(section)
+            case .request(let request):
+                perform(request)
+            case .subscribe:
+                if feed == nil {
+                    feed = SystemEventStream(
+                        client: parent.api,
+                        onStatus: { [weak self] status, detail in self?.sendStatus(status, detail) },
+                        onEvent: { [weak self] event in self?.sendEvent(event) })
+                }
+                feed?.start()
+            case .unsubscribe:
+                feed?.stop()
+                feed = nil
             }
+        }
+
+        /// Makes one allowlisted call with the authenticated client and replies to the page.
+        @MainActor
+        private func perform(_ request: SystemBridgeRequest) {
+            guard let call = request.call else {
+                reply(id: request.id, status: 400, body: nil, error: "not_allowed")
+                return
+            }
+            let client = parent.api
+            let id = request.id
+            let timeout = Self.requestTimeout
+            Task { @MainActor [weak self] in
+                do {
+                    let (status, data) = try await client.sendReturningStatus(
+                        path: call.path, method: call.method, body: call.body, timeout: timeout)
+                    let error: String? = (200..<300).contains(status) ? nil : "HTTP \(status)"
+                    self?.reply(id: id, status: status, body: data, error: error)
+                } catch APIError.noSession {
+                    self?.reply(id: id, status: 401, body: nil, error: "signed_out")
+                } catch {
+                    self?.reply(id: id, status: 0, body: nil, error: "unreachable")
+                }
+            }
+        }
+
+        @MainActor
+        private func reply(id: String, status: Int, body: Data?, error: String?) {
+            guard let web = webView,
+                  let script = SystemBridge.responseScript(id: id, status: status, body: body, error: error) else { return }
+            web.evaluateJavaScript(script, completionHandler: nil)
+        }
+
+        @MainActor
+        private func sendEvent(_ event: SystemFeedEvent) {
+            guard pageReady, let web = webView, let script = SystemBridge.eventScript(event) else { return }
+            web.evaluateJavaScript(script, completionHandler: nil)
+        }
+
+        @MainActor
+        private func sendStatus(_ status: String, _ detail: String?) {
+            guard pageReady, let web = webView,
+                  let script = SystemBridge.statusScript(status: status, detail: detail) else { return }
+            web.evaluateJavaScript(script, completionHandler: nil)
         }
 
         // MARK: WKScriptMessageHandler

@@ -13,7 +13,7 @@ export function DevConnect({ controller }: { controller: OsController }) {
 
   const submit = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    controller.configure({ baseURL: baseURL.trim(), token: token.trim(), theme, projectName: 'Dev server' });
+    controller.connectDev({ baseURL: baseURL.trim(), token: token.trim(), theme, projectName: 'Dev server' });
   };
 
   return (

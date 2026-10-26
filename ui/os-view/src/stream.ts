@@ -1,5 +1,7 @@
-// GET /kb/os/stream as a reconnecting change feed. Each event only says "the
-// state changed, re-fetch"; the payload is never used here.
+// GET /kb/os/stream as a reconnecting change feed for the dev-browser mode only.
+// Inside the Mac app native holds this stream and forwards its events over the
+// bridge. Each event only says "the state changed, re-fetch"; the payload is
+// never used here.
 import { HttpError, authHeaders, endpoint, type Connection, type FetchLike } from './api';
 import { createSseParser } from './sse';
 import type { OsEventsEvent } from './types';
