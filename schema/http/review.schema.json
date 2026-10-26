@@ -191,7 +191,7 @@
       "request": {
         "body": {
           "type": "object",
-          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). Rejecting drops any credentials held from submit.",
+          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). Rejecting drops any credentials held from submit. Only a pending item can be rejected (compare-and-swap on pending): any other status answers 409 REVIEW_NOT_PENDING with the stored status in the message, and an unknown id answers 404.",
           "properties": {
             "id": { "type": "string" },
             "note": { "type": "string", "description": "Stored as reviewerNote." }
@@ -203,6 +203,7 @@
         "400": { "$ref": "_common#/$defs/Error" },
         "401": { "$ref": "_common#/$defs/Error" },
         "404": { "$ref": "_common#/$defs/Error" },
+        "409": { "$ref": "_common#/$defs/Error" },
         "429": { "$ref": "_common#/$defs/Error" }
       }
     },
