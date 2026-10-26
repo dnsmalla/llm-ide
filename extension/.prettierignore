@@ -2,3 +2,4 @@ dist/
 node_modules/
 *.d.ts
 src/lib/api-types.ts
+src/styles/tokens.generated.css
