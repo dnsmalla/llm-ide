@@ -932,6 +932,33 @@ export type NotesGenerationOk = {
   ok: true;
 };
 
+/** How to stop the item: method and path of the existing route, and the JSON body to send. null for an item with no cancel route (a live capture session). */
+export type Cancel = {
+  method?: "POST";
+  path?: "/agent/v2/cancel" | "/kb/agent/stop";
+  body?: {
+    chatSessionId?: string;
+    sessionId?: string;
+  };
+} | null;
+
+export type KitStatus = {
+  id: string;
+  /** The LLMIDE_FEATURES keys this kit depends on; empty = always on. */
+  requires: string[];
+  enabled: boolean;
+};
+
+export type UsageCounts = {
+  calls: number;
+  runs: number;
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheWrite: number;
+  billable: number;
+};
+
 /** A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols. */
 export type PlanningTask = {
   id: string;
@@ -3739,6 +3766,176 @@ export type PostAgentSdkSpikeResponse400 = CommonError;
 
 export type PostAgentSdkSpikeResponse401 = CommonError;
 
+/** Request parts for `GET /kb/os/state` (schema/http/os.schema.json). */
+export type GetKbOsStateRequest = {
+  query: {
+    /** day (default) or week; any other value is a 400 VALIDATION_FAILED. */
+    window?: string;
+    /** How many activity rows to return: a positive integer, default 30, capped at 100. Any other value falls back to 30. */
+    activity?: string;
+  };
+};
+
+export type GetKbOsStateResponse200 = {
+  /** ISO 8601 time the aggregate was built. */
+  generatedAt: string;
+  /** SERVER_API_VERSION of this server. */
+  apiVersion: number;
+  system: {
+    /** The sorted enabled LLMIDE_FEATURES keys, or null when every feature is on. */
+    features: string[] | null;
+    kits: KitStatus[];
+    /** Same as /health: ok when the DB, the Claude CLI and the skills checks all pass. */
+    status: "ok" | "degraded";
+    checks: {
+      db: boolean;
+      claude: boolean;
+      claudeError?: string;
+      skills: boolean;
+      skillsError?: string;
+    };
+  };
+  running: {
+    /** This user's v2 chat turns running now (the in-process turn lock). Cancel: POST /agent/v2/cancel. */
+    chatTurns: {
+      chatSessionId: string;
+      startedAt: string;
+      cancel: Cancel;
+    }[];
+    /** This user's meeting-agent runs attached to a capture session. Cancel: POST /kb/agent/stop. */
+    meetingAgentRuns: ({
+      sessionId: string;
+      planId: string | null;
+      startedAt: string | null;
+      lastTickAt: string | null;
+      cancel: Cancel;
+    })[];
+    /** This user's live caption sessions not yet finalized. No cancel route: a session ends when its capture client stops. */
+    liveSessions: ({
+      sessionId: string;
+      meetingTitle: string | null;
+      startedAt: string | null;
+      lastWrite: string | null;
+      captionCount: number;
+      /** Always null: a live capture session has no cancel route (it ends when its capture client stops). */
+      cancel: null;
+    })[];
+  };
+  activity: {
+    /** Activity rows newer than the user's last-seen cursor. */
+    unread: number;
+    /** Newest first, from the activity table (kb/activity.mjs). */
+    items: ({
+      id: number;
+      kind: string;
+      title: string;
+      /** The event's structured detail; its keys depend on the kind, so they are not declared. */
+      detail: Record<string, unknown> | null;
+      link: string | null;
+      /** Local time as stored (YYYY-MM-DD HH:MM:SS). */
+      createdAt: string;
+    })[];
+  };
+  tokens: {
+    window: "day" | "week";
+    windowHours: 24 | 168;
+    totals: {
+      calls: number;
+      runs: number;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      billable: number;
+    };
+    byModel: {
+      calls: number;
+      runs: number;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      billable: number;
+      provider: string;
+      model: string;
+    }[];
+    bySource: {
+      calls: number;
+      runs: number;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      billable: number;
+      /** api, cli or auto-task. */
+      source: string;
+    }[];
+    byEndpoint: ({
+      calls: number;
+      runs: number;
+      input: number;
+      output: number;
+      cacheRead: number;
+      cacheWrite: number;
+      billable: number;
+      /** null when the row recorded no endpoint. */
+      endpoint: string | null;
+    })[];
+    /** Averages over the caller's newest 50 v2 turns (turn_composition, kb/turn-composition.mjs). All are chars/4 estimates of LLM-IDE text except avgFirstCallPromptTokens, which is the first API call's real prompt size (input + cache write + cache read). Prefix = system prompt + skills append + LLM-IDE tool definitions; fence = context + memory + skills fences; null when no turn reported the value. */
+    turnComposition: {
+      turns: number;
+      avgFirstCallPromptTokens: number | null;
+      avgPrefixTokens: number | null;
+      avgFenceTokens: number | null;
+      avgToolResultTokens: number | null;
+    };
+  };
+  knowledge: {
+    sources: {
+      total: number;
+      byKind: ({
+        kind: string;
+        count: number;
+        lastIndexedAt: string | null;
+      })[];
+    };
+    meetings: {
+      count: number;
+    };
+    /** review_items with status pending. */
+    pendingReviews: number;
+    outcomes: {
+      total: number;
+      terminal: number;
+      /** Row count per outcome state (open, merged, closed, ...). */
+      byState: Record<string, number>;
+    };
+    /** Freshness of each code graph this user has uploaded. */
+    codeGraph: ({
+      repoId: string;
+      commitSha: string | null;
+      generatedAt: string | null;
+    })[];
+    /** Per repo, the project-memory ledger facts (kb/memory-ledger.mjs): active and superseded counts. */
+    projectMemory: ({
+      repoRoot: string;
+      facts: number;
+      active: number;
+      superseded: number;
+      lastConfirmedAt: string | null;
+    })[];
+  };
+  /** Kits the server cannot see yet; shown from the Mac app (the v1 gap). */
+  macOnly: {
+    loop: "on this Mac";
+    autoTasks: "on this Mac";
+  };
+};
+
+export type GetKbOsStateResponse400 = CommonError;
+
+export type GetKbOsStateResponse401 = CommonError;
+
 /** Request parts for `POST /kb/generate-plan` (schema/http/planning.schema.json). */
 export type PostKbGeneratePlanRequest = {
   body: {
@@ -6064,6 +6261,14 @@ export interface ApiEndpoints {
       200: PostAgentSdkSpikeResponse200;
       400: PostAgentSdkSpikeResponse400;
       401: PostAgentSdkSpikeResponse401;
+    };
+  };
+  "GET /kb/os/state": {
+    request: GetKbOsStateRequest;
+    responses: {
+      200: GetKbOsStateResponse200;
+      400: GetKbOsStateResponse400;
+      401: GetKbOsStateResponse401;
     };
   };
   "POST /kb/generate-plan": {

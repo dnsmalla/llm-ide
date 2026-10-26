@@ -30,6 +30,15 @@
     }
   },
   "operations": {
+    "GET /kb/os/state": {
+      "summary": "System view aggregate (read-only, no model call)",
+      "description": "The Agentic OS view in one read: the feature set and kit table with each kit enabled or not, the /health checks, this user's running chat turns, meeting-agent runs and live sessions (each with its cancel call), recent activity, token usage for a day or a week (by model, source and endpoint, with the turn-composition averages), and knowledge counts (sources, outcomes, pending reviews, code-graph freshness, project memory). Every value is this user's and is read from data already recorded.",
+      "responses": {
+        "200": "The System view aggregate",
+        "400": "window is not day or week",
+        "401": "Missing or invalid access token"
+      }
+    },
     "DELETE /agent/v2/session": {
       "summary": "Drop a chat's SDK-session mapping (chat deletion)",
       "description": "Removes the chat→SDK-session mapping row and best-effort deletes the SDK transcript files recorded for the session id (per-user engine home).",

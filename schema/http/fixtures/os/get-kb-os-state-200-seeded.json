@@ -1,0 +1,285 @@
+{
+  "endpoint": "GET /kb/os/state",
+  "status": 200,
+  "description": "Captured by running the real handler (routes/os.mjs) on a temp DB seeded with example data: one API turn with cache tokens and one CLI run, two activity rows, one memory fact, one source, one code-graph repo, one pending review, two outcome rows and one plan task, one v2 turn recorded in turn_composition, a parked chat turn and a live session with its meeting-agent run. The request carries the default activity limit (30), so the captured body is the default-parameter response. Not a live HTTP exchange: the health checks are the probe results the boot path reports on a healthy host, and the running items come from the in-process registries. Every value is example data.",
+  "request": {
+    "query": {
+      "activity": "30"
+    }
+  },
+  "response": {
+    "generatedAt": "2026-10-26T13:56:08.696Z",
+    "apiVersion": 79,
+    "system": {
+      "features": null,
+      "kits": [
+        {
+          "id": "os-kit",
+          "requires": [],
+          "enabled": true
+        },
+        {
+          "id": "knowledge-kit",
+          "requires": [],
+          "enabled": true
+        },
+        {
+          "id": "agent-kit",
+          "requires": [
+            "agent_chat"
+          ],
+          "enabled": true
+        },
+        {
+          "id": "capture-kit",
+          "requires": [],
+          "enabled": true
+        },
+        {
+          "id": "graph-kit",
+          "requires": [
+            "code_graph_3d"
+          ],
+          "enabled": true
+        },
+        {
+          "id": "docs-kit",
+          "requires": [
+            "doc_gen"
+          ],
+          "enabled": true
+        },
+        {
+          "id": "work-kit",
+          "requires": [
+            "gantt_issues"
+          ],
+          "enabled": true
+        },
+        {
+          "id": "workspace-kit",
+          "requires": [
+            "file_explorer",
+            "terminal"
+          ],
+          "enabled": true
+        },
+        {
+          "id": "automation-kit",
+          "requires": [
+            "auto_tasks"
+          ],
+          "enabled": true
+        },
+        {
+          "id": "sync-kit",
+          "requires": [
+            "mobile_sync"
+          ],
+          "enabled": true
+        }
+      ],
+      "status": "ok",
+      "checks": {
+        "db": true,
+        "claude": true,
+        "skills": true
+      }
+    },
+    "running": {
+      "chatTurns": [
+        {
+          "chatSessionId": "chat-1",
+          "startedAt": "2026-10-26T13:56:08.693Z",
+          "cancel": {
+            "method": "POST",
+            "path": "/agent/v2/cancel",
+            "body": {
+              "chatSessionId": "chat-1"
+            }
+          }
+        }
+      ],
+      "meetingAgentRuns": [
+        {
+          "sessionId": "live-1",
+          "planId": null,
+          "startedAt": "2026-10-26T13:56:08.695Z",
+          "lastTickAt": null,
+          "cancel": {
+            "method": "POST",
+            "path": "/kb/agent/stop",
+            "body": {
+              "sessionId": "live-1"
+            }
+          }
+        }
+      ],
+      "liveSessions": [
+        {
+          "sessionId": "live-1",
+          "meetingTitle": "Weekly sync",
+          "startedAt": "2026-10-26T13:56:08.694Z",
+          "lastWrite": "2026-10-26T13:56:08.695Z",
+          "captionCount": 2,
+          "cancel": null
+        }
+      ]
+    },
+    "activity": {
+      "unread": 2,
+      "items": [
+        {
+          "id": 2,
+          "kind": "knowledge_updated",
+          "title": "Ingested 3 notes",
+          "detail": null,
+          "link": null,
+          "createdAt": "2026-10-26 13:56:08"
+        },
+        {
+          "id": 1,
+          "kind": "meeting_added",
+          "title": "Weekly sync",
+          "detail": {
+            "meetingId": "m-1"
+          },
+          "link": "https://example.com/meeting/m-1",
+          "createdAt": "2026-10-26 13:56:08"
+        }
+      ]
+    },
+    "tokens": {
+      "window": "day",
+      "windowHours": 24,
+      "totals": {
+        "calls": 2,
+        "runs": 2,
+        "input": 1200,
+        "output": 300,
+        "cacheRead": 8000,
+        "cacheWrite": 400,
+        "billable": 2800
+      },
+      "byModel": [
+        {
+          "provider": "anthropic",
+          "model": "claude-sonnet-5",
+          "calls": 1,
+          "runs": 1,
+          "input": 1200,
+          "output": 300,
+          "cacheRead": 8000,
+          "cacheWrite": 400,
+          "billable": 2800
+        },
+        {
+          "provider": "anthropic",
+          "model": "claude-haiku-5-5",
+          "calls": 1,
+          "runs": 1,
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "billable": 0
+        }
+      ],
+      "bySource": [
+        {
+          "source": "api",
+          "calls": 1,
+          "runs": 1,
+          "input": 1200,
+          "output": 300,
+          "cacheRead": 8000,
+          "cacheWrite": 400,
+          "billable": 2800
+        },
+        {
+          "source": "cli",
+          "calls": 1,
+          "runs": 1,
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "billable": 0
+        }
+      ],
+      "byEndpoint": [
+        {
+          "endpoint": "/agent/v2/stream",
+          "calls": 1,
+          "runs": 1,
+          "input": 1200,
+          "output": 300,
+          "cacheRead": 8000,
+          "cacheWrite": 400,
+          "billable": 2800
+        },
+        {
+          "endpoint": "/kb/loop/agent-run",
+          "calls": 1,
+          "runs": 1,
+          "input": 0,
+          "output": 0,
+          "cacheRead": 0,
+          "cacheWrite": 0,
+          "billable": 0
+        }
+      ],
+      "turnComposition": {
+        "turns": 1,
+        "avgFirstCallPromptTokens": 8200,
+        "avgPrefixTokens": 3500,
+        "avgFenceTokens": 400,
+        "avgToolResultTokens": 400
+      }
+    },
+    "knowledge": {
+      "sources": {
+        "total": 1,
+        "byKind": [
+          {
+            "kind": "code",
+            "count": 1,
+            "lastIndexedAt": "2026-10-26 13:56:08"
+          }
+        ]
+      },
+      "meetings": {
+        "count": 0
+      },
+      "pendingReviews": 1,
+      "outcomes": {
+        "total": 2,
+        "terminal": 1,
+        "byState": {
+          "merged": 1,
+          "open": 1
+        }
+      },
+      "codeGraph": [
+        {
+          "repoId": "example-repo",
+          "commitSha": "abc1234",
+          "generatedAt": "2026-10-26 09:00:00"
+        }
+      ],
+      "projectMemory": [
+        {
+          "repoRoot": "/example/repo",
+          "facts": 1,
+          "active": 1,
+          "superseded": 0,
+          "lastConfirmedAt": "2026-10-26 22:56:08"
+        }
+      ]
+    },
+    "macOnly": {
+      "loop": "on this Mac",
+      "autoTasks": "on this Mac"
+    }
+  }
+}

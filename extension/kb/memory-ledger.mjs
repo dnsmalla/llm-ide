@@ -100,3 +100,18 @@ export function pruneMemoryLedger(userId, repoRoot, factsInFile) {
   })();
   return n;
 }
+
+/**
+ * One row per repo the caller has ledger facts for: fact counts by status and
+ * the newest confirmation. Per-user listing for the System view; scoped by user.
+ */
+export function memoryLedgerRepos(userId) {
+  requireUser(userId);
+  return getDb().prepare(`SELECT repo_root AS repoRoot,
+      COUNT(*) AS facts,
+      SUM(CASE WHEN status = 'active' THEN 1 ELSE 0 END) AS active,
+      SUM(CASE WHEN status = 'superseded' THEN 1 ELSE 0 END) AS superseded,
+      MAX(last_confirmed_at) AS lastConfirmedAt
+    FROM project_memory_ledger WHERE user_id = ?
+    GROUP BY repo_root ORDER BY repo_root`).all(userId);
+}

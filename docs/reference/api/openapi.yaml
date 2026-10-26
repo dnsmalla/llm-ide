@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 78
+  x-api-version: 79
 servers:
   - url: "https://{host}"
     variables:
@@ -24,6 +24,7 @@ tags:
   - name: "kb-sources"
   - name: "live-loop-misc"
   - name: "notes-generation"
+  - name: "os"
   - name: "planning"
   - name: "providers-usage"
   - name: "review"
@@ -6890,6 +6891,515 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/os/state:
+    get:
+      summary: "System view aggregate (read-only, no model call)"
+      description: "The Agentic OS view in one read: the feature set and kit table with each kit enabled or not, the /health checks, this user's running chat turns, meeting-agent runs and live sessions (each with its cancel call), recent activity, token usage for a day or a week (by model, source and endpoint, with the turn-composition averages), and knowledge counts (sources, outcomes, pending reviews, code-graph freshness, project memory). Every value is this user's and is read from data already recorded."
+      tags:
+        - "os"
+      parameters:
+        - name: "window"
+          in: "query"
+          required: false
+          description: "day (default) or week; any other value is a 400 VALIDATION_FAILED."
+          schema:
+            type: "string"
+        - name: "activity"
+          in: "query"
+          required: false
+          description: "How many activity rows to return: a positive integer, default 30, capped at 100. Any other value falls back to 30."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "The System view aggregate"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "generatedAt"
+                  - "apiVersion"
+                  - "system"
+                  - "running"
+                  - "activity"
+                  - "tokens"
+                  - "knowledge"
+                  - "macOnly"
+                properties:
+                  generatedAt:
+                    type: "string"
+                    description: "ISO 8601 time the aggregate was built."
+                  apiVersion:
+                    type: "integer"
+                    description: "SERVER_API_VERSION of this server."
+                  system:
+                    type: "object"
+                    required:
+                      - "features"
+                      - "kits"
+                      - "status"
+                      - "checks"
+                    properties:
+                      features:
+                        type:
+                          - "array"
+                          - "null"
+                        description: "The sorted enabled LLMIDE_FEATURES keys, or null when every feature is on."
+                        items:
+                          type: "string"
+                      kits:
+                        type: "array"
+                        items:
+                          "$ref": "#/components/schemas/KitStatus"
+                      status:
+                        type: "string"
+                        enum:
+                          - "ok"
+                          - "degraded"
+                        description: "Same as /health: ok when the DB, the Claude CLI and the skills checks all pass."
+                      checks:
+                        type: "object"
+                        required:
+                          - "db"
+                          - "claude"
+                          - "skills"
+                        properties:
+                          db:
+                            type: "boolean"
+                          claude:
+                            type: "boolean"
+                          claudeError:
+                            type: "string"
+                          skills:
+                            type: "boolean"
+                          skillsError:
+                            type: "string"
+                  running:
+                    type: "object"
+                    required:
+                      - "chatTurns"
+                      - "meetingAgentRuns"
+                      - "liveSessions"
+                    properties:
+                      chatTurns:
+                        type: "array"
+                        description: "This user's v2 chat turns running now (the in-process turn lock). Cancel: POST /agent/v2/cancel."
+                        items:
+                          type: "object"
+                          required:
+                            - "chatSessionId"
+                            - "startedAt"
+                            - "cancel"
+                          properties:
+                            chatSessionId:
+                              type: "string"
+                            startedAt:
+                              type: "string"
+                            cancel:
+                              "$ref": "#/components/schemas/Cancel"
+                      meetingAgentRuns:
+                        type: "array"
+                        description: "This user's meeting-agent runs attached to a capture session. Cancel: POST /kb/agent/stop."
+                        items:
+                          type: "object"
+                          required:
+                            - "sessionId"
+                            - "planId"
+                            - "startedAt"
+                            - "lastTickAt"
+                            - "cancel"
+                          properties:
+                            sessionId:
+                              type: "string"
+                            planId:
+                              type:
+                                - "string"
+                                - "null"
+                            startedAt:
+                              type:
+                                - "string"
+                                - "null"
+                            lastTickAt:
+                              type:
+                                - "string"
+                                - "null"
+                            cancel:
+                              "$ref": "#/components/schemas/Cancel"
+                      liveSessions:
+                        type: "array"
+                        description: "This user's live caption sessions not yet finalized. No cancel route: a session ends when its capture client stops."
+                        items:
+                          type: "object"
+                          required:
+                            - "sessionId"
+                            - "meetingTitle"
+                            - "startedAt"
+                            - "lastWrite"
+                            - "captionCount"
+                            - "cancel"
+                          properties:
+                            sessionId:
+                              type: "string"
+                            meetingTitle:
+                              type:
+                                - "string"
+                                - "null"
+                            startedAt:
+                              type:
+                                - "string"
+                                - "null"
+                            lastWrite:
+                              type:
+                                - "string"
+                                - "null"
+                            captionCount:
+                              type: "integer"
+                            cancel:
+                              type: "null"
+                              description: "Always null: a live capture session has no cancel route (it ends when its capture client stops)."
+                  activity:
+                    type: "object"
+                    required:
+                      - "unread"
+                      - "items"
+                    properties:
+                      unread:
+                        type: "integer"
+                        description: "Activity rows newer than the user's last-seen cursor."
+                      items:
+                        type: "array"
+                        description: "Newest first, from the activity table (kb/activity.mjs)."
+                        items:
+                          type: "object"
+                          required:
+                            - "id"
+                            - "kind"
+                            - "title"
+                            - "detail"
+                            - "link"
+                            - "createdAt"
+                          properties:
+                            id:
+                              type: "integer"
+                            kind:
+                              type: "string"
+                            title:
+                              type: "string"
+                            detail:
+                              type:
+                                - "object"
+                                - "null"
+                              additionalProperties: true
+                              description: "The event's structured detail; its keys depend on the kind, so they are not declared."
+                            link:
+                              type:
+                                - "string"
+                                - "null"
+                            createdAt:
+                              type: "string"
+                              description: "Local time as stored (YYYY-MM-DD HH:MM:SS)."
+                  tokens:
+                    type: "object"
+                    required:
+                      - "window"
+                      - "windowHours"
+                      - "totals"
+                      - "byModel"
+                      - "bySource"
+                      - "byEndpoint"
+                      - "turnComposition"
+                    properties:
+                      window:
+                        type: "string"
+                        enum:
+                          - "day"
+                          - "week"
+                      windowHours:
+                        type: "integer"
+                        enum:
+                          - 24
+                          - 168
+                      totals:
+                        type: "object"
+                        required:
+                          - "calls"
+                          - "runs"
+                          - "input"
+                          - "output"
+                          - "cacheRead"
+                          - "cacheWrite"
+                          - "billable"
+                        properties:
+                          calls:
+                            type: "integer"
+                          runs:
+                            type: "integer"
+                          input:
+                            type: "integer"
+                          output:
+                            type: "integer"
+                          cacheRead:
+                            type: "integer"
+                          cacheWrite:
+                            type: "integer"
+                          billable:
+                            type: "integer"
+                      byModel:
+                        type: "array"
+                        items:
+                          type: "object"
+                          required:
+                            - "calls"
+                            - "runs"
+                            - "input"
+                            - "output"
+                            - "cacheRead"
+                            - "cacheWrite"
+                            - "billable"
+                            - "provider"
+                            - "model"
+                          properties:
+                            calls:
+                              type: "integer"
+                            runs:
+                              type: "integer"
+                            input:
+                              type: "integer"
+                            output:
+                              type: "integer"
+                            cacheRead:
+                              type: "integer"
+                            cacheWrite:
+                              type: "integer"
+                            billable:
+                              type: "integer"
+                            provider:
+                              type: "string"
+                            model:
+                              type: "string"
+                      bySource:
+                        type: "array"
+                        items:
+                          type: "object"
+                          required:
+                            - "calls"
+                            - "runs"
+                            - "input"
+                            - "output"
+                            - "cacheRead"
+                            - "cacheWrite"
+                            - "billable"
+                            - "source"
+                          properties:
+                            calls:
+                              type: "integer"
+                            runs:
+                              type: "integer"
+                            input:
+                              type: "integer"
+                            output:
+                              type: "integer"
+                            cacheRead:
+                              type: "integer"
+                            cacheWrite:
+                              type: "integer"
+                            billable:
+                              type: "integer"
+                            source:
+                              type: "string"
+                              description: "api, cli or auto-task."
+                      byEndpoint:
+                        type: "array"
+                        items:
+                          type: "object"
+                          required:
+                            - "calls"
+                            - "runs"
+                            - "input"
+                            - "output"
+                            - "cacheRead"
+                            - "cacheWrite"
+                            - "billable"
+                            - "endpoint"
+                          properties:
+                            calls:
+                              type: "integer"
+                            runs:
+                              type: "integer"
+                            input:
+                              type: "integer"
+                            output:
+                              type: "integer"
+                            cacheRead:
+                              type: "integer"
+                            cacheWrite:
+                              type: "integer"
+                            billable:
+                              type: "integer"
+                            endpoint:
+                              type:
+                                - "string"
+                                - "null"
+                              description: "null when the row recorded no endpoint."
+                      turnComposition:
+                        type: "object"
+                        required:
+                          - "turns"
+                          - "avgFirstCallPromptTokens"
+                          - "avgPrefixTokens"
+                          - "avgFenceTokens"
+                          - "avgToolResultTokens"
+                        description: "Averages over the caller's newest 50 v2 turns (turn_composition, kb/turn-composition.mjs). All are chars/4 estimates of LLM-IDE text except avgFirstCallPromptTokens, which is the first API call's real prompt size (input + cache write + cache read). Prefix = system prompt + skills append + LLM-IDE tool definitions; fence = context + memory + skills fences; null when no turn reported the value."
+                        properties:
+                          turns:
+                            type: "integer"
+                          avgFirstCallPromptTokens:
+                            type:
+                              - "integer"
+                              - "null"
+                          avgPrefixTokens:
+                            type:
+                              - "integer"
+                              - "null"
+                          avgFenceTokens:
+                            type:
+                              - "integer"
+                              - "null"
+                          avgToolResultTokens:
+                            type:
+                              - "integer"
+                              - "null"
+                  knowledge:
+                    type: "object"
+                    required:
+                      - "sources"
+                      - "meetings"
+                      - "pendingReviews"
+                      - "outcomes"
+                      - "codeGraph"
+                      - "projectMemory"
+                    properties:
+                      sources:
+                        type: "object"
+                        required:
+                          - "total"
+                          - "byKind"
+                        properties:
+                          total:
+                            type: "integer"
+                          byKind:
+                            type: "array"
+                            items:
+                              type: "object"
+                              required:
+                                - "kind"
+                                - "count"
+                                - "lastIndexedAt"
+                              properties:
+                                kind:
+                                  type: "string"
+                                count:
+                                  type: "integer"
+                                lastIndexedAt:
+                                  type:
+                                    - "string"
+                                    - "null"
+                      meetings:
+                        type: "object"
+                        required:
+                          - "count"
+                        properties:
+                          count:
+                            type: "integer"
+                      pendingReviews:
+                        type: "integer"
+                        description: "review_items with status pending."
+                      outcomes:
+                        type: "object"
+                        required:
+                          - "total"
+                          - "terminal"
+                          - "byState"
+                        properties:
+                          total:
+                            type: "integer"
+                          terminal:
+                            type: "integer"
+                          byState:
+                            type: "object"
+                            description: "Row count per outcome state (open, merged, closed, ...)."
+                            additionalProperties:
+                              type: "integer"
+                      codeGraph:
+                        type: "array"
+                        description: "Freshness of each code graph this user has uploaded."
+                        items:
+                          type: "object"
+                          required:
+                            - "repoId"
+                            - "commitSha"
+                            - "generatedAt"
+                          properties:
+                            repoId:
+                              type: "string"
+                            commitSha:
+                              type:
+                                - "string"
+                                - "null"
+                            generatedAt:
+                              type:
+                                - "string"
+                                - "null"
+                      projectMemory:
+                        type: "array"
+                        description: "Per repo, the project-memory ledger facts (kb/memory-ledger.mjs): active and superseded counts."
+                        items:
+                          type: "object"
+                          required:
+                            - "repoRoot"
+                            - "facts"
+                            - "active"
+                            - "superseded"
+                            - "lastConfirmedAt"
+                          properties:
+                            repoRoot:
+                              type: "string"
+                            facts:
+                              type: "integer"
+                            active:
+                              type: "integer"
+                            superseded:
+                              type: "integer"
+                            lastConfirmedAt:
+                              type:
+                                - "string"
+                                - "null"
+                  macOnly:
+                    type: "object"
+                    description: "Kits the server cannot see yet; shown from the Mac app (the v1 gap)."
+                    required:
+                      - "loop"
+                      - "autoTasks"
+                    properties:
+                      loop:
+                        type: "string"
+                        const: "on this Mac"
+                      autoTasks:
+                        type: "string"
+                        const: "on this Mac"
+        "400":
+          description: "window is not day or week"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Missing or invalid access token"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/outcomes/refresh:
     post:
       summary: "Poll dispatched tasks across providers and record outcomes"
@@ -10040,6 +10550,28 @@ components:
           type:
             - "string"
             - "null"
+    Cancel:
+      type:
+        - "object"
+        - "null"
+      description: "How to stop the item: method and path of the existing route, and the JSON body to send. null for an item with no cancel route (a live capture session)."
+      properties:
+        method:
+          type: "string"
+          enum:
+            - "POST"
+        path:
+          type: "string"
+          enum:
+            - "/agent/v2/cancel"
+            - "/kb/agent/stop"
+        body:
+          type: "object"
+          properties:
+            chatSessionId:
+              type: "string"
+            sessionId:
+              type: "string"
     CatalogEntry:
       type: "object"
       required:
@@ -10731,6 +11263,22 @@ components:
       properties:
         ok:
           const: true
+    KitStatus:
+      type: "object"
+      required:
+        - "id"
+        - "requires"
+        - "enabled"
+      properties:
+        id:
+          type: "string"
+        requires:
+          type: "array"
+          description: "The LLMIDE_FEATURES keys this kit depends on; empty = always on."
+          items:
+            type: "string"
+        enabled:
+          type: "boolean"
     LegacyPersona:
       description: "The legacy single-persona surface (GET and PUT /kb/agent/persona): the stored fields only, no id."
       type: "object"
@@ -12240,6 +12788,31 @@ components:
           type: "string"
         content:
           type: "string"
+    UsageCounts:
+      type: "object"
+      required:
+        - "calls"
+        - "runs"
+        - "input"
+        - "output"
+        - "cacheRead"
+        - "cacheWrite"
+        - "billable"
+      properties:
+        calls:
+          type: "integer"
+        runs:
+          type: "integer"
+        input:
+          type: "integer"
+        output:
+          type: "integer"
+        cacheRead:
+          type: "integer"
+        cacheWrite:
+          type: "integer"
+        billable:
+          type: "integer"
     User:
       type: "object"
       required:

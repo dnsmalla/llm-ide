@@ -92,6 +92,7 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("DELETE /auth/me/connectors/:id", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("DELETE /auth/me/mcp-plugins/:id", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("DELETE /kb/agent/ask/history", "no Mac caller (see schema/http/INVENTORY.md)"),
+    ("GET /kb/os/state", "no Mac caller yet (os-kit OS-3)"),
     ("DELETE /kb/agent/personas/:id", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("DELETE /kb/agent/project-memory", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("DELETE /kb/agent/session-memory", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
