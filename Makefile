@@ -163,6 +163,7 @@ chat-gates:
 contract-gates:
 	node scripts/conformance-http.mjs
 	node scripts/gen-api-types.mjs --check
+	node scripts/gen-openapi.mjs --check
 	node scripts/http-inventory.mjs --check
 
 # Generated TypeScript types for the HTTP contract (extension/src/lib/api-types.ts).
@@ -170,6 +171,13 @@ contract-gates:
 .PHONY: api-types
 api-types:
 	node scripts/gen-api-types.mjs
+
+# Generated OpenAPI 3.1 document (docs/reference/api/openapi.yaml) from schema/http,
+# merged with docs/reference/api/openapi.overlay.json. Regenerate after changing
+# schema/http or the overlay; `contract-gates` fails while it is stale.
+.PHONY: openapi
+openapi:
+	node scripts/gen-openapi.mjs
 
 # Doc Gen / Visual: the template-surface marker, which decides which menu a
 # user's template appears in and round-trips through a file on their disk.
