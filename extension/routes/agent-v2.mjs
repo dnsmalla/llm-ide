@@ -603,8 +603,14 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   }
   // Every exit path — success, Stop, failure: a stopped turn's tool calls
   // still cost tokens and are exactly the data the report needs.
-  recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolAccounting.events() });
-  if (turnComposition) recordTurnComposition(userId, { ...turnComposition, turnId });
+  const toolEvents = toolAccounting.events();
+  recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolEvents });
+  // Tool-result text this turn put into the transcript (turn_composition,
+  // migration 0044): the same resultChars turn_tool_events keeps per call.
+  if (turnComposition) {
+    const toolResultChars = toolEvents.reduce((n, e) => n + (Number(e?.resultChars) || 0), 0);
+    recordTurnComposition(userId, { ...turnComposition, turnId, toolResultChars });
+  }
   const totalMs = Date.now() - turnStartedAt;
   recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
   log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });

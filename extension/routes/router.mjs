@@ -51,6 +51,7 @@ import { redactSecrets, redactWithKey } from '../core/redact-secrets.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { recordActivity, listActivity, unreadCount, markSeen, ACTIVITY_KINDS } from '../kb/activity.mjs';
 import { getLimits, setLimits, usageSummary, resolveModel, recordUsage, getRateLimits, PROVIDERS as USAGE_PROVIDERS } from '../kb/usage.mjs';
+import { turnCompositionRecent } from '../kb/turn-composition.mjs';
 import { installProjectSkills, isInstallableExclude } from '../kb/install-project-skills.mjs';
 import { listDisabledItems } from '../llm-sources/state.mjs';
 import { BUILTIN_ID } from '../llm-sources/registry.mjs';
@@ -1021,6 +1022,14 @@ export async function handleKB(req, res) {
       const u = new URL(url, 'http://127.0.0.1');
       const provider = u.searchParams.get('provider') || 'anthropic';
       sendJSON(res, 200, { ratelimits: getRateLimits(userId, provider) });
+      return true;
+    }
+
+    // Per-turn context split (turn_composition, migrations 0040/0044): the
+    // caller's own newest turns. Read-only, so no rate-limit bucket.
+    if (req.method === 'GET' && (url === '/kb/usage/turn-composition' || url.startsWith('/kb/usage/turn-composition?'))) {
+      const u = new URL(url, 'http://127.0.0.1');
+      sendJSON(res, 200, { turns: turnCompositionRecent(userId, { limit: u.searchParams.get('limit') }) });
       return true;
     }
 

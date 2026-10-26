@@ -827,6 +827,20 @@ paths:
             application/json:
               schema: { type: object, properties: { providers: { type: object } } }
 
+  /kb/usage/turn-composition:
+    get:
+      summary: The caller's newest v2 chat turns, with the measured context split (migrations 0040/0044)
+      parameters:
+        - in: query
+          name: limit
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        '200':
+          description: Newest first. Token fields are approximate (chars / 4) for LLM-IDE text and the SDK's own estimates for sdk* fields; null when not measured.
+          content:
+            application/json:
+              schema: { type: object, properties: { turns: { type: array, items: { type: object } } } }
+
   /kb/usage/resolve:
     get:
       summary: Which model in a provider's chain should run next (auto-fallback)

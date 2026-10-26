@@ -134,6 +134,22 @@ export function v2MountedEntries({ gateway = false, mode, hasSubagents } = {}) {
     && usefulThisTurn(e.name, { mode, hasSubagents }));
 }
 
+/**
+ * Characters of the llmide tool definitions mounted on a turn (name,
+ * description, input schema, as JSON). An approximation of what the SDK sends
+ * as tool schemas: the zod conversion is not reproduced here, so it is sized
+ * from the same declarative schema. Token estimate = chars / 4 (turn_composition,
+ * migration 0044). Pure; no model call.
+ */
+export function v2ToolDefinitionChars(opts = {}) {
+  let chars = 0;
+  for (const entry of v2MountedEntries(opts)) {
+    const meta = metaFor(entry);
+    chars += JSON.stringify({ name: entry.name, description: meta.description, input_schema: meta.schema }).length;
+  }
+  return chars;
+}
+
 export function buildLlmIdeServer(userId, agentContext, currentMessage, {
   renderMemory, runClaude, userSkills, userSubagents, internalSkills,
   // True on an Anthropic-compatible gateway turn — keeps the llmide web tools
