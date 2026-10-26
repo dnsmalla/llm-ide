@@ -1323,7 +1323,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         flushWarmCliPool('plugin_update');
         safeAudit(db, { ...auditBase, outcome: 'success', detail: { from: out.from, to: out.to, trustReset: out.trustReset, claudeUpdated: out.claudeUpdated } });
       } else {
-        safeAudit(db, { ...auditBase, outcome: 'failure', detail: { code: out.error?.code || out.code || String(status) } });
+        safeAudit(db, { ...auditBase, outcome: 'failure', detail: { code: out.code || String(status) } });
       }
       send(res, status, out);
     } catch (err) {

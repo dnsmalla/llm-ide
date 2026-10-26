@@ -8,9 +8,6 @@
     }
   },
   "response": {
-    "error": {
-      "code": "NOT_FOUND",
-      "message": "Unknown Claude plugin"
-    }
+    "code": "NOT_FOUND"
   }
 }

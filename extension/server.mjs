@@ -272,7 +272,7 @@ const HOST = config.host;
 //   v74 — LLMIDE_FEATURES (comma-separated ENABLED feature keys, the Mac's AppFeature raw values; unset/empty = all) is honoured: a disabled feature's route group (auto_tasks → /kb/loop/*, gantt_issues → /kb/issue-schedule, code_graph_3d → /kb/ingest-code-graph) is never loaded and answers 404 { error: 'feature_disabled', feature }; /health gains `features` (null = all, else the sorted enabled keys) and its `endpoints` omit the disabled groups' paths.
 //   v76 — ALL_ENDPOINTS now lists /kb/issues, /kb/export-all, /kb/live/:id/stream and /kb/email/classify (already served by routes/router.mjs and routes/live.mjs; /health ENDPOINTS advertises them). No request or response shape change.
 //   v77 — GET /kb/usage/turn-composition?limit= → { turns: [...] }: the caller's newest v2 chat turns' measured context split (migration 0044): LLM-IDE parts as approximate tokens (chars/4), the SDK's own end-of-turn categories (sdk_*), tool-result size and user MCP server count. Additive; read-only.
-const SERVER_API_VERSION = 78;
+const SERVER_API_VERSION = 77;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [

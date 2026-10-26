@@ -5,10 +5,6 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
-### Changed
-
-- **API v78: Claude plugin update 404 uses the standard error envelope.** `POST /auth/me/claude-plugins/update` answered an unknown or non-imported plugin with a bare `{ "code": "NOT_FOUND" }`. It now answers `{ "error": { "code": "NOT_FOUND", "message": "..." } }`, so clients can show the message. The Mac app's decoder maps the envelope back to its not-found outcome. Other outcomes on this route (409, 502, and the 200 `REIMPORT_FAILED`) keep their existing shapes. `SERVER_API_VERSION` 77 → 78.
-
 ### Added
 
 - **API v76: four served routes added to the endpoint roster.** `/kb/issues`, `/kb/export-all`, `/kb/live/:id/stream` and `/kb/email/classify` were answered by the server and called by clients but missing from `ALL_ENDPOINTS`, so `/health` did not advertise them. No request or response change; `SERVER_API_VERSION` 75 → 76.

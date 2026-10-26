@@ -913,6 +913,22 @@
         }
       }
     },
+    "ClaudeUpdateNotFound": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "description": "A bare body, NOT the Error envelope: plugins/claude-update.mjs returns { code } for an unknown plugin name. The Mac decodes errors through the envelope, so it shows no message for this response (see the P3 report).",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    },
     "PluginRows": {
       "type": "object",
       "required": [
@@ -1830,7 +1846,7 @@
           "$ref": "_common#/$defs/Error"
         },
         "404": {
-          "$ref": "_common#/$defs/Error"
+          "$ref": "#/$defs/ClaudeUpdateNotFound"
         }
       }
     },
