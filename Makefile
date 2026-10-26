@@ -164,6 +164,13 @@ contract-gates:
 	node scripts/conformance-http.mjs
 	node scripts/gen-api-types.mjs --check
 	node scripts/http-inventory.mjs --check
+	node scripts/gen-design-tokens.mjs --check
+
+# Design tokens: schema/design/tokens.json -> Mac ThemeTokens.swift and schema/design/tokens.css.
+# Regenerate after editing tokens.json; `contract-gates` fails while the outputs are stale.
+.PHONY: design-tokens
+design-tokens:
+	node scripts/gen-design-tokens.mjs
 
 # Generated TypeScript types for the HTTP contract (extension/src/lib/api-types.ts).
 # Regenerate after changing schema/http; `contract-gates` fails while it is stale.
