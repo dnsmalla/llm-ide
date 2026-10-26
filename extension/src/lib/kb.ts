@@ -86,11 +86,7 @@ export async function savePlan(opts: {
   return postJSON('/kb/plan/save', opts, 10_000);
 }
 
-export async function searchKB(opts: {
-  q?: string;
-  kind?: KBSearchKind;
-  limit?: number;
-}): Promise<KBSearchHit[]> {
+export async function searchKB(opts: { q?: string; kind?: KBSearchKind; limit?: number }): Promise<KBSearchHit[]> {
   const serverUrl = await getServerUrl();
   const params = new URLSearchParams();
   if (opts.q) params.set('q', opts.q);

@@ -61,7 +61,7 @@ test('GET /kb/usage/limits returns the built-in chains by default', async () => 
   const body = res.json();
   assert.ok(body.chains.anthropic.length >= 3);
   // Read from the one source rather than restating an id here: the previous
-  // hard-coded 'claude-opus-5-5' (since retired) was one of the three divergent lists this
+  // hard-coded default id was one of the three divergent lists this
   // file is now the client of. See schema/models/anthropic-models.json.
   const anthropicModels = JSON.parse(
     fs.readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),

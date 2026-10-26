@@ -6,11 +6,7 @@
 //
 // `fallback` is the site's own wording for a body with no usable message;
 // it defaults to `Server error: <status>` (or `Server error` with no status).
-export function errorText(
-  body: unknown,
-  status?: number,
-  fallback?: string,
-): string {
+export function errorText(body: unknown, status?: number, fallback?: string): string {
   const defaultFallback = status === undefined ? 'Server error' : `Server error: ${status}`;
   const err = body && typeof body === 'object' ? (body as { error?: unknown }).error : undefined;
   if (typeof err === 'string' && err.trim()) return err;
