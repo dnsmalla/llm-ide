@@ -1,0 +1,18 @@
+{
+  "endpoint": "PUT /kb/agent/personas/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "no-such-persona"
+    },
+    "body": {
+      "promptSuffix": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "persona not found"
+    }
+  }
+}

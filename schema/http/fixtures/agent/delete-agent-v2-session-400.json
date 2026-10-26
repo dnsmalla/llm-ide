@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /agent/v2/session",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "chatSessionId is required"
+    }
+  }
+}

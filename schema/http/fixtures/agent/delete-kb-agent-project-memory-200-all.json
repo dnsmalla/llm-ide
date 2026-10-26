@@ -1,0 +1,14 @@
+{
+  "endpoint": "DELETE /kb/agent/project-memory",
+  "status": 200,
+  "request": {
+    "body": {
+      "repo": "/example/workspace",
+      "workspaceRoot": "/example/workspace",
+      "all": true
+    }
+  },
+  "response": {
+    "facts": []
+  }
+}

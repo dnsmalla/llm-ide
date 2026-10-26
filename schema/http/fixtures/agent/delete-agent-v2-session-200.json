@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /agent/v2/session",
+  "status": 200,
+  "request": {
+    "body": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273"
+    }
+  },
+  "response": {
+    "ok": true,
+    "sdkSessionId": "bench-fake-ef6740db-1c90-4bc4-acfe-be05245663f5"
+  }
+}

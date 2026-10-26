@@ -1,0 +1,14 @@
+{
+  "endpoint": "DELETE /kb/agent/tool-approvals",
+  "status": 200,
+  "request": {
+    "body": {
+      "all": true
+    }
+  },
+  "response": {
+    "rules": [],
+    "approvals": [],
+    "removed": 1
+  }
+}

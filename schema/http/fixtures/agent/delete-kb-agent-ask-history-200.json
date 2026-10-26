@@ -1,0 +1,7 @@
+{
+  "endpoint": "DELETE /kb/agent/ask/history",
+  "status": 200,
+  "response": {
+    "removed": 2
+  }
+}

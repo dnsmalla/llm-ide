@@ -1,0 +1,22 @@
+{
+  "endpoint": "GET /kb/agent/feedback/stats",
+  "status": 200,
+  "request": {
+    "query": {
+      "sinceDays": "30"
+    }
+  },
+  "response": {
+    "total": 1,
+    "byVerdict": {
+      "useful": 1,
+      "noise": 0,
+      "later": 0
+    },
+    "usefulRate": 1,
+    "avgScore": {
+      "useful": 1
+    },
+    "sinceDays": 30
+  }
+}

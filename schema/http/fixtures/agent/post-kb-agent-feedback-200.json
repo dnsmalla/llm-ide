@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/agent/feedback",
+  "status": 200,
+  "request": {
+    "body": {
+      "sessionId": "capture-session",
+      "captionSeq": 1,
+      "verdict": "useful",
+      "score": 1,
+      "planTaskId": "task-1"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

@@ -1,0 +1,18 @@
+{
+  "endpoint": "PUT /kb/agent/persona",
+  "status": 200,
+  "request": {
+    "body": {
+      "name": "Capture Agent",
+      "promptSuffix": "Keep answers short.",
+      "autoDispatch": false
+    }
+  },
+  "response": {
+    "persona": {
+      "name": "Capture Agent",
+      "promptSuffix": "Keep answers short.",
+      "autoDispatch": false
+    }
+  }
+}

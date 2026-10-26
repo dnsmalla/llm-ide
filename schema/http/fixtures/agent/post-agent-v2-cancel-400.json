@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /agent/v2/cancel",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "chatSessionId is required"
+    }
+  }
+}

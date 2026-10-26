@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /agent/v2/decision",
+  "status": 404,
+  "request": {
+    "body": {
+      "requestId": "req-none",
+      "sdkSessionId": "sdk-none",
+      "action": "allow"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "DECISION_UNKNOWN",
+      "message": "No pending decision for this requestId (unknown)"
+    }
+  }
+}

@@ -1,0 +1,158 @@
+{
+  "endpoint": "GET /kb/agent/catalog",
+  "status": 200,
+  "response": {
+    "skills": {
+      "global": [
+        {
+          "name": "ask-internal",
+          "kind": "read",
+          "description": "Delegate to the LLM-IDE internal agent — the only authority on this app's state.\nWhen to use: The user references this app's data or surfaces (see global prompt for the full list). Do not call for general engineering questions."
+        },
+        {
+          "name": "ask-subagent",
+          "kind": "read",
+          "description": "Delegate to a plugin-defined named subagent. Each subagent has its own narrow role (defined by the plugin author in `agents/<name>.md`), its own restricted tool set, and is isolated from the global chat history.\nWhen to use: The user asks for something a known subagent specialises in — for example, the `summarizer` subagent for short summaries, a `triage` subagent for bug-report classification, etc. The list of available subagents for this user is shipped with each session: do not invent names. If no subagent matches the task, fall back to `ask-internal` or answer directly.\nWhen NOT to use: - General engineering questions → answer directly. - Anything about this app's own state (meetings, plans, project config) → use `ask-internal` instead. - A subagent name the user hasn't enabled → don't call; the handler will return an error."
+        },
+        {
+          "name": "ask-user",
+          "kind": "write",
+          "description": "Ask the user a question whose answer is one of a few fixed choices. The app shows it as a card with the options as buttons; the user taps one, and their choice comes back to you as this tool's result so you can continue."
+        },
+        {
+          "name": "bash",
+          "kind": "write",
+          "description": "Run a shell command **in the user's app**, as an action they can see. Emitting this ends your turn: the app surfaces the command (Manual mode — the user confirms it; Bypass mode — it runs immediately), runs it in the project folder with no fixed time limit (the user can Stop it), and feeds the output back as a new turn for you to continue from.\nWhen to use: - The command CHANGES state: `npm install`, `git push`, a script that writes files. - The command is SLOW: `npm test`, `swift build`, a full lint or test run. (`run-bash` gives up at 30 s; this tool has no fixed limit.) - The user should see the command as a discrete action before it happens. **Always prefer this over printing a command for the user to copy.**\nWhen NOT to use: - Read-only inspection (`git status`, `node --version`, `ls`, `grep`) — use `run-bash`, which answers in the same turn. - Destructive, irreversible operations (`rm -rf`, `git reset --hard <sha>`, `DROP TABLE`) — describe the risk and ask for explicit confirmation first. - Commands that require user input during execution (interactive prompts): stdin is closed, so they fail rather than hang."
+        },
+        {
+          "name": "check-citations",
+          "kind": "read",
+          "description": "Check a plan or answer you are about to present — reports every cited file that does not exist, every `path:line` past the end of its file, and every code symbol the project's code graph does not know. Call it on the full document before presenting a plan."
+        },
+        {
+          "name": "code-relations",
+          "kind": "read",
+          "description": "Exact structural answers from the code graph for ONE symbol — who calls it (callers), what it calls (callees), or what is affected if it changes (impact — callers, references, subclasses and importers of its file), by hop. Use after find-code has told you the symbol's exact name."
+        },
+        {
+          "name": "decide",
+          "kind": "read",
+          "description": "Make a calibrated yes/no, pick-one or score decision about material you already have (a diff, files, test output) and get back probabilities and confidence instead of a guess."
+        },
+        {
+          "name": "fetch-url",
+          "kind": "read",
+          "description": "Fetch and read the contents of a URL.\nWhen to use: You have a specific URL (from the user, from search results, or from a GitHub link) and need to read its full contents. Use `web-search` first to find relevant pages, then `fetch-url` to read the ones that look promising."
+        },
+        {
+          "name": "find-code",
+          "kind": "read",
+          "description": "Search the project's code index and graph for a symbol, file, or feature — returns definition sites with file:line, graph-related code (callers, callees, importers), and full-text hits. Use this before any grep."
+        },
+        {
+          "name": "git-op",
+          "kind": "write",
+          "description": "Act on the user's **active repository** with git. You PROPOSE the operation; the Mac app shows the user a confirmation (auto-runs read-only ops) and runs it locally. You never run git yourself.\nWhen to use: The user asks for a git action on their repo: \"revert the last change\", \"commit this on a branch\", \"merge feature-x\", \"what changed\", \"push my branch\"."
+        },
+        {
+          "name": "list-files",
+          "kind": "read",
+          "description": "List files in the project the user has open (and their indexed repos), so you can discover what exists before reading anything.\nWhen to use: The user refers to a file in their project (\"the README\", \"the config\", \"that test\") and you need to find its path, or you want to see the project's layout. Use this instead of guessing a path. Reads are scoped to the open workspace and indexed repos — never the wider disk. Looking for CODE rather than a path? Use `find-code` — it returns the symbol's `file:line` and what relates to it, so you skip the list-then-read-whole-file round trip."
+        },
+        {
+          "name": "load-skill",
+          "kind": "read",
+          "description": "Load a skill from the user's own skills library and get its full instructions back, so you can follow them for the rest of this turn.\nWhen to use: - A skill you are following tells you to invoke or switch to a named skill. Load that skill and follow it. - You have reached the stage a skill covers and were told which one to load (in PLAN / ASSIST_PLAN mode, the mode's bindings name the plan- writing skill to load once the design is approved). Do NOT load a skill speculatively \"in case it helps\", and do not load one you have already loaded this turn — the instructions are already in your context. Each load costs real prompt budget."
+        },
+        {
+          "name": "project_memory",
+          "kind": "read",
+          "description": "Retrieve this project's accumulated memory — durable, auto-generated facts, decisions, and Q&A distilled from past sessions in this repo/workspace.\nWhen to use: Call this when grounded project-specific context (past decisions, known issues, prior answers) would improve the answer, instead of guessing. Returns a short note if no project memory has been generated yet for this workspace."
+        },
+        {
+          "name": "read-file",
+          "kind": "read",
+          "description": "Read the text contents of a file in the project the user has open (or an indexed repo) so you can review, explain, or reference it.\nWhen to use: The user asks you to review/explain/check a file that exists in their project (\"review the README\", \"what does logger.mjs do\"). Find the path with `list-files` first if you're unsure. This is read-only — to CHANGE a file, propose an `update-file` with `old_text`/`new_text` anchored on the lines you read here (the file does not need to be attached)."
+        },
+        {
+          "name": "run-bash",
+          "kind": "read",
+          "description": "Execute a **read-only** shell command in the user's workspace and get its output back inside this same turn. Keep it to commands that only LOOK at things — for anything that changes state or takes real time, use `bash`, which surfaces as an action in the app.\nWhen to use: - Inspecting repo or environment state: `git status`, `git log`, `git diff`, `ls`, `cat`, `grep`, `which`, `node --version`. - Any quick check whose output you need in order to answer the question.\nWhen NOT to use: - Commands that CHANGE state (`npm install`, `git push`, scripts that write files) or that are SLOW (`npm test`, `swift build`) — use `bash`. It gets a 180 s budget and surfaces as an action in the app; this tool times out at 30 s and, for anything outside the read-only allowlist, still costs the user an approval prompt. - Destructive operations (`rm -rf`, `drop table`, `git reset --hard`) — confirm with the user first. - Commands requiring user input (interactive prompts). - Long-running daemons — use `npm run server &` style only if the user explicitly asks."
+        },
+        {
+          "name": "save-plan",
+          "kind": "write",
+          "description": "Save the plan you just proposed as a Markdown file in the open project, under `llm-doc/plans/`. The Mac client picks the exact filename (from today's date + `title`) and saves it immediately, with no confirmation step — this tool takes no `path` argument, so it can never write anywhere else, and it always writes to that one plan-specific location, so it's safe to fire automatically.\nWhen to use: Only for a document that is FINISHED and that the user has approved. The plan-like modes run a multi-turn process (see the skill and mode bindings in your prompt): questions first, then a design the user signs off on, then the written plan. A save on any earlier turn writes a draft the user never agreed to. It saves right away with no confirmation, so treat it as committed the moment you call it — never call it for a draft you are still revising, and always say in your reply that you saved it and where. Two documents can legitimately be saved across one planning session: the design/spec the user approved, and the implementation plan written from it.…"
+        },
+        {
+          "name": "search-kb",
+          "kind": "read",
+          "description": "Search the user's knowledge base — meeting transcripts, decisions, action items, and connected sources — by free text.\nWhen to use: The user references something discussed or decided outside the code (\"what did we decide about the auth flow?\", \"when is the deploy planned?\", \"what did the client ask for?\"). Code questions should use `find-code` instead (symbol index + code graph); this searches MEETING/PLANNING knowledge, not code. Prefer this over `ask-internal` for a straightforward free-text lookup — it's a single tool call instead of a full internal-agent delegation; use `ask-internal` only when the request needs write access or reasoning beyond a keyword search."
+        },
+        {
+          "name": "task-create",
+          "kind": "read",
+          "description": "Add a new task to your session task list.\nWhen to use: At the start of a multi-step job, call this once per task to build out your plan. You can also add tasks mid-work when you discover new work."
+        },
+        {
+          "name": "task-list",
+          "kind": "read",
+          "description": "Return your current task list for this session.\nWhen to use: Call this to check which tasks are pending, in-progress, or done. Use it at the start of a continuation turn to decide what to work on next."
+        },
+        {
+          "name": "task-update",
+          "kind": "read",
+          "description": "Update a task's status or title.\nWhen to use: - Mark a task `in_progress` when you start it. - Mark it `completed` when you finish it. - Mark it `skipped` if it turns out not to be needed. - Mark it `failed` if the tool result for this task indicates an error (a non-zero exit code, a rejected API call, an exception). Do this INSTEAD of `completed` — never mark a task completed when its result was actually a failure. After marking a task failed, the system stops offering you the remaining pending tasks automatically; see the \"Multi-turn autonomous work\" rules for what to do next."
+        },
+        {
+          "name": "update-file",
+          "kind": "write",
+          "description": "Propose an edit to a real file on disk. The Mac client resolves the path, computes the resulting content, and shows the user the change with **Apply**, **Review diff**, and **Skip**. On Apply the Mac writes the file. In Bypass (auto-edit) mode it applies without asking.\nWhen to use: The user wants a file on disk changed: fix this bug, refactor this, add a section, rename this, apply that suggestion. Do NOT use for: - Creating new files — only edits to existing files are supported. - A whole-repo change spanning many files, or work that needs a branch and an MR — that is the Review Code workflow (`trigger-review-code`), which runs the CLI in the repo."
+        },
+        {
+          "name": "web-search",
+          "kind": "read",
+          "description": "Search the web and get a synthesized summary plus the sources behind it.\nWhen to use: The user asks a question that requires current information not in the local codebase or LLM-IDE app state (e.g., \"what's the latest Node.js release\", \"find examples of X on GitHub\"). Do not use for questions about the local code or the app itself — use `search-kb` or `ask-internal` instead."
+        }
+      ],
+      "internal": [
+        {
+          "name": "comment-gitlab-issue",
+          "kind": "write",
+          "description": "Propose a comment on an EXISTING GitLab issue in the user's active project. The user reviews the comment body in an editable sheet before anything is posted.\nWhen to use: The user asks to comment on / add to / reply to an existing issue (e.g. \"add it to the comment of issue #1\", \"reply to #42 with…\", \"leave a note on the colourful icons issue\"). The issue's iid MUST be visible in the System context block — pick it from there. For brand-new issues that don't yet exist, use `create-gitlab-issue` instead. If the System context says `Active project: (none configured)`, do not call this tool. Tell the user to add a project in Settings → GitLab."
+        },
+        {
+          "name": "create-gitlab-issue",
+          "kind": "write",
+          "description": "Propose a new issue in the user's active project. Works for both GitLab and GitHub — the Mac client files it against whichever provider the active project uses (see `Provider:` in the System context). The user reviews the title, description, labels, and assignee in an editable sheet before anything is filed.\nWhen to use: The user explicitly asks for an issue / ticket / bug report. Use the active project from the System context block — do not ask the user which project, and do not care whether it is GitLab or GitHub; this one tool covers both. If the System context says `Active project: (none configured)`, do not call this tool. Tell the user to add a project in Settings → GitLab or GitHub."
+        },
+        {
+          "name": "search-kb",
+          "kind": "read",
+          "description": "Search the user's meetings, notes, decisions, and indexed code chunks through the knowledge-base full-text index.\nWhen to use: The user asks about something they have discussed before, or you need prior context to answer well. Always prefer a search over guessing."
+        },
+        {
+          "name": "trigger-review-code",
+          "kind": "write",
+          "description": "Propose a code-change task to be carried out by the Review Code workflow in the Mac client. The plan is handed to the existing multi-step sheet (Create branch → generate changes via the Claude CLI in the repo's working directory → review diff → commit → push & open MR). The user confirms the plan before anything runs.\nWhen to use: The user asks to update / edit / implement / execute / apply changes to the repo (e.g. \"update code based on this plan\", \"implement issue #42\", \"apply the fix we discussed to the repo\", \"make those changes\"). The change MUST be tied to an existing issue — pick the matching `iid` from the System context's recent open issues. If the user hasn't referenced any issue and none in context obviously fits, do NOT call this tool — instead emit `create-gitlab-issue` first. You have NO direct file-read, file-edit, shell, or git tools. The Mac client confirms and runs the actual edits via the Claude CLI in the repo's working directory. Never ask the user for permission to read files or run shell commands. If the System context says `Active project: (none configured)`, do not call this tool. Tell the user to add a project in Settings → GitLab."
+        }
+      ],
+      "plugins": [
+        {
+          "pluginName": "claude-project-artifact",
+          "pluginDisplayName": "Project Artifact",
+          "skills": [
+            {
+              "name": "project-artifact",
+              "kind": "read",
+              "description": "Generate and publish a project status artifact — an opinionated, tabbed status page for a project too big for one update (overview & success criteria, the workstream sequence, next steps, plus background, plan, risks & open questions, and decisions/FAQ when they earn a tab) — published with the built-in Artifact tool to a default-private claude.ai page the user can share with teammates. Use when a piece of work spans several workstreams and you want a shareable overview kept current. Each artifact is backed by a small per-project config in the plugin data dir, so refreshing it re-gathers live state, redeploys the same URL, and reports only the delta. For software projects whose workstreams are PRs, also read swe.md (the X.Y PR-numbering convention; pulling PR state with gh/git; a per-PR detail block). Needs the built-in Artifact tool (claude.ai login). Not for single-PR changes or public docs."
+            }
+          ]
+        }
+      ]
+    },
+    "subagents": {
+      "plugins": []
+    }
+  }
+}

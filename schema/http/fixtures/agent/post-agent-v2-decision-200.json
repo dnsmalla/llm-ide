@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /agent/v2/decision",
+  "status": 200,
+  "description": "Transcribed from the handler (routes/agent-v2.mjs handleV2Decision), not captured: a 200 needs a parked AskUserQuestion approval from a live engine turn, which the offline fake engine never parks.",
+  "request": {
+    "body": {
+      "requestId": "req-example",
+      "sdkSessionId": "sdk-example",
+      "action": "allow"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

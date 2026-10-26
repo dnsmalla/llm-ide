@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /kb/agent/persona",
+  "status": 200,
+  "response": {
+    "persona": null
+  }
+}

@@ -1,0 +1,25 @@
+{
+  "endpoint": "GET /kb/agent/ask/history",
+  "status": 200,
+  "request": {
+    "query": {
+      "limit": "10"
+    }
+  },
+  "response": {
+    "messages": [
+      {
+        "seq": 1,
+        "role": "user",
+        "content": "Hello agent.",
+        "created_at": 1792998701.765
+      },
+      {
+        "seq": 2,
+        "role": "assistant",
+        "content": "Stub reply from the capture CLI.",
+        "created_at": 1792998701.821
+      }
+    ]
+  }
+}

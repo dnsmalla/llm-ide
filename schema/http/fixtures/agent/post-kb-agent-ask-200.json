@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/agent/ask",
+  "status": 200,
+  "request": {
+    "body": {
+      "message": "Hello agent.",
+      "history": [
+        {
+          "role": "user",
+          "content": "Hi."
+        },
+        {
+          "role": "assistant",
+          "content": "Hello."
+        }
+      ],
+      "provider": "anthropic",
+      "model": "claude-haiku-5-5"
+    }
+  },
+  "response": {
+    "reply": "Stub reply from the capture CLI."
+  }
+}

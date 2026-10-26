@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/agent/stop",
+  "status": 200,
+  "request": {
+    "body": {
+      "sessionId": "no-such-session"
+    }
+  },
+  "response": {
+    "stopped": false,
+    "reason": "unknown-session"
+  }
+}

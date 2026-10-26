@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /kb/chat/sessions/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "4392f026-5251-4aaa-8360-cd63d004a477"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "session not found"
+    }
+  }
+}

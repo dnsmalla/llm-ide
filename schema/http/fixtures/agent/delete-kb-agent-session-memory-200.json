@@ -1,0 +1,12 @@
+{
+  "endpoint": "DELETE /kb/agent/session-memory",
+  "status": 200,
+  "request": {
+    "body": {
+      "sessionId": "p9-memory-session"
+    }
+  },
+  "response": {
+    "removed": 1
+  }
+}

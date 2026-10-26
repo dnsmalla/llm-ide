@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/messages",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "nope"
+    },
+    "body": {
+      "role": "user",
+      "content": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "session not found"
+    }
+  }
+}

@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /kb/agent/stop",
+  "status": 200,
+  "request": {
+    "body": {
+      "sessionId": "capture-live-session"
+    }
+  },
+  "response": {
+    "stopped": true
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/agent/dispatch",
+  "status": 200,
+  "request": {
+    "body": {
+      "sessionId": "capture-live-session"
+    }
+  },
+  "response": {
+    "sessionId": "capture-live-session",
+    "planId": "plan-1",
+    "attached": false,
+    "reason": "already-attached"
+  }
+}

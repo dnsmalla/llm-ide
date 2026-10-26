@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/chat/sessions",
+  "status": 201,
+  "request": {
+    "body": {
+      "title": "Capture chat",
+      "surface": "any",
+      "mode": "ask"
+    }
+  },
+  "response": {
+    "session": {
+      "id": "aa3ff8bd-f4a5-49fb-a34e-4e254c235c4f",
+      "title": "Capture chat",
+      "surface": "any",
+      "mode": "ask",
+      "projectId": null,
+      "createdAt": 1792998701.62,
+      "updatedAt": 1792998701.62
+    }
+  }
+}

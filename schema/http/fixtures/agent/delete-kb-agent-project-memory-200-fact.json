@@ -1,0 +1,16 @@
+{
+  "endpoint": "DELETE /kb/agent/project-memory",
+  "status": 200,
+  "request": {
+    "body": {
+      "repo": "/example/workspace",
+      "workspaceRoot": "/example/workspace",
+      "fact": "[db|engine] The project stores data in SQLite."
+    }
+  },
+  "response": {
+    "facts": [
+      "[perf|store] The project keeps its cache in memory."
+    ]
+  }
+}

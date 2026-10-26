@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/agent/project-memory",
+  "status": 200,
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "facts": [],
+    "repo": null
+  }
+}

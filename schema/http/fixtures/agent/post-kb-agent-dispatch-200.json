@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/agent/dispatch",
+  "status": 200,
+  "request": {
+    "body": {
+      "sessionId": "capture-live-session",
+      "planId": "plan-1",
+      "persona": "default",
+      "language": "en",
+      "meetingUrl": "https://example.com/meeting/capture"
+    }
+  },
+  "response": {
+    "sessionId": "capture-live-session",
+    "planId": "plan-1",
+    "attached": true
+  }
+}
