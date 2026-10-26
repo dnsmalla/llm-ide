@@ -172,6 +172,27 @@ contract-gates:
 	node scripts/gen-openapi.mjs --check
 	node scripts/http-inventory.mjs --check
 	node scripts/gen-design-tokens.mjs --check
+	$(MAKE) os-view-check
+
+# System view (ui/os-view): the React page the Mac app shows in a web view. The
+# build writes the committed bundle to mac/Sources/LlmIdeMac/Resources/os-view
+# (Monaco precedent). Fixed file names, no hashes, so rebuilds are deterministic.
+.PHONY: os-view
+os-view:
+	cd ui/os-view && { test -d node_modules || npm ci; } && npm run build
+
+# Rebuilds the System view into a temp dir and fails when the committed bundle is stale.
+.PHONY: os-view-check
+os-view-check:
+	cd ui/os-view && { test -d node_modules || npm ci; }
+	rm -rf ui/os-view/.bundle-check && \
+	(cd ui/os-view && OS_VIEW_OUT="$$PWD/.bundle-check" npm run build >/dev/null) && \
+	if diff -r ui/os-view/.bundle-check mac/Sources/LlmIdeMac/Resources/os-view >/dev/null; then \
+		rm -rf ui/os-view/.bundle-check; echo "os-view-check: ok"; \
+	else \
+		diff -rq ui/os-view/.bundle-check mac/Sources/LlmIdeMac/Resources/os-view; \
+		rm -rf ui/os-view/.bundle-check; echo "os-view-check: committed bundle is stale; run make os-view"; exit 1; \
+	fi
 
 # Design tokens: schema/design/tokens.json -> Mac ThemeTokens.swift and schema/design/tokens.css.
 # Regenerate after editing tokens.json; `contract-gates` fails while the outputs are stale.
