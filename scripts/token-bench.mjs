@@ -349,6 +349,10 @@ async function registerAndLogin(base) {
  * @returns {Promise<{ ttftMs: number|null, totalMs: number, error: string|null }>}
  */
 const MAX_RATE_LIMIT_RETRIES = 30;
+// A turn that runs longer than this is stuck (e.g. waiting on an approval
+// nobody answers), not slow: fail it with a clear message instead of hanging
+// until the stream or the access token dies.
+const TURN_TIMEOUT_MS = 240_000;
 
 /**
  * POST the turn, waiting out the server's per-user turn limiter (429) and
@@ -362,6 +366,7 @@ async function openTurnStream(body, base, token) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
       body,
+      signal: AbortSignal.timeout(TURN_TIMEOUT_MS),
     });
     if (res.status === 429 && attempt < MAX_RATE_LIMIT_RETRIES) {
       const retryAfter = Number(res.headers.get('retry-after')) || 5;
@@ -375,7 +380,12 @@ async function openTurnStream(body, base, token) {
 }
 
 async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, model, message }) {
-  const body = JSON.stringify({ message, mode, model, provider: 'anthropic', agentContext: { chatSessionId, workspaceRoot } });
+  // accept-edits: the bench workspace is a throwaway temp dir, and with the
+  // default ('ask') an edit waits on an approval prompt the bench never answers.
+  const body = JSON.stringify({
+    message, mode, model, provider: 'anthropic', permissionMode: 'accept-edits',
+    agentContext: { chatSessionId, workspaceRoot },
+  });
   // `started` is the successful attempt's request start, so waits for the
   // limiter are not billed as turn time.
   const { res, started } = await openTurnStream(body, base, token);
@@ -383,18 +393,25 @@ async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, mod
   let error = null;
   let buf = '';
   const decoder = new TextDecoder();
-  for await (const chunk of res.body) {
-    buf += decoder.decode(chunk, { stream: true });
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) >= 0) {
-      const frame = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      const line = frame.split('\n').find((l) => l.startsWith('data: '));
-      if (!line) continue;
-      const ev = JSON.parse(line.slice(6));
-      if (ev.type === 'delta' && ttftMs === null) ttftMs = performance.now() - started;
-      if (ev.type === 'error') error = `${ev.code}: ${ev.message}`;
+  try {
+    for await (const chunk of res.body) {
+      buf += decoder.decode(chunk, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) >= 0) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        const line = frame.split('\n').find((l) => l.startsWith('data: '));
+        if (!line) continue;
+        const ev = JSON.parse(line.slice(6));
+        if (ev.type === 'delta' && ttftMs === null) ttftMs = performance.now() - started;
+        if (ev.type === 'error') error = `${ev.code}: ${ev.message}`;
+      }
     }
+  } catch (err) {
+    if (err?.name === 'TimeoutError') {
+      throw new Error(`turn did not finish within ${TURN_TIMEOUT_MS / 1000} s (stuck, e.g. on an approval): ${message.slice(0, 60)}`);
+    }
+    throw err;
   }
   return { ttftMs, totalMs: performance.now() - started, error };
 }
