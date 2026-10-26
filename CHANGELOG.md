@@ -7,6 +7,11 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **Measured context split per v2 chat turn (API v76, migration 0044).** `turn_composition` now records the
+  approximate tokens (chars / 4) of the system append, skill text, llmide tool definitions, the
+  `<<<LLMIDE_CONTEXT>>>` fence (memory and skills parts), and this turn's tool-result text, plus the SDK's own
+  end-of-turn context categories (system prompt, system tools, MCP tools, memory, messages). Read it per user
+  with `GET /kb/usage/turn-composition?limit=`. Read-only; no model calls.
 - **Warm CLI pool for the chat mode classifier.** On subscription (CLI) installs the auto-mode classifier
   no longer pays a cold `claude` start on every turn: one idle `claude -p --input-format stream-json`
   child is kept for the classifier's exact argv, user and env, answers one prompt, and is replaced
