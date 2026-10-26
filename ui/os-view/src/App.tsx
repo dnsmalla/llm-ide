@@ -58,16 +58,16 @@ function Header({ state, controller }: { state: ViewState; controller: OsControl
 
 export function App({ controller }: { controller: OsController }) {
   const state = useSyncExternalStore(controller.subscribe, controller.getSnapshot, controller.getSnapshot);
-  const connected = state.conn !== null;
+  const connected = state.connected;
   const data = state.data;
 
   return (
     <div className="os">
       <Header state={state} controller={controller} />
 
-      {state.needToken ? (
+      {state.signedOut ? (
         <p className="banner banner-warn" role="status">
-          The access token was refused. Waiting for LLM-IDE to send a new one.
+          Your LLM-IDE session has ended. Sign in to LLM-IDE again.
         </p>
       ) : null}
       {state.error ? (
