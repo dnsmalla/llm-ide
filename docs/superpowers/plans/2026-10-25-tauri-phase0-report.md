@@ -82,6 +82,18 @@ launch ever shows the 30 s hidden phase is the first open item below.
   every copy was deleted, the script now excludes secrets/.claude/keys/DBs and
   verifies the node binary. Nothing left the machine.
 
+### Found on the first user-started launch (2026-10-26)
+- **File access (TCC):** a Finder-launched app was silently denied
+  `~/Desktop` ("read failed: Operation not permitted") — agent runs inherited
+  the terminal's grant, so this never showed before. Fixed in the PoC with
+  `NS{Desktop,Documents,Downloads}FolderUsageDescription` (macOS now asks).
+  Phase 1: open projects through a file dialog (security-scoped access) and
+  keep the usage strings.
+- **Navigation parity:** the PoC copies the Mac look but not its behaviour —
+  in the Mac app the sections live in the top toolbar and **Home** returns to
+  the normal IDE view. Tracked for the screen-by-screen parity check
+  (Phase 3); the user accepted deferring it.
+
 ## Open items (need the user)
 
 1. Launch the PoC yourself (Finder), keep it frontmost, press **Bench → Run
