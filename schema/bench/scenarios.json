@@ -1,24 +1,29 @@
 {
   "_comment": [
-    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17).",
-    "Each scenario opens a NEW v2 chat; every turn of a multi-turn scenario reuses",
-    "that chat. `mode` is sent explicitly so the classifier never runs (its own",
-    "call would be part of the measurement). The bench creates a temp workspace",
-    "holding notes.txt; the prompts refer to it.",
-    "Change a prompt only together with a new token-baseline.json."
+    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17). Version 2.",
+    "Every sample opens a NEW v2 chat (one chat per scenario sample; every turn of",
+    "a multi-turn scenario reuses that chat). The bench reseeds its temp workspace",
+    "before each sample (notes.txt ~10 KB, data/part-1..3.txt ~10 KB each).",
+    "`mode` is sent explicitly; auto modes are refused, so the classifier never runs.",
+    "`expectTools`: the scenario should make at least one tool round trip (hops > 1).",
+    "A real run fails when it does not; a --fake run only warns.",
+    "Change a prompt, a seed file or this file's version only together with a new",
+    "token-baseline.json. Bump `version` on any such change."
   ],
-  "version": 1,
+  "version": 2,
   "scenarios": [
     { "id": "greeting", "mode": "ask", "turns": ["hi"] },
     {
       "id": "explain-file",
       "mode": "ask",
-      "turns": ["Explain in three sentences what notes.txt contains."]
+      "expectTools": true,
+      "turns": ["Read notes.txt and explain in three sentences what it is about."]
     },
     {
       "id": "small-edit",
       "mode": "execute",
-      "turns": ["In notes.txt, change the word 'alpha' to 'beta' and tell me when it is done."]
+      "expectTools": true,
+      "turns": ["In notes.txt, change the first word 'alpha' to 'beta' and tell me when it is done."]
     },
     {
       "id": "plan-step",
@@ -30,6 +35,26 @@
       "mode": "ask",
       "turns": [
         "Remember the code word is 'amber'. Reply with OK only.",
+        "What code word did I ask you to remember? Reply with the word only."
+      ]
+    },
+    {
+      "id": "long-tool-results",
+      "mode": "ask",
+      "expectTools": true,
+      "turns": [
+        "Read data/part-1.txt, data/part-2.txt and data/part-3.txt. For each one, give its first heading.",
+        "Which of the three files has the most lines? Answer with the file name only."
+      ]
+    },
+    {
+      "id": "cache-slope",
+      "mode": "ask",
+      "turns": [
+        "Remember the code word is 'cedar'. Reply with OK only.",
+        "Reply with the word 'one' only.",
+        "Reply with the word 'two' only.",
+        "Reply with the word 'three' only.",
         "What code word did I ask you to remember? Reply with the word only."
       ]
     }
