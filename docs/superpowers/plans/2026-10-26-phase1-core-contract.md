@@ -51,7 +51,7 @@ files, the Chrome extension hooks in `extension/src/`.
 | P11 | **Server conformance in tests** | a node test that replays each fixture's request against a temp-DB server and validates the live response against the schema | `npm test` green |
 | P12 | **Swift decode check** | `api-contract-lab` (executable, like `chat-contract-lab`) decoding every fixture with the Mac's `Codable` models and reporting fields Swift drops; allowlist with reasons | `make regression` runs it |
 | P13 | **Generated TypeScript types** | `schema/http` → `extension/src/lib/api-types.ts` (+ the same file consumed by `desktop/` later); replace hand-written response types in extension hooks where they exist | `tsc` green; no duplicated response interfaces left (grep gate) |
-| P14 | **OpenAPI + docs** | generated `schema/http/openapi.json`; `docs/reference/api/` pages link to it; `SERVER_API_VERSION` bump rule documented | `make docs-check` |
+| P14 | **OpenAPI + docs** | the repo already hand-maintains `docs/reference/api/openapi.yaml` with an API-coverage check in `make docs-check` — reuse it: generate it from `schema/http` (keeping its existing descriptions) instead of adding a second OpenAPI file; `SERVER_API_VERSION` bump rule documented | `make docs-check` |
 | P15 | **Shared design tokens** | `schema/design/tokens.json` (the three themes, spacing, type scale, category/status colours, moved from `Theme.swift`); generators → `mac/…/Core/Platform/ThemeTokens.swift` (Theme.swift reads it) and CSS (`desktop/`, Chrome extension) | Mac app pixel-identical (screenshot diff of Library + Chat in 3 themes); `--check` gates in all three |
 | P16 | **CI + pre-push** | `make contract-gates` in `make regression` and CI | push gate green |
 
