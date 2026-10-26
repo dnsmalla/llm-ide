@@ -338,3 +338,28 @@ test('a saved one-word rule never skips the prompt for a sensitive-path command 
   answerDecision({ requestId: req.requestId, sdkSessionId: 'legacy-sens', userId: user.id, action: 'deny' });
   assert.ok((await runPromise).error);
 });
+
+test('POST /code-assist/decision answers 400 VALIDATION_FAILED for a body that is not JSON', async () => {
+  const { handleAIRoutes } = await import('../server/ai-routes.mjs');
+  const user = registerUser(getDb(), { email: 'code-assist-decision-badjson@example.com', password: 'CorrectHorseBattery', displayName: 't' });
+  const req = {
+    method: 'POST',
+    url: '/code-assist/decision',
+    user: { id: user.id },
+    on(event, cb) {
+      if (event === 'data') cb(Buffer.from('{"requestId": '));
+      if (event === 'end') cb();
+    },
+  };
+  let statusCode = null;
+  let body = null;
+  const res = {
+    writeHead(code) { statusCode = code; },
+    setHeader() {},
+    end(chunk) { body = chunk ? JSON.parse(chunk) : null; },
+  };
+  const handled = await handleAIRoutes(req, res);
+  assert.equal(handled, true);
+  assert.equal(statusCode, 400);
+  assert.equal(body.error.code, 'VALIDATION_FAILED');
+});

@@ -764,7 +764,15 @@ export async function handleAIRoutes(req, res) {
   // shape: the registry owns tenancy (deciding user AND session — here
   // the legacy chat's agentContext.sessionId — must match the parked entry).
   if (req.method === 'POST' && req.url === '/code-assist/decision') {
-    const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+    const raw = await readBody(req, 64 * 1024);
+    let body;
+    try {
+      body = JSON.parse(raw);
+    } catch {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Request body must be valid JSON' } });
+      return true;
+    }
+    if (!body || typeof body !== 'object') body = {};
     const out = answerDecision({
       requestId: body.requestId,
       sdkSessionId: body.sdkSessionId,

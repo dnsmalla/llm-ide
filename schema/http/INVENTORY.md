@@ -98,8 +98,8 @@ Endpoints with no client caller (34):
 | `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:265` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:268` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:105` | `LlmIdeAPIClient+LoopAgent.swift` | - | - |
-| `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:791` | - | `App.tsx`, `useQuestions.ts` | - |
-| `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:861` | - | `App.tsx` | - |
+| `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:799` | - | `App.tsx`, `useQuestions.ts` | - |
+| `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:869` | - | `App.tsx` | - |
 | `/kb/ingest` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:133` | `LlmIdeAPIClient+KB.swift` | `App.tsx` | - |
 | `/kb/search` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:255` | `LlmIdeAPIClient+KB.swift` | `App.tsx`, `kb.ts` | - |
 | `/kb/issues` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:287` | - | `kb.ts` | - |
