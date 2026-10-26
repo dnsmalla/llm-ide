@@ -918,7 +918,7 @@
       "required": [
         "code"
       ],
-      "description": "A bare body, NOT the Error envelope: plugins/claude-update.mjs returns { code } for an unknown plugin name. The Mac decodes errors through the envelope, so it shows no message for this response (see the P3 report).",
+      "description": "Deliberately a bare {code} body, not the {error:{...}} envelope: on this route bare bodies are the update outcome protocol the Mac decodes (PluginUpdateOutcome.decode → .notFound), while an envelope means the route itself is missing (older server). Do not wrap it — PluginUpdatePresentationTests.updateOutcomeDecoding guards this.",
       "properties": {
         "code": {
           "type": "string"
