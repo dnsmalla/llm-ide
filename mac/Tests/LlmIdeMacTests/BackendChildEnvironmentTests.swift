@@ -33,6 +33,16 @@ final class BackendChildEnvironmentTests: XCTestCase {
         XCTAssertEqual(replaced["LLMIDE_FEATURES"], "agent_chat")
     }
 
+    func testBenchFakeSwitchesAreNeverPassedThrough() {
+        var inherited = base
+        inherited["LLMIDE_BENCH_FAKE"] = "1"
+        inherited["LLMIDE_BENCH_FAKE_TOKEN"] = "x"
+        let env = BackendManager.childEnvironment(base: inherited, featureKeys: ["agent_chat"])
+        XCTAssertNil(env["LLMIDE_BENCH_FAKE"])
+        XCTAssertNil(env["LLMIDE_BENCH_FAKE_TOKEN"])
+        XCTAssertEqual(env["LLMIDE_FEATURES"], "agent_chat")
+    }
+
     func testAllowlistStillAppliesAroundTheFeatureKey() {
         let env = BackendManager.childEnvironment(base: base, featureKeys: ["agent_chat"])
         XCTAssertEqual(env["LLMIDE_OTHER"], "kept")

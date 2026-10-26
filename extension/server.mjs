@@ -5,7 +5,7 @@ import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { handleKB, initFeatureRoutes } from './routes/router.mjs';
-import { prewarmAgentEngine } from './routes/agent-v2.mjs';
+import { prewarmAgentEngine, benchFakeEngineEnabled } from './routes/agent-v2.mjs';
 import { enabledEndpoints } from './routes/feature-routes.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
@@ -1219,6 +1219,12 @@ server.listen(PORT, HOST, () => {
     pid: process.pid,
     config: configSummary(),
   });
+  // Token-bench fake engine (scripts/token-bench.mjs --fake): make it loud.
+  // Every chat turn on this server is synthetic while it is active.
+  if (benchFakeEngineEnabled()) {
+    const bar = '!'.repeat(72);
+    process.stderr.write(`\n${bar}\n!! LLMIDE BENCH FAKE ENGINE ACTIVE: chat turns are SYNTHETIC, no model is called.\n!! Started with LLMIDE_BENCH_FAKE=1 and --bench-fake. Never run a user server this way.\n${bar}\n\n`);
+  }
   // The v2 chat engine + Agent SDK are not on the boot path (routes/agent-v2.mjs
   // loads them lazily), so /health answers ~200 ms sooner. Import them now,
   // off the listen callback, so the first chat turn does not pay that cost
