@@ -15,6 +15,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { scrubReviewPayloadRows } from './review-payload.mjs';
+import { migrateRetiredModelIds } from './model-ids.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
@@ -26,6 +27,7 @@ const FILE_RE = /^(\d{3,4})_([\w.-]+)\.sql$/;
 // here, the step runs inside the same transaction right after its SQL.
 const JS_MIGRATIONS = new Map([
   [45, (db) => scrubReviewPayloadRows(db)],
+  [46, (db) => migrateRetiredModelIds(db)],
 ]);
 
 // True when `sql` consists of exactly one effective statement and that

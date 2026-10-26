@@ -1,0 +1,14 @@
+-- Re-key saved Anthropic model limits to live model ids.
+--
+-- schema/models/anthropic-models.json moved to the 5.5 family and maps each
+-- retired id to its successor (`retired`). Saved model_limits rows still named
+-- the old ids, so they sorted ahead of the new defaults and Auto Tasks pinned
+-- a retired model. The data step is JavaScript because the map lives in that
+-- JSON file: migrateRetiredModelIds, registered for version 46 in
+-- JS_MIGRATIONS (kb/migrations.mjs). It renames model_limits rows (dropping a
+-- retired row when the user already has one for the successor) and clears
+-- quota_state flags under retired ids. usage_ledger is NOT rewritten: it is
+-- history; counting treats a retired id as its successor (kb/model-ids.mjs).
+--
+-- The statement below is a no-op; the file exists to record version 46.
+SELECT 1;

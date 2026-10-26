@@ -14,8 +14,8 @@
 // All functions are best-effort on the write side: a metering failure must
 // never throw into the model call that triggered it (mirrors activity.mjs).
 
-import { readFileSync } from 'node:fs';
 import { AsyncLocalStorage } from 'node:async_hooks';
+import { ANTHROPIC_MODELS, canonicalModel, modelAliases } from './model-ids.mjs';
 
 // ---------------------------------------------------------------------------
 // Built-in fallback chains. Order = default priority (lower index tried first).
@@ -33,9 +33,6 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 // providers/runtime.mjs and (via the conformance gate) ClaudeLink/ClaudeCLI.swift.
 // Three hand-kept copies previously disagreed — the server's own default was an
 // id the Mac treated as retired.
-const ANTHROPIC_MODELS = JSON.parse(
-  readFileSync(new URL('../../schema/models/anthropic-models.json', import.meta.url), 'utf8'),
-);
 const anthropicChain = ANTHROPIC_MODELS.chain.map((entry) => (
   entry.fast
     ? { model: entry.id, label: entry.label, fast: true }
@@ -162,11 +159,14 @@ export function usedForModel(db, userId, provider, model, unit, windowKind, now 
   // ledgerRowsForTurn). They are part of the main model's turn, not a use of
   // that model the user chose, so a cap the user set on it must not fill up
   // — or pause the model — because of them.
+  // The ledger keeps the id that actually ran; a retired id counts toward
+  // its successor (kb/model-ids.mjs).
+  const ids = modelAliases(provider, model);
   const row = db.prepare(
     `SELECT ${col} AS n FROM usage_ledger
-      WHERE user_id=? AND provider=? AND model=? AND ts>=?
+      WHERE user_id=? AND provider=? AND model IN (${ids.map(() => '?').join(',')}) AND ts>=?
         AND (endpoint IS NULL OR endpoint NOT LIKE '%:internal')`
-  ).get(userId, provider, model, startStr);
+  ).get(userId, provider, ...ids, startStr);
   return row ? Number(row.n) : 0;
 }
 
@@ -183,6 +183,7 @@ export function usedForModel(db, userId, provider, model, unit, windowKind, now 
  */
 export function tokenBreakdown(db, userId, provider, model, windowKind, now = new Date()) {
   const startStr = toSqliteLocal(windowStart(windowKind, now));
+  const ids = modelAliases(provider, model);
   const row = db.prepare(
     `SELECT COALESCE(SUM(input_tokens),0)          AS input,
             COALESCE(SUM(output_tokens),0)         AS output,
@@ -192,8 +193,8 @@ export function tokenBreakdown(db, userId, provider, model, windowKind, now = ne
                       AND cache_read_tokens IS NULL AND cache_creation_tokens IS NULL
                      THEN 1 ELSE 0 END)            AS unknownRows
        FROM usage_ledger
-      WHERE user_id=? AND provider=? AND model=? AND ts>=?`
-  ).get(userId, provider, model, startStr) || {};
+      WHERE user_id=? AND provider=? AND model IN (${ids.map(() => '?').join(',')}) AND ts>=?`
+  ).get(userId, provider, ...ids, startStr) || {};
   const input = Number(row.input || 0);
   const cacheRead = Number(row.cacheRead || 0);
   const cacheCreation = Number(row.cacheCreation || 0);
@@ -217,7 +218,7 @@ function isQuotaFlagged(db, userId, provider, model, windowKind, now) {
   const row = db.prepare(
     `SELECT 1 FROM quota_state
       WHERE user_id=? AND provider=? AND model=? AND window_start=? AND exhausted=1`
-  ).get(userId, provider, model, startStr);
+  ).get(userId, provider, canonicalModel(provider, model), startStr);
   return !!row;
 }
 
@@ -229,8 +230,15 @@ export function getLimits(db, userId, { provider } = {}) {
   const stored = db.prepare(
     `SELECT provider, model, priority, enabled, limit_value, unit, window_kind, threshold_pct
        FROM model_limits WHERE user_id=?`
-  ).all(userId);
-  const storedByKey = new Map(stored.map((r) => [`${r.provider}::${r.model}`, r]));
+  ).all(userId).map((r) => ({ ...r, storedModel: r.model, model: canonicalModel(r.provider, r.model) }));
+  // A row stored under a retired id answers for its successor, unless the
+  // user also has a row under the live id (that one wins).
+  const storedByKey = new Map();
+  for (const r of stored) {
+    const key = `${r.provider}::${r.model}`;
+    const prev = storedByKey.get(key);
+    if (!prev || r.storedModel === r.model) storedByKey.set(key, r);
+  }
 
   const chains = {};
   for (const prov of want) {
@@ -432,9 +440,11 @@ export function setLimits(db, userId, chains) {
     for (const [provider, models] of Object.entries(chains)) {
       if (!PROVIDERS.includes(provider) || !Array.isArray(models)) continue;
       del.run(userId, provider);
+      const seen = new Set();
       models.forEach((m, i) => {
-        const model = typeof m?.model === 'string' ? m.model.slice(0, 128) : '';
-        if (!model) return;
+        const model = typeof m?.model === 'string' ? canonicalModel(provider, m.model.slice(0, 128)) : '';
+        if (!model || seen.has(model)) return;
+        seen.add(model);
         ins.run(
           userId, provider, model,
           clampInt(m.priority, 0, 999, i),
@@ -455,6 +465,7 @@ export function setLimits(db, userId, chains) {
 // this when a live 429/quota error fires). Self-expires when the window rolls.
 export function flagQuota(db, userId, provider, model, now = new Date()) {
   if (!userId || !provider || !model) return;
+  model = canonicalModel(provider, model);
   try {
     const lim = (getLimits(db, userId, { provider }).chains[provider] || [])
       .find((m) => m.model === model);
@@ -479,10 +490,15 @@ export function flagQuota(db, userId, provider, model, now = new Date()) {
 export function usdCapForModel(db, userId, provider, model) {
   if (!userId || !provider || !model) return null;
   try {
+    // Any alias: a row saved under a retired id still caps its successor; the
+    // live id's own row wins when both exist.
+    const live = canonicalModel(provider, model);
+    const ids = modelAliases(provider, model);
     const row = db.prepare(
       `SELECT limit_value FROM model_limits
-        WHERE user_id=? AND provider=? AND model=? AND unit='usd' AND enabled=1`
-    ).get(userId, provider, model);
+        WHERE user_id=? AND provider=? AND model IN (${ids.map(() => '?').join(',')}) AND unit='usd' AND enabled=1
+        ORDER BY model = ? DESC LIMIT 1`
+    ).get(userId, provider, ...ids, live);
     const cap = Number(row?.limit_value);
     return Number.isFinite(cap) && cap > 0 ? cap : null;
   } catch {
@@ -555,7 +571,8 @@ export function resolveModel(db, userId, provider, now = new Date(), { preferMod
   // unknown preferModel walks the whole chain from the top (Auto Tasks default).
   let candidates = annotated;
   if (preferModel) {
-    const idx = annotated.findIndex((m) => m.model === preferModel);
+    const want = canonicalModel(provider, preferModel);
+    const idx = annotated.findIndex((m) => m.model === want);
     if (idx >= 0) candidates = annotated.slice(idx);
   }
   const result = pickFromChain(candidates, { provider, now });
