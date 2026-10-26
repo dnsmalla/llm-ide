@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/generate-plan",
+  "status": 500,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No model call: the meeting is not in the KB, so the planner throws before it calls the model.",
+  "request": {
+    "body": {
+      "meetingId": "mtg-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PLAN_GENERATION_FAILED",
+      "message": "Meeting mtg-missing not found in KB"
+    }
+  }
+}

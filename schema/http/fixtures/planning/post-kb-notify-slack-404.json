@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/notify/slack",
+  "status": 404,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: A plan notification for a plan that does not exist.",
+  "request": {
+    "body": {
+      "webhookUrl": "https://hooks.slack.com/services/EXAMPLE/EXAMPLE/EXAMPLE",
+      "kind": "plan",
+      "planId": "plan-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Plan not found"
+    }
+  }
+}

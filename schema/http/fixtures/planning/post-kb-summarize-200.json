@@ -1,0 +1,45 @@
+{
+  "endpoint": "POST /kb/summarize",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The model text is a canned local stub (LLMIDE_ANTHROPIC_CLI, a script that prints the CLI result object), so no model call is made. The summary is parsed from the stub reply; model is the model that answered.",
+  "request": {
+    "body": {
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "title": "Weekly sync",
+      "language": "en",
+      "started_at": "2026-10-20T09:00:00.000Z",
+      "duration_seconds": 1800,
+      "participants": [
+        "Alice",
+        "Bob"
+      ]
+    }
+  },
+  "response": {
+    "gist": "The team agreed to ship the release on Friday.",
+    "tldr": [
+      "Ship on Friday",
+      "Bob updates the release notes by Thursday"
+    ],
+    "full": "## Summary\nThe team agreed to ship on Friday.",
+    "actions": [
+      {
+        "owner": "Bob",
+        "text": "Update the release notes",
+        "due": "Thursday"
+      }
+    ],
+    "decisions": [
+      {
+        "text": "Ship the release on Friday"
+      }
+    ],
+    "blockers": [
+      {
+        "text": "Waiting on the QA sign-off"
+      }
+    ],
+    "model": "claude-sonnet-4-6",
+    "generated_at": 1792995821199
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/outcomes/task/:id",
+  "status": 400,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: The id has a character outside the safe id set.",
+  "request": {
+    "params": {
+      "id": "bad.id"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_ID",
+      "message": "id must be 1–128 alphanumeric / _ / - characters"
+    }
+  }
+}

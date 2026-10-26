@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/generate-code",
+  "status": 500,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No such task, so generateCodeForTask throws before the model is called.",
+  "request": {
+    "body": {
+      "taskId": "t-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "CODEGEN_FAILED",
+      "message": "Task t-missing not found"
+    }
+  }
+}

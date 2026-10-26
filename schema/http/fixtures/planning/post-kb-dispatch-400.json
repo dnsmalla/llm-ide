@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/dispatch",
+  "status": 400,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: Preview of a plan that does not exist: dispatchPlan throws and the route answers 400 DISPATCH_FAILED.",
+  "request": {
+    "body": {
+      "planId": "plan-missing",
+      "target": "preview"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "DISPATCH_FAILED",
+      "message": "Plan plan-missing not found"
+    }
+  }
+}

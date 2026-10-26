@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/generate-code",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The model text is a canned local stub (LLMIDE_ANTHROPIC_CLI, a script that prints the CLI result object), so no model call is made. The stub proposes a modify of a file it was never shown. With no file context the modify is dropped and listed in rejected.",
+  "request": {
+    "body": {
+      "taskId": "r-1",
+      "language": "en",
+      "includeFileContext": false
+    }
+  },
+  "response": {
+    "taskId": "r-1",
+    "summary": "Edit the legacy module.",
+    "files": [],
+    "tests": [],
+    "notes": "Stub reply.\n\nDropped \"modify\" for file(s) not provided in full as context: src/legacy.js.",
+    "rejected": [
+      "src/legacy.js"
+    ]
+  }
+}

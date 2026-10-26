@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/analyze-risks",
+  "status": 500,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The stub CLI exits non-zero for the marked prompt, so the model call throws and the route answers 500 RISK_ANALYSIS_FAILED with the error message.",
+  "request": {
+    "body": {
+      "plan": {
+        "title": "Stub failure",
+        "tasks": [
+          {
+            "id": "f-1",
+            "title": "[[stub-fail]] risk task"
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RISK_ANALYSIS_FAILED",
+      "message": "Claude error: /example/stub-cli.mjs failed: stub: forced failure"
+    }
+  }
+}

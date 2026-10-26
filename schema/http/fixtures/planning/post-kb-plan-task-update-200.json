@@ -1,0 +1,33 @@
+{
+  "endpoint": "POST /kb/plan-task/update",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The same handler as PATCH, reached by POST. Updates the task status only.",
+  "request": {
+    "body": {
+      "taskId": "t-mvov8l6w-1-3w4a",
+      "patch": {
+        "status": "done"
+      }
+    }
+  },
+  "response": {
+    "id": "t-mvov8l6w-1-3w4a",
+    "planId": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+    "position": 1,
+    "milestone": "Release",
+    "title": "Ship the release",
+    "description": "Ship on Friday once the notes are ready.",
+    "owner": "Alice",
+    "due": null,
+    "estimateDays": 1,
+    "dependsOn": [
+      "t-mvov8l6w-0-4nvf"
+    ],
+    "status": "done",
+    "risk": "med",
+    "riskReason": "Depends on the notes being finished first.",
+    "files": [],
+    "symbols": [],
+    "meta": {}
+  }
+}

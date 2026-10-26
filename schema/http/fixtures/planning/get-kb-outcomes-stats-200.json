@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/outcomes/stats",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: Counts of recorded outcomes by state.",
+  "response": {
+    "total": 1,
+    "byState": {
+      "unknown": 1
+    }
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "endpoint": "GET /kb/plans",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Plan list for the user, newest first.",
+  "request": {
+    "query": {
+      "limit": "5"
+    }
+  },
+  "response": {
+    "plans": [
+      {
+        "id": "plan-mvov8l8f-fTXIGvBouNEzXX2v",
+        "title": "Release plan",
+        "meetingId": "mtg-plan-001",
+        "createdAt": "2026-10-26 06:18:39",
+        "updatedAt": "2026-10-26 06:21:10",
+        "taskCount": 2
+      }
+    ],
+    "count": 1
+  }
+}

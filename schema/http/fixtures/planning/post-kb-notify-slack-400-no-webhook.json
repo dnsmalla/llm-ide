@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/notify/slack",
+  "status": 400,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. No external call is made: No webhookUrl in the body and none in the vault: refused before any send.",
+  "request": {
+    "body": {
+      "kind": "custom",
+      "payload": {
+        "text": "Release is on track."
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "No Slack webhook URL — provide one or store via /auth/me/secrets"
+    }
+  }
+}

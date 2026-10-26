@@ -1,0 +1,70 @@
+{
+  "endpoint": "POST /kb/analyze-risks",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. The model text is a canned local stub (LLMIDE_ANTHROPIC_CLI, a script that prints the CLI result object), so no model call is made. With a plan body (no planId) the result is returned and nothing is saved.",
+  "request": {
+    "body": {
+      "plan": {
+        "title": "Draft release plan",
+        "goal": "Ship the release on Friday",
+        "language": "en",
+        "meetingId": "mtg-plan-001",
+        "tasks": [
+          {
+            "id": "d-1",
+            "title": "Update the release notes",
+            "description": "Bob updates the notes before Thursday.",
+            "owner": "Bob",
+            "estimateDays": 1,
+            "dependsOn": [],
+            "status": "planned"
+          },
+          {
+            "id": "d-2",
+            "title": "Ship the release",
+            "description": "Ship on Friday once the notes are ready.",
+            "owner": "Alice",
+            "estimateDays": 1,
+            "dependsOn": [
+              "d-1"
+            ],
+            "status": "planned"
+          }
+        ]
+      },
+      "language": "en"
+    }
+  },
+  "response": {
+    "title": "Draft release plan",
+    "goal": "Ship the release on Friday",
+    "language": "en",
+    "meetingId": "mtg-plan-001",
+    "tasks": [
+      {
+        "id": "d-1",
+        "title": "Update the release notes",
+        "description": "Bob updates the notes before Thursday.",
+        "owner": "Bob",
+        "estimateDays": 1,
+        "dependsOn": [],
+        "status": "planned",
+        "risk": "low",
+        "riskReason": "Small, well-scoped documentation update."
+      },
+      {
+        "id": "d-2",
+        "title": "Ship the release",
+        "description": "Ship on Friday once the notes are ready.",
+        "owner": "Alice",
+        "estimateDays": 1,
+        "dependsOn": [
+          "d-1"
+        ],
+        "status": "planned",
+        "risk": "med",
+        "riskReason": "Depends on the notes being finished first."
+      }
+    ]
+  }
+}

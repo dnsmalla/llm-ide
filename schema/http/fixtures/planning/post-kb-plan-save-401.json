@@ -1,0 +1,40 @@
+{
+  "endpoint": "POST /kb/plan/save",
+  "status": 401,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP and seeded through the API. Sent without an access token.",
+  "request": {
+    "body": {
+      "title": "Saved stub plan",
+      "goal": "Stub goal",
+      "language": "en",
+      "meetingId": "mtg-plan-001",
+      "meta": {
+        "source": "capture"
+      },
+      "tasks": [
+        {
+          "id": "s-1",
+          "title": "Stub task",
+          "description": "Stub description",
+          "owner": "Alice",
+          "due": "2026-11-06",
+          "estimateDays": 2,
+          "dependsOn": [],
+          "status": "planned",
+          "risk": "low",
+          "riskReason": "Small change.",
+          "milestone": "Release",
+          "files": [],
+          "symbols": [],
+          "meta": {}
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}
