@@ -124,7 +124,8 @@ function handleOsStream(req, res, userId) {
       if (w.dirty) {
         w.dirty = false;
         writeEvent(type);
-        w.timer = setTimeout(tick, OS_COALESCE_MS);
+        // A failed write cleans the stream up; do not re-arm after that.
+        if (!cleanedUp) w.timer = setTimeout(tick, OS_COALESCE_MS);
       } else {
         windows.delete(type);
       }
