@@ -11,9 +11,13 @@ import type {
 } from './api-types';
 import { authFetch, getServerUrl, parseJsonResponse, REQUEST_TIMEOUT_MS } from './config';
 
+/** The kinds the search filter offers. The server answers any kind in its list, so a hit's kind is typed as string. */
+export type KBSearchKind = 'meeting' | 'action' | 'decision' | 'blocker';
+
 export interface KBSearchHit {
-  kind: 'meeting' | 'action' | 'decision' | 'blocker';
-  meetingId: string;
+  kind: string;
+  /** null for hits that are not tied to a meeting (tickets, plans, outcomes). */
+  meetingId: string | null;
   entityId: string | null;
   title: string;
   body: string;
@@ -84,7 +88,7 @@ export async function savePlan(opts: {
 
 export async function searchKB(opts: {
   q?: string;
-  kind?: KBSearchHit['kind'];
+  kind?: KBSearchKind;
   limit?: number;
 }): Promise<KBSearchHit[]> {
   const serverUrl = await getServerUrl();
