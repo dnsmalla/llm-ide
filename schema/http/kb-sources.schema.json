@@ -756,7 +756,11 @@
           "type": "object",
           "properties": {
             "include": {
-              "type": "string"
+              "type": "string",
+              "enum": [
+                "transcript"
+              ],
+              "description": "Opt-in extras: `transcript` adds the stored transcript text as `transcript`. Any other value is ignored (the handler checks equality only)."
             }
           }
         },

@@ -1065,7 +1065,11 @@
             "displayName": {
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "email",
+            "password"
+          ]
         }
       },
       "responses": {
@@ -1105,7 +1109,11 @@
             "password": {
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "email",
+            "password"
+          ]
         }
       },
       "responses": {
@@ -1128,7 +1136,10 @@
             "refreshToken": {
               "type": "string"
             }
-          }
+          },
+          "required": [
+            "refreshToken"
+          ]
         }
       },
       "responses": {

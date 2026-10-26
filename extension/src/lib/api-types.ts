@@ -1745,9 +1745,9 @@ export type GetAuthWellKnownResponse200 = WellKnown;
 /** Request parts for `POST /auth/register` (schema/http/health-auth.schema.json). */
 export type PostAuthRegisterRequest = {
   body: {
-    email?: string;
+    email: string;
     /** 10 to 200 characters */
-    password?: string;
+    password: string;
     displayName?: string;
   };
 };
@@ -1767,8 +1767,8 @@ export type PostAuthRegisterResponse429 = CommonError;
 /** Request parts for `POST /auth/login` (schema/http/health-auth.schema.json). */
 export type PostAuthLoginRequest = {
   body: {
-    email?: string;
-    password?: string;
+    email: string;
+    password: string;
   };
 };
 
@@ -1781,7 +1781,7 @@ export type PostAuthLoginResponse429 = CommonError;
 /** Request parts for `POST /auth/refresh` (schema/http/health-auth.schema.json). */
 export type PostAuthRefreshRequest = {
   body: {
-    refreshToken?: string;
+    refreshToken: string;
   };
 };
 
@@ -2610,7 +2610,8 @@ export type GetKbIssuesResponse401 = CommonError;
 /** Request parts for `GET /kb/meeting/:id` (schema/http/kb-sources.schema.json). */
 export type GetKbMeetingIdRequest = {
   query: {
-    include?: string;
+    /** Opt-in extras: `transcript` adds the stored transcript text as `transcript`. Any other value is ignored (the handler checks equality only). */
+    include?: "transcript";
   };
   params: {
     id: string;

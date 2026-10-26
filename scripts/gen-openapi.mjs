@@ -305,8 +305,14 @@ function buildOperation({ doc, key, spec, convert, resolve, ov, eventName, seenO
     // A body is required only when its schema requires some property: a handler that
     // accepts an empty POST has no required properties in its contract.
     const bodyNode = resolve(parts.body, doc);
-    const bodyRequired = Array.isArray(bodyNode.required) && bodyNode.required.length > 0;
+    // An overlay bodyRequired (boolean) wins where a fixture deliberately sends a body
+    // without the field the handler rejects, so the contract keeps its fixtures valid.
+    const ruleRequired = Array.isArray(bodyNode.required) && bodyNode.required.length > 0;
+    const bodyRequired = ov.bodyRequired ?? ruleRequired;
+    if (typeof bodyRequired !== 'boolean') throw new Error(`openapi.overlay.json: ${opKey} bodyRequired must be a boolean`);
     op.requestBody = { required: bodyRequired, content: { 'application/json': { schema: convert(parts.body, doc) } } };
+  } else if (ov.bodyRequired !== undefined) {
+    throw new Error(`openapi.overlay.json: ${opKey} has bodyRequired but no request body`);
   }
 
   const declared = Object.keys(spec.responses || {});

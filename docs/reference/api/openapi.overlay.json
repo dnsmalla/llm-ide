@@ -118,6 +118,18 @@
               }
             }
           }
+        },
+        "429": {
+          "removeContent": [
+            "text/plain"
+          ],
+          "content": {
+            "text/html": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
         }
       }
     },
@@ -713,7 +725,8 @@
         "400": "Validation error",
         "401": "Current password incorrect",
         "404": "User not found"
-      }
+      },
+      "bodyRequired": true
     },
     "POST /auth/me/secrets": {
       "summary": "Set or delete an encrypted secret",
@@ -1051,14 +1064,16 @@
         "200": "Generated plan",
         "400": "Validation error",
         "500": "Plan generation failed"
-      }
+      },
+      "bodyRequired": true
     },
     "POST /kb/ingest": {
       "summary": "Upsert a meeting and replace its entities",
       "responses": {
         "200": "Ingest result",
         "400": "Validation error"
-      }
+      },
+      "bodyRequired": true
     },
     "POST /kb/ingest-code-graph": {
       "summary": "Store a repo's structural code graph (nodes/edges) for agent traversal",

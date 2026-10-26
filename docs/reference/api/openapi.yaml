@@ -329,7 +329,7 @@ paths:
         "429":
           description: "Too Many Requests"
           content:
-            text/plain:
+            text/html:
               schema:
                 type: "string"
   /auth/google/start:
@@ -415,7 +415,7 @@ paths:
         - "health-auth"
       security: []
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -425,6 +425,9 @@ paths:
                   type: "string"
                 password:
                   type: "string"
+              required:
+                - "email"
+                - "password"
       responses:
         "200":
           description: "Session issued"
@@ -1749,7 +1752,7 @@ paths:
       tags:
         - "health-auth"
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -2232,7 +2235,7 @@ paths:
         - "health-auth"
       security: []
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -2240,6 +2243,8 @@ paths:
               properties:
                 refreshToken:
                   type: "string"
+              required:
+                - "refreshToken"
       responses:
         "200":
           description: "Session rotated"
@@ -2273,7 +2278,7 @@ paths:
         - "health-auth"
       security: []
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -2286,6 +2291,9 @@ paths:
                   description: "10 to 200 characters"
                 displayName:
                   type: "string"
+              required:
+                - "email"
+                - "password"
       responses:
         "201":
           description: "User created (first user becomes admin)"
@@ -5709,7 +5717,7 @@ paths:
       tags:
         - "planning"
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -5799,7 +5807,7 @@ paths:
       tags:
         - "kb-sources"
       requestBody:
-        required: false
+        required: true
         content:
           application/json:
             schema:
@@ -6805,6 +6813,8 @@ paths:
           description: "Opt-in extras. `transcript` adds the stored transcript text as `transcript`."
           schema:
             type: "string"
+            enum:
+              - "transcript"
       responses:
         "200":
           description: "Meeting record"
