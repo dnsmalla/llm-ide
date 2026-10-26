@@ -1,5 +1,6 @@
 mod core_host;
 mod pty;
+mod sse_replay;
 
 use std::sync::OnceLock;
 
@@ -204,7 +205,10 @@ pub fn run() {
             pty_spawn,
             pty_write,
             pty_resize,
-            pty_kill
+            pty_kill,
+            sse_replay::sse_replay_start,
+            sse_replay::sse_replay_stop,
+            sse_replay::sse_channel_stream
         ])
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");
@@ -217,6 +221,7 @@ pub fn run() {
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
             app_handle.state::<CoreHost>().shutdown();
             pty::kill_all();
+            sse_replay::stop();
         }
         _ => {}
     });

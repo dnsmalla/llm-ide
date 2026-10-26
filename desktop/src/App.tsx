@@ -37,8 +37,8 @@ async function launchTheme(): Promise<ThemeId | null> {
 }
 
 /**
- * Section for this launch. `LLMIDE_POC_AUTOBENCH=editor` opens the Editor and `=terminal`
- * the Terminal (their benches need them mounted); other autobench modes open the Code Graph;
+ * Section for this launch. `LLMIDE_POC_AUTOBENCH=editor` opens the Editor, `=terminal`
+ * the Terminal and `=chat` the Chat (their benches need them mounted); other autobench modes open the Code Graph;
  * `LLMIDE_POC_SECTION`
  * opens a named section for screenshots; otherwise the Code Graph.
  */
@@ -46,7 +46,7 @@ async function launchSection(): Promise<string> {
   try {
     const mode = await invoke<string | null>("autobench_mode");
     // An autobench mode decides the section alone; LLMIDE_POC_SECTION is ignored.
-    if (mode) return mode === "editor" || mode === "terminal" ? mode : "graph";
+    if (mode) return mode === "editor" || mode === "terminal" || mode === "chat" ? mode : "graph";
     const override = await invoke<string | null>("section_override");
     if (override && TABS.some((t) => t.id === override)) return override;
   } catch {
