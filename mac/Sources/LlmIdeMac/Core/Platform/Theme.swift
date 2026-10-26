@@ -21,66 +21,62 @@ struct Theme: Equatable, Identifiable {
     let danger: Color
     let rowAlt: Color
     let gridLine: Color
+    // Sidebar category hues (Library). Purple and teal have no palette slot,
+    // so each theme authors them; see the category notes below.
+    let categoryPurple: Color
+    let categoryTeal: Color
+    let categoryAmber: Color
 
-    static let all: [Theme] = [.dark, .light, .midnight]
+    /// Every theme's values come from `ThemeTokens` (generated from
+    /// schema/design/tokens.json), so the Mac app, the Tauri desktop and the
+    /// extension share one palette.
+    static let all: [Theme] = ThemeTokens.palettes.map { Theme(palette: $0) }
 
     // Dark palette tuned for WCAG-AA contrast on small text against
     // both `body` and `surface`.  Surface sits ~7% above body so cards
     // visibly lift; muted text is bright enough (~4.7:1 on surface) to
     // read at a glance.
-    static let dark = Theme(
-        id: "dark", name: "Dark", isDark: true,
-        body: Color(red: 0.07, green: 0.08, blue: 0.11),
-        surface: Color(red: 0.14, green: 0.15, blue: 0.20),
-        surface2: Color(red: 0.19, green: 0.20, blue: 0.26),
-        border: Color.white.opacity(0.14),
-        text: Color(red: 0.94, green: 0.95, blue: 0.98),
-        textMuted: Color(red: 0.78, green: 0.81, blue: 0.90),
-        accent: Color(red: 0.40, green: 0.72, blue: 0.82),     // meet-notes teal, lifted for dark BG
-        accent2: Color(red: 0.55, green: 0.70, blue: 1.00),
-        accent3: Color(red: 0.38, green: 0.90, blue: 0.65),
-        accent4: Color(red: 0.98, green: 0.82, blue: 0.40),
-        danger: Color(red: 0.96, green: 0.50, blue: 0.50),
-        rowAlt: Color.white.opacity(0.04),
-        gridLine: Color.white.opacity(0.12)
-    )
+    static let dark = Theme(palette: ThemeTokens.dark)
 
-    static let light = Theme(
-        id: "light", name: "Light", isDark: false,
-        body: Color(red: 0.97, green: 0.97, blue: 0.98),
-        surface: Color.white,
-        surface2: Color(red: 0.95, green: 0.96, blue: 0.98),
-        border: Color.black.opacity(0.10),
-        text: Color(red: 0.12, green: 0.14, blue: 0.18),
-        textMuted: Color(red: 0.42, green: 0.46, blue: 0.55),
-        accent: Color(red: 0.18, green: 0.49, blue: 0.56),
-        accent2: Color(red: 0.20, green: 0.40, blue: 0.85),
-        accent3: Color(red: 0.18, green: 0.65, blue: 0.40),
-        accent4: Color(red: 0.85, green: 0.55, blue: 0.10),
-        danger: Color(red: 0.80, green: 0.20, blue: 0.20),
-        rowAlt: Color.black.opacity(0.025),
-        gridLine: Color.black.opacity(0.08)
-    )
+    static let light = Theme(palette: ThemeTokens.light)
 
-    static let midnight = Theme(
-        id: "midnight", name: "Midnight", isDark: true,
-        body: Color(red: 0.06, green: 0.07, blue: 0.13),
-        surface: Color(red: 0.12, green: 0.14, blue: 0.21),
-        surface2: Color(red: 0.17, green: 0.19, blue: 0.27),
-        border: Color.white.opacity(0.16),
-        text: Color(red: 0.93, green: 0.95, blue: 0.99),
-        textMuted: Color(red: 0.78, green: 0.83, blue: 0.93),
-        accent: Color(red: 0.55, green: 0.74, blue: 1.00),
-        accent2: Color(red: 0.65, green: 0.82, blue: 1.00),
-        accent3: Color(red: 0.45, green: 0.92, blue: 0.72),
-        accent4: Color(red: 0.99, green: 0.85, blue: 0.50),
-        danger: Color(red: 0.98, green: 0.55, blue: 0.55),
-        rowAlt: Color.white.opacity(0.04),
-        gridLine: Color.white.opacity(0.12)
-    )
+    static let midnight = Theme(palette: ThemeTokens.midnight)
 
     static func find(id: String) -> Theme {
         all.first(where: { $0.id == id }) ?? .dark
+    }
+
+    init(palette p: ThemeTokens.Palette) {
+        id = p.id
+        name = p.name
+        isDark = p.isDark
+        body = Theme.color(p.body)
+        surface = Theme.color(p.surface)
+        surface2 = Theme.color(p.surface2)
+        border = Theme.color(p.border)
+        text = Theme.color(p.text)
+        textMuted = Theme.color(p.textMuted)
+        accent = Theme.color(p.accent)
+        accent2 = Theme.color(p.accent2)
+        accent3 = Theme.color(p.accent3)
+        accent4 = Theme.color(p.accent4)
+        danger = Theme.color(p.danger)
+        rowAlt = Theme.color(p.rowAlt)
+        gridLine = Theme.color(p.gridLine)
+        categoryPurple = Theme.color(p.categoryPurple)
+        categoryTeal = Theme.color(p.categoryTeal)
+        categoryAmber = Theme.color(p.categoryAmber)
+    }
+
+    /// Builds the SwiftUI colour for a token. `Color.white` / `Color.black`
+    /// are used for the keyword swatches so the value is the same expression
+    /// the palette was originally written with.
+    static func color(_ s: ThemeTokens.Swatch) -> Color {
+        switch s {
+        case let .rgb(r, g, b): return Color(red: r, green: g, blue: b)
+        case let .white(a): return a == 1 ? Color.white : Color.white.opacity(a)
+        case let .black(a): return a == 1 ? Color.black : Color.black.opacity(a)
+        }
     }
 }
 
@@ -97,33 +93,10 @@ extension Theme {
     // MARK: - Sidebar category hues
     //
     // The Library sidebar colour-codes its sections. Blue/green/brand map
-    // straight onto palette slots; purple and teal have no slot, so they are
-    // authored per-theme here (exactly like the accents) to read correctly on
-    // each background — never raw `.purple` / `.teal`, which wash out in
-    // Midnight.
-    var categoryPurple: Color {
-        switch id {
-        case "light":    return Color(red: 0.52, green: 0.36, blue: 0.78)
-        case "midnight": return Color(red: 0.76, green: 0.64, blue: 1.00)
-        default:         return Color(red: 0.70, green: 0.56, blue: 0.95) // dark
-        }
-    }
-    var categoryTeal: Color {
-        switch id {
-        case "light":    return Color(red: 0.10, green: 0.52, blue: 0.55)
-        case "midnight": return Color(red: 0.52, green: 0.86, blue: 0.90)
-        default:         return Color(red: 0.42, green: 0.78, blue: 0.82) // dark
-        }
-    }
-    /// LLM Sources' hue — kept visually distinct from Plugins' teal since
-    /// both live in the Library sidebar as sibling sections.
-    var categoryAmber: Color {
-        switch id {
-        case "light":    return Color(red: 0.72, green: 0.48, blue: 0.08)
-        case "midnight": return Color(red: 0.95, green: 0.78, blue: 0.45)
-        default:         return Color(red: 0.90, green: 0.70, blue: 0.35) // dark
-        }
-    }
+    // straight onto palette slots; purple, teal and amber have no slot, so
+    // each theme authors them in tokens.json (`categoryPurple`, `categoryTeal`,
+    // `categoryAmber`) — never raw `.purple` / `.teal`, which wash out in
+    // Midnight. Amber is LLM Sources' hue, kept distinct from Plugins' teal.
 
     /// Single source of truth for a Library file-tree section's tint, derived
     /// from the active palette. Sources/Notes read as the blue (info) family,
@@ -207,61 +180,90 @@ final class ThemeStore: ObservableObject {
 // Centralizing them means a future polish pass tightens the whole UI
 // from one file rather than chasing a thousand call sites.
 
+// The numbers come from `ThemeTokens` (schema/design/tokens.json). Each name
+// keeps its meaning: see the comments in tokens.json for the intent of a role.
+
 enum Spacing {
-    static let xs: CGFloat = 4
-    static let sm: CGFloat = 8
-    static let md: CGFloat = 12
-    static let lg: CGFloat = 16
-    static let xl: CGFloat = 24
-    static let xxl: CGFloat = 32
+    static let xs: CGFloat = CGFloat(ThemeTokens.spacing.xs)
+    static let sm: CGFloat = CGFloat(ThemeTokens.spacing.sm)
+    static let md: CGFloat = CGFloat(ThemeTokens.spacing.md)
+    static let lg: CGFloat = CGFloat(ThemeTokens.spacing.lg)
+    static let xl: CGFloat = CGFloat(ThemeTokens.spacing.xl)
+    static let xxl: CGFloat = CGFloat(ThemeTokens.spacing.xxl)
 }
 
 enum Radius {
-    static let sm: CGFloat = 6
-    static let md: CGFloat = 10
-    static let lg: CGFloat = 14
+    static let sm: CGFloat = CGFloat(ThemeTokens.radius.sm)
+    static let md: CGFloat = CGFloat(ThemeTokens.radius.md)
+    static let lg: CGFloat = CGFloat(ThemeTokens.radius.lg)
 }
 
 enum Typography {
     // MARK: - Scale
 
     /// Display — page titles, hero copy.
-    static let display      = Font.system(size: 26, weight: .bold)
+    static let display      = font(ThemeTokens.typeScale.display)
     /// Title — view titles, large card headers.
-    static let title        = Font.system(size: 18, weight: .semibold)
+    static let title        = font(ThemeTokens.typeScale.title)
     /// Section heading — used in side panels, settings cards.
-    static let section      = Font.system(size: 12, weight: .semibold)
+    static let section      = font(ThemeTokens.typeScale.section)
     /// Body text — default prose.
-    static let body         = Font.system(size: 13)
+    static let body         = font(ThemeTokens.typeScale.body)
     /// Body semibold — emphasis, interactive labels.
-    static let bodyStrong   = Font.system(size: 13, weight: .semibold)
+    static let bodyStrong   = font(ThemeTokens.typeScale.bodyStrong)
     /// Caption — metadata, hints, secondary text.
-    static let caption      = Font.system(size: 11)
+    static let caption      = font(ThemeTokens.typeScale.caption)
     /// Caption semibold — chip/badge labels.
-    static let captionStrong = Font.system(size: 11, weight: .semibold)
+    static let captionStrong = font(ThemeTokens.typeScale.captionStrong)
     /// Mono — code refs, IDs, timestamps.
-    static let mono         = Font.system(size: 11, design: .monospaced)
+    static let mono         = font(ThemeTokens.typeScale.mono)
 
     // MARK: - File browser tokens (tree panel + library list)
 
     /// File and folder names in tree/list rows.
-    static let filename     = Font.system(size: 12)
+    static let filename     = font(ThemeTokens.typeScale.filename)
     /// Secondary metadata under file rows (extension, file size).
-    static let fileMeta     = Font.system(size: 10)
+    static let fileMeta     = font(ThemeTokens.typeScale.fileMeta)
     /// EXPLORER / DOCUMENTS / CODE & NOTES panel headers.
-    static let treeHeader   = Font.system(size: 10, weight: .semibold)
+    static let treeHeader   = font(ThemeTokens.typeScale.treeHeader)
 
     // MARK: - Empty / placeholder states
 
     /// Primary label in an empty-state placeholder.
-    static let emptyTitle   = Font.callout.weight(.medium)
+    static let emptyTitle   = font(ThemeTokens.typeScale.emptyTitle)
     /// Secondary hint text in an empty-state placeholder.
-    static let emptyHint    = Font.caption
+    static let emptyHint    = font(ThemeTokens.typeScale.emptyHint)
 
     // MARK: - Interactive controls
 
     /// Primary action buttons (Record, New Change…).
-    static let button       = Font.callout.weight(.medium)
+    static let button       = font(ThemeTokens.typeScale.button)
+
+    /// Turns a `ThemeTokens.TypeToken` into a SwiftUI font. A text-style token
+    /// keeps the system size (`Font.callout` / `Font.caption`); a size token
+    /// uses `Font.system(size:)`. A nil weight or design is passed through as
+    /// nil, so the call matches the original `Font.system(size:…)` exactly.
+    static func font(_ t: ThemeTokens.TypeToken) -> Font {
+        let weight = t.weight.map(swiftWeight)
+        if let style = t.textStyle {
+            let base: Font = style == .callout ? .callout : .caption
+            return weight.map { base.weight($0) } ?? base
+        }
+        return Font.system(
+            size: CGFloat(t.size ?? 13),
+            weight: weight,
+            design: t.monospaced ? .monospaced : nil
+        )
+    }
+
+    private static func swiftWeight(_ w: ThemeTokens.FontWeightToken) -> Font.Weight {
+        switch w {
+        case .regular: return .regular
+        case .medium: return .medium
+        case .semibold: return .semibold
+        case .bold: return .bold
+        }
+    }
 }
 
 /// Reusable card surface — subtle hairline border + correct corner
