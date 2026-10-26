@@ -391,6 +391,8 @@ async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, mod
   const { res, started } = await openTurnStream(body, base, token);
   let ttftMs = null;
   let error = null;
+  let sdkSessionId = null;
+  let declined = 0;
   let buf = '';
   const decoder = new TextDecoder();
   try {
@@ -405,6 +407,14 @@ async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, mod
         const ev = JSON.parse(line.slice(6));
         if (ev.type === 'delta' && ttftMs === null) ttftMs = performance.now() - started;
         if (ev.type === 'error') error = `${ev.code}: ${ev.message}`;
+        if (ev.type === 'init' && ev.sessionId) sdkSessionId = ev.sessionId;
+        // Nobody answers a question or an approval in a bench run: decline it
+        // at once (as a user dismissing it would) so the turn carries on
+        // instead of parking until the decision times out.
+        if (ev.type === 'approval_request' && ev.requestId) {
+          declined += 1;
+          await declineDecision({ base, token, requestId: ev.requestId, sdkSessionId });
+        }
       }
     }
   } catch (err) {
@@ -413,7 +423,16 @@ async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, mod
     }
     throw err;
   }
-  return { ttftMs, totalMs: performance.now() - started, error };
+  return { ttftMs, totalMs: performance.now() - started, error, declined };
+}
+
+async function declineDecision({ base, token, requestId, sdkSessionId }) {
+  const r = await fetch(`${base}/agent/v2/decision`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ requestId, sdkSessionId, action: 'deny' }),
+  });
+  if (!r.ok) throw new Error(`decline decision HTTP ${r.status}: ${await r.text()}`);
 }
 
 async function fetchComposition(ctx) {
@@ -461,6 +480,7 @@ async function runSample({ scenario, ctx }) {
       billable: billableTokens(raw),
       ttftMs: t.ttftMs,
       totalMs: t.totalMs,
+      declinedDecisions: t.declined,
       split: {
         firstCallPromptTokens: comp.firstCallPromptTokens ?? null,
         systemPromptTokens: comp.systemPromptTokens ?? null,
