@@ -5,6 +5,14 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Security
+
+- **Review items keep only the fields their kind uses, and no credentials at any depth.** `POST /kb/review/submit`
+  now stores a per-kind whitelist of payload keys (dispatch: target, planId, taskIds, config, items; codegen-apply:
+  repoPath, taskId, files, tests, summary, pr, allowedRepos) and strips token / apiKey / secret / password /
+  credential / auth / bearer keys recursively; unknown payload keys are no longer stored or echoed. Migration 0045
+  scrubs existing rows. Rejecting a review item now requires it to be pending (409 `REVIEW_NOT_PENDING` otherwise).
+
 ### Added
 
 - **API v78: `GET /kb/meeting/:id?include=transcript`.** The meeting record gains an opt-in `transcript` field. The default response is unchanged. The Mac's Doc Gen uses it to read the transcript; `SERVER_API_VERSION` 77 → 78.
