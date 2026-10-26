@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 400,
+  "request": {
+    "body": {
+      "message": "x",
+      "skills": "regression",
+      "repoRoot": "/example/repo"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "skills must be an array of ids"
+    }
+  }
+}

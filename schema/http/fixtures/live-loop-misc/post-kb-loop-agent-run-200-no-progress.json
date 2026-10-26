@@ -1,0 +1,46 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 200,
+  "description": "The engine stopped the step for no progress; the reason is carried through as noProgressReason.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000
+    }
+  },
+  "response": {
+    "reply": "",
+    "changedPaths": [],
+    "changedExtraPaths": [],
+    "createdPaths": [],
+    "usage": {
+      "inputTokens": 5000,
+      "outputTokens": 90,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "costUsd": 0.01,
+      "numTurns": 7,
+      "durationMs": 22000
+    },
+    "resolvedSkills": [
+      "regression"
+    ],
+    "unresolvedSkills": [],
+    "truncatedSkills": [
+      "regression"
+    ],
+    "ran": true,
+    "resultSubtype": "no_progress",
+    "denied": [
+      {
+        "toolName": "Write",
+        "reason": "path is outside the repo root"
+      }
+    ],
+    "noProgressReason": "the same Read call was made 6 times with no file changed in between"
+  }
+}

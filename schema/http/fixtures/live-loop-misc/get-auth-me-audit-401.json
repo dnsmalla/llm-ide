@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /auth/me/audit",
+  "status": 401,
+  "request": {
+    "query": {
+      "limit": "5"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

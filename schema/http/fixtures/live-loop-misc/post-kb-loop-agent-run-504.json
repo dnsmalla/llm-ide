@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 504,
+  "description": "Cut off by the run timeout (timeoutMs 1000). The route aborts the engine and answers 504.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 1000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AGENT_RUN_TIMEOUT",
+      "message": "The agent run exceeded 1000 ms"
+    }
+  }
+}

@@ -1,0 +1,26 @@
+{
+  "endpoint": "POST /kb/live/:id/append",
+  "status": 429,
+  "description": "Caption appends are rate-limited per user (burst 30, then 5 a second). Retry-After is also set.",
+  "request": {
+    "params": {
+      "id": "sess-burst-1"
+    },
+    "body": {
+      "captions": [
+        {
+          "speaker": "Burst",
+          "text": "line 0",
+          "ts": 1767225600000,
+          "source": "meet"
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "retryAfterSec": 1
+    }
+  }
+}

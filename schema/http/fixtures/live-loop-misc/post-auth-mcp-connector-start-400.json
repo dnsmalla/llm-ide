@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/mcp-connector/start",
+  "status": 400,
+  "request": {
+    "body": {
+      "id": "nope"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Unknown MCP connector 'nope'"
+    }
+  }
+}

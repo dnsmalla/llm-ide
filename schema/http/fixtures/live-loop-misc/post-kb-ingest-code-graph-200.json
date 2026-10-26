@@ -1,0 +1,59 @@
+{
+  "endpoint": "POST /kb/ingest-code-graph",
+  "status": 200,
+  "description": "The repo is allow-listed; one of three nodes has no id and is dropped.",
+  "request": {
+    "body": {
+      "repoPath": "/example/repo",
+      "graph": {
+        "nodes": [
+          {
+            "id": "file:src/app.ts",
+            "title": "src/app.ts",
+            "kind": "file",
+            "metadata": {
+              "source_file": "src/app.ts",
+              "line": 1,
+              "language": "typescript"
+            }
+          },
+          {
+            "id": "symbol:src/app.ts#main",
+            "title": "main",
+            "kind": "function",
+            "metadata": {
+              "source_file": "src/app.ts",
+              "line": 12,
+              "language": "typescript",
+              "doc": "Entry point."
+            }
+          },
+          {
+            "title": "orphan without id",
+            "kind": "function"
+          }
+        ],
+        "edges": [
+          {
+            "fromId": "file:src/app.ts",
+            "toId": "symbol:src/app.ts#main",
+            "kind": "contains",
+            "confidence": "EXTRACTED"
+          }
+        ]
+      },
+      "replace": true,
+      "commitSha": "abc1234",
+      "generatedAt": "2026-10-26T04:00:00Z"
+    }
+  },
+  "response": {
+    "ok": true,
+    "repo": "/example/repo",
+    "nodes": 2,
+    "edges": 1,
+    "droppedNodes": 1,
+    "droppedEdges": 0,
+    "replaced": true
+  }
+}

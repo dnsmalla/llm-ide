@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/delete",
+  "status": 401,
+  "request": {
+    "body": {
+      "password": "not-the-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

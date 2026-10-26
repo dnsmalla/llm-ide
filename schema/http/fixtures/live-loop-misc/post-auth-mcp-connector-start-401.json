@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/mcp-connector/start",
+  "status": 401,
+  "request": {
+    "body": {
+      "id": "miro"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

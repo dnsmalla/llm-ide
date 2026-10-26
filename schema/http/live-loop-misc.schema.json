@@ -1,0 +1,1139 @@
+{
+  "description": "Live captions, the Loop headless agent step, the issue-schedule overlay, the code-graph upload, the account audit and delete, and the MCP connector start and status. Rows: POST /kb/loop/agent-run (feature auto_tasks), POST /kb/ingest-code-graph (feature code_graph_3d), GET, PUT and DELETE /kb/issue-schedule (feature gantt_issues), GET /kb/live/sessions, GET /kb/live/:id, POST /kb/live/:id/append, POST /kb/live/:id/finalize, GET /kb/live/:id/stream (live captions: core, always on), GET /auth/me/audit, POST /auth/me/delete, POST /auth/mcp-connector/start and GET /auth/mcp-connector/status. Feature-owned rows answer 404 {error: 'feature_disabled', feature: <key>} when that LLMIDE_FEATURES key is off; every such 404 is declared and captured by a second temp-DB server started with auto_tasks, gantt_issues and code_graph_3d off. Fixtures are real responses from `node server.mjs` on a temp DB (127.0.0.1), seeded through the API, with repo paths /example/repo. Exceptions, each stated on its fixture: the loop 200/400-provider/502/503/504 fixtures are produced in-process by calling routes/loop-agent.mjs with its engine seam (deps.runAgent, deps.validateRoot) stubbed, so no model is called and no CLI spawns; the route's response construction is what is captured. Not captured offline, so their 2xx is x-unspecified with a reason: the SSE live stream (no event schema exists in the repo), POST /auth/mcp-connector/start success and 502 (both reach the connector's remote MCP server for dynamic client registration). The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says. Request fields the fixtures do not exercise are x-optional.",
+  "$defs": {
+    "LiveCaption": {
+      "type": "object",
+      "required": [
+        "seq",
+        "speaker",
+        "text",
+        "ts",
+        "source"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "speaker": {
+          "type": "string"
+        },
+        "text": {
+          "type": "string"
+        },
+        "ts": {
+          "type": "number"
+        },
+        "source": {
+          "type": "string"
+        },
+        "meta": {
+          "x-optional": true,
+          "type": "object",
+          "properties": {
+            "planTaskId": {
+              "type": "string"
+            },
+            "score": {
+              "type": "number"
+            },
+            "reason": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "LiveSession": {
+      "type": "object",
+      "required": [
+        "sessionId",
+        "meetingTitle",
+        "startedAt",
+        "lastWrite",
+        "captionCount",
+        "sequence"
+      ],
+      "properties": {
+        "sessionId": {
+          "type": "string"
+        },
+        "meetingTitle": {
+          "type": "string"
+        },
+        "startedAt": {
+          "type": "number"
+        },
+        "lastWrite": {
+          "type": "number"
+        },
+        "captionCount": {
+          "type": "integer"
+        },
+        "sequence": {
+          "type": "integer"
+        }
+      }
+    },
+    "RateLimited": {
+      "type": "object",
+      "required": [
+        "error"
+      ],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": [
+            "code",
+            "retryAfterSec"
+          ],
+          "properties": {
+            "code": {
+              "const": "RATE_LIMITED"
+            },
+            "retryAfterSec": {
+              "type": "integer"
+            }
+          }
+        }
+      }
+    },
+    "FeatureDisabled": {
+      "type": "object",
+      "required": [
+        "error",
+        "feature"
+      ],
+      "properties": {
+        "error": {
+          "const": "feature_disabled"
+        },
+        "feature": {
+          "type": "string"
+        }
+      }
+    },
+    "ScheduleItem": {
+      "type": "object",
+      "required": [
+        "provider",
+        "repo",
+        "issueNumber",
+        "dependsOn",
+        "updatedAt"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string"
+        },
+        "repo": {
+          "type": "string"
+        },
+        "issueNumber": {
+          "type": "integer"
+        },
+        "startDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "dueDate": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "estimateDays": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "integer"
+          }
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      }
+    },
+    "LoopUsage": {
+      "type": "object",
+      "required": [
+        "inputTokens",
+        "outputTokens",
+        "cacheReadTokens",
+        "cacheCreationTokens",
+        "costUsd",
+        "numTurns",
+        "durationMs"
+      ],
+      "properties": {
+        "inputTokens": {
+          "type": "integer"
+        },
+        "outputTokens": {
+          "type": "integer"
+        },
+        "cacheReadTokens": {
+          "type": "integer"
+        },
+        "cacheCreationTokens": {
+          "type": "integer"
+        },
+        "costUsd": {
+          "type": "number"
+        },
+        "numTurns": {
+          "type": "integer"
+        },
+        "durationMs": {
+          "type": "number"
+        }
+      }
+    },
+    "CodeGraphNode": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Required by the server: a node without an id is dropped and counted in droppedNodes."
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "source_file": {
+              "type": "string"
+            },
+            "line": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "Mac sends it as a string (CodeGraph metadata is [String:String]); the server normalises with String()."
+            },
+            "language": {
+              "type": "string"
+            },
+            "doc": {
+              "type": "string"
+            }
+          }
+        }
+      }
+    },
+    "CodeGraphEdge": {
+      "type": "object",
+      "properties": {
+        "fromId": {
+          "type": "string"
+        },
+        "toId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "confidence": {
+          "type": "string"
+        }
+      }
+    },
+    "AuditItem": {
+      "type": "object",
+      "required": [
+        "id",
+        "action",
+        "resource",
+        "outcome",
+        "detail",
+        "createdAt",
+        "ip",
+        "userAgent"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "action": {
+          "type": "string"
+        },
+        "resource": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "outcome": {
+          "type": "string"
+        },
+        "detail": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
+        },
+        "createdAt": {
+          "type": "string"
+        },
+        "ip": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "userAgent": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /kb/loop/agent-run": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "message": {
+              "type": "string"
+            },
+            "skills": {
+              "type": [
+                "array",
+                "string"
+              ],
+              "items": {
+                "type": "string"
+              },
+              "description": "a string is refused with 400 (must be an array of ids)"
+            },
+            "repoRoot": {
+              "type": "string"
+            },
+            "extraRoots": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true
+            },
+            "language": {
+              "type": "string",
+              "x-optional": true
+            },
+            "model": {
+              "type": "string",
+              "x-optional": true
+            },
+            "provider": {
+              "type": "string",
+              "description": "anthropic or a custom:<id> provider"
+            },
+            "timeoutMs": {
+              "type": "number"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "The Loop step's result. The 200 fixtures are produced in-process (routes/loop-agent.mjs with the engine seam stubbed). The result fields are the engine's runLoopAgent return, forwarded verbatim by the route.",
+          "type": "object",
+          "required": [
+            "reply",
+            "changedPaths",
+            "changedExtraPaths",
+            "createdPaths",
+            "usage",
+            "resolvedSkills",
+            "unresolvedSkills",
+            "truncatedSkills",
+            "ran",
+            "resultSubtype",
+            "denied"
+          ],
+          "properties": {
+            "reply": {
+              "type": "string"
+            },
+            "changedPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "repo-relative"
+            },
+            "changedExtraPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "absolute paths under the extra roots"
+            },
+            "createdPaths": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "the subset of changedPaths that a Write created"
+            },
+            "usage": {
+              "$ref": "#/$defs/LoopUsage"
+            },
+            "resolvedSkills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "unresolvedSkills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "truncatedSkills": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "ran": {
+              "type": "boolean"
+            },
+            "resultSubtype": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "success, timeout, aborted, no_progress, or null"
+            },
+            "denied": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "toolName",
+                  "reason"
+                ],
+                "properties": {
+                  "toolName": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "noProgressReason": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Set with resultSubtype no_progress."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "#/$defs/FeatureDisabled"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "503": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "504": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/ingest-code-graph": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "repoPath": {
+              "type": "string"
+            },
+            "graph": {
+              "type": "object",
+              "properties": {
+                "nodes": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/CodeGraphNode"
+                  }
+                },
+                "edges": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/CodeGraphEdge"
+                  }
+                }
+              }
+            },
+            "replace": {
+              "type": "boolean"
+            },
+            "commitSha": {
+              "type": "string"
+            },
+            "generatedAt": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "repo",
+            "nodes",
+            "edges",
+            "droppedNodes",
+            "droppedEdges",
+            "replaced"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "repo": {
+              "type": "string",
+              "description": "canonical repo path"
+            },
+            "nodes": {
+              "type": "integer",
+              "description": "nodes written"
+            },
+            "edges": {
+              "type": "integer",
+              "description": "edges written"
+            },
+            "droppedNodes": {
+              "type": "integer"
+            },
+            "droppedEdges": {
+              "type": "integer"
+            },
+            "replaced": {
+              "type": "boolean"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "#/$defs/FeatureDisabled"
+        }
+      }
+    },
+    "GET /kb/issue-schedule": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "schedules",
+            "count"
+          ],
+          "properties": {
+            "schedules": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ScheduleItem"
+              }
+            },
+            "count": {
+              "type": "integer"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "#/$defs/FeatureDisabled"
+        }
+      }
+    },
+    "PUT /kb/issue-schedule": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "issueNumber": {
+              "type": "integer"
+            },
+            "startDate": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "dueDate": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "estimateDays": {
+              "type": [
+                "number",
+                "null"
+              ]
+            },
+            "dependsOn": {
+              "type": "array",
+              "items": {
+                "type": "integer"
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/ScheduleItem"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "#/$defs/FeatureDisabled"
+        }
+      }
+    },
+    "DELETE /kb/issue-schedule": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "repo": {
+              "type": "string"
+            },
+            "issueNumber": {
+              "type": [
+                "integer",
+                "string"
+              ],
+              "description": "a non-integer is refused with 400 VALIDATION_FAILED"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "deleted"
+          ],
+          "properties": {
+            "deleted": {
+              "type": "boolean",
+              "description": "false when no schedule existed"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "#/$defs/FeatureDisabled"
+        }
+      }
+    },
+    "GET /kb/live/sessions": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessions"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LiveSession"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/live/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "since": {
+              "type": "string",
+              "description": "decimal caption sequence; captions after it are returned"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "captions",
+            "sequence",
+            "finalized",
+            "exists"
+          ],
+          "properties": {
+            "captions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LiveCaption"
+              }
+            },
+            "sequence": {
+              "type": "integer"
+            },
+            "finalized": {
+              "type": "boolean"
+            },
+            "exists": {
+              "type": "boolean",
+              "description": "false for an unknown session id"
+            },
+            "meetingTitle": {
+              "type": "string",
+              "x-optional": true
+            },
+            "startedAt": {
+              "type": "number",
+              "x-optional": true
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/live/:id/append": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "captions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "speaker": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "ts": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string"
+                  },
+                  "meta": {
+                    "type": "object",
+                    "x-optional": true,
+                    "properties": {
+                      "planTaskId": {
+                        "type": "string"
+                      },
+                      "score": {
+                        "type": "number"
+                      },
+                      "reason": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "meetingTitle": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sequence",
+            "accepted"
+          ],
+          "properties": {
+            "sequence": {
+              "type": "integer"
+            },
+            "accepted": {
+              "type": "integer",
+              "description": "captions stored; 0 for duplicates, empty input or a finalized session"
+            },
+            "backpressure": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "true when the ring buffer is nearly full"
+            },
+            "finalized": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "true when the session was already finalized; late writes are dropped"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "#/$defs/RateLimited"
+        }
+      }
+    },
+    "POST /kb/live/:id/finalize": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "oneOf": [
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "finalized",
+                "captionCount",
+                "dbCleaned",
+                "cleanupError"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string"
+                },
+                "finalized": {
+                  "const": true
+                },
+                "captionCount": {
+                  "type": "integer"
+                },
+                "dbCleaned": {
+                  "type": "boolean",
+                  "description": "the meetings row written by crash-recovery was removed"
+                },
+                "cleanupError": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "sessionId",
+                "finalized",
+                "captionCount"
+              ],
+              "properties": {
+                "sessionId": {
+                  "type": "string"
+                },
+                "finalized": {
+                  "const": true
+                },
+                "captionCount": {
+                  "type": "integer",
+                  "description": "0: the id was never seen, so the route answers the empty summary"
+                }
+              }
+            }
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/live/:id/stream": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "Server-sent events: a leading newline, then data: lines carrying the GET /kb/live/:id body (captions, sequence, finalized, exists) whenever new captions arrive, a ': heartbeat' comment every 30 s, and an end after 10 minutes idle. There is no event schema in the repo, so the stream is described here and not typed."
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/audit": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "limit": {
+              "type": "string",
+              "description": "capped at 1000; default 100"
+            },
+            "action": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "items"
+          ],
+          "properties": {
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/AuditItem"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/delete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "password": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "counts"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "counts": {
+              "type": "object",
+              "description": "rows removed per table",
+              "additionalProperties": {
+                "type": "integer"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/mcp-connector/start": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string",
+              "description": "connector id, e.g. miro"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "Success returns { authUrl, state } for the Mac app to open, or { state, alreadyConnected: true } when the vault already holds a token. Not captured offline: the start contacts the connector's remote MCP server for dynamic client registration, which needs the network."
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "x-unspecified": "MCP_AUTH_START_FAILED when the remote MCP server cannot be reached or refuses registration. Needs the network, so not captured offline."
+        }
+      }
+    },
+    "GET /auth/mcp-connector/status": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "x-optional": true,
+              "description": "a sign-in flow started by POST /auth/mcp-connector/start; only its initiator may read it"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "id",
+            "connected",
+            "status"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "connected": {
+              "type": "boolean",
+              "description": "reads the vault: true when this user holds tokens for the connector"
+            },
+            "status": {
+              "type": "string",
+              "description": "pending, complete, error, or unknown (no flow, or already read)"
+            },
+            "account": {
+              "type": "string",
+              "x-optional": true
+            },
+            "message": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

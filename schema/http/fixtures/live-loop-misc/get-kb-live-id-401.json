@@ -1,0 +1,18 @@
+{
+  "endpoint": "GET /kb/live/:id",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    },
+    "query": {
+      "since": "0"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

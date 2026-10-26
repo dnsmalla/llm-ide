@@ -1,0 +1,37 @@
+{
+  "endpoint": "POST /kb/live/:id/append",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    },
+    "body": {
+      "captions": [
+        {
+          "speaker": "Alice Example",
+          "text": "Shall we start with the release checklist?",
+          "ts": 1767225600000,
+          "source": "meet"
+        },
+        {
+          "speaker": "Bob Example",
+          "text": "Yes, the checklist is in the shared folder.",
+          "ts": 1767225605000,
+          "source": "meet",
+          "meta": {
+            "planTaskId": "task-1",
+            "score": 0.9,
+            "reason": "matches the release plan"
+          }
+        }
+      ],
+      "meetingTitle": "Example standup"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

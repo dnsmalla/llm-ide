@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/ingest-code-graph",
+  "status": 400,
+  "request": {
+    "body": {
+      "repoPath": "/example/repo"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "repoPath and graph are required"
+    }
+  }
+}

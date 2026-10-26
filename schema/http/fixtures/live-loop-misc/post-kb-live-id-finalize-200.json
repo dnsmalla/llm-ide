@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/live/:id/finalize",
+  "status": 200,
+  "description": "Finalize a live session: the meeting row is removed and the in-memory session is marked finalized.",
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    }
+  },
+  "response": {
+    "sessionId": "sess-example-1",
+    "finalized": true,
+    "captionCount": 2,
+    "dbCleaned": true,
+    "cleanupError": null
+  }
+}

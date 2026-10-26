@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 502,
+  "description": "Any other engine failure is answered with a generic INTERNAL_ERROR; the detail stays in the server log.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INTERNAL_ERROR",
+      "message": "The Loop agent run failed. Please try again."
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "DELETE /kb/issue-schedule",
+  "status": 401,
+  "request": {
+    "body": {
+      "provider": "github",
+      "repo": "example/repo",
+      "issueNumber": 12
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

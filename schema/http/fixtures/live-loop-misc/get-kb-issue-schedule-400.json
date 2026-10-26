@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/issue-schedule",
+  "status": 400,
+  "request": {
+    "query": {
+      "provider": "github"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "repo must be \"owner/name\""
+    }
+  }
+}

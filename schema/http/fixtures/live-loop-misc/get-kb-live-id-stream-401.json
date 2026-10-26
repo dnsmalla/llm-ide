@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/live/:id/stream",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

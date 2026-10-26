@@ -1,0 +1,38 @@
+{
+  "endpoint": "POST /kb/loop/agent-run",
+  "status": 200,
+  "description": "A requested skill is not installed: nothing runs (ran false) and the unresolved id is named.",
+  "request": {
+    "body": {
+      "message": "Run the regression stage.",
+      "skills": [
+        "regression"
+      ],
+      "repoRoot": "/example/repo",
+      "timeoutMs": 60000
+    }
+  },
+  "response": {
+    "reply": "",
+    "changedPaths": [],
+    "changedExtraPaths": [],
+    "createdPaths": [],
+    "usage": {
+      "inputTokens": 0,
+      "outputTokens": 0,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "costUsd": 0,
+      "numTurns": 0,
+      "durationMs": 0
+    },
+    "resolvedSkills": [],
+    "unresolvedSkills": [
+      "missing-skill"
+    ],
+    "truncatedSkills": [],
+    "ran": false,
+    "resultSubtype": null,
+    "denied": []
+  }
+}

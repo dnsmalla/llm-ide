@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/ingest-code-graph",
+  "status": 403,
+  "request": {
+    "body": {
+      "repoPath": "/example/repo",
+      "graph": {
+        "nodes": [],
+        "edges": []
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PATH_NOT_APPROVED",
+      "message": "Repo path is not on your allow-list"
+    }
+  }
+}

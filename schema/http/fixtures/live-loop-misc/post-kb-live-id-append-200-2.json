@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/live/:id/append",
+  "status": 200,
+  "description": "An empty captions array is accepted as a no-op.",
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    },
+    "body": {
+      "captions": []
+    }
+  },
+  "response": {
+    "sequence": 0,
+    "accepted": 0
+  }
+}

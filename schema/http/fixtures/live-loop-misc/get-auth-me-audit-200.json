@@ -1,0 +1,43 @@
+{
+  "endpoint": "GET /auth/me/audit",
+  "status": 200,
+  "request": {
+    "query": {
+      "limit": "5"
+    }
+  },
+  "response": {
+    "items": [
+      {
+        "id": 7,
+        "action": "auth.repo_add",
+        "resource": "/example/repo",
+        "outcome": "success",
+        "detail": null,
+        "createdAt": "2026-10-26 07:19:25",
+        "ip": "127.0.0.1",
+        "userAgent": "node"
+      },
+      {
+        "id": 1,
+        "action": "auth.register",
+        "resource": null,
+        "outcome": "success",
+        "detail": null,
+        "createdAt": "2026-10-26 07:19:23",
+        "ip": "127.0.0.1",
+        "userAgent": "node"
+      },
+      {
+        "id": 2,
+        "action": "auth.login",
+        "resource": null,
+        "outcome": "success",
+        "detail": null,
+        "createdAt": "2026-10-26 07:19:23",
+        "ip": "127.0.0.1",
+        "userAgent": "node"
+      }
+    ]
+  }
+}

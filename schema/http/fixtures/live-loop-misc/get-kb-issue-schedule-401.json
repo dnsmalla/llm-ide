@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/issue-schedule",
+  "status": 401,
+  "request": {
+    "query": {
+      "provider": "github",
+      "repo": "example/repo"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}
