@@ -375,7 +375,7 @@ export type McpPlugin = {
   package?: {
     runner: string;
     name: string;
-    version: string;
+    version: string | null;
     tag?: string | null;
   };
 };
@@ -487,6 +487,18 @@ export type LlmSource = {
   enabled: boolean;
   /** skills/agents/commands/templates this user unchecked inside the source */
   disabledItemCount: number;
+  /** the last update's diff; present only after an update ran */
+  lastUpdate?: {
+    at: string;
+    fromRev: string | null;
+    toRev: string | null;
+    /** kind:name keys added */
+    added: string[];
+    /** kind:name keys removed */
+    removed: string[];
+  } | null;
+  /** kind:name keys of the source's items as of the last scan; written for local sources only */
+  knownItems?: string[];
 };
 
 export type LlmSourceUpdate = {
@@ -579,8 +591,8 @@ export type SearchHit = {
   entityId: string | null;
   title: string;
   body: string;
-  /** FTS5 bm25 rank (lower is a better match) */
-  rank: number;
+  /** FTS5 bm25 rank (lower is a better match); set on full-text hits only, absent on the empty-query listing and the entity/outcome fallbacks */
+  rank?: number;
   /** tickets: the source URL or id */
   ref?: string;
   /** tickets: provider, repo, state, number, labels, author, dates, isPR */
@@ -589,6 +601,8 @@ export type SearchHit = {
   meetingTitle?: string;
   /** meeting date, or the index time for tickets */
   date?: string;
+  /** meetings, empty-query listing only */
+  durationSec?: number;
 };
 
 export type Issue = {
@@ -942,6 +956,39 @@ export type CodeFile = {
   content: string;
 };
 
+/** A stored plan task, as getPlan and getTaskById return it: every column, always present (null when unset). Status is one of ALLOWED_TASK_STATUS (kb/plans.mjs); risk is low|med|high or null. Drafts from analyze-risks and code-sync use the looser Task def. */
+export type PlanTask = {
+  id: string;
+  planId: string;
+  position: number;
+  milestone?: string | null;
+  title: string;
+  description?: string | null;
+  owner?: string | null;
+  due?: string | null;
+  estimateDays?: number | null;
+  dependsOn: string[];
+  status: "planned" | "in_progress" | "done" | "blocked" | "cancelled";
+  risk: "low" | "med" | "high" | null;
+  riskReason?: string | null;
+  files: {
+    ref?: string;
+    title?: string;
+    bodyExcerpt?: string;
+    rank?: number;
+  }[];
+  symbols: {
+    symbol_id?: string;
+    title?: string;
+    kind?: string;
+    repo_id?: string;
+    source_file?: string;
+    line?: number;
+  }[];
+  /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots), or null. */
+  meta?: Record<string, unknown> | null;
+};
+
 export type ModelLimit = {
   provider: string;
   model: string;
@@ -1205,9 +1252,9 @@ export type GetKbAgentRunsResponse200 = {
     lastTickAt: number | null;
     /** the loop's last candidate decision (agents/meeting-agent.mjs recordDecision); null until the loop has judged one */
     lastDecision: {
-      reason?: string;
-      score?: number | null;
-      asked?: boolean;
+      reason: string;
+      score: number | null;
+      asked: boolean;
     } | null;
   })[];
 };
@@ -1935,7 +1982,47 @@ export type GetAuthMePluginsRequest = Record<string, never>;
 
 export type GetAuthMePluginsResponse200 = {
   pluginDir: string;
-  plugins: Record<string, unknown>[];
+  plugins: ({
+    /** plugin slug */
+    name?: string;
+    /** manifest version; null when the manifest declares none */
+    version?: string | null;
+    displayName?: string | null;
+    description?: string | null;
+    author?: string | null;
+    /** this user's enable state */
+    enabled?: boolean;
+    /** true when the Agent SDK can load the plugin from its .claude-plugin manifest */
+    sdkReadable?: boolean;
+    /** this user's nativePlugins preference */
+    nativePluginsOn?: boolean;
+    skillCount?: number;
+    /** {trigger, description} rows */
+    commands?: unknown[];
+    /** {name, description, allowedTools} rows */
+    subagents?: unknown[];
+    /** llmide | claude | codex */
+    format?: string;
+    /** 'claude' | 'codex' when a vendor bridge imported it, else null */
+    origin?: string | null;
+    sourceVersion?: string | null;
+    /** where git/marketplace/zip installs came from */
+    installSource?: string | null;
+    unsupportedComponents?: unknown[];
+    pendingComponents?: unknown[];
+    /** runnable hook handlers the plugin declares */
+    hookCount?: number;
+    declaresHooks?: boolean;
+    /** hook kinds llm-ide will run */
+    executableKinds?: unknown[];
+    hookNotes?: unknown[];
+    /** effective trust */
+    hooksTrusted?: boolean;
+    trustOutdated?: boolean;
+    trustOutdatedKinds?: unknown[];
+    nativeDelivery?: boolean;
+    mcpServerCount?: number;
+  })[];
 };
 
 export type GetAuthMePluginsResponse401 = CommonError;
@@ -3734,7 +3821,7 @@ export type GetKbPlanIdResponse200 = {
   meta: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
-  tasks: PlanningTask[];
+  tasks: PlanTask[];
 };
 
 export type GetKbPlanIdResponse401 = CommonError;
@@ -3794,7 +3881,7 @@ export type PostKbPlanSaveResponse200 = {
   meta: Record<string, unknown>;
   createdAt: string;
   updatedAt: string;
-  tasks: PlanningTask[];
+  tasks: PlanTask[];
 };
 
 export type PostKbPlanSaveResponse400 = CommonError;
@@ -3854,38 +3941,7 @@ export type PatchKbPlanTaskUpdateRequest = {
   };
 };
 
-/** A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols. */
-export type PatchKbPlanTaskUpdateResponse200 = {
-  id: string;
-  planId?: string;
-  position?: number;
-  milestone?: string | null;
-  title: string;
-  description?: string | null;
-  owner?: string | null;
-  due?: string | null;
-  estimateDays?: number | null;
-  dependsOn?: string[];
-  status: string;
-  risk?: string | null;
-  riskReason?: string | null;
-  files?: {
-    ref?: string;
-    title?: string;
-    bodyExcerpt?: string;
-    rank?: number;
-  }[];
-  symbols?: {
-    symbol_id?: string;
-    title?: string;
-    kind?: string;
-    repo_id?: string;
-    source_file?: string;
-    line?: number;
-  }[];
-  /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots). */
-  meta?: Record<string, unknown>;
-};
+export type PatchKbPlanTaskUpdateResponse200 = PlanTask;
 
 export type PatchKbPlanTaskUpdateResponse400 = CommonError;
 
@@ -3914,38 +3970,7 @@ export type PostKbPlanTaskUpdateRequest = {
   };
 };
 
-/** A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols. */
-export type PostKbPlanTaskUpdateResponse200 = {
-  id: string;
-  planId?: string;
-  position?: number;
-  milestone?: string | null;
-  title: string;
-  description?: string | null;
-  owner?: string | null;
-  due?: string | null;
-  estimateDays?: number | null;
-  dependsOn?: string[];
-  status: string;
-  risk?: string | null;
-  riskReason?: string | null;
-  files?: {
-    ref?: string;
-    title?: string;
-    bodyExcerpt?: string;
-    rank?: number;
-  }[];
-  symbols?: {
-    symbol_id?: string;
-    title?: string;
-    kind?: string;
-    repo_id?: string;
-    source_file?: string;
-    line?: number;
-  }[];
-  /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots). */
-  meta?: Record<string, unknown>;
-};
+export type PostKbPlanTaskUpdateResponse200 = PlanTask;
 
 export type PostKbPlanTaskUpdateResponse400 = CommonError;
 

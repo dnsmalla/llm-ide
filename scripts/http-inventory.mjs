@@ -353,7 +353,8 @@ function build() {
 
   const macFiles = walk(MAC_DIR_REL, (f) => f.endsWith('.swift'));
   const macResourceFiles = walk(`${MAC_DIR_REL}/Resources`, (f) => f.endsWith('.json'));
-  const extFiles = walk(EXT_SRC_REL, (f) => /\.(ts|tsx)$/.test(f) && !/\.d\.ts$/.test(f));
+  // api-types.ts is generated from these same routes; counting it as a caller would hide the gaps.
+  const extFiles = walk(EXT_SRC_REL, (f) => /\.(ts|tsx)$/.test(f) && !/\.d\.ts$/.test(f) && !/(^|\/)api-types\.ts$/.test(f));
   const macClients = collectClients([...macFiles, ...macResourceFiles]);
   const extClients = collectClients(extFiles);
 

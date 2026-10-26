@@ -25,7 +25,10 @@ const CHECK = process.argv.includes('--check');
 
 // Hand-written types in extension/src that deliberately keep a generated name.
 // Key: "<relative path>:<TypeName>", value: why it stays hand-written.
-const HAND_TYPE_ALLOWLIST = {};
+const HAND_TYPE_ALLOWLIST = {
+  'extension/src/lib/plan.ts:PlanTask':
+    'the client plan model (CodeRef/Plan/PlanTask in plan.ts) predates the generated stored PlanTask; both describe the same row, so migrating the client type is a follow-up, not part of the contract gate',
+};
 
 const METHODS = new Set(['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS']);
 const REQUEST_PARTS = ['query', 'params', 'body'];
@@ -146,10 +149,28 @@ function objectType(node, doc, ind) {
   return `${literal} & Record<string, ${index}>`;
 }
 
+// Keywords the generator maps to TypeScript. The schema contract (SCHEMA.md) allows
+// a smaller set, but a keyword the generator does not map would be silently typed
+// as `unknown` or dropped, so any other keyword fails the run instead.
+const HANDLED_KEYWORDS = new Set([
+  'type', 'properties', 'required', 'items', 'enum', 'const', '$ref', '$defs',
+  'additionalProperties', 'oneOf', 'description', 'title',
+  // metadata that does not change a type
+  '$schema', '$id', '$comment',
+]);
+
+function assertHandled(node, doc, ind) {
+  for (const key of Object.keys(node)) {
+    if (HANDLED_KEYWORDS.has(key) || key.startsWith('x-')) continue;
+    throw new Error(`${doc.rel}: unhandled schema keyword "${key}" (node at indent ${ind.length}); the generator maps only ${[...HANDLED_KEYWORDS].join(', ')} and x-* extensions`);
+  }
+}
+
 function ts(node, doc, ind = '') {
   if (node === undefined || node === null || typeof node !== 'object') return 'unknown';
   if (node.$ref) return refName(node.$ref, doc);
   if (node['x-unspecified'] !== undefined) return 'unknown';
+  assertHandled(node, doc, ind);
   if (node.const !== undefined) return JSON.stringify(node.const);
   if (Array.isArray(node.enum)) return union(node.enum.map((v) => JSON.stringify(v)));
   if (Array.isArray(node.oneOf)) return union(node.oneOf.map((v) => ts(v, doc, ind)));
@@ -289,11 +310,28 @@ function generate() {
   ].join('\n');
 
   const text = `${header}\n${body.join('\n')}\n${map}`;
+  assertUniqueExports(text);
   return { text, endpointCount, responseCount, typeCount: countExports(text) };
 }
 
+function exportedNames(text) {
+  return [...text.matchAll(/^export (?:type|interface) (\w+)/gm)].map((m) => m[1]);
+}
+
 function countExports(text) {
-  return (text.match(/^export (type|interface) \w+/gm) || []).length;
+  return exportedNames(text).length;
+}
+
+// Two declarations with one name would make one silently shadow the other in
+// api-types.ts (a def and an endpoint, two defs across documents), so fail the run.
+function assertUniqueExports(text) {
+  const seenNames = new Set();
+  const dupes = new Set();
+  for (const name of exportedNames(text)) {
+    if (seenNames.has(name)) dupes.add(name);
+    seenNames.add(name);
+  }
+  if (dupes.size) throw new Error(`duplicate exported type name(s) in api-types.ts: ${[...dupes].join(', ')}`);
 }
 
 // ---------- hand-written duplicate gate ----------
@@ -328,7 +366,7 @@ function handDuplicates(generatedNames) {
 // ---------- main ----------
 
 const { text, endpointCount, responseCount, typeCount } = generate();
-const generatedNames = new Set([...text.matchAll(/^export (?:type|interface) (\w+)/gm)].map((m) => m[1]));
+const generatedNames = new Set(exportedNames(text));
 
 if (CHECK) {
   const current = existsSync(OUT_FILE) ? readFileSync(OUT_FILE, 'utf8') : '';

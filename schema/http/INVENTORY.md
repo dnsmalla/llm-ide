@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 164 token, 12 public
 - Handler found: 174; no handler found: 2
-- No Mac and no extension caller: 35 (tests only: 22, comments/docs only: 11, no reference: 2)
+- No Mac and no extension caller: 35 (tests only: 22, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -62,11 +62,11 @@ Endpoints with no client caller (35):
 - `/kb/review/get/:id` — tests only
 - `/kb/review/reject` — tests only
 - `/kb/review/delete` — tests only
-- `/kb/outcomes/retry-failed` — no reference
+- `/kb/outcomes/retry-failed` — comments/docs only
 - `/kb/outcomes/task/:id` — comments/docs only
 - `/kb/outcomes/stats` — comments/docs only
 - `/kb/agent/feedback` — comments/docs only
-- `/kb/agent/feedback/by-task` — no reference
+- `/kb/agent/feedback/by-task` — comments/docs only
 - `/kb/agent/personas` — comments/docs only
 - `/kb/agent/personas/:id` — comments/docs only
 - `/kb/agent/personas/active` — comments/docs only
@@ -167,7 +167,7 @@ Endpoints with no client caller (35):
 | `/kb/review/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/review.mjs:257` | - | - | tests only |
 | `/kb/notify/slack` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1343` | - | `App.tsx` | - |
 | `/kb/outcomes/refresh` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1280` | `LlmIdeAPIClient+Export.swift` | `App.tsx` | - |
-| `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1329` | - | - | no reference |
+| `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1329` | - | - | comments/docs only |
 | `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1312` | - | - | comments/docs only |
 | `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1323` | - | - | comments/docs only |
 | `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:66` | `LlmIdeAPIClient+Live.swift` | `useRemoteSessions.ts` | - |
@@ -180,7 +180,7 @@ Endpoints with no client caller (35):
 | `/kb/agent/runs` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:103` | `LlmIdeAPIClient+Agent.swift` | `useAgent.ts` | - |
 | `/kb/agent/feedback` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:307` | - | - | comments/docs only |
 | `/kb/agent/feedback/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:324` | - | `AgentStatsBadge.tsx` | - |
-| `/kb/agent/feedback/by-task` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:333` | - | - | no reference |
+| `/kb/agent/feedback/by-task` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:333` | - | - | comments/docs only |
 | `/kb/agent/persona` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent.mjs:122` | `LlmIdeAPIClient+Agent.swift` | `AgentPersonaSettings.tsx` | - |
 | `/kb/agent/personas` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/agent.mjs:139` | - | - | comments/docs only |
 | `/kb/agent/personas/:id` | ALL_ENDPOINTS | DELETE, PUT | token | core | `extension/routes/agent.mjs:163` | - | - | comments/docs only |
