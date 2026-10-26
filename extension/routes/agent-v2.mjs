@@ -79,10 +79,14 @@ export function __setEngineImporterForTest(fn) {
 //
 // Test seam for the token bench (scripts/token-bench.mjs --fake): with
 // LLMIDE_BENCH_FAKE=1 a turn goes to llm_agent/sdk/bench-fake-engine.mjs, which
-// makes no model call and never loads the SDK. Refused under
-// NODE_ENV=production so a production server can never be switched to fake.
-export function benchFakeEngineEnabled(env = process.env) {
-  return env.LLMIDE_BENCH_FAKE === '1' && env.NODE_ENV !== 'production';
+// makes no model call and never loads the SDK. The switch needs BOTH the env
+// var AND the `--bench-fake` argv flag (the Mac app never passes the flag, and
+// it also strips LLMIDE_BENCH_FAKE from the child env), and it is refused under
+// NODE_ENV=production.
+export function benchFakeEngineEnabled(env = process.env, argv = process.argv) {
+  return env.LLMIDE_BENCH_FAKE === '1'
+    && argv.includes('--bench-fake')
+    && env.NODE_ENV !== 'production';
 }
 
 export async function runEngineTurn(args) {
