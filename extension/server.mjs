@@ -26,6 +26,7 @@ import { config, configSummary } from './core/config.mjs';
 import { sendJSON } from './core/utils.mjs';
 import { routeTimeoutMs, withRouteTimeout } from './server/route-timeout.mjs';
 import { buildHealthPayload, buildNotFoundDetails } from './server/control-plane.mjs';
+import { configureOsRoutes } from './routes/os.mjs';
 import { startBackgroundOutcomePoller, stopBackgroundOutcomePoller } from './agents/outcome-watcher.mjs';
 import { sweepStaleCliTempDirs } from './providers/providers.mjs';
 import { flushWarmCliPool } from './providers/warm-cli-pool.mjs';
@@ -273,7 +274,8 @@ const HOST = config.host;
 //   v76 — ALL_ENDPOINTS now lists /kb/issues, /kb/export-all, /kb/live/:id/stream and /kb/email/classify (already served by routes/router.mjs and routes/live.mjs; /health ENDPOINTS advertises them). No request or response shape change.
 //   v77 — GET /kb/usage/turn-composition?limit= → { turns: [...] }: the caller's newest v2 chat turns' measured context split (migration 0044): LLM-IDE parts as approximate tokens (chars/4), the SDK's own end-of-turn categories (sdk_*), tool-result size and user MCP server count. Additive; read-only.
 //   v78 — GET /kb/meeting/:id?include=transcript adds `transcript` (the stored transcript text) to the record; the default response is unchanged (no transcript). Used by the Mac's Doc Gen.
-const SERVER_API_VERSION = 78;
+//   v79 — GET /kb/os/state: the read-only System view aggregate (feature set + kit table, health checks, this user's running chat turns / meeting-agent runs / live sessions with their cancel routes, activity, token usage by window, turn composition, knowledge counts). No model call, no write. Additive.
+const SERVER_API_VERSION = 79;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -387,6 +389,7 @@ const ALL_ENDPOINTS = [
   '/kb/chat/sessions',
   '/kb/chat/sessions/:id',
   '/kb/chat/sessions/:id/messages',
+  '/kb/os/state',
 ];
 const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
 
@@ -627,35 +630,12 @@ const server = http.createServer(async (req, res) => {
   // also surface schema status, uptime, and a Claude-CLI presence
   // indicator so an operator can spot problems without grepping logs.
   if (req.method === 'GET' && (req.url === '/' || req.url === '/health')) {
-    let migration = null;
-    let dbOk = false;
-    try { migration = migrationStatus(getDb({ logger })); dbOk = true; } catch { /* dbOk stays false */ }
-    // Mirror the cached Claude-CLI probe result; the probe runs at
-    // boot and once an hour after.  We don't run it inline because
-    // execFile would add ~50ms to every health request.
-    const claude = claudeProbeResult();
-    // Cheap existsSync check, not a fresh clone/fetch — resolveCentralSkillsRepo()
-    // is pure path resolution (see core/skills-repo.mjs).
-    let skillsAvailable = false;
-    try {
-      const { resolveCentralSkillsRepo } = await import('./core/skills-repo.mjs');
-      skillsAvailable = !!resolveCentralSkillsRepo();
-    } catch { /* skillsAvailable stays false */ }
     // /health is unauthenticated. Minimal liveness shape only — the
     // verbose detail (pid, env, schema, endpoint list) used to be
     // gated behind ?debug=1 but that was no gate at all: any caller
     // could just append the query. Operators who need verbose status
     // should authenticate and hit /metrics or /auth/me/audit.
-    sendJSON(res, 200, buildHealthPayload({
-      dbOk,
-      claude,
-      migration,
-      apiVersion: SERVER_API_VERSION,
-      endpoints: ENDPOINTS,
-      serverStartedAt: SERVER_STARTED_AT,
-      skillsAvailable,
-      features: config.features,
-    }));
+    sendJSON(res, 200, await collectHealth());
     return;
   }
 
@@ -890,6 +870,38 @@ const server = http.createServer(async (req, res) => {
 });
 
 const SERVER_STARTED_AT = Date.now();
+
+// The health payload /health serves, built from the same probes. The System
+// view (GET /kb/os/state) reads its `status` and `checks` from here too, so
+// the two can never disagree.
+async function collectHealth() {
+  let migration = null;
+  let dbOk = false;
+  try { migration = migrationStatus(getDb({ logger })); dbOk = true; } catch { /* dbOk stays false */ }
+  // Mirror the cached Claude-CLI probe result; the probe runs at
+  // boot and once an hour after.  We don't run it inline because
+  // execFile would add ~50ms to every health request.
+  const claude = claudeProbeResult();
+  // Cheap existsSync check, not a fresh clone/fetch — resolveCentralSkillsRepo()
+  // is pure path resolution (see core/skills-repo.mjs).
+  let skillsAvailable = false;
+  try {
+    const { resolveCentralSkillsRepo } = await import('./core/skills-repo.mjs');
+    skillsAvailable = !!resolveCentralSkillsRepo();
+  } catch { /* skillsAvailable stays false */ }
+  return buildHealthPayload({
+    dbOk,
+    claude,
+    migration,
+    apiVersion: SERVER_API_VERSION,
+    endpoints: ENDPOINTS,
+    serverStartedAt: SERVER_STARTED_AT,
+    skillsAvailable,
+    features: config.features,
+  });
+}
+
+configureOsRoutes({ apiVersion: SERVER_API_VERSION, health: collectHealth });
 
 // Claude-CLI presence probe.  Runs at boot and every hour; cached so
 // /health is cheap.  We treat a missing CLI as "degraded" rather than

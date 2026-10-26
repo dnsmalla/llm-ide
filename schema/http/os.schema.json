@@ -1,0 +1,792 @@
+{
+  "description": "The Agentic OS view's read-only aggregate (os-kit, OS-1): GET /kb/os/state. Roster: the one method-path below is in ALL_ENDPOINTS (extension/server.mjs) and served by extension/routes/os.mjs, dispatched from extension/routes/router.mjs. Always on (no LLMIDE_FEATURES group owns it). Token-protected and user-scoped: every number is this user's. No model call and no write. Every value is read from data the server already records: the feature set and kit table, the /health checks (the same probes /health runs), this process's in-flight chat turns, meeting-agent runs and live capture sessions, and the activity, usage_ledger, turn_composition, sources, meetings, review_items, outcomes, project_memory_ledger and code_graph_meta tables. Each running item carries the cancel call that stops it; a live capture session has none (null). macOnly names the kits the server cannot see yet (Loop, Auto Tasks), which are shown from the Mac. Token windows: day = last 24 h, week = last 7 days. billable = input + output + 0.1 x cache read + 1.25 x cache write (the token-bench weights); a CLI run that reports no token counts counts as one call and its runs, with zero tokens. Captured fixture: a temp DB seeded with example data (one API turn with cache tokens, one CLI run, two activity rows, one memory fact, one source, one code-graph repo, one pending review, two outcome rows, one parked chat turn and one live session); the response is the handler's return value, not a live HTTP exchange. The live contract test replays the request against an empty user, so the nullable types cover the empty state.",
+  "$defs": {
+    "Cancel": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "How to stop the item: method and path of the existing route, and the JSON body to send. null for an item with no cancel route (a live capture session).",
+      "properties": {
+        "method": {
+          "type": "string",
+          "enum": [
+            "POST"
+          ]
+        },
+        "path": {
+          "type": "string",
+          "enum": [
+            "/agent/v2/cancel",
+            "/kb/agent/stop"
+          ]
+        },
+        "body": {
+          "type": "object",
+          "properties": {
+            "chatSessionId": {
+              "type": "string",
+              "x-optional": true
+            },
+            "sessionId": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      }
+    },
+    "KitStatus": {
+      "type": "object",
+      "required": [
+        "id",
+        "requires",
+        "enabled"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "requires": {
+          "type": "array",
+          "description": "The LLMIDE_FEATURES keys this kit depends on; empty = always on.",
+          "items": {
+            "type": "string"
+          }
+        },
+        "enabled": {
+          "type": "boolean"
+        }
+      }
+    },
+    "UsageCounts": {
+      "type": "object",
+      "required": [
+        "calls",
+        "runs",
+        "input",
+        "output",
+        "cacheRead",
+        "cacheWrite",
+        "billable"
+      ],
+      "properties": {
+        "calls": {
+          "type": "integer"
+        },
+        "runs": {
+          "type": "integer"
+        },
+        "input": {
+          "type": "integer"
+        },
+        "output": {
+          "type": "integer"
+        },
+        "cacheRead": {
+          "type": "integer"
+        },
+        "cacheWrite": {
+          "type": "integer"
+        },
+        "billable": {
+          "type": "integer"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /kb/os/state": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "window": {
+              "type": "string",
+              "description": "day (default) or week; any other value is a 400 VALIDATION_FAILED."
+            },
+            "activity": {
+              "type": "string",
+              "description": "How many activity rows to return: a positive integer, default 30, capped at 100. Any other value falls back to 30."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "generatedAt",
+            "apiVersion",
+            "system",
+            "running",
+            "activity",
+            "tokens",
+            "knowledge",
+            "macOnly"
+          ],
+          "properties": {
+            "generatedAt": {
+              "type": "string",
+              "description": "ISO 8601 time the aggregate was built."
+            },
+            "apiVersion": {
+              "type": "integer",
+              "description": "SERVER_API_VERSION of this server."
+            },
+            "system": {
+              "type": "object",
+              "required": [
+                "features",
+                "kits",
+                "status",
+                "checks"
+              ],
+              "properties": {
+                "features": {
+                  "type": [
+                    "array",
+                    "null"
+                  ],
+                  "description": "The sorted enabled LLMIDE_FEATURES keys, or null when every feature is on.",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "kits": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/KitStatus"
+                  }
+                },
+                "status": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "degraded"
+                  ],
+                  "description": "Same as /health: ok when the DB, the Claude CLI and the skills checks all pass."
+                },
+                "checks": {
+                  "type": "object",
+                  "required": [
+                    "db",
+                    "claude",
+                    "skills"
+                  ],
+                  "properties": {
+                    "db": {
+                      "type": "boolean"
+                    },
+                    "claude": {
+                      "type": "boolean"
+                    },
+                    "claudeError": {
+                      "type": "string",
+                      "x-optional": true
+                    },
+                    "skills": {
+                      "type": "boolean"
+                    },
+                    "skillsError": {
+                      "type": "string",
+                      "x-optional": true
+                    }
+                  }
+                }
+              }
+            },
+            "running": {
+              "type": "object",
+              "required": [
+                "chatTurns",
+                "meetingAgentRuns",
+                "liveSessions"
+              ],
+              "properties": {
+                "chatTurns": {
+                  "type": "array",
+                  "description": "This user's v2 chat turns running now (the in-process turn lock). Cancel: POST /agent/v2/cancel.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "chatSessionId",
+                      "startedAt",
+                      "cancel"
+                    ],
+                    "properties": {
+                      "chatSessionId": {
+                        "type": "string"
+                      },
+                      "startedAt": {
+                        "type": "string"
+                      },
+                      "cancel": {
+                        "$ref": "#/$defs/Cancel"
+                      }
+                    }
+                  }
+                },
+                "meetingAgentRuns": {
+                  "type": "array",
+                  "description": "This user's meeting-agent runs attached to a capture session. Cancel: POST /kb/agent/stop.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sessionId",
+                      "planId",
+                      "startedAt",
+                      "lastTickAt",
+                      "cancel"
+                    ],
+                    "properties": {
+                      "sessionId": {
+                        "type": "string"
+                      },
+                      "planId": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "startedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastTickAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "cancel": {
+                        "$ref": "#/$defs/Cancel"
+                      }
+                    }
+                  }
+                },
+                "liveSessions": {
+                  "type": "array",
+                  "description": "This user's live caption sessions not yet finalized. No cancel route: a session ends when its capture client stops.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "sessionId",
+                      "meetingTitle",
+                      "startedAt",
+                      "lastWrite",
+                      "captionCount",
+                      "cancel"
+                    ],
+                    "properties": {
+                      "sessionId": {
+                        "type": "string"
+                      },
+                      "meetingTitle": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "startedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "lastWrite": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "captionCount": {
+                        "type": "integer"
+                      },
+                      "cancel": {
+                        "type": "null",
+                        "description": "Always null: a live capture session has no cancel route (it ends when its capture client stops)."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "activity": {
+              "type": "object",
+              "required": [
+                "unread",
+                "items"
+              ],
+              "properties": {
+                "unread": {
+                  "type": "integer",
+                  "description": "Activity rows newer than the user's last-seen cursor."
+                },
+                "items": {
+                  "type": "array",
+                  "description": "Newest first, from the activity table (kb/activity.mjs).",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "id",
+                      "kind",
+                      "title",
+                      "detail",
+                      "link",
+                      "createdAt"
+                    ],
+                    "properties": {
+                      "id": {
+                        "type": "integer"
+                      },
+                      "kind": {
+                        "type": "string"
+                      },
+                      "title": {
+                        "type": "string"
+                      },
+                      "detail": {
+                        "type": [
+                          "object",
+                          "null"
+                        ],
+                        "additionalProperties": true,
+                        "description": "The event's structured detail; its keys depend on the kind, so they are not declared."
+                      },
+                      "link": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "createdAt": {
+                        "type": "string",
+                        "description": "Local time as stored (YYYY-MM-DD HH:MM:SS)."
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "tokens": {
+              "type": "object",
+              "required": [
+                "window",
+                "windowHours",
+                "totals",
+                "byModel",
+                "bySource",
+                "byEndpoint",
+                "turnComposition"
+              ],
+              "properties": {
+                "window": {
+                  "type": "string",
+                  "enum": [
+                    "day",
+                    "week"
+                  ]
+                },
+                "windowHours": {
+                  "type": "integer",
+                  "enum": [
+                    24,
+                    168
+                  ]
+                },
+                "totals": {
+                  "type": "object",
+                  "required": [
+                    "calls",
+                    "runs",
+                    "input",
+                    "output",
+                    "cacheRead",
+                    "cacheWrite",
+                    "billable"
+                  ],
+                  "properties": {
+                    "calls": {
+                      "type": "integer"
+                    },
+                    "runs": {
+                      "type": "integer"
+                    },
+                    "input": {
+                      "type": "integer"
+                    },
+                    "output": {
+                      "type": "integer"
+                    },
+                    "cacheRead": {
+                      "type": "integer"
+                    },
+                    "cacheWrite": {
+                      "type": "integer"
+                    },
+                    "billable": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "byModel": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "calls",
+                      "runs",
+                      "input",
+                      "output",
+                      "cacheRead",
+                      "cacheWrite",
+                      "billable",
+                      "provider",
+                      "model"
+                    ],
+                    "properties": {
+                      "calls": {
+                        "type": "integer"
+                      },
+                      "runs": {
+                        "type": "integer"
+                      },
+                      "input": {
+                        "type": "integer"
+                      },
+                      "output": {
+                        "type": "integer"
+                      },
+                      "cacheRead": {
+                        "type": "integer"
+                      },
+                      "cacheWrite": {
+                        "type": "integer"
+                      },
+                      "billable": {
+                        "type": "integer"
+                      },
+                      "provider": {
+                        "type": "string"
+                      },
+                      "model": {
+                        "type": "string"
+                      }
+                    }
+                  }
+                },
+                "bySource": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "calls",
+                      "runs",
+                      "input",
+                      "output",
+                      "cacheRead",
+                      "cacheWrite",
+                      "billable",
+                      "source"
+                    ],
+                    "properties": {
+                      "calls": {
+                        "type": "integer"
+                      },
+                      "runs": {
+                        "type": "integer"
+                      },
+                      "input": {
+                        "type": "integer"
+                      },
+                      "output": {
+                        "type": "integer"
+                      },
+                      "cacheRead": {
+                        "type": "integer"
+                      },
+                      "cacheWrite": {
+                        "type": "integer"
+                      },
+                      "billable": {
+                        "type": "integer"
+                      },
+                      "source": {
+                        "type": "string",
+                        "description": "api, cli or auto-task."
+                      }
+                    }
+                  }
+                },
+                "byEndpoint": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "calls",
+                      "runs",
+                      "input",
+                      "output",
+                      "cacheRead",
+                      "cacheWrite",
+                      "billable",
+                      "endpoint"
+                    ],
+                    "properties": {
+                      "calls": {
+                        "type": "integer"
+                      },
+                      "runs": {
+                        "type": "integer"
+                      },
+                      "input": {
+                        "type": "integer"
+                      },
+                      "output": {
+                        "type": "integer"
+                      },
+                      "cacheRead": {
+                        "type": "integer"
+                      },
+                      "cacheWrite": {
+                        "type": "integer"
+                      },
+                      "billable": {
+                        "type": "integer"
+                      },
+                      "endpoint": {
+                        "type": [
+                          "string",
+                          "null"
+                        ],
+                        "description": "null when the row recorded no endpoint."
+                      }
+                    }
+                  }
+                },
+                "turnComposition": {
+                  "type": "object",
+                  "required": [
+                    "turns",
+                    "avgFirstCallPromptTokens",
+                    "avgPrefixTokens",
+                    "avgFenceTokens",
+                    "avgToolResultTokens"
+                  ],
+                  "description": "Averages over the caller's newest 50 v2 turns (turn_composition, kb/turn-composition.mjs). All are chars/4 estimates of LLM-IDE text except avgFirstCallPromptTokens, which is the first API call's real prompt size (input + cache write + cache read). Prefix = system prompt + skills append + LLM-IDE tool definitions; fence = context + memory + skills fences; null when no turn reported the value.",
+                  "properties": {
+                    "turns": {
+                      "type": "integer"
+                    },
+                    "avgFirstCallPromptTokens": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "avgPrefixTokens": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "avgFenceTokens": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    },
+                    "avgToolResultTokens": {
+                      "type": [
+                        "integer",
+                        "null"
+                      ]
+                    }
+                  }
+                }
+              }
+            },
+            "knowledge": {
+              "type": "object",
+              "required": [
+                "sources",
+                "meetings",
+                "pendingReviews",
+                "outcomes",
+                "codeGraph",
+                "projectMemory"
+              ],
+              "properties": {
+                "sources": {
+                  "type": "object",
+                  "required": [
+                    "total",
+                    "byKind"
+                  ],
+                  "properties": {
+                    "total": {
+                      "type": "integer"
+                    },
+                    "byKind": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "required": [
+                          "kind",
+                          "count",
+                          "lastIndexedAt"
+                        ],
+                        "properties": {
+                          "kind": {
+                            "type": "string"
+                          },
+                          "count": {
+                            "type": "integer"
+                          },
+                          "lastIndexedAt": {
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "meetings": {
+                  "type": "object",
+                  "required": [
+                    "count"
+                  ],
+                  "properties": {
+                    "count": {
+                      "type": "integer"
+                    }
+                  }
+                },
+                "pendingReviews": {
+                  "type": "integer",
+                  "description": "review_items with status pending."
+                },
+                "outcomes": {
+                  "type": "object",
+                  "required": [
+                    "total",
+                    "terminal",
+                    "byState"
+                  ],
+                  "properties": {
+                    "total": {
+                      "type": "integer"
+                    },
+                    "terminal": {
+                      "type": "integer"
+                    },
+                    "byState": {
+                      "type": "object",
+                      "description": "Row count per outcome state (open, merged, closed, ...).",
+                      "additionalProperties": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                },
+                "codeGraph": {
+                  "type": "array",
+                  "description": "Freshness of each code graph this user has uploaded.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "repoId",
+                      "commitSha",
+                      "generatedAt"
+                    ],
+                    "properties": {
+                      "repoId": {
+                        "type": "string"
+                      },
+                      "commitSha": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      },
+                      "generatedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                },
+                "projectMemory": {
+                  "type": "array",
+                  "description": "Per repo, the project-memory ledger facts (kb/memory-ledger.mjs): active and superseded counts.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "repoRoot",
+                      "facts",
+                      "active",
+                      "superseded",
+                      "lastConfirmedAt"
+                    ],
+                    "properties": {
+                      "repoRoot": {
+                        "type": "string"
+                      },
+                      "facts": {
+                        "type": "integer"
+                      },
+                      "active": {
+                        "type": "integer"
+                      },
+                      "superseded": {
+                        "type": "integer"
+                      },
+                      "lastConfirmedAt": {
+                        "type": [
+                          "string",
+                          "null"
+                        ]
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "macOnly": {
+              "type": "object",
+              "description": "Kits the server cannot see yet; shown from the Mac app (the v1 gap).",
+              "required": [
+                "loop",
+                "autoTasks"
+              ],
+              "properties": {
+                "loop": {
+                  "type": "string",
+                  "const": "on this Mac"
+                },
+                "autoTasks": {
+                  "type": "string",
+                  "const": "on this Mac"
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

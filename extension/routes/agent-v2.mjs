@@ -163,6 +163,23 @@ function chatSessionLockKey(userId, chatSessionId) {
 // out: the app showed the chat as idle, so there was no Stop to press.
 const inFlightAborts = new Map();
 
+// Who owns each in-flight turn and when it started, by the same lock key.
+// Read-only view for GET /kb/os/state (listInFlightChatTurns).
+const inFlightTurns = new Map();
+
+/**
+ * This user's chat turns running right now (read-only). Entries of other
+ * users are never returned: the owner is compared, not parsed from the key.
+ */
+export function listInFlightChatTurns(userId) {
+  const out = [];
+  for (const turn of inFlightTurns.values()) {
+    if (turn.userId !== userId) continue;
+    out.push({ chatSessionId: turn.chatSessionId, startedAt: new Date(turn.startedAt).toISOString() });
+  }
+  return out.sort((a, b) => (a.startedAt < b.startedAt ? -1 : a.startedAt > b.startedAt ? 1 : 0));
+}
+
 // The 409 both lock checks in handleV2Stream answer with — one body so the
 // early probe and the authoritative check can never drift apart.
 //
@@ -415,11 +432,13 @@ async function handleV2Stream(req, res, userId, deps) {
     return true;
   }
   inFlightChatSessions.add(lockKey);
+  inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt });
   try {
     return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
   } finally {
     inFlightChatSessions.delete(lockKey);
     inFlightAborts.delete(lockKey);
+    inFlightTurns.delete(lockKey);
   }
 }
 

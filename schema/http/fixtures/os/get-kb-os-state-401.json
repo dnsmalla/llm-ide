@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/os/state",
+  "status": 401,
+  "description": "No access token: the global auth middleware answers before routing.",
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/os/state",
+  "status": 400,
+  "description": "window must be day or week. The message is the handler's own text.",
+  "request": {
+    "query": {
+      "window": "year"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "window must be \"day\" or \"week\""
+    }
+  }
+}
