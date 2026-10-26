@@ -385,6 +385,10 @@ let package = Package(
                 // Resources/monaco/ except by re-running that script — edit
                 // Resources/monaco-src/ instead for the hand-authored parts.
                 .copy("Resources/monaco"),
+                // OS view: the React bundle (Vite build of the ui-kit tokens)
+                // shown in a WKWebView by Features/System. Placeholder until the
+                // real bundle lands; same offline, bundled-files policy as monaco.
+                .copy("Resources/os-view"),
                 // NOT mermaid: it used to be vendored here (3.4 MB) and is now
                 // an optional component downloaded on demand, pinned by version
                 // and SHA-256 — see Core/Editor/Mermaid.swift. Do not re-add a

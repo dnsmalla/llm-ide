@@ -137,6 +137,7 @@ extension ShellSection {
 
         // ── Neutral ──────────────────────────────────────
         case .settings:   return .gray
+        case .system:     return Color(red: 0.42, green: 0.50, blue: 0.92) // indigo-slate, Home landing
         }
     }
 }

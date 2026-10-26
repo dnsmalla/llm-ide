@@ -20,6 +20,10 @@ import Foundation
 /// migration, not a refactor.
 enum ShellSection: String, Hashable, CaseIterable {
     case library, live, explorer, search, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, loopEngine, settings
+    /// The OS view (React bundle in a WKWebView). Not a menu item: it is
+    /// reached only as the Home landing (Settings → Home opens → System, which
+    /// is also the default). Always compiled — `backingFeature` is nil.
+    case system
 
     /// User-friendly label — single source of truth so the sidebar
     /// row, the settings toggle and any future menu item agree.
@@ -39,6 +43,7 @@ enum ShellSection: String, Hashable, CaseIterable {
         case .codeGraph: return "Code Graph"
         case .loopEngine: return "Loop"
         case .settings:  return "Settings"
+        case .system:    return "System"
         }
     }
 
@@ -58,8 +63,17 @@ enum ShellSection: String, Hashable, CaseIterable {
         case .codeGraph: return "point.3.connected.trianglepath.dotted"
         case .loopEngine: return "repeat.circle"
         case .settings:  return "gearshape"
+        case .system:    return "square.grid.3x3.topleft.filled"
         }
     }
+
+    /// The top-bar tool buttons, in display order. `.live` appears only while a
+    /// session runs (AppShell filters it), and `.system` is deliberately absent:
+    /// it is the Home landing, never a menu item.
+    static let toolbarOrder: [ShellSection] = [
+        .codeGraph, .autoCode, .conflicts, .issues,
+        .gantt, .loopEngine, .docGen, .visual, .library, .live,
+    ]
 
     /// Sections the user is allowed to hide from the top bar. Library is the
     /// landing fallback when hidden sections are selected; Settings is the
