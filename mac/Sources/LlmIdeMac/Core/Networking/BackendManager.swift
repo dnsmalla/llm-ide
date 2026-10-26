@@ -92,6 +92,8 @@ final class BackendManager {
     /// feature route groups to load (comma-separated `AppFeature` raw values;
     /// unset/empty → all, the same semantics as `mac/Package.swift`).
     nonisolated static let featuresEnvKey = "LLMIDE_FEATURES"
+    /// Token-bench fake-engine switches (see extension/routes/agent-v2.mjs).
+    nonisolated static let benchFakeEnvKeys = ["LLMIDE_BENCH_FAKE", "LLMIDE_BENCH_FAKE_TOKEN"]
 
     /// Returns the ENABLED feature keys to hand the spawned server, or nil to
     /// leave `LLMIDE_FEATURES` unset (the server then loads every group).
@@ -470,6 +472,12 @@ final class BackendManager {
         // must follow the user's ACTIVE toggles, so the inherited value is
         // always dropped and only the app's own state is written back.
         env.removeValue(forKey: featuresEnvKey)
+        // The token bench's fake-engine seam (scripts/token-bench.mjs --fake)
+        // is a developer switch. An inherited value must never turn the
+        // shipped app's chat into the synthetic engine, so it is dropped here
+        // too; the server also needs the `--bench-fake` argv flag, which the
+        // app never passes.
+        for key in benchFakeEnvKeys { env.removeValue(forKey: key) }
         if let featureKeys {
             env[featuresEnvKey] = featureKeys.sorted().joined(separator: ",")
         }
