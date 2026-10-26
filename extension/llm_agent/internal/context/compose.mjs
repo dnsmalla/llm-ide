@@ -88,9 +88,32 @@ function renderGitStatus(gs) {
   return `Staged: ${staged}, unstaged: ${unstaged}; ${upstream}`;
 }
 
-export function composeGitContext(agentContext) {
-  const branch = typeof agentContext?.currentBranch === 'string'
+function gitBranch(agentContext) {
+  return typeof agentContext?.currentBranch === 'string'
     ? agentContext.currentBranch.trim().slice(0, 200) : '';
+}
+
+/**
+ * What decides whether the git block is re-sent: the branch and whether the
+ * tree is dirty. Raw counts are left out on purpose: the agent's own file
+ * edits move them every turn, and resending the block each time would bloat
+ * the transcript. A sent block still shows the counts it had at that time.
+ */
+export function gitStateKey(agentContext) {
+  const gs = agentContext?.gitStatus;
+  let dirty = 'unknown';
+  if (typeof gs === 'string') dirty = `text:${gs.trim()}`;
+  else if (gs && typeof gs === 'object') {
+    const counts = [gs.staged, gs.unstaged, gs.untracked].map(gitCount);
+    if (counts[0] !== null && counts[1] !== null) {
+      dirty = counts.some((n) => n !== null && n > 0);
+    }
+  }
+  return JSON.stringify({ branch: gitBranch(agentContext), dirty });
+}
+
+export function composeGitContext(agentContext) {
+  const branch = gitBranch(agentContext);
   const status = renderGitStatus(agentContext?.gitStatus);
   if (!branch && !status) return '';
   const lines = ['## Git state (the active repo)'];

@@ -44,7 +44,7 @@ import {
   readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
   buildUserPluginDelivery,
 } from '../skills/index.mjs';
-import { composeSystemContext, composeRecentContext, composeGitContext } from '../internal/context/compose.mjs';
+import { composeSystemContext, composeRecentContext, composeGitContext, gitStateKey } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
 import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } from './compact-system-prompt.mjs';
@@ -726,7 +726,7 @@ export function buildEngineOptions(
   const carriesGit = !!agentContext && ('currentBranch' in agentContext || 'gitStatus' in agentContext);
   if (carriesGit) {
     const gitText = composeGitContext(agentContext);
-    const gitHash = gitText ? contentHash(gitText) : null;
+    const gitHash = gitText ? contentHash(gitStateKey(agentContext)) : null;
     if (gitText && gitHash !== prev?.gitHash) {
       contextParts.push(prev?.gitHash ? `${gitText}\n\n(Updated since your last view of the repo state.)` : gitText);
     } else if (!gitText && next.gitHash) {

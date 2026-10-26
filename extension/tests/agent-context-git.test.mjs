@@ -72,6 +72,16 @@ test('a request that drops the git keys says once that the branch is stale', () 
   assert.match(back.prompt, /Current branch: feat\/x/, 'a repo state that returns is sent again');
 });
 
+test('a count-only change does not resend the block; a dirty flip or a branch change does', () => {
+  const first = turn({ currentBranch: 'feat/x', gitStatus: STATUS });
+  const moreStaged = turn({ currentBranch: 'feat/x', gitStatus: { ...STATUS, staged: 4, unstaged: 0 } }, first.meta.delivered);
+  assert.ok(!moreStaged.prompt.includes('Current branch: feat/x'), 'counts moved, dirty did not: not re-sent');
+  const clean = turn({ currentBranch: 'feat/x', gitStatus: { ...STATUS, staged: 0, unstaged: 0 } }, moreStaged.meta.delivered);
+  assert.match(clean.prompt, /Current branch: feat\/x[\s\S]*Staged: 0, unstaged: 0[\s\S]*Updated since/, 'clean now: sent, with the counts it had');
+  const again = turn({ currentBranch: 'feat/x', gitStatus: { ...STATUS, staged: 0, unstaged: 0 } }, clean.meta.delivered);
+  assert.ok(!again.prompt.includes('Current branch: feat/x'));
+});
+
 test('the git block is never in the system prompt', () => {
   const out = turn({ currentBranch: 'feat/x', gitStatus: STATUS });
   assert.ok(!JSON.stringify(out.queryOptions.systemPrompt ?? '').includes('feat/x'));
