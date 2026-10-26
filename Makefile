@@ -147,16 +147,16 @@ graph-gates: graph-kit-checkout
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-engine-lab
 	cd mac/LocalPackages/graph-kit && node scripts/conformance-memory.mjs
 
-# The Chat slice's assertion gate. An executable for the same reason the graph
-# labs are: this toolchain has no XCTest, so `test-mac` above skips `swift test`
-# entirely — pure logic lifted out of ChatEngine would otherwise have no gate at
-# all. Wired into `regression` because a gate nothing runs is a gate in name only.
 .PHONY: api-gates
 # Decodes every 2xx HTTP contract fixture with the Mac's Codable models and
 # fails on a decode error or an unallowlisted dropped key (Phase 1 P12).
 api-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run api-contract-lab
 
+# The Chat slice's assertion gate. An executable for the same reason the graph
+# labs are: this toolchain has no XCTest, so `test-mac` above skips `swift test`
+# entirely — pure logic lifted out of ChatEngine would otherwise have no gate at
+# all. Wired into `regression` because a gate nothing runs is a gate in name only.
 .PHONY: chat-gates
 chat-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab

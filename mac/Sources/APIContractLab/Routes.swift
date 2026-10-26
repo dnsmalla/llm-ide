@@ -17,10 +17,18 @@ func route<T: Decodable>(_ endpoint: String, _ model: String, _ type: T.Type) ->
         // Same decoder the client uses: LlmIdeAPIClient.init sets keyDecodingStrategy
         // .useDefaultKeys and leaves the date strategy at its default.
         let value = try JSONDecoder().decode(T.self, from: data)
-        guard let encodable = value as? any Encodable else { return nil }
-        return try JSONEncoder().encode(encodable)
+        if let encodable = value as? any Encodable { return try JSONEncoder().encode(encodable) }
+        // A lab mirror of a private wrapper declares its keys, so at least the
+        // envelope is drop-checked even though the element models are Decodable-only.
+        if let envelope = T.self as? any Envelope.Type {
+            return try JSONSerialization.data(withJSONObject: Dictionary(uniqueKeysWithValues: envelope.keys.map { ($0, true) }))
+        }
+        return nil
     }
 }
+
+/// A lab mirror's top-level keys (the stored properties of the client wrapper it mirrors).
+protocol Envelope { static var keys: Set<String> { get } }
 
 /// Fixture endpoint -> the Mac model the client decodes it into.
 let apiRoutes: [Route] = [
@@ -192,7 +200,7 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("POST /kb/slack/seen", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("POST /kb/usage/record", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("PUT /auth/me/prefs", "Mac decodes the private UserPrefsWrap ({prefs: ...}); not in this table yet"),
-    ("PUT /kb/agent/persona", "Mac call site not verified against this fixture yet"),
+    ("PUT /kb/agent/persona", "no Mac caller (only GET /kb/agent/persona is called)"),
     ("PUT /kb/agent/personas/:id", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("PUT /kb/agent/personas/active", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("PUT /kb/issue-schedule", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
@@ -204,24 +212,24 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
 // named from another target. Keep in sync with the client file named.
 
 /// LlmIdeAPIClient+Agent.swift listAgentRuns: struct Wrap { runs }
-struct RunsWrap: Decodable { let runs: [LlmIdeAPIClient.AgentRun] }
+struct RunsWrap: Decodable, Envelope { let runs: [LlmIdeAPIClient.AgentRun] ; static let keys: Set<String> = ["runs"] }
 /// LlmIdeAPIClient+AgentMeta.swift SkillLibraryResponse
-struct SkillLibraryWrap: Decodable { let repo: String?; let skills: [LlmIdeAPIClient.SkillLibraryEntry] }
+struct SkillLibraryWrap: Decodable, Envelope { let repo: String?; let skills: [LlmIdeAPIClient.SkillLibraryEntry] ; static let keys: Set<String> = ["repo", "skills"] }
 /// LlmIdeAPIClient+Connectors.swift ConnectorListResponse / ConnectorCatalogResponse
-struct ConnectorListWrap: Decodable { let connectors: [ConnectorCatalogEntry] }
-struct ConnectorCatalogWrap: Decodable { let catalog: [ConnectorCatalogEntry] }
+struct ConnectorListWrap: Decodable, Envelope { let connectors: [ConnectorCatalogEntry] ; static let keys: Set<String> = ["connectors"] }
+struct ConnectorCatalogWrap: Decodable, Envelope { let catalog: [ConnectorCatalogEntry] ; static let keys: Set<String> = ["catalog"] }
 /// LlmIdeAPIClient+LlmSources.swift LlmSourcesListResponse
-struct LlmSourcesWrap: Decodable { let sources: [LlmIdeAPIClient.LlmSourceInfo] }
+struct LlmSourcesWrap: Decodable, Envelope { let sources: [LlmIdeAPIClient.LlmSourceInfo] ; static let keys: Set<String> = ["sources"] }
 /// LlmIdeAPIClient+McpPlugins.swift McpPluginListResponse / McpCatalogResponse / *McpSourcesResponse
-struct McpPluginsWrap: Decodable { let plugins: [LlmIdeAPIClient.McpPluginInfo] }
-struct McpCatalogWrap: Decodable { let servers: [LlmIdeAPIClient.McpCatalogEntry] }
-struct ClaudeMcpSourcesWrap: Decodable { let servers: [LlmIdeAPIClient.ClaudeMcpSource] }
-struct CodexMcpSourcesWrap: Decodable { let servers: [LlmIdeAPIClient.CodexMcpSource] }
+struct McpPluginsWrap: Decodable, Envelope { let plugins: [LlmIdeAPIClient.McpPluginInfo] ; static let keys: Set<String> = ["plugins"] }
+struct McpCatalogWrap: Decodable, Envelope { let servers: [LlmIdeAPIClient.McpCatalogEntry] ; static let keys: Set<String> = ["servers"] }
+struct ClaudeMcpSourcesWrap: Decodable, Envelope { let servers: [LlmIdeAPIClient.ClaudeMcpSource] ; static let keys: Set<String> = ["servers"] }
+struct CodexMcpSourcesWrap: Decodable, Envelope { let servers: [LlmIdeAPIClient.CodexMcpSource] ; static let keys: Set<String> = ["servers"] }
 /// LlmIdeAPIClient+KB.swift search: struct Wrap { results }
-struct SearchWrap: Decodable { let results: [LlmIdeAPIClient.SearchHit] }
+struct SearchWrap: Decodable, Envelope { let results: [LlmIdeAPIClient.SearchHit] ; static let keys: Set<String> = ["results"] }
 /// LlmIdeAPIClient+Live.swift listLiveSessions: struct Wrap { sessions }
-struct LiveSessionsWrap: Decodable { let sessions: [LlmIdeAPIClient.LiveSessionInfo] }
+struct LiveSessionsWrap: Decodable, Envelope { let sessions: [LlmIdeAPIClient.LiveSessionInfo] ; static let keys: Set<String> = ["sessions"] }
 /// LlmIdeAPIClient+Providers.swift listProviderModels: struct Resp { models, entries? }
-struct ProviderModelsWrap: Decodable { let models: [String]; let entries: [ProviderModelEntry]? }
+struct ProviderModelsWrap: Decodable, Envelope { let models: [String]; let entries: [ProviderModelEntry]? ; static let keys: Set<String> = ["models", "entries"] }
 /// LlmIdeAPIClient+Usage.swift saveUsageLimits: struct Resp { ok, chains }
 struct SaveLimitsWrap: Codable { let ok: Bool; let chains: [String: [LlmIdeAPIClient.ModelLimit]] }

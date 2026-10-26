@@ -297,6 +297,11 @@ jobs:
       - name: Loop contract gate
         run: make loop-gates
 
+      - name: API contract gate
+        # Decodes every 2xx HTTP contract fixture with the Mac's Codable models
+        # (Phase 1 P12); the swift build above already compiled the lab.
+        run: make api-gates
+
       # graph-kit's own CI runs its unit tests, not these labs (exact-layout
       # ground truth, engine invariants, Swift↔TS memory conformance) — so
       # without this step they gate nothing anywhere.

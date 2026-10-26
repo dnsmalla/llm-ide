@@ -80,8 +80,11 @@ for group in groups {
     for file in files {
         let url = dir.appendingPathComponent(file)
         guard let raw = try? Data(contentsOf: url),
-              let fixture = try? JSONSerialization.jsonObject(with: raw) as? [String: Any],
-              let endpoint = fixture["endpoint"] as? String,
+              let fixture = try? JSONSerialization.jsonObject(with: raw) as? [String: Any] else {
+            fail("\(group)/\(file): unreadable or not a JSON object")
+            continue
+        }
+        guard let endpoint = fixture["endpoint"] as? String,
               let status = fixture["status"] as? Int,
               (200..<300).contains(status),
               let response = fixture["response"] else { continue }
