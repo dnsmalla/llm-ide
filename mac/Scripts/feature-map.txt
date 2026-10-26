@@ -36,3 +36,4 @@ Features/Generation/    Feature:Generation    sealed
 Features/Settings/    Feature:Settings    sealed
 Features/Library/    Feature:Library    sealed
 Features/MobileControl/    Feature:MobileControl    sealed
+Features/System/    Feature:System    sealed

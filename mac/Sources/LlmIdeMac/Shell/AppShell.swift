@@ -565,13 +565,9 @@ struct AppShell: View {
     /// The "tool" sections shown as named buttons in the title bar. `.search`
     /// is the field; `.explorer`/`.sourceControl` are the panel-header switcher;
     /// `.settings` is in the account menu; `.live` only while a session runs.
-    private static let toolOrder: [ShellState.Section] = [
-        .codeGraph, .autoCode, .conflicts, .issues,
-        .gantt, .loopEngine, .docGen, .visual, .library, .live,
-    ]
     private var liveActive: Bool { capture.isRunning || liveMirror.activeSession != nil }
     private var toolSections: [ShellState.Section] {
-        Self.toolOrder.filter { section in
+        ShellSection.toolbarOrder.filter { section in
             if section == .live { return liveActive }
             if let feature = section.backingFeature, !registry.isEnabled(feature) { return false }
             return !config.hiddenSidebarSections.contains(section.rawValue)
@@ -791,6 +787,8 @@ struct AppShell: View {
                     isCompiled: registry.compiledFeatures.contains(.autoTasks))
             }
         case .settings:  SettingsView(api: api)
+        case .system:
+            SystemView(api: api) { target in shell.section = target }
         }
     }
 
