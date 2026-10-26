@@ -237,7 +237,8 @@
       ],
       "properties": {
         "id": {
-          "type": "string"
+          "type": "string",
+          "description": "<family>/<file-stem>"
         },
         "family": {
           "type": "string"
@@ -374,16 +375,20 @@
       ],
       "properties": {
         "projectRoot": {
-          "type": "string"
+          "type": "string",
+          "description": "Absolute workspace root the rule applies to"
         },
         "toolName": {
-          "type": "string"
+          "type": "string",
+          "description": "`Bash`, `run-bash`, or an act tool name"
         },
         "pattern": {
-          "type": "string"
+          "type": "string",
+          "description": "Command prefix for shell tools; empty = the whole tool"
         },
         "grantedAt": {
-          "type": "string"
+          "type": "string",
+          "description": "ISO-8601 timestamp"
         }
       }
     },
@@ -436,7 +441,8 @@
           ],
           "properties": {
             "message": {
-              "type": "string"
+              "type": "string",
+              "description": "User message. Fence sentinels are neutralised, then capped at 120 000 chars; the message and attachments share one 150 000-char turn budget, message first. An over-cap message is truncated and the model is told so in-band, not rejected."
             },
             "agentContext": {
               "type": "object",
@@ -446,15 +452,18 @@
               ],
               "properties": {
                 "chatSessionId": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Mac chat session id — the mapping key"
                 },
                 "workspaceRoot": {
-                  "type": "string"
+                  "type": "string",
+                  "description": "Workspace the engine roots its reads in"
                 }
               }
             },
             "mode": {
-              "type": "string"
+              "type": "string",
+              "description": "Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions"
             },
             "language": {
               "type": "string",
@@ -462,12 +471,13 @@
             },
             "model": {
               "type": "string",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Model id from the picker, passed to the SDK verbatim (an Anthropic id, or the custom provider's own id on a gateway turn); omitted = config default"
             },
             "provider": {
               "type": "string",
               "x-optional": true,
-              "description": "anthropic (the default) or custom:<uuid>"
+              "description": "Provider the turn runs on (server v43+): `anthropic` (default when omitted) or an Anthropic-compatible custom provider `custom:<uuid>` registered with an `anthropicBaseURL`. The engine points the Agent SDK at that endpoint with the provider's own key and meters the turn under this id. Any other value fails before the SDK spawns with a terminal error event coded `PROVIDER_NOT_AGENT_CAPABLE` (no Anthropic-compatible endpoint) or `PROVIDER_UNAVAILABLE` (unregistered / disabled / no key)."
             },
             "effort": {
               "type": "string",
@@ -478,11 +488,13 @@
               "items": {
                 "type": "string"
               },
-              "x-optional": true
+              "x-optional": true,
+              "description": "Invoked skill ids (max 5); bodies are prompt-injected"
             },
             "planExecute": {
               "type": "boolean",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Set only by the Mac saved-plan card's \"Execute plan\" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request."
             },
             "planWrite": {
               "type": "boolean",
@@ -490,18 +502,21 @@
             },
             "permissionMode": {
               "type": "string",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Claude Code's modes. `ask` (default; `manual` is its old spelling): prompt-tier calls park an approval unless a saved project rule covers them. `accept-edits`: in-workspace Edit/Write run unasked, shell still asks. `bypass`: nothing that would park asks. No mode lifts the blocklist or write containment."
             },
             "attachments": {
               "type": "array",
               "items": {
                 "type": "object"
               },
-              "x-optional": true
+              "x-optional": true,
+              "description": "File attachments (max 30 files, 80 000 chars each, 200 000 total)"
             },
             "fresh": {
               "type": "boolean",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Skip the recorded SDK session id and start a new one"
             },
             "history": {
               "type": "array",
@@ -534,7 +549,8 @@
           ],
           "properties": {
             "requestId": {
-              "type": "string"
+              "type": "string",
+              "description": "Id from the approval_request event"
             },
             "sdkSessionId": {
               "type": "string"
@@ -554,7 +570,7 @@
             "feedback": {
               "type": "string",
               "x-optional": true,
-              "description": "the denial reason, on deny"
+              "description": "With `deny`: the user's instruction, handed to the model as the denial reason (max 2000 chars)"
             }
           }
         }
@@ -844,7 +860,7 @@
           "properties": {
             "sinceDays": {
               "type": "string",
-              "description": "the window in days; default 30"
+              "description": "The window in days; the default is 30."
             }
           }
         }
@@ -896,7 +912,7 @@
           "properties": {
             "sinceDays": {
               "type": "string",
-              "description": "the window in days; default 30"
+              "description": "The window in days; the default is 30."
             }
           }
         }
@@ -1241,7 +1257,8 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "Built-in skills repo path"
             },
             "templates": {
               "type": "array",
@@ -1272,7 +1289,8 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "Central skills repo path"
             },
             "skills": {
               "type": "array",
@@ -1334,7 +1352,8 @@
           ],
           "properties": {
             "repo": {
-              "type": "string"
+              "type": "string",
+              "description": "Absolute root from the GET above"
             },
             "workspaceRoot": {
               "type": "string"
@@ -1395,7 +1414,7 @@
             },
             "all": {
               "type": "boolean",
-              "description": "true revokes everything"
+              "description": "Revoke every rule and legacy grant"
             }
           }
         }
@@ -1475,7 +1494,8 @@
           ],
           "properties": {
             "sessionId": {
-              "type": "string"
+              "type": "string",
+              "description": "Chat session UUID (AgentContext.chatSessionId)"
             }
           }
         }
@@ -1503,7 +1523,8 @@
           "type": "object",
           "properties": {
             "message": {
-              "type": "string"
+              "type": "string",
+              "description": "User message (max 8 000 chars after sanitization)"
             },
             "image": {
               "type": "object",
@@ -1563,7 +1584,7 @@
           "properties": {
             "limit": {
               "type": "string",
-              "description": "newest N, within the server's hard cap; default 50"
+              "description": "Returns the newest N messages, oldest first; the default is 50, and reads are capped at 500."
             }
           }
         }
@@ -1614,7 +1635,8 @@
               "description": "ask, agent or transcript"
             },
             "limit": {
-              "type": "string"
+              "type": "string",
+              "description": "The default is 50, with a minimum of 1 and a cap of 200."
             }
           }
         }
@@ -1692,7 +1714,7 @@
           "properties": {
             "limit": {
               "type": "string",
-              "description": "the newest N messages"
+              "description": "Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000."
             }
           }
         }

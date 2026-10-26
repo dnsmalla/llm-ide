@@ -1,0 +1,1390 @@
+{
+  "info": {
+    "title": "LLM-IDE API",
+    "version": "2.10.0",
+    "description": "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n",
+    "license": {
+      "name": "MIT"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://{host}",
+      "variables": {
+        "host": {
+          "default": "llmide.example.com"
+        }
+      }
+    }
+  ],
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
+  "securitySchemes": {
+    "bearerAuth": {
+      "type": "http",
+      "scheme": "bearer",
+      "bearerFormat": "JWT"
+    }
+  },
+  "operations": {
+    "DELETE /agent/v2/session": {
+      "summary": "Drop a chat's SDK-session mapping (chat deletion)",
+      "description": "Removes the chat→SDK-session mapping row and best-effort deletes the SDK transcript files recorded for the session id (per-user engine home).",
+      "responses": {
+        "200": "Mapping dropped (sdkSessionId is null when none was recorded)",
+        "400": "chatSessionId missing"
+      }
+    },
+    "DELETE /kb/agent/personas/{id}": {
+      "summary": "Delete a persona by ID (refuses if it is the last one)",
+      "responses": {
+        "200": "Delete result",
+        "400": "Delete failed (e.g. last persona)"
+      }
+    },
+    "DELETE /kb/agent/project-memory": {
+      "summary": "Remove one captured fact, or clear a repo's captured facts",
+      "responses": {
+        "200": "The remaining facts",
+        "404": "Repo not on the caller's allow-list"
+      }
+    },
+    "DELETE /kb/agent/session-memory": {
+      "summary": "Delete everything session memory captured for one chat session",
+      "description": "Called when the user clears or deletes a chat, so its captured memory does not outlive it. A real DB delete (kb/session-memory.mjs, table `session_memory`) — distinct from project memory (`/kb/agent/project-memory`, above), which is durable and never touched by a session's lifecycle, only its own explicit per-fact edit/delete. Not repo-scoped, so no allow-list resolution is involved.",
+      "responses": {
+        "200": "How many facts were dropped",
+        "400": "sessionId missing"
+      }
+    },
+    "DELETE /kb/agent/tool-approvals": {
+      "summary": "Revoke one rule, one legacy grant, or everything",
+      "description": "Revocation only ever removes permission — the tool simply asks again — so there is nothing to gate. Returns the remaining set so a caller re-renders from the server's own view.",
+      "responses": {
+        "200": "The remaining rules and grants, and how many were removed",
+        "400": "Nothing to revoke was named"
+      }
+    },
+    "DELETE /kb/chat/sessions/{id}": {
+      "summary": "Delete a chat session and its messages",
+      "responses": {
+        "200": "Deleted",
+        "404": "Session not found"
+      }
+    },
+    "DELETE /kb/chat/sessions/{id}/messages": {
+      "summary": "Clear a session's messages, keeping the session",
+      "responses": {
+        "200": "How many messages were cleared"
+      }
+    },
+    "DELETE /kb/issue-schedule": {
+      "summary": "Remove one issue's schedule overlay",
+      "responses": {
+        "200": "ok",
+        "400": "Validation error",
+        "404": "feature_disabled — LLMIDE_FEATURES omits gantt_issues; the route module is not loaded"
+      }
+    },
+    "GET /auth/google/callback": {
+      "summary": "Google's OAuth redirect target (public)",
+      "description": "Google redirects the user's browser here after consent — there is no Authorization header on this request, so it is public (allow- listed in server/auth.mjs PUBLIC_PATHS). The `state` query param (minted by POST /auth/google/start) carries the userId and PKCE verifier; the handler exchanges `code` for tokens, stores the refresh token in the vault, and always returns an HTML page (never throws) so the tab can close itself.",
+      "security": [],
+      "responses": {
+        "200": "HTML confirmation or error page"
+      },
+      "extraParameters": [
+        {
+          "name": "error",
+          "in": "query",
+          "description": "Set by Google when the user cancels consent; the callback then reports the sign-in as cancelled.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "responseContent": {
+        "200": {
+          "removeContent": [
+            "text/plain"
+          ],
+          "content": {
+            "text/html": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "429": {
+          "removeContent": [
+            "text/plain"
+          ],
+          "content": {
+            "text/html": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /auth/google/status": {
+      "summary": "Poll Gmail Google Sign-In status",
+      "description": "Only the user who initiated the flow (via /auth/google/start) may read its status.",
+      "responses": {
+        "200": "Current status of the sign-in flow",
+        "403": "State belongs to a different user"
+      }
+    },
+    "GET /auth/me": {
+      "summary": "Current user",
+      "responses": {
+        "200": "User record",
+        "404": "User not found"
+      }
+    },
+    "GET /auth/me/audit": {
+      "summary": "Per-user audit log",
+      "responses": {
+        "200": "Audit entries newest-first",
+        "500": "Audit DB failure"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 100
+        }
+      }
+    },
+    "GET /auth/me/secrets": {
+      "summary": "List stored credential keys (no values)",
+      "responses": {
+        "200": "Keys + allowed-key list"
+      }
+    },
+    "GET /auth/well-known": {
+      "summary": "Server capability + auth metadata",
+      "security": [],
+      "responses": {
+        "200": "Issuer, registration policy, vault keys"
+      }
+    },
+    "GET /health": {
+      "summary": "Health probe",
+      "security": [],
+      "responses": {
+        "200": "Server status snapshot"
+      }
+    },
+    "GET /kb/activity": {
+      "summary": "List the authenticated user's activity feed",
+      "parameters": {
+        "query.since": "Return only items with id > this value (incremental poll cursor)",
+        "query.limit": "Maximum number of items to return. Clamped to 1-200; the default is 100 when absent or zero."
+      },
+      "responses": {
+        "200": "Activity items + unread count"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 100
+        },
+        "query.since": {
+          "type": "integer",
+          "default": 0
+        }
+      }
+    },
+    "GET /kb/agent-sdk": {
+      "summary": "The backend's Claude Agent SDK version against the npm registry's latest",
+      "parameters": {
+        "query.force": "Bypass the 1 h latest-version cache"
+      },
+      "responses": {
+        "200": "`running` is what this process loaded at startup, `installed` what is on disk (they differ after an update until the backend restarts — `restartNeeded`). `canUpdate` is false while remote access is on."
+      }
+    },
+    "GET /kb/agent/ask/history": {
+      "summary": "Retrieve persisted ask-the-agent conversation history (oldest-first)",
+      "responses": {
+        "200": "Message history"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
+      }
+    },
+    "GET /kb/agent/catalog": {
+      "summary": "Executable skills + plugin subagents for the Code Assistant \"/\" menu",
+      "responses": {
+        "200": "Catalog of skills the agent can actually dispatch"
+      }
+    },
+    "GET /kb/agent/commands": {
+      "summary": "Slash-commands enabled for this user (powers the chat \"/\" autocomplete)",
+      "responses": {
+        "200": "Commands, sorted by trigger"
+      }
+    },
+    "GET /kb/agent/feedback/by-task": {
+      "summary": "Per-plan-task agent feedback breakdown",
+      "responses": {
+        "200": "Feedback breakdown by plan task"
+      },
+      "parameterSchemas": {
+        "query.sinceDays": {
+          "type": "integer",
+          "default": 30
+        }
+      }
+    },
+    "GET /kb/agent/feedback/stats": {
+      "summary": "Aggregate agent feedback statistics for the user",
+      "responses": {
+        "200": "Feedback statistics"
+      },
+      "parameterSchemas": {
+        "query.sinceDays": {
+          "type": "integer",
+          "default": 30
+        }
+      }
+    },
+    "GET /kb/agent/generation-library": {
+      "summary": "Doc Gen / Visual template and command catalog from the enabled skills sources",
+      "description": "The kit's `templates/` and `commands/` families for the Mac app's Doc Gen and Visual menus. Each entry carries its `surface` (doc | visual), which divides the two menus. First enabled source wins on an id collision. Added in API v51.",
+      "responses": {
+        "200": "Generation library"
+      }
+    },
+    "GET /kb/agent/persona": {
+      "summary": "Get the user's active agent persona (legacy single-persona surface)",
+      "responses": {
+        "200": "Active persona or null"
+      }
+    },
+    "GET /kb/agent/personas": {
+      "summary": "List all agent personas and indicate the active one",
+      "responses": {
+        "200": "Personas list with active marker"
+      }
+    },
+    "GET /kb/agent/project-memory": {
+      "summary": "Auto-captured chat-memory facts for a repo (project-memory viewer)",
+      "description": "Send the client's indexedRepos candidate paths; the server resolves the FIRST allow-listed one — the same target memory capture writes to — and returns its absolute root so subsequent DELETEs address the same file. A repo that is not on the caller's allow-list yields `{ facts: [], repo: null }` without touching disk.",
+      "parameters": {
+        "query.repo": "Candidate repo path; repeatable, tried in order.",
+        "query.workspaceRoot": "Open Explorer folder, tried after the repo candidates."
+      },
+      "responses": {
+        "200": "Facts plus the resolved root"
+      },
+      "parameterSchemas": {
+        "query.repo": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "GET /kb/agent/runs": {
+      "summary": "List sessions that currently have the agent attached",
+      "responses": {
+        "200": "Active agent runs"
+      }
+    },
+    "GET /kb/agent/skill-library": {
+      "summary": "Central skills-repo discovery catalog (skills the agent cannot execute)",
+      "description": "The `skills/` + `runtime/` families NOT already in /kb/agent/catalog. The client attaches a chosen skill's SKILL.md to the next request as context.",
+      "responses": {
+        "200": "Skill library"
+      }
+    },
+    "GET /kb/agent/tool-approvals": {
+      "summary": "The caller's \"always allow\" permission rules",
+      "description": "Claude-style rules made from the approval card's \"always allow\" button: per user, per project (the resolved workspace root), per tool, and for shell tools per command PREFIX (`npm test`, `git status`). A compound command never matches a prefix rule. A rule only ever skips the interactive approval a `prompt`-tier call would park; it can never promote a `blocked` command or a write outside the workspace, because those checks run first and unconditionally. `approvals` are the pre-v55 global per-tool grants: no longer honoured by either engine, still listed so they can be seen and revoked.",
+      "responses": {
+        "200": "The caller's rules"
+      }
+    },
+    "GET /kb/chat/sessions": {
+      "summary": "List unified chat sessions (shared by macOS + extension)",
+      "responses": {
+        "200": "Sessions, newest first"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
+      }
+    },
+    "GET /kb/chat/sessions/{id}": {
+      "summary": "Fetch one chat session with its messages",
+      "parameters": {
+        "query.limit": "Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000."
+      },
+      "responses": {
+        "200": "The session",
+        "404": "Session not found"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 200
+        }
+      }
+    },
+    "GET /kb/entity/{id}": {
+      "summary": "Fetch a single KB entity (action / decision / blocker / etc.) by ID",
+      "responses": {
+        "200": "Entity record",
+        "400": "Invalid ID format",
+        "404": "Not found"
+      },
+      "parameterSchemas": {
+        "path.id": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
+      }
+    },
+    "GET /kb/export-all": {
+      "summary": "Export every KB row for the caller as newline-delimited JSON, paged by cursor",
+      "responses": {
+        "200": "NDJSON stream of export records"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 100
+        }
+      },
+      "responseContent": {
+        "200": {
+          "removeContent": [
+            "text/plain"
+          ],
+          "content": {
+            "application/x-ndjson": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/issue-schedule": {
+      "summary": "List the user's scheduling overlay for a repo's issues (gantt parity)",
+      "description": "GitHub issues carry no start/due/estimate/dependency fields. This per-user overlay supplies them so the Mac gantt can draw real bars. Keyed by (provider, repo, issueNumber); user_id-scoped.",
+      "parameters": {
+        "query.repo": "\"owner/name\""
+      },
+      "responses": {
+        "200": "ok",
+        "400": "Validation error",
+        "404": "feature_disabled — LLMIDE_FEATURES omits gantt_issues; the route module is not loaded"
+      },
+      "parameterSchemas": {
+        "query.provider": {
+          "enum": [
+            "github",
+            "gitlab"
+          ],
+          "default": "github"
+        },
+        "query.repo": {
+          "required": true,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        }
+      }
+    },
+    "GET /kb/issues": {
+      "summary": "List issues from the connected tracker for a repo (read-only)",
+      "responses": {
+        "200": "Issues matching the filter"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 20
+        },
+        "query.state": {
+          "default": "open"
+        },
+        "query.provider": {
+          "default": "github"
+        }
+      }
+    },
+    "GET /kb/live/sessions": {
+      "summary": "List active in-memory live capture sessions for the user",
+      "responses": {
+        "200": "Active sessions"
+      }
+    },
+    "GET /kb/live/{id}": {
+      "summary": "Poll for new captions since a sequence number",
+      "parameters": {
+        "path.id": "Live session ID",
+        "query.since": "Return captions with sequence > this value"
+      },
+      "responses": {
+        "200": "Caption batch"
+      },
+      "parameterSchemas": {
+        "query.since": {
+          "type": "integer",
+          "default": 0
+        }
+      }
+    },
+    "GET /kb/live/{id}/stream": {
+      "summary": "Server-sent events stream of a live capture session's captions",
+      "description": "Content-Type text/event-stream. At most MAX_SSE_PER_USER concurrent streams per user (429 TOO_MANY_STREAMS beyond that).",
+      "responses": {
+        "200": "SSE stream of caption events for the session",
+        "429": "Too many concurrent live streams for this user"
+      },
+      "responseContent": {
+        "200": {
+          "content": {
+            "text/event-stream": {
+              "schema": {}
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/meeting/{id}": {
+      "summary": "Fetch a single meeting record by ID",
+      "parameters": {
+        "query.include": "Opt-in extras. `transcript` adds the stored transcript text as `transcript`."
+      },
+      "responses": {
+        "200": "Meeting record",
+        "400": "Invalid ID format",
+        "404": "Not found"
+      },
+      "parameterSchemas": {
+        "path.id": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
+      }
+    },
+    "GET /kb/outcomes/stats": {
+      "summary": "Aggregate outcome statistics for the user (counts by state)",
+      "responses": {
+        "200": "Outcome statistics"
+      }
+    },
+    "GET /kb/outcomes/task/{id}": {
+      "summary": "List all outcome records for a specific plan task",
+      "responses": {
+        "200": "Outcome list",
+        "400": "Invalid ID"
+      },
+      "parameterSchemas": {
+        "path.id": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
+      }
+    },
+    "GET /kb/plan/{id}": {
+      "summary": "Fetch a single plan by ID",
+      "responses": {
+        "200": "Plan",
+        "404": "Not found"
+      }
+    },
+    "GET /kb/plans": {
+      "summary": "List plans for the authenticated user",
+      "responses": {
+        "200": "Plan list"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
+      }
+    },
+    "GET /kb/project/{id}/export": {
+      "summary": "Export one project's knowledge-base content",
+      "parameters": {
+        "path.id": "1–128 chars of alphanumerics / `_` / `-` (rejected otherwise, so a crafted id cannot traverse)."
+      },
+      "responses": {
+        "200": "Export payload",
+        "400": "INVALID_PROJECT_ID",
+        "500": "EXPORT_FAILED"
+      }
+    },
+    "GET /kb/review/get/{id}": {
+      "summary": "Fetch a single review item by ID",
+      "responses": {
+        "200": "Review item",
+        "404": "Not found"
+      }
+    },
+    "GET /kb/review/list": {
+      "summary": "List review items (optionally filtered by status)",
+      "responses": {
+        "200": "Review items"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
+      }
+    },
+    "GET /kb/routing-tiers": {
+      "summary": "The caller's tier routing config plus per-tier usability (API v67+)",
+      "description": "The stored config and, for each tier, whether the server can run it right now — the same check the server's resolver applies (custom provider registered/enabled/keyed; DeepSeek keyed; OpenAI/Google keyed or, API v68+, their CLI installed for the logged-in subscription path; v69+: the CLI must pass a `--version` health probe, which this request may wait a few seconds for) — and whether it can run on the Agent SDK engine (first-party Anthropic, or a custom provider with an Anthropic-compatible endpoint and a key). The Mac app uses it to skip a route the server would refuse.",
+      "responses": {
+        "200": "Config + status"
+      }
+    },
+    "GET /kb/search": {
+      "summary": "Tenant-scoped FTS5 + empty-query unified search",
+      "responses": {
+        "200": "Search results"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 20
+        },
+        "query.projectId": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
+      }
+    },
+    "GET /kb/slack/conversations": {
+      "summary": "List Slack conversations visible to the saved token",
+      "description": "`complete: false` means pagination was cut short (a `slack_conversations_incomplete` warning is logged); the returned channels are still usable.",
+      "responses": {
+        "200": "Channels",
+        "400": "SLACK_NO_TOKEN — connect Slack first"
+      }
+    },
+    "GET /kb/stats": {
+      "summary": "Per-user KB statistics (meeting count, entity counts, etc.)",
+      "responses": {
+        "200": "Statistics object"
+      }
+    },
+    "GET /kb/system/status": {
+      "summary": "Unified system status — KB stats, active captures, agent runs, pending reviews, outcome summary",
+      "responses": {
+        "200": "System status snapshot"
+      }
+    },
+    "GET /kb/usage/limits": {
+      "summary": "Read the user's per-model usage caps (built-in chains merged with overrides)",
+      "parameters": {
+        "query.provider": "Optional — restrict to one provider (anthropic|openai|google|custom)"
+      },
+      "responses": {
+        "200": "Chains keyed by provider"
+      }
+    },
+    "GET /kb/usage/ratelimits": {
+      "summary": "Latest provider API rate-limit snapshot (API-key mode only; null otherwise)",
+      "responses": {
+        "200": "Rate-limit buckets (requests/tokens limit, remaining, reset) or null"
+      }
+    },
+    "GET /kb/usage/resolve": {
+      "summary": "Which model in a provider's chain should run next (auto-fallback)",
+      "parameters": {
+        "query.prefer": "Preferred model — kept when healthy, stepped down only when constrained"
+      },
+      "responses": {
+        "200": "Resolution (model, status ok|degraded|paused|unconfigured, resetAt, reason, engaged)"
+      },
+      "parameterSchemas": {
+        "query.provider": {
+          "enum": [
+            "anthropic",
+            "openai",
+            "google",
+            "custom"
+          ],
+          "default": "anthropic"
+        }
+      }
+    },
+    "GET /kb/usage/summary": {
+      "summary": "Live per-model usage + resolved active model per provider (dashboard)",
+      "responses": {
+        "200": "Per-provider usage summary"
+      }
+    },
+    "GET /kb/usage/turn-composition": {
+      "summary": "The caller's newest v2 chat turns, with the measured context split (migrations 0040/0044)",
+      "responses": {
+        "200": "Newest first. Token fields are approximate (chars / 4) for LLM-IDE text and the SDK's own estimates for sdk* fields; null when not measured."
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
+      }
+    },
+    "PATCH /kb/chat/sessions/{id}": {
+      "summary": "Rename a chat session",
+      "responses": {
+        "200": "Renamed",
+        "400": "title required",
+        "404": "Session not found"
+      }
+    },
+    "POST /agent-sdk/spike": {
+      "summary": "P0 spike — direct Claude Agent SDK query over SSE (temporary)",
+      "description": "Proof-of-concept surface from the P0 spike (SDK streaming, kb_search MCP tool, vault-key auth). Temporary by design; its successor is the /agent/v2/* protocol above.",
+      "responses": {
+        "200": "SSE stream of spike events",
+        "400": "Missing prompt"
+      },
+      "responseContent": {
+        "200": {
+          "content": {
+            "text/event-stream": {
+              "schema": {}
+            }
+          }
+        }
+      }
+    },
+    "POST /agent/v2/cancel": {
+      "summary": "Stop the caller's in-flight Agent-engine turn for one chat",
+      "description": "Same abort a dropped stream triggers (SDK subprocess and parked decisions). The chat's turn lock is released once the turn finishes unwinding (about two seconds), so a client retries its send after this rather than at once. Scoped to the calling user. Server API v54.",
+      "responses": {
+        "200": "Answered; `cancelled` says whether a turn was running",
+        "400": "VALIDATION_FAILED — chatSessionId missing"
+      }
+    },
+    "POST /agent/v2/decision": {
+      "summary": "Answer a parked approval (AskUserQuestion or ToolApproval) from a v2 stream",
+      "description": "Tenancy-checked: the deciding user must own the session the approval was parked under; foreign decisions are 403 and logged. An AskUserQuestion is answered with `answers`; a ToolApproval with `action`. A ToolApproval's approval_request carries an optional `suggestion` { toolName, pattern?, scope: project|session, label } — what `always-allow` would save: a project command-prefix / tool rule, or (edits) a grant for this chat.",
+      "responses": {
+        "200": "Decision delivered; the stream emits approval_resolved and the turn continues",
+        "403": "DECISION_FORBIDDEN — belongs to another user or session",
+        "404": "DECISION_EXPIRED / DECISION_UNKNOWN — nothing pending"
+      }
+    },
+    "POST /agent/v2/stream": {
+      "summary": "Run one Agent-SDK chat turn and stream its events over SSE",
+      "description": "The server owns the chat→SDK-session mapping: consecutive turns with the same `agentContext.chatSessionId` resume the same SDK conversation. `fresh: true` deliberately skips the recorded id (client asked to start over, e.g. after a SESSION_UNRESUMABLE error). Validation errors answer as plain JSON before the SSE headers are written; once streaming, failures arrive as a terminal `data: {\"type\":\"error\",...}` event instead of an HTTP status.",
+      "responses": {
+        "200": "SSE stream of engine events — init first, mode_set right after init, result or error last. Event types: init, delta, tool_use_start, tool_args_delta, tool_result, usage, approval_request, approval_resolved, mode_set, result, error, sdk. Unknown event types and fields must be ignored by clients.",
+        "400": "Missing message / chatSessionId / workspaceRoot",
+        "429": "Rate limited"
+      }
+    },
+    "POST /auth/google/start": {
+      "summary": "Begin Gmail Google Sign-In (OAuth2 PKCE)",
+      "description": "Persists the caller's own Google OAuth \"Desktop app\" client credentials to the vault, mints a PKCE pair + one-time state token, and returns the Google consent URL for the client to open in a browser.",
+      "responses": {
+        "200": "Consent URL + state token issued",
+        "400": "Validation error"
+      }
+    },
+    "POST /auth/login": {
+      "summary": "Exchange credentials for a session",
+      "security": [],
+      "responses": {
+        "200": "Session issued",
+        "401": "Invalid credentials",
+        "403": "Account disabled",
+        "429": "Rate limited per IP"
+      }
+    },
+    "POST /auth/logout": {
+      "summary": "Revoke current refresh token (or all sessions with allDevices=true)",
+      "responses": {
+        "200": "ok"
+      }
+    },
+    "POST /auth/me/password": {
+      "summary": "Change password (revokes all sessions)",
+      "responses": {
+        "200": "ok",
+        "400": "Validation error",
+        "401": "Current password incorrect",
+        "404": "User not found"
+      },
+      "bodyRequired": true
+    },
+    "POST /auth/me/secrets": {
+      "summary": "Set or delete an encrypted secret",
+      "responses": {
+        "200": "ok"
+      }
+    },
+    "POST /auth/refresh": {
+      "summary": "Rotate session via refresh token",
+      "security": [],
+      "responses": {
+        "200": "Session rotated",
+        "401": "Invalid or revoked refresh token",
+        "403": "Account disabled",
+        "429": "Rate limited"
+      }
+    },
+    "POST /auth/register": {
+      "summary": "Public registration",
+      "security": [],
+      "responses": {
+        "201": "User created (first user becomes admin)",
+        "400": "Validation error",
+        "403": "Registration disabled",
+        "409": "Email already registered",
+        "429": "Rate limited per IP"
+      }
+    },
+    "POST /chat": {
+      "summary": "Chat with the meeting assistant about a transcript",
+      "responses": {
+        "200": "Assistant reply",
+        "400": "Validation error",
+        "429": "Rate limited"
+      }
+    },
+    "POST /code-assist": {
+      "summary": "Code-assist chat with optional file attachments",
+      "description": "With `Accept: text/event-stream` the answer streams as SSE events (`progress`, `chunk`, `done`, `tasks`, `error`). A turn that fails because the named provider cannot run (missing / disabled / keyless, or its CLI is missing, broken or logged out) before ANY progress or chunk event went out sends `{ type: 'error', error, code: 'PROVIDER_UNAVAILABLE' }` (API v70+) — the buffered path's 400 with the same code — so a client can retry once without its tier route. Every other error event has no `code`.",
+      "responses": {
+        "200": "Assistant reply",
+        "400": "Validation error, or (API v67+) PROVIDER_UNAVAILABLE — the named provider is missing, disabled or has no API key; message is the Settings hint",
+        "502": "Upstream LLM error (error code INTERNAL_ERROR)",
+        "429": "Rate limited"
+      }
+    },
+    "POST /code-assist/decision": {
+      "summary": "Answer a parked act-tool approval from a legacy /code-assist stream",
+      "description": "The legacy-engine counterpart of POST /agent/v2/decision, backed by the same in-process decision registry. A 'prompt'-tier run-bash command parks an approval and emits a progress event of phase `approval_request`; this route resolves it. Tenancy-checked: the deciding user AND the session the approval was parked under (the legacy chat's `agentContext.sessionId`) must both match, or the answer is 403.",
+      "responses": {
+        "200": "Decision delivered; the parked tool call resumes (or is denied) and the stream continues",
+        "403": "DECISION_FORBIDDEN — belongs to another user or session",
+        "404": "DECISION_EXPIRED / DECISION_UNKNOWN — nothing pending"
+      }
+    },
+    "POST /extract-entities": {
+      "summary": "Extract structured actions, decisions, and blockers from a transcript",
+      "responses": {
+        "200": "Extracted entities",
+        "400": "Validation error",
+        "500": "AI parse failed (AI_PARSE_FAILED)",
+        "429": "Rate limited"
+      }
+    },
+    "POST /generate-doc": {
+      "summary": "Generate a structured Markdown document from a template and/or a command, over source content",
+      "responses": {
+        "200": "Generated markdown document",
+        "400": "Validation error"
+      }
+    },
+    "POST /generate-docx": {
+      "summary": "Generate a DOCX meeting-notes file from a transcript",
+      "responses": {
+        "200": "DOCX binary",
+        "400": "Validation error",
+        "500": "AI parse or DOCX build failure",
+        "429": "Rate limited"
+      },
+      "responseContent": {
+        "200": {
+          "removeContent": [
+            "application/octet-stream"
+          ],
+          "content": {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
+      }
+    },
+    "POST /generate-notes": {
+      "summary": "Generate markdown meeting notes from a transcript",
+      "responses": {
+        "200": "Notes generated (JSON or SSE depending on Accept header)",
+        "400": "Validation error",
+        "429": "Rate limited"
+      },
+      "responseContent": {
+        "200": {
+          "content": {
+            "text/event-stream": {
+              "schema": {}
+            }
+          }
+        }
+      }
+    },
+    "POST /generate-questions": {
+      "summary": "Generate targeted follow-up questions from a transcript",
+      "responses": {
+        "200": "Markdown follow-up questions",
+        "400": "Validation error",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/activity": {
+      "summary": "Record an in-process activity event (Mac app)",
+      "responses": {
+        "200": "Event recorded",
+        "400": "Invalid kind or title"
+      }
+    },
+    "POST /kb/activity/seen": {
+      "summary": "Advance the activity last-seen cursor",
+      "responses": {
+        "200": "Cursor advanced"
+      }
+    },
+    "POST /kb/agent-sdk/update": {
+      "summary": "Install the registry's latest Claude Agent SDK in this backend's checkout",
+      "description": "Runs `npm install @anthropic-ai/claude-agent-sdk@<latest> --save-exact`, then loads the new package in a separate process; if either fails the previous version is reinstalled. Never restarts the backend — the client does. One update at a time; refused while a chat turn is running, and /agent/v2/stream answers 503 SDK_UPDATING while it runs; refused while remote access is on unless LLMIDE_ALLOW_SDK_UPDATE=1.",
+      "responses": {
+        "200": "Always 200; `ok` says whether it updated"
+      }
+    },
+    "POST /kb/agent/ask": {
+      "summary": "Free-text Q&A with the meeting agent (uses active persona voice)",
+      "responses": {
+        "200": "Agent reply",
+        "400": "Missing or empty message",
+        "500": "Agent ask failed",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/agent/dispatch": {
+      "summary": "Attach the meeting agent question-loop to an active live session",
+      "responses": {
+        "200": "Dispatch result",
+        "400": "Dispatch failed",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/agent/feedback": {
+      "summary": "Record user feedback on an agent question (useful / noise / later)",
+      "responses": {
+        "200": "ok",
+        "400": "Feedback failed"
+      }
+    },
+    "POST /kb/agent/personas": {
+      "summary": "Create a new agent persona",
+      "responses": {
+        "200": "Created persona plus full list",
+        "400": "Create failed"
+      }
+    },
+    "POST /kb/agent/stop": {
+      "summary": "Detach the meeting agent from a live session",
+      "responses": {
+        "200": "Stop result",
+        "400": "Missing sessionId"
+      }
+    },
+    "POST /kb/analyze-risks": {
+      "summary": "Re-compute LLM risk assessment for a plan",
+      "responses": {
+        "200": "Plan with risk fields updated",
+        "400": "Validation error",
+        "404": "Plan not found",
+        "500": "Risk analysis failed (RISK_ANALYSIS_FAILED)",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/box/test": {
+      "summary": "Verify Box credentials and folder access",
+      "responses": {
+        "200": "Folder info",
+        "400": "Missing secret or fields",
+        "502": "Box connect failed"
+      }
+    },
+    "POST /kb/chat/sessions": {
+      "summary": "Create a chat session",
+      "responses": {
+        "201": "The created session"
+      }
+    },
+    "POST /kb/chat/sessions/{id}/messages": {
+      "summary": "Append a message to a chat session",
+      "responses": {
+        "201": "Appended",
+        "400": "Invalid role or content",
+        "404": "Session not found"
+      }
+    },
+    "POST /kb/code-sync": {
+      "summary": "Annotate plan tasks with matching code file references from the KB",
+      "responses": {
+        "200": "Plan with code-sync annotations applied",
+        "400": "Neither planId nor plan provided",
+        "404": "Plan not found",
+        "500": "Code sync failed (CODE_SYNC_FAILED)"
+      }
+    },
+    "POST /kb/conflict-questions": {
+      "summary": "Surface cross-meeting conflicts and undecided items from KB history vs current transcript",
+      "responses": {
+        "200": "Markdown follow-up questions",
+        "500": "LLM error",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/connect-box": {
+      "summary": "Index a Box folder's documents into the KB",
+      "responses": {
+        "200": "Indexing summary",
+        "400": "Missing secret or fields",
+        "502": "Box index failed"
+      }
+    },
+    "POST /kb/connect-git": {
+      "summary": "Index a local Git repo's code files into the KB",
+      "responses": {
+        "200": "Indexing summary",
+        "400": "Missing path",
+        "403": "Path not on user allow-list"
+      }
+    },
+    "POST /kb/connect-github-issues": {
+      "summary": "Fetch and index GitHub issues for a repo",
+      "responses": {
+        "200": "Indexing summary",
+        "400": "Validation or indexing error"
+      }
+    },
+    "POST /kb/connect-qa": {
+      "summary": "Index JUnit XML test results into the KB",
+      "responses": {
+        "200": "Indexing summary",
+        "400": "Validation or parse error"
+      }
+    },
+    "POST /kb/connect-tickets-json": {
+      "summary": "Index an inline JSON array of tickets (Backlog, Jira, or generic)",
+      "responses": {
+        "200": "Indexing summary",
+        "400": "Validation or indexing error"
+      }
+    },
+    "POST /kb/custom-providers": {
+      "summary": "Sync the Mac app's custom model providers to the server",
+      "description": "Replaces the CALLER's custom-provider list (other users are untouched). The list is persisted per user, so it survives a server restart; an empty array deletes it. Entries without an id, a name, or an http(s) baseURL are dropped.",
+      "responses": {
+        "200": "Synced",
+        "400": "Invalid request body",
+        "405": "Method not allowed",
+        "413": "Request body too large"
+      }
+    },
+    "POST /kb/delete": {
+      "summary": "Delete a meeting and its associated entities",
+      "responses": {
+        "200": "ok",
+        "400": "Validation error"
+      }
+    },
+    "POST /kb/dispatch": {
+      "summary": "Preview / send tasks to GitHub, Backlog, or Linear",
+      "responses": {
+        "200": "ok",
+        "400": "Validation error",
+        "403": "Forbidden",
+        "409": "Conflict. Code REVIEW_CONFIG_MISMATCH (API v75+) when the request `config` names a destination (e.g. repo) different from the approved review; credentials in `config` are still accepted"
+      }
+    },
+    "POST /kb/email/classify": {
+      "summary": "Classify a fetched email with LLM and extract to-dos (60 s server timeout)",
+      "responses": {
+        "200": "Classification result",
+        "400": "Validation error",
+        "500": "Unexpected classify error",
+        "502": "Email classify LLM call failed",
+        "504": "Email classify timed out (>60 s)",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/email/fetch": {
+      "summary": "Fetch recent emails via IMAP and return them for ingestion",
+      "responses": {
+        "200": "Fetched messages (server-side high-water mark and dedup applied)",
+        "400": "Missing host/user or no IMAP password stored",
+        "502": "IMAP error"
+      }
+    },
+    "POST /kb/email/seen": {
+      "summary": "Record imported message IDs and advance the IMAP high-water mark",
+      "responses": {
+        "200": "ok"
+      }
+    },
+    "POST /kb/email/test": {
+      "summary": "Test IMAP connection using stored app password",
+      "responses": {
+        "200": "Connection success with mailbox info",
+        "400": "Missing credentials or no password stored",
+        "502": "IMAP connection failed"
+      }
+    },
+    "POST /kb/generate-code": {
+      "summary": "LLM-generate files + tests for a single task (preview only)",
+      "responses": {
+        "200": "ok",
+        "400": "Validation error",
+        "500": "Code generation failed"
+      }
+    },
+    "POST /kb/generate-plan": {
+      "summary": "Synthesize a plan from a meeting (chains analyze-risks + code-sync by default)",
+      "responses": {
+        "200": "Generated plan",
+        "400": "Validation error",
+        "500": "Plan generation failed"
+      },
+      "bodyRequired": true
+    },
+    "POST /kb/ingest": {
+      "summary": "Upsert a meeting and replace its entities",
+      "responses": {
+        "200": "Ingest result",
+        "400": "Validation error"
+      },
+      "bodyRequired": true
+    },
+    "POST /kb/ingest-code-graph": {
+      "summary": "Store a repo's structural code graph (nodes/edges) for agent traversal",
+      "description": "Written by the macOS app after each knowledge-graph generation. Populates `code_graph_nodes`/`code_graph_edges` with `source='structure'`, which backs `findRelatedSymbols` and the code-sync agent's symbol grounding. Large graphs arrive in batches — set `replace` on the first batch only, otherwise each batch discards the previous one. One request accepts at most 5000 nodes and 20000 edges.",
+      "responses": {
+        "200": "Stored counts for this batch, plus entries dropped as malformed",
+        "400": "Missing fields or batch over the per-request cap",
+        "403": "Path not on user allow-list",
+        "404": "feature_disabled — LLMIDE_FEATURES omits code_graph_3d; the route module is not loaded"
+      }
+    },
+    "POST /kb/ingest-scip": {
+      "summary": "Ingest a SCIP index into the code-graph tables",
+      "description": "`repoPath` must be on the caller's repo allow-list (compared after `path.resolve`), since it is used as the graph's identity key.",
+      "responses": {
+        "200": "Ingest counts",
+        "400": "Missing args or SCIP index failed",
+        "403": "Repo path not on the allow-list"
+      }
+    },
+    "POST /kb/live/{id}/append": {
+      "summary": "Append caption chunks to an active live session",
+      "responses": {
+        "200": "Append summary",
+        "400": "Missing sessionId or captions",
+        "429": "Rate limited (liveAppend bucket)"
+      }
+    },
+    "POST /kb/live/{id}/finalize": {
+      "summary": "Finalize a live capture session (marks it done; ingest separately via /kb/ingest)",
+      "responses": {
+        "200": "Finalization summary"
+      }
+    },
+    "POST /kb/loop/agent-run": {
+      "summary": "Run one headless, confined agent step for the Mac Loop",
+      "description": "The Loop's skill stages, stage repairs and fault repairs. Runs on the Claude Agent SDK with FILE TOOLS ONLY (Read, Glob, Grep, Edit, Write) plus one read-only code-graph search, `mcp__llmide__find-code`, served in-process (strict MCP config: no user, project or plugin MCP server can join), working directory `repoRoot`, and every path confined to it (symlinks resolved; secret paths such as `.env` and `.git/` refused). No shell, no network, no plugins, no operator settings. A step that repeats itself or keeps failing is stopped as `no_progress`. Nothing is ever parked for approval: a refused tool call is denied and listed in `denied`. `repoRoot` must be absolute and either at or below a root on the caller's repo allow-list (`/auth/me/repos`) or a linked git worktree of one under a `.llmide-loop-worktrees/` or `loop-worktrees/` directory. `extraRoots` (at most 4) widens the confinement to a project's notes directory in the split layout: each must be an existing directory named `llm-doc` whose parent contains `system/project.json` and is `repoRoot` itself or an ancestor of it at most 3 levels up (symlinks resolved); anything else is 400 `EXTRA_ROOT_NOT_ALLOWED`. Grep and Glob patterns naming a secret path are refused, and every Grep carries the secret denylist as negative globs. A run cut off by the timeout or a disconnect is still metered for the usage the SDK reported. When any requested skill id is not installed the agent does not run (`ran: false`, the id in `unresolvedSkills`). `timeoutMs` (default 30 min, clamped to 1 s – 4 h) aborts the run; a client disconnect aborts it too. Rate-limited on the `agentTurn` bucket. `provider` (v66, the Mac's Loop tier route) runs the step on an Anthropic-compatible custom provider through its Anthropic base URL and key (the same gateway contract as `/agent/v2/stream`); the tools and confinement are identical for every provider, and the run is metered under the provider that ran. Absent means first-party Anthropic. Server API v58 (provider: v66).",
+      "responses": {
+        "200": "The run finished (or did not start because a skill is missing — see `ran`)",
+        "400": "VALIDATION_FAILED, REPO_ROOT_NOT_ALLOWED — repoRoot outside the allow-list, EXTRA_ROOT_NOT_ALLOWED — an extraRoots entry is not the project's llm-doc, PROVIDER_UNAVAILABLE — the custom provider is missing, disabled or keyless, or PROVIDER_NOT_AGENT_CAPABLE — the provider has no Anthropic-compatible endpoint",
+        "502": "INTERNAL_ERROR — the engine failed",
+        "503": "NO_KEY — no Anthropic credentials",
+        "504": "AGENT_RUN_TIMEOUT — timeoutMs elapsed",
+        "404": "feature_disabled — LLMIDE_FEATURES omits auto_tasks; the route module is not loaded"
+      }
+    },
+    "POST /kb/mcp-connector/classify": {
+      "summary": "Classify one ingested connector item and extract to-dos",
+      "description": "Accepts the Source Connector manifest engine's fixed `{ body: { …fields } }` envelope; the connector id rides inside the field map as `connectorId`.",
+      "responses": {
+        "200": "Classification",
+        "400": "Missing body.text",
+        "502": "The model did not return valid JSON"
+      }
+    },
+    "POST /kb/mcp-connector/fetch": {
+      "summary": "Fetch new items from a remote MCP connector (server-side dedup against the seen ledger)",
+      "responses": {
+        "200": "Items not yet imported. Partial success — one unreadable parent is reported in `failures`, not as an error.",
+        "400": "Unknown connector id, not connected (MCP_UNAUTHORIZED), or no fetch mapping (MCP_NOT_FETCHABLE)",
+        "502": "MCP fetch failed"
+      }
+    },
+    "POST /kb/mcp-connector/seen": {
+      "summary": "Mark MCP connector item ids as imported (per user, per connector)",
+      "responses": {
+        "200": "Marked",
+        "400": "Unknown connector id"
+      }
+    },
+    "POST /kb/mcp-connector/test": {
+      "summary": "Verify a remote MCP connector's saved OAuth tokens (connect + tools/list)",
+      "responses": {
+        "200": "Connected — server identity and available tools",
+        "400": "Unknown connector id",
+        "502": "MCP connection failed"
+      }
+    },
+    "POST /kb/notify/slack": {
+      "summary": "Send a plan / dispatch / custom message via Slack incoming webhook",
+      "responses": {
+        "200": "ok",
+        "400": "Missing kind, no webhook configured, or notify failed",
+        "404": "Plan not found (when kind=plan)"
+      }
+    },
+    "POST /kb/outcomes/refresh": {
+      "summary": "Poll dispatched tasks across providers and record outcomes",
+      "responses": {
+        "200": "Poll summary",
+        "500": "Refresh failed"
+      }
+    },
+    "POST /kb/outcomes/retry-failed": {
+      "summary": "Retry all failed dispatched tasks across providers",
+      "responses": {
+        "200": "Retry summary",
+        "500": "Retry failed"
+      }
+    },
+    "POST /kb/plan-task/update": {
+      "summary": "Patch a single plan task (status, owner, due, risk, etc.)",
+      "responses": {
+        "200": "Updated task",
+        "400": "Missing taskId",
+        "404": "Task not found"
+      }
+    },
+    "POST /kb/plan/delete": {
+      "summary": "Delete a plan and its tasks",
+      "responses": {
+        "200": "ok",
+        "400": "Missing id"
+      }
+    },
+    "POST /kb/plan/save": {
+      "summary": "Create or update a plan without an LLM call (manual / auto-stub)",
+      "responses": {
+        "200": "Saved plan",
+        "400": "Validation error",
+        "500": "SQLite write failed (code SAVE_FAILED)"
+      }
+    },
+    "POST /kb/project/install-skills": {
+      "summary": "Install the central skills kit into a project folder",
+      "description": "Used by New Project / Rebuild. The target must already contain `system/project.json`, so an arbitrary path cannot be written to.",
+      "responses": {
+        "200": "Install result",
+        "400": "INVALID_PATH / NOT_A_PROJECT",
+        "404": "PATH_NOT_FOUND / KIT_MISSING",
+        "500": "INSTALL_FAILED"
+      }
+    },
+    "POST /kb/providers/models": {
+      "summary": "Fetch the current chat model list for a provider",
+      "responses": {
+        "200": "Model ID list (empty when nothing could be listed). For `anthropic` the list comes from the Agent SDK — the account's own models, with or without an API key — in the SDK's order (its default first), with display names in `entries`; if the SDK cannot answer it falls back to the key-based `/v1/models` listing. Other providers: sorted ids from their models endpoint.",
+        "400": "Unknown provider",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/providers/verify": {
+      "summary": "Verify an LLM provider credential (live probe or CLI binary check)",
+      "responses": {
+        "200": "Verification result (always 200; check ok field)",
+        "400": "Unknown provider",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/review/approve": {
+      "summary": "Execute an approved review item (re-runs guardrails)",
+      "responses": {
+        "200": "executed. API v75+: review payloads in all /kb/review/* responses are redacted (token/apiKey/secret/password leaves removed)",
+        "400": "Validation error",
+        "404": "Review item not found",
+        "409": "REVIEW_NOT_PENDING, or REVIEW_RACE when another request claimed the item",
+        "422": "GUARDRAILS_FAILED at approval time (auto-rejects the item), or CREDENTIAL_REQUIRED (API v75+) when the only failing check is the missing credential: the item stays pending so the approve can be retried with `config`/`pr` credentials or after saving one to the vault",
+        "500": "Approval execution failed"
+      }
+    },
+    "POST /kb/review/delete": {
+      "summary": "Delete a review item from the queue",
+      "responses": {
+        "200": "ok",
+        "400": "Missing id"
+      }
+    },
+    "POST /kb/review/reject": {
+      "summary": "Reject a pending review item",
+      "responses": {
+        "200": "Updated review item",
+        "400": "Missing id",
+        "404": "Not found"
+      }
+    },
+    "POST /kb/review/submit": {
+      "summary": "Submit an artifact (dispatch / codegen-apply) for human review",
+      "responses": {
+        "200": "Review item created (pending)",
+        "400": "Validation error"
+      }
+    },
+    "POST /kb/routing-tiers": {
+      "summary": "Sync the Mac app's per-role tier routing config to the server",
+      "description": "Replaces the CALLER's tier routing config (other users are untouched), persisted per user. Each tier names a provider + model; each feature names a tier. Every entry is optional and invalid entries are dropped (unknown tier/feature names, a provider outside anthropic|openai|google|deepseek|jev|custom:<id>, a model id outside `^[A-Za-z0-9][A-Za-z0-9._:/-]{0,127}(\\[1m\\])?$`) and reported back in `dropped` (API v67+). An unset or unusable tier (custom provider missing/disabled/keyless, DeepSeek without an API key, OpenAI/Google with neither an API key nor their logged-in CLI — codex/gemini, API v68+; v67 required the key) keeps the role on its default provider and model. API v73+: `jev` (decision-only, key required) is a valid tier provider but serves ONLY the `decisions` feature; any other feature on a jev tier keeps its default.",
+      "responses": {
+        "200": "Synced",
+        "400": "Body is not a JSON object",
+        "405": "Method not allowed",
+        "413": "Request body too large"
+      }
+    },
+    "POST /kb/slack/fetch": {
+      "summary": "Fetch new messages from a Slack channel (incremental, past the per-channel high-water mark)",
+      "responses": {
+        "200": "New messages plus a skipped count",
+        "400": "Validation error or no token saved",
+        "502": "Slack fetch failed"
+      }
+    },
+    "POST /kb/slack/seen": {
+      "summary": "Mark Slack messages seen and advance the per-channel high-water mark",
+      "responses": {
+        "200": "Acknowledged"
+      }
+    },
+    "POST /kb/slack/test": {
+      "summary": "Verify the saved Slack bot token (auth.test); no request body",
+      "responses": {
+        "200": "Token valid — Slack workspace info",
+        "400": "No Slack bot token saved",
+        "502": "Slack connection failed"
+      }
+    },
+    "POST /kb/summarize": {
+      "summary": "Summarize a transcript with LLM (3-minute server timeout)",
+      "responses": {
+        "200": "Structured summary",
+        "400": "Validation error",
+        "500": "Unexpected summarize error",
+        "502": "Summarize LLM call failed",
+        "504": "Summarize timed out (>3 min)",
+        "429": "Rate limited"
+      }
+    },
+    "POST /kb/usage/record": {
+      "summary": "Record one usage event (used by the Mac Auto Tasks CLI path)",
+      "responses": {
+        "200": "Recorded"
+      }
+    },
+    "PUT /kb/agent/persona": {
+      "summary": "Set or reset the active agent persona",
+      "responses": {
+        "200": "Updated persona"
+      }
+    },
+    "PUT /kb/agent/personas/active": {
+      "summary": "Set the active persona by ID",
+      "responses": {
+        "200": "Updated personas list with new active",
+        "404": "Persona not found"
+      }
+    },
+    "PUT /kb/agent/personas/{id}": {
+      "summary": "Update a persona by ID",
+      "responses": {
+        "200": "Updated persona",
+        "404": "Not found"
+      }
+    },
+    "PUT /kb/issue-schedule": {
+      "summary": "Create or replace one issue's schedule overlay",
+      "responses": {
+        "200": "ok",
+        "400": "Validation error",
+        "404": "feature_disabled — LLMIDE_FEATURES omits gantt_issues; the route module is not loaded"
+      }
+    },
+    "PUT /kb/usage/limits": {
+      "summary": "Replace the per-model caps for the providers present in the body",
+      "responses": {
+        "200": "Saved; returns the merged chains"
+      }
+    }
+  },
+  "components": {
+    "FeatureDisabled": "404 body for a path owned by a feature the server was started without (LLMIDE_FEATURES). Deliberately not the Error envelope: a client can tell it from an unknown route without parsing a message."
+  },
+  "outsideRoster": {
+    "/metrics": {
+      "get": {
+        "summary": "Prometheus scrape target",
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Prometheus text-format metrics",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Not authenticated",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Admin role required",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
