@@ -76,7 +76,20 @@ export function __setEngineImporterForTest(fn) {
 // The production `runTurn`. It awaits the import INSIDE the route's turn
 // try/catch, so an import failure ends the stream with the same terminal
 // ENGINE_ERROR event as any other engine failure.
+//
+// Test seam for the token bench (scripts/token-bench.mjs --fake): with
+// LLMIDE_BENCH_FAKE=1 a turn goes to llm_agent/sdk/bench-fake-engine.mjs, which
+// makes no model call and never loads the SDK. Refused under
+// NODE_ENV=production so a production server can never be switched to fake.
+export function benchFakeEngineEnabled(env = process.env) {
+  return env.LLMIDE_BENCH_FAKE === '1' && env.NODE_ENV !== 'production';
+}
+
 export async function runEngineTurn(args) {
+  if (benchFakeEngineEnabled()) {
+    const { runBenchFakeTurn } = await import('../llm_agent/sdk/bench-fake-engine.mjs');
+    return runBenchFakeTurn(args);
+  }
   const { runAgentV2Turn } = await loadAgentEngine();
   return runAgentV2Turn(args);
 }

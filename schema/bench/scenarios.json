@@ -1,0 +1,37 @@
+{
+  "_comment": [
+    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17).",
+    "Each scenario opens a NEW v2 chat; every turn of a multi-turn scenario reuses",
+    "that chat. `mode` is sent explicitly so the classifier never runs (its own",
+    "call would be part of the measurement). The bench creates a temp workspace",
+    "holding notes.txt; the prompts refer to it.",
+    "Change a prompt only together with a new token-baseline.json."
+  ],
+  "version": 1,
+  "scenarios": [
+    { "id": "greeting", "mode": "ask", "turns": ["hi"] },
+    {
+      "id": "explain-file",
+      "mode": "ask",
+      "turns": ["Explain in three sentences what notes.txt contains."]
+    },
+    {
+      "id": "small-edit",
+      "mode": "execute",
+      "turns": ["In notes.txt, change the word 'alpha' to 'beta' and tell me when it is done."]
+    },
+    {
+      "id": "plan-step",
+      "mode": "plan",
+      "turns": ["Plan one step: add a second line to notes.txt that says 'gamma'."]
+    },
+    {
+      "id": "two-turn-reuse",
+      "mode": "ask",
+      "turns": [
+        "Remember the code word is 'amber'. Reply with OK only.",
+        "What code word did I ask you to remember? Reply with the word only."
+      ]
+    }
+  ]
+}

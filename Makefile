@@ -177,6 +177,17 @@ generation-gates:
 loop-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run loop-contract-lab
 
+# Token & speed gate (Phase 1 P17). NOT in `regression`: a real run spends
+# tokens (one short turn per scenario on the cheapest model). Run on demand or
+# nightly; `token-bench-fake` exercises the same pipeline with no model calls.
+# See docs/how-to/run-the-token-bench.md.
+.PHONY: token-bench token-bench-fake
+token-bench:
+	node scripts/token-bench.mjs
+
+token-bench-fake:
+	node scripts/token-bench.mjs --fake
+
 # Enable the repo's git hooks (.githooks/). The pre-push hook runs the
 # regression gate before any push that touches mac/. Run once per clone.
 .PHONY: hooks
