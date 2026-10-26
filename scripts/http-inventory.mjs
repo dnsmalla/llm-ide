@@ -231,10 +231,10 @@ function normalizeFrom(s) {
       out += s[i++];
     } else break;
   }
-  return out
-    .split('/')
-    .map((seg) => (seg.includes('*') ? '*' : seg))
-    .join('/');
+  // A segment that is wholly interpolated stays "*"; one that mixes literal
+  // text with an interpolation ("limits\(q)") keeps its literal part as a glob
+  // ("limits*") so it cannot match an unrelated sibling segment.
+  return out;
 }
 
 function skipBalanced(s, start, open, close) {
@@ -279,7 +279,19 @@ function clientMatchesRoster(c, e) {
   const cs = (prefix ? c.slice(0, -1) : c).split('/').slice(1);
   const es = e.split('/').slice(1);
   if (prefix ? es.length <= cs.length : es.length !== cs.length) return false;
-  return cs.every((seg, i) => seg === '*' || es[i].startsWith(':') || es[i] === seg);
+  return cs.every((seg, i) => segMatches(seg, es[i]));
+}
+
+// One client segment against one roster segment. "*" (a wholly interpolated
+// segment) matches anything; a glob like "limits*" matches only roster segments
+// that fit its literal text; a roster parameter (":id") takes any client
+// segment; otherwise the segments must be equal.
+function segMatches(seg, rosterSeg) {
+  if (seg === '*') return true;
+  if (rosterSeg.startsWith(':')) return true;
+  if (!seg.includes('*')) return seg === rosterSeg;
+  const re = new RegExp(`^${seg.split('*').map((p) => p.replace(/[.+?^${}()|[\]\\]/g, '\\$&')).join('.*')}$`);
+  return re.test(rosterSeg);
 }
 
 function clientAllowed(c) {
