@@ -1831,6 +1831,37 @@ paths:
         '504': { description: Summarize timed out (>3 min), content: { application/json: { schema: { $ref: '#/components/schemas/Error' } } } }
         '429': { description: Rate limited }
 
+  /kb/issues:
+    get:
+      summary: List issues from the connected tracker for a repo (read-only)
+      parameters:
+        - { in: query, name: repo, schema: { type: string } }
+        - { in: query, name: state, schema: { type: string, default: open } }
+        - { in: query, name: provider, schema: { type: string, default: github } }
+        - { in: query, name: limit, schema: { type: integer, maximum: 100, default: 20 } }
+      responses:
+        '200':
+          description: Issues matching the filter
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  issues: { type: array, items: { type: object } }
+
+  /kb/export-all:
+    get:
+      summary: Export every KB row for the caller as newline-delimited JSON, paged by cursor
+      parameters:
+        - { in: query, name: cursor, schema: { type: string } }
+        - { in: query, name: limit, schema: { type: integer, maximum: 500, default: 100 } }
+      responses:
+        '200':
+          description: NDJSON stream of export records
+          content:
+            application/x-ndjson:
+              schema: { type: string }
+
   /kb/email/classify:
     post:
       summary: Classify a fetched email with LLM and extract to-dos (60 s server timeout)
@@ -2417,6 +2448,24 @@ paths:
                   captionCount: { type: integer }
                   persisted:    { type: boolean, description: 'true when captions were successfully written to SQLite' }
                   persistError: { type: string, nullable: true, description: 'Error message if SQLite persist failed (session is still marked finalized)' }
+
+  /kb/live/{id}/stream:
+    get:
+      summary: Server-sent events stream of a live capture session's captions
+      description: Content-Type text/event-stream. At most MAX_SSE_PER_USER concurrent streams per user (429 TOO_MANY_STREAMS beyond that).
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        '200':
+          description: SSE stream of caption events for the session
+          content:
+            text/event-stream:
+              schema: { type: string }
+        '429':
+          description: Too many concurrent live streams for this user
 
   # ── KB agent ─────────────────────────────────────────────────────────────
 

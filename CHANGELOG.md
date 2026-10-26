@@ -7,6 +7,8 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **API v76: four served routes added to the endpoint roster.** `/kb/issues`, `/kb/export-all`, `/kb/live/:id/stream` and `/kb/email/classify` were answered by the server and called by clients but missing from `ALL_ENDPOINTS`, so `/health` did not advertise them. No request or response change; `SERVER_API_VERSION` 75 → 76.
+
 - **Warm CLI pool for the chat mode classifier.** On subscription (CLI) installs the auto-mode classifier
   no longer pays a cold `claude` start on every turn: one idle `claude -p --input-format stream-json`
   child is kept for the classifier's exact argv, user and env, answers one prompt, and is replaced
