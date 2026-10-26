@@ -13,12 +13,11 @@
 // HAND_TYPE_ALLOWLIST below, each with the reason it must stay.
 
 import { readFileSync, readdirSync, writeFileSync, existsSync } from 'node:fs';
-import { join, dirname, resolve, basename, relative } from 'node:path';
+import { join, dirname, resolve, relative } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadContractDocs } from './lib/http-contract.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
-const SCHEMA_DIR = join(ROOT, 'schema/http');
-const EVENT_SCHEMAS = ['schema/agent-v2/agent-v2.schema.json'];
 const OUT_FILE = join(ROOT, 'extension/src/lib/api-types.ts');
 const SRC_DIR = join(ROOT, 'extension/src');
 const CHECK = process.argv.includes('--check');
@@ -59,24 +58,7 @@ const propKey = (k) => (/^[A-Za-z_$][\w$]*$/.test(k) ? k : JSON.stringify(k));
 
 // ---------- load documents ----------
 
-function loadDocs() {
-  const docs = new Map(); // id -> { id, file, json, rel }
-  const groupFiles = readdirSync(SCHEMA_DIR)
-    .filter((f) => f.endsWith('.schema.json'))
-    .sort();
-  for (const f of groupFiles) {
-    const id = f.replace(/\.schema\.json$/, '');
-    const rel = `schema/http/${f}`;
-    docs.set(id, { id, rel, json: JSON.parse(readFileSync(join(SCHEMA_DIR, f), 'utf8')) });
-  }
-  for (const rel of EVENT_SCHEMAS) {
-    const id = basename(rel).replace(/\.schema\.json$/, '');
-    docs.set(id, { id, rel, json: JSON.parse(readFileSync(join(ROOT, rel), 'utf8')), event: true });
-  }
-  return docs;
-}
-
-const docs = loadDocs();
+const docs = loadContractDocs(ROOT);
 const pathToDoc = new Map([...docs.values()].map((d) => [d.rel, d.id]));
 const httpDocIds = [...docs.values()].filter((d) => !d.event).map((d) => d.id);
 
