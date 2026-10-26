@@ -11,30 +11,35 @@
 
 import { getSecret } from './vault.mjs';
 
-const SECRET_KEY_RE = /token|apikey|api_key|secret|password/i;
+import { REVIEW_SECRET_KEY_RE, scrubSecretKeysDeep } from '../kb/review-payload.mjs';
 
-// payload sections whose credential-looking leaves are stripped
+// payload sections whose top-level credential leaves are held for approval
 const SECRET_SECTIONS = ['config', 'pr'];
 
-/** Split `payload` into { payload: <without secrets>, secrets: {config, pr} }. */
+const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
+
+/**
+ * Split `payload` into { payload: <without credentials>, secrets: {config, pr} }.
+ * The payload is scrubbed at every depth (scrubSecretKeysDeep). The secrets
+ * returned are only the credential leaves directly under config / pr: those
+ * are held in memory for approval; anything nested elsewhere is dropped.
+ */
 export function stripReviewSecrets(payload) {
-  const out = { ...(payload || {}) };
+  const base = isPlainObject(payload) ? payload : {};
   const secrets = {};
   for (const section of SECRET_SECTIONS) {
-    const obj = out[section];
-    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) continue;
-    const kept = {};
+    const obj = base[section];
+    if (!isPlainObject(obj)) continue;
     const taken = {};
     for (const [k, v] of Object.entries(obj)) {
-      if (SECRET_KEY_RE.test(k)) { if (v) taken[k] = v; } else kept[k] = v;
+      if (REVIEW_SECRET_KEY_RE.test(k) && v) taken[k] = v;
     }
-    out[section] = kept;
     if (Object.keys(taken).length) secrets[section] = taken;
   }
-  return { payload: out, secrets };
+  return { payload: scrubSecretKeysDeep(base), secrets };
 }
 
-/** Public view of a review item: payload never carries credentials. */
+/** Public view of a review item: payload never carries credentials, at any depth. */
 export function redactReviewItem(item) {
   if (!item || !item.payload) return item;
   return { ...item, payload: stripReviewSecrets(item.payload).payload };

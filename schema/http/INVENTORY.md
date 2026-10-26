@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 164 token, 12 public
 - Handler found: 174; no handler found: 2
-- No Mac and no extension caller: 34 (tests only: 20, comments/docs only: 12, no reference: 2)
+- No Mac and no extension caller: 34 (tests only: 21, comments/docs only: 11, no reference: 2)
 
 By first path segment:
 
@@ -59,7 +59,7 @@ Endpoints with no client caller (34):
 - `/kb/plan-task/update` — comments/docs only
 - `/kb/plan/delete` — comments/docs only
 - `/kb/review/get/:id` — tests only
-- `/kb/review/reject` — comments/docs only
+- `/kb/review/reject` — tests only
 - `/kb/review/delete` — tests only
 - `/kb/outcomes/retry-failed` — no reference
 - `/kb/outcomes/task/:id` — comments/docs only
@@ -158,12 +158,12 @@ Endpoints with no client caller (34):
 | `/kb/dispatch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:182` | - | `App.tsx` | - |
 | `/kb/generate-code` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:324` | - | `App.tsx` | - |
 | `/kb/issue-schedule` | ALL_ENDPOINTS | DELETE, GET, PUT | token | gantt_issues | `extension/routes/issue-schedule.mjs:24` | `LlmIdeAPIClient+IssueSchedule.swift` | - | - |
-| `/kb/review/submit` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:46` | - | `App.tsx` | - |
-| `/kb/review/list` | ALL_ENDPOINTS | GET | token | core | `extension/routes/review.mjs:78` | - | `App.tsx` | - |
-| `/kb/review/get/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/review.mjs:87` | - | - | tests only |
-| `/kb/review/approve` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:113` | - | `App.tsx` | - |
-| `/kb/review/reject` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:95` | - | - | comments/docs only |
-| `/kb/review/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/review.mjs:227` | - | - | tests only |
+| `/kb/review/submit` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:57` | - | `App.tsx` | - |
+| `/kb/review/list` | ALL_ENDPOINTS | GET | token | core | `extension/routes/review.mjs:91` | - | `App.tsx` | - |
+| `/kb/review/get/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/review.mjs:100` | - | - | tests only |
+| `/kb/review/approve` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:127` | - | `App.tsx` | - |
+| `/kb/review/reject` | ALL_ENDPOINTS | POST | token | core | `extension/routes/review.mjs:108` | - | - | tests only |
+| `/kb/review/delete` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/review.mjs:257` | - | - | tests only |
 | `/kb/notify/slack` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1328` | - | `App.tsx` | - |
 | `/kb/outcomes/refresh` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1265` | `LlmIdeAPIClient+Export.swift` | `App.tsx` | - |
 | `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1314` | - | - | no reference |

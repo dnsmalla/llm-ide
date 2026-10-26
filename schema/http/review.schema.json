@@ -29,7 +29,7 @@
     "Payload": {
       "type": "object",
       "additionalProperties": true,
-      "description": "The kind-specific payload, open because its shape depends on kind. dispatch: target (github, backlog or linear; preview never reaches review), planId, taskIds, config (tracker credentials and settings: repo, space, projectId, issueTypeId, teamId; credential keys are stripped), and items, which the server replaces with the plan's tasks at submit and approve (title, body). codegen-apply: repoPath, taskId, summary, files and tests (each {path, content}), pr (ghRepo, baseBranch; credential keys are stripped), and allowedRepos, which the server sets from the user's allow-list at submit and approve. The server never trusts a client-sent allowedRepos or items."
+      "description": "The kind-specific payload, open because its shape depends on kind. Submit keeps only the keys listed for the kind (kb/review-payload.mjs REVIEW_PAYLOAD_KEYS) and removes credential-looking keys (token, apiKey, secret, password, credential, auth, bearer, authorization) at every depth; every review response returns the payload scrubbed the same way. dispatch: target (github, backlog or linear; preview never reaches review), planId, taskIds, config (tracker credentials and settings: repo, space, projectId, issueTypeId, teamId; credential keys are stripped), and items, which the server replaces with the plan's tasks at submit and approve (title, body). codegen-apply: repoPath, taskId, summary, files and tests (each {path, content}), pr (ghRepo, baseBranch; credential keys are stripped), and allowedRepos, which the server sets from the user's allow-list at submit and approve. The server never trusts a client-sent allowedRepos or items."
     },
     "ReviewItem": {
       "type": "object",
@@ -191,7 +191,7 @@
       "request": {
         "body": {
           "type": "object",
-          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). Rejecting drops any credentials held from submit.",
+          "description": "id is required by the handler (400 VALIDATION_FAILED 'Missing id'). Rejecting drops any credentials held from submit. Only a pending item can be rejected (compare-and-swap on pending): any other status answers 409 REVIEW_NOT_PENDING with the stored status in the message, and an unknown id answers 404.",
           "properties": {
             "id": { "type": "string" },
             "note": { "type": "string", "description": "Stored as reviewerNote." }
@@ -203,6 +203,7 @@
         "400": { "$ref": "_common#/$defs/Error" },
         "401": { "$ref": "_common#/$defs/Error" },
         "404": { "$ref": "_common#/$defs/Error" },
+        "409": { "$ref": "_common#/$defs/Error" },
         "429": { "$ref": "_common#/$defs/Error" }
       }
     },
