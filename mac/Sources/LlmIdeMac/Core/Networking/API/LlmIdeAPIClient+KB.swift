@@ -29,7 +29,7 @@ extension LlmIdeAPIClient {
         let meta: [String: String]
     }
 
-    struct SearchHit: Codable, Identifiable {
+    public struct SearchHit: Codable, Identifiable {
         let kind: String
         let meetingId: String?
         let entityId: String?
@@ -39,10 +39,10 @@ extension LlmIdeAPIClient {
         let meetingTitle: String?
         let ref: String?
         let rank: Double?
-        var id: String { "\(kind)-\(entityId ?? meetingId ?? title)" }
+        public var id: String { "\(kind)-\(entityId ?? meetingId ?? title)" }
     }
 
-    struct MeetingDetail: Codable {
+    public struct MeetingDetail: Codable {
         let id: String
         let title: String
         let date: String?

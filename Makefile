@@ -104,7 +104,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates
+regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
 
 .PHONY: feature-gates
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
@@ -151,6 +151,12 @@ graph-gates: graph-kit-checkout
 # labs are: this toolchain has no XCTest, so `test-mac` above skips `swift test`
 # entirely — pure logic lifted out of ChatEngine would otherwise have no gate at
 # all. Wired into `regression` because a gate nothing runs is a gate in name only.
+.PHONY: api-gates
+# Decodes every 2xx HTTP contract fixture with the Mac's Codable models and
+# fails on a decode error or an unallowlisted dropped key (Phase 1 P12).
+api-gates:
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run api-contract-lab
+
 .PHONY: chat-gates
 chat-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab

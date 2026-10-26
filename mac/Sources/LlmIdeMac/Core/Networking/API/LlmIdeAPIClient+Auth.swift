@@ -63,7 +63,7 @@ extension LlmIdeAPIClient {
         return r.path
     }
 
-    struct ConnectGitResult: Decodable {
+    public struct ConnectGitResult: Decodable {
         let ok: Bool
         let filesScanned: Int?
         let filesIndexed: Int?
@@ -301,7 +301,7 @@ extension LlmIdeAPIClient {
 
 /// `GET /auth/me/{claude,codex}-plugins/updates` from API v60: which imported
 /// plugins have an update, and how it was detected.
-struct PluginUpdateCheck: Decodable {
+public struct PluginUpdateCheck: Decodable {
     /// False when the `claude` CLI could not answer and the local scan did
     /// (always false for Codex).
     let cli: Bool
@@ -417,7 +417,7 @@ struct PluginUpdatesResponse: Decodable {
 
 /// What a vendor rescan found — reported back so the user learns the refresh
 /// did something, rather than watching an unchanged list.
-struct PluginRefreshResponse: Decodable {
+public struct PluginRefreshResponse: Decodable {
     let installed: Int
     let marketplace: Int
 }
@@ -450,7 +450,7 @@ struct PluginInstallResponse: Decodable {
     }
 }
 
-struct PluginUninstallResponse: Decodable {
+public struct PluginUninstallResponse: Decodable {
     let ok: Bool
     let removed: Bool
 }
@@ -650,12 +650,12 @@ struct PluginInfo: Decodable, Identifiable, Equatable {
     }
 }
 
-struct PluginsListResponse: Decodable {
+public struct PluginsListResponse: Decodable {
     let pluginDir: String
     let plugins: [PluginInfo]
 }
 
-struct PluginReloadResponse: Decodable {
+public struct PluginReloadResponse: Decodable {
     let pluginDir: String
     let count: Int
     let warnings: [String]
@@ -731,11 +731,11 @@ struct ClaudeMarketplacePlugin: Decodable, Identifiable {
     }
 }
 
-struct ClaudePluginsListResponse: Decodable {
+public struct ClaudePluginsListResponse: Decodable {
     let plugins: [ClaudePlugin]
 }
 
-struct ClaudeMarketplaceListResponse: Decodable {
+public struct ClaudeMarketplaceListResponse: Decodable {
     let plugins: [ClaudeMarketplacePlugin]
 }
 
@@ -815,11 +815,11 @@ struct CodexMarketplacePlugin: Decodable, Identifiable {
     }
 }
 
-struct CodexPluginsListResponse: Decodable {
+public struct CodexPluginsListResponse: Decodable {
     let plugins: [CodexPlugin]
 }
 
-struct CodexMarketplaceListResponse: Decodable {
+public struct CodexMarketplaceListResponse: Decodable {
     let plugins: [CodexMarketplacePlugin]
 }
 

@@ -10,7 +10,7 @@ extension LlmIdeAPIClient {
     /// One model's cap in a provider's fallback chain. Codable both ways: the
     /// same shape is read from GET /limits and written back to PUT /limits
     /// (the server ignores the read-only `label`/`custom` fields on write).
-    struct ModelLimit: Codable, Identifiable, Hashable {
+    public struct ModelLimit: Codable, Identifiable, Hashable {
         var model: String
         var label: String?
         var priority: Int
@@ -21,7 +21,7 @@ extension LlmIdeAPIClient {
         var thresholdPct: Int        // proactive switch point, 1–100
         var custom: Bool?
 
-        var id: String { model }
+        public var id: String { model }
 
         enum CodingKeys: String, CodingKey {
             case model, label, priority, enabled
@@ -33,7 +33,7 @@ extension LlmIdeAPIClient {
         }
     }
 
-    struct UsageLimits: Codable { var chains: [String: [ModelLimit]] }
+    public struct UsageLimits: Codable { var chains: [String: [ModelLimit]] }
 
     /// Resolver verdict: which model should run, and why.
     struct UsageResolution: Codable, Hashable {

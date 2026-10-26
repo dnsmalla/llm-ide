@@ -37,12 +37,12 @@ extension LlmIdeAPIClient {
         let reason: String?
     }
 
-    struct McpUpdateCheck: Decodable, Equatable {
+    public struct McpUpdateCheck: Decodable, Equatable {
         let checkedAt: String?
         let servers: [McpServerUpdate]
     }
 
-    struct McpUpdateAck: Decodable, Equatable {
+    public struct McpUpdateAck: Decodable, Equatable {
         let ok: Bool
         let from: String?
         let to: String?
@@ -58,8 +58,8 @@ extension LlmIdeAPIClient {
         let changes: [String]
     }
 
-    struct McpPluginInfo: Decodable, Identifiable, Equatable {
-        let id: String
+    public struct McpPluginInfo: Decodable, Identifiable, Equatable {
+        public let id: String
         let name: String
         /// "stdio" | "http" | "sse". Absent on records written before
         /// transports existed, which were always stdio.
@@ -121,7 +121,7 @@ extension LlmIdeAPIClient {
             case credential, credentialMissing, source, builtin, enabled, consented, effective
             case package, catalogId, sourceName
         }
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             self.id = try c.decode(String.self, forKey: .id)
             self.name = try c.decode(String.self, forKey: .name)
@@ -160,7 +160,7 @@ extension LlmIdeAPIClient {
 
     /// One server discovered by the admin-only read-only scan of the
     /// operator's `~/.claude.json` — never written to, an import source only.
-    struct ClaudeMcpSource: Decodable, Identifiable, Equatable {
+    public struct ClaudeMcpSource: Decodable, Identifiable, Equatable {
         let name: String
         let transport: String?
         /// Absent for a hosted entry. These used to be dropped by the scanner
@@ -169,28 +169,28 @@ extension LlmIdeAPIClient {
         let args: [String]?
         let env: [String: String]?
         let url: String?
-        var id: String { name }
+        public var id: String { name }
         var isHosted: Bool { transport == "http" || transport == "sse" }
     }
     private struct ClaudeMcpSourcesResponse: Decodable { let servers: [ClaudeMcpSource] }
 
     /// Same as ClaudeMcpSource, scanned from `~/.codex/config.toml`'s
     /// `[mcp_servers.*]` tables instead (mcp/codex-source.mjs).
-    struct CodexMcpSource: Decodable, Identifiable, Equatable {
+    public struct CodexMcpSource: Decodable, Identifiable, Equatable {
         let name: String
         let transport: String?
         let command: String?
         let args: [String]?
         let env: [String: String]?
         let url: String?
-        var id: String { name }
+        public var id: String { name }
         var isHosted: Bool { transport == "http" || transport == "sse" }
     }
     private struct CodexMcpSourcesResponse: Decodable { let servers: [CodexMcpSource] }
 
     /// One curated, one-click-addable server (extension/mcp/catalog.mjs).
-    struct McpCatalogEntry: Decodable, Identifiable, Equatable {
-        let id: String
+    public struct McpCatalogEntry: Decodable, Identifiable, Equatable {
+        public let id: String
         let name: String
         let description: String
         let transport: String
@@ -218,7 +218,7 @@ extension LlmIdeAPIClient {
             case id, name, description, transport, command, args, url
             case credential, oauth, requiresArg, registered
         }
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             self.id = try c.decode(String.self, forKey: .id)
             self.name = try c.decode(String.self, forKey: .name)

@@ -2,7 +2,7 @@ import Foundation
 
 /// The backend's Claude Agent SDK version and in-place update
 /// (`extension/llm_agent/sdk/updater.mjs`, server API v57).
-struct AgentSdkStatus: Decodable, Equatable {
+public struct AgentSdkStatus: Decodable, Equatable {
     /// The version the running backend loaded at startup.
     let running: String?
     /// The version installed on disk — differs from `running` after an
@@ -17,7 +17,7 @@ struct AgentSdkStatus: Decodable, Equatable {
     let error: String?
 }
 
-struct AgentSdkUpdateResult: Decodable, Equatable {
+public struct AgentSdkUpdateResult: Decodable, Equatable {
     let ok: Bool
     let from: String?
     let to: String?

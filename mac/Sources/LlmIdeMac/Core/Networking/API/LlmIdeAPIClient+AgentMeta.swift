@@ -31,8 +31,8 @@ extension LlmIdeAPIClient {
 
     // MARK: Central skills-repo catalog (discovery)
 
-    struct SkillLibraryEntry: Decodable, Identifiable, Equatable {
-        let id: String          // "<family>/<dir>"
+    public struct SkillLibraryEntry: Decodable, Identifiable, Equatable {
+        public let id: String          // "<family>/<dir>"
         let family: String      // "skills" | "runtime"
         let name: String
         let description: String
@@ -46,7 +46,7 @@ extension LlmIdeAPIClient {
         /// `sourceId`/`sourceName` are new fields (multi-source LLM-sources
         /// feature) — decoded with fallbacks so a pre-upgrade server response
         /// still decodes, mirroring `PluginInfo.subagents`'s back-compat pattern.
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             self.id          = try c.decode(String.self, forKey: .id)
             self.family      = try c.decode(String.self, forKey: .family)
@@ -94,7 +94,7 @@ extension LlmIdeAPIClient {
         }
     }
 
-    struct GenerationLibrary: Decodable {
+    public struct GenerationLibrary: Decodable {
         let templates: [GenerationLibraryEntry]
         let commands: [GenerationLibraryEntry]
     }
@@ -170,12 +170,12 @@ extension LlmIdeAPIClient {
         let grantedAt: String
         var id: String { toolName }
     }
-    struct ToolPermissions: Decodable, Equatable {
+    public struct ToolPermissions: Decodable, Equatable {
         var rules: [ToolRule]
         var legacy: [ToolApproval]
         enum CodingKeys: String, CodingKey { case rules, legacy = "approvals" }
         init(rules: [ToolRule] = [], legacy: [ToolApproval] = []) { self.rules = rules; self.legacy = legacy }
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             // `rules` is absent on a pre-v55 server.
             rules = try c.decodeIfPresent([ToolRule].self, forKey: .rules) ?? []

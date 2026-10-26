@@ -10,8 +10,8 @@ import Foundation
 // only, never invoked/executed/spawned.
 extension LlmIdeAPIClient {
 
-    struct LlmSourceInfo: Decodable, Identifiable, Equatable {
-        let id: String
+    public struct LlmSourceInfo: Decodable, Identifiable, Equatable {
+        public let id: String
         let name: String
         let origin: String       // "builtin" | "git" | "local" (server may add more later)
         let location: String?    // absolute path (in-place read) — nil if never resolved
@@ -42,7 +42,7 @@ extension LlmIdeAPIClient {
         /// still decodes the list instead of throwing `keyNotFound` and
         /// silently rendering the section empty. Mirrors the back-compat pattern
         /// in `SkillLibraryEntry.init(from:)`.
-        init(from decoder: Decoder) throws {
+        public init(from decoder: Decoder) throws {
             let c = try decoder.container(keyedBy: CodingKeys.self)
             self.id         = try c.decode(String.self, forKey: .id)
             self.name       = try c.decode(String.self, forKey: .name)
@@ -121,7 +121,7 @@ extension LlmIdeAPIClient {
         let args: [String]
         var id: String { name }
     }
-    struct LlmSourceDiscoveryDetail: Decodable {
+    public struct LlmSourceDiscoveryDetail: Decodable {
         /// Optional so a Mac build ahead of its server still decodes the
         /// pre-skills response shape (the field shipped later than the rest).
         var skills: [LlmSourceSkill]?
