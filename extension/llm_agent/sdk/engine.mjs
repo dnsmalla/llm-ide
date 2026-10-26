@@ -1005,7 +1005,7 @@ const CONTEXT_USAGE_TIMEOUT_MS = 2000;
  * per-category token-count API calls. Best-effort — a missing method (fake
  * or older query), a failure or a slow answer must never hold up the turn.
  */
-export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS } = {}) {
+export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS, onRaw } = {}) {
   if (typeof q?.getContextUsage !== 'function') return null;
   let timer;
   try {
@@ -1013,6 +1013,9 @@ export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS
       q.getContextUsage({ detail: 'summary' }),
       new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`timed out after ${timeoutMs} ms`)), timeoutMs); }),
     ]);
+    // The raw response (with each category's isDeferred, which the wire event
+    // does not carry) goes to the composition recorder, not to the client.
+    try { onRaw?.(response); } catch { /* telemetry only */ }
     return mapContextUsage(response);
   } catch (err) {
     console.warn(`context usage unavailable: ${String(err?.message ?? err).slice(0, 200)}`);
@@ -1713,7 +1716,7 @@ export async function runAgentV2Turn(
   // emits a second `result` (the session is released after the first).
   let contextUsageRead = false;
   // The mapped context_usage event (SDK categories), kept for turn_composition.
-  let contextUsageEvent = null;
+  let contextUsageRaw = null;
   const usageTotals = {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
     costUsd: 0, numTurns: 0, durationMs: 0,
@@ -1886,11 +1889,8 @@ export async function runAgentV2Turn(
           // describe a model this window math does not know.
           if (!gatewayBaseUrl && !contextUsageRead) {
             contextUsageRead = true;
-            const contextUsage = await readContextUsage(q);
-            if (contextUsage) {
-              contextUsageEvent = contextUsage;
-              onEvent?.(contextUsage);
-            }
+            const contextUsage = await readContextUsage(q, { onRaw: (raw) => { contextUsageRaw = raw; } });
+            if (contextUsage) onEvent?.(contextUsage);
           }
           q.releaseInput?.();
         }
@@ -1996,8 +1996,9 @@ export async function runAgentV2Turn(
       contextChars: meta.sizes?.contextChars ?? 0,
       llmideToolChars,
       userMcpServers: userMcp?.servers ? Object.keys(userMcp.servers).length : 0,
-      sdkContextTotalTokens: Number.isFinite(contextUsageEvent?.totalTokens) ? contextUsageEvent.totalTokens : null,
-      sdkCategories: Array.isArray(contextUsageEvent?.categories) ? contextUsageEvent.categories : null,
+      sdkContextTotalTokens: Number.isFinite(contextUsageRaw?.totalTokens) ? Math.round(contextUsageRaw.totalTokens) : null,
+      // The SDK's categories as returned (kind and isDeferred intact).
+      sdkCategories: Array.isArray(contextUsageRaw?.categories) ? contextUsageRaw.categories : null,
     };
   }
 }

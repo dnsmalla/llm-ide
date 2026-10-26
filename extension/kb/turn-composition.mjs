@@ -12,10 +12,18 @@ const intOrNull = (v) => (v == null ? null : clampInt(v));
 const approxTokens = (chars) => (chars == null || !Number.isFinite(Number(chars))
   ? null : Math.max(0, Math.min(1_000_000_000, Math.ceil(Number(chars) / 4))));
 
-// The SDK's getContextUsage categories, mapped by name (the SDK's own names,
-// see llm_agent/sdk/events.mjs). Summed when a name matches more than once.
-function sdkTokensFor(categories, pattern) {
-  const hits = categories.filter((c) => pattern.test(c.name));
+// The SDK's getContextUsage categories. Classified by the SDK's own `kind`
+// and `isDeferred` first, then matched by an anchored exact name, so that
+// "MCP tools (deferred)" can never inflate "MCP tools" (see sdk.d.ts: classify
+// on kind, never on the English name). Only live ('used', not deferred) rows
+// feed the live sums; deferred tool schemas are summed on their own.
+function sdkLiveTokensFor(categories, pattern) {
+  const hits = categories.filter((c) => c.kind === 'used' && c.isDeferred !== true && pattern.test(c.name));
+  return hits.length ? intOrNull(hits.reduce((n, c) => n + (Number(c.tokens) || 0), 0)) : null;
+}
+
+function sdkDeferredToolsTokens(categories) {
+  const hits = categories.filter((c) => (c.kind === 'deferred' || c.isDeferred === true) && /tools/i.test(c.name));
   return hits.length ? intOrNull(hits.reduce((n, c) => n + (Number(c.tokens) || 0), 0)) : null;
 }
 
@@ -40,7 +48,7 @@ export function recordTurnComposition(userId, row) {
       ? row.sdkCategories.filter((c) => c && typeof c.name === 'string' && Number.isFinite(Number(c.tokens)))
       : [];
     const sdkCategories = categories.length
-      ? categories.map((c) => `${String(c.name).slice(0, 64)}=${clampInt(c.tokens)}`).join(';').slice(0, 1024)
+      ? categories.map((c) => `${String(c.name).slice(0, 64)}:${String(c.kind || '').slice(0, 16)}=${clampInt(c.tokens)}`).join(';').slice(0, 1024)
       : null;
     // Column/value pairs, in one place so the INSERT cannot drift from them.
     const cols = [
@@ -78,11 +86,12 @@ export function recordTurnComposition(userId, row) {
       ['tool_result_tokens', approxTokens(row.toolResultChars)],
       // The SDK's own end-of-turn categories (estimates, not ours).
       ['sdk_context_total_tokens', intOrNull(row.sdkContextTotalTokens)],
-      ['sdk_system_prompt_tokens', sdkTokensFor(categories, /system prompt/i)],
-      ['sdk_system_tools_tokens', sdkTokensFor(categories, /system tools/i)],
-      ['sdk_mcp_tools_tokens', sdkTokensFor(categories, /mcp tools/i)],
-      ['sdk_memory_tokens', sdkTokensFor(categories, /memory/i)],
-      ['sdk_messages_tokens', sdkTokensFor(categories, /messages/i)],
+      ['sdk_system_prompt_tokens', sdkLiveTokensFor(categories, /^system prompt$/i)],
+      ['sdk_system_tools_tokens', sdkLiveTokensFor(categories, /^system tools$/i)],
+      ['sdk_mcp_tools_tokens', sdkLiveTokensFor(categories, /^mcp tools$/i)],
+      ['sdk_memory_tokens', sdkLiveTokensFor(categories, /^memory files$/i)],
+      ['sdk_messages_tokens', sdkLiveTokensFor(categories, /^messages$/i)],
+      ['sdk_deferred_tools_tokens', sdkDeferredToolsTokens(categories)],
       ['sdk_categories', sdkCategories],
     ];
     getDb().prepare(

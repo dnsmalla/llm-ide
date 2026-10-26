@@ -10,9 +10,13 @@
 --     The chars are exact; the /4 is a rough estimate, not a tokenizer count.
 --   * `sdk_*` columns: the SDK's own getContextUsage() 'summary' categories,
 --     read once per turn from the live session after `result` (no API calls).
---     The SDK names them; they are mapped by name here, and the full list is
---     kept in `sdk_categories` ("name=tokens;...", bounded) so a category the
---     mapping does not know is not lost. Its estimates are the SDK's, not ours.
+--     Classified by the SDK's `kind` and `isDeferred` first, then an anchored
+--     exact name: live sums take only kind 'used' and not deferred, so
+--     "MCP tools (deferred)" never inflates "MCP tools". Deferred tool schemas
+--     are summed on their own in `sdk_deferred_tools_tokens`. The full list is
+--     kept in `sdk_categories` ("name:kind=tokens;...", bounded) so a category
+--     the mapping does not know is not lost. Its estimates are the SDK's, not
+--     ours. (0044 was edited in place before it was merged or pushed.)
 --
 -- The builtin tool schemas and the user MCP tool schemas are not visible to
 -- the client; their sizes come only from the SDK categories (system tools and
@@ -34,4 +38,5 @@ ALTER TABLE turn_composition ADD COLUMN sdk_system_tools_tokens INTEGER;
 ALTER TABLE turn_composition ADD COLUMN sdk_mcp_tools_tokens INTEGER;
 ALTER TABLE turn_composition ADD COLUMN sdk_memory_tokens INTEGER;
 ALTER TABLE turn_composition ADD COLUMN sdk_messages_tokens INTEGER;
+ALTER TABLE turn_composition ADD COLUMN sdk_deferred_tools_tokens INTEGER;
 ALTER TABLE turn_composition ADD COLUMN sdk_categories TEXT;

@@ -35,6 +35,8 @@ const SDK_CATEGORIES = [
   { name: 'Memory files', kind: 'used', tokens: 500 },
   { name: 'Messages', kind: 'used', tokens: 100000 },
   { name: 'Free space', kind: 'free', tokens: 800000 },
+  { name: 'MCP tools (deferred)', kind: 'deferred', isDeferred: true, tokens: 50000 },
+  { name: 'Skills', kind: 'used', tokens: 900 },
 ];
 const measured = (turnId, extra = {}) => ({
   turnId, mode: 'execute', model: 'claude-sonnet-5-5', resumed: true,
@@ -76,13 +78,28 @@ test('a faked turn with known sizes is written as approximate tokens and SDK cat
   assert.equal(r.sdk_context_total_tokens, 125000);
   assert.equal(r.sdk_system_prompt_tokens, 9000);
   assert.equal(r.sdk_system_tools_tokens, 6000);
-  assert.equal(r.sdk_mcp_tools_tokens, 3000);
+  assert.equal(r.sdk_mcp_tools_tokens, 3000, 'the deferred MCP row never inflates the live MCP tools sum');
   assert.equal(r.sdk_memory_tokens, 500);
   assert.equal(r.sdk_messages_tokens, 100000);
-  assert.match(r.sdk_categories, /^System prompt=9000;System tools=6000;MCP tools=3000;Memory files=500;Messages=100000;Free space=800000$/);
+  assert.equal(r.sdk_deferred_tools_tokens, 50000, 'deferred tool schemas are summed on their own');
+  assert.match(r.sdk_categories, /^System prompt:used=9000;System tools:used=6000;MCP tools:used=3000;Memory files:used=500;Messages:used=100000;Free space:free=800000;MCP tools \(deferred\):deferred=50000;Skills:used=900$/);
   // The 0040 columns are unchanged.
   assert.equal(r.system_chars, 4000);
   assert.equal(r.first_call_prompt_tokens, 120005);
+});
+
+test('classification is by kind and anchored name: a deferred row never counts as live', () => {
+  recordTurnComposition(A, measured('split-kind', {
+    sdkCategories: [
+      { name: 'System tools', kind: 'deferred', isDeferred: true, tokens: 7000 },
+      { name: 'System tools (deferred)', kind: 'used', tokens: 8000 },
+      { name: 'MCP tools', kind: 'used', isDeferred: true, tokens: 9000 },
+    ],
+  }));
+  const r = db.getDb().prepare('SELECT * FROM turn_composition WHERE turn_id = ?').get('split-kind');
+  assert.equal(r.sdk_system_tools_tokens, null, 'neither row is a live "System tools"');
+  assert.equal(r.sdk_mcp_tools_tokens, null, 'isDeferred excludes it from the live sum');
+  assert.equal(r.sdk_deferred_tools_tokens, 16000, 'deferred = kind deferred OR isDeferred, tool rows only (7000 + 9000)');
 });
 
 test('unmeasured parts stay NULL, not zero', () => {
