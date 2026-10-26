@@ -13,6 +13,10 @@ import React, { useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 import { useSession } from '../hooks/useSession';
 
+// Mirrors MIN_PASSWORD in extension/server/users.mjs (src/ cannot import
+// server code, so keep the two values in step by hand).
+const PASSWORD_MIN_LENGTH = 10;
+
 interface Me {
   id: string;
   email: string;
@@ -73,8 +77,8 @@ export default function UserAccountSettings(): JSX.Element {
       setPwStatus('New passwords do not match.');
       return;
     }
-    if (newPw.length < 8) {
-      setPwStatus('New password must be at least 8 characters.');
+    if (newPw.length < PASSWORD_MIN_LENGTH) {
+      setPwStatus(`New password must be at least ${PASSWORD_MIN_LENGTH} characters.`);
       return;
     }
     setPwBusy(true);
