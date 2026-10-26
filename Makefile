@@ -163,6 +163,7 @@ chat-gates:
 contract-gates:
 	node scripts/conformance-http.mjs
 	node scripts/gen-api-types.mjs --check
+	node scripts/http-inventory.mjs --check
 
 # Generated TypeScript types for the HTTP contract (extension/src/lib/api-types.ts).
 # Regenerate after changing schema/http; `contract-gates` fails while it is stale.
