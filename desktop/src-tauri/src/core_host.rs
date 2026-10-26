@@ -209,16 +209,17 @@ impl CoreHost {
     }
 
     fn spawn_server(&self) -> Result<u32, String> {
-        let repo = repo_root()?;
-        let node = node_binary();
+        let rt = resolve_runtime()?;
+        eprintln!("core: runtime={} node={} root={}", rt.mode, rt.node.display(), rt.root.display());
+        let node = rt.node.clone();
         let db_dir = std::env::temp_dir().join("llmide-poc");
         std::fs::create_dir_all(&db_dir)
             .map_err(|e| format!("cannot create {}: {e}", db_dir.display()))?;
         let db_path = db_dir.join("poc.db");
 
         let mut child = Command::new(&node)
-            .arg(repo.join("extension").join("server.mjs"))
-            .current_dir(repo.join("extension"))
+            .arg(rt.root.join("extension").join("server.mjs"))
+            .current_dir(rt.root.join("extension"))
             .env("LLMIDE_PORT", SPAWN_PORT.to_string())
             .env("LLMIDE_DB_PATH", &db_path)
             .env("LLMIDE_ENGINE_PREWARM", "0")
@@ -349,6 +350,50 @@ pub(crate) fn repo_root() -> Result<PathBuf, String> {
         .find(|dir: &&Path| dir.join("extension").join("server.mjs").is_file())
         .map(Path::to_path_buf)
         .ok_or_else(|| "repo root not found (set LLMIDE_REPO_ROOT)".to_string())
+}
+
+/// The Node core to run: the copy bundled in a `.app` (`Resources/core`), or
+/// `LLMIDE_POC_BUNDLED=1` forces it, else the repo checkout (dev runs).
+pub(crate) struct Runtime {
+    pub mode: &'static str,
+    pub node: PathBuf,
+    pub root: PathBuf,
+}
+
+pub(crate) fn resolve_runtime() -> Result<Runtime, String> {
+    let forced = std::env::var("LLMIDE_POC_BUNDLED").as_deref() == Ok("1");
+    let exe = std::env::current_exe().map_err(|e| format!("current_exe: {e}"))?;
+    // Inside an app bundle the bundled core is mandatory: never fall back to
+    // repo mode from a shipped .app. Repo mode is for non-bundle dev runs only.
+    if forced || in_app_bundle(&exe) {
+        if let Some(core) = bundled_core_dir(&exe) {
+            return Ok(Runtime {
+                mode: "bundled",
+                node: core.join("node").join("node"),
+                root: core.join("root"),
+            });
+        }
+        if forced {
+            return Err(format!("LLMIDE_POC_BUNDLED=1 but no Resources/core next to {}", exe.display()));
+        }
+        return Err(format!(
+            "bundled core missing from Contents/Resources/core (executable: {})",
+            exe.display()
+        ));
+    }
+    Ok(Runtime { mode: "repo", node: node_binary(), root: repo_root()? })
+}
+
+fn in_app_bundle(exe: &Path) -> bool {
+    exe.to_string_lossy().contains(".app/Contents/MacOS/")
+}
+
+/// `<App>.app/Contents/Resources/core`, when it holds the node binary and tree.
+fn bundled_core_dir(exe: &Path) -> Option<PathBuf> {
+    let dir = exe.parent()?.parent()?.join("Resources").join("core");
+    let ok = dir.join("root").join("extension").join("server.mjs").is_file()
+        && dir.join("node").join("node").is_file();
+    ok.then_some(dir)
 }
 
 /// `LLMIDE_NODE`, else the first well-known Homebrew/system node, else PATH.
