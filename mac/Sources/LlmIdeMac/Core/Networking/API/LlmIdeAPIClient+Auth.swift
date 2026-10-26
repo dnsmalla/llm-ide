@@ -370,6 +370,17 @@ enum PluginUpdateOutcome: Equatable {
             let command: String?
             let sha256: String?
         }
+        // The unknown-plugin 404 is the standard `{error:{code,message}}`
+        // envelope (the route has no other body for it). Map it here so the
+        // caller still gets `.notFound`, not a generic HTTP error.
+        struct Envelope: Decodable {
+            struct Inner: Decodable { let code: String? }
+            let error: Inner?
+        }
+        if status == 404,
+           (try? JSONDecoder().decode(Envelope.self, from: data))?.error?.code == "NOT_FOUND" {
+            return .notFound
+        }
         guard let body = try? JSONDecoder().decode(Body.self, from: data) else { return nil }
         // CLI output can echo a credential; never show it unredacted.
         let detail = SecretRedactor.redact(body.detail ?? "")

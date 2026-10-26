@@ -255,7 +255,7 @@ async function runUpdate(d, imp, acceptCommand) {
     return cliFailed('claude CLI not found');
   }
   const found = findEntry(list, imp);
-  if (!found) return { status: 404, body: { code: 'NOT_FOUND', detail: 'not installed in Claude Code' } };
+  if (!found) return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'Plugin is not installed in Claude Code' } } };
   // Tier 1 is decided now, not from the badge the client saw: Claude Code is
   // already ahead, so its install is copied offline without touching Claude.
   if (claudeIsAhead(found.entry, imp.stamp)) return reimportEntry(d, imp, found.entry, false);
@@ -290,9 +290,9 @@ export async function updateClaudePlugin({ name, acceptCommand, deps } = {}) {
   for (const key of ['reload', 'isTurnActive', 'clearMcpConsents']) {
     if (typeof d[key] !== 'function') throw new Error(`updateClaudePlugin: deps.${key} is required`);
   }
-  if (typeof name !== 'string' || !PLUGIN_NAME_RE.test(name)) return { status: 404, body: { code: 'NOT_FOUND' } };
+  if (typeof name !== 'string' || !PLUGIN_NAME_RE.test(name)) return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'Unknown Claude plugin' } } };
   const stamp = readImportStamp(name, d.mnDir);
-  if (!stamp) return { status: 404, body: { code: 'NOT_FOUND' } };
+  if (!stamp) return { status: 404, body: { error: { code: 'NOT_FOUND', message: 'Plugin was not imported from Claude Code' } } };
   if (d.isTurnActive()) return { status: 409, body: { code: 'BUSY' } };
   if (busy) return { status: 409, body: { code: 'UPDATE_IN_PROGRESS' } };
   busy = true;

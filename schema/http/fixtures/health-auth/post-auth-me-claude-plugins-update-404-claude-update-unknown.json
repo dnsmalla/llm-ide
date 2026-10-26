@@ -7,6 +7,9 @@
     }
   },
   "response": {
-    "code": "NOT_FOUND"
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Unknown Claude plugin"
+    }
   }
 }
