@@ -10,12 +10,12 @@ import { spawnShell, type PtyHandle } from "../terminal/ptyClient";
 import { OutputPump } from "../terminal/outputPump";
 import { terminalFont, xtermTheme } from "../terminal/xtermTheme";
 import { runTerminalBench, type TerminalReady } from "../terminal/termBench";
+import { claimStep, finishStep } from "../bench/runner";
 
 /** Autobench hard limit: if the bench has not finished by then, report and exit. */
 const WATCHDOG_MS = 120_000;
 
-// Module-level guards: StrictMode runs effects twice in development.
-let benchStarted = false;
+// Module-level guard: StrictMode runs effects twice in development.
 let watchdogStarted = false;
 
 export function TerminalView() {
@@ -86,19 +86,20 @@ export function TerminalView() {
   // LLMIDE_POC_AUTOBENCH=terminal: run only the terminal bench, then exit through bench_done.
   // Outside the try, so a normal launch never reaches the exit call.
   useEffect(() => {
-    if (!ready || benchStarted) return;
-    benchStarted = true;
+    if (!ready) return;
     void (async () => {
       const mode = await invoke<string | null>("autobench_mode").catch(() => null);
-      if (mode !== "terminal") return;
+      const start = claimStep("terminal", mode);
+      if (!start) return;
+      let error: string | undefined;
       try {
         await runTerminalBench(ready);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        await emitBench({ name: "term_error", value: 0, unit: "error", message }).catch(() => undefined);
+        error = e instanceof Error ? e.message : String(e);
+        await emitBench({ name: "term_error", value: 0, unit: "error", message: error }).catch(() => undefined);
       } finally {
         await ready.handle.kill();
-        await invoke("bench_done").catch(() => undefined);
+        await finishStep(start, "terminal", error);
       }
     })();
   }, [ready]);

@@ -7,6 +7,7 @@
 // Used only in LLMIDE_POC_AUTOBENCH=chat.
 import { emitBench, percentile, waitVisibleAndPainted } from "../editor/editorBench";
 import { startStallMonitor } from "../terminal/stall";
+import { isStepCancelled } from "../bench/runner";
 import type { SeqTracker } from "./chatModel";
 import { buildFixture, buildLongFixture, type FixtureEvent } from "./fixture";
 import type { ReplayRun, ReplayOptions } from "./replay";
@@ -137,6 +138,8 @@ export async function runChatBench(runTurn: TurnRunner): Promise<void> {
   const visibleWaitMs = await waitVisibleAndPainted();
   await emitBench({ name: "chat_visible_wait_ms", value: round1(visibleWaitMs), unit: "ms" });
   await runBurst(runTurn);
+  if (isStepCancelled("chat")) return;
   await runPaced(runTurn);
+  if (isStepCancelled("chat")) return;
   await runLong(runTurn);
 }

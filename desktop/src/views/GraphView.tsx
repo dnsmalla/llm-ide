@@ -17,11 +17,11 @@ import {
   type LayoutRun,
 } from "../graph/layout";
 import { measureCameraFps } from "../graph/fps";
+import { emitBench } from "../bench/records";
+import { claimStep, finishStep, isStepCancelled } from "../bench/runner";
 
-/** Emits one measurement as a `BENCH <json>` stdout line via the Rust `bench` command. */
-function emit(record: Record<string, string | number>): Promise<void> {
-  return invoke("bench", { line: JSON.stringify(record) });
-}
+/** Emits one measurement as a `BENCH <json>` stdout line (also kept for the Bench table). */
+const emit = emitBench;
 
 /** Lays out and renders one source into `container`. Caller owns the returned renderer. */
 async function renderSource(
@@ -92,6 +92,7 @@ async function runAutobench(log: (s: string) => void) {
   document.body.appendChild(stage);
   try {
     for (const id of plan) {
+      if (isStepCancelled("graph")) break;
       const suffix = SOURCE_SUFFIX[id];
       try {
         log(`bench ${id}: layout…`);
@@ -141,7 +142,7 @@ async function runAutobench(log: (s: string) => void) {
       }
     }
     try {
-      await runSlowdownProbes(log);
+      if (!isStepCancelled("graph")) await runSlowdownProbes(log);
     } catch (e) {
       const message = e instanceof Error ? e.message : String(e);
       log(`probes failed: ${message}`);
@@ -152,8 +153,6 @@ async function runAutobench(log: (s: string) => void) {
     log("autobench finished");
   }
 }
-
-let autobenchStarted = false;
 
 export function GraphView() {
   const container = useRef<HTMLDivElement>(null);
@@ -173,14 +172,14 @@ export function GraphView() {
 
   // LLMIDE_POC_AUTOBENCH=graph: run the benches on load, then exit cleanly.
   // Module-level guard: StrictMode mounts effects twice in development.
+  // Outside the claim: a normal launch (no autobench, no run) returns here and never reaches
+  // finishStep, which exits the app in single-mode autobench.
   useEffect(() => {
-    if (autobenchStarted) return;
-    autobenchStarted = true;
     void (async () => {
-      // Outside the try: a normal launch (no autobench) must not reach the
-      // finally, which exits the app.
       const mode = await invoke<string | null>("autobench_mode").catch(() => null);
-      if (mode !== "graph") return;
+      const start = claimStep("graph", mode);
+      if (!start) return;
+      let error: string | undefined;
       try {
         setStatus("autobench running");
         window.addEventListener("error", (ev) => void emit({ name: "graph_webview_error", value: 0, unit: "error", message: String(ev.message) }));
@@ -191,9 +190,10 @@ export function GraphView() {
         });
         setStatus("autobench done");
       } catch (e: unknown) {
-        setStatus(`autobench error: ${String(e)}`);
+        error = String(e);
+        setStatus(`autobench error: ${error}`);
       } finally {
-        await invoke("bench_done").catch(() => undefined);
+        await finishStep(start, "graph", error);
       }
     })();
   }, []);

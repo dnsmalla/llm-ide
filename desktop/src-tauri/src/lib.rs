@@ -1,3 +1,4 @@
+mod ax_probe;
 mod core_host;
 mod pty;
 mod sse_replay;
@@ -208,7 +209,8 @@ pub fn run() {
             pty_kill,
             sse_replay::sse_replay_start,
             sse_replay::sse_replay_stop,
-            sse_replay::sse_channel_stream
+            sse_replay::sse_channel_stream,
+            ax_probe::ax_probe
         ])
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");

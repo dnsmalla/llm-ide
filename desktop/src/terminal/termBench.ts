@@ -6,6 +6,7 @@ import { emitBench } from "../editor/editorBench";
 import type { PtyHandle } from "./ptyClient";
 import type { OutputPump } from "./outputPump";
 import { startStallMonitor } from "./stall";
+import { isStepCancelled } from "../bench/runner";
 
 /** The marker is split in the typed command so the echoed command line never matches it. */
 export const BENCH_COMMAND = "yes | head -1000000; echo __BENCH_DONE''__";
@@ -32,6 +33,7 @@ async function waitForFirstOutput(pump: OutputPump): Promise<void> {
   const start = performance.now();
   while (pump.firstOutputAt === null) {
     if (performance.now() - start > FIRST_OUTPUT_CAP_MS) throw new Error("shell printed nothing within 30 s");
+    if (isStepCancelled("terminal")) throw new Error("terminal bench cancelled");
     await sleep(20);
   }
 }

@@ -5,6 +5,7 @@ import { EditorView } from "./views/EditorView";
 import { TerminalView } from "./views/TerminalView";
 import { ChatView } from "./views/ChatView";
 import { BenchView } from "./views/BenchView";
+import { ALL_STEPS, runSteps, setBenchNavigator } from "./bench/runner";
 import { SectionChromeBar } from "./design/components/SectionChromeBar";
 import { AppStatusBar } from "./design/components/AppStatusBar";
 import { LibrarySidebar, SelectItemEmpty } from "./design/components/LibrarySidebar";
@@ -38,14 +39,15 @@ async function launchTheme(): Promise<ThemeId | null> {
 
 /**
  * Section for this launch. `LLMIDE_POC_AUTOBENCH=editor` opens the Editor, `=terminal`
- * the Terminal and `=chat` the Chat (their benches need them mounted); other autobench modes open the Code Graph;
- * `LLMIDE_POC_SECTION`
- * opens a named section for screenshots; otherwise the Code Graph.
+ * the Terminal and `=chat` the Chat (their benches need them mounted); `all` and `ax` open the
+ * Bench tab, which the runner moves through the sections; other autobench modes open the Code
+ * Graph; `LLMIDE_POC_SECTION` opens a named section for screenshots; otherwise the Code Graph.
  */
 async function launchSection(): Promise<string> {
   try {
     const mode = await invoke<string | null>("autobench_mode");
     // An autobench mode decides the section alone; LLMIDE_POC_SECTION is ignored.
+    if (mode === "all" || mode === "ax") return "bench";
     if (mode) return mode === "editor" || mode === "terminal" || mode === "chat" ? mode : "graph";
     const override = await invoke<string | null>("section_override");
     if (override && TABS.some((t) => t.id === override)) return override;
@@ -63,11 +65,20 @@ export function App() {
   const { status, pollError } = useCoreStatus();
 
   // Apply the env overrides once at launch; theme changes persist from the status bar.
+  // Autobench `all` / `ax` start the runner after the launch section is set, so the runner's
+  // first tab switch is not overwritten by the launch section.
   useEffect(() => {
     let cancelled = false;
-    void launchSection().then((id) => {
-      if (!cancelled) setActive(id);
-    });
+    setBenchNavigator(setActive);
+    void (async () => {
+      const id = await launchSection();
+      if (cancelled) return;
+      setActive(id);
+      const mode = await invoke<string | null>("autobench_mode").catch(() => null);
+      if (cancelled) return;
+      if (mode === "all") void runSteps(ALL_STEPS, true);
+      else if (mode === "ax") void runSteps(["ax"], true);
+    })();
     void launchTheme().then((id) => {
       if (id && !cancelled) setTheme(id);
     });

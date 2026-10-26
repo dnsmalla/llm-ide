@@ -2,7 +2,8 @@
 // a warm-up, then 200 scripted keystrokes at the end of a mid-file line. Each keystroke is
 // measured three ways: time inside the edit call (sync), trigger to the first frame callback
 // (paint), and trigger to the second frame (2raf, the old metric).
-import { invoke } from "@tauri-apps/api/core";
+import { emitBench } from "../bench/records";
+import { isStepCancelled } from "../bench/runner";
 import type { editor as MonacoEditorNs, Uri } from "monaco-editor";
 import { getTypeScriptWorker, workerStats } from "./monacoEnv";
 import { SAMPLE_LINES } from "./sampleFile";
@@ -25,10 +26,8 @@ document.addEventListener("securitypolicyviolation", (ev) => {
   if (!firstViolation) firstViolation = `${ev.effectiveDirective} ${ev.blockedURI}`;
 });
 
-/** Emits one measurement as a `BENCH <json>` stdout line via the Rust `bench` command. */
-export function emitBench(record: Record<string, string | number>): Promise<void> {
-  return invoke("bench", { line: JSON.stringify(record) });
-}
+/** Emits one measurement as a `BENCH <json>` stdout line (also kept for the Bench table). */
+export { emitBench };
 
 /** Resolves after the next frame has been painted (rAF, then a second rAF). */
 export function nextPaint(): Promise<void> {
@@ -130,6 +129,7 @@ export async function runEditorBench(editor: Editor, model: TextModel, timing: O
   editor.revealLineInCenter(line);
   // Warm-up: unmeasured keystrokes replace a fixed wait.
   for (let i = 0; i < WARM_KEYSTROKES; i += 1) {
+    if (isStepCancelled("editor")) return;
     editor.trigger("keyboard", "type", { text: TYPED.charAt(i % TYPED.length) });
     await nextPaint();
   }
@@ -152,6 +152,7 @@ export async function runEditorBench(editor: Editor, model: TextModel, timing: O
   const paint: number[] = [];
   const twoRaf: number[] = [];
   for (let i = 0; i < KEYSTROKES; i += 1) {
+    if (isStepCancelled("editor")) return;
     const text = TYPED.charAt(i % TYPED.length);
     const t0 = performance.now();
     editor.trigger("keyboard", "type", { text });

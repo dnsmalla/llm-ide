@@ -13,6 +13,7 @@ import {
   type OpenTiming,
 } from "../editor/editorBench";
 import { EditorTabBar } from "../design/components/EditorTabBar";
+import { claimStep, finishStep } from "../bench/runner";
 
 const FILE_NAME = "sample.ts";
 const MODEL_URI = "inmemory://llmide/sample.ts";
@@ -26,8 +27,7 @@ function sampleSource(): string {
   return sourceCache;
 }
 
-// Module-level guards: StrictMode runs effects twice in development.
-let benchStarted = false;
+// Module-level guard: StrictMode runs effects twice in development.
 let watchdogStarted = false;
 
 interface Opened {
@@ -93,19 +93,20 @@ export function EditorView() {
   // LLMIDE_POC_AUTOBENCH=editor: run only the editor bench, then exit through bench_done.
   // Outside the try, so a normal launch never reaches the exit call.
   useEffect(() => {
-    if (!opened || benchStarted) return;
-    benchStarted = true;
+    if (!opened) return;
     void (async () => {
       const mode = await invoke<string | null>("autobench_mode").catch(() => null);
-      if (mode !== "editor") return;
+      const start = claimStep("editor", mode);
+      if (!start) return;
+      let error: string | undefined;
       try {
         await runEditorBench(opened.editor, opened.model, opened.timing, sampleSource().length);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        await emitBench({ name: "editor_error", value: 0, unit: "error", message }).catch(() => undefined);
+        error = e instanceof Error ? e.message : String(e);
+        await emitBench({ name: "editor_error", value: 0, unit: "error", message: error }).catch(() => undefined);
       } finally {
         await emitBenchDiagnostics().catch(() => undefined);
-        await invoke("bench_done").catch(() => undefined);
+        await finishStep(start, "editor", error);
       }
     })();
   }, [opened]);

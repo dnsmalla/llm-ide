@@ -7,7 +7,8 @@ import { replayEvents, type ReplayOptions } from "../chat/replay";
 import { runChatBench, notifyFinalRendered, type CommitSample, type TurnStats } from "../chat/chatBench";
 import { Markdown } from "../chat/markdown";
 import { StatusBanner } from "../design/components/StatusBanner";
-import { emitBench } from "../editor/editorBench";
+import { emitBench } from "../bench/records";
+import { claimStep, finishStep } from "../bench/runner";
 
 /** Autobench hard limit: the three benches (burst, paced at 20 ms/event, long) fit well inside it. */
 const WATCHDOG_MS = 300_000;
@@ -15,8 +16,7 @@ const PROMPT = "Replay the recorded turn: read the decoder and summarise the wir
 const COMMIT_MARK = "chat-commit-start";
 const COMMIT_MEASURE = "chat-commit";
 
-// Module-level guards: StrictMode runs effects twice in development.
-let benchStarted = false;
+// Module-level guard: StrictMode runs effects twice in development.
 let watchdogStarted = false;
 
 /** A sealed (closed) markdown block: its text never changes, so the memo skips it on every commit. */
@@ -178,18 +178,18 @@ export function ChatView() {
   // LLMIDE_POC_AUTOBENCH=chat: the three benches, then exit through bench_done. Outside the
   // try, so a normal launch never reaches the exit call.
   useEffect(() => {
-    if (benchStarted) return;
-    benchStarted = true;
     void (async () => {
       const mode = await invoke<string | null>("autobench_mode").catch(() => null);
-      if (mode !== "chat") return;
+      const start = claimStep("chat", mode);
+      if (!start) return;
+      let error: string | undefined;
       try {
         await runChatBench(runTurn);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        await emitBench({ name: "chat_error", value: 0, unit: "error", message }).catch(() => undefined);
+        error = e instanceof Error ? e.message : String(e);
+        await emitBench({ name: "chat_error", value: 0, unit: "error", message: error }).catch(() => undefined);
       } finally {
-        await invoke("bench_done").catch(() => undefined);
+        await finishStep(start, "chat", error);
       }
     })();
   }, [runTurn]);
