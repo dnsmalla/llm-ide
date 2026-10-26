@@ -163,6 +163,160 @@
           "type": "string"
         }
       }
+    },
+    "PlanTask": {
+      "type": "object",
+      "required": [
+        "id",
+        "planId",
+        "position",
+        "title",
+        "status",
+        "dependsOn",
+        "risk",
+        "files",
+        "symbols"
+      ],
+      "description": "A stored plan task, as getPlan and getTaskById return it: every column, always present (null when unset). Status is one of ALLOWED_TASK_STATUS (kb/plans.mjs); risk is low|med|high or null. Drafts from analyze-risks and code-sync use the looser Task def.",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "planId": {
+          "type": "string"
+        },
+        "position": {
+          "type": "integer"
+        },
+        "milestone": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "title": {
+          "type": "string"
+        },
+        "description": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "owner": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "due": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "estimateDays": {
+          "type": [
+            "number",
+            "null"
+          ]
+        },
+        "dependsOn": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "status": {
+          "enum": [
+            "planned",
+            "in_progress",
+            "done",
+            "blocked",
+            "cancelled"
+          ]
+        },
+        "risk": {
+          "enum": [
+            "low",
+            "med",
+            "high",
+            null
+          ]
+        },
+        "riskReason": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "files": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
+            "properties": {
+              "ref": {
+                "type": "string",
+                "x-optional": true
+              },
+              "title": {
+                "type": "string",
+                "x-optional": true
+              },
+              "bodyExcerpt": {
+                "type": "string",
+                "x-optional": true
+              },
+              "rank": {
+                "type": "number",
+                "x-optional": true
+              }
+            }
+          }
+        },
+        "symbols": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "A code-graph symbol row (kb/code-graph.mjs hydrateSymbols). Not exercised offline: no SCIP index in the temp DB.",
+            "properties": {
+              "symbol_id": {
+                "type": "string",
+                "x-optional": true
+              },
+              "title": {
+                "type": "string",
+                "x-optional": true
+              },
+              "kind": {
+                "type": "string",
+                "x-optional": true
+              },
+              "repo_id": {
+                "type": "string",
+                "x-optional": true
+              },
+              "source_file": {
+                "type": "string",
+                "x-optional": true
+              },
+              "line": {
+                "type": "integer",
+                "x-optional": true
+              }
+            }
+          }
+        },
+        "meta": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots), or null."
+        }
+      }
     }
   },
   "endpoints": {
@@ -643,7 +797,7 @@
             "tasks": {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/Task"
+                "$ref": "#/$defs/PlanTask"
               }
             }
           }
@@ -843,7 +997,7 @@
             "tasks": {
               "type": "array",
               "items": {
-                "$ref": "#/$defs/Task"
+                "$ref": "#/$defs/PlanTask"
               }
             }
           }
@@ -992,141 +1146,7 @@
       },
       "responses": {
         "200": {
-          "type": "object",
-          "required": [
-            "id",
-            "title",
-            "status"
-          ],
-          "description": "A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols.",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "planId": {
-              "type": "string"
-            },
-            "position": {
-              "type": "integer"
-            },
-            "milestone": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "title": {
-              "type": "string"
-            },
-            "description": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "owner": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "due": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "estimateDays": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "dependsOn": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "status": {
-              "type": "string"
-            },
-            "risk": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "riskReason": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "files": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
-                "properties": {
-                  "ref": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "title": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "bodyExcerpt": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "rank": {
-                    "type": "number",
-                    "x-optional": true
-                  }
-                }
-              }
-            },
-            "symbols": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "description": "A code-graph symbol row (kb/code-graph.mjs hydrateSymbols). Not exercised offline: no SCIP index in the temp DB.",
-                "properties": {
-                  "symbol_id": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "title": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "kind": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "repo_id": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "source_file": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "line": {
-                    "type": "integer",
-                    "x-optional": true
-                  }
-                }
-              }
-            },
-            "meta": {
-              "type": "object",
-              "additionalProperties": true,
-              "description": "Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots)."
-            }
-          }
+          "$ref": "#/$defs/PlanTask"
         },
         "400": {
           "$ref": "_common#/$defs/Error"
@@ -1210,141 +1230,7 @@
       },
       "responses": {
         "200": {
-          "type": "object",
-          "required": [
-            "id",
-            "title",
-            "status"
-          ],
-          "description": "A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols.",
-          "properties": {
-            "id": {
-              "type": "string"
-            },
-            "planId": {
-              "type": "string"
-            },
-            "position": {
-              "type": "integer"
-            },
-            "milestone": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "title": {
-              "type": "string"
-            },
-            "description": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "owner": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "due": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "estimateDays": {
-              "type": [
-                "number",
-                "null"
-              ]
-            },
-            "dependsOn": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "status": {
-              "type": "string"
-            },
-            "risk": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "riskReason": {
-              "type": [
-                "string",
-                "null"
-              ]
-            },
-            "files": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "description": "A code-graph file reference (graphkit rollupCodeRefs). Its fields are not exercised by the offline capture: the temp DB has no code index, so code-sync returns empty lists.",
-                "properties": {
-                  "ref": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "title": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "bodyExcerpt": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "rank": {
-                    "type": "number",
-                    "x-optional": true
-                  }
-                }
-              }
-            },
-            "symbols": {
-              "type": "array",
-              "items": {
-                "type": "object",
-                "description": "A code-graph symbol row (kb/code-graph.mjs hydrateSymbols). Not exercised offline: no SCIP index in the temp DB.",
-                "properties": {
-                  "symbol_id": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "title": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "kind": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "repo_id": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "source_file": {
-                    "type": "string",
-                    "x-optional": true
-                  },
-                  "line": {
-                    "type": "integer",
-                    "x-optional": true
-                  }
-                }
-              }
-            },
-            "meta": {
-              "type": "object",
-              "additionalProperties": true,
-              "description": "Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots)."
-            }
-          }
+          "$ref": "#/$defs/PlanTask"
         },
         "400": {
           "$ref": "_common#/$defs/Error"
