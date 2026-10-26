@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/me/codex-plugins/import",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "name and source required"
+    }
+  }
+}

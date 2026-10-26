@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/me/connectors/add",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "gdrive"
+    }
+  },
+  "response": {
+    "ok": true,
+    "id": "gdrive"
+  }
+}

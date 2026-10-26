@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /auth/me/llm-sources/items",
+  "status": 200,
+  "request": {
+    "body": {
+      "sourceId": "builtin",
+      "kind": "skill",
+      "names": [
+        "no-such-skill"
+      ],
+      "enabled": false
+    }
+  },
+  "response": {
+    "ok": true,
+    "disabled": [
+      "skill:no-such-skill"
+    ]
+  }
+}

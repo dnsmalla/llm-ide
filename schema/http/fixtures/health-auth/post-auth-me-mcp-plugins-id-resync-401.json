@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/:id/resync",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

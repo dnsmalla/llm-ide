@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/refresh",
+  "status": 401,
+  "request": {
+    "body": {
+      "refreshToken": "example-invalid-refresh-token"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Invalid refresh token"
+    }
+  }
+}

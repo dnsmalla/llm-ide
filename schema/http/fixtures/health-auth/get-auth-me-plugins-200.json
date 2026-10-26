@@ -1,0 +1,8 @@
+{
+  "endpoint": "GET /auth/me/plugins",
+  "status": 200,
+  "response": {
+    "pluginDir": "/tmp/example",
+    "plugins": []
+  }
+}

@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /auth/slack/callback",
+  "status": 200,
+  "request": {
+    "query": {
+      "code": "x",
+      "state": "nope"
+    }
+  },
+  "response": "<!doctype html><meta charset=utf-8><body style=\"font-family:system-ui;padding:2rem\"><p>This sign-in link has expired — start again from the app.</p><p>You can close this tab and return to LLM-IDE.</p><script>setTimeout(()=>window.close(),1500)</script>"
+}

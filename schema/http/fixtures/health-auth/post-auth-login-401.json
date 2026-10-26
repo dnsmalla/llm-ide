@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/login",
+  "status": 401,
+  "request": {
+    "body": {
+      "email": "capture-user@example.com",
+      "password": "wrong-password-xx"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Invalid credentials"
+    }
+  }
+}

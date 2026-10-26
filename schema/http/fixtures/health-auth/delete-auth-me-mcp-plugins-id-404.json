@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /auth/me/mcp-plugins/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "nope"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REMOVE_FAILED",
+      "message": "not found"
+    }
+  }
+}

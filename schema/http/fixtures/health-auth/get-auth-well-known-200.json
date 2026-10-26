@@ -1,0 +1,30 @@
+{
+  "endpoint": "GET /auth/well-known",
+  "status": 200,
+  "response": {
+    "issuer": "llmide",
+    "registrationOpen": true,
+    "vaultKeys": [
+      "github.token",
+      "backlog.apiKey",
+      "linear.apiKey",
+      "slack.webhookUrl",
+      "slack.botToken",
+      "slack.userToken",
+      "box.clientSecret",
+      "email.imapPassword",
+      "claude.apiKey",
+      "openai.apiKey",
+      "google.apiKey",
+      "deepseek.apiKey",
+      "custom.apiKey",
+      "custom.baseUrl",
+      "jev.apiKey",
+      "serpapi.apiKey",
+      "google.email.clientId",
+      "google.email.clientSecret",
+      "google.email.refreshToken"
+    ],
+    "accessTokenTTLSec": 900
+  }
+}

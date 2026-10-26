@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /auth/login",
+  "status": 200,
+  "request": {
+    "body": {
+      "email": "capture-user@example.com",
+      "password": "example-password"
+    }
+  },
+  "response": {
+    "user": {
+      "id": "85eaf45b2dd93108",
+      "email": "capture-user@example.com",
+      "displayName": "Capture User",
+      "role": "admin",
+      "status": "active",
+      "createdAt": "2026-10-26 04:31:31",
+      "lastLoginAt": "2026-10-26 04:31:31"
+    },
+    "accessToken": "eyJ.example.access",
+    "refreshToken": "example-refresh-token",
+    "accessTokenTTLSec": 900
+  }
+}

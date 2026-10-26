@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /auth/me/codex-plugins/marketplace",
+  "status": 200,
+  "response": {
+    "plugins": []
+  }
+}

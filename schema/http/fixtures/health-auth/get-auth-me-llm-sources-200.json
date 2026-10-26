@@ -1,0 +1,25 @@
+{
+  "endpoint": "GET /auth/me/llm-sources",
+  "status": 200,
+  "response": {
+    "sources": [
+      {
+        "id": "builtin",
+        "name": "Central Skills",
+        "origin": "builtin",
+        "location": "/example/repo/.skills",
+        "builtin": true,
+        "version": "3.0.0",
+        "installed": true,
+        "skillCount": 60,
+        "agentCount": 1,
+        "commandCount": 15,
+        "templateCount": 9,
+        "hookCount": 3,
+        "mcpCount": 0,
+        "enabled": true,
+        "disabledItemCount": 0
+      }
+    ]
+  }
+}

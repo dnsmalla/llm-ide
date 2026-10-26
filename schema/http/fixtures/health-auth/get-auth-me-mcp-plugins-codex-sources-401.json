@@ -1,0 +1,10 @@
+{
+  "endpoint": "GET /auth/me/mcp-plugins/codex-sources",
+  "status": 401,
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

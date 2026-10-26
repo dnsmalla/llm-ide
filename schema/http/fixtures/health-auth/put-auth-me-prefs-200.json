@@ -1,0 +1,18 @@
+{
+  "endpoint": "PUT /auth/me/prefs",
+  "status": 200,
+  "request": {
+    "body": {
+      "language": "en",
+      "bilingual": false,
+      "nativePlugins": true
+    }
+  },
+  "response": {
+    "prefs": {
+      "language": "en",
+      "bilingual": false,
+      "nativePlugins": true
+    }
+  }
+}

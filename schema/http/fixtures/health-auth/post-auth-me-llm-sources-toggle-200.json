@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /auth/me/llm-sources/toggle",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "builtin",
+      "enabled": true
+    }
+  },
+  "response": {
+    "ok": true,
+    "enabled": true
+  }
+}

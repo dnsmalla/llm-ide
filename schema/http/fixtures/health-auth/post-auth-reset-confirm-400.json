@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /auth/reset-confirm",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "token is required"
+    }
+  }
+}

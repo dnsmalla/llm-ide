@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/mcp-plugins/:id/resync",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "nope"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "not found"
+    }
+  }
+}

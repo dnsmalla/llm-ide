@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/plugins/toggle",
+  "status": 400,
+  "request": {
+    "body": {
+      "name": "nope",
+      "enabled": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "plugin 'nope' is not installed"
+    }
+  }
+}

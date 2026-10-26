@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /auth/me/mcp-plugins/updates",
+  "status": 200,
+  "response": {
+    "checkedAt": "2026-10-26T04:31:34.226Z",
+    "servers": [
+      {
+        "id": "filesystem",
+        "runner": "npx",
+        "name": "@modelcontextprotocol/server-filesystem",
+        "current": "2.0.1",
+        "latest": "2.0.1",
+        "status": "up-to-date"
+      }
+    ]
+  }
+}

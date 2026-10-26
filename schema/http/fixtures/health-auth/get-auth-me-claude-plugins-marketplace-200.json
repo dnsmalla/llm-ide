@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /auth/me/claude-plugins/marketplace",
+  "status": 200,
+  "response": {
+    "plugins": []
+  }
+}

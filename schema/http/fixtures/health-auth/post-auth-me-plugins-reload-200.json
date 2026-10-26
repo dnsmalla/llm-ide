@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /auth/me/plugins/reload",
+  "status": 200,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "pluginDir": "/tmp/example",
+    "count": 0,
+    "warnings": []
+  }
+}

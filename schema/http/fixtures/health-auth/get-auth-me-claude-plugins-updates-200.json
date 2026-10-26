@@ -1,0 +1,9 @@
+{
+  "endpoint": "GET /auth/me/claude-plugins/updates",
+  "status": 200,
+  "response": {
+    "cli": false,
+    "checkedAt": "2026-10-26T04:31:33.045Z",
+    "updates": []
+  }
+}

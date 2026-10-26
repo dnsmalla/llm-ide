@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /auth/register",
+  "status": 201,
+  "request": {
+    "body": {
+      "email": "capture-user@example.com",
+      "password": "example-password",
+      "displayName": "Capture User"
+    }
+  },
+  "response": {
+    "user": {
+      "id": "349dfbcf1cda9642",
+      "email": "capture-user@example.com",
+      "displayName": "Capture User",
+      "role": "admin",
+      "status": "active",
+      "createdAt": "2026-10-26 04:02:36",
+      "lastLoginAt": null
+    }
+  }
+}

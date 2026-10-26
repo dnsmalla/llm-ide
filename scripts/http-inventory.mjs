@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 // HTTP inventory — writes schema/http/INVENTORY.md and fails on inconsistencies.
 //
-// Source of truth: the ALL_ENDPOINTS array in extension/server.mjs, parsed from
-// source text (the server is never imported: importing it boots it). Feature
-// ownership comes from FEATURE_ROUTE_GROUPS (extension/routes/feature-routes.mjs),
-// public routes from PUBLIC_PATHS / PUBLIC_PREFIXES (extension/server/auth.mjs).
+// Source of truth: two rosters, parsed from source text (the server is never
+// imported: importing it boots it). ALL_ENDPOINTS in extension/server.mjs is the
+// advertised roster. The public + auth roster (scripts/lib/roster.mjs) holds the
+// pre-routing public paths (PUBLIC_PATHS, extension/server/auth.mjs) and the auth
+// namespace (literal and prefix dispatch in extension/server/auth-routes.mjs).
+// Feature ownership comes from FEATURE_ROUTE_GROUPS (extension/routes/feature-routes.mjs).
 //
 // Usage:
 //   node scripts/http-inventory.mjs           regenerate INVENTORY.md, exit 1 on inconsistencies
@@ -22,7 +24,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { parseRoster } from './lib/roster.mjs';
+import { loadRosters } from './lib/roster.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_REL = 'schema/http/INVENTORY.md';
@@ -44,13 +46,14 @@ const HANDLER_FILES_REL = [
 // Reasons are one line each. Keys: a roster path (noHandler), a normalized
 // client path or a prefix ending in "/*" (clientNotInRoster), or a roster path
 // listed twice (duplicate). Entries here are findings, not waivers for new code.
+// clientNotInRoster is empty: the public + auth roster (/health, /launch-app and
+// the /auth/* namespace) is now a roster, so clients resolve against it.
 const ALLOWLIST = {
-  noHandler: {},
-  clientNotInRoster: {
-    '/auth/*': 'auth namespace is served by extension/server/auth-routes.mjs but is outside ALL_ENDPOINTS; the P3 health/auth/meta task brings it into the roster',
-    '/health': 'BackendManager polls GET /health (readiness and version); served before routing in server.mjs, not an ALL_ENDPOINTS route (the P3 task decides whether to list it)',
-    '/launch-app': 'GET deep-link redirect (llmide://) answered in server.mjs before routing; not an ALL_ENDPOINTS route, called by the extension service worker and side panel',
+  noHandler: {
+    '/auth/me/mcp-plugins/:id/update': 'dispatched by the regex mcpVersionMatch in extension/server/auth-routes.mjs (/^\\/auth\\/me\\/mcp-plugins\\/…\\/(update|resync)$/), which the literal scanner cannot see',
+    '/auth/me/mcp-plugins/:id/resync': 'dispatched by the regex mcpVersionMatch in extension/server/auth-routes.mjs (/^\\/auth\\/me\\/mcp-plugins\\/…\\/(update|resync)$/), which the literal scanner cannot see',
   },
+  clientNotInRoster: {},
   duplicate: {},
 };
 
@@ -327,8 +330,11 @@ function referenceKind(e, corpus) {
 // ---------------------------------------------------------------- build the model
 
 function build() {
-  const serverSrc = read(SERVER_REL);
-  const roster = parseRoster(serverSrc, SERVER_REL);
+  const rosters = loadRosters(read);
+  const roster = [
+    ...rosters.endpoints.map((r) => ({ ...r, file: SERVER_REL, roster: 'ALL_ENDPOINTS' })),
+    ...rosters.publicAuth.map((r) => ({ ...r, roster: 'public+auth' })),
+  ];
   const groups = parseFeatureGroups(read(FEATURE_ROUTES_REL));
   const pub = parsePublic(read(AUTH_REL));
   const { cands, subMethods } = collectHandlerCandidates();
@@ -344,9 +350,9 @@ function build() {
   for (const r of roster) {
     if (seen.has(r.path)) {
       if (!Object.hasOwn(ALLOWLIST.duplicate, r.path)) {
-        errors.push(`duplicate ALL_ENDPOINTS entry ${r.path} (lines ${seen.get(r.path)} and ${r.line})`);
+        errors.push(`duplicate roster entry ${r.path} (${r.roster}, line ${seen.get(r.path).line}; and line ${r.line})`);
       }
-    } else seen.set(r.path, r.line);
+    } else seen.set(r.path, { line: r.line });
   }
 
   const corpus = loadCorpus();
@@ -383,7 +389,7 @@ function build() {
     }
     if (!methods.length) methods = ['ANY'];
     if (!best && !Object.hasOwn(ALLOWLIST.noHandler, e)) {
-      errors.push(`ALL_ENDPOINTS ${e} (server.mjs:${r.line}) has no handler found by the scanner`);
+      errors.push(`${r.roster} ${e} (${r.file}:${r.line}) has no handler found by the scanner`);
     }
     const shape = rosterShape(e);
     const isPublic = pub.paths.has(e) || pub.prefixes.some((p) => e.startsWith(p) || shape.prefix.startsWith(p));
@@ -393,6 +399,7 @@ function build() {
     const noCaller = macHere.length === 0 && extHere.length === 0;
     return {
       path: e,
+      roster: r.roster,
       noCallerRef: noCaller ? referenceKind(e, corpus) : '-',
       methods: methods.join(', '),
       auth: isPublic ? 'public' : 'token',
@@ -472,14 +479,16 @@ function render(model) {
   out.push('<!-- Generated by scripts/http-inventory.mjs. Do not edit by hand. -->');
   out.push('Regenerate: `node scripts/http-inventory.mjs` (CI: `node scripts/http-inventory.mjs --check`).');
   out.push('');
-  out.push('Source of truth: `ALL_ENDPOINTS` in `extension/server.mjs`. Feature groups from');
-  out.push('`extension/routes/feature-routes.mjs`, public routes from `extension/server/auth.mjs`.');
+  out.push('Source of truth: `ALL_ENDPOINTS` in `extension/server.mjs`, and the public + auth roster');
+  out.push('(`scripts/lib/roster.mjs`: `PUBLIC_PATHS` in `extension/server/auth.mjs`, dispatch in `extension/server/auth-routes.mjs`).');
+  out.push('Feature groups from `extension/routes/feature-routes.mjs`.');
   out.push('Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` string literals.');
   out.push('`*` in a client path = an interpolated or `:param` segment. Method `ANY` = no method check found.');
   out.push('');
   out.push('## Summary');
   out.push('');
-  out.push(`- Endpoints in \`ALL_ENDPOINTS\`: **${total}**`);
+  out.push(`- Endpoints in \`ALL_ENDPOINTS\`: **${rows.filter((r) => r.roster === 'ALL_ENDPOINTS').length}**`);
+  out.push(`- Public + auth roster (pre-routing public paths and the auth namespace; not advertised by \`/health\`): **${rows.filter((r) => r.roster === 'public+auth').length}**`);
   out.push(`- Auth: ${byAuth.token || 0} token, ${byAuth.public || 0} public`);
   out.push(`- Handler found: ${total - noHandler.length}; no handler found: ${noHandler.length}`);
   out.push(`- No Mac and no extension caller: ${noClient.length} (tests only: ${refKinds['tests only'] || 0}, comments/docs only: ${refKinds['comments/docs only'] || 0}, no reference: ${refKinds['no reference'] || 0})`);
@@ -503,11 +512,11 @@ function render(model) {
   out.push('');
   out.push('## Endpoints');
   out.push('');
-  out.push('| path | methods | auth | feature | handler | Mac callers | extension callers | no-caller reference |');
-  out.push('|---|---|---|---|---|---|---|---|');
+  out.push('| path | roster | methods | auth | feature | handler | Mac callers | extension callers | no-caller reference |');
+  out.push('|---|---|---|---|---|---|---|---|---|');
   for (const r of rows) {
     const list = (xs) => (xs.length ? xs.map((x) => `\`${x}\``).join(', ') : '-');
-    out.push(`| \`${r.path}\` | ${r.methods} | ${r.auth} | ${r.feature} | ${r.handler === '-' ? '-' : `\`${r.handler}\``} | ${list(r.mac)} | ${list(r.ext)} | ${r.noCallerRef} |`);
+    out.push(`| \`${r.path}\` | ${r.roster} | ${r.methods} | ${r.auth} | ${r.feature} | ${r.handler === '-' ? '-' : `\`${r.handler}\``} | ${list(r.mac)} | ${list(r.ext)} | ${r.noCallerRef} |`);
   }
   out.push('');
   out.push('## Consistency');

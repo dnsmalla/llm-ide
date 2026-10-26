@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/register",
+  "status": 403,
+  "request": {
+    "body": {
+      "email": "capture-user@example.com",
+      "password": "example-password"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "FORBIDDEN",
+      "message": "Registration is disabled"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/plugins/install",
+  "status": 400,
+  "request": {
+    "query": {
+      "replace": "1",
+      "expect": "example"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INSTALL_FAILED",
+      "message": "Could not read zip (unzip exited 9): [/tmp/example\n  End-of-central-directory signature not found.  Either this file is not\n  a zipfile, or it constitutes one disk of "
+    }
+  }
+}

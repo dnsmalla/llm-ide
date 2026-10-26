@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /auth/me/llm-sources/updates",
+  "status": 200,
+  "response": {
+    "sources": [
+      {
+        "id": "builtin",
+        "checkedAt": "2026-10-26T04:31:33.065Z",
+        "status": "up-to-date",
+        "localRev": "d0f1f0d7bfecf3605d98612d551f3a4b3bf05b1f",
+        "remoteRev": "d0f1f0d7bfecf3605d98612d551f3a4b3bf05b1f"
+      }
+    ]
+  }
+}

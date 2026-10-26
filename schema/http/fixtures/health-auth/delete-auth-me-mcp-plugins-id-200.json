@@ -1,0 +1,12 @@
+{
+  "endpoint": "DELETE /auth/me/mcp-plugins/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "filesystem"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

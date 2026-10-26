@@ -1,0 +1,32 @@
+{
+  "endpoint": "GET /auth/me/mcp-plugins",
+  "status": 200,
+  "response": {
+    "plugins": [
+      {
+        "id": "filesystem",
+        "name": "Filesystem",
+        "source": "catalog",
+        "transport": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem@2.0.1",
+          "/tmp"
+        ],
+        "catalogId": "filesystem",
+        "builtin": false,
+        "enabled": false,
+        "consented": false,
+        "package": {
+          "runner": "npx",
+          "name": "@modelcontextprotocol/server-filesystem",
+          "version": "2.0.1",
+          "tag": null
+        },
+        "credentialMissing": false,
+        "effective": false
+      }
+    ]
+  }
+}

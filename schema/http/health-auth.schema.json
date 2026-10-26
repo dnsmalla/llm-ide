@@ -1,0 +1,2666 @@
+{
+  "description": "Health probe, public auth discovery, the auth session, and the /auth/me user endpoints the Mac app and the Chrome extension call. Roster: GET / and GET /health (served before routing, not listed in ALL_ENDPOINTS), GET /launch-app (pre-routing redirect), and the /auth/* namespace, all from the public + auth roster (scripts/lib/roster.mjs). Fixtures are real responses from `node server.mjs` on a temp DB, replaying each request over HTTP; tokens and passwords in fixtures are placeholders. Every token-protected endpoint declares the 401 that a request without an access token gets. Request bodies declare no required keys: the server validates them and answers 400, and a 400 fixture has to carry the body it was sent. Plugin, connector and MCP-server rows are not pinned where the fixtures cannot exemplify them (plugin directories are empty in the capture): the envelope is pinned, the row is an object with a description. Not declared in this group: the 400 for a malformed JSON body (every JSON route returns it, but a fixture carries parsed JSON), /auth/me/delete, /auth/me/audit, and /auth/mcp-connector/start and /status (no Mac or extension caller).",
+  "$defs": {
+    "User": {
+      "type": "object",
+      "required": [
+        "id",
+        "email",
+        "displayName",
+        "role",
+        "status",
+        "createdAt",
+        "lastLoginAt"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "email": {
+          "type": "string"
+        },
+        "displayName": {
+          "type": "string"
+        },
+        "role": {
+          "type": "string",
+          "description": "admin | user"
+        },
+        "status": {
+          "type": "string"
+        },
+        "createdAt": {
+          "type": "string",
+          "description": "SQLite datetime, YYYY-MM-DD HH:MM:SS (UTC), not ISO 8601"
+        },
+        "lastLoginAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "SQLite datetime, or null before the first login"
+        }
+      }
+    },
+    "Session": {
+      "type": "object",
+      "required": [
+        "user",
+        "accessToken",
+        "refreshToken",
+        "accessTokenTTLSec"
+      ],
+      "properties": {
+        "user": {
+          "$ref": "#/$defs/User"
+        },
+        "accessToken": {
+          "type": "string"
+        },
+        "refreshToken": {
+          "type": "string"
+        },
+        "accessTokenTTLSec": {
+          "type": "integer"
+        }
+      }
+    },
+    "Ok": {
+      "type": "object",
+      "required": [
+        "ok"
+      ],
+      "properties": {
+        "ok": {
+          "const": true
+        }
+      }
+    },
+    "Health": {
+      "type": "object",
+      "required": [
+        "status",
+        "apiVersion",
+        "schemaVersion",
+        "uptimeSec",
+        "endpoints",
+        "features",
+        "checks"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "ok",
+            "degraded"
+          ],
+          "description": "ok when the DB, the Claude CLI probe and .skills all pass; degraded otherwise"
+        },
+        "apiVersion": {
+          "type": "integer",
+          "description": "SERVER_API_VERSION"
+        },
+        "schemaVersion": {
+          "type": "integer",
+          "description": "current migration number"
+        },
+        "uptimeSec": {
+          "type": "integer"
+        },
+        "endpoints": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "ALL_ENDPOINTS minus the paths of disabled features"
+        },
+        "features": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          },
+          "description": "sorted LLMIDE_FEATURES keys; null means every feature"
+        },
+        "checks": {
+          "type": "object",
+          "required": [
+            "db",
+            "claude",
+            "skills"
+          ],
+          "properties": {
+            "db": {
+              "type": "boolean"
+            },
+            "claude": {
+              "type": "boolean"
+            },
+            "claudeError": {
+              "type": "string",
+              "x-optional": true,
+              "description": "present only while claude is false"
+            },
+            "skills": {
+              "type": "boolean"
+            },
+            "skillsError": {
+              "type": "string",
+              "x-optional": true,
+              "description": "present only while skills is false"
+            }
+          }
+        }
+      }
+    },
+    "WellKnown": {
+      "type": "object",
+      "required": [
+        "issuer",
+        "registrationOpen",
+        "vaultKeys",
+        "accessTokenTTLSec"
+      ],
+      "properties": {
+        "issuer": {
+          "type": "string"
+        },
+        "registrationOpen": {
+          "type": "boolean"
+        },
+        "vaultKeys": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "names of the secrets a user may store"
+        },
+        "accessTokenTTLSec": {
+          "type": "integer"
+        }
+      }
+    },
+    "Prefs": {
+      "type": "object",
+      "description": "Per-user UI preferences. A key the user never set is absent.",
+      "properties": {
+        "language": {
+          "type": "string",
+          "x-optional": true
+        },
+        "bilingual": {
+          "type": "boolean",
+          "x-optional": true
+        },
+        "nativePlugins": {
+          "type": "boolean",
+          "x-optional": true
+        }
+      }
+    },
+    "Secret": {
+      "type": "object",
+      "required": [
+        "key",
+        "updatedAt"
+      ],
+      "properties": {
+        "key": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      }
+    },
+    "OAuthStart": {
+      "type": "object",
+      "required": [
+        "authUrl",
+        "state"
+      ],
+      "properties": {
+        "authUrl": {
+          "type": "string"
+        },
+        "state": {
+          "type": "string",
+          "description": "poll with the matching /status route"
+        }
+      }
+    },
+    "GoogleStatus": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "complete",
+            "error",
+            "unknown"
+          ],
+          "description": "unknown: the state is expired or was never issued"
+        },
+        "email": {
+          "type": "string",
+          "x-optional": true
+        },
+        "message": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    },
+    "SlackStatus": {
+      "type": "object",
+      "required": [
+        "status"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "pending",
+            "complete",
+            "error",
+            "unknown"
+          ],
+          "description": "unknown: the state is expired or was never issued"
+        },
+        "teamName": {
+          "type": "string",
+          "x-optional": true
+        },
+        "channels": {
+          "type": "array",
+          "x-optional": true,
+          "items": {
+            "type": "object",
+            "description": "channels found for the connected workspace"
+          }
+        },
+        "message": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    },
+    "McpPlugin": {
+      "type": "object",
+      "description": "One registered MCP server, with this user's consent and enable state.",
+      "required": [
+        "id",
+        "name",
+        "source",
+        "transport",
+        "builtin",
+        "enabled",
+        "consented",
+        "credentialMissing"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "description": "claude | codex | catalog | manual"
+        },
+        "transport": {
+          "type": "string",
+          "description": "stdio | http | sse"
+        },
+        "command": {
+          "type": "string",
+          "x-optional": true
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-optional": true
+        },
+        "url": {
+          "type": "string",
+          "x-optional": true
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-optional": true,
+          "description": "values are redacted by the server; names are real"
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-optional": true,
+          "description": "values are redacted by the server"
+        },
+        "catalogId": {
+          "type": "string",
+          "x-optional": true
+        },
+        "sourceName": {
+          "type": "string",
+          "x-optional": true
+        },
+        "builtin": {
+          "type": "boolean"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "consented": {
+          "type": "boolean"
+        },
+        "credentialMissing": {
+          "type": "boolean",
+          "description": "the plugin declares a credential the vault has no value for"
+        },
+        "effective": {
+          "type": "boolean",
+          "x-optional": true,
+          "description": "enabled AND consented AND (for a plugin-declared server) its plugin enabled for this user"
+        },
+        "package": {
+          "type": "object",
+          "x-optional": true,
+          "required": [
+            "runner",
+            "name",
+            "version"
+          ],
+          "properties": {
+            "runner": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "version": {
+              "type": "string"
+            },
+            "tag": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "McpAdded": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "source",
+        "builtin"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string"
+        },
+        "builtin": {
+          "type": "boolean"
+        },
+        "transport": {
+          "type": "string",
+          "x-optional": true
+        },
+        "command": {
+          "type": "string",
+          "x-optional": true
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-optional": true
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-optional": true
+        },
+        "url": {
+          "type": "string",
+          "x-optional": true
+        },
+        "catalogId": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    },
+    "CatalogEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "description",
+        "transport",
+        "docsUrl",
+        "registered"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string"
+        },
+        "command": {
+          "type": "string",
+          "x-optional": true
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-optional": true
+        },
+        "url": {
+          "type": "string",
+          "x-optional": true
+        },
+        "docsUrl": {
+          "type": "string"
+        },
+        "requiresArg": {
+          "type": "object",
+          "x-optional": true,
+          "description": "a trailing argument the server cannot work without",
+          "required": [
+            "label"
+          ],
+          "properties": {
+            "label": {
+              "type": "string"
+            },
+            "placeholder": {
+              "type": "string"
+            }
+          }
+        },
+        "credential": {
+          "type": "object",
+          "x-optional": true,
+          "description": "the vault key a credential-bearing server reads; values never leave the server",
+          "properties": {
+            "vaultKey": {
+              "type": "string",
+              "x-optional": true
+            },
+            "target": {
+              "type": "string",
+              "x-optional": true
+            },
+            "name": {
+              "type": "string",
+              "x-optional": true
+            },
+            "label": {
+              "type": "string",
+              "x-optional": true
+            },
+            "template": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        },
+        "oauth": {
+          "type": "boolean",
+          "x-optional": true
+        },
+        "registered": {
+          "type": "boolean",
+          "description": "already in this install's registry"
+        }
+      }
+    },
+    "ClaudeSource": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "A server scanned from the operator's ~/.claude.json (CLAUDE_CONFIG_PATH), read-only.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string",
+          "x-optional": true
+        },
+        "command": {
+          "type": "string",
+          "x-optional": true
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-optional": true
+        },
+        "env": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-optional": true
+        },
+        "url": {
+          "type": "string",
+          "x-optional": true
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "x-optional": true,
+          "description": "values redacted to bullets"
+        }
+      }
+    },
+    "CodexSource": {
+      "type": "object",
+      "required": [
+        "name"
+      ],
+      "description": "A server scanned from the operator's ~/.codex/config.toml (CODEX_CONFIG_PATH), read-only.",
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "transport": {
+          "type": "string",
+          "x-optional": true
+        },
+        "command": {
+          "type": "string",
+          "x-optional": true
+        },
+        "args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "x-optional": true
+        }
+      }
+    },
+    "McpUpdate": {
+      "type": "object",
+      "required": [
+        "id",
+        "runner",
+        "name",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "runner": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "current": {
+          "type": "string",
+          "x-optional": true
+        },
+        "latest": {
+          "type": "string",
+          "x-optional": true
+        },
+        "status": {
+          "type": "string",
+          "description": "e.g. up-to-date"
+        },
+        "reason": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    },
+    "ConnectorEntry": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "description",
+        "icon",
+        "authKind",
+        "docsUrl",
+        "pipelineReady"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "icon": {
+          "type": "string",
+          "description": "SF Symbol name"
+        },
+        "authKind": {
+          "type": "string",
+          "description": "google-oauth | slack-oauth | box-ccg | miro-oauth"
+        },
+        "docsUrl": {
+          "type": "string"
+        },
+        "pipelineReady": {
+          "type": "boolean",
+          "description": "false while the connector's fetch pipeline does not exist yet"
+        },
+        "selected": {
+          "type": "boolean",
+          "x-optional": true,
+          "description": "set only on the catalog endpoint"
+        }
+      }
+    },
+    "LlmSource": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "origin",
+        "builtin",
+        "installed",
+        "enabled",
+        "skillCount",
+        "agentCount",
+        "commandCount",
+        "templateCount",
+        "hookCount",
+        "mcpCount",
+        "disabledItemCount"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "origin": {
+          "type": "string",
+          "description": "builtin | git | local"
+        },
+        "location": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "absolute path, or null if never resolved"
+        },
+        "builtin": {
+          "type": "boolean"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "ref": {
+          "type": "string",
+          "x-optional": true,
+          "description": "git ref, git sources only"
+        },
+        "installed": {
+          "type": "boolean"
+        },
+        "skillCount": {
+          "type": "integer"
+        },
+        "agentCount": {
+          "type": "integer"
+        },
+        "commandCount": {
+          "type": "integer"
+        },
+        "templateCount": {
+          "type": "integer"
+        },
+        "hookCount": {
+          "type": "integer"
+        },
+        "mcpCount": {
+          "type": "integer"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "disabledItemCount": {
+          "type": "integer",
+          "description": "skills/agents/commands/templates this user unchecked inside the source"
+        }
+      }
+    },
+    "LlmSourceUpdate": {
+      "type": "object",
+      "required": [
+        "id",
+        "status"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "checkedAt": {
+          "type": "string",
+          "x-optional": true
+        },
+        "status": {
+          "type": "string",
+          "description": "up-to-date | update-available | local | error"
+        },
+        "localRev": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-optional": true
+        },
+        "remoteRev": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "x-optional": true
+        },
+        "message": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    },
+    "DiscoveryItem": {
+      "type": "object",
+      "required": [
+        "name",
+        "description",
+        "path",
+        "enabled",
+        "isNew"
+      ],
+      "properties": {
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "path": {
+          "type": "string"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "isNew": {
+          "type": "boolean"
+        }
+      }
+    },
+    "DiscoveryHook": {
+      "type": "object",
+      "required": [
+        "event",
+        "command"
+      ],
+      "properties": {
+        "event": {
+          "type": "string"
+        },
+        "matcher": {
+          "type": "string",
+          "x-optional": true
+        },
+        "command": {
+          "type": "string"
+        }
+      }
+    },
+    "Discovery": {
+      "type": "object",
+      "required": [
+        "skills",
+        "agents",
+        "commands",
+        "templates",
+        "hooks",
+        "mcpServers"
+      ],
+      "properties": {
+        "skills": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveryItem"
+          }
+        },
+        "agents": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveryItem"
+          }
+        },
+        "commands": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveryItem"
+          }
+        },
+        "templates": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveryItem"
+          }
+        },
+        "hooks": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/DiscoveryHook"
+          }
+        },
+        "mcpServers": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "name, command, args of an MCP server the source ships; not exemplified in the P3 capture"
+          }
+        }
+      }
+    },
+    "ClaudeUpdateNotFound": {
+      "type": "object",
+      "required": [
+        "code"
+      ],
+      "description": "A bare body, NOT the Error envelope: plugins/claude-update.mjs returns { code } for an unknown plugin name. The Mac decodes errors through the envelope, so it shows no message for this response (see the P3 report).",
+      "properties": {
+        "code": {
+          "type": "string"
+        },
+        "detail": {
+          "type": "string",
+          "x-optional": true
+        }
+      }
+    },
+    "PluginRows": {
+      "type": "object",
+      "required": [
+        "plugins"
+      ],
+      "properties": {
+        "plugins": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "description": "one plugin row; the P3 capture has no plugin on disk, so its fields are not pinned here"
+          }
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Health"
+        }
+      }
+    },
+    "GET /health": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Health"
+        }
+      }
+    },
+    "GET /launch-app": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "to": {
+              "type": "string",
+              "description": "transcript | plan | review | history | settings; any other value falls back to transcript"
+            },
+            "session": {
+              "type": "string",
+              "description": "appended to the llmide:// target"
+            }
+          }
+        }
+      },
+      "responses": {
+        "302": {
+          "x-content": "text",
+          "type": "string",
+          "description": "HTML page with a meta refresh to llmide://<tab>; the Location header carries the same target"
+        }
+      }
+    },
+    "GET /auth/well-known": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/WellKnown"
+        }
+      }
+    },
+    "POST /auth/register": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string",
+              "description": "10 to 200 characters"
+            },
+            "displayName": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "201": {
+          "type": "object",
+          "required": [
+            "user"
+          ],
+          "properties": {
+            "user": {
+              "$ref": "#/$defs/User"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/login": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            },
+            "password": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Session"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/refresh": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "refreshToken": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Session"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/logout": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "refreshToken": {
+              "type": "string",
+              "description": "revokes that one session; without it every refresh token of the user is revoked"
+            },
+            "allDevices": {
+              "type": "boolean",
+              "description": "revokes every session"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/reset-request": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "email": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "oneOf": [
+            {
+              "title": "development: the token is returned",
+              "type": "object",
+              "required": [
+                "ok",
+                "token",
+                "expiresAt"
+              ],
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "token": {
+                  "type": "string",
+                  "description": "single-use reset token, 1 hour TTL"
+                },
+                "expiresAt": {
+                  "type": "string"
+                }
+              }
+            },
+            {
+              "title": "unknown email, or production: the same message either way",
+              "type": "object",
+              "required": [
+                "ok",
+                "message"
+              ],
+              "properties": {
+                "ok": {
+                  "const": true
+                },
+                "message": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/reset-confirm": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "token": {
+              "type": "string"
+            },
+            "newPassword": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/google/start": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "clientId": {
+              "type": "string",
+              "x-optional": true,
+              "description": "bring-your-own client: both fields, or neither for the hosted client"
+            },
+            "clientSecret": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/OAuthStart"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "503": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/google/status": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/GoogleStatus"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/google/callback": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "text",
+          "type": "string",
+          "description": "HTML page; no bearer token on this route (Google's redirect)"
+        },
+        "429": {
+          "x-content": "text",
+          "type": "string",
+          "description": "HTML page when the per-IP OAuth-callback bucket is empty"
+        }
+      }
+    },
+    "POST /auth/slack/start": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "the client sends an empty object; the server reads no fields"
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/OAuthStart"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "503": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/slack/status": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/SlackStatus"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/slack/callback": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "text",
+          "type": "string",
+          "description": "HTML page; no bearer token on this route (Slack's redirect)"
+        }
+      }
+    },
+    "GET /auth/mcp-connector/callback": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "code": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-content": "text",
+          "type": "string",
+          "description": "HTML page; no bearer token on this route (the remote MCP server's redirect)"
+        }
+      }
+    },
+    "GET /auth/me": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/User"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/password": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "currentPassword": {
+              "type": "string"
+            },
+            "newPassword": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/prefs": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "prefs"
+          ],
+          "properties": {
+            "prefs": {
+              "$ref": "#/$defs/Prefs"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /auth/me/prefs": {
+      "request": {
+        "body": {
+          "$ref": "#/$defs/Prefs"
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "prefs"
+          ],
+          "properties": {
+            "prefs": {
+              "$ref": "#/$defs/Prefs"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/secrets": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "secrets",
+            "available"
+          ],
+          "properties": {
+            "secrets": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Secret"
+              },
+              "description": "keys this user has set; values never leave the server"
+            },
+            "available": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "every key a user may store"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/secrets": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "key": {
+              "type": "string"
+            },
+            "value": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "key"
+          ],
+          "description": "A missing or non-string `value` deletes the secret (auth-routes.mjs: deleted = !value) — by design today; an explicit delete would be clearer."
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/repos": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string",
+              "description": "an absolute local path, registered as allowed for git connect"
+            },
+            "label": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "path"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "path": {
+              "type": "string",
+              "description": "the canonical absolute path stored"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/plugins": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "pluginDir",
+            "plugins"
+          ],
+          "properties": {
+            "pluginDir": {
+              "type": "string"
+            },
+            "plugins": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "installed plugin row; not pinned in P3 (no plugin on disk in the capture)"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/plugins/toggle": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success needs an installed plugin; the P3 capture installs none (an install takes a plugin zip)"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/plugins/hook-trust": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "trusted": {
+              "type": "boolean"
+            },
+            "kinds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success needs an installed plugin that declares hooks; not in the P3 capture"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/plugins/reload": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "the client sends an empty object; the server reads no fields"
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "pluginDir",
+            "count",
+            "warnings"
+          ],
+          "properties": {
+            "pluginDir": {
+              "type": "string"
+            },
+            "count": {
+              "type": "integer"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/plugins/install": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "replace": {
+              "type": "string",
+              "description": "1 replaces an installed plugin of the same name"
+            },
+            "expect": {
+              "type": "string",
+              "description": "the plugin name the upload must carry"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success needs a valid plugin zip; the body is raw application/zip bytes, which a JSON fixture cannot carry"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /auth/me/plugins/uninstall/:name": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "name"
+          ],
+          "properties": {
+            "name": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "removed"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "removed": {
+              "type": "boolean",
+              "description": "false when no plugin of that name was installed"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/claude-plugins/installed": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PluginRows"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/claude-plugins/marketplace": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PluginRows"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/claude-plugins/import": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success imports a plugin from the Claude marketplace on disk; not in the P3 capture"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/claude-plugins/refresh": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "the client sends an empty object; the server reads no fields"
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "installed",
+            "marketplace"
+          ],
+          "properties": {
+            "installed": {
+              "type": "integer"
+            },
+            "marketplace": {
+              "type": "integer"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/claude-plugins/updates": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "cli",
+            "checkedAt",
+            "updates"
+          ],
+          "properties": {
+            "cli": {
+              "type": "boolean",
+              "description": "true when the claude CLI answered the check; false for the local scan"
+            },
+            "checkedAt": {
+              "type": "string"
+            },
+            "updates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "name, pluginId, importedVersion, claudeVersion, latest, tier, plus the legacy sourceVersion and source (withLegacyFields); rows not pinned in P3"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/claude-plugins/update": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "acceptCommand": {
+              "type": "string",
+              "description": "hex digest of the hook command the user accepted"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success needs an installed Claude plugin with an update available; not in the P3 capture"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "#/$defs/ClaudeUpdateNotFound"
+        }
+      }
+    },
+    "GET /auth/me/codex-plugins/installed": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PluginRows"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/codex-plugins/marketplace": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/PluginRows"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/codex-plugins/import": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "source": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success imports a Codex plugin from disk; not in the P3 capture"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/codex-plugins/refresh": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "the client sends an empty object; the server reads no fields"
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "installed",
+            "marketplace"
+          ],
+          "properties": {
+            "installed": {
+              "type": "integer"
+            },
+            "marketplace": {
+              "type": "integer"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/codex-plugins/updates": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "cli",
+            "checkedAt",
+            "updates"
+          ],
+          "properties": {
+            "cli": {
+              "type": "boolean"
+            },
+            "checkedAt": {
+              "type": "string"
+            },
+            "updates": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "description": "same row shape as the Claude updates; rows not pinned in P3"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/llm-sources": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sources"
+          ],
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LlmSource"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/llm-sources/updates": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sources"
+          ],
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/LlmSourceUpdate"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/llm-sources/toggle": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "enabled"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/llm-sources/items": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string"
+            },
+            "kind": {
+              "enum": [
+                "skill",
+                "agent",
+                "command",
+                "template"
+              ]
+            },
+            "names": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "disabled"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "disabled": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "kind:name of every item this user has unchecked in the source"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/llm-sources/add": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "x-optional": true
+            },
+            "path": {
+              "type": "string",
+              "x-optional": true
+            },
+            "ref": {
+              "type": "string",
+              "x-optional": true
+            },
+            "name": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success needs a reachable git URL or a local source directory; not in the P3 capture"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/llm-sources/update": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success runs git against the source remote; the capture has no network access to it"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /auth/me/llm-sources/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success removes a non-builtin source; not in the P3 capture"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/llm-sources/:id/discovery": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Discovery"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/mcp-plugins": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "plugins"
+          ],
+          "properties": {
+            "plugins": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/McpPlugin"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/mcp-plugins/catalog": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "servers"
+          ],
+          "properties": {
+            "servers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CatalogEntry"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/mcp-plugins/claude-sources": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "servers"
+          ],
+          "properties": {
+            "servers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ClaudeSource"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/mcp-plugins/codex-sources": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "servers"
+          ],
+          "properties": {
+            "servers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CodexSource"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/mcp-plugins/updates": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "checkedAt",
+            "servers"
+          ],
+          "properties": {
+            "checkedAt": {
+              "type": "string"
+            },
+            "servers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/McpUpdate"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/mcp-plugins/add": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "Three mutually exclusive forms: a catalog entry (catalogId, arg), an imported Claude or Codex server (claudeName or codexName), or a manual server (name, transport, command, args, env, url, headers, source). Only the catalog form is exemplified in P3; the others are open.",
+          "properties": {
+            "catalogId": {
+              "type": "string"
+            },
+            "arg": {
+              "type": "string",
+              "description": "the catalog entry's requiresArg value"
+            }
+          },
+          "additionalProperties": true
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "plugin"
+          ],
+          "properties": {
+            "plugin": {
+              "$ref": "#/$defs/McpAdded"
+            },
+            "pinned": {
+              "type": "boolean",
+              "x-optional": true
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/mcp-plugins/consent": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "consented": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "consented"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "consented": {
+              "type": "boolean"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/mcp-plugins/toggle": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "enabled"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "enabled": {
+              "type": "boolean"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/mcp-plugins/:id/resync": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success needs a Claude Code or Codex source for the server to compare against; the capture has neither"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/mcp-plugins/:id/resync": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "success needs a Claude Code or Codex source for the server to compare against; the capture has neither"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/mcp-plugins/:id/update": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "from": {
+              "type": "string",
+              "x-optional": true
+            },
+            "to": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /auth/me/mcp-plugins/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Ok"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/connectors": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "connectors"
+          ],
+          "properties": {
+            "connectors": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConnectorEntry"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/connectors/catalog": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "catalog"
+          ],
+          "properties": {
+            "catalog": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ConnectorEntry"
+              }
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/connectors/add": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "id"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /auth/me/connectors/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "id"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

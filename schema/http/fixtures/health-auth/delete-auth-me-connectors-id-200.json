@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /auth/me/connectors/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "gdrive"
+    }
+  },
+  "response": {
+    "ok": true,
+    "id": "gdrive"
+  }
+}

@@ -165,6 +165,15 @@ and the number of `x-unspecified` responses.
 an `ALL_ENDPOINTS` path has no endpoint at all. It is off until the route-group
 specifications land (P3–P10). P16 makes it the default.
 
+## Malformed JSON bodies
+
+Every route that reads a JSON body answers an unparseable body with the same
+envelope, `400 VALIDATION_FAILED` (message `Body must be valid JSON`, or
+`Invalid JSON body` on a few routes). It is not declared per route: a fixture
+carries parsed JSON, so it cannot exemplify an unparseable body, and declaring
+it on every route would force a fixture that cannot be written. Treat any JSON
+route as also answering this 400.
+
 ## Rules for editing
 
 - Declare a field only when the server sends it. Fixtures are transcribed from the

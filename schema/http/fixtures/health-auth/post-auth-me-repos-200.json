@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /auth/me/repos",
+  "status": 200,
+  "request": {
+    "body": {
+      "path": "/tmp/example-repo",
+      "label": "example"
+    }
+  },
+  "response": {
+    "ok": true,
+    "path": "/tmp/example"
+  }
+}

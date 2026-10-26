@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /auth/reset-request",
+  "status": 200,
+  "request": {
+    "body": {
+      "email": "capture-user@example.com"
+    }
+  },
+  "response": {
+    "ok": true,
+    "token": "example-reset-token",
+    "expiresAt": "2026-10-26T05:31:31.455Z"
+  }
+}

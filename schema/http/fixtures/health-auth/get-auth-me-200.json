@@ -1,0 +1,13 @@
+{
+  "endpoint": "GET /auth/me",
+  "status": 200,
+  "response": {
+    "id": "85eaf45b2dd93108",
+    "email": "capture-user@example.com",
+    "displayName": "Capture User",
+    "role": "admin",
+    "status": "active",
+    "createdAt": "2026-10-26 04:31:31",
+    "lastLoginAt": "2026-10-26 04:31:31"
+  }
+}

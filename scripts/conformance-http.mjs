@@ -21,7 +21,9 @@
 //                  paths by any fixture of the endpoint; response paths by a
 //                  fixture of that status (and of that oneOf variant).
 //   3. ROSTER    — every declared endpoint exists in ALL_ENDPOINTS
-//                  (extension/server.mjs), parsed by scripts/lib/roster.mjs.
+//                  (extension/server.mjs) or in the public + auth roster
+//                  (extension/server/auth.mjs, auth-routes.mjs), both parsed by
+//                  scripts/lib/roster.mjs.
 //
 // The summary line also reports the share of ALL_ENDPOINTS with a specified 2xx
 // response, and the count of x-unspecified responses. `--require-all` fails when
@@ -39,12 +41,11 @@ import {
   loadJson, listJson, makeSchemaWalker, RefError, variantFor,
   validateNode, coverablePaths, keywordProblems, createCoverage, createReport,
 } from './lib/conformance.mjs';
-import { parseRoster } from './lib/roster.mjs';
+import { loadRosters } from './lib/roster.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCHEMA_DIR = join(ROOT, 'schema/http');
 const FIXTURE_DIR = join(SCHEMA_DIR, 'fixtures');
-const SERVER_REL = 'extension/server.mjs';
 const SCHEMA_SUFFIX = '.schema.json';
 const COMMON_FILE = `_common${SCHEMA_SUFFIX}`;
 const COMMON_NAME = '_common';
@@ -75,7 +76,13 @@ function guard(where, fn, fallback) {
 
 // ---------------------------------------------------------------- roster
 
-const roster = new Set(parseRoster(readFileSync(join(ROOT, SERVER_REL), 'utf8'), SERVER_REL).map((r) => r.path));
+// Two rosters: ALL_ENDPOINTS (advertised by /health) and the public + auth roster
+// (pre-routing public paths and the auth namespace, read from their definitions).
+// A declared endpoint must be in either one.
+const rosters = loadRosters((rel) => readFileSync(join(ROOT, rel), 'utf8'));
+const allEndpoints = new Set(rosters.endpoints.map((r) => r.path));
+const publicAuth = new Set(rosters.publicAuth.map((r) => r.path));
+const roster = new Set([...allEndpoints, ...publicAuth]);
 
 // ---------------------------------------------------------------- common + events
 
@@ -207,7 +214,7 @@ for (const file of readdirSync(SCHEMA_DIR).filter((f) => f.endsWith(SCHEMA_SUFFI
     if (!m) { note(`${file}${ptr}: endpoint key "${key}" is not "<METHOD> <path>"`); continue; }
     if (!METHODS.has(m[1])) note(`${file}${ptr}: "${key}" uses an unsupported method ${m[1]}`);
     if (endpoints.has(key)) { note(`${file}${ptr}: "${key}" is declared in more than one group file`); continue; }
-    if (!roster.has(m[2])) note(`${file}${ptr}: "${key}" is not in ALL_ENDPOINTS (${SERVER_REL})`);
+    if (!roster.has(m[2])) note(`${file}${ptr}: "${key}" is in neither ALL_ENDPOINTS (extension/server.mjs) nor the public + auth roster`);
     if (!spec || typeof spec !== 'object' || Array.isArray(spec)) { note(`${file}${ptr}: endpoint must be an object`); continue; }
 
     if (spec.request !== undefined) {
@@ -358,14 +365,16 @@ for (const [key, ep] of endpoints) {
 }
 if (requireAll) {
   for (const key of no2xx) note(`"${key}" has no specified 2xx response (--require-all)`);
-  for (const p of roster) if (!specified.has(p)) note(`ALL_ENDPOINTS ${p} has no schema (--require-all)`);
+  for (const p of roster) if (!specified.has(p)) note(`roster path ${p} has no schema (--require-all)`);
 }
 for (const u of unspecifiedList) console.log(`unspecified: ${u}`);
 
 const pct = roster.size ? ((100 * specified.size) / roster.size).toFixed(1) : '0.0';
+const specifiedOf = (set) => [...set].filter((p) => specified.has(p)).length;
 report.finish({
   title: 'http conformance',
   footer: 'See schema/http/SCHEMA.md.',
-  ok: `http conformance: ${groups.length} groups, ${specified.size}/${roster.size} endpoints specified (${pct}%), `
+  ok: `http conformance: ${groups.length} groups, ${specified.size}/${roster.size} endpoints specified (${pct}%; `
+    + `ALL_ENDPOINTS ${specifiedOf(allEndpoints)}/${allEndpoints.size}, public + auth ${specifiedOf(publicAuth)}/${publicAuth.size}), `
     + `${fixtureCount} fixtures, ${unspecifiedList.length} unspecified${requireAll ? ' (--require-all)' : ''}`,
 });
