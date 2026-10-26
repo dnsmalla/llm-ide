@@ -156,9 +156,17 @@ export async function handleKB(req, res) {
         : undefined;
       // Custom (OpenAI-compatible) provider also needs a base URL — accept it
       // in the body (verify-before-save) or read the stored one.
-      const baseUrl = provider === 'custom'
-        ? ((typeof body.baseUrl === 'string' && body.baseUrl) ? body.baseUrl : customBaseUrl(userId))
-        : undefined;
+      // A stored base URL that fails the SSRF guard throws in customBaseUrl;
+      // answer with the documented 200 { ok:false, detail } shape, not a 500.
+      let baseUrl;
+      try {
+        baseUrl = provider === 'custom'
+          ? ((typeof body.baseUrl === 'string' && body.baseUrl) ? body.baseUrl : customBaseUrl(userId))
+          : undefined;
+      } catch (err) {
+        sendJSON(res, 200, { ok: false, detail: String(err?.message || err).slice(0, 200) });
+        return true;
+      }
       const result = await verifyProvider({ provider, mode, apiKey, baseUrl });
       sendJSON(res, 200, result);
       return true;
@@ -209,7 +217,14 @@ export async function handleKB(req, res) {
       }
       const key = providerApiKey(userId, provider);
       if (!key) { sendJSON(res, 200, { models: [], detail: sdkDetail || 'no API key configured' }); return true; }
-      const baseUrl = provider === 'custom' ? customBaseUrl(userId) : undefined;
+      let baseUrl;
+      try {
+        baseUrl = provider === 'custom' ? customBaseUrl(userId) : undefined;
+      } catch (err) {
+        // Stored base URL refused by the SSRF guard: same empty-list answer as
+        // the other "can't list" cases, with the reason in detail.
+        sendJSON(res, 200, { models: [], detail: String(err?.message || err).slice(0, 200) }); return true;
+      }
       if (provider === 'custom' && !baseUrl) {
         sendJSON(res, 200, { models: [], detail: 'no base URL configured' }); return true;
       }
