@@ -840,7 +840,7 @@
                 "deny",
                 "always-allow"
               ],
-              "description": "'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once.\n"
+              "description": "'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once."
             },
             "feedback": {
               "type": "string",

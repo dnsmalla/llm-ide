@@ -85,7 +85,7 @@ function componentNames(docs) {
 
 // ---------- schema conversion ----------
 
-function makeConverter(names) {
+function makeConverter(names, docs) {
   const refTarget = (ref, doc) => {
     const m = /^([^#]*)#\/\$defs\/(.+)$/.exec(ref);
     if (!m) throw new Error(`${doc.rel}: unsupported $ref "${ref}"`);
@@ -126,7 +126,23 @@ function makeConverter(names) {
     }
     return out;
   };
-  return { convert, refTarget };
+  // The node a schema (or $ref) denotes, following references to their $defs target.
+  const resolve = (node, doc) => {
+    let current = node;
+    let docId = doc.id;
+    for (let hops = 0; current && current.$ref !== undefined; hops += 1) {
+      if (hops > 16) throw new Error(`${doc.rel}: $ref chain too deep`);
+      const m = /^([^#]*)#\/\$defs\/(.+)$/.exec(current.$ref);
+      if (!m) throw new Error(`${doc.rel}: unsupported $ref "${current.$ref}"`);
+      const target = m[1] ? '_common' : docId;
+      const found = docs.get(target)?.json?.$defs?.[m[2]];
+      if (!found) throw new Error(`${doc.rel}: unresolved $ref "${current.$ref}"`);
+      current = found;
+      docId = target;
+    }
+    return current;
+  };
+  return { convert, refTarget, resolve };
 }
 
 // ---------- YAML output ----------
@@ -171,7 +187,55 @@ const toYaml = (doc) => `${yamlBlock(doc, 0).join('\n')}\n`;
 // OpenAPI path form: Express-style :name becomes {name}.
 const oasPath = (path) => path.replace(/:([A-Za-z_]\w*)/g, '{$1}');
 
-function buildOperation({ doc, key, spec, convert, ov, eventName, seenOverlay }) {
+// Overlay overrides for one parameter's OpenAPI schema. The contract types query values
+// as strings (the wire form; fixtures carry "5", not 5), so a numeric parameter is typed
+// here as an integer with its handler default. Only keywords the handler actually
+// enforces or relies on belong here, and each override must name a real parameter.
+const PARAM_OVERRIDE_KEYS = new Set(['type', 'default', 'pattern', 'enum', 'format', 'items', 'required']);
+const PARAM_TYPES = new Set(['string', 'integer', 'number', 'boolean', 'array']);
+
+function applyParamOverride(opKey, location, name, schema, override, seenOverlay) {
+  const where = `openapi.overlay.json: ${opKey} parameterSchemas.${location}.${name}`;
+  for (const k of Object.keys(override)) {
+    if (!PARAM_OVERRIDE_KEYS.has(k)) throw new Error(`${where}: keyword "${k}" is not an allowed override`);
+  }
+  if (override.type !== undefined && !PARAM_TYPES.has(override.type)) {
+    throw new Error(`${where}: type "${override.type}" is not allowed`);
+  }
+  seenOverlay.add(`${opKey}|param override ${location}.${name}`);
+  const { required, ...rest } = override;
+  Object.assign(schema, rest);
+  return required;
+}
+
+// Response media types the overlay adds or removes. A status with no contract body that
+// the handlers answer with the shared JSON error envelope gets that envelope by default.
+const ERROR_CONTENT = { 'application/json': { schema: { $ref: '#/components/schemas/Error' } } };
+
+// overlay operations[opKey].responseContent[status] = { removeContent?: [mediaType],
+// content?: { mediaType: { schema } } }. Media types are added or replaced; removeContent
+// drops the contract's own. Used for the wire types the contract cannot name (a DOCX
+// download, NDJSON, text/html, an SSE stream of unspecified events).
+function applyContentOverride(opKey, status, response, ov, seenOverlay) {
+  const o = ov.responseContent?.[status];
+  if (o === undefined) return;
+  const where = `openapi.overlay.json: ${opKey} responseContent.${status}`;
+  for (const k of Object.keys(o)) {
+    if (k !== 'removeContent' && k !== 'content') throw new Error(`${where}: keyword "${k}" is not allowed`);
+  }
+  const content = { ...(response.content || {}) };
+  for (const mt of o.removeContent || []) delete content[mt];
+  for (const [mt, entry] of Object.entries(o.content || {})) {
+    if (!mt.includes('/')) throw new Error(`${where}: "${mt}" is not a media type`);
+    if (!entry || typeof entry !== 'object' || !('schema' in entry)) throw new Error(`${where}: ${mt} needs a schema`);
+    content[mt] = entry;
+  }
+  if (Object.keys(content).length) response.content = content;
+  else delete response.content;
+  seenOverlay.add(`${opKey}|content ${status}`);
+}
+
+function buildOperation({ doc, key, spec, convert, resolve, ov, eventName, seenOverlay }) {
   const [method, path] = [key.split(' ')[0], key.split(' ').slice(1).join(' ')];
   const opKey = `${method} ${oasPath(path)}`;
   const parts = spec.request || {};
@@ -195,16 +259,40 @@ function buildOperation({ doc, key, spec, convert, ov, eventName, seenOverlay })
     return desc === undefined ? {} : { description: desc };
   };
 
+  const overrideFor = (location, name, schema) => {
+    const override = ov.parameterSchemas?.[`${location}.${name}`];
+    return override === undefined ? undefined : applyParamOverride(opKey, location, name, schema, override, seenOverlay);
+  };
+
   for (const name of pathParams) {
     const schema = convert(parts.params.properties[name], doc);
+    overrideFor('path', name, schema);
     params.push({ name, in: 'path', required: true, ...described('path', name, schema), schema });
   }
   if (parts.query) {
     const required = new Set(parts.query.required || []);
     for (const name of Object.keys(parts.query.properties || {})) {
       const schema = convert(parts.query.properties[name], doc);
-      params.push({ name, in: 'query', required: required.has(name), ...described('query', name, schema), schema });
+      const overrideRequired = overrideFor('query', name, schema);
+      const isRequired = overrideRequired ?? required.has(name);
+      params.push({ name, in: 'query', required: isRequired, ...described('query', name, schema), schema });
     }
+  }
+  for (const k of Object.keys(ov.parameterSchemas || {})) {
+    if (!seenOverlay.has(`${opKey}|param override ${k}`)) {
+      throw new Error(`openapi.overlay.json: ${opKey} parameterSchemas.${k} names no parameter in the contract`);
+    }
+  }
+  // Query parameters the handler reads but the contract does not declare yet. They carry
+  // no fixture coverage, so they live here, marked, until the contract declares them.
+  for (const extra of ov.extraParameters || []) {
+    if (extra.in !== 'query' || typeof extra.name !== 'string') {
+      throw new Error(`openapi.overlay.json: ${opKey} extraParameters entries must be query parameters with a name`);
+    }
+    if (params.some((p) => p.name === extra.name && p.in === extra.in)) {
+      throw new Error(`openapi.overlay.json: ${opKey} extraParameters.${extra.name} is already in the contract`);
+    }
+    params.push({ name: extra.name, in: 'query', required: false, 'x-undeclared': true, ...extra, schema: { type: 'string', ...(extra.schema || {}) } });
   }
 
   const op = {};
@@ -214,7 +302,11 @@ function buildOperation({ doc, key, spec, convert, ov, eventName, seenOverlay })
   if (ov.security !== undefined) op.security = ov.security;
   if (params.length) op.parameters = params;
   if (parts.body !== undefined) {
-    op.requestBody = { required: true, content: { 'application/json': { schema: convert(parts.body, doc) } } };
+    // A body is required only when its schema requires some property: a handler that
+    // accepts an empty POST has no required properties in its contract.
+    const bodyNode = resolve(parts.body, doc);
+    const bodyRequired = Array.isArray(bodyNode.required) && bodyNode.required.length > 0;
+    op.requestBody = { required: bodyRequired, content: { 'application/json': { schema: convert(parts.body, doc) } } };
   }
 
   const declared = Object.keys(spec.responses || {});
@@ -230,6 +322,8 @@ function buildOperation({ doc, key, spec, convert, ov, eventName, seenOverlay })
     if (overlayDesc !== undefined) seenOverlay.add(`${opKey}|response ${status}`);
     if (node === undefined) {
       responses[status] = { description: overlayDesc, 'x-undeclared': true };
+      if (Number(status) >= 400) responses[status].content = structuredClone(ERROR_CONTENT);
+      applyContentOverride(opKey, status, responses[status], ov, seenOverlay);
       continue;
     }
     const xContent = node['x-content'];
@@ -260,7 +354,13 @@ function buildOperation({ doc, key, spec, convert, ov, eventName, seenOverlay })
       if (schema.description !== undefined) delete schema.description;
       r = { description: desc, content: { 'application/json': { schema } } };
     }
+    // Error statuses the handlers answer with the shared JSON envelope (sendError).
+    if (r.content === undefined && Number(status) >= 400) r.content = structuredClone(ERROR_CONTENT);
+    applyContentOverride(opKey, status, r, ov, seenOverlay);
     responses[status] = r;
+  }
+  for (const s of Object.keys(ov.responseContent || {})) {
+    if (!statuses.includes(s)) throw new Error(`openapi.overlay.json: ${opKey} responseContent.${s} names no response`);
   }
   op.responses = responses;
   return { opKey, path: oasPath(path), method: method.toLowerCase(), op };
@@ -271,7 +371,7 @@ function buildOperation({ doc, key, spec, convert, ov, eventName, seenOverlay })
 function build() {
   const docs = loadContractDocs(ROOT);
   const names = componentNames(docs);
-  const { convert } = makeConverter(names);
+  const { convert, resolve } = makeConverter(names, docs);
   const overlay = JSON.parse(readFileSync(OVERLAY_FILE, 'utf8'));
   const serverSrc = readFileSync(SERVER_FILE, 'utf8');
   const apiVersion = Number(serverSrc.match(/const SERVER_API_VERSION = (\d+);/)?.[1]);
@@ -296,10 +396,10 @@ function build() {
       }
       const spec = d.json.endpoints[key];
       const probe = buildOperation({
-        doc: d, key, spec, convert, ov: {}, eventName, seenOverlay: new Set(),
+        doc: d, key, spec, convert, resolve, ov: {}, eventName, seenOverlay: new Set(),
       });
       const ov = overlay.operations?.[probe.opKey] ?? {};
-      const built = buildOperation({ doc: d, key, spec, convert, ov, eventName, seenOverlay });
+      const built = buildOperation({ doc: d, key, spec, convert, resolve, ov, eventName, seenOverlay });
       if (ops.has(built.opKey)) throw new Error(`${d.rel} ${key}: duplicate operation ${built.opKey}`);
       ops.set(built.opKey, built);
     }

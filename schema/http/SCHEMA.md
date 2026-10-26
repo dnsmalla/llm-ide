@@ -199,6 +199,8 @@ Two files are generated from this contract. Do not edit either by hand.
 - `extension/src/lib/api-types.ts`: `node scripts/gen-api-types.mjs` (`make api-types`).
 - `docs/reference/api/openapi.yaml`: `node scripts/gen-openapi.mjs` (`make openapi`). Human prose the group files do not carry (summaries, descriptions, response descriptions) lives in `docs/reference/api/openapi.overlay.json`, keyed by `METHOD /path` in OpenAPI form. The generator fails when an overlay entry names nothing the contract generates.
 
+The overlay also carries what the contract cannot express yet, per operation: `parameterSchemas` (typed overrides of a parameter's OpenAPI schema, such as `integer` with its handler default, or a pattern the handler enforces), `responseContent` (wire media types such as a DOCX download or `text/event-stream`), and `extraParameters` (query parameters the handler reads that the contract does not declare). Each override must name something the contract generates; the generator fails otherwise. Query values stay strings in the contract, matching the fixtures. A request body is `required` in the OpenAPI output only when its schema has required properties. An error status with no body in the contract gets the shared `Error` envelope.
+
 `make contract-gates` runs both generators with `--check` and fails while either output is stale.
 
 ## Version bump rule

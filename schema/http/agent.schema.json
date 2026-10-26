@@ -503,7 +503,7 @@
             "permissionMode": {
               "type": "string",
               "x-optional": true,
-              "description": "Claude Code's modes. `ask` (default; `manual` is its old spelling): prompt-tier calls park an approval unless a saved project rule covers them. `accept-edits`: in-workspace Edit/Write run unasked, shell still asks. `bypass`: nothing that would park asks. No mode lifts the blocklist or write containment.\n"
+              "description": "Claude Code's modes. `ask` (default; `manual` is its old spelling): prompt-tier calls park an approval unless a saved project rule covers them. `accept-edits`: in-workspace Edit/Write run unasked, shell still asks. `bypass`: nothing that would park asks. No mode lifts the blocklist or write containment."
             },
             "attachments": {
               "type": "array",
@@ -860,7 +860,7 @@
           "properties": {
             "sinceDays": {
               "type": "string",
-              "description": "the window in days; default 30 The default is 30 days."
+              "description": "The window in days; the default is 30."
             }
           }
         }
@@ -912,7 +912,7 @@
           "properties": {
             "sinceDays": {
               "type": "string",
-              "description": "the window in days; default 30 The default is 30 days."
+              "description": "The window in days; the default is 30."
             }
           }
         }
@@ -1584,7 +1584,7 @@
           "properties": {
             "limit": {
               "type": "string",
-              "description": "newest N, within the server's hard cap; default 50 The default is 50; reads are capped at 500."
+              "description": "Returns the newest N messages, oldest first; the default is 50, and reads are capped at 500."
             }
           }
         }
@@ -1714,7 +1714,7 @@
           "properties": {
             "limit": {
               "type": "string",
-              "description": "the newest N messages"
+              "description": "Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000."
             }
           }
         }

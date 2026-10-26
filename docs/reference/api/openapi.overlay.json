@@ -95,6 +95,30 @@
       "security": [],
       "responses": {
         "200": "HTML confirmation or error page"
+      },
+      "extraParameters": [
+        {
+          "name": "error",
+          "in": "query",
+          "description": "Set by Google when the user cancels consent; the callback then reports the sign-in as cancelled.",
+          "schema": {
+            "type": "string"
+          }
+        }
+      ],
+      "responseContent": {
+        "200": {
+          "removeContent": [
+            "text/plain"
+          ],
+          "content": {
+            "text/html": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "GET /auth/google/status": {
@@ -117,6 +141,12 @@
       "responses": {
         "200": "Audit entries newest-first",
         "500": "Audit DB failure"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 100
+        }
       }
     },
     "GET /auth/me/secrets": {
@@ -147,6 +177,16 @@
       },
       "responses": {
         "200": "Activity items + unread count"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 100
+        },
+        "query.since": {
+          "type": "integer",
+          "default": 0
+        }
       }
     },
     "GET /kb/agent-sdk": {
@@ -162,6 +202,12 @@
       "summary": "Retrieve persisted ask-the-agent conversation history (oldest-first)",
       "responses": {
         "200": "Message history"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
       }
     },
     "GET /kb/agent/catalog": {
@@ -180,12 +226,24 @@
       "summary": "Per-plan-task agent feedback breakdown",
       "responses": {
         "200": "Feedback breakdown by plan task"
+      },
+      "parameterSchemas": {
+        "query.sinceDays": {
+          "type": "integer",
+          "default": 30
+        }
       }
     },
     "GET /kb/agent/feedback/stats": {
       "summary": "Aggregate agent feedback statistics for the user",
       "responses": {
         "200": "Feedback statistics"
+      },
+      "parameterSchemas": {
+        "query.sinceDays": {
+          "type": "integer",
+          "default": 30
+        }
       }
     },
     "GET /kb/agent/generation-library": {
@@ -216,6 +274,14 @@
       },
       "responses": {
         "200": "Facts plus the resolved root"
+      },
+      "parameterSchemas": {
+        "query.repo": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
       }
     },
     "GET /kb/agent/runs": {
@@ -242,16 +308,28 @@
       "summary": "List unified chat sessions (shared by macOS + extension)",
       "responses": {
         "200": "Sessions, newest first"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
       }
     },
     "GET /kb/chat/sessions/{id}": {
       "summary": "Fetch one chat session with its messages",
       "parameters": {
-        "query.limit": "Max messages returned. The default is 50, with a minimum of 1 and a cap of 200."
+        "query.limit": "Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000."
       },
       "responses": {
         "200": "The session",
         "404": "Session not found"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 200
+        }
       }
     },
     "GET /kb/entity/{id}": {
@@ -260,12 +338,37 @@
         "200": "Entity record",
         "400": "Invalid ID format",
         "404": "Not found"
+      },
+      "parameterSchemas": {
+        "path.id": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
       }
     },
     "GET /kb/export-all": {
       "summary": "Export every KB row for the caller as newline-delimited JSON, paged by cursor",
       "responses": {
         "200": "NDJSON stream of export records"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 100
+        }
+      },
+      "responseContent": {
+        "200": {
+          "removeContent": [
+            "text/plain"
+          ],
+          "content": {
+            "application/x-ndjson": {
+              "schema": {
+                "type": "string"
+              }
+            }
+          }
+        }
       }
     },
     "GET /kb/issue-schedule": {
@@ -278,12 +381,37 @@
         "200": "ok",
         "400": "Validation error",
         "404": "feature_disabled — LLMIDE_FEATURES omits gantt_issues; the route module is not loaded"
+      },
+      "parameterSchemas": {
+        "query.provider": {
+          "enum": [
+            "github",
+            "gitlab"
+          ],
+          "default": "github"
+        },
+        "query.repo": {
+          "required": true,
+          "pattern": "^[A-Za-z0-9._-]+/[A-Za-z0-9._-]+$"
+        }
       }
     },
     "GET /kb/issues": {
       "summary": "List issues from the connected tracker for a repo (read-only)",
       "responses": {
         "200": "Issues matching the filter"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 20
+        },
+        "query.state": {
+          "default": "open"
+        },
+        "query.provider": {
+          "default": "github"
+        }
       }
     },
     "GET /kb/live/sessions": {
@@ -300,6 +428,12 @@
       },
       "responses": {
         "200": "Caption batch"
+      },
+      "parameterSchemas": {
+        "query.since": {
+          "type": "integer",
+          "default": 0
+        }
       }
     },
     "GET /kb/live/{id}/stream": {
@@ -308,6 +442,15 @@
       "responses": {
         "200": "SSE stream of caption events for the session",
         "429": "Too many concurrent live streams for this user"
+      },
+      "responseContent": {
+        "200": {
+          "content": {
+            "text/event-stream": {
+              "schema": {}
+            }
+          }
+        }
       }
     },
     "GET /kb/meeting/{id}": {
@@ -319,6 +462,11 @@
         "200": "Meeting record",
         "400": "Invalid ID format",
         "404": "Not found"
+      },
+      "parameterSchemas": {
+        "path.id": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
       }
     },
     "GET /kb/outcomes/stats": {
@@ -332,6 +480,11 @@
       "responses": {
         "200": "Outcome list",
         "400": "Invalid ID"
+      },
+      "parameterSchemas": {
+        "path.id": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
       }
     },
     "GET /kb/plan/{id}": {
@@ -345,6 +498,12 @@
       "summary": "List plans for the authenticated user",
       "responses": {
         "200": "Plan list"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
       }
     },
     "GET /kb/project/{id}/export": {
@@ -369,6 +528,12 @@
       "summary": "List review items (optionally filtered by status)",
       "responses": {
         "200": "Review items"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
       }
     },
     "GET /kb/routing-tiers": {
@@ -382,6 +547,15 @@
       "summary": "Tenant-scoped FTS5 + empty-query unified search",
       "responses": {
         "200": "Search results"
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 20
+        },
+        "query.projectId": {
+          "pattern": "^[A-Za-z0-9_-]{1,128}$"
+        }
       }
     },
     "GET /kb/slack/conversations": {
@@ -426,6 +600,17 @@
       },
       "responses": {
         "200": "Resolution (model, status ok|degraded|paused|unconfigured, resetAt, reason, engaged)"
+      },
+      "parameterSchemas": {
+        "query.provider": {
+          "enum": [
+            "anthropic",
+            "openai",
+            "google",
+            "custom"
+          ],
+          "default": "anthropic"
+        }
       }
     },
     "GET /kb/usage/summary": {
@@ -438,6 +623,12 @@
       "summary": "The caller's newest v2 chat turns, with the measured context split (migrations 0040/0044)",
       "responses": {
         "200": "Newest first. Token fields are approximate (chars / 4) for LLM-IDE text and the SDK's own estimates for sdk* fields; null when not measured."
+      },
+      "parameterSchemas": {
+        "query.limit": {
+          "type": "integer",
+          "default": 50
+        }
       }
     },
     "PATCH /kb/chat/sessions/{id}": {
@@ -454,6 +645,15 @@
       "responses": {
         "200": "SSE stream of spike events",
         "400": "Missing prompt"
+      },
+      "responseContent": {
+        "200": {
+          "content": {
+            "text/event-stream": {
+              "schema": {}
+            }
+          }
+        }
       }
     },
     "POST /agent/v2/cancel": {
@@ -592,6 +792,21 @@
         "400": "Validation error",
         "500": "AI parse or DOCX build failure",
         "429": "Rate limited"
+      },
+      "responseContent": {
+        "200": {
+          "removeContent": [
+            "application/octet-stream"
+          ],
+          "content": {
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document": {
+              "schema": {
+                "type": "string",
+                "format": "binary"
+              }
+            }
+          }
+        }
       }
     },
     "POST /generate-notes": {
@@ -600,6 +815,15 @@
         "200": "Notes generated (JSON or SSE depending on Accept header)",
         "400": "Validation error",
         "429": "Rate limited"
+      },
+      "responseContent": {
+        "200": {
+          "content": {
+            "text/event-stream": {
+              "schema": {}
+            }
+          }
+        }
       }
     },
     "POST /generate-questions": {

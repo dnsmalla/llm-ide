@@ -692,7 +692,7 @@
                       "key",
                       "cli"
                     ],
-                    "description": "API v68+, only when usable. `key` = runs on an API key (user vault or operator env; custom providers always), `cli` = runs on the provider's logged-in CLI subscription (claude / codex / gemini). A key wins when both exist.\n"
+                    "description": "API v68+, only when usable. `key` = runs on an API key (user vault or operator env; custom providers always), `cli` = runs on the provider's logged-in CLI subscription (claude / codex / gemini). A key wins when both exist."
                   }
                 }
               },
@@ -715,7 +715,7 @@
                   }
                 }
               },
-              "description": "API v69+. One entry per CONFIGURED feature. `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`.\n"
+              "description": "API v69+. One entry per CONFIGURED feature. `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`."
             }
           }
         },
@@ -1339,7 +1339,7 @@
           "properties": {
             "limit": {
               "type": "string",
-              "description": "1-200, default 50 Clamped to 1-200; the default is 50."
+              "description": "Clamped to 1-200; the default is 50."
             }
           }
         }

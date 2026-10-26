@@ -113,7 +113,7 @@
           "items": {
             "type": "string"
           },
-          "description": "Endpoints this process serves — a feature disabled by LLMIDE_FEATURES drops its paths (v74)"
+          "description": "Endpoints this process serves; a feature disabled by LLMIDE_FEATURES drops its paths (v74)."
         },
         "features": {
           "type": [
@@ -123,7 +123,7 @@
           "items": {
             "type": "string"
           },
-          "description": "LLMIDE_FEATURES as applied (v74): null = every feature; otherwise the enabled feature keys, sorted (agent_chat always present).\n"
+          "description": "Null means every feature is enabled; otherwise the sorted enabled feature keys, with agent_chat always included."
         },
         "checks": {
           "type": "object",

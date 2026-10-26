@@ -299,9 +299,9 @@ export type Health = {
   /** current migration number */
   schemaVersion: number;
   uptimeSec: number;
-  /** Endpoints this process serves — a feature disabled by LLMIDE_FEATURES drops its paths (v74) */
+  /** Endpoints this process serves; a feature disabled by LLMIDE_FEATURES drops its paths (v74). */
   endpoints: string[];
-  /** LLMIDE_FEATURES as applied (v74): null = every feature; otherwise the enabled feature keys, sorted (agent_chat always present). */
+  /** Null means every feature is enabled; otherwise the sorted enabled feature keys, with agent_chat always included. */
   features: string[] | null;
   checks: {
     db: boolean;
@@ -1305,7 +1305,7 @@ export type PostKbAgentFeedbackResponse400 = CommonError;
 /** Request parts for `GET /kb/agent/feedback/stats` (schema/http/agent.schema.json). */
 export type GetKbAgentFeedbackStatsRequest = {
   query: {
-    /** the window in days; default 30 The default is 30 days. */
+    /** The window in days; the default is 30. */
     sinceDays?: string;
   };
 };
@@ -1322,7 +1322,7 @@ export type GetKbAgentFeedbackStatsResponse200 = {
 /** Request parts for `GET /kb/agent/feedback/by-task` (schema/http/agent.schema.json). */
 export type GetKbAgentFeedbackByTaskRequest = {
   query: {
-    /** the window in days; default 30 The default is 30 days. */
+    /** The window in days; the default is 30. */
     sinceDays?: string;
   };
 };
@@ -1578,7 +1578,7 @@ export type PostKbAgentAskResponse400 = CommonError;
 /** Request parts for `GET /kb/agent/ask/history` (schema/http/agent.schema.json). */
 export type GetKbAgentAskHistoryRequest = {
   query: {
-    /** newest N, within the server's hard cap; default 50 The default is 50; reads are capped at 500. */
+    /** Returns the newest N messages, oldest first; the default is 50, and reads are capped at 500. */
     limit?: string;
   };
 };
@@ -1630,7 +1630,7 @@ export type PostKbChatSessionsResponse201 = {
 /** Request parts for `GET /kb/chat/sessions/:id` (schema/http/agent.schema.json). */
 export type GetKbChatSessionsIdRequest = {
   query: {
-    /** the newest N messages */
+    /** Maximum messages returned; the default is 200, with a minimum of 1 and a cap of 2000. */
     limit?: string;
   };
   params: {
@@ -2573,11 +2573,11 @@ export type DeleteAuthMeConnectorsIdResponse401 = CommonError;
 export type GetKbSearchRequest = {
   query: {
     q?: string;
-    /** Limits results to one kind from the list; any other value searches every kind. */
+    /** One of meeting, action, decision, blocker, code, ticket, qa, doc, plan, task or outcome; any other value searches every kind. */
     kind?: string;
     /** Capped at 100; zero, negative or non-numeric values give the default 20. */
     limit?: string;
-    /** project scope; ignored unless it is a safe id Ignored unless it matches ^[A-Za-z0-9_-]{1,128}$. */
+    /** Ignored unless it is a safe id (1-128 letters, digits, underscores or hyphens). */
     projectId?: string;
   };
 };
@@ -2592,11 +2592,11 @@ export type GetKbSearchResponse401 = CommonError;
 export type GetKbIssuesRequest = {
   query: {
     repo?: string;
-    /** default open; all disables the filter Defaults to open. */
+    /** Defaults to open; all disables the filter. */
     state?: string;
-    /** default github Defaults to github. */
+    /** Defaults to github. */
     provider?: string;
-    /** Capped at 100; zero or negative gives the default 20. */
+    /** Capped at 100; zero, negative or non-numeric values give the default 20. */
     limit?: string;
   };
 };
@@ -2610,7 +2610,7 @@ export type GetKbIssuesResponse401 = CommonError;
 /** Request parts for `GET /kb/meeting/:id` (schema/http/kb-sources.schema.json). */
 export type GetKbMeetingIdRequest = {
   query: {
-    include?: "transcript";
+    include?: string;
   };
   params: {
     id: string;
@@ -2690,7 +2690,7 @@ export type GetKbExportAllRequest = {
   query: {
     /** meeting id to resume after */
     cursor?: string;
-    /** 1 to 500, default 100 Capped at 500; the default is 100. */
+    /** Capped at 500; an absent value gives 100, and 0 or a non-numeric value is not replaced by the default. */
     limit?: string;
   };
 };
@@ -2763,7 +2763,7 @@ export type PostKbConnectGitRequest = {
   body: {
     /** Absolute path to the repo root (must be on user allow-list) */
     path?: string;
-    /** Replace existing code chunks for this repo */
+    /** Replace existing code chunks for this repo; default true. */
     replace?: boolean;
   };
 };
@@ -2783,7 +2783,7 @@ export type PostKbIngestScipRequest = {
     repoPath?: string;
     /** Path to the SCIP index file */
     scipPath?: string;
-    /** Replace the repo's existing graph rows */
+    /** Replace the repo's existing graph rows; default true. */
     replace?: boolean;
   };
 };
@@ -2816,7 +2816,7 @@ export type PostKbConnectGithubIssuesResponse401 = CommonError;
 /** Request parts for `POST /kb/connect-tickets-json` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectTicketsJsonRequest = {
   body: {
-    /** Source label stored on each ticket entity */
+    /** Source label stored on each ticket entity; default manual. */
     provider?: string;
     /** Array of ticket objects (max 8 MB body) */
     tickets?: {
@@ -3096,9 +3096,9 @@ export type PostKbMcpConnectorClassifyResponse502 = unknown;
 /** Request parts for `GET /kb/activity` (schema/http/kb-sources.schema.json). */
 export type GetKbActivityRequest = {
   query: {
-    /** return items with an id greater than this An absent or non-numeric value means 0. */
+    /** Returns items with an id greater than this value; an absent or non-numeric value means 0. */
     since?: string;
-    /** 1 to 200, default 100 Clamped to 1-200; the default is 100 when absent or zero. */
+    /** Clamped to 1-200; the default is 100 when absent or zero. */
     limit?: string;
   };
 };
@@ -3182,7 +3182,7 @@ export type PostKbLoopAgentRunResponse200 = {
   /** Resolved skills longer than the cap; only their head was sent */
   truncatedSkills: string[];
   ran: boolean;
-  /** The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step because it was repeating itself (the same call again with no file changed) or 5 tool calls in a row failed */
+  /** The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step: the same tool call repeated more than three times with no file change in between, or five tool calls in a row failed. */
   resultSubtype: string | null;
   denied: {
     toolName: string;
@@ -3368,7 +3368,6 @@ export type PostKbLiveIdAppendResponse200 = {
   sequence: number;
   /** Number of caption items accepted (0 when session is already finalized) */
   accepted: number;
-  /** Advisory — true when the ring buffer is ≥90% full; callers should throttle */
   backpressure?: boolean;
   /** Present (true) when the session was already finalized; all captions were dropped */
   finalized?: boolean;
@@ -3419,7 +3418,7 @@ export type GetKbLiveIdStreamResponse429 = CommonError;
 /** Request parts for `GET /auth/me/audit` (schema/http/live-loop-misc.schema.json). */
 export type GetAuthMeAuditRequest = {
   query: {
-    /** capped at 1000; default 100 Capped at 500; the default is 100 when absent or zero. */
+    /** Capped at 500; the default is 100 when absent or zero. */
     limit?: string;
     action?: string;
   };
@@ -4647,7 +4646,7 @@ export type GetKbUsageRatelimitsResponse401 = CommonError;
 /** Request parts for `GET /kb/usage/turn-composition` (schema/http/providers-usage.schema.json). */
 export type GetKbUsageTurnCompositionRequest = {
   query: {
-    /** 1-200, default 50 Clamped to 1-200; the default is 50. */
+    /** Clamped to 1-200; the default is 50. */
     limit?: string;
   };
 };
