@@ -393,6 +393,35 @@ public final class LlmIdeAPIClient: @unchecked Sendable {
         return (http.statusCode, data)
     }
 
+    /// Opens an authenticated GET whose body is a byte stream (Server-Sent
+    /// Events). A 401 refreshes the session once and re-opens; an unrecoverable
+    /// 401 comes back as status 401 (not thrown) so the caller can stop cleanly.
+    /// The caller reads the bytes on a 2xx and drops them otherwise. Only a
+    /// missing session or a transport failure throws.
+    func openStream(path: String, isRetry: Bool = false) async throws -> (status: Int, bytes: URLSession.AsyncBytes) {
+        guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.setValue("text/event-stream", forHTTPHeaderField: "Accept")
+        let token: String? = await MainActor.run { sessionStore?.accessToken }
+        guard let token else { throw APIError.noSession }
+        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (bytes, response): (URLSession.AsyncBytes, URLResponse)
+        do { (bytes, response) = try await llmSession.bytes(for: req) }
+        catch { throw APIError.network(error) }
+        guard let http = response as? HTTPURLResponse else {
+            throw APIError.network(URLError(.badServerResponse))
+        }
+        if http.statusCode == 401 && !isRetry, let store = sessionStore {
+            let hasRefresh = await MainActor.run { store.refreshToken != nil }
+            if hasRefresh, await store.attemptRefresh(via: self) {
+                return try await openStream(path: path, isRetry: true)
+            }
+        }
+        return (http.statusCode, bytes)
+    }
+
     /// Empty-body marker so the generic POST/GET share one implementation.
     struct EmptyBody: Encodable {}
 

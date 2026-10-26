@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 166 token, 12 public
 - Handler found: 176; no handler found: 2
-- No Mac and no extension caller: 37 (tests only: 24, comments/docs only: 13, no reference: 0)
+- No Mac and no extension caller: 35 (tests only: 22, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -45,7 +45,7 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | gantt_issues | 1 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (37):
+Endpoints with no client caller (35):
 
 - `/agent-sdk/spike` — tests only
 - `/kb/entity/:id` — tests only
@@ -72,8 +72,6 @@ Endpoints with no client caller (37):
 - `/kb/agent/personas/active` — comments/docs only
 - `/kb/agent/ask` — tests only
 - `/kb/agent/ask/history` — comments/docs only
-- `/kb/os/state` — tests only
-- `/kb/os/stream` — tests only
 - `/` — tests only
 - `/auth/reset-request` — tests only
 - `/auth/reset-confirm` — tests only
@@ -99,7 +97,7 @@ Endpoints with no client caller (37):
 | `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:277` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:280` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:283` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
-| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:286` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
+| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:286` | `LlmIdeAPIClient+CodeAssist.swift`, `SystemBridge.swift` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:105` | `LlmIdeAPIClient+LoopAgent.swift` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:792` | - | `App.tsx`, `useQuestions.ts` | - |
 | `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:862` | - | `App.tsx` | - |
@@ -178,7 +176,7 @@ Endpoints with no client caller (37):
 | `/kb/live/:id/finalize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:55` | - | `useLiveSync.ts` | - |
 | `/kb/live/:id/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:72` | - | `useRemoteTranscript.ts` | - |
 | `/kb/agent/dispatch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:71` | `LlmIdeAPIClient+Agent.swift` | `useAgent.ts` | - |
-| `/kb/agent/stop` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:91` | `LlmIdeAPIClient+Agent.swift` | `useAgent.ts` | - |
+| `/kb/agent/stop` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:91` | `LlmIdeAPIClient+Agent.swift`, `SystemBridge.swift` | `useAgent.ts` | - |
 | `/kb/agent/runs` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:103` | `LlmIdeAPIClient+Agent.swift` | `useAgent.ts` | - |
 | `/kb/agent/feedback` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:307` | - | - | comments/docs only |
 | `/kb/agent/feedback/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:324` | - | `AgentStatsBadge.tsx` | - |
@@ -199,8 +197,8 @@ Endpoints with no client caller (37):
 | `/kb/chat/sessions` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/chat.mjs:21` | - | `App.tsx`, `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id` | ALL_ENDPOINTS | DELETE, GET, PATCH | token | core | `extension/routes/chat.mjs:44` | - | `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id/messages` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/chat.mjs:101` | - | `unified-chat.ts` | - |
-| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:169` | - | - | tests only |
-| `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:166` | - | - | tests only |
+| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:169` | `SystemBridge.swift` | - | - |
+| `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:166` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:61` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:633` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:270` | `LlmIdeAPIClient.swift` | `config.ts` | - |
@@ -270,7 +268,7 @@ Endpoints with no client caller (37):
 
 ## Consistency
 
-Checked: 178 roster entries, 702 Swift files, 46 extension source files.
+Checked: 178 roster entries, 703 Swift files, 46 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
@@ -278,7 +276,7 @@ Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
 Unresolvable client paths (1): first segment only, not matched to any route:
 
-- `/auth/` (Mac mac/Sources/LlmIdeMac/Core/Networking/LlmIdeAPIClient.swift:560)
+- `/auth/` (Mac mac/Sources/LlmIdeMac/Core/Networking/LlmIdeAPIClient.swift:589)
 
 Open inconsistencies (0):
 
