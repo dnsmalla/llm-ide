@@ -26,6 +26,10 @@ export const REVIEW_SECRET_KEY_RE = /token|apikey|api_key|secret|password|creden
 
 const isPlainObject = (v) => v !== null && typeof v === 'object' && !Array.isArray(v);
 
+// Keys that would reach the copy's prototype instead of becoming an own
+// property (a JSON payload can carry "__proto__" as an ordinary key).
+export const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+
 /**
  * Deep copy of `node` without any object entry whose key names a credential,
  * at any depth (objects inside arrays included). Non-object values are kept.
@@ -35,7 +39,7 @@ export function scrubSecretKeysDeep(node) {
   if (!isPlainObject(node)) return node;
   const out = {};
   for (const [k, v] of Object.entries(node)) {
-    if (REVIEW_SECRET_KEY_RE.test(k)) continue;
+    if (REVIEW_SECRET_KEY_RE.test(k) || UNSAFE_OBJECT_KEYS.has(k)) continue;
     out[k] = scrubSecretKeysDeep(v);
   }
   return out;

@@ -643,7 +643,8 @@ async function main(argv) {
     fake: opts.fake, model, scenarios, scenariosVersion: version, repeat: opts.repeat, log: (m) => console.error(m),
   });
 
-  const outFile = opts.out || path.join(os.tmpdir(), `token-bench-${Date.now()}.json`);
+  // A private directory, not a predictable name in the shared temp dir.
+  const outFile = opts.out || path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'token-bench-')), 'results.json');
   fs.writeFileSync(outFile, `${JSON.stringify(current, null, 2)}\n`);
 
   if (opts.baseline) {

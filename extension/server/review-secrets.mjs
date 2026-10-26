@@ -11,7 +11,7 @@
 
 import { getSecret } from './vault.mjs';
 
-import { REVIEW_SECRET_KEY_RE, scrubSecretKeysDeep } from '../kb/review-payload.mjs';
+import { REVIEW_SECRET_KEY_RE, UNSAFE_OBJECT_KEYS, scrubSecretKeysDeep } from '../kb/review-payload.mjs';
 
 // payload sections whose top-level credential leaves are held for approval
 const SECRET_SECTIONS = ['config', 'pr'];
@@ -32,7 +32,7 @@ export function stripReviewSecrets(payload) {
     if (!isPlainObject(obj)) continue;
     const taken = {};
     for (const [k, v] of Object.entries(obj)) {
-      if (REVIEW_SECRET_KEY_RE.test(k) && v) taken[k] = v;
+      if (REVIEW_SECRET_KEY_RE.test(k) && v && !UNSAFE_OBJECT_KEYS.has(k)) taken[k] = v;
     }
     if (Object.keys(taken).length) secrets[section] = taken;
   }

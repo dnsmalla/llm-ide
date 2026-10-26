@@ -228,3 +228,13 @@ test('scrubReviewPayloadRows returns only the rows it changed', async () => {
   db.submitReview(U, { kind: 'dispatch', planId: 'plan1', title: 'clean', payload: { planId: 'plan1', target: 'github', config: { repo: 'a/b' } }, guardrails: {} });
   assert.equal(scrubReviewPayloadRows(db.getDb()), 0);
 });
+
+test('scrubSecretKeysDeep drops a "__proto__" key instead of setting the copy\'s prototype', async () => {
+  const { scrubSecretKeysDeep } = await import('../kb/review-payload.mjs');
+  const parsed = JSON.parse('{"title":"t","__proto__":{"polluted":true},"nested":{"__proto__":{"x":1},"ok":1}}');
+  const out = scrubSecretKeysDeep(parsed);
+  assert.equal(Object.getPrototypeOf(out), Object.prototype);
+  assert.equal(out.polluted, undefined);
+  assert.equal(out.nested.x, undefined);
+  assert.deepEqual(JSON.parse(JSON.stringify(out)), { title: 't', nested: { ok: 1 } });
+});
