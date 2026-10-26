@@ -1473,6 +1473,11 @@ paths:
           name: id
           required: true
           schema: { type: string, pattern: '^[A-Za-z0-9_-]{1,128}$' }
+        - in: query
+          name: include
+          required: false
+          description: Opt-in extras. `transcript` adds the stored transcript text as `transcript`.
+          schema: { type: string, enum: [transcript] }
       responses:
         '200':
           description: Meeting record

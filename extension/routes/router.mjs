@@ -339,6 +339,13 @@ export async function handleKB(req, res) {
         sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'Not found' } });
         return true;
       }
+      // Opt-in: the transcript is large and most callers only need the
+      // summary, so it is added only for `?include=transcript`.
+      const include = new URL(url, 'http://127.0.0.1').searchParams.get('include');
+      if (include === 'transcript') {
+        sendJSON(res, 200, { ...m, transcript: kb.getMeetingTranscript(userId, id) });
+        return true;
+      }
       sendJSON(res, 200, m);
       return true;
     }

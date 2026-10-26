@@ -7,6 +7,8 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ### Added
 
+- **API v78: `GET /kb/meeting/:id?include=transcript`.** The meeting record gains an opt-in `transcript` field. The default response is unchanged. The Mac's Doc Gen uses it to read the transcript; `SERVER_API_VERSION` 77 → 78.
+
 - **API v76: four served routes added to the endpoint roster.** `/kb/issues`, `/kb/export-all`, `/kb/live/:id/stream` and `/kb/email/classify` were answered by the server and called by clients but missing from `ALL_ENDPOINTS`, so `/health` did not advertise them. No request or response change; `SERVER_API_VERSION` 75 → 76.
 
 - **Measured context split per v2 chat turn (API v77, migration 0044).** `turn_composition` now records the

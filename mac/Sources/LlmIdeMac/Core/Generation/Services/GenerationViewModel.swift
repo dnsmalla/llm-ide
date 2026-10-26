@@ -210,7 +210,7 @@ final class GenerationViewModel: ObservableObject {
                     guard !Task.isCancelled else { return }
                     switch source {
                     case .meeting(let id, let title):
-                        if let detail = try? await api.getMeeting(id: id) {
+                        if let detail = try? await api.getMeeting(id: id, includeTranscript: true) {
                             var content = detail.transcript ?? ""
                             if let entities = detail.entities, !entities.isEmpty {
                                 let summary = entities

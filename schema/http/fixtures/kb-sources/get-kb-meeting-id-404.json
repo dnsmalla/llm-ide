@@ -2,6 +2,7 @@
   "endpoint": "GET /kb/meeting/:id",
   "status": 404,
   "request": {
+    "query": {},
     "params": {
       "id": "missing-meeting-1"
     }

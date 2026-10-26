@@ -2,6 +2,7 @@
   "endpoint": "GET /kb/meeting/:id",
   "status": 200,
   "request": {
+    "query": {},
     "params": {
       "id": "example-meeting-1"
     }

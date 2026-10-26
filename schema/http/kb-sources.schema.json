@@ -138,6 +138,11 @@
           "items": {
             "$ref": "#/$defs/MeetingEntity"
           }
+        },
+        "transcript": {
+          "type": "string",
+          "x-optional": true,
+          "description": "present only with ?include=transcript"
         }
       }
     },
@@ -739,6 +744,15 @@
     },
     "GET /kb/meeting/:id": {
       "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "include": {
+              "type": "string",
+              "enum": ["transcript"]
+            }
+          }
+        },
         "params": {
           "type": "object",
           "required": [
