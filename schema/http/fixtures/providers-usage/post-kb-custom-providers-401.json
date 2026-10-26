@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /kb/custom-providers",
+  "status": 401,
+  "request": {
+    "body": {
+      "providers": [
+        {
+          "id": "example-glm",
+          "name": "Example GLM",
+          "baseURL": "https://models.example.test/v1",
+          "apiKey": "custom.example-glm.apiKey",
+          "models": [
+            {
+              "id": "example-model",
+              "displayName": "Example model"
+            }
+          ],
+          "isOpenAICompatible": true,
+          "isEnabled": true,
+          "anthropicBaseURL": null
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

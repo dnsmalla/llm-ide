@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /kb/usage/record",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. A run with token counts, as the Auto Task CLI path reports them.",
+  "request": {
+    "body": {
+      "provider": "anthropic",
+      "model": "claude-sonnet-5-5",
+      "source": "auto-task",
+      "endpoint": "loop",
+      "runs": 1,
+      "inputTokens": 1200,
+      "outputTokens": 300,
+      "cacheReadTokens": 8000,
+      "cacheCreationTokens": 500,
+      "turns": 3,
+      "stopReason": "end_turn",
+      "requestId": "req-example"
+    }
+  },
+  "response": {
+    "ok": true,
+    "id": 1
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "endpoint": "PUT /kb/usage/limits",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Missing chains object"
+    }
+  }
+}

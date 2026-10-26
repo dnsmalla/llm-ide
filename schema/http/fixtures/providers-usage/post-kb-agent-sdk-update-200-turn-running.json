@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/agent-sdk/update",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. Not a live HTTP exchange: updateSdk() called in-process with one chat turn \"running\", which refuses before any npm install or registry access. The route sends this return value verbatim.",
+  "response": {
+    "ok": false,
+    "from": "0.3.301",
+    "to": "0.3.301",
+    "rolledBack": false,
+    "restartNeeded": false,
+    "log": "1 chat turn is running — let it finish (or stop it), then update."
+  }
+}

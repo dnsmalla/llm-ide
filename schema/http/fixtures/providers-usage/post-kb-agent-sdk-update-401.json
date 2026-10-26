@@ -1,0 +1,10 @@
+{
+  "endpoint": "POST /kb/agent-sdk/update",
+  "status": 401,
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

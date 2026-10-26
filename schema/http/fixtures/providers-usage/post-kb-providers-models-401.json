@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/providers/models",
+  "status": 401,
+  "request": {
+    "body": {
+      "provider": "openai"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

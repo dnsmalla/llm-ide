@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/usage/record",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "anthropic"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "provider and model are required"
+    }
+  }
+}

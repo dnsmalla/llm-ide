@@ -1,0 +1,129 @@
+{
+  "endpoint": "GET /kb/usage/summary",
+  "status": 200,
+  "request": {
+    "query": {
+      "provider": "anthropic"
+    }
+  },
+  "response": {
+    "providers": {
+      "anthropic": {
+        "active": {
+          "provider": "anthropic",
+          "model": "claude-opus-4-8",
+          "status": "ok",
+          "resetAt": "2026-10-26T15:00:00.000Z",
+          "reason": "Opus 4.8",
+          "used": 0,
+          "limit": 0,
+          "pct": 0,
+          "unit": "runs",
+          "engaged": true
+        },
+        "models": [
+          {
+            "model": "claude-opus-4-8",
+            "label": "Opus 4.8",
+            "enabled": true,
+            "custom": false,
+            "priority": 0,
+            "unit": "runs",
+            "window_kind": "daily",
+            "limit": 0,
+            "threshold_pct": 90,
+            "used": 0,
+            "pct": null,
+            "state": "ok",
+            "quota": false,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheCreation": 0,
+              "totalInput": 0,
+              "cacheHitPct": null,
+              "unknownRows": 0
+            },
+            "resetAt": "2026-10-26T15:00:00.000Z"
+          },
+          {
+            "model": "claude-sonnet-5-5",
+            "label": "claude-sonnet-5-5",
+            "enabled": true,
+            "custom": true,
+            "priority": 0,
+            "unit": "runs",
+            "window_kind": "daily",
+            "limit": 100,
+            "threshold_pct": 80,
+            "used": 1,
+            "pct": 1,
+            "state": "ok",
+            "quota": false,
+            "tokens": {
+              "input": 1200,
+              "output": 300,
+              "cacheRead": 8000,
+              "cacheCreation": 500,
+              "totalInput": 9700,
+              "cacheHitPct": 82,
+              "unknownRows": 0
+            },
+            "resetAt": "2026-10-26T15:00:00.000Z"
+          },
+          {
+            "model": "claude-sonnet-4-6",
+            "label": "Sonnet 4.6",
+            "enabled": true,
+            "custom": false,
+            "priority": 1,
+            "unit": "runs",
+            "window_kind": "daily",
+            "limit": 0,
+            "threshold_pct": 90,
+            "used": 0,
+            "pct": null,
+            "state": "ok",
+            "quota": false,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheCreation": 0,
+              "totalInput": 0,
+              "cacheHitPct": null,
+              "unknownRows": 0
+            },
+            "resetAt": "2026-10-26T15:00:00.000Z"
+          },
+          {
+            "model": "claude-haiku-4-5-20251001",
+            "label": "Haiku 4.5",
+            "enabled": true,
+            "custom": false,
+            "priority": 2,
+            "unit": "runs",
+            "window_kind": "daily",
+            "limit": 0,
+            "threshold_pct": 90,
+            "used": 0,
+            "pct": null,
+            "state": "ok",
+            "quota": false,
+            "tokens": {
+              "input": 0,
+              "output": 0,
+              "cacheRead": 0,
+              "cacheCreation": 0,
+              "totalInput": 0,
+              "cacheHitPct": null,
+              "unknownRows": 0
+            },
+            "resetAt": "2026-10-26T15:00:00.000Z"
+          }
+        ]
+      }
+    }
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "endpoint": "PUT /kb/usage/limits",
+  "status": 429,
+  "request": {
+    "body": {
+      "chains": {
+        "anthropic": [
+          {
+            "model": "claude-sonnet-5-5",
+            "priority": 0,
+            "enabled": true,
+            "limit_value": 100,
+            "unit": "runs",
+            "window_kind": "daily",
+            "threshold_pct": 80
+          }
+        ]
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests",
+      "details": {
+        "retryAfterSec": 1
+      }
+    }
+  }
+}

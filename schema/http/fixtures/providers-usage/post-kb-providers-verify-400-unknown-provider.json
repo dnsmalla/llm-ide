@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/providers/verify",
+  "status": 400,
+  "request": {
+    "body": {
+      "provider": "nope"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Unknown provider (allowed: anthropic, openai, google, deepseek, glm, custom, jev)"
+    }
+  }
+}

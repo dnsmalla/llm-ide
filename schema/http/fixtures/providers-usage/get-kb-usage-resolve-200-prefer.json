@@ -1,0 +1,22 @@
+{
+  "endpoint": "GET /kb/usage/resolve",
+  "status": 200,
+  "request": {
+    "query": {
+      "provider": "anthropic",
+      "prefer": "claude-sonnet-5-5"
+    }
+  },
+  "response": {
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "status": "ok",
+    "resetAt": "2026-10-26T15:00:00.000Z",
+    "reason": "claude-sonnet-5-5 (1% used)",
+    "used": 1,
+    "limit": 100,
+    "pct": 1,
+    "unit": "runs",
+    "engaged": true
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/providers/verify",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. No key supplied and none stored for openai, so no request is made.",
+  "request": {
+    "body": {
+      "provider": "openai"
+    }
+  },
+  "response": {
+    "ok": false,
+    "detail": "no API key provided"
+  }
+}

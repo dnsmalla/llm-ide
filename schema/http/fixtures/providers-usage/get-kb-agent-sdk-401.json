@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/agent-sdk",
+  "status": 401,
+  "request": {
+    "query": {
+      "force": "1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

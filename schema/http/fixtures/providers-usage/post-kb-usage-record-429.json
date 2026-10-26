@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/usage/record",
+  "status": 429,
+  "request": {
+    "body": {
+      "provider": "openai",
+      "model": "gpt-4o",
+      "source": "cli",
+      "endpoint": "auto-task",
+      "runs": 1
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests",
+      "details": {
+        "retryAfterSec": 1
+      }
+    }
+  }
+}

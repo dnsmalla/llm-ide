@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/custom-providers",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "providers array required"
+    }
+  }
+}

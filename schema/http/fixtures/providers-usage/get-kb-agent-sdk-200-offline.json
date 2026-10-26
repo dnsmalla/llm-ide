@@ -1,0 +1,20 @@
+{
+  "endpoint": "GET /kb/agent-sdk",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. Not a live HTTP exchange: the Agent SDK status is produced by sdkStatus() in llm_agent/sdk/updater.mjs, called in-process with an offline fetch stub, because the route reads the npm registry (external). The body is sdkStatus()'s return value, which the route sends verbatim.",
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "package": "@anthropic-ai/claude-agent-sdk",
+    "running": "0.3.301",
+    "installed": "0.3.301",
+    "declared": "0.3.301",
+    "restartNeeded": false,
+    "latest": null,
+    "updateAvailable": false,
+    "updating": false,
+    "canUpdate": true,
+    "error": "registry not reached (offline capture)"
+  }
+}

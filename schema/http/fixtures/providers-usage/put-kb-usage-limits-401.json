@@ -1,0 +1,15 @@
+{
+  "endpoint": "PUT /kb/usage/limits",
+  "status": 401,
+  "request": {
+    "body": {
+      "chains": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

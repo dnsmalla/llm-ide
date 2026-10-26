@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/providers/verify",
+  "status": 200,
+  "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR, LLMIDE_ENGINE_PREWARM=0), replayed over HTTP. No model call and no external network. mode cli for deepseek, which has no CLI mode: answered without running a binary.",
+  "request": {
+    "body": {
+      "provider": "deepseek",
+      "mode": "cli"
+    }
+  },
+  "response": {
+    "ok": false,
+    "detail": "deepseek has no CLI mode — use an API key"
+  }
+}
