@@ -110,7 +110,7 @@ test('getLimits returns built-in chains by default (inert, no cap)', async () =>
   const { getLimits } = await import('../kb/usage.mjs');
   const { chains } = getLimits(db, userId);
   assert.deepEqual(chains.anthropic.map((m) => m.model),
-    ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']);
+    ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']);
   assert.equal(chains.anthropic[0].limit_value, 0); // inert until set
   assert.equal(chains.anthropic[0].enabled, true);
 });
@@ -120,12 +120,12 @@ test('setLimits + getLimits round-trips user caps and reordering', async () => {
   const { setLimits, getLimits } = await import('../kb/usage.mjs');
   setLimits(db, userId, {
     anthropic: [
-      { model: 'claude-sonnet-4-6', priority: 0, limit_value: 50, unit: 'runs', window_kind: 'daily', threshold_pct: 80 },
-      { model: 'claude-opus-4-8',   priority: 1, limit_value: 10, unit: 'tokens', window_kind: 'monthly', threshold_pct: 90 },
+      { model: 'claude-sonnet-5-5', priority: 0, limit_value: 50, unit: 'runs', window_kind: 'daily', threshold_pct: 80 },
+      { model: 'claude-opus-5-5',   priority: 1, limit_value: 10, unit: 'tokens', window_kind: 'monthly', threshold_pct: 90 },
     ],
   });
   const { chains } = getLimits(db, userId, { provider: 'anthropic' });
-  assert.equal(chains.anthropic[0].model, 'claude-sonnet-4-6');
+  assert.equal(chains.anthropic[0].model, 'claude-sonnet-5-5');
   assert.equal(chains.anthropic[0].limit_value, 50);
   assert.equal(chains.anthropic[0].threshold_pct, 80);
   assert.equal(chains.anthropic[1].unit, 'tokens');
@@ -137,10 +137,10 @@ test('setLimits + getLimits round-trips user caps and reordering', async () => {
 test('recordUsage feeds run- and token-based aggregation', async () => {
   const { db, userId } = await setup();
   const { recordUsage, usedForModel } = await import('../kb/usage.mjs');
-  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8', inputTokens: 100, outputTokens: 50 });
-  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8', source: 'auto-task' }); // no tokens
-  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'runs', 'daily'), 2);
-  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'tokens', 'daily'), 150);
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-5-5', inputTokens: 100, outputTokens: 50 });
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-5-5', source: 'auto-task' }); // no tokens
+  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-5-5', 'runs', 'daily'), 2);
+  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-5-5', 'tokens', 'daily'), 150);
 });
 
 test('a chat turn\'s internal helper-model rows never count toward that model\'s cap', async () => {
@@ -156,14 +156,14 @@ test('recordUsage sanity-clamps self-reported token counts (no ledger poisoning)
   const { db, userId } = await setup();
   const { recordUsage, usedForModel } = await import('../kb/usage.mjs');
   // A negative count would mask real usage if summed in — dropped to null (unreported).
-  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8', inputTokens: -500, outputTokens: 40 });
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-5-5', inputTokens: -500, outputTokens: 40 });
   // An absurd/overflow value is capped rather than allowed to dominate the window sum.
-  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8', inputTokens: 1e18, outputTokens: 0 });
-  const tokens = usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'tokens', 'daily');
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-5-5', inputTokens: 1e18, outputTokens: 0 });
+  const tokens = usedForModel(db, userId, 'anthropic', 'claude-opus-5-5', 'tokens', 'daily');
   // 40 (negative→null) + 100_000_000 (capped) + 0 = 100_000_040; never negative, never 1e18.
   assert.equal(tokens, 100_000_040);
   // Both events still count as runs regardless of token validity.
-  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'runs', 'daily'), 2);
+  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-5-5', 'runs', 'daily'), 2);
 });
 
 test('recordUsage isolates users', async () => {
@@ -171,9 +171,9 @@ test('recordUsage isolates users', async () => {
   const { registerUser } = await import('../server/users.mjs');
   const { recordUsage, usedForModel } = await import('../kb/usage.mjs');
   const other = registerUser(db, { email: 'u-other-usage@ex.com', password: 'pw-12345678' }).id;
-  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8' });
-  recordUsage(db, { userId: other, provider: 'anthropic', model: 'claude-opus-4-8' });
-  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-4-8', 'runs', 'daily'), 1);
+  recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-5-5' });
+  recordUsage(db, { userId: other, provider: 'anthropic', model: 'claude-opus-5-5' });
+  assert.equal(usedForModel(db, userId, 'anthropic', 'claude-opus-5-5', 'runs', 'daily'), 1);
 });
 
 // --- resolveModel end-to-end (DB) -----------------------------------------
@@ -183,14 +183,14 @@ test('resolveModel switches to the next model once usage crosses threshold', asy
   const { setLimits, recordUsage, resolveModel } = await import('../kb/usage.mjs');
   setLimits(db, userId, {
     anthropic: [
-      { model: 'claude-opus-4-8',   priority: 0, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
-      { model: 'claude-sonnet-4-6', priority: 1, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-opus-5-5',   priority: 0, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-sonnet-5-5', priority: 1, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
     ],
   });
   // 9/10 on opus → 90% → at threshold → should switch to sonnet
-  for (let i = 0; i < 9; i++) recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8' });
+  for (let i = 0; i < 9; i++) recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-5-5' });
   const r = resolveModel(db, userId, 'anthropic');
-  assert.equal(r.model, 'claude-sonnet-4-6');
+  assert.equal(r.model, 'claude-sonnet-5-5');
   assert.equal(r.status, 'ok');
 });
 
@@ -202,12 +202,12 @@ test('resolveModel pauses when the whole chain is exhausted', async () => {
   // default chain includes Haiku, so cap all three.
   setLimits(db, userId, {
     anthropic: [
-      { model: 'claude-opus-4-8',           priority: 0, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
-      { model: 'claude-sonnet-4-6',         priority: 1, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
-      { model: 'claude-haiku-4-5-20251001', priority: 2, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-opus-5-5',           priority: 0, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-sonnet-5-5',         priority: 1, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-haiku-5-5', priority: 2, limit_value: 2, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
     ],
   });
-  for (const m of ['claude-opus-4-8', 'claude-sonnet-4-6', 'claude-haiku-4-5-20251001']) {
+  for (const m of ['claude-opus-5-5', 'claude-sonnet-5-5', 'claude-haiku-5-5']) {
     for (let i = 0; i < 2; i++) recordUsage(db, { userId, provider: 'anthropic', model: m });
   }
   const r = resolveModel(db, userId, 'anthropic');
@@ -221,9 +221,9 @@ test('flagQuota makes resolveModel skip the flagged model reactively', async () 
   const { flagQuota, resolveModel } = await import('../kb/usage.mjs');
   // No caps set (all limit 0) — but a live quota error on opus should still
   // bump resolution to sonnet.
-  flagQuota(db, userId, 'anthropic', 'claude-opus-4-8');
+  flagQuota(db, userId, 'anthropic', 'claude-opus-5-5');
   const r = resolveModel(db, userId, 'anthropic');
-  assert.equal(r.model, 'claude-sonnet-4-6');
+  assert.equal(r.model, 'claude-sonnet-5-5');
   assert.equal(r.engaged, true); // a quota flag engages the chain
 });
 
@@ -231,7 +231,7 @@ test('resolveModel is inert (engaged=false) with no caps and no quota flags', as
   const { db, userId } = await setup();
   const { resolveModel } = await import('../kb/usage.mjs');
   const r = resolveModel(db, userId, 'anthropic');
-  assert.equal(r.model, 'claude-opus-4-8'); // chain top
+  assert.equal(r.model, 'claude-opus-5-5'); // chain top
   assert.equal(r.engaged, false);           // callers should NOT override
 });
 
@@ -239,7 +239,7 @@ test('resolveModel engages once a cap is set', async () => {
   const { db, userId } = await setup();
   const { setLimits, resolveModel } = await import('../kb/usage.mjs');
   setLimits(db, userId, {
-    anthropic: [{ model: 'claude-opus-4-8', priority: 0, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 }],
+    anthropic: [{ model: 'claude-opus-5-5', priority: 0, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 }],
   });
   assert.equal(resolveModel(db, userId, 'anthropic').engaged, true);
 });
@@ -248,8 +248,8 @@ test('resolveModel preferModel keeps the requested model when healthy', async ()
   const { db, userId } = await setup();
   const { resolveModel } = await import('../kb/usage.mjs');
   // No caps; ask for Sonnet (not the chain top) — should keep Sonnet, not upgrade to Opus.
-  const r = resolveModel(db, userId, 'anthropic', new Date(), { preferModel: 'claude-sonnet-4-6' });
-  assert.equal(r.model, 'claude-sonnet-4-6');
+  const r = resolveModel(db, userId, 'anthropic', new Date(), { preferModel: 'claude-sonnet-5-5' });
+  assert.equal(r.model, 'claude-sonnet-5-5');
 });
 
 test('resolveModel preferModel steps DOWN (not up) when the requested model is exhausted', async () => {
@@ -257,15 +257,15 @@ test('resolveModel preferModel steps DOWN (not up) when the requested model is e
   const { setLimits, recordUsage, resolveModel } = await import('../kb/usage.mjs');
   setLimits(db, userId, {
     anthropic: [
-      { model: 'claude-opus-4-8',            priority: 0, limit_value: 100, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
-      { model: 'claude-sonnet-4-6',          priority: 1, limit_value: 5,   unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
-      { model: 'claude-haiku-4-5-20251001',  priority: 2, limit_value: 100, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-opus-5-5',            priority: 0, limit_value: 100, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-sonnet-5-5',          priority: 1, limit_value: 5,   unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
+      { model: 'claude-haiku-5-5',  priority: 2, limit_value: 100, unit: 'runs', window_kind: 'daily', threshold_pct: 90 },
     ],
   });
-  for (let i = 0; i < 5; i++) recordUsage(db, { userId, provider: 'anthropic', model: 'claude-sonnet-4-6' });
+  for (let i = 0; i < 5; i++) recordUsage(db, { userId, provider: 'anthropic', model: 'claude-sonnet-5-5' });
   // Requested Sonnet is exhausted → step DOWN to Haiku, never back up to Opus.
-  const r = resolveModel(db, userId, 'anthropic', new Date(), { preferModel: 'claude-sonnet-4-6' });
-  assert.equal(r.model, 'claude-haiku-4-5-20251001');
+  const r = resolveModel(db, userId, 'anthropic', new Date(), { preferModel: 'claude-sonnet-5-5' });
+  assert.equal(r.model, 'claude-haiku-5-5');
 });
 
 test('recordRateLimits parses OpenAI x-ratelimit headers under the provider key', async () => {
@@ -282,15 +282,15 @@ test('usageSummary reports per-model state + active model', async () => {
   const { db, userId } = await setup();
   const { setLimits, recordUsage, usageSummary } = await import('../kb/usage.mjs');
   setLimits(db, userId, {
-    anthropic: [{ model: 'claude-opus-4-8', priority: 0, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 }],
+    anthropic: [{ model: 'claude-opus-5-5', priority: 0, limit_value: 10, unit: 'runs', window_kind: 'daily', threshold_pct: 90 }],
   });
-  for (let i = 0; i < 5; i++) recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-4-8' });
+  for (let i = 0; i < 5; i++) recordUsage(db, { userId, provider: 'anthropic', model: 'claude-opus-5-5' });
   const sum = usageSummary(db, userId, { provider: 'anthropic' });
-  const opus = sum.providers.anthropic.models.find((m) => m.model === 'claude-opus-4-8');
+  const opus = sum.providers.anthropic.models.find((m) => m.model === 'claude-opus-5-5');
   assert.equal(opus.used, 5);
   assert.equal(opus.pct, 50);
   assert.equal(opus.state, 'ok');
-  assert.equal(sum.providers.anthropic.active.model, 'claude-opus-4-8');
+  assert.equal(sum.providers.anthropic.active.model, 'claude-opus-5-5');
 });
 
 test('recordRateLimits captures anthropic-ratelimit headers; getRateLimits returns the snapshot', async () => {
@@ -302,12 +302,12 @@ test('recordRateLimits captures anthropic-ratelimit headers; getRateLimits retur
     ['anthropic-ratelimit-tokens-limit', '80000'],
     ['anthropic-ratelimit-tokens-remaining', '79500'],
   ]);
-  recordRateLimits('user-rl-1', { provider: 'anthropic', model: 'claude-opus-4-8', headers });
+  recordRateLimits('user-rl-1', { provider: 'anthropic', model: 'claude-opus-5-5', headers });
   const snap = getRateLimits('user-rl-1');
   assert.equal(snap.requests.limit, 1000);
   assert.equal(snap.requests.remaining, 999);
   assert.equal(snap.tokens.remaining, 79500);
-  assert.equal(snap.model, 'claude-opus-4-8');
+  assert.equal(snap.model, 'claude-opus-5-5');
   assert.ok(snap.capturedAt);
 });
 
@@ -338,7 +338,7 @@ test('fastModelFor: the flagged fast entry per provider; null when the chain is 
   const { fastModelFor } = await import('../kb/usage.mjs');
   // Asserted by id on purpose — a chain reorder or flag move must FAIL here
   // and be a conscious choice, not a silent re-pick.
-  assert.equal(fastModelFor('anthropic'), 'claude-haiku-4-5-20251001');
+  assert.equal(fastModelFor('anthropic'), 'claude-haiku-5-5');
   assert.equal(fastModelFor('openai'), 'gpt-4o-mini', 'NOT o3-mini: reasoning tokens eat small budgets');
   assert.equal(fastModelFor('google'), 'gemini-2.0-flash');
   assert.equal(fastModelFor('custom'), null);
