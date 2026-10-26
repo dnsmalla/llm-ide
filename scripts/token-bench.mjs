@@ -311,6 +311,8 @@ async function startServer({ fake, dir, port }) {
   const server = {
     base,
     child,
+    /** The server's recent stdout/stderr, for diagnosing a failed run. */
+    tail(n = 3000) { return output.slice(-n); },
     stop() {
       return new Promise((resolve) => {
         liveServers.delete(server);
@@ -648,6 +650,14 @@ const isMain = process.argv[1] && pathToFileURL(path.resolve(process.argv[1])).h
 if (isMain) {
   main(process.argv.slice(2)).then(
     async (code) => { await cleanupAll(); process.exitCode = code; },
-    async (err) => { console.error(err?.stack || err); await cleanupAll(); process.exitCode = 2; },
+    async (err) => {
+      console.error(err?.stack || err);
+      for (const s of liveServers) {
+        const exited = s.child.exitCode != null ? ` (server exited with ${s.child.exitCode})` : '';
+        console.error(`--- bench server output${exited} ---\n${s.tail()}`);
+      }
+      await cleanupAll();
+      process.exitCode = 2;
+    },
   );
 }
