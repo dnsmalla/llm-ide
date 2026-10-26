@@ -1,4 +1,5 @@
 import { useState, useCallback, useRef, useEffect } from 'react';
+import type { PostGenerateQuestionsResponse200 } from '../../lib/api-types';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { conflictQuestions } from '../../lib/kb';
 import { MsgType } from '../../lib/messages';
@@ -55,7 +56,7 @@ export function useQuestions() {
           throw new Error(errorText(err, response.status, 'Failed to generate questions. Please try again.'));
         }
 
-        const data = await response.json();
+        const data: PostGenerateQuestionsResponse200 = await response.json();
         if (typeof data?.questions !== 'string' || !data.questions.trim()) {
           throw new Error('Empty response from server');
         }

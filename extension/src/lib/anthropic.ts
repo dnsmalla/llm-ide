@@ -1,4 +1,5 @@
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from './config';
+import type { PostGenerateNotesResponse200 } from './api-types';
 import { errorText } from './server-error';
 
 /**
@@ -93,7 +94,7 @@ export async function generateMeetingNotesStream(
     }
 
     // Non-streaming fallback — server responded with JSON.
-    const data = await response.json();
+    const data: PostGenerateNotesResponse200 = await response.json();
     if (typeof data?.notes !== 'string' || !data.notes.trim()) {
       throw new Error('Empty response from server');
     }

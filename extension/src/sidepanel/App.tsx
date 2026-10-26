@@ -10,7 +10,8 @@ import { useSession } from './hooks/useSession';
 import { getServerUrl, HEALTH_CHECK_TIMEOUT_MS, TIMING } from '../lib/config';
 import RecordingControls from './components/RecordingControls';
 import { useAgent } from './hooks/useAgent';
-import { useRemoteSessions, RemoteSession } from './hooks/useRemoteSessions';
+import { useRemoteSessions } from './hooks/useRemoteSessions';
+import type { LiveSession } from '../lib/api-types';
 import { useRemoteTranscript } from './hooks/useRemoteTranscript';
 import LanguageSelector from './components/LanguageSelector';
 import TranscriptView from './components/TranscriptView';
@@ -238,7 +239,7 @@ export default function App() {
     isMirroring,
   });
 
-  const handleJoin = useCallback((session: RemoteSession) => {
+  const handleJoin = useCallback((session: LiveSession) => {
     setIsMirroring(true);
     setSessionId(session.sessionId);
     setActiveTab('transcript');

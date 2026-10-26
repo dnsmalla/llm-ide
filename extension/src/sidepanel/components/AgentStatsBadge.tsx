@@ -7,22 +7,15 @@
 // Deliberately minimal — no chart, no per-task drill-down.  The full
 // breakdown shows on hover.
 
+import type { GetKbAgentFeedbackStatsResponse200 } from '../../lib/api-types';
 import type { JSX } from 'react';
 import React, { useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 
-interface Stats {
-  total: number;
-  byVerdict: { useful: number; noise: number; later: number };
-  usefulRate: number | null;
-  avgScore: { useful?: number; noise?: number; later?: number };
-  sinceDays: number;
-}
-
 const POLL_MS = 30_000;
 
 export default function AgentStatsBadge(): JSX.Element | null {
-  const [stats, setStats] = useState<Stats | null>(null);
+  const [stats, setStats] = useState<GetKbAgentFeedbackStatsResponse200 | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -32,7 +25,7 @@ export default function AgentStatsBadge(): JSX.Element | null {
         const url = await getServerUrl();
         const r = await authFetch(`${url}/kb/agent/feedback/stats`);
         if (r.ok) {
-          const j: Stats = await r.json();
+          const j: GetKbAgentFeedbackStatsResponse200 = await r.json();
           if (!cancelled) setStats(j);
         }
       } catch {

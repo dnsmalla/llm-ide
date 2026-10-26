@@ -1,9 +1,9 @@
 import React from 'react';
-import { RemoteSession } from '../hooks/useRemoteSessions';
+import type { LiveSession } from '../../lib/api-types';
 
 interface Props {
-  sessions: RemoteSession[];
-  onJoin: (session: RemoteSession) => void;
+  sessions: LiveSession[];
+  onJoin: (session: LiveSession) => void;
   onDismiss: () => void;
 }
 
