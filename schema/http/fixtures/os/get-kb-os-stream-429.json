@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/os/stream",
+  "status": 429,
+  "description": "A fifth concurrent stream for one user (the cap is 4, MAX_OS_STREAMS_PER_USER in routes/os.mjs). Produced by running the handler in-process with four streams open for the same user.",
+  "response": {
+    "error": {
+      "code": "TOO_MANY_STREAMS",
+      "message": "Too many concurrent System streams"
+    }
+  }
+}

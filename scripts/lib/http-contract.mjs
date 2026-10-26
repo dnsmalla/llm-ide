@@ -5,7 +5,7 @@
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
-export const EVENT_SCHEMAS = ['schema/agent-v2/agent-v2.schema.json'];
+export const EVENT_SCHEMAS = ['schema/agent-v2/agent-v2.schema.json', 'schema/os/os-events.schema.json'];
 
 // Returns a Map: document id -> { id, rel, json, event? }. Group documents come
 // first (sorted by file name), event documents after them.

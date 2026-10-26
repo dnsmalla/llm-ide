@@ -39,6 +39,15 @@
         "401": "Missing or invalid access token"
       }
     },
+    "GET /kb/os/stream": {
+      "summary": "System view change channel (Server-Sent Events)",
+      "description": "A per-user event stream that tells the System view when to re-fetch GET /kb/os/state. It opens with a hello event; after that each event is a change notice (activity, usage, turn-start, turn-end, agent-run or live-session) carrying only its type and time, never data. Bursts of one type are coalesced to one event per 250 ms per stream. A heartbeat comment is sent every 30 s, and the stream closes after 10 minutes idle. At most 4 streams per user.",
+      "responses": {
+        "200": "Server-sent events: hello, then change notices",
+        "401": "Missing or invalid access token",
+        "429": "More than 4 concurrent streams for this user"
+      }
+    },
     "DELETE /agent/v2/session": {
       "summary": "Drop a chat's SDK-session mapping (chat deletion)",
       "description": "Removes the chat→SDK-session mapping row and best-effort deletes the SDK transcript files recorded for the session id (per-user engine home).",

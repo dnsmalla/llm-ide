@@ -17,6 +17,7 @@ import { appendCaptions, getCaptionsSince, listActiveSessions } from './live-ses
 import { draftQuestion } from './agent-prompt.mjs';
 import { getPlan, getAgentPersona } from '../kb/db.mjs';
 import { logger as _agentLog } from '../core/logger.mjs';
+import { emitOsEvent } from '../core/os-events.mjs';
 
 const log = _agentLog.child ? _agentLog.child({ component: 'meeting-agent' }) : _agentLog;
 
@@ -212,6 +213,7 @@ export async function dispatchAgent({
     language,
   });
   runs.set(resolvedSessionId, run);
+  emitOsEvent(userId, 'agent-run');
 
   // Surface the attachment as a system caption so both UIs flip to
   // "agent watching" instantly.  Speaker uses the resolved persona
@@ -320,6 +322,7 @@ export async function stopAgent({ userId, sessionId }) {
   // session ends when the capturing client (extension/Mac app)
   // stops recording — that's when /kb/live/<id>/finalize is called.
   runs.delete(sessionId);
+  emitOsEvent(userId, 'agent-run');
   return { stopped: true };
 }
 
@@ -399,6 +402,7 @@ async function tickRun(run) {
     recordDecision(run, 'capture-stopped');
     stopQuestionLoop(run);
     runs.delete(run.sessionId);
+    emitOsEvent(run.userId, 'agent-run');
     return;
   }
 
