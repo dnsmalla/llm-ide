@@ -54,6 +54,15 @@ function exactKeys(obj, expected, where) {
 }
 
 const isNum = (v) => typeof v === 'number' && Number.isFinite(v);
+const isSize = (v) => isNum(v) && v >= 0 && v <= 1000;
+// Theme ids become `static let <id>` in Swift; a keyword would not compile.
+const SWIFT_RESERVED = new Set([
+  'associatedtype', 'class', 'deinit', 'enum', 'extension', 'fileprivate', 'func', 'import', 'init',
+  'inout', 'internal', 'let', 'open', 'operator', 'private', 'protocol', 'public', 'rethrows', 'static',
+  'struct', 'subscript', 'typealias', 'var', 'break', 'case', 'continue', 'default', 'defer', 'do',
+  'else', 'fallthrough', 'for', 'guard', 'if', 'in', 'repeat', 'return', 'switch', 'where', 'while',
+  'as', 'catch', 'false', 'is', 'nil', 'self', 'super', 'throw', 'throws', 'true', 'try', 'all', 'find',
+]);
 
 function checkSwatch(v, where) {
   if (!v || typeof v !== 'object') fail(`${where} must be an object`);
@@ -78,6 +87,7 @@ function validate(src) {
   for (const t of src.themes) {
     exactKeys(t, ['id', 'name', 'isDark', 'colors'], `theme ${t.id}`);
     if (!/^[a-z][A-Za-z0-9]*$/.test(t.id)) fail(`theme id "${t.id}" must be a lowerCamel Swift identifier`);
+    if (SWIFT_RESERVED.has(t.id)) fail(`theme id "${t.id}" is a Swift keyword`);
     if (ids.has(t.id)) fail(`duplicate theme id "${t.id}"`);
     ids.add(t.id);
     if (typeof t.name !== 'string' || typeof t.isDark !== 'boolean') fail(`theme ${t.id}: name/isDark malformed`);
@@ -85,15 +95,15 @@ function validate(src) {
     for (const r of ROLES) checkSwatch(t.colors[r], `theme ${t.id}.${r}`);
   }
   exactKeys(src.spacing, SPACING, 'spacing');
-  for (const k of SPACING) if (!isNum(src.spacing[k])) fail(`spacing.${k} must be a number`);
+  for (const k of SPACING) if (!isSize(src.spacing[k])) fail(`spacing.${k} must be a number in 0..1000`);
   exactKeys(src.radius, RADIUS, 'radius');
-  for (const k of RADIUS) if (!isNum(src.radius[k])) fail(`radius.${k} must be a number`);
+  for (const k of RADIUS) if (!isSize(src.radius[k])) fail(`radius.${k} must be a number in 0..1000`);
   exactKeys(src.typography, TYPE, 'typography');
   for (const k of TYPE) {
     const t = src.typography[k];
     const allowed = ['size', 'weight', 'monospaced', 'textStyle'];
     for (const key of Object.keys(t)) if (!allowed.includes(key)) fail(`typography.${k} has unknown key "${key}"`);
-    if (t.size !== undefined && !isNum(t.size)) fail(`typography.${k}.size must be a number`);
+    if (t.size !== undefined && !(isSize(t.size) && t.size > 0)) fail(`typography.${k}.size must be a number in 1..1000`);
     if (t.weight !== undefined && !(t.weight in WEIGHTS)) fail(`typography.${k}.weight "${t.weight}" unknown`);
     if (t.textStyle !== undefined && !TEXT_STYLES.includes(t.textStyle)) fail(`typography.${k}.textStyle "${t.textStyle}" unknown`);
     if (t.size === undefined && t.textStyle === undefined) fail(`typography.${k} needs a size or a textStyle`);

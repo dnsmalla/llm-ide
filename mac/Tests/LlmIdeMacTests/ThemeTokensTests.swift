@@ -134,4 +134,24 @@ final class ThemeTokensTests: XCTestCase {
         XCTAssertEqual(Radius.md, 10)
         XCTAssertEqual(Radius.lg, 14)
     }
+    // MARK: - Typography
+
+    /// Expected expressions copied from the original Theme.swift, so a token or
+    /// `Typography.font` change that alters any font fails here.
+    func test_typography() {
+        XCTAssertEqual(Typography.display, Font.system(size: 26, weight: .bold))
+        XCTAssertEqual(Typography.title, Font.system(size: 18, weight: .semibold))
+        XCTAssertEqual(Typography.section, Font.system(size: 12, weight: .semibold))
+        XCTAssertEqual(Typography.body, Font.system(size: 13))
+        XCTAssertEqual(Typography.bodyStrong, Font.system(size: 13, weight: .semibold))
+        XCTAssertEqual(Typography.caption, Font.system(size: 11))
+        XCTAssertEqual(Typography.captionStrong, Font.system(size: 11, weight: .semibold))
+        XCTAssertEqual(Typography.mono, Font.system(size: 11, design: .monospaced))
+        XCTAssertEqual(Typography.filename, Font.system(size: 12))
+        XCTAssertEqual(Typography.fileMeta, Font.system(size: 10))
+        XCTAssertEqual(Typography.treeHeader, Font.system(size: 10, weight: .semibold))
+        XCTAssertEqual(Typography.emptyTitle, Font.callout.weight(.medium))
+        XCTAssertEqual(Typography.emptyHint, Font.caption)
+        XCTAssertEqual(Typography.button, Font.callout.weight(.medium))
+    }
 }
