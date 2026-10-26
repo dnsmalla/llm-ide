@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/review/submit",
+  "status": 401,
+  "request": {
+    "body": {
+      "kind": "codegen-apply",
+      "payload": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/review/submit",
+  "status": 400,
+  "request": {
+    "body": {
+      "kind": "unknown-kind",
+      "payload": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "REVIEW_SUBMIT_FAILED",
+      "message": "Unknown review kind: unknown-kind"
+    }
+  }
+}

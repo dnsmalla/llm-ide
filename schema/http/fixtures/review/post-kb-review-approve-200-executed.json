@@ -1,0 +1,79 @@
+{
+  "endpoint": "POST /kb/review/approve",
+  "status": 200,
+  "description": "Codegen-apply approved: files written under the allow-listed repo (no PR: no GitHub token). A dispatch approval is not captured here: it needs a tracker token and reaches the network.",
+  "request": {
+    "body": {
+      "id": "rev-mvov51xz-TX5ZST_g84UKFP6V",
+      "note": "Reviewed by example."
+    }
+  },
+  "response": {
+    "id": "rev-mvov51xz-TX5ZST_g84UKFP6V",
+    "kind": "codegen-apply",
+    "planId": null,
+    "taskId": "task-1",
+    "title": "Example codegen note",
+    "payload": {
+      "repoPath": "/example/repo",
+      "taskId": "task-1",
+      "summary": "Example note",
+      "files": [
+        {
+          "path": "docs/example-note.md",
+          "content": "# Example note\n\nExample body.\n"
+        },
+        {
+          "path": "docs/example.notes",
+          "content": "Example notes file.\n"
+        }
+      ],
+      "allowedRepos": [
+        "/example/repo",
+        "/example/repo2"
+      ]
+    },
+    "guardrails": {
+      "passed": true,
+      "blocking": [],
+      "warnings": [
+        {
+          "ruleId": "codegen.path-ext",
+          "severity": "warning",
+          "message": "Path \"docs/example.notes\" has an unfamiliar extension; double-check before approving."
+        }
+      ],
+      "info": [
+        {
+          "ruleId": "codegen.summary",
+          "severity": "info",
+          "message": "Will write 2 files + 0 tests under /example/repo."
+        }
+      ],
+      "findings": [
+        {
+          "ruleId": "codegen.path-ext",
+          "severity": "warning",
+          "message": "Path \"docs/example.notes\" has an unfamiliar extension; double-check before approving."
+        },
+        {
+          "ruleId": "codegen.summary",
+          "severity": "info",
+          "message": "Will write 2 files + 0 tests under /example/repo."
+        }
+      ]
+    },
+    "status": "executed",
+    "reviewerNote": "Reviewed by example.",
+    "result": {
+      "baseDir": "/example/repo/.llmide-auto/task-1",
+      "files": [
+        ".llmide-auto/task-1/docs/example-note.md",
+        ".llmide-auto/task-1/docs/example.notes"
+      ],
+      "count": 2
+    },
+    "createdAt": "2026-10-26 06:15:54",
+    "decidedAt": "2026-10-26 06:15:54"
+  }
+}

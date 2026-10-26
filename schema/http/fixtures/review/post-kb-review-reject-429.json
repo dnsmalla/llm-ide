@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/review/reject",
+  "status": 429,
+  "request": {
+    "body": {
+      "id": "example-review-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests",
+      "details": {
+        "retryAfterSec": 1
+      }
+    }
+  }
+}

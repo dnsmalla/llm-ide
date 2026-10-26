@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/review/submit",
+  "status": 429,
+  "request": {
+    "body": {
+      "kind": "unknown-kind",
+      "payload": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests",
+      "details": {
+        "retryAfterSec": 1
+      }
+    }
+  }
+}

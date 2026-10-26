@@ -1,0 +1,103 @@
+{
+  "endpoint": "POST /kb/review/approve",
+  "status": 422,
+  "description": "Guardrails re-run at approval time fail on the allow-list; the item is auto-rejected.",
+  "request": {
+    "body": {
+      "id": "rev-mvov51y7-SsK--GOXoReRh0nN"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "GUARDRAILS_FAILED",
+      "message": "Guardrails fail at approval time"
+    },
+    "guardrails": {
+      "passed": false,
+      "blocking": [
+        {
+          "ruleId": "codegen.allowlist",
+          "severity": "blocking",
+          "message": "Repo path is not in the allow-list. Allowed: /example/repo, /example/repo2."
+        }
+      ],
+      "warnings": [],
+      "info": [
+        {
+          "ruleId": "codegen.summary",
+          "severity": "info",
+          "message": "Will write 1 file + 0 tests under /example/outside-allowlist."
+        }
+      ],
+      "findings": [
+        {
+          "ruleId": "codegen.allowlist",
+          "severity": "blocking",
+          "message": "Repo path is not in the allow-list. Allowed: /example/repo, /example/repo2."
+        },
+        {
+          "ruleId": "codegen.summary",
+          "severity": "info",
+          "message": "Will write 1 file + 0 tests under /example/outside-allowlist."
+        }
+      ]
+    },
+    "item": {
+      "id": "rev-mvov51y7-SsK--GOXoReRh0nN",
+      "kind": "codegen-apply",
+      "planId": null,
+      "taskId": "task-1",
+      "title": "Example outside allow-list",
+      "payload": {
+        "repoPath": "/example/outside-allowlist",
+        "taskId": "task-1",
+        "summary": "Example",
+        "files": [
+          {
+            "path": "docs/outside.md",
+            "content": "Example.\n"
+          }
+        ],
+        "allowedRepos": [
+          "/example/repo",
+          "/example/repo2"
+        ]
+      },
+      "guardrails": {
+        "passed": false,
+        "blocking": [
+          {
+            "ruleId": "codegen.allowlist",
+            "severity": "blocking",
+            "message": "Repo path is not in the allow-list. Allowed: /example/repo, /example/repo2."
+          }
+        ],
+        "warnings": [],
+        "info": [
+          {
+            "ruleId": "codegen.summary",
+            "severity": "info",
+            "message": "Will write 1 file + 0 tests under /example/outside-allowlist."
+          }
+        ],
+        "findings": [
+          {
+            "ruleId": "codegen.allowlist",
+            "severity": "blocking",
+            "message": "Repo path is not in the allow-list. Allowed: /example/repo, /example/repo2."
+          },
+          {
+            "ruleId": "codegen.summary",
+            "severity": "info",
+            "message": "Will write 1 file + 0 tests under /example/outside-allowlist."
+          }
+        ]
+      },
+      "status": "rejected",
+      "reviewerNote": "Auto-rejected: guardrails fail at approval time.",
+      "result": {},
+      "createdAt": "2026-10-26 06:15:54",
+      "decidedAt": "2026-10-26 06:15:54"
+    }
+  }
+}

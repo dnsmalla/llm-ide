@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/review/list",
+  "status": 200,
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "items": [],
+    "count": 0
+  }
+}

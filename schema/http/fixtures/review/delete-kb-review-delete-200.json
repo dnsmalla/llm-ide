@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /kb/review/delete",
+  "status": 200,
+  "description": "Deleting an unknown id answers ok: the handler does not check for a row.",
+  "request": {
+    "body": {
+      "id": "example-review-missing"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

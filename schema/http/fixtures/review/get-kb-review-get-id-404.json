@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/review/get/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "example-review-missing"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "Not found"
+    }
+  }
+}
