@@ -199,8 +199,8 @@ Endpoints with no client caller (37):
 | `/kb/chat/sessions` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/chat.mjs:21` | - | `App.tsx`, `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id` | ALL_ENDPOINTS | DELETE, GET, PATCH | token | core | `extension/routes/chat.mjs:44` | - | `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id/messages` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/chat.mjs:101` | - | `unified-chat.ts` | - |
-| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:168` | - | - | tests only |
-| `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:165` | - | - | tests only |
+| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:169` | - | - | tests only |
+| `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:166` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:61` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:633` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:270` | `LlmIdeAPIClient.swift` | `config.ts` | - |

@@ -1,0 +1,3 @@
+node_modules/
+# make os-view-check builds here and deletes it again
+.bundle-check/

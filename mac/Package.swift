@@ -385,9 +385,9 @@ let package = Package(
                 // Resources/monaco/ except by re-running that script — edit
                 // Resources/monaco-src/ instead for the hand-authored parts.
                 .copy("Resources/monaco"),
-                // OS view: the React bundle (Vite build of the ui-kit tokens)
-                // shown in a WKWebView by Features/System. Placeholder until the
-                // real bundle lands; same offline, bundled-files policy as monaco.
+                // The System view (os-kit OS-3): built from ui/os-view by
+                // `make os-view`, which writes this folder. Do not hand-edit
+                // anything under Resources/os-view/; edit ui/os-view/src instead.
                 .copy("Resources/os-view"),
                 // NOT mermaid: it used to be vendored here (3.4 MB) and is now
                 // an optional component downloaded on demand, pinned by version

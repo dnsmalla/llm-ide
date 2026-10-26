@@ -1,0 +1,433 @@
+/* The System view's styles. Colours, spacing, radius and type come only from the
+   --tok-* variables in tokens.generated.css (schema/design/tokens.json). No
+   literal colours here: tests/styles.test.mjs enforces that. */
+@import './tokens.generated.css';
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+/* Secondary text. The light theme's muted colour is 4.2-4.3:1 on its surfaces,
+   below the 4.5:1 body-text floor, so light uses the primary text colour here. */
+:root {
+  --os-muted: var(--tok-color-text-muted);
+}
+
+html[data-theme='light'] {
+  --os-muted: var(--tok-color-text);
+}
+
+html,
+body {
+  margin: 0;
+  background: var(--tok-color-body);
+  color: var(--tok-color-text);
+  color-scheme: dark;
+}
+
+html[data-theme='light'] {
+  color-scheme: light;
+}
+
+body {
+  font-family: ui-sans-serif, -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  font-size: var(--tok-type-body-size);
+  line-height: 1.45;
+  -webkit-font-smoothing: antialiased;
+}
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+dl,
+dd {
+  margin: 0;
+}
+
+ul,
+ol {
+  padding: 0;
+  list-style: none;
+}
+
+h1 {
+  font-size: var(--tok-type-title-size);
+  font-weight: var(--tok-type-title-weight);
+}
+
+.os {
+  max-width: 1120px;
+  margin: 0 auto;
+  padding: var(--tok-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--tok-space-lg);
+}
+
+/* ---- header ---- */
+
+.os-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--tok-space-md);
+}
+
+.os-head-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tok-space-md);
+}
+
+.os-head-foot {
+  flex-basis: 100%;
+}
+
+.seg {
+  display: inline-flex;
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-sm);
+  overflow: hidden;
+}
+
+.seg-btn {
+  font: inherit;
+  font-size: var(--tok-type-body-size);
+  font-weight: var(--tok-type-button-weight);
+  padding: var(--tok-space-xs) var(--tok-space-md);
+  background: var(--tok-color-surface);
+  color: var(--os-muted);
+  border: 0;
+  cursor: pointer;
+}
+
+.seg-on {
+  background: var(--tok-color-surface2);
+  color: var(--tok-color-text);
+  box-shadow: inset 0 -2px 0 var(--tok-color-accent);
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--tok-space-xs);
+  margin: 0;
+  color: var(--os-muted);
+  font-size: var(--tok-type-caption-size);
+}
+
+.live-live .dot {
+  background: var(--tok-color-accent3);
+}
+
+.live-reconnecting .dot,
+.live-connecting .dot {
+  background: var(--tok-color-accent4);
+}
+
+.live-stopped .dot,
+.live-idle .dot {
+  background: var(--tok-color-text-muted);
+}
+
+/* ---- layout ---- */
+
+.os-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--tok-space-lg);
+  align-items: start;
+}
+
+.card {
+  min-width: 0;
+  background: var(--tok-color-surface);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-md);
+  padding: var(--tok-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--tok-space-md);
+}
+
+.card-wide {
+  grid-column: 1 / -1;
+}
+
+.card-title {
+  font-size: var(--tok-type-section-size);
+  font-weight: var(--tok-type-section-weight);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--os-muted);
+}
+
+.sub-title {
+  font-size: var(--tok-type-body-strong-size);
+  font-weight: var(--tok-type-body-strong-weight);
+  margin-top: var(--tok-space-xs);
+}
+
+.meta {
+  color: var(--os-muted);
+  font-size: var(--tok-type-caption-size);
+}
+
+.empty {
+  color: var(--os-muted);
+}
+
+.banner {
+  margin: 0;
+  padding: var(--tok-space-md);
+  border-radius: var(--tok-radius-sm);
+  border: 1px solid var(--tok-color-border);
+  background: var(--tok-color-surface2);
+}
+
+.banner-error {
+  color: var(--tok-color-danger);
+}
+
+.banner-warn {
+  border-left: 3px solid var(--tok-color-accent4);
+}
+
+/* ---- controls ---- */
+
+.btn {
+  font: inherit;
+  font-size: var(--tok-type-body-size);
+  font-weight: var(--tok-type-button-weight);
+  align-self: flex-start;
+  padding: var(--tok-space-xs) var(--tok-space-md);
+  border-radius: var(--tok-radius-sm);
+  border: 1px solid var(--tok-color-border);
+  background: var(--tok-color-surface2);
+  color: var(--tok-color-text);
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.btn:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.btn-primary {
+  border-color: var(--tok-color-accent);
+  color: var(--tok-color-accent);
+}
+
+.btn-danger {
+  color: var(--tok-color-danger);
+}
+
+button:focus-visible,
+input:focus-visible,
+select:focus-visible {
+  outline: 2px solid var(--tok-color-accent);
+  outline-offset: 2px;
+}
+
+.field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tok-space-xs);
+  font-size: var(--tok-type-caption-size);
+  color: var(--os-muted);
+}
+
+.field input,
+.field select {
+  font: inherit;
+  font-size: var(--tok-type-body-size);
+  color: var(--tok-color-text);
+  background: var(--tok-color-body);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-sm);
+  padding: var(--tok-space-xs) var(--tok-space-sm);
+}
+
+.dev-form {
+  max-width: 480px;
+}
+
+/* ---- lists ---- */
+
+.checks li,
+.plain li,
+.rows li,
+.timeline li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: var(--tok-space-sm);
+  padding: var(--tok-space-xs) 0;
+}
+
+.checks li + li,
+.rows li + li,
+.timeline li + li,
+.plain li + li,
+.kits .kit + .kit {
+  border-top: 1px solid var(--tok-color-border);
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex: none;
+  background: var(--tok-color-text-muted);
+}
+
+.dot-ok {
+  background: var(--tok-color-accent3);
+}
+
+.dot-bad {
+  background: var(--tok-color-danger);
+}
+
+.row {
+  justify-content: space-between;
+}
+
+.row-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  flex: 1 1 200px;
+}
+
+.kits {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  gap: var(--tok-space-sm);
+}
+
+.kit {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tok-space-xs);
+  padding: var(--tok-space-md);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-sm);
+  background: var(--tok-color-surface2);
+}
+
+.kit-name {
+  font-family: var(--tok-type-mono-family);
+  font-size: var(--tok-type-mono-size);
+  color: var(--tok-color-text);
+  overflow-wrap: anywhere;
+}
+
+.timeline li {
+  gap: var(--tok-space-md);
+}
+
+.timeline time {
+  font-family: var(--tok-type-mono-family);
+  font-size: var(--tok-type-mono-size);
+  color: var(--os-muted);
+  min-width: 9em;
+}
+
+.timeline-title {
+  flex: 1 1 200px;
+  overflow-wrap: anywhere;
+}
+
+.tag {
+  font-size: var(--tok-type-caption-strong-size);
+  font-weight: var(--tok-type-caption-strong-weight);
+  color: var(--tok-color-accent2);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-sm);
+  padding: 0 var(--tok-space-xs);
+  white-space: nowrap;
+}
+
+.plain.actions li {
+  justify-content: space-between;
+}
+
+/* ---- totals, bars ---- */
+
+.totals {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(110px, 1fr));
+  gap: var(--tok-space-sm);
+}
+
+.totals div {
+  display: flex;
+  flex-direction: column;
+  padding: var(--tok-space-sm);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-sm);
+}
+
+.totals dt {
+  font-size: var(--tok-type-caption-size);
+  color: var(--os-muted);
+}
+
+.totals dd {
+  font-size: var(--tok-type-title-size);
+  font-weight: var(--tok-type-title-weight);
+  font-variant-numeric: tabular-nums;
+}
+
+.breakdown,
+.composition {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tok-space-sm);
+}
+
+.breakdown-head {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: var(--tok-space-xs);
+}
+
+.bar {
+  height: 8px;
+  margin-top: var(--tok-space-xs);
+  border-radius: 4px;
+  background: var(--tok-color-grid-line);
+  overflow: hidden;
+}
+
+.bar-fill {
+  height: 100%;
+  background: var(--tok-color-accent);
+  border-radius: 4px;
+}
+
+/* ---- phone and narrow widths ---- */
+
+@media (max-width: 720px) {
+  .os {
+    padding: var(--tok-space-lg);
+  }
+
+  .os-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .timeline time {
+    min-width: 0;
+  }
+}
