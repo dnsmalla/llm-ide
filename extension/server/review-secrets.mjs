@@ -30,10 +30,9 @@ export function stripReviewSecrets(payload) {
   for (const section of SECRET_SECTIONS) {
     const obj = base[section];
     if (!isPlainObject(obj)) continue;
-    const taken = {};
-    for (const [k, v] of Object.entries(obj)) {
-      if (REVIEW_SECRET_KEY_RE.test(k) && v && !UNSAFE_OBJECT_KEYS.has(k)) taken[k] = v;
-    }
+    const taken = Object.fromEntries(
+      Object.entries(obj).filter(([k, v]) => REVIEW_SECRET_KEY_RE.test(k) && v && !UNSAFE_OBJECT_KEYS.has(k)),
+    );
     if (Object.keys(taken).length) secrets[section] = taken;
   }
   return { payload: scrubSecretKeysDeep(base), secrets };

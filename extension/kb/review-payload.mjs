@@ -37,12 +37,13 @@ export const UNSAFE_OBJECT_KEYS = new Set(['__proto__', 'constructor', 'prototyp
 export function scrubSecretKeysDeep(node) {
   if (Array.isArray(node)) return node.map(scrubSecretKeysDeep);
   if (!isPlainObject(node)) return node;
-  const out = {};
-  for (const [k, v] of Object.entries(node)) {
-    if (REVIEW_SECRET_KEY_RE.test(k) || UNSAFE_OBJECT_KEYS.has(k)) continue;
-    out[k] = scrubSecretKeysDeep(v);
-  }
-  return out;
+  // Object.fromEntries defines own properties, so no key can reach the
+  // prototype; the unsafe keys are dropped as well.
+  return Object.fromEntries(
+    Object.entries(node)
+      .filter(([k]) => !REVIEW_SECRET_KEY_RE.test(k) && !UNSAFE_OBJECT_KEYS.has(k))
+      .map(([k, v]) => [k, scrubSecretKeysDeep(v)]),
+  );
 }
 
 /** The payload with only the keys `kind` reads. Unknown kinds keep no keys. */
