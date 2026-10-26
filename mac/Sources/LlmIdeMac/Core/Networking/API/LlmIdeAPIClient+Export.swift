@@ -222,12 +222,22 @@ extension LlmIdeAPIClient {
     /// Cheap pre-check used by the first-launch prompt — we only show
     /// the export dialog when the user actually has legacy meetings.
     func legacyMeetingCount() async -> Int {
-        struct StatsResp: Decodable { let totals: Totals? }
-        struct Totals: Decodable { let meetings: Int? }
-        if let s: StatsResp = try? await get("/kb/stats", authenticated: true) {
-            return s.totals?.meetings ?? 0
+        if let s: LegacyStatsBody = try? await get("/kb/stats", authenticated: true) {
+            return s.meetingCount
         }
         return 0
+    }
+
+    /// The `/kb/stats` fields this check reads. The server answers the
+    /// meeting count as a top-level `meetings`; the older `totals.meetings`
+    /// shape is still accepted.
+    struct LegacyStatsBody: Decodable {
+        let meetings: Int?
+        let totals: Totals?
+
+        struct Totals: Decodable { let meetings: Int? }
+
+        var meetingCount: Int { meetings ?? totals?.meetings ?? 0 }
     }
 
     /// NDJSON stream of /kb/export-all.  Each non-terminal line is a
