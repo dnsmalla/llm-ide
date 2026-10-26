@@ -1,0 +1,20 @@
+{
+  "$defs": {
+    "Error": {
+      "description": "The error envelope every failing /kb/* and legacy route returns (extension/core/errors.mjs, sendError). code is a stable identifier clients switch on; message is prose; details is optional structured context (e.g. the guardrail report on GUARDRAIL_FAILED).",
+      "type": "object",
+      "required": ["error"],
+      "properties": {
+        "error": {
+          "type": "object",
+          "required": ["code", "message"],
+          "properties": {
+            "code": { "type": "string" },
+            "message": { "type": "string" },
+            "details": { "x-optional": true, "description": "Optional; shape depends on code." }
+          }
+        }
+      }
+    }
+  }
+}

@@ -22,6 +22,7 @@
 import { readFileSync, writeFileSync, readdirSync, existsSync, mkdirSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { parseRoster } from './lib/roster.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const OUT_REL = 'schema/http/INVENTORY.md';
@@ -79,12 +80,6 @@ function walk(relDir, keep) {
   return out.sort();
 }
 
-function lineOf(text, index) {
-  let n = 1;
-  for (let i = 0; i < index; i++) if (text.charCodeAt(i) === 10) n++;
-  return n;
-}
-
 // Text lines that are code (not whole-line comments). A trailing `// …` is
 // stripped only when it follows whitespace, so "http://" inside a string survives.
 function codeLines(text) {
@@ -108,16 +103,6 @@ function stringLiterals(code) {
 }
 
 // ---------------------------------------------------------------- parsing sources
-
-function parseRoster(src) {
-  const m = /const ALL_ENDPOINTS = \[([\s\S]*?)\];/.exec(src);
-  if (!m) throw new Error(`ALL_ENDPOINTS array not found in ${SERVER_REL}`);
-  const base = m.index + m[0].indexOf('[') + 1;
-  return [...m[1].matchAll(/'(\/[^']*)'/g)].map((x) => ({
-    path: x[1],
-    line: lineOf(src, base + x.index),
-  }));
-}
 
 function parseFeatureGroups(src) {
   const m = /FEATURE_ROUTE_GROUPS = Object\.freeze\(\{([\s\S]*?)\n\}\);/.exec(src);
@@ -343,7 +328,7 @@ function referenceKind(e, corpus) {
 
 function build() {
   const serverSrc = read(SERVER_REL);
-  const roster = parseRoster(serverSrc);
+  const roster = parseRoster(serverSrc, SERVER_REL);
   const groups = parseFeatureGroups(read(FEATURE_ROUTES_REL));
   const pub = parsePublic(read(AUTH_REL));
   const { cands, subMethods } = collectHandlerCandidates();

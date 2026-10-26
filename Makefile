@@ -156,6 +156,13 @@ chat-gates:
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null swift run chat-contract-lab
 	node scripts/conformance-agent-v2.mjs
 
+# HTTP endpoint contract (schema/http): request and response shapes per route
+# group, checked against the roster. Deliberately NOT in `regression` yet: the
+# route-group specs land in P3-P10 of the Phase 1 plan, and P16 wires this in.
+.PHONY: contract-gates
+contract-gates:
+	node scripts/conformance-http.mjs
+
 # Doc Gen / Visual: the template-surface marker, which decides which menu a
 # user's template appears in and round-trips through a file on their disk.
 .PHONY: generation-gates

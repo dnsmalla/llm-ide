@@ -22,14 +22,16 @@
 //                  outside the linker unnoticed. server/ai-routes.mjs is out
 //                  of scope: it serves the LEGACY /code-assist wire.
 //
-// No JSON-Schema library: `ajv` is only present transitively (via eslint) and
-// would vanish on an eslint upgrade. The schema uses a small, fixed subset, so
-// the ~60 lines below are the whole validator.
+// The generic parts (schema walking, variant matching, validity, coverage, the
+// report) live in scripts/lib/conformance.mjs, shared with conformance-http.mjs.
+// What stays here is agent/v2-specific: ALLOWED_UNDECODED, the Swift decode step,
+// the emitter roster scan and the model-id check.
 
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { join, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { readJson, listJson, makeSchemaWalker, variantFor, checkDoc, createCoverage, createReport } from './lib/conformance.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCHEMA_PATH = join(ROOT, 'schema/agent-v2/agent-v2.schema.json');
@@ -52,105 +54,32 @@ const ALLOWED_UNDECODED = Object.freeze({
   },
 });
 
-const fail = [];
-const note = (msg) => fail.push(msg);
+const report = createReport();
+const note = (msg) => report.note(msg);
 
 // ---------------------------------------------------------------- schema
 
-const schema = JSON.parse(readFileSync(SCHEMA_PATH, 'utf8'));
-
-/** Dotted field paths a schema variant declares, minus the `type` discriminator. */
-function schemaPaths(node, prefix = '') {
-  const out = new Set();
-  const props = node?.properties;
-  if (!props) return out;
-  for (const [key, value] of Object.entries(props)) {
-    if (!prefix && key === 'type') continue; // the case itself carries it
-    const path = prefix ? `${prefix}.${key}` : key;
-    out.add(path);
-    const nested = value?.type === 'array' ? resolveRef(value.items) : value;
-    if (nested && nested.type === 'object') {
-      for (const child of schemaPaths(nested, path)) out.add(child);
-    }
-  }
-  return out;
-}
-
-function resolveRef(node) {
-  if (node?.$ref?.startsWith('#/$defs/')) return schema.$defs[node.$ref.slice('#/$defs/'.length)];
-  return node;
-}
-
-function variantFor(doc) {
-  return schema.oneOf.find((v) => {
-    const p = v.properties || {};
-    if (p.type?.const !== doc.type) return false;
-    if (p.kind?.const && p.kind.const !== doc.kind) return false;
-    return true;
-  });
-}
-
-/**
- * Paths the schema declares as OPAQUE — a property with no `type` and no
- * `properties`, i.e. `{}`. `sdk.raw` is the only one today: it is a whole SDK
- * message passed through verbatim, so its interior is not part of this
- * contract and must not be walked.
- */
-function opaquePaths(node, prefix = '') {
-  const out = new Set();
-  for (const [key, value] of Object.entries(node?.properties || {})) {
-    const path = prefix ? `${prefix}.${key}` : key;
-    if (value && typeof value === 'object' && !value.type && !value.properties && !value.$ref && !value.const) {
-      out.add(path);
-      continue;
-    }
-    const nested = value?.type === 'array' ? resolveRef(value.items) : value;
-    if (nested?.type === 'object') for (const p of opaquePaths(nested, path)) out.add(p);
-  }
-  return out;
-}
-
-/** Dotted paths a concrete document actually carries, not descending into opaque values. */
-function docPaths(value, prefix = '', opaque = new Set()) {
-  const out = new Set();
-  if (Array.isArray(value)) {
-    for (const item of value) for (const p of docPaths(item, prefix, opaque)) out.add(p);
-    return out;
-  }
-  if (value === null || typeof value !== 'object') return out;
-  for (const [key, child] of Object.entries(value)) {
-    if (!prefix && key === 'type') continue;
-    const path = prefix ? `${prefix}.${key}` : key;
-    out.add(path);
-    if (opaque.has(path)) continue;
-    for (const p of docPaths(child, path, opaque)) out.add(p);
-  }
-  return out;
-}
+const schema = readJson(SCHEMA_PATH);
+// `type` is the variant discriminator, not a field: it is skipped at the root.
+const walker = makeSchemaWalker(schema, { rootSkip: ['type'] });
 
 // ---------------------------------------------------------------- fixtures
 
-const fixtures = readdirSync(FIXTURE_DIR).filter((f) => f.endsWith('.json')).sort();
+const fixtures = listJson(FIXTURE_DIR);
 if (fixtures.length === 0) { console.error('no fixtures found'); process.exit(1); }
 
 const docs = new Map();
-const exercised = new Set();
+const coverage = createCoverage();
 
 for (const name of fixtures) {
-  const doc = JSON.parse(readFileSync(join(FIXTURE_DIR, name), 'utf8'));
-  const variant = variantFor(doc);
+  const doc = readJson(join(FIXTURE_DIR, name));
+  const variant = variantFor(schema.oneOf, doc);
   if (!variant) { note(`${name}: no schema variant matches type=${doc.type} kind=${doc.kind}`); continue; }
 
-  const declared = schemaPaths(variant);
-  const present = docPaths(doc, '', opaquePaths(variant));
-
-  for (const key of variant.required || []) {
-    if (key !== 'type' && !(key in doc)) note(`${name}: missing required "${key}"`);
-  }
-  for (const path of present) {
-    if (!declared.has(path)) note(`${name}: "${path}" is not declared by the schema variant "${variant.title}"`);
-  }
-  for (const path of present) exercised.add(`${variant.title}::${path}`);
+  // 1. VALIDITY — required keys and undeclared keys for this variant.
+  const { present, problems } = checkDoc({ walker, node: variant, doc, name, label: `the schema variant "${variant.title}"` });
+  for (const msg of problems) note(msg);
+  coverage.exercise(variant.title, present);
   docs.set(name, { doc, variant, present });
 }
 
@@ -167,11 +96,7 @@ for (const [i, v] of schema.oneOf.entries()) {
 
 // 2. COVERAGE — a declared path no fixture exercises is checked only in theory.
 for (const variant of schema.oneOf) {
-  for (const path of schemaPaths(variant)) {
-    if (!exercised.has(`${variant.title}::${path}`)) {
-      note(`schema declares "${path}" on "${variant.title}" but no fixture exercises it`);
-    }
-  }
+  for (const msg of coverage.check(variant.title, walker.schemaPaths(variant), `on "${variant.title}"`)) note(msg);
 }
 
 // ---------------------------------------------------------------- swift side
@@ -349,10 +274,8 @@ for (const rel of [
 
 // ---------------------------------------------------------------- report
 
-if (fail.length) {
-  console.error('\n=== agent/v2 conformance FAILED ===');
-  for (const f of fail) console.error('  ✗ ' + f);
-  console.error(`\n${fail.length} problem(s). See schema/agent-v2/SCHEMA.md.`);
-  process.exit(1);
-}
-console.log(`agent/v2 conformance: ${fixtures.length} fixtures, ${known.size} variants — Swift and the wire agree`);
+report.finish({
+  title: 'agent/v2 conformance',
+  footer: 'See schema/agent-v2/SCHEMA.md.',
+  ok: `agent/v2 conformance: ${fixtures.length} fixtures, ${known.size} variants — Swift and the wire agree`,
+});
