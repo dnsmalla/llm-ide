@@ -779,21 +779,23 @@
                     "description": "the loop's last candidate decision (agents/meeting-agent.mjs recordDecision); null until the loop has judged one",
                     "properties": {
                       "reason": {
-                        "type": "string",
-                        "x-optional": true
+                        "type": "string"
                       },
                       "score": {
                         "type": [
                           "number",
                           "null"
-                        ],
-                        "x-optional": true
+                        ]
                       },
                       "asked": {
-                        "type": "boolean",
-                        "x-optional": true
+                        "type": "boolean"
                       }
-                    }
+                    },
+                    "required": [
+                      "reason",
+                      "score",
+                      "asked"
+                    ]
                   }
                 }
               }
