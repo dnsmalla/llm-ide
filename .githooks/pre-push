@@ -60,9 +60,11 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     if printf '%s\n' "$files" | grep -qE '^(mac/|schema/|scripts/conformance-)'; then
         mac_changed=1
     fi
-    # The HTTP contract gate: the group schemas and fixtures, the generator and
-    # inventory scripts, and the generated client types it keeps in sync.
-    if printf '%s\n' "$files" | grep -qE '^(schema/|scripts/conformance-|scripts/gen-api-types\.mjs$|scripts/http-inventory\.mjs$|scripts/lib/|extension/src/lib/api-types\.ts$)'; then
+    # The HTTP contract gate (~1 s, no Swift): its inputs are spread wide — the
+    # schemas and fixtures, every generator, the OpenAPI overlay, server.mjs
+    # (SERVER_API_VERSION), and the mac/ + extension/ trees the inventory walks —
+    # so run it whenever any of them changed rather than list each path.
+    if printf '%s\n' "$files" | grep -qE '^(mac/|extension/|schema/|scripts/|docs/reference/api/)'; then
         contract_changed=1
     fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then
