@@ -76,7 +76,10 @@ enum SystemBridge {
     /// not enabled, so the page cannot route into a disabled feature.
     @MainActor
     static func section(forOpenTarget target: String,
-                        isEnabled: (AppFeature) -> Bool = { FeatureRegistry.shared.isEnabled($0) }) -> ShellSection? {
+                        isEnabled: ((AppFeature) -> Bool)? = nil) -> ShellSection? {
+        // A default-argument closure is evaluated outside the main actor, so
+        // the registry is read here, inside the @MainActor body.
+        let isEnabled = isEnabled ?? { FeatureRegistry.shared.isEnabled($0) }
         let section: ShellSection
         switch target {
         case "loop":      section = .loopEngine
