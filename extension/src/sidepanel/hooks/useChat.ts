@@ -11,7 +11,7 @@ import {
   type UnifiedChatMessage,
 } from '../../lib/unified-chat';
 
-export interface ChatMessage {
+export interface ChatViewMessage {
   role: 'user' | 'assistant';
   content: string;
   timestamp: number;
@@ -22,12 +22,12 @@ const MAX_HISTORY = 10;
 const STORAGE_KEY = 'chatMessages';
 const MAX_STORED_MESSAGES = 200;
 
-function toChatMessage(m: UnifiedChatMessage): ChatMessage {
+function toChatMessage(m: UnifiedChatMessage): ChatViewMessage {
   return { role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp };
 }
 
 export function useChat() {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const [messages, setMessages] = useState<ChatViewMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
@@ -96,13 +96,13 @@ export function useChat() {
       const issueKeywords = ['issue', 'issues', 'bug', 'ticket', 'github', '#'];
       const asksAboutIssues = issueKeywords.some((k) => trimmed.toLowerCase().includes(k));
 
-      const userMsg: ChatMessage = {
+      const userMsg: ChatViewMessage = {
         role: 'user',
         content: trimmed,
         timestamp: Date.now(),
       };
 
-      let historySnapshot: ChatMessage[] = [];
+      let historySnapshot: ChatViewMessage[] = [];
       setMessages((prev) => {
         const updated = [...prev, userMsg];
         historySnapshot = updated.slice(-MAX_HISTORY);
@@ -163,7 +163,7 @@ export function useChat() {
         if (typeof data?.reply !== 'string' || !data.reply.trim()) {
           throw new Error('Empty response from server');
         }
-        const assistantMsg: ChatMessage = {
+        const assistantMsg: ChatViewMessage = {
           role: 'assistant',
           content: data.reply,
           timestamp: Date.now(),

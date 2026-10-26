@@ -162,6 +162,13 @@ chat-gates:
 .PHONY: contract-gates
 contract-gates:
 	node scripts/conformance-http.mjs
+	node scripts/gen-api-types.mjs --check
+
+# Generated TypeScript types for the HTTP contract (extension/src/lib/api-types.ts).
+# Regenerate after changing schema/http; `contract-gates` fails while it is stale.
+.PHONY: api-types
+api-types:
+	node scripts/gen-api-types.mjs
 
 # Doc Gen / Visual: the template-surface marker, which decides which menu a
 # user's template appears in and round-trips through a file on their disk.

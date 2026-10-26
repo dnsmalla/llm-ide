@@ -8,6 +8,7 @@
 // POST /auth/me/password   → currentPassword + newPassword
 // Sign out                 → useSession().logout()
 
+import type { GetAuthMeResponse200 } from '../../lib/api-types';
 import type { JSX } from 'react';
 import React, { useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
@@ -16,17 +17,6 @@ import { useSession } from '../hooks/useSession';
 // Mirrors MIN_PASSWORD in extension/server/users.mjs (src/ cannot import
 // server code, so keep the two values in step by hand).
 const PASSWORD_MIN_LENGTH = 10;
-
-interface Me {
-  id: string;
-  email: string;
-  displayName: string;
-  role: string;
-  status: string;
-  // SQLite datetime, UTC, e.g. "2026-10-26 04:31:31".
-  createdAt: string;
-  lastLoginAt: string | null;
-}
 
 function fmtDate(s: string | null | undefined): string {
   if (!s) return '—';
@@ -42,7 +32,7 @@ function fmtDate(s: string | null | undefined): string {
 
 export default function UserAccountSettings(): JSX.Element {
   const { logout } = useSession();
-  const [me, setMe] = useState<Me | null>(null);
+  const [me, setMe] = useState<GetAuthMeResponse200 | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   // Change-password form
@@ -60,7 +50,7 @@ export default function UserAccountSettings(): JSX.Element {
         const url = await getServerUrl();
         const r = await authFetch(`${url}/auth/me`);
         if (!r.ok) throw new Error(`HTTP ${r.status}`);
-        const j: Me = await r.json();
+        const j: GetAuthMeResponse200 = await r.json();
         if (!cancelled) setMe(j);
       } catch (err) {
         if (!cancelled) setError(err instanceof Error ? err.message : 'failed to load');

@@ -1,3 +1,4 @@
+import type { GetKbChatSessionsResponse200 } from './api-types';
 import { getServerUrl, authFetch } from './config';
 
 export type UnifiedChatRole = 'user' | 'assistant' | 'system';
@@ -44,7 +45,7 @@ export async function listChatSessions(opts?: {
   const qs = params.toString();
   const res = await authFetch(`${base}/kb/chat/sessions${qs ? `?${qs}` : ''}`);
   if (!res.ok) throw new Error(`list sessions failed: ${res.status}`);
-  const data = await res.json();
+  const data: GetKbChatSessionsResponse200 = await res.json();
   return Array.isArray(data?.sessions) ? data.sessions : [];
 }
 

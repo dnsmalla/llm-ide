@@ -1,0 +1,6289 @@
+// GENERATED - do not edit.
+// Source: schema/http/*.schema.json (+ schema/agent-v2 event schema).
+// Regenerate with `node scripts/gen-api-types.mjs` (or `make api-types`).
+// Check with `node scripts/gen-api-types.mjs --check` (part of `make contract-gates`).
+
+/** The error envelope every failing /kb/* and legacy route returns (extension/core/errors.mjs, sendError). code is a stable identifier clients switch on; message is prose; details is optional structured context (e.g. the guardrail report on GUARDRAIL_FAILED). */
+export type CommonError = {
+  error: {
+    code: string;
+    message: string;
+    /** Optional; shape depends on code. */
+    details?: unknown;
+  };
+};
+
+export type AgentOk = {
+  ok: true;
+};
+
+/** The legacy single-persona surface (GET and PUT /kb/agent/persona): the stored fields only, no id. */
+export type LegacyPersona = {
+  name: string | null;
+  promptSuffix: string | null;
+  autoDispatch: boolean;
+};
+
+/** A row of the multi-persona registry (kb/personas.mjs). id 'default' is the migrated legacy persona. */
+export type Persona = {
+  id: string;
+  name: string | null;
+  promptSuffix: string | null;
+  autoDispatch: boolean;
+  /** ISO 8601 timestamp */
+  createdAt: string;
+};
+
+export type PersonaList = {
+  personas: Persona[];
+  /** the active persona's id */
+  active: string | null;
+  count: number;
+};
+
+/** A unified chat session (kb/chat-sessions.mjs). createdAt and updatedAt are epoch seconds with a fraction. */
+export type ChatSession = {
+  id: string;
+  title: string;
+  /** mac, extension or any */
+  surface: string;
+  /** ask, agent or transcript */
+  mode: string;
+  projectId: string | null;
+  createdAt: number;
+  updatedAt: number;
+};
+
+export type ChatMessage = {
+  seq: number;
+  /** user, assistant or system */
+  role: string;
+  content: string;
+  /** Caller-supplied metadata stored as sent; the server does not interpret it. */
+  meta: Record<string, unknown> | null;
+  createdAt: number;
+};
+
+export type AskMessage = {
+  seq: number;
+  /** user or assistant */
+  role: string;
+  content: string;
+  /** epoch seconds with a fraction */
+  created_at: number;
+};
+
+export type SkillEntry = {
+  name: string;
+  kind: "read" | "write";
+  description: string;
+};
+
+/** A kit template or command (generation-library). surface divides the Doc Gen and Visual menus. */
+export type LibraryEntry = {
+  id: string;
+  family: string;
+  name: string;
+  description: string;
+  surface: "doc" | "visual";
+  /** the Markdown body the app seeds into the project */
+  body: string;
+  path: string;
+  sourceId: string;
+  sourceName: string;
+};
+
+export type SkillLibraryEntry = {
+  id: string;
+  family: string;
+  name: string;
+  description: string;
+  path: string;
+  sourceId: string;
+  sourceName: string;
+};
+
+export type TaskFeedback = {
+  planTaskId: string;
+  total: number;
+  byVerdict: VerdictCounts;
+  usefulRate: number | null;
+  avgScoreUseful: number | null;
+  avgScoreNoise: number | null;
+};
+
+export type VerdictCounts = {
+  useful: number;
+  noise: number;
+  later: number;
+};
+
+export type ToolRule = {
+  projectRoot: string;
+  toolName: string;
+  pattern: string;
+  grantedAt: string;
+};
+
+export type ToolApprovalListing = {
+  rules: ToolRule[];
+  /** pre-0034 global grants, no longer honoured by either engine, still listed and revocable */
+  approvals: ApprovalGrant[];
+};
+
+export type ApprovalGrant = {
+  toolName: string;
+  grantedAt: string;
+};
+
+export type task = {
+  id: string;
+  title: string;
+  status: string;
+};
+
+/** One `data:` payload on GET/POST /agent/v2/stream. Every variant sets additionalProperties:false ON PURPOSE — a field added server-side must be added here in the same edit, which is what makes scripts/conformance-agent-v2.mjs able to notice that the Mac does not decode it. See SCHEMA.md. */
+export type AgentV2Event = {
+  type: "init";
+  sessionId: string | null;
+  claudeCodeVersion: string | null;
+  model: string | null;
+  tools: string[];
+  capabilities: string[];
+  mcpServers: ({
+    name?: string | null;
+    status?: string | null;
+  })[];
+} | {
+  type: "delta";
+  text: string;
+} | {
+  type: "tool_use_start";
+  index: number;
+  id: string | null;
+  name: string | null;
+} | {
+  type: "tool_args_delta";
+  index: number;
+  partialJson: string;
+} | {
+  type: "tool_result";
+  toolUseId: string | null;
+  isError: boolean;
+  text: string;
+  truncated: boolean;
+} | {
+  type: "usage";
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+} | {
+  type: "memory";
+  sessionFacts: number;
+  chars: number;
+  approxTokens: number;
+} | {
+  type: "context_usage";
+  totalTokens: number;
+  maxTokens: number;
+  percentage: number;
+  categories: {
+    name: string;
+    kind: string;
+    tokens: number;
+  }[];
+} | {
+  type: "result";
+  subtype: string | null;
+  costUsd: number | null;
+  numTurns: number | null;
+  durationMs: number | null;
+  sessionId: string | null;
+  stopReason: string | null;
+} | {
+  type: "sdk";
+  sdkType: string | null;
+  subtype: string | null;
+  raw: unknown;
+} | {
+  type: "approval_request";
+  requestId: string;
+  kind: "ToolApproval";
+  toolName: string;
+  argsSummary: string | null;
+  /** Only for Bash / Edit / Write — engine.mjs approvalArgsFor. Absent for every other gated tool. */
+  args?: {
+    command?: string;
+    filePath?: string;
+    oldString?: string;
+    newString?: string;
+    replaceAll?: boolean;
+    contentPreview?: string;
+    totalChars?: number;
+    exists?: boolean;
+    truncated?: boolean;
+  };
+} | {
+  type: "approval_request";
+  requestId: string;
+  kind: "AskUserQuestion";
+  /** PASSED THROUGH FROM THE SDK VERBATIM (engine.mjs:906). This is the one place the wire IS the SDK's shape, so an SDK rename lands here first — see SCHEMA.md. */
+  questions: {
+    question: string;
+    header?: string;
+    multiSelect: boolean;
+    options: {
+      label: string;
+      description?: string;
+      preview?: string;
+    }[];
+  }[];
+} | {
+  type: "approval_resolved";
+  requestId: string;
+  outcome: string;
+} | {
+  type: "mode_set";
+  mode: string;
+} | {
+  type: "tasks";
+  tasks: task[];
+  continueNeeded: boolean;
+} | {
+  type: "tasks_progress";
+  tasks: task[];
+} | {
+  type: "error";
+  code: string;
+  message: string;
+  retryable: boolean;
+};
+
+export type User = {
+  id: string;
+  email: string;
+  displayName: string;
+  /** admin | user */
+  role: string;
+  status: string;
+  /** SQLite datetime, YYYY-MM-DD HH:MM:SS (UTC), not ISO 8601 */
+  createdAt: string;
+  /** SQLite datetime, or null before the first login */
+  lastLoginAt: string | null;
+};
+
+export type Session = {
+  user: User;
+  accessToken: string;
+  refreshToken: string;
+  accessTokenTTLSec: number;
+};
+
+export type HealthAuthOk = {
+  ok: true;
+};
+
+export type Health = {
+  /** ok when the DB, the Claude CLI probe and .skills all pass; degraded otherwise */
+  status: "ok" | "degraded";
+  /** SERVER_API_VERSION */
+  apiVersion: number;
+  /** current migration number */
+  schemaVersion: number;
+  uptimeSec: number;
+  /** ALL_ENDPOINTS minus the paths of disabled features */
+  endpoints: string[];
+  /** sorted LLMIDE_FEATURES keys; null means every feature */
+  features: string[] | null;
+  checks: {
+    db: boolean;
+    claude: boolean;
+    /** present only while claude is false */
+    claudeError?: string;
+    skills: boolean;
+    /** present only while skills is false */
+    skillsError?: string;
+  };
+};
+
+export type WellKnown = {
+  issuer: string;
+  registrationOpen: boolean;
+  /** names of the secrets a user may store */
+  vaultKeys: string[];
+  accessTokenTTLSec: number;
+};
+
+/** Per-user UI preferences. A key the user never set is absent. */
+export type Prefs = {
+  language?: string;
+  bilingual?: boolean;
+  nativePlugins?: boolean;
+};
+
+export type Secret = {
+  key: string;
+  updatedAt: string;
+};
+
+export type OAuthStart = {
+  authUrl: string;
+  /** poll with the matching /status route */
+  state: string;
+};
+
+export type GoogleStatus = {
+  /** unknown: the state is expired or was never issued */
+  status: "pending" | "complete" | "error" | "unknown";
+  email?: string;
+  message?: string;
+};
+
+export type SlackStatus = {
+  /** unknown: the state is expired or was never issued */
+  status: "pending" | "complete" | "error" | "unknown";
+  teamName?: string;
+  channels?: Record<string, unknown>[];
+  message?: string;
+};
+
+/** One registered MCP server, with this user's consent and enable state. */
+export type McpPlugin = {
+  id: string;
+  name: string;
+  /** claude | codex | catalog | manual */
+  source: string;
+  /** stdio | http | sse */
+  transport: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  /** values are redacted by the server; names are real */
+  env?: Record<string, string>;
+  /** values are redacted by the server */
+  headers?: Record<string, string>;
+  catalogId?: string;
+  sourceName?: string;
+  builtin: boolean;
+  enabled: boolean;
+  consented: boolean;
+  /** the plugin declares a credential the vault has no value for */
+  credentialMissing: boolean;
+  /** enabled AND consented AND (for a plugin-declared server) its plugin enabled for this user */
+  effective?: boolean;
+  package?: {
+    runner: string;
+    name: string;
+    version: string;
+    tag?: string | null;
+  };
+};
+
+export type McpAdded = {
+  id: string;
+  name: string;
+  source: string;
+  builtin: boolean;
+  transport?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  catalogId?: string;
+};
+
+export type CatalogEntry = {
+  id: string;
+  name: string;
+  description: string;
+  transport: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  docsUrl: string;
+  /** a trailing argument the server cannot work without */
+  requiresArg?: {
+    label: string;
+    placeholder?: string;
+  };
+  /** the vault key a credential-bearing server reads; values never leave the server */
+  credential?: {
+    vaultKey?: string;
+    target?: string;
+    name?: string;
+    label?: string;
+    template?: string;
+  };
+  oauth?: boolean;
+  /** already in this install's registry */
+  registered: boolean;
+};
+
+/** A server scanned from the operator's ~/.claude.json (CLAUDE_CONFIG_PATH), read-only. */
+export type ClaudeSource = {
+  name: string;
+  transport?: string;
+  command?: string;
+  args?: string[];
+  env?: Record<string, string>;
+  url?: string;
+  /** values redacted to bullets */
+  headers?: Record<string, string>;
+};
+
+/** A server scanned from the operator's ~/.codex/config.toml (CODEX_CONFIG_PATH), read-only. */
+export type CodexSource = {
+  name: string;
+  transport?: string;
+  command?: string;
+  args?: string[];
+};
+
+export type McpUpdate = {
+  id: string;
+  runner: string;
+  name: string;
+  current?: string;
+  latest?: string;
+  /** e.g. up-to-date */
+  status: string;
+  reason?: string;
+};
+
+export type ConnectorEntry = {
+  id: string;
+  name: string;
+  description: string;
+  /** SF Symbol name */
+  icon: string;
+  /** google-oauth | slack-oauth | box-ccg | miro-oauth */
+  authKind: string;
+  docsUrl: string;
+  /** false while the connector's fetch pipeline does not exist yet */
+  pipelineReady: boolean;
+  /** set only on the catalog endpoint */
+  selected?: boolean;
+};
+
+export type LlmSource = {
+  id: string;
+  name: string;
+  /** builtin | git | local */
+  origin: string;
+  /** absolute path, or null if never resolved */
+  location?: string | null;
+  builtin: boolean;
+  version?: string | null;
+  /** git ref, git sources only */
+  ref?: string;
+  installed: boolean;
+  skillCount: number;
+  agentCount: number;
+  commandCount: number;
+  templateCount: number;
+  hookCount: number;
+  mcpCount: number;
+  enabled: boolean;
+  /** skills/agents/commands/templates this user unchecked inside the source */
+  disabledItemCount: number;
+};
+
+export type LlmSourceUpdate = {
+  id: string;
+  checkedAt?: string;
+  /** up-to-date | update-available | local | error */
+  status: string;
+  localRev?: string | null;
+  remoteRev?: string | null;
+  message?: string;
+};
+
+export type DiscoveryItem = {
+  name: string;
+  description: string;
+  path: string;
+  enabled: boolean;
+  isNew: boolean;
+};
+
+export type DiscoveryHook = {
+  event: string;
+  matcher?: string;
+  command: string;
+};
+
+export type Discovery = {
+  skills: DiscoveryItem[];
+  agents: DiscoveryItem[];
+  commands: DiscoveryItem[];
+  templates: DiscoveryItem[];
+  hooks: DiscoveryHook[];
+  mcpServers: Record<string, unknown>[];
+};
+
+/** Deliberately a bare {code} body, not the {error:{...}} envelope: on this route bare bodies are the update outcome protocol the Mac decodes (PluginUpdateOutcome.decode → .notFound), while an envelope means the route itself is missing (older server). Do not wrap it — PluginUpdatePresentationTests.updateOutcomeDecoding guards this. */
+export type ClaudeUpdateNotFound = {
+  code: string;
+  detail?: string;
+};
+
+export type PluginRows = {
+  plugins: Record<string, unknown>[];
+};
+
+export type KbSourcesOk = {
+  ok: true;
+};
+
+export type Entity = {
+  id: string;
+  meetingId: string;
+  /** null when the parent meeting row is gone */
+  meetingTitle: string | null;
+  /** meeting date (YYYY-MM-DD as stored) */
+  date: string | null;
+  /** decision | action | blocker | ... */
+  kind: string;
+  text: string;
+  quote: string | null;
+  /** kind-specific metadata; open set (owner, due, ...) */
+  meta: Record<string, unknown>;
+};
+
+export type MeetingEntity = {
+  id: string;
+  kind: string;
+  text: string;
+  quote: string | null;
+  /** kind-specific metadata; open set */
+  meta: Record<string, unknown>;
+};
+
+export type Meeting = {
+  id: string;
+  title: string;
+  date: string;
+  durationSec: number;
+  language: string | null;
+  participants: string[];
+  entities: MeetingEntity[];
+  /** present only with ?include=transcript */
+  transcript?: string;
+};
+
+export type SearchHit = {
+  /** meeting | decision | action | blocker | code | ticket | qa | doc | plan | task | outcome */
+  kind: string;
+  meetingId: string | null;
+  entityId: string | null;
+  title: string;
+  body: string;
+  /** FTS5 bm25 rank (lower is a better match) */
+  rank: number;
+  /** tickets: the source URL or id */
+  ref?: string;
+  /** tickets: provider, repo, state, number, labels, author, dates, isPR */
+  meta?: Record<string, unknown>;
+  /** meeting-linked hits */
+  meetingTitle?: string;
+  /** meeting date, or the index time for tickets */
+  date?: string;
+};
+
+export type Issue = {
+  id: string;
+  title: string;
+  body: string;
+  /** empty when the ticket had no ref */
+  url: string;
+  provider: string;
+  repo?: string;
+  number?: number;
+  state?: string;
+  labels: string[];
+  author?: string;
+  createdAt?: string;
+  updatedAt?: string;
+  isPR?: boolean;
+};
+
+export type ProjectExport = {
+  projectId: string;
+  /** ISO 8601 UTC */
+  exportedAt: string;
+  meetingCount: number;
+  planCount: number;
+  meetings: Record<string, unknown>[];
+  plans: Record<string, unknown>[];
+};
+
+export type Reviews = {
+  pending: number;
+  approved: number;
+  rejected: number;
+  executed: number;
+  failed: number;
+  expired: number;
+};
+
+export type Stats = {
+  meetings: number;
+  entities: number;
+  /** one count per indexed source kind; the open set includes code, ticket and qa and any kind added later */
+  sources: {
+    code: number;
+    ticket: number;
+    qa: number;
+    /** last index time per kind, SQLite datetime (UTC) */
+    lastIndexed: Record<string, string>;
+    [key: string]: unknown;
+  };
+  plans: number;
+  tasks: number;
+  reviews: Reviews;
+  outcomes: Outcomes;
+};
+
+export type SystemStatus = {
+  stats: Stats;
+  flow: {
+    capture: {
+      activeCount: number;
+      sessions: Record<string, unknown>[];
+    };
+    agent: {
+      activeCount: number;
+      runs: Record<string, unknown>[];
+    };
+    review: {
+      pendingCount: number;
+      byStatus: Reviews;
+      pendingItems: Record<string, unknown>[];
+    };
+    outcomes: Outcomes;
+  };
+};
+
+export type IngestResult = {
+  ok: true;
+  meetingId: string;
+  /** entities in the request, before the allowed-kind filter */
+  entityCount: number;
+};
+
+export type GitIndex = {
+  ok: true;
+  repo: string;
+  filesScanned: number;
+  filesIndexed: number;
+  filesWritten: number;
+  unchanged: number;
+  removed: number;
+  chunks: number;
+};
+
+export type TicketIndex = {
+  ok: true;
+  count: number;
+  chunks: number;
+};
+
+export type QaIndex = {
+  ok: true;
+  source: string;
+  total: number;
+  failed: number;
+  chunks: number;
+};
+
+export type ActivityItem = {
+  id: number;
+  kind: string;
+  title: string;
+  /** kind-specific detail; open set */
+  detail: Record<string, unknown> | null;
+  link: string | null;
+  /** SQLite datetime (UTC) */
+  created_at: string;
+};
+
+export type Outcomes = {
+  total: number;
+  /** outcome count per state; open set, empty when no outcomes exist */
+  byState: Record<string, unknown>;
+};
+
+export type LiveCaption = {
+  seq: number;
+  speaker: string;
+  text: string;
+  ts: number;
+  source: string;
+  meta?: {
+    planTaskId?: string;
+    score?: number;
+    reason?: string;
+  };
+};
+
+export type LiveSession = {
+  sessionId: string;
+  meetingTitle: string;
+  startedAt: number;
+  lastWrite: number;
+  captionCount: number;
+  sequence: number;
+};
+
+export type RateLimited = {
+  error: {
+    code: "RATE_LIMITED";
+    retryAfterSec: number;
+  };
+};
+
+export type FeatureDisabled = {
+  error: "feature_disabled";
+  feature: string;
+};
+
+export type ScheduleItem = {
+  provider: string;
+  repo: string;
+  issueNumber: number;
+  startDate?: string | null;
+  dueDate?: string | null;
+  estimateDays?: number | null;
+  dependsOn: number[];
+  updatedAt: string;
+};
+
+export type LoopUsage = {
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  costUsd: number;
+  numTurns: number;
+  durationMs: number;
+};
+
+export type CodeGraphNode = {
+  /** Required by the server: a node without an id is dropped and counted in droppedNodes. */
+  id?: string;
+  title?: string;
+  kind?: string;
+  metadata?: {
+    source_file?: string;
+    /** Mac sends it as a string (CodeGraph metadata is [String:String]); the server normalises with String(). */
+    line?: number | string;
+    language?: string;
+    doc?: string;
+  };
+};
+
+export type CodeGraphEdge = {
+  fromId?: string;
+  toId?: string;
+  kind?: string;
+  confidence?: string;
+};
+
+export type AuditItem = {
+  id: number;
+  action: string;
+  resource: string | null;
+  outcome: string;
+  detail: Record<string, unknown> | null;
+  createdAt: string;
+  ip: string | null;
+  userAgent: string | null;
+};
+
+/** One prior chat turn. role is 'user' or 'assistant'; the server maps any other role to 'Assistant' in the /chat prompt. */
+export type Turn = {
+  role?: string;
+  content?: string;
+};
+
+/** One selected source for /generate-doc. name is the display name (sanitized to one line, 80 chars); content is the source text, budgeted by packSources. */
+export type Source = {
+  name?: string;
+  content?: string;
+};
+
+/** One file attached to a Code Assistant turn. A content starting with '[binary:<media type>]' followed by a newline marks a binary file; an image media type is replaced by a one-line note on the legacy engine. */
+export type Attachment = {
+  path?: string;
+  content?: string;
+};
+
+/** The Mac client's agent context. The server forwards only these keys (buildEnrichedAgentContext, extension/server/ai-routes.mjs); any other key is dropped. activeProject, indexedRepos entries and recentIssues entries are opaque to this route, so they are open objects. */
+export type AgentContext = {
+  sessionId?: string | null;
+  chatSessionId?: string | null;
+  /** The active project as the Mac sends it; opaque here and forwarded unchanged. */
+  activeProject?: Record<string, unknown> | null;
+  indexedRepos?: Record<string, unknown>[];
+  recentIssues?: Record<string, unknown>[];
+  workspaceRoot?: string | null;
+  activeRepoRoot?: string | null;
+  /** The active repo's branch, capped at 200 characters. */
+  currentBranch?: string | null;
+  /** Staged and unstaged file counts and the upstream position (the Mac's GitStatus). Rendered per turn as the Git state block. */
+  gitStatus?: {
+    staged?: number;
+    unstaged?: number;
+    ahead?: number;
+    behind?: number;
+    hasUpstream?: boolean;
+  } | null;
+};
+
+/** A session task (llm_agent/runtime/handlers/session-tasks.mjs). status is one of pending, in_progress, completed, skipped, failed; a model-written status is stored as given, so it is typed as a string. */
+export type NotesGenerationTask = {
+  id?: string;
+  title?: string;
+  status?: string;
+  /** Epoch milliseconds (Date.now()). */
+  createdAt?: number;
+};
+
+/** usage of the legacy (no agentContext) /code-assist reply, and the attachment accounting of every /code-assist reply. */
+export type LegacyUsage = {
+  attachmentCount?: number;
+  attachmentChars?: number;
+  paths?: string[];
+  truncatedPaths?: string[];
+};
+
+/** usage of an agent-path /code-assist reply: LegacyUsage plus the memory block size (route.mjs memoryUsage) and, when every model call of the turn reported tokens, the summed turn tokens (kb/usage.mjs turnTokenUsageFields). The memory fields and the token fields are absent in some turns, so they are x-optional. */
+export type AgentUsage = {
+  attachmentCount?: number;
+  attachmentChars?: number;
+  paths?: string[];
+  truncatedPaths?: string[];
+  memoryChars?: number;
+  memoryApproxTokens?: number;
+  memoryHasChatMemory?: boolean;
+  inputTokens?: number;
+  outputTokens?: number;
+  cacheReadTokens?: number;
+  cacheCreationTokens?: number;
+  modelCalls?: number;
+};
+
+export type EntityAction = {
+  /** Sanitized to one line, 500 chars. */
+  text: string;
+  /** Sanitized to one line, 50 chars; null when unknown. */
+  owner: string | null;
+  /** YYYY-MM-DD, or null (the server checks the shape with a regex; the keyword is not supported here). */
+  due: string | null;
+  /** Verbatim phrase from the transcript, 200 chars. */
+  quote: string;
+};
+
+export type EntityDecision = {
+  text: string;
+  participants: string[];
+  quote: string;
+};
+
+export type EntityBlocker = {
+  text: string;
+  /** Any other model value is coerced to med. */
+  severity: "low" | "med" | "high";
+  quote: string;
+};
+
+export type NotesGenerationOk = {
+  ok: true;
+};
+
+/** A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols. */
+export type PlanningTask = {
+  id: string;
+  planId?: string;
+  position?: number;
+  milestone?: string | null;
+  title: string;
+  description?: string | null;
+  owner?: string | null;
+  due?: string | null;
+  estimateDays?: number | null;
+  dependsOn?: string[];
+  status: string;
+  risk?: string | null;
+  riskReason?: string | null;
+  files?: {
+    ref?: string;
+    title?: string;
+    bodyExcerpt?: string;
+    rank?: number;
+  }[];
+  symbols?: {
+    symbol_id?: string;
+    title?: string;
+    kind?: string;
+    repo_id?: string;
+    source_file?: string;
+    line?: number;
+  }[];
+  /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots). */
+  meta?: Record<string, unknown>;
+};
+
+export type CodeFile = {
+  path: string;
+  kind: "create" | "modify";
+  language?: string;
+  content: string;
+};
+
+export type ModelLimit = {
+  provider: string;
+  model: string;
+  label: string;
+  priority: number;
+  enabled: boolean;
+  limit_value: number;
+  unit: "runs" | "tokens";
+  window_kind: "daily" | "monthly";
+  threshold_pct: number;
+  custom: boolean;
+};
+
+/** The resolver verdict (kb/usage.mjs resolveModel). used, limit, pct and unit are present only when a model was picked (ok or degraded); a paused or unconfigured verdict has no pick. */
+export type Resolution = {
+  provider: string;
+  /** null when paused or unconfigured */
+  model: string | null;
+  status: "ok" | "degraded" | "paused" | "unconfigured";
+  /** ISO-8601 window reset; null when there is no chain */
+  resetAt: string | null;
+  reason: string;
+  used?: number;
+  limit?: number;
+  pct?: number;
+  unit?: string;
+  engaged: boolean;
+};
+
+export type ModelStat = {
+  model: string;
+  label: string;
+  enabled: boolean;
+  custom: boolean;
+  priority: number;
+  unit: string;
+  window_kind: string;
+  limit: number;
+  threshold_pct: number;
+  used: number;
+  pct: number | null;
+  state: "ok" | "warning" | "exhausted";
+  quota: boolean;
+  tokens: {
+    input: number;
+    output: number;
+    cacheRead: number;
+    cacheCreation: number;
+    totalInput: number;
+    cacheHitPct: number | null;
+    unknownRows: number;
+  };
+  resetAt: string;
+};
+
+export type TokenBreakdown = {
+  input: number;
+  output: number;
+  cacheRead: number;
+  cacheCreation: number;
+  totalInput: number;
+  cacheHitPct: number | null;
+  unknownRows: number;
+};
+
+export type RouteRef = {
+  /** anthropic | openai | google | deepseek | jev | custom:<id> */
+  provider: string;
+  model: string;
+};
+
+/** One guardrail finding (extension/guardrails/rules.mjs check()). severity is blocking (fails the gate), warning (shown, does not fail) or info. details, when present, carries the matched snippets of a secret or PII finding; snippets are redacted before they are stored. */
+export type Finding = {
+  ruleId: string;
+  severity: "blocking" | "warning" | "info";
+  message: string;
+  details?: Record<string, unknown>[];
+};
+
+/** The guardrail report runGuardrails returns for the item, as stored at submit and re-run at approval time. passed is false when any finding has severity blocking. findings is the full list; the server also sends blocking, warnings and info, which are the same findings partitioned by severity (open keys, so not declared here). */
+export type Guardrails = {
+  passed: boolean;
+  findings: Finding[];
+  [key: string]: unknown;
+};
+
+/** The kind-specific payload, open because its shape depends on kind. Submit keeps only the keys listed for the kind (kb/review-payload.mjs REVIEW_PAYLOAD_KEYS) and removes credential-looking keys (token, apiKey, secret, password, credential, auth, bearer, authorization) at every depth; every review response returns the payload scrubbed the same way. dispatch: target (github, backlog or linear; preview never reaches review), planId, taskIds, config (tracker credentials and settings: repo, space, projectId, issueTypeId, teamId; credential keys are stripped), and items, which the server replaces with the plan's tasks at submit and approve (title, body). codegen-apply: repoPath, taskId, summary, files and tests (each {path, content}), pr (ghRepo, baseBranch; credential keys are stripped), and allowedRepos, which the server sets from the user's allow-list at submit and approve. The server never trusts a client-sent allowedRepos or items. */
+export type Payload = Record<string, unknown>;
+
+/** A review item as the GET, submit, approve and reject routes send it (redactReviewItem: the payload has no credentials). result is {} while the item is undecided, the apply result after codegen-apply (baseDir, files, count), or {error} after a failed execution. decidedAt is null until the item is decided. */
+export type ReviewItem = {
+  id: string;
+  kind: "dispatch" | "codegen-apply";
+  planId?: string | null;
+  taskId?: string | null;
+  title: string;
+  payload: Payload;
+  guardrails: Guardrails;
+  status: "pending" | "approved" | "rejected" | "executed" | "failed" | "expired";
+  reviewerNote?: string | null;
+  result?: Record<string, unknown>;
+  createdAt: string;
+  decidedAt?: string | null;
+};
+
+/** One row of the list route: the item without payload, guardrails or result (kb.listReviews). */
+export type ReviewSummary = {
+  id: string;
+  kind: "dispatch" | "codegen-apply";
+  planId?: string | null;
+  taskId?: string | null;
+  title: string;
+  status: "pending" | "approved" | "rejected" | "executed" | "failed" | "expired";
+  createdAt: string;
+  decidedAt?: string | null;
+};
+
+/** The 422 body of approve. CREDENTIAL_REQUIRED: the only blocking finding is dispatch.creds; the item stays pending and nothing is sent. GUARDRAILS_FAILED: the guardrails fail at approval time; the item is auto-rejected (item.status is rejected, with the reviewer note 'Auto-rejected: guardrails fail at approval time.'). */
+export type GuardrailRejection = {
+  error: {
+    code: "CREDENTIAL_REQUIRED" | "GUARDRAILS_FAILED";
+    message: string;
+  };
+  guardrails: Guardrails;
+  item: ReviewItem;
+};
+
+/** The 500 body of approve when execution throws. The item is already marked failed, and result.error holds the message. */
+export type ExecutionFailure = {
+  error: {
+    code: "REVIEW_EXECUTION_FAILED";
+    message: string;
+  };
+  item: ReviewItem;
+};
+
+export type ReviewOk = {
+  ok: true;
+};
+
+/** Request parts for `POST /agent/v2/stream` (schema/http/agent.schema.json). */
+export type PostAgentV2StreamRequest = {
+  body: {
+    message: string;
+    agentContext: {
+      chatSessionId: string;
+      workspaceRoot: string;
+    };
+    mode?: string;
+    language?: string;
+    model?: string;
+    /** anthropic (the default) or custom:<uuid> */
+    provider?: string;
+    effort?: string;
+    skills?: string[];
+    planExecute?: boolean;
+    planWrite?: boolean;
+    permissionMode?: string;
+    attachments?: Record<string, unknown>[];
+    fresh?: boolean;
+    /** read only when fresh is true */
+    history?: Record<string, unknown>[];
+  };
+};
+
+export type PostAgentV2StreamResponse200 = ReadonlyArray<AgentV2Event>;
+
+export type PostAgentV2StreamResponse400 = CommonError;
+
+/** Request parts for `POST /agent/v2/decision` (schema/http/agent.schema.json). */
+export type PostAgentV2DecisionRequest = {
+  body: {
+    requestId: string;
+    sdkSessionId: string;
+    /** allow, deny or answer; may be omitted when answers is sent (the server then answers) */
+    action?: string;
+    /** question to answer (AskUserQuestion approval): question text to chosen answer */
+    answers?: Record<string, string>;
+    /** the denial reason, on deny */
+    feedback?: string;
+  };
+};
+
+export type PostAgentV2DecisionResponse200 = AgentOk;
+
+export type PostAgentV2DecisionResponse404 = CommonError;
+
+/** Request parts for `DELETE /agent/v2/session` (schema/http/agent.schema.json). */
+export type DeleteAgentV2SessionRequest = {
+  body: {
+    chatSessionId?: string;
+  };
+};
+
+export type DeleteAgentV2SessionResponse200 = {
+  ok: true;
+  /** the SDK session the chat was bound to, or null when it had none */
+  sdkSessionId: string | null;
+};
+
+export type DeleteAgentV2SessionResponse400 = CommonError;
+
+/** Request parts for `POST /agent/v2/cancel` (schema/http/agent.schema.json). */
+export type PostAgentV2CancelRequest = {
+  body: {
+    chatSessionId?: string;
+  };
+};
+
+export type PostAgentV2CancelResponse200 = {
+  /** false when no turn was in flight for the chat */
+  cancelled: boolean;
+};
+
+export type PostAgentV2CancelResponse400 = CommonError;
+
+/** Request parts for `POST /kb/agent/dispatch` (schema/http/agent.schema.json). */
+export type PostKbAgentDispatchRequest = {
+  body: {
+    sessionId?: string;
+    planId?: string | null;
+    persona?: string | null;
+    language?: string | null;
+    meetingUrl?: string | null;
+  };
+};
+
+export type PostKbAgentDispatchResponse200 = {
+  sessionId: string;
+  planId: string | null;
+  /** false when the session already had a loop attached */
+  attached: boolean;
+  /** set only when attached is false: already-attached */
+  reason?: string;
+};
+
+/** Request parts for `POST /kb/agent/stop` (schema/http/agent.schema.json). */
+export type PostKbAgentStopRequest = {
+  body: {
+    sessionId?: string;
+  };
+};
+
+export type PostKbAgentStopResponse200 = {
+  stopped: boolean;
+  /** set only when stopped is false: unknown-session or forbidden */
+  reason?: string;
+};
+
+export type PostKbAgentStopResponse400 = CommonError;
+
+/** Request parts for `GET /kb/agent/runs` (schema/http/agent.schema.json). */
+export type GetKbAgentRunsRequest = Record<string, never>;
+
+export type GetKbAgentRunsResponse200 = {
+  runs: ({
+    sessionId: string;
+    planId: string | null;
+    /** epoch milliseconds */
+    startedAt: number;
+    lastTickAt: number | null;
+    /** the loop's last candidate decision (agents/meeting-agent.mjs recordDecision); null until the loop has judged one */
+    lastDecision: {
+      reason?: string;
+      score?: number | null;
+      asked?: boolean;
+    } | null;
+  })[];
+};
+
+/** Request parts for `POST /kb/agent/feedback` (schema/http/agent.schema.json). */
+export type PostKbAgentFeedbackRequest = {
+  body: {
+    sessionId?: string;
+    captionSeq?: number;
+    /** useful, noise or later */
+    verdict?: string;
+    planTaskId?: string;
+    score?: number;
+  };
+};
+
+export type PostKbAgentFeedbackResponse200 = AgentOk;
+
+export type PostKbAgentFeedbackResponse400 = CommonError;
+
+/** Request parts for `GET /kb/agent/feedback/stats` (schema/http/agent.schema.json). */
+export type GetKbAgentFeedbackStatsRequest = {
+  query: {
+    /** the window in days; default 30 */
+    sinceDays?: string;
+  };
+};
+
+export type GetKbAgentFeedbackStatsResponse200 = {
+  total: number;
+  byVerdict: VerdictCounts;
+  usefulRate: number | null;
+  /** mean score per verdict, keyed by verdict */
+  avgScore: Record<string, number | null>;
+  sinceDays: number;
+};
+
+/** Request parts for `GET /kb/agent/feedback/by-task` (schema/http/agent.schema.json). */
+export type GetKbAgentFeedbackByTaskRequest = {
+  query: {
+    /** the window in days; default 30 */
+    sinceDays?: string;
+  };
+};
+
+export type GetKbAgentFeedbackByTaskResponse200 = {
+  tasks: TaskFeedback[];
+};
+
+/** Request parts for `GET /kb/agent/persona` (schema/http/agent.schema.json). */
+export type GetKbAgentPersonaRequest = Record<string, never>;
+
+export type GetKbAgentPersonaResponse200 = {
+  /** the stored persona, or null when none is set */
+  persona: {
+    name?: string | null;
+    promptSuffix?: string | null;
+    autoDispatch?: boolean;
+  } | null;
+};
+
+/** Request parts for `PUT /kb/agent/persona` (schema/http/agent.schema.json). */
+export type PutKbAgentPersonaRequest = {
+  body: {
+    name?: string;
+    promptSuffix?: string;
+    autoDispatch?: boolean;
+  };
+};
+
+export type PutKbAgentPersonaResponse200 = {
+  persona: LegacyPersona;
+};
+
+/** Request parts for `GET /kb/agent/personas` (schema/http/agent.schema.json). */
+export type GetKbAgentPersonasRequest = Record<string, never>;
+
+export type GetKbAgentPersonasResponse200 = PersonaList;
+
+/** Request parts for `POST /kb/agent/personas` (schema/http/agent.schema.json). */
+export type PostKbAgentPersonasRequest = {
+  body: {
+    name?: string;
+    promptSuffix?: string;
+    autoDispatch?: boolean;
+  };
+};
+
+export type PostKbAgentPersonasResponse200 = {
+  persona: Persona;
+  personas: Persona[];
+  active: string | null;
+  count: number;
+};
+
+/** Request parts for `PUT /kb/agent/personas/active` (schema/http/agent.schema.json). */
+export type PutKbAgentPersonasActiveRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PutKbAgentPersonasActiveResponse200 = PersonaList;
+
+export type PutKbAgentPersonasActiveResponse404 = CommonError;
+
+/** Request parts for `PUT /kb/agent/personas/:id` (schema/http/agent.schema.json). */
+export type PutKbAgentPersonasIdRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    name?: string;
+    promptSuffix?: string;
+    autoDispatch?: boolean;
+  };
+};
+
+export type PutKbAgentPersonasIdResponse200 = {
+  persona: Persona;
+};
+
+export type PutKbAgentPersonasIdResponse404 = CommonError;
+
+/** Request parts for `DELETE /kb/agent/personas/:id` (schema/http/agent.schema.json). */
+export type DeleteKbAgentPersonasIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteKbAgentPersonasIdResponse200 = {
+  removed: boolean;
+  active: string | null;
+};
+
+export type DeleteKbAgentPersonasIdResponse400 = CommonError;
+
+/** Request parts for `GET /kb/agent/catalog` (schema/http/agent.schema.json). */
+export type GetKbAgentCatalogRequest = Record<string, never>;
+
+export type GetKbAgentCatalogResponse200 = {
+  skills: {
+    global: SkillEntry[];
+    internal: SkillEntry[];
+    plugins: {
+      pluginName: string;
+      pluginDisplayName: string;
+      skills: SkillEntry[];
+    }[];
+  };
+  subagents: {
+    plugins: Record<string, unknown>[];
+  };
+};
+
+/** Request parts for `GET /kb/agent/commands` (schema/http/agent.schema.json). */
+export type GetKbAgentCommandsRequest = Record<string, never>;
+
+export type GetKbAgentCommandsResponse200 = unknown;
+
+/** Request parts for `GET /kb/agent/generation-library` (schema/http/agent.schema.json). */
+export type GetKbAgentGenerationLibraryRequest = Record<string, never>;
+
+export type GetKbAgentGenerationLibraryResponse200 = {
+  repo: string | null;
+  templates: LibraryEntry[];
+  commands: LibraryEntry[];
+};
+
+/** Request parts for `GET /kb/agent/skill-library` (schema/http/agent.schema.json). */
+export type GetKbAgentSkillLibraryRequest = Record<string, never>;
+
+export type GetKbAgentSkillLibraryResponse200 = {
+  repo: string | null;
+  skills: SkillLibraryEntry[];
+};
+
+/** Request parts for `GET /kb/agent/project-memory` (schema/http/agent.schema.json). */
+export type GetKbAgentProjectMemoryRequest = {
+  query: {
+    /** an indexed repo path; resolved against the allow-list */
+    repo?: string;
+    /** the open workspace folder */
+    workspaceRoot?: string;
+  };
+};
+
+export type GetKbAgentProjectMemoryResponse200 = {
+  facts: string[];
+  /** the resolved absolute root, or null when no candidate is allow-listed */
+  repo: string | null;
+};
+
+/** Request parts for `DELETE /kb/agent/project-memory` (schema/http/agent.schema.json). */
+export type DeleteKbAgentProjectMemoryRequest = {
+  body: {
+    repo: string;
+    workspaceRoot?: string;
+    /** one fact to remove, by its identity */
+    fact?: string;
+    /** true clears every fact of the repo */
+    all?: boolean;
+  };
+};
+
+export type DeleteKbAgentProjectMemoryResponse200 = {
+  facts: string[];
+};
+
+export type DeleteKbAgentProjectMemoryResponse404 = CommonError;
+
+/** Request parts for `GET /kb/agent/tool-approvals` (schema/http/agent.schema.json). */
+export type GetKbAgentToolApprovalsRequest = Record<string, never>;
+
+export type GetKbAgentToolApprovalsResponse200 = ToolApprovalListing;
+
+/** Request parts for `DELETE /kb/agent/tool-approvals` (schema/http/agent.schema.json). */
+export type DeleteKbAgentToolApprovalsRequest = {
+  body: {
+    /** with toolName and pattern: one project rule */
+    projectRoot?: string;
+    /** alone: one legacy global grant */
+    toolName?: string;
+    pattern?: string;
+    /** true revokes everything */
+    all?: boolean;
+  };
+};
+
+export type DeleteKbAgentToolApprovalsResponse200 = {
+  rules: ToolRule[];
+  approvals: ApprovalGrant[];
+  removed: number;
+};
+
+export type DeleteKbAgentToolApprovalsResponse400 = CommonError;
+
+/** Request parts for `GET /kb/agent/session-memory` (schema/http/agent.schema.json). */
+export type GetKbAgentSessionMemoryRequest = {
+  query: {
+    /** the chat's id; a blank value answers 400 */
+    sessionId: string;
+  };
+};
+
+export type GetKbAgentSessionMemoryResponse200 = {
+  facts: string[];
+};
+
+export type GetKbAgentSessionMemoryResponse400 = CommonError;
+
+/** Request parts for `DELETE /kb/agent/session-memory` (schema/http/agent.schema.json). */
+export type DeleteKbAgentSessionMemoryRequest = {
+  body: {
+    sessionId: string;
+  };
+};
+
+export type DeleteKbAgentSessionMemoryResponse200 = {
+  removed: number;
+};
+
+export type DeleteKbAgentSessionMemoryResponse400 = CommonError;
+
+/** Request parts for `POST /kb/agent/ask` (schema/http/agent.schema.json). */
+export type PostKbAgentAskRequest = {
+  body: {
+    message?: string;
+    /** one base64 image, capped per image; not exercised offline */
+    image?: Record<string, unknown>;
+    /** the prior turns of this chat; only the last 10 are sent to the model */
+    history?: {
+      /** user or assistant */
+      role: string;
+      content: string;
+    }[];
+    provider?: string;
+    model?: string;
+  };
+};
+
+export type PostKbAgentAskResponse200 = {
+  reply: string;
+};
+
+export type PostKbAgentAskResponse400 = CommonError;
+
+/** Request parts for `GET /kb/agent/ask/history` (schema/http/agent.schema.json). */
+export type GetKbAgentAskHistoryRequest = {
+  query: {
+    /** newest N, within the server's hard cap; default 50 */
+    limit?: string;
+  };
+};
+
+export type GetKbAgentAskHistoryResponse200 = {
+  messages: AskMessage[];
+};
+
+/** Request parts for `DELETE /kb/agent/ask/history` (schema/http/agent.schema.json). */
+export type DeleteKbAgentAskHistoryRequest = Record<string, never>;
+
+export type DeleteKbAgentAskHistoryResponse200 = {
+  removed: number;
+};
+
+/** Request parts for `GET /kb/chat/sessions` (schema/http/agent.schema.json). */
+export type GetKbChatSessionsRequest = {
+  query: {
+    /** mac, extension or any */
+    surface?: string;
+    /** ask, agent or transcript */
+    mode?: string;
+    limit?: string;
+  };
+};
+
+export type GetKbChatSessionsResponse200 = {
+  sessions: ChatSession[];
+};
+
+/** Request parts for `POST /kb/chat/sessions` (schema/http/agent.schema.json). */
+export type PostKbChatSessionsRequest = {
+  body: {
+    title?: string;
+    /** mac, extension or any; default any */
+    surface?: string;
+    /** ask, agent or transcript; default ask */
+    mode?: string;
+    /** the server also accepts project_id */
+    projectId?: string;
+  };
+};
+
+export type PostKbChatSessionsResponse201 = {
+  session: ChatSession;
+};
+
+/** Request parts for `GET /kb/chat/sessions/:id` (schema/http/agent.schema.json). */
+export type GetKbChatSessionsIdRequest = {
+  query: {
+    /** the newest N messages */
+    limit?: string;
+  };
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbChatSessionsIdResponse200 = {
+  session: {
+    id: string;
+    title: string;
+    surface: string;
+    mode: string;
+    projectId: string | null;
+    createdAt: number;
+    updatedAt: number;
+    messages: ChatMessage[];
+  };
+};
+
+export type GetKbChatSessionsIdResponse404 = CommonError;
+
+/** Request parts for `PATCH /kb/chat/sessions/:id` (schema/http/agent.schema.json). */
+export type PatchKbChatSessionsIdRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    title?: string;
+  };
+};
+
+export type PatchKbChatSessionsIdResponse200 = AgentOk;
+
+export type PatchKbChatSessionsIdResponse400 = CommonError;
+
+export type PatchKbChatSessionsIdResponse404 = CommonError;
+
+/** Request parts for `DELETE /kb/chat/sessions/:id` (schema/http/agent.schema.json). */
+export type DeleteKbChatSessionsIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteKbChatSessionsIdResponse200 = AgentOk;
+
+export type DeleteKbChatSessionsIdResponse404 = CommonError;
+
+/** Request parts for `POST /kb/chat/sessions/:id/messages` (schema/http/agent.schema.json). */
+export type PostKbChatSessionsIdMessagesRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    /** user, assistant or system */
+    role?: string;
+    content?: string;
+    /** caller-supplied metadata, stored as sent */
+    meta?: Record<string, unknown> | null;
+  };
+};
+
+export type PostKbChatSessionsIdMessagesResponse201 = {
+  seq: number;
+  createdAt: number;
+};
+
+export type PostKbChatSessionsIdMessagesResponse400 = CommonError;
+
+export type PostKbChatSessionsIdMessagesResponse404 = CommonError;
+
+/** Request parts for `DELETE /kb/chat/sessions/:id/messages` (schema/http/agent.schema.json). */
+export type DeleteKbChatSessionsIdMessagesRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteKbChatSessionsIdMessagesResponse200 = {
+  cleared: number;
+};
+
+/** Request parts for `GET /` (schema/http/health-auth.schema.json). */
+export type GetRequest = Record<string, never>;
+
+export type GetResponse200 = Health;
+
+/** Request parts for `GET /health` (schema/http/health-auth.schema.json). */
+export type GetHealthRequest = Record<string, never>;
+
+export type GetHealthResponse200 = Health;
+
+/** Request parts for `GET /launch-app` (schema/http/health-auth.schema.json). */
+export type GetLaunchAppRequest = {
+  query: {
+    /** transcript | plan | review | history | settings; any other value falls back to transcript */
+    to?: string;
+    /** appended to the llmide:// target */
+    session?: string;
+  };
+};
+
+/** HTML page with a meta refresh to llmide://<tab>; the Location header carries the same target */
+export type GetLaunchAppResponse302 = string;
+
+/** Request parts for `GET /auth/well-known` (schema/http/health-auth.schema.json). */
+export type GetAuthWellKnownRequest = Record<string, never>;
+
+export type GetAuthWellKnownResponse200 = WellKnown;
+
+/** Request parts for `POST /auth/register` (schema/http/health-auth.schema.json). */
+export type PostAuthRegisterRequest = {
+  body: {
+    email?: string;
+    /** 10 to 200 characters */
+    password?: string;
+    displayName?: string;
+  };
+};
+
+export type PostAuthRegisterResponse201 = {
+  user: User;
+};
+
+export type PostAuthRegisterResponse400 = CommonError;
+
+export type PostAuthRegisterResponse403 = CommonError;
+
+export type PostAuthRegisterResponse409 = CommonError;
+
+export type PostAuthRegisterResponse429 = CommonError;
+
+/** Request parts for `POST /auth/login` (schema/http/health-auth.schema.json). */
+export type PostAuthLoginRequest = {
+  body: {
+    email?: string;
+    password?: string;
+  };
+};
+
+export type PostAuthLoginResponse200 = Session;
+
+export type PostAuthLoginResponse401 = CommonError;
+
+export type PostAuthLoginResponse429 = CommonError;
+
+/** Request parts for `POST /auth/refresh` (schema/http/health-auth.schema.json). */
+export type PostAuthRefreshRequest = {
+  body: {
+    refreshToken?: string;
+  };
+};
+
+export type PostAuthRefreshResponse200 = Session;
+
+export type PostAuthRefreshResponse401 = CommonError;
+
+export type PostAuthRefreshResponse429 = CommonError;
+
+/** Request parts for `POST /auth/logout` (schema/http/health-auth.schema.json). */
+export type PostAuthLogoutRequest = {
+  body: {
+    /** revokes that one session; without it every refresh token of the user is revoked */
+    refreshToken?: string;
+    /** revokes every session */
+    allDevices?: boolean;
+  };
+};
+
+export type PostAuthLogoutResponse200 = HealthAuthOk;
+
+export type PostAuthLogoutResponse401 = CommonError;
+
+/** Request parts for `POST /auth/reset-request` (schema/http/health-auth.schema.json). */
+export type PostAuthResetRequestRequest = {
+  body: {
+    email?: string;
+  };
+};
+
+export type PostAuthResetRequestResponse200 = {
+  ok: true;
+  /** single-use reset token, 1 hour TTL */
+  token: string;
+  expiresAt: string;
+} | {
+  ok: true;
+  message: string;
+};
+
+export type PostAuthResetRequestResponse429 = CommonError;
+
+/** Request parts for `POST /auth/reset-confirm` (schema/http/health-auth.schema.json). */
+export type PostAuthResetConfirmRequest = {
+  body: {
+    token?: string;
+    newPassword?: string;
+  };
+};
+
+export type PostAuthResetConfirmResponse200 = HealthAuthOk;
+
+export type PostAuthResetConfirmResponse400 = CommonError;
+
+export type PostAuthResetConfirmResponse401 = CommonError;
+
+export type PostAuthResetConfirmResponse429 = CommonError;
+
+/** Request parts for `POST /auth/google/start` (schema/http/health-auth.schema.json). */
+export type PostAuthGoogleStartRequest = {
+  body: {
+    /** bring-your-own client: both fields, or neither for the hosted client */
+    clientId?: string;
+    clientSecret?: string;
+  };
+};
+
+export type PostAuthGoogleStartResponse200 = OAuthStart;
+
+export type PostAuthGoogleStartResponse401 = CommonError;
+
+export type PostAuthGoogleStartResponse503 = CommonError;
+
+/** Request parts for `GET /auth/google/status` (schema/http/health-auth.schema.json). */
+export type GetAuthGoogleStatusRequest = {
+  query: {
+    state?: string;
+  };
+};
+
+export type GetAuthGoogleStatusResponse200 = GoogleStatus;
+
+export type GetAuthGoogleStatusResponse401 = CommonError;
+
+/** Request parts for `GET /auth/google/callback` (schema/http/health-auth.schema.json). */
+export type GetAuthGoogleCallbackRequest = {
+  query: {
+    code?: string;
+    state?: string;
+  };
+};
+
+/** HTML page; no bearer token on this route (Google's redirect) */
+export type GetAuthGoogleCallbackResponse200 = string;
+
+/** HTML page when the per-IP OAuth-callback bucket is empty */
+export type GetAuthGoogleCallbackResponse429 = string;
+
+/** Request parts for `POST /auth/slack/start` (schema/http/health-auth.schema.json). */
+export type PostAuthSlackStartRequest = {
+  body: Record<string, unknown>;
+};
+
+export type PostAuthSlackStartResponse200 = OAuthStart;
+
+export type PostAuthSlackStartResponse401 = CommonError;
+
+export type PostAuthSlackStartResponse503 = CommonError;
+
+/** Request parts for `GET /auth/slack/status` (schema/http/health-auth.schema.json). */
+export type GetAuthSlackStatusRequest = {
+  query: {
+    state?: string;
+  };
+};
+
+export type GetAuthSlackStatusResponse200 = SlackStatus;
+
+export type GetAuthSlackStatusResponse401 = CommonError;
+
+/** Request parts for `GET /auth/slack/callback` (schema/http/health-auth.schema.json). */
+export type GetAuthSlackCallbackRequest = {
+  query: {
+    code?: string;
+    state?: string;
+  };
+};
+
+/** HTML page; no bearer token on this route (Slack's redirect) */
+export type GetAuthSlackCallbackResponse200 = string;
+
+/** Request parts for `GET /auth/mcp-connector/callback` (schema/http/health-auth.schema.json). */
+export type GetAuthMcpConnectorCallbackRequest = {
+  query: {
+    code?: string;
+    state?: string;
+  };
+};
+
+/** HTML page; no bearer token on this route (the remote MCP server's redirect) */
+export type GetAuthMcpConnectorCallbackResponse200 = string;
+
+/** Request parts for `GET /auth/me` (schema/http/health-auth.schema.json). */
+export type GetAuthMeRequest = Record<string, never>;
+
+export type GetAuthMeResponse200 = User;
+
+export type GetAuthMeResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/password` (schema/http/health-auth.schema.json). */
+export type PostAuthMePasswordRequest = {
+  body: {
+    currentPassword?: string;
+    newPassword?: string;
+  };
+};
+
+export type PostAuthMePasswordResponse200 = HealthAuthOk;
+
+export type PostAuthMePasswordResponse400 = CommonError;
+
+export type PostAuthMePasswordResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/prefs` (schema/http/health-auth.schema.json). */
+export type GetAuthMePrefsRequest = Record<string, never>;
+
+export type GetAuthMePrefsResponse200 = {
+  prefs: Prefs;
+};
+
+export type GetAuthMePrefsResponse401 = CommonError;
+
+/** Request parts for `PUT /auth/me/prefs` (schema/http/health-auth.schema.json). */
+export type PutAuthMePrefsRequest = {
+  body: Prefs;
+};
+
+export type PutAuthMePrefsResponse200 = {
+  prefs: Prefs;
+};
+
+export type PutAuthMePrefsResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/secrets` (schema/http/health-auth.schema.json). */
+export type GetAuthMeSecretsRequest = Record<string, never>;
+
+export type GetAuthMeSecretsResponse200 = {
+  /** keys this user has set; values never leave the server */
+  secrets: Secret[];
+  /** every key a user may store */
+  available: string[];
+};
+
+export type GetAuthMeSecretsResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/secrets` (schema/http/health-auth.schema.json). */
+export type PostAuthMeSecretsRequest = {
+  body: {
+    key: string;
+    value?: string;
+  };
+};
+
+export type PostAuthMeSecretsResponse200 = HealthAuthOk;
+
+export type PostAuthMeSecretsResponse400 = CommonError;
+
+export type PostAuthMeSecretsResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/repos` (schema/http/health-auth.schema.json). */
+export type PostAuthMeReposRequest = {
+  body: {
+    /** an absolute local path, registered as allowed for git connect */
+    path?: string;
+    label?: string;
+  };
+};
+
+export type PostAuthMeReposResponse200 = {
+  ok: true;
+  /** the canonical absolute path stored */
+  path: string;
+};
+
+export type PostAuthMeReposResponse400 = CommonError;
+
+export type PostAuthMeReposResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/plugins` (schema/http/health-auth.schema.json). */
+export type GetAuthMePluginsRequest = Record<string, never>;
+
+export type GetAuthMePluginsResponse200 = {
+  pluginDir: string;
+  plugins: Record<string, unknown>[];
+};
+
+export type GetAuthMePluginsResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/plugins/toggle` (schema/http/health-auth.schema.json). */
+export type PostAuthMePluginsToggleRequest = {
+  body: {
+    name?: string;
+    enabled?: boolean;
+  };
+};
+
+export type PostAuthMePluginsToggleResponse200 = unknown;
+
+export type PostAuthMePluginsToggleResponse400 = CommonError;
+
+export type PostAuthMePluginsToggleResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/plugins/hook-trust` (schema/http/health-auth.schema.json). */
+export type PostAuthMePluginsHookTrustRequest = {
+  body: {
+    name?: string;
+    trusted?: boolean;
+    kinds?: string[];
+  };
+};
+
+export type PostAuthMePluginsHookTrustResponse200 = unknown;
+
+export type PostAuthMePluginsHookTrustResponse400 = CommonError;
+
+export type PostAuthMePluginsHookTrustResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/plugins/reload` (schema/http/health-auth.schema.json). */
+export type PostAuthMePluginsReloadRequest = {
+  body: Record<string, unknown>;
+};
+
+export type PostAuthMePluginsReloadResponse200 = {
+  pluginDir: string;
+  count: number;
+  warnings: string[];
+};
+
+export type PostAuthMePluginsReloadResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/plugins/install` (schema/http/health-auth.schema.json). */
+export type PostAuthMePluginsInstallRequest = {
+  query: {
+    /** 1 replaces an installed plugin of the same name */
+    replace?: string;
+    /** the plugin name the upload must carry */
+    expect?: string;
+  };
+};
+
+export type PostAuthMePluginsInstallResponse200 = unknown;
+
+export type PostAuthMePluginsInstallResponse400 = CommonError;
+
+export type PostAuthMePluginsInstallResponse401 = CommonError;
+
+/** Request parts for `DELETE /auth/me/plugins/uninstall/:name` (schema/http/health-auth.schema.json). */
+export type DeleteAuthMePluginsUninstallNameRequest = {
+  params: {
+    name: string;
+  };
+};
+
+export type DeleteAuthMePluginsUninstallNameResponse200 = {
+  ok: true;
+  /** false when no plugin of that name was installed */
+  removed: boolean;
+};
+
+export type DeleteAuthMePluginsUninstallNameResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/claude-plugins/installed` (schema/http/health-auth.schema.json). */
+export type GetAuthMeClaudePluginsInstalledRequest = Record<string, never>;
+
+export type GetAuthMeClaudePluginsInstalledResponse200 = PluginRows;
+
+export type GetAuthMeClaudePluginsInstalledResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/claude-plugins/marketplace` (schema/http/health-auth.schema.json). */
+export type GetAuthMeClaudePluginsMarketplaceRequest = Record<string, never>;
+
+export type GetAuthMeClaudePluginsMarketplaceResponse200 = PluginRows;
+
+export type GetAuthMeClaudePluginsMarketplaceResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/claude-plugins/import` (schema/http/health-auth.schema.json). */
+export type PostAuthMeClaudePluginsImportRequest = {
+  body: {
+    name?: string;
+    source?: string;
+  };
+};
+
+export type PostAuthMeClaudePluginsImportResponse200 = unknown;
+
+export type PostAuthMeClaudePluginsImportResponse400 = CommonError;
+
+export type PostAuthMeClaudePluginsImportResponse401 = CommonError;
+
+export type PostAuthMeClaudePluginsImportResponse404 = CommonError;
+
+/** Request parts for `POST /auth/me/claude-plugins/refresh` (schema/http/health-auth.schema.json). */
+export type PostAuthMeClaudePluginsRefreshRequest = {
+  body: Record<string, unknown>;
+};
+
+export type PostAuthMeClaudePluginsRefreshResponse200 = {
+  installed: number;
+  marketplace: number;
+};
+
+export type PostAuthMeClaudePluginsRefreshResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/claude-plugins/updates` (schema/http/health-auth.schema.json). */
+export type GetAuthMeClaudePluginsUpdatesRequest = Record<string, never>;
+
+export type GetAuthMeClaudePluginsUpdatesResponse200 = {
+  /** true when the claude CLI answered the check; false for the local scan */
+  cli: boolean;
+  checkedAt: string;
+  updates: Record<string, unknown>[];
+};
+
+export type GetAuthMeClaudePluginsUpdatesResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/claude-plugins/update` (schema/http/health-auth.schema.json). */
+export type PostAuthMeClaudePluginsUpdateRequest = {
+  body: {
+    name?: string;
+    /** hex digest of the hook command the user accepted */
+    acceptCommand?: string;
+  };
+};
+
+export type PostAuthMeClaudePluginsUpdateResponse200 = unknown;
+
+export type PostAuthMeClaudePluginsUpdateResponse401 = CommonError;
+
+export type PostAuthMeClaudePluginsUpdateResponse404 = ClaudeUpdateNotFound;
+
+/** Request parts for `GET /auth/me/codex-plugins/installed` (schema/http/health-auth.schema.json). */
+export type GetAuthMeCodexPluginsInstalledRequest = Record<string, never>;
+
+export type GetAuthMeCodexPluginsInstalledResponse200 = PluginRows;
+
+export type GetAuthMeCodexPluginsInstalledResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/codex-plugins/marketplace` (schema/http/health-auth.schema.json). */
+export type GetAuthMeCodexPluginsMarketplaceRequest = Record<string, never>;
+
+export type GetAuthMeCodexPluginsMarketplaceResponse200 = PluginRows;
+
+export type GetAuthMeCodexPluginsMarketplaceResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/codex-plugins/import` (schema/http/health-auth.schema.json). */
+export type PostAuthMeCodexPluginsImportRequest = {
+  body: {
+    name?: string;
+    source?: string;
+  };
+};
+
+export type PostAuthMeCodexPluginsImportResponse200 = unknown;
+
+export type PostAuthMeCodexPluginsImportResponse400 = CommonError;
+
+export type PostAuthMeCodexPluginsImportResponse401 = CommonError;
+
+export type PostAuthMeCodexPluginsImportResponse404 = CommonError;
+
+/** Request parts for `POST /auth/me/codex-plugins/refresh` (schema/http/health-auth.schema.json). */
+export type PostAuthMeCodexPluginsRefreshRequest = {
+  body: Record<string, unknown>;
+};
+
+export type PostAuthMeCodexPluginsRefreshResponse200 = {
+  installed: number;
+  marketplace: number;
+};
+
+export type PostAuthMeCodexPluginsRefreshResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/codex-plugins/updates` (schema/http/health-auth.schema.json). */
+export type GetAuthMeCodexPluginsUpdatesRequest = Record<string, never>;
+
+export type GetAuthMeCodexPluginsUpdatesResponse200 = {
+  cli: boolean;
+  checkedAt: string;
+  updates: Record<string, unknown>[];
+};
+
+export type GetAuthMeCodexPluginsUpdatesResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/llm-sources` (schema/http/health-auth.schema.json). */
+export type GetAuthMeLlmSourcesRequest = Record<string, never>;
+
+export type GetAuthMeLlmSourcesResponse200 = {
+  sources: LlmSource[];
+};
+
+export type GetAuthMeLlmSourcesResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/llm-sources/updates` (schema/http/health-auth.schema.json). */
+export type GetAuthMeLlmSourcesUpdatesRequest = Record<string, never>;
+
+export type GetAuthMeLlmSourcesUpdatesResponse200 = {
+  sources: LlmSourceUpdate[];
+};
+
+export type GetAuthMeLlmSourcesUpdatesResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/llm-sources/toggle` (schema/http/health-auth.schema.json). */
+export type PostAuthMeLlmSourcesToggleRequest = {
+  body: {
+    id?: string;
+    enabled?: boolean;
+  };
+};
+
+export type PostAuthMeLlmSourcesToggleResponse200 = {
+  ok: true;
+  enabled: boolean;
+};
+
+export type PostAuthMeLlmSourcesToggleResponse400 = CommonError;
+
+export type PostAuthMeLlmSourcesToggleResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/llm-sources/items` (schema/http/health-auth.schema.json). */
+export type PostAuthMeLlmSourcesItemsRequest = {
+  body: {
+    sourceId?: string;
+    kind?: "skill" | "agent" | "command" | "template";
+    names?: string[];
+    enabled?: boolean;
+  };
+};
+
+export type PostAuthMeLlmSourcesItemsResponse200 = {
+  ok: true;
+  /** kind:name of every item this user has unchecked in the source */
+  disabled: string[];
+};
+
+export type PostAuthMeLlmSourcesItemsResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/llm-sources/add` (schema/http/health-auth.schema.json). */
+export type PostAuthMeLlmSourcesAddRequest = {
+  body: {
+    url?: string;
+    path?: string;
+    ref?: string;
+    name?: string;
+  };
+};
+
+export type PostAuthMeLlmSourcesAddResponse200 = unknown;
+
+export type PostAuthMeLlmSourcesAddResponse400 = CommonError;
+
+export type PostAuthMeLlmSourcesAddResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/llm-sources/update` (schema/http/health-auth.schema.json). */
+export type PostAuthMeLlmSourcesUpdateRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostAuthMeLlmSourcesUpdateResponse200 = unknown;
+
+export type PostAuthMeLlmSourcesUpdateResponse401 = CommonError;
+
+export type PostAuthMeLlmSourcesUpdateResponse404 = CommonError;
+
+/** Request parts for `DELETE /auth/me/llm-sources/:id` (schema/http/health-auth.schema.json). */
+export type DeleteAuthMeLlmSourcesIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteAuthMeLlmSourcesIdResponse200 = unknown;
+
+export type DeleteAuthMeLlmSourcesIdResponse400 = CommonError;
+
+export type DeleteAuthMeLlmSourcesIdResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/llm-sources/:id/discovery` (schema/http/health-auth.schema.json). */
+export type GetAuthMeLlmSourcesIdDiscoveryRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetAuthMeLlmSourcesIdDiscoveryResponse200 = Discovery;
+
+export type GetAuthMeLlmSourcesIdDiscoveryResponse401 = CommonError;
+
+export type GetAuthMeLlmSourcesIdDiscoveryResponse404 = CommonError;
+
+/** Request parts for `GET /auth/me/mcp-plugins` (schema/http/health-auth.schema.json). */
+export type GetAuthMeMcpPluginsRequest = Record<string, never>;
+
+export type GetAuthMeMcpPluginsResponse200 = {
+  plugins: McpPlugin[];
+};
+
+export type GetAuthMeMcpPluginsResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/mcp-plugins/catalog` (schema/http/health-auth.schema.json). */
+export type GetAuthMeMcpPluginsCatalogRequest = Record<string, never>;
+
+export type GetAuthMeMcpPluginsCatalogResponse200 = {
+  servers: CatalogEntry[];
+};
+
+export type GetAuthMeMcpPluginsCatalogResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/mcp-plugins/claude-sources` (schema/http/health-auth.schema.json). */
+export type GetAuthMeMcpPluginsClaudeSourcesRequest = Record<string, never>;
+
+export type GetAuthMeMcpPluginsClaudeSourcesResponse200 = {
+  servers: ClaudeSource[];
+};
+
+export type GetAuthMeMcpPluginsClaudeSourcesResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/mcp-plugins/codex-sources` (schema/http/health-auth.schema.json). */
+export type GetAuthMeMcpPluginsCodexSourcesRequest = Record<string, never>;
+
+export type GetAuthMeMcpPluginsCodexSourcesResponse200 = {
+  servers: CodexSource[];
+};
+
+export type GetAuthMeMcpPluginsCodexSourcesResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/mcp-plugins/updates` (schema/http/health-auth.schema.json). */
+export type GetAuthMeMcpPluginsUpdatesRequest = Record<string, never>;
+
+export type GetAuthMeMcpPluginsUpdatesResponse200 = {
+  checkedAt: string;
+  servers: McpUpdate[];
+};
+
+export type GetAuthMeMcpPluginsUpdatesResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/mcp-plugins/add` (schema/http/health-auth.schema.json). */
+export type PostAuthMeMcpPluginsAddRequest = {
+  body: {
+    catalogId?: string;
+    /** the catalog entry's requiresArg value */
+    arg?: string;
+    [key: string]: unknown;
+  };
+};
+
+export type PostAuthMeMcpPluginsAddResponse200 = {
+  plugin: McpAdded;
+  pinned?: boolean;
+};
+
+export type PostAuthMeMcpPluginsAddResponse400 = CommonError;
+
+export type PostAuthMeMcpPluginsAddResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/mcp-plugins/consent` (schema/http/health-auth.schema.json). */
+export type PostAuthMeMcpPluginsConsentRequest = {
+  body: {
+    id?: string;
+    consented?: boolean;
+  };
+};
+
+export type PostAuthMeMcpPluginsConsentResponse200 = {
+  ok: true;
+  consented: boolean;
+};
+
+export type PostAuthMeMcpPluginsConsentResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/mcp-plugins/toggle` (schema/http/health-auth.schema.json). */
+export type PostAuthMeMcpPluginsToggleRequest = {
+  body: {
+    id?: string;
+    enabled?: boolean;
+  };
+};
+
+export type PostAuthMeMcpPluginsToggleResponse200 = {
+  ok: true;
+  enabled: boolean;
+};
+
+export type PostAuthMeMcpPluginsToggleResponse401 = CommonError;
+
+export type PostAuthMeMcpPluginsToggleResponse409 = CommonError;
+
+/** Request parts for `GET /auth/me/mcp-plugins/:id/resync` (schema/http/health-auth.schema.json). */
+export type GetAuthMeMcpPluginsIdResyncRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetAuthMeMcpPluginsIdResyncResponse200 = unknown;
+
+export type GetAuthMeMcpPluginsIdResyncResponse400 = CommonError;
+
+export type GetAuthMeMcpPluginsIdResyncResponse401 = CommonError;
+
+export type GetAuthMeMcpPluginsIdResyncResponse404 = CommonError;
+
+/** Request parts for `POST /auth/me/mcp-plugins/:id/resync` (schema/http/health-auth.schema.json). */
+export type PostAuthMeMcpPluginsIdResyncRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type PostAuthMeMcpPluginsIdResyncResponse200 = unknown;
+
+export type PostAuthMeMcpPluginsIdResyncResponse400 = CommonError;
+
+export type PostAuthMeMcpPluginsIdResyncResponse401 = CommonError;
+
+export type PostAuthMeMcpPluginsIdResyncResponse404 = CommonError;
+
+/** Request parts for `POST /auth/me/mcp-plugins/:id/update` (schema/http/health-auth.schema.json). */
+export type PostAuthMeMcpPluginsIdUpdateRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type PostAuthMeMcpPluginsIdUpdateResponse200 = {
+  ok: true;
+  from?: string;
+  to?: string;
+};
+
+export type PostAuthMeMcpPluginsIdUpdateResponse401 = CommonError;
+
+export type PostAuthMeMcpPluginsIdUpdateResponse404 = CommonError;
+
+/** Request parts for `DELETE /auth/me/mcp-plugins/:id` (schema/http/health-auth.schema.json). */
+export type DeleteAuthMeMcpPluginsIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteAuthMeMcpPluginsIdResponse200 = HealthAuthOk;
+
+export type DeleteAuthMeMcpPluginsIdResponse401 = CommonError;
+
+export type DeleteAuthMeMcpPluginsIdResponse404 = CommonError;
+
+/** Request parts for `GET /auth/me/connectors` (schema/http/health-auth.schema.json). */
+export type GetAuthMeConnectorsRequest = Record<string, never>;
+
+export type GetAuthMeConnectorsResponse200 = {
+  connectors: ConnectorEntry[];
+};
+
+export type GetAuthMeConnectorsResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/connectors/catalog` (schema/http/health-auth.schema.json). */
+export type GetAuthMeConnectorsCatalogRequest = Record<string, never>;
+
+export type GetAuthMeConnectorsCatalogResponse200 = {
+  catalog: ConnectorEntry[];
+};
+
+export type GetAuthMeConnectorsCatalogResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/connectors/add` (schema/http/health-auth.schema.json). */
+export type PostAuthMeConnectorsAddRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostAuthMeConnectorsAddResponse200 = {
+  ok: true;
+  id: string;
+};
+
+export type PostAuthMeConnectorsAddResponse400 = CommonError;
+
+export type PostAuthMeConnectorsAddResponse401 = CommonError;
+
+/** Request parts for `DELETE /auth/me/connectors/:id` (schema/http/health-auth.schema.json). */
+export type DeleteAuthMeConnectorsIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteAuthMeConnectorsIdResponse200 = {
+  ok: true;
+  id: string;
+};
+
+export type DeleteAuthMeConnectorsIdResponse401 = CommonError;
+
+/** Request parts for `GET /kb/search` (schema/http/kb-sources.schema.json). */
+export type GetKbSearchRequest = {
+  query: {
+    q?: string;
+    /** one of the allowed kinds; any other value searches every kind */
+    kind?: string;
+    /** 1 to 100; anything else is the default 20 */
+    limit?: string;
+    /** project scope; ignored unless it is a safe id */
+    projectId?: string;
+  };
+};
+
+export type GetKbSearchResponse200 = {
+  results: SearchHit[];
+};
+
+export type GetKbSearchResponse401 = CommonError;
+
+/** Request parts for `GET /kb/issues` (schema/http/kb-sources.schema.json). */
+export type GetKbIssuesRequest = {
+  query: {
+    repo?: string;
+    /** default open; all disables the filter */
+    state?: string;
+    /** default github */
+    provider?: string;
+    limit?: string;
+  };
+};
+
+export type GetKbIssuesResponse200 = {
+  issues: Issue[];
+};
+
+export type GetKbIssuesResponse401 = CommonError;
+
+/** Request parts for `GET /kb/meeting/:id` (schema/http/kb-sources.schema.json). */
+export type GetKbMeetingIdRequest = {
+  query: {
+    include?: "transcript";
+  };
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbMeetingIdResponse200 = Meeting;
+
+export type GetKbMeetingIdResponse400 = CommonError;
+
+export type GetKbMeetingIdResponse401 = CommonError;
+
+export type GetKbMeetingIdResponse404 = CommonError;
+
+/** Request parts for `GET /kb/entity/:id` (schema/http/kb-sources.schema.json). */
+export type GetKbEntityIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbEntityIdResponse200 = Entity;
+
+export type GetKbEntityIdResponse400 = CommonError;
+
+export type GetKbEntityIdResponse401 = CommonError;
+
+export type GetKbEntityIdResponse404 = CommonError;
+
+/** Request parts for `GET /kb/project/:id/export` (schema/http/kb-sources.schema.json). */
+export type GetKbProjectIdExportRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbProjectIdExportResponse200 = ProjectExport;
+
+export type GetKbProjectIdExportResponse400 = CommonError;
+
+export type GetKbProjectIdExportResponse401 = CommonError;
+
+/** Request parts for `POST /kb/project/install-skills` (schema/http/kb-sources.schema.json). */
+export type PostKbProjectInstallSkillsRequest = {
+  body: {
+    /** absolute project folder (must hold system/project.json) */
+    path?: string;
+    language?: string;
+    stacks?: string;
+  };
+};
+
+export type PostKbProjectInstallSkillsResponse200 = unknown;
+
+export type PostKbProjectInstallSkillsResponse400 = CommonError;
+
+export type PostKbProjectInstallSkillsResponse401 = CommonError;
+
+export type PostKbProjectInstallSkillsResponse404 = CommonError;
+
+/** Request parts for `GET /kb/stats` (schema/http/kb-sources.schema.json). */
+export type GetKbStatsRequest = Record<string, never>;
+
+export type GetKbStatsResponse200 = Stats;
+
+export type GetKbStatsResponse401 = CommonError;
+
+/** Request parts for `GET /kb/system/status` (schema/http/kb-sources.schema.json). */
+export type GetKbSystemStatusRequest = Record<string, never>;
+
+export type GetKbSystemStatusResponse200 = SystemStatus;
+
+export type GetKbSystemStatusResponse401 = CommonError;
+
+/** Request parts for `GET /kb/export-all` (schema/http/kb-sources.schema.json). */
+export type GetKbExportAllRequest = {
+  query: {
+    /** meeting id to resume after */
+    cursor?: string;
+    /** 1 to 500, default 100 */
+    limit?: string;
+  };
+};
+
+/** application/x-ndjson: one JSON record per line (meeting with its entities), then a final {done, next_cursor} line; next_cursor is null on the last page */
+export type GetKbExportAllResponse200 = string;
+
+export type GetKbExportAllResponse401 = CommonError;
+
+/** Request parts for `POST /kb/delete` (schema/http/kb-sources.schema.json). */
+export type PostKbDeleteRequest = {
+  body: {
+    /** meeting id */
+    id?: string;
+  };
+};
+
+export type PostKbDeleteResponse200 = KbSourcesOk;
+
+export type PostKbDeleteResponse400 = CommonError;
+
+export type PostKbDeleteResponse401 = CommonError;
+
+/** Request parts for `DELETE /kb/delete` (schema/http/kb-sources.schema.json). */
+export type DeleteKbDeleteRequest = {
+  body: {
+    /** meeting id */
+    id?: string;
+  };
+};
+
+export type DeleteKbDeleteResponse200 = KbSourcesOk;
+
+export type DeleteKbDeleteResponse400 = CommonError;
+
+export type DeleteKbDeleteResponse401 = CommonError;
+
+/** Request parts for `POST /kb/ingest` (schema/http/kb-sources.schema.json). */
+export type PostKbIngestRequest = {
+  body: {
+    id?: string;
+    title?: string;
+    date?: string;
+    language?: string;
+    participants?: string[];
+    /** seconds */
+    duration?: number;
+    transcript?: string;
+    entities?: {
+      id?: string;
+      kind?: string;
+      text?: string;
+      quote?: string;
+      /** kind-specific metadata, stored as given */
+      meta?: Record<string, unknown>;
+    }[];
+    /** stored as meta.projectId; scopes search and project export */
+    projectId?: string;
+  };
+};
+
+export type PostKbIngestResponse200 = IngestResult;
+
+export type PostKbIngestResponse400 = CommonError;
+
+export type PostKbIngestResponse401 = CommonError;
+
+/** Request parts for `POST /kb/connect-git` (schema/http/kb-sources.schema.json). */
+export type PostKbConnectGitRequest = {
+  body: {
+    /** absolute repo path; must be on the user's repo allow-list */
+    path?: string;
+    /** default true */
+    replace?: boolean;
+  };
+};
+
+export type PostKbConnectGitResponse200 = GitIndex;
+
+export type PostKbConnectGitResponse400 = CommonError;
+
+export type PostKbConnectGitResponse401 = CommonError;
+
+export type PostKbConnectGitResponse403 = CommonError;
+
+/** Request parts for `POST /kb/ingest-scip` (schema/http/kb-sources.schema.json). */
+export type PostKbIngestScipRequest = {
+  body: {
+    /** must be on the user's repo allow-list */
+    repoPath?: string;
+    scipPath?: string;
+    /** default true */
+    replace?: boolean;
+  };
+};
+
+export type PostKbIngestScipResponse200 = unknown;
+
+export type PostKbIngestScipResponse400 = CommonError;
+
+export type PostKbIngestScipResponse401 = CommonError;
+
+export type PostKbIngestScipResponse403 = CommonError;
+
+/** Request parts for `POST /kb/connect-github-issues` (schema/http/kb-sources.schema.json). */
+export type PostKbConnectGithubIssuesRequest = {
+  body: {
+    /** owner/name */
+    repo?: string;
+    /** GitHub token; the success path needs the network */
+    token?: string;
+    state?: string;
+  };
+};
+
+export type PostKbConnectGithubIssuesResponse200 = unknown;
+
+export type PostKbConnectGithubIssuesResponse400 = CommonError;
+
+export type PostKbConnectGithubIssuesResponse401 = CommonError;
+
+/** Request parts for `POST /kb/connect-tickets-json` (schema/http/kb-sources.schema.json). */
+export type PostKbConnectTicketsJsonRequest = {
+  body: {
+    /** default manual */
+    provider?: string;
+    tickets?: {
+      id?: string;
+      title?: string;
+      body?: string;
+      url?: string;
+      /** provider-specific ticket fields, merged into the stored meta */
+      meta?: Record<string, unknown>;
+    }[];
+  };
+};
+
+export type PostKbConnectTicketsJsonResponse200 = TicketIndex;
+
+export type PostKbConnectTicketsJsonResponse400 = CommonError;
+
+export type PostKbConnectTicketsJsonResponse401 = CommonError;
+
+/** Request parts for `POST /kb/connect-qa` (schema/http/kb-sources.schema.json). */
+export type PostKbConnectQaRequest = {
+  body: {
+    /** JUnit XML */
+    xml?: string;
+    source?: string;
+  };
+};
+
+export type PostKbConnectQaResponse200 = QaIndex;
+
+export type PostKbConnectQaResponse400 = CommonError;
+
+export type PostKbConnectQaResponse401 = CommonError;
+
+/** Request parts for `POST /kb/email/test` (schema/http/kb-sources.schema.json). */
+export type PostKbEmailTestRequest = {
+  body: {
+    host?: string;
+    port?: number;
+    secure?: boolean;
+    user?: string;
+    /** typed app password, probed without saving it */
+    password?: string;
+    mailbox?: string;
+    /** password | google */
+    authMethod?: string;
+  };
+};
+
+export type PostKbEmailTestResponse200 = unknown;
+
+export type PostKbEmailTestResponse400 = CommonError;
+
+export type PostKbEmailTestResponse401 = CommonError;
+
+export type PostKbEmailTestResponse502 = CommonError;
+
+/** Request parts for `POST /kb/email/fetch` (schema/http/kb-sources.schema.json). */
+export type PostKbEmailFetchRequest = {
+  body: {
+    host?: string;
+    port?: number;
+    secure?: boolean;
+    user?: string;
+    mailbox?: string;
+    /** password | google */
+    authMethod?: string;
+    lookbackDays?: number;
+    /** default true */
+    unreadOnly?: boolean;
+    fromFilter?: string;
+    markRead?: boolean;
+  };
+};
+
+export type PostKbEmailFetchResponse200 = unknown;
+
+export type PostKbEmailFetchResponse400 = CommonError;
+
+export type PostKbEmailFetchResponse401 = CommonError;
+
+export type PostKbEmailFetchResponse502 = CommonError;
+
+/** Request parts for `POST /kb/email/seen` (schema/http/kb-sources.schema.json). */
+export type PostKbEmailSeenRequest = {
+  body: {
+    messageIds?: string[];
+    /** advances the forward-only high-water mark when it parses as a date */
+    lastFetchedAt?: string;
+  };
+};
+
+export type PostKbEmailSeenResponse200 = KbSourcesOk;
+
+export type PostKbEmailSeenResponse401 = CommonError;
+
+/** Request parts for `POST /kb/email/classify` (schema/http/kb-sources.schema.json). */
+export type PostKbEmailClassifyRequest = {
+  body: {
+    subject?: string;
+    body?: string;
+  };
+};
+
+export type PostKbEmailClassifyResponse200 = unknown;
+
+export type PostKbEmailClassifyResponse400 = CommonError;
+
+export type PostKbEmailClassifyResponse401 = CommonError;
+
+/** Request parts for `POST /kb/slack/test` (schema/http/kb-sources.schema.json). */
+export type PostKbSlackTestRequest = {
+  body: {
+    /** typed Slack token, probed without saving it; the probe needs the network */
+    token?: string;
+  };
+};
+
+export type PostKbSlackTestResponse200 = unknown;
+
+export type PostKbSlackTestResponse400 = CommonError;
+
+export type PostKbSlackTestResponse401 = CommonError;
+
+export type PostKbSlackTestResponse502 = unknown;
+
+/** Request parts for `POST /kb/slack/fetch` (schema/http/kb-sources.schema.json). */
+export type PostKbSlackFetchRequest = {
+  body: {
+    channelId?: string;
+    lookbackDays?: number;
+  };
+};
+
+export type PostKbSlackFetchResponse200 = unknown;
+
+export type PostKbSlackFetchResponse400 = CommonError;
+
+export type PostKbSlackFetchResponse401 = CommonError;
+
+export type PostKbSlackFetchResponse502 = unknown;
+
+/** Request parts for `POST /kb/slack/seen` (schema/http/kb-sources.schema.json). */
+export type PostKbSlackSeenRequest = {
+  body: {
+    channelId?: string;
+    messageTs?: string[];
+    /** Slack timestamp; advances the channel high-water mark when it is a positive number */
+    lastTs?: string;
+  };
+};
+
+export type PostKbSlackSeenResponse200 = KbSourcesOk;
+
+export type PostKbSlackSeenResponse401 = CommonError;
+
+/** Request parts for `GET /kb/slack/conversations` (schema/http/kb-sources.schema.json). */
+export type GetKbSlackConversationsRequest = Record<string, never>;
+
+export type GetKbSlackConversationsResponse200 = unknown;
+
+export type GetKbSlackConversationsResponse400 = CommonError;
+
+export type GetKbSlackConversationsResponse401 = CommonError;
+
+/** Request parts for `POST /kb/box/test` (schema/http/kb-sources.schema.json). */
+export type PostKbBoxTestRequest = {
+  body: {
+    clientId?: string;
+    /** user | enterprise (default enterprise) */
+    subjectType?: string;
+    subjectId?: string;
+    folderId?: string;
+  };
+};
+
+export type PostKbBoxTestResponse200 = unknown;
+
+export type PostKbBoxTestResponse400 = CommonError;
+
+export type PostKbBoxTestResponse401 = CommonError;
+
+export type PostKbBoxTestResponse502 = unknown;
+
+/** Request parts for `POST /kb/connect-box` (schema/http/kb-sources.schema.json). */
+export type PostKbConnectBoxRequest = {
+  body: {
+    clientId?: string;
+    /** user | enterprise (default enterprise) */
+    subjectType?: string;
+    subjectId?: string;
+    folderId?: string;
+  };
+};
+
+export type PostKbConnectBoxResponse200 = unknown;
+
+export type PostKbConnectBoxResponse400 = CommonError;
+
+export type PostKbConnectBoxResponse401 = CommonError;
+
+export type PostKbConnectBoxResponse502 = unknown;
+
+/** Request parts for `POST /kb/mcp-connector/test` (schema/http/kb-sources.schema.json). */
+export type PostKbMcpConnectorTestRequest = {
+  body: {
+    /** connector id from mcp-connector-defs (for example miro) */
+    id?: string;
+  };
+};
+
+export type PostKbMcpConnectorTestResponse200 = unknown;
+
+export type PostKbMcpConnectorTestResponse400 = CommonError;
+
+export type PostKbMcpConnectorTestResponse401 = CommonError;
+
+export type PostKbMcpConnectorTestResponse502 = unknown;
+
+/** Request parts for `POST /kb/mcp-connector/fetch` (schema/http/kb-sources.schema.json). */
+export type PostKbMcpConnectorFetchRequest = {
+  body: {
+    id?: string;
+    /** 1 to 200 */
+    limit?: number;
+  };
+};
+
+export type PostKbMcpConnectorFetchResponse200 = unknown;
+
+export type PostKbMcpConnectorFetchResponse400 = CommonError;
+
+export type PostKbMcpConnectorFetchResponse401 = CommonError;
+
+export type PostKbMcpConnectorFetchResponse502 = unknown;
+
+/** Request parts for `POST /kb/mcp-connector/seen` (schema/http/kb-sources.schema.json). */
+export type PostKbMcpConnectorSeenRequest = {
+  body: {
+    id?: string;
+    itemIds?: string[];
+  };
+};
+
+export type PostKbMcpConnectorSeenResponse200 = {
+  ok: true;
+  /** items newly marked as seen */
+  marked: number;
+};
+
+export type PostKbMcpConnectorSeenResponse401 = CommonError;
+
+/** Request parts for `POST /kb/mcp-connector/classify` (schema/http/kb-sources.schema.json). */
+export type PostKbMcpConnectorClassifyRequest = {
+  body: {
+    body?: {
+      connectorId?: string;
+      title?: string;
+      date?: string;
+      text?: string;
+    };
+  };
+};
+
+export type PostKbMcpConnectorClassifyResponse200 = unknown;
+
+export type PostKbMcpConnectorClassifyResponse400 = CommonError;
+
+export type PostKbMcpConnectorClassifyResponse401 = CommonError;
+
+export type PostKbMcpConnectorClassifyResponse502 = unknown;
+
+/** Request parts for `GET /kb/activity` (schema/http/kb-sources.schema.json). */
+export type GetKbActivityRequest = {
+  query: {
+    /** return items with an id greater than this */
+    since?: string;
+    /** 1 to 200, default 100 */
+    limit?: string;
+  };
+};
+
+export type GetKbActivityResponse200 = {
+  items: ActivityItem[];
+  unread: number;
+  lastId: number;
+};
+
+export type GetKbActivityResponse401 = CommonError;
+
+/** Request parts for `POST /kb/activity` (schema/http/kb-sources.schema.json). */
+export type PostKbActivityRequest = {
+  body: {
+    /** must be one of ACTIVITY_KINDS (kb/activity.mjs) */
+    kind?: string;
+    title?: string;
+    /** kind-specific detail */
+    detail?: Record<string, unknown>;
+    link?: string;
+  };
+};
+
+export type PostKbActivityResponse200 = {
+  ok: true;
+  id: number;
+};
+
+export type PostKbActivityResponse400 = CommonError;
+
+export type PostKbActivityResponse401 = CommonError;
+
+/** Request parts for `POST /kb/activity/seen` (schema/http/kb-sources.schema.json). */
+export type PostKbActivitySeenRequest = {
+  body: {
+    /** mark every activity item up to this id as seen */
+    uptoId?: number;
+  };
+};
+
+export type PostKbActivitySeenResponse200 = {
+  ok: true;
+  unread: number;
+};
+
+export type PostKbActivitySeenResponse401 = CommonError;
+
+/** Request parts for `POST /kb/loop/agent-run` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLoopAgentRunRequest = {
+  body: {
+    message?: string;
+    /** a string is refused with 400 (must be an array of ids) */
+    skills?: string[] | string;
+    repoRoot?: string;
+    extraRoots?: string[];
+    language?: string;
+    model?: string;
+    /** anthropic or a custom:<id> provider */
+    provider?: string;
+    timeoutMs?: number;
+  };
+};
+
+/** The Loop step's result. The 200 fixtures are produced in-process (routes/loop-agent.mjs with the engine seam stubbed). The result fields are the engine's runLoopAgent return, forwarded verbatim by the route. */
+export type PostKbLoopAgentRunResponse200 = {
+  reply: string;
+  /** repo-relative */
+  changedPaths: string[];
+  /** absolute paths under the extra roots */
+  changedExtraPaths: string[];
+  /** the subset of changedPaths that a Write created */
+  createdPaths: string[];
+  usage: LoopUsage;
+  resolvedSkills: string[];
+  unresolvedSkills: string[];
+  truncatedSkills: string[];
+  ran: boolean;
+  /** success, timeout, aborted, no_progress, or null */
+  resultSubtype: string | null;
+  denied: {
+    toolName: string;
+    reason: string;
+  }[];
+  /** Set with resultSubtype no_progress. */
+  noProgressReason?: string;
+};
+
+export type PostKbLoopAgentRunResponse400 = CommonError;
+
+export type PostKbLoopAgentRunResponse401 = CommonError;
+
+export type PostKbLoopAgentRunResponse404 = FeatureDisabled;
+
+export type PostKbLoopAgentRunResponse502 = CommonError;
+
+export type PostKbLoopAgentRunResponse503 = CommonError;
+
+export type PostKbLoopAgentRunResponse504 = CommonError;
+
+/** Request parts for `POST /kb/ingest-code-graph` (schema/http/live-loop-misc.schema.json). */
+export type PostKbIngestCodeGraphRequest = {
+  body: {
+    repoPath?: string;
+    graph?: {
+      nodes?: CodeGraphNode[];
+      edges?: CodeGraphEdge[];
+    };
+    replace?: boolean;
+    commitSha?: string;
+    generatedAt?: string;
+  };
+};
+
+export type PostKbIngestCodeGraphResponse200 = {
+  ok: true;
+  /** canonical repo path */
+  repo: string;
+  /** nodes written */
+  nodes: number;
+  /** edges written */
+  edges: number;
+  droppedNodes: number;
+  droppedEdges: number;
+  replaced: boolean;
+};
+
+export type PostKbIngestCodeGraphResponse400 = CommonError;
+
+export type PostKbIngestCodeGraphResponse401 = CommonError;
+
+export type PostKbIngestCodeGraphResponse403 = CommonError;
+
+export type PostKbIngestCodeGraphResponse404 = FeatureDisabled;
+
+/** Request parts for `GET /kb/issue-schedule` (schema/http/live-loop-misc.schema.json). */
+export type GetKbIssueScheduleRequest = {
+  query: {
+    provider?: string;
+    repo?: string;
+  };
+};
+
+export type GetKbIssueScheduleResponse200 = {
+  schedules: ScheduleItem[];
+  count: number;
+};
+
+export type GetKbIssueScheduleResponse400 = CommonError;
+
+export type GetKbIssueScheduleResponse401 = CommonError;
+
+export type GetKbIssueScheduleResponse404 = FeatureDisabled;
+
+/** Request parts for `PUT /kb/issue-schedule` (schema/http/live-loop-misc.schema.json). */
+export type PutKbIssueScheduleRequest = {
+  body: {
+    provider?: string;
+    repo?: string;
+    issueNumber?: number;
+    startDate?: string | null;
+    dueDate?: string | null;
+    estimateDays?: number | null;
+    dependsOn?: number[];
+  };
+};
+
+export type PutKbIssueScheduleResponse200 = ScheduleItem;
+
+export type PutKbIssueScheduleResponse400 = CommonError;
+
+export type PutKbIssueScheduleResponse401 = CommonError;
+
+export type PutKbIssueScheduleResponse404 = FeatureDisabled;
+
+/** Request parts for `DELETE /kb/issue-schedule` (schema/http/live-loop-misc.schema.json). */
+export type DeleteKbIssueScheduleRequest = {
+  body: {
+    provider?: string;
+    repo?: string;
+    /** a non-integer is refused with 400 VALIDATION_FAILED */
+    issueNumber?: number | string;
+  };
+};
+
+export type DeleteKbIssueScheduleResponse200 = {
+  /** false when no schedule existed */
+  deleted: boolean;
+};
+
+export type DeleteKbIssueScheduleResponse400 = CommonError;
+
+export type DeleteKbIssueScheduleResponse401 = CommonError;
+
+export type DeleteKbIssueScheduleResponse404 = FeatureDisabled;
+
+/** Request parts for `GET /kb/live/sessions` (schema/http/live-loop-misc.schema.json). */
+export type GetKbLiveSessionsRequest = Record<string, never>;
+
+export type GetKbLiveSessionsResponse200 = {
+  sessions: LiveSession[];
+};
+
+export type GetKbLiveSessionsResponse401 = CommonError;
+
+/** Request parts for `GET /kb/live/:id` (schema/http/live-loop-misc.schema.json). */
+export type GetKbLiveIdRequest = {
+  query: {
+    /** decimal caption sequence; captions after it are returned */
+    since?: string;
+  };
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbLiveIdResponse200 = {
+  captions: LiveCaption[];
+  sequence: number;
+  finalized: boolean;
+  /** false for an unknown session id */
+  exists: boolean;
+  meetingTitle?: string;
+  startedAt?: number;
+};
+
+export type GetKbLiveIdResponse401 = CommonError;
+
+/** Request parts for `POST /kb/live/:id/append` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLiveIdAppendRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    captions?: {
+      speaker?: string;
+      text?: string;
+      ts?: number;
+      source?: string;
+      meta?: {
+        planTaskId?: string;
+        score?: number;
+        reason?: string;
+      };
+    }[];
+    meetingTitle?: string;
+  };
+};
+
+export type PostKbLiveIdAppendResponse200 = {
+  sequence: number;
+  /** captions stored; 0 for duplicates, empty input or a finalized session */
+  accepted: number;
+  /** true when the ring buffer is nearly full */
+  backpressure?: boolean;
+  /** true when the session was already finalized; late writes are dropped */
+  finalized?: boolean;
+};
+
+export type PostKbLiveIdAppendResponse400 = CommonError;
+
+export type PostKbLiveIdAppendResponse401 = CommonError;
+
+export type PostKbLiveIdAppendResponse429 = RateLimited;
+
+/** Request parts for `POST /kb/live/:id/finalize` (schema/http/live-loop-misc.schema.json). */
+export type PostKbLiveIdFinalizeRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type PostKbLiveIdFinalizeResponse200 = {
+  sessionId: string;
+  finalized: true;
+  captionCount: number;
+  /** the meetings row written by crash-recovery was removed */
+  dbCleaned: boolean;
+  cleanupError: string | null;
+} | {
+  sessionId: string;
+  finalized: true;
+  /** 0: the id was never seen, so the route answers the empty summary */
+  captionCount: number;
+};
+
+export type PostKbLiveIdFinalizeResponse401 = CommonError;
+
+/** Request parts for `GET /kb/live/:id/stream` (schema/http/live-loop-misc.schema.json). */
+export type GetKbLiveIdStreamRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbLiveIdStreamResponse200 = unknown;
+
+export type GetKbLiveIdStreamResponse401 = CommonError;
+
+export type GetKbLiveIdStreamResponse429 = CommonError;
+
+/** Request parts for `GET /auth/me/audit` (schema/http/live-loop-misc.schema.json). */
+export type GetAuthMeAuditRequest = {
+  query: {
+    /** capped at 1000; default 100 */
+    limit?: string;
+    action?: string;
+  };
+};
+
+export type GetAuthMeAuditResponse200 = {
+  items: AuditItem[];
+};
+
+export type GetAuthMeAuditResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/delete` (schema/http/live-loop-misc.schema.json). */
+export type PostAuthMeDeleteRequest = {
+  body: {
+    password?: string;
+  };
+};
+
+export type PostAuthMeDeleteResponse200 = {
+  ok: true;
+  /** rows removed per table */
+  counts: Record<string, number>;
+};
+
+export type PostAuthMeDeleteResponse401 = CommonError;
+
+/** Request parts for `POST /auth/mcp-connector/start` (schema/http/live-loop-misc.schema.json). */
+export type PostAuthMcpConnectorStartRequest = {
+  body: {
+    /** connector id, e.g. miro */
+    id?: string;
+  };
+};
+
+export type PostAuthMcpConnectorStartResponse200 = unknown;
+
+export type PostAuthMcpConnectorStartResponse400 = CommonError;
+
+export type PostAuthMcpConnectorStartResponse401 = CommonError;
+
+export type PostAuthMcpConnectorStartResponse502 = unknown;
+
+/** Request parts for `GET /auth/mcp-connector/status` (schema/http/live-loop-misc.schema.json). */
+export type GetAuthMcpConnectorStatusRequest = {
+  query: {
+    id?: string;
+    /** a sign-in flow started by POST /auth/mcp-connector/start; only its initiator may read it */
+    state?: string;
+  };
+};
+
+export type GetAuthMcpConnectorStatusResponse200 = {
+  id: string;
+  /** reads the vault: true when this user holds tokens for the connector */
+  connected: boolean;
+  /** pending, complete, error, or unknown (no flow, or already read) */
+  status: string;
+  account?: string;
+  message?: string;
+};
+
+export type GetAuthMcpConnectorStatusResponse400 = CommonError;
+
+export type GetAuthMcpConnectorStatusResponse401 = CommonError;
+
+/** Request parts for `POST /generate-notes` (schema/http/notes-generation.schema.json). */
+export type PostGenerateNotesRequest = {
+  body: {
+    transcript?: string;
+    meetingTitle?: string;
+    meetingId?: string;
+    language?: string;
+  };
+};
+
+/** The JSON form (no Accept: text/event-stream). The stream form is not specified: its events are chunk and done, carrying the same text, then error on failure, and it is not covered by this schema. */
+export type PostGenerateNotesResponse200 = {
+  /** Markdown meeting notes. */
+  notes: string;
+};
+
+export type PostGenerateNotesResponse400 = CommonError;
+
+export type PostGenerateNotesResponse401 = CommonError;
+
+export type PostGenerateNotesResponse429 = CommonError;
+
+export type PostGenerateNotesResponse500 = CommonError;
+
+/** Request parts for `POST /generate-questions` (schema/http/notes-generation.schema.json). */
+export type PostGenerateQuestionsRequest = {
+  body: {
+    transcript?: string;
+    participants?: string[];
+    types?: string[];
+    language?: string;
+  };
+};
+
+export type PostGenerateQuestionsResponse200 = {
+  /** Markdown: one H2 section per category used, each a numbered list. */
+  questions: string;
+};
+
+export type PostGenerateQuestionsResponse400 = CommonError;
+
+export type PostGenerateQuestionsResponse401 = CommonError;
+
+export type PostGenerateQuestionsResponse429 = CommonError;
+
+export type PostGenerateQuestionsResponse500 = CommonError;
+
+/** Request parts for `POST /extract-entities` (schema/http/notes-generation.schema.json). */
+export type PostExtractEntitiesRequest = {
+  body: {
+    transcript?: string;
+    participants?: string[];
+    meetingTitle?: string;
+    language?: string;
+  };
+};
+
+/** The model's JSON after validation (ai-routes.mjs validate): each array is capped at 30 items and an item without text is dropped. Every key is always present. */
+export type PostExtractEntitiesResponse200 = {
+  actions: EntityAction[];
+  decisions: EntityDecision[];
+  blockers: EntityBlocker[];
+};
+
+export type PostExtractEntitiesResponse400 = CommonError;
+
+export type PostExtractEntitiesResponse401 = CommonError;
+
+export type PostExtractEntitiesResponse429 = CommonError;
+
+/** The fixture is INTERNAL_ERROR (a runClaude failure, sendError maps it generically). The handler also answers 500 AI_PARSE_FAILED when the model's JSON is unparseable after the retry (ai-routes.mjs, the 'Failed to parse entity JSON' branch); that body is not captured here because it needs a model reply. */
+export type PostExtractEntitiesResponse500 = CommonError;
+
+/** Request parts for `POST /generate-doc` (schema/http/notes-generation.schema.json). */
+export type PostGenerateDocRequest = {
+  body: {
+    templateName?: string;
+    sections?: string[];
+    command?: string;
+    prompt?: string;
+    sources?: Source[];
+  };
+};
+
+/** The generated Markdown and what the source budget could not give the model: names are capped at 50 per list, the counts are exact. The Mac client reads truncated and omitted; their absence would mean an older server. */
+export type PostGenerateDocResponse200 = {
+  content: string;
+  truncated: string[];
+  truncatedCount: number;
+  omitted: string[];
+  omittedCount: number;
+};
+
+export type PostGenerateDocResponse400 = CommonError;
+
+export type PostGenerateDocResponse401 = CommonError;
+
+export type PostGenerateDocResponse429 = CommonError;
+
+export type PostGenerateDocResponse500 = CommonError;
+
+/** Request parts for `POST /generate-docx` (schema/http/notes-generation.schema.json). */
+export type PostGenerateDocxRequest = {
+  body: {
+    transcript?: string;
+    meetingTitle?: string;
+    meetingId?: string;
+    language?: string;
+  };
+};
+
+/** A .docx attachment named meeting-notes-<YYYY-MM-DD>.docx (Content-Disposition attachment). The body is the Word package bytes and is not described further here. */
+export type PostGenerateDocxResponse200 = Blob;
+
+export type PostGenerateDocxResponse400 = CommonError;
+
+export type PostGenerateDocxResponse401 = CommonError;
+
+export type PostGenerateDocxResponse429 = CommonError;
+
+/** Two bodies: INTERNAL_ERROR (a runClaude failure, captured) and AI_PARSE_FAILED when the model's JSON cannot be parsed, and INTERNAL_ERROR with 'Failed to build DOCX: ...' when the docx build throws (export-routes.mjs). Only the first is captured; the others need a model reply or a broken build. */
+export type PostGenerateDocxResponse500 = CommonError;
+
+/** Request parts for `POST /chat` (schema/http/notes-generation.schema.json). */
+export type PostChatRequest = {
+  body: {
+    message?: string;
+    transcript?: string;
+    history?: Turn[];
+    language?: string;
+  };
+};
+
+export type PostChatResponse200 = {
+  /** The model's reply, trimmed. */
+  reply: string;
+};
+
+export type PostChatResponse400 = CommonError;
+
+export type PostChatResponse401 = CommonError;
+
+export type PostChatResponse429 = CommonError;
+
+export type PostChatResponse500 = CommonError;
+
+/** Request parts for `POST /code-assist` (schema/http/notes-generation.schema.json). */
+export type PostCodeAssistRequest = {
+  body: {
+    message?: string;
+    history?: Turn[];
+    attachments?: Attachment[];
+    skills?: string[];
+    language?: string;
+    model?: string;
+    /** A provider id, or custom:<uuid>. A provider without a configured key answers 400 PROVIDER_UNAVAILABLE. */
+    provider?: string;
+    /** 'subagent' or absent. */
+    tier?: string;
+    /** The chat mode the picker sent (auto, plan, assist_plan, review, document, execute). */
+    mode?: string;
+    planExecute?: boolean;
+    planWrite?: boolean;
+    clientCaps?: string[];
+    agentContext?: AgentContext;
+  };
+};
+
+/** One of two JSON bodies, chosen by whether the request carried agentContext: the agent path (with continueNeeded, tasks and mode) or the legacy path (reply and usage only). Each variant has its own fixture. */
+export type PostCodeAssistResponse200 = {
+  reply: string;
+  /** A tool call waiting for the user's approval, or null. Its keys come from the model's tool call, so the object is open. */
+  pendingTool?: Record<string, unknown> | null;
+  usage: AgentUsage;
+  continueNeeded: boolean;
+  tasks: NotesGenerationTask[];
+  /** The resolved mode of the turn. */
+  mode: string;
+} | {
+  /** The model's reply, trimmed. */
+  reply: string;
+  usage: LegacyUsage;
+};
+
+/** VALIDATION_FAILED (missing or empty message), or PROVIDER_UNAVAILABLE (the named provider has no key or base URL; the Mac retries once without its tier route on this code). */
+export type PostCodeAssistResponse400 = CommonError;
+
+export type PostCodeAssistResponse401 = CommonError;
+
+export type PostCodeAssistResponse429 = CommonError;
+
+/** INTERNAL_ERROR with the fixed message 'The assistant is temporarily unavailable. Please try again.' (codeAssistErrorResponse, ai-routes.mjs). The provider detail is logged server-side only. */
+export type PostCodeAssistResponse502 = CommonError;
+
+/** Request parts for `POST /code-assist/decision` (schema/http/notes-generation.schema.json). */
+export type PostCodeAssistDecisionRequest = {
+  body: {
+    requestId?: string;
+    /** The legacy chat's agentContext.sessionId. */
+    sdkSessionId?: string;
+    action?: "answer" | "allow" | "deny" | "always-allow";
+    /** Kept on a deny only; capped at 2 000 characters. */
+    feedback?: string;
+    /** AskUserQuestion answers, forwarded to the engine unchanged. */
+    answers?: Record<string, unknown>;
+  };
+};
+
+export type PostCodeAssistDecisionResponse200 = NotesGenerationOk;
+
+export type PostCodeAssistDecisionResponse401 = CommonError;
+
+export type PostCodeAssistDecisionResponse403 = CommonError;
+
+export type PostCodeAssistDecisionResponse404 = CommonError;
+
+/** Request parts for `POST /agent-sdk/spike` (schema/http/notes-generation.schema.json). */
+export type PostAgentSdkSpikeRequest = {
+  body: {
+    prompt?: string;
+    resume?: string;
+  };
+};
+
+export type PostAgentSdkSpikeResponse200 = unknown;
+
+export type PostAgentSdkSpikeResponse400 = CommonError;
+
+export type PostAgentSdkSpikeResponse401 = CommonError;
+
+/** Request parts for `POST /kb/generate-plan` (schema/http/planning.schema.json). */
+export type PostKbGeneratePlanRequest = {
+  body: {
+    meetingId?: string;
+    goal?: string;
+    language?: string;
+    skipRisk?: boolean;
+    skipCodeSync?: boolean;
+  };
+};
+
+/** A stored plan, as getPlan returns it. */
+export type PostKbGeneratePlanResponse200 = {
+  id: string;
+  meetingId?: string | null;
+  title: string;
+  goal?: string | null;
+  language?: string | null;
+  /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
+  meta: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  tasks: PlanningTask[];
+};
+
+export type PostKbGeneratePlanResponse400 = CommonError;
+
+export type PostKbGeneratePlanResponse401 = CommonError;
+
+export type PostKbGeneratePlanResponse429 = CommonError;
+
+export type PostKbGeneratePlanResponse500 = CommonError;
+
+/** Request parts for `POST /kb/analyze-risks` (schema/http/planning.schema.json). */
+export type PostKbAnalyzeRisksRequest = {
+  body: {
+    planId?: string;
+    /** A client-supplied plan draft. The server reads title, goal, language, meetingId and each task's id, title, description, owner, estimateDays, dependsOn, status. */
+    plan?: {
+      title?: string;
+      goal?: string;
+      language?: string;
+      meetingId?: string;
+      tasks?: {
+        id?: string;
+        title?: string;
+        description?: string;
+        owner?: string;
+        estimateDays?: number;
+        dependsOn?: string[];
+        status?: string;
+      }[];
+    };
+    language?: string;
+  };
+};
+
+/** A plan body from the risk or code-sync routes. With planId the stored plan is returned (SavedPlan shape); with a plan body the result is the sent plan with the pass applied, so id and timestamps may be absent. */
+export type PostKbAnalyzeRisksResponse200 = {
+  id?: string;
+  meetingId?: string | null;
+  title?: string;
+  goal?: string | null;
+  language?: string | null;
+  /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
+  meta?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+  tasks: PlanningTask[];
+};
+
+export type PostKbAnalyzeRisksResponse400 = CommonError;
+
+export type PostKbAnalyzeRisksResponse401 = CommonError;
+
+export type PostKbAnalyzeRisksResponse404 = CommonError;
+
+export type PostKbAnalyzeRisksResponse429 = CommonError;
+
+export type PostKbAnalyzeRisksResponse500 = CommonError;
+
+/** Request parts for `POST /kb/code-sync` (schema/http/planning.schema.json). */
+export type PostKbCodeSyncRequest = {
+  body: {
+    planId?: string;
+    /** A client-supplied plan draft. The server reads title, goal, language, meetingId and each task's id, title, description, owner, estimateDays, dependsOn, status. */
+    plan?: {
+      title?: string;
+      goal?: string;
+      language?: string;
+      meetingId?: string;
+      tasks?: {
+        id?: string;
+        title?: string;
+        description?: string;
+        owner?: string;
+        estimateDays?: number;
+        dependsOn?: string[];
+        status?: string;
+      }[];
+    };
+  };
+};
+
+/** A plan body from the risk or code-sync routes. With planId the stored plan is returned (SavedPlan shape); with a plan body the result is the sent plan with the pass applied, so id and timestamps may be absent. */
+export type PostKbCodeSyncResponse200 = {
+  id?: string;
+  meetingId?: string | null;
+  title?: string;
+  goal?: string | null;
+  language?: string | null;
+  /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
+  meta?: Record<string, unknown>;
+  createdAt?: string;
+  updatedAt?: string;
+  tasks: PlanningTask[];
+};
+
+export type PostKbCodeSyncResponse400 = CommonError;
+
+export type PostKbCodeSyncResponse401 = CommonError;
+
+export type PostKbCodeSyncResponse404 = CommonError;
+
+/** Request parts for `GET /kb/plans` (schema/http/planning.schema.json). */
+export type GetKbPlansRequest = {
+  query: {
+    limit?: string;
+  };
+};
+
+export type GetKbPlansResponse200 = {
+  plans: ({
+    id?: string;
+    title?: string;
+    meetingId?: string | null;
+    createdAt?: string;
+    updatedAt?: string;
+    taskCount?: number;
+  })[];
+  count: number;
+};
+
+export type GetKbPlansResponse401 = CommonError;
+
+/** Request parts for `GET /kb/plan/:id` (schema/http/planning.schema.json). */
+export type GetKbPlanIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+/** A stored plan, as getPlan returns it. */
+export type GetKbPlanIdResponse200 = {
+  id: string;
+  meetingId?: string | null;
+  title: string;
+  goal?: string | null;
+  language?: string | null;
+  /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
+  meta: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  tasks: PlanningTask[];
+};
+
+export type GetKbPlanIdResponse401 = CommonError;
+
+export type GetKbPlanIdResponse404 = CommonError;
+
+/** Request parts for `POST /kb/plan/save` (schema/http/planning.schema.json). */
+export type PostKbPlanSaveRequest = {
+  body: {
+    id?: string;
+    title?: string;
+    goal?: string;
+    language?: string;
+    meetingId?: string;
+    /** Stored as plan meta. */
+    meta?: Record<string, unknown>;
+    tasks?: {
+      id?: string;
+      title?: string;
+      description?: string;
+      owner?: string;
+      due?: string;
+      estimateDays?: number;
+      dependsOn?: string[];
+      status?: string;
+      risk?: string;
+      riskReason?: string;
+      milestone?: string;
+      files?: {
+        ref?: string;
+        title?: string;
+        bodyExcerpt?: string;
+        rank?: number;
+      }[];
+      symbols?: {
+        symbol_id?: string;
+        title?: string;
+        kind?: string;
+        repo_id?: string;
+        source_file?: string;
+        line?: number;
+      }[];
+      /** Stored task meta. */
+      meta?: Record<string, unknown>;
+    }[];
+  };
+};
+
+/** A stored plan, as getPlan returns it. */
+export type PostKbPlanSaveResponse200 = {
+  id: string;
+  meetingId?: string | null;
+  title: string;
+  goal?: string | null;
+  language?: string | null;
+  /** Free-form plan meta; savePlan keeps meta.snapshots (last 3 versions) on update. */
+  meta: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  tasks: PlanningTask[];
+};
+
+export type PostKbPlanSaveResponse400 = CommonError;
+
+export type PostKbPlanSaveResponse401 = CommonError;
+
+export type PostKbPlanSaveResponse500 = CommonError;
+
+/** Request parts for `DELETE /kb/plan/delete` (schema/http/planning.schema.json). */
+export type DeleteKbPlanDeleteRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type DeleteKbPlanDeleteResponse200 = {
+  ok: true;
+};
+
+export type DeleteKbPlanDeleteResponse400 = CommonError;
+
+export type DeleteKbPlanDeleteResponse401 = CommonError;
+
+/** Request parts for `POST /kb/plan/delete` (schema/http/planning.schema.json). */
+export type PostKbPlanDeleteRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostKbPlanDeleteResponse200 = {
+  ok: true;
+};
+
+export type PostKbPlanDeleteResponse400 = CommonError;
+
+export type PostKbPlanDeleteResponse401 = CommonError;
+
+/** Request parts for `PATCH /kb/plan-task/update` (schema/http/planning.schema.json). */
+export type PatchKbPlanTaskUpdateRequest = {
+  body: {
+    taskId?: string;
+    /** Only the keys present change; an explicit null clears a field. */
+    patch?: {
+      status?: string;
+      risk?: string | null;
+      riskReason?: string | null;
+      owner?: string | null;
+      due?: string | null;
+      files?: {
+        ref?: string;
+        title?: string;
+        bodyExcerpt?: string;
+        rank?: number;
+      }[];
+    };
+  };
+};
+
+/** A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols. */
+export type PatchKbPlanTaskUpdateResponse200 = {
+  id: string;
+  planId?: string;
+  position?: number;
+  milestone?: string | null;
+  title: string;
+  description?: string | null;
+  owner?: string | null;
+  due?: string | null;
+  estimateDays?: number | null;
+  dependsOn?: string[];
+  status: string;
+  risk?: string | null;
+  riskReason?: string | null;
+  files?: {
+    ref?: string;
+    title?: string;
+    bodyExcerpt?: string;
+    rank?: number;
+  }[];
+  symbols?: {
+    symbol_id?: string;
+    title?: string;
+    kind?: string;
+    repo_id?: string;
+    source_file?: string;
+    line?: number;
+  }[];
+  /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots). */
+  meta?: Record<string, unknown>;
+};
+
+export type PatchKbPlanTaskUpdateResponse400 = CommonError;
+
+export type PatchKbPlanTaskUpdateResponse401 = CommonError;
+
+export type PatchKbPlanTaskUpdateResponse404 = CommonError;
+
+/** Request parts for `POST /kb/plan-task/update` (schema/http/planning.schema.json). */
+export type PostKbPlanTaskUpdateRequest = {
+  body: {
+    taskId?: string;
+    /** Only the keys present change; an explicit null clears a field. */
+    patch?: {
+      status?: string;
+      risk?: string | null;
+      riskReason?: string | null;
+      owner?: string | null;
+      due?: string | null;
+      files?: {
+        ref?: string;
+        title?: string;
+        bodyExcerpt?: string;
+        rank?: number;
+      }[];
+    };
+  };
+};
+
+/** A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols. */
+export type PostKbPlanTaskUpdateResponse200 = {
+  id: string;
+  planId?: string;
+  position?: number;
+  milestone?: string | null;
+  title: string;
+  description?: string | null;
+  owner?: string | null;
+  due?: string | null;
+  estimateDays?: number | null;
+  dependsOn?: string[];
+  status: string;
+  risk?: string | null;
+  riskReason?: string | null;
+  files?: {
+    ref?: string;
+    title?: string;
+    bodyExcerpt?: string;
+    rank?: number;
+  }[];
+  symbols?: {
+    symbol_id?: string;
+    title?: string;
+    kind?: string;
+    repo_id?: string;
+    source_file?: string;
+    line?: number;
+  }[];
+  /** Free-form task meta (dispatched, dispatchRetry, outcome, code, snapshots). */
+  meta?: Record<string, unknown>;
+};
+
+export type PostKbPlanTaskUpdateResponse400 = CommonError;
+
+export type PostKbPlanTaskUpdateResponse401 = CommonError;
+
+export type PostKbPlanTaskUpdateResponse404 = CommonError;
+
+/** Request parts for `POST /kb/dispatch` (schema/http/planning.schema.json). */
+export type PostKbDispatchRequest = {
+  body: {
+    planId?: string;
+    target?: "preview" | "github" | "backlog" | "linear";
+    taskIds?: string[];
+    reviewId?: string;
+    /** Destination and credential keys for the target (repo/owner for github, space/projectId for backlog, teamId/projectId for linear). Credentials come from the vault unless sent here. Open: the keys are per target. */
+    config?: {
+      repo?: string;
+      [key: string]: unknown;
+    };
+  };
+};
+
+/** Preview form verified. Non-preview results carry provider fields (url, number, error) that the offline capture cannot produce. */
+export type PostKbDispatchResponse200 = {
+  target: string;
+  plan: {
+    id: string;
+    title: string;
+  };
+  results: {
+    taskId: string;
+    status: string;
+    title?: string;
+    body?: string;
+    labels?: string[];
+    assignees?: string[];
+  }[];
+};
+
+export type PostKbDispatchResponse400 = CommonError;
+
+export type PostKbDispatchResponse401 = CommonError;
+
+export type PostKbDispatchResponse403 = CommonError;
+
+export type PostKbDispatchResponse429 = CommonError;
+
+/** Request parts for `POST /kb/generate-code` (schema/http/planning.schema.json). */
+export type PostKbGenerateCodeRequest = {
+  body: {
+    taskId?: string;
+    language?: string;
+    includeFileContext?: boolean;
+  };
+};
+
+/** Generated files are returned, never stored. A modify of a file the model was not shown in full is dropped and listed in rejected. */
+export type PostKbGenerateCodeResponse200 = {
+  taskId: string;
+  summary: string;
+  files: CodeFile[];
+  tests: CodeFile[];
+  notes: string;
+  rejected: string[];
+};
+
+export type PostKbGenerateCodeResponse400 = CommonError;
+
+export type PostKbGenerateCodeResponse401 = CommonError;
+
+export type PostKbGenerateCodeResponse429 = CommonError;
+
+export type PostKbGenerateCodeResponse500 = CommonError;
+
+/** Request parts for `POST /kb/summarize` (schema/http/planning.schema.json). */
+export type PostKbSummarizeRequest = {
+  body: {
+    transcript?: string;
+    title?: string;
+    language?: string;
+    started_at?: string;
+    duration_seconds?: number;
+    participants?: string[];
+  };
+};
+
+export type PostKbSummarizeResponse200 = {
+  gist: string;
+  tldr: string[];
+  full: string;
+  actions: {
+    owner?: string;
+    text: string;
+    due?: string;
+  }[];
+  decisions: {
+    text: string;
+  }[];
+  blockers: {
+    text: string;
+  }[];
+  model?: string;
+  generated_at: number;
+};
+
+export type PostKbSummarizeResponse400 = CommonError;
+
+export type PostKbSummarizeResponse401 = CommonError;
+
+export type PostKbSummarizeResponse429 = CommonError;
+
+export type PostKbSummarizeResponse500 = CommonError;
+
+export type PostKbSummarizeResponse502 = CommonError;
+
+/** Request parts for `POST /kb/conflict-questions` (schema/http/planning.schema.json). */
+export type PostKbConflictQuestionsRequest = {
+  body: {
+    transcript?: string;
+    fileContext?: string;
+    language?: string;
+  };
+};
+
+export type PostKbConflictQuestionsResponse200 = {
+  questions: string;
+};
+
+export type PostKbConflictQuestionsResponse401 = CommonError;
+
+export type PostKbConflictQuestionsResponse429 = CommonError;
+
+export type PostKbConflictQuestionsResponse500 = CommonError;
+
+/** Request parts for `POST /kb/notify/slack` (schema/http/planning.schema.json). */
+export type PostKbNotifySlackRequest = {
+  body: {
+    kind?: string;
+    webhookUrl?: string;
+    planId?: string;
+    /** Per kind: a plan, a dispatch result, a review, or {text} for custom. */
+    payload?: Record<string, unknown>;
+  };
+};
+
+export type PostKbNotifySlackResponse200 = unknown;
+
+export type PostKbNotifySlackResponse400 = CommonError;
+
+export type PostKbNotifySlackResponse401 = CommonError;
+
+export type PostKbNotifySlackResponse404 = CommonError;
+
+export type PostKbNotifySlackResponse429 = CommonError;
+
+/** Request parts for `POST /kb/outcomes/refresh` (schema/http/planning.schema.json). */
+export type PostKbOutcomesRefreshRequest = {
+  body: {
+    taskIds?: string[];
+    /** Inline credentials, merged over the vault values; not echoed back. */
+    creds?: Record<string, unknown>;
+  };
+};
+
+export type PostKbOutcomesRefreshResponse200 = {
+  pollErroredCount: number;
+  pollCount: number;
+  changedCount: number;
+  durationMs: number;
+  byState: Record<string, number>;
+  polled: {
+    taskId: string;
+    planId?: string;
+    title?: string;
+    provider?: string;
+    url?: string;
+    state: string;
+    /** Poll detail (error, or the provider's status). */
+    meta?: Record<string, unknown>;
+    changed: boolean;
+    circuitOpen?: boolean;
+  }[];
+};
+
+export type PostKbOutcomesRefreshResponse401 = CommonError;
+
+export type PostKbOutcomesRefreshResponse429 = CommonError;
+
+/** Request parts for `POST /kb/outcomes/retry-failed` (schema/http/planning.schema.json). */
+export type PostKbOutcomesRetryFailedRequest = {
+  body: {
+    /** Credentials and destination for the retry targets (as /kb/dispatch config). */
+    config?: Record<string, unknown>;
+  };
+};
+
+export type PostKbOutcomesRetryFailedResponse200 = {
+  retried: number;
+  ok: number;
+  failed: number;
+  deferred: number;
+};
+
+export type PostKbOutcomesRetryFailedResponse401 = CommonError;
+
+/** Request parts for `GET /kb/outcomes/task/:id` (schema/http/planning.schema.json). */
+export type GetKbOutcomesTaskIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbOutcomesTaskIdResponse200 = {
+  outcomes: ({
+    id: number;
+    provider: string;
+    ref?: string | null;
+    state: string;
+    isTerminal: boolean;
+    /** Outcome detail. */
+    meta?: Record<string, unknown>;
+    observedAt: string;
+  })[];
+};
+
+export type GetKbOutcomesTaskIdResponse400 = CommonError;
+
+export type GetKbOutcomesTaskIdResponse401 = CommonError;
+
+/** Request parts for `GET /kb/outcomes/stats` (schema/http/planning.schema.json). */
+export type GetKbOutcomesStatsRequest = Record<string, never>;
+
+export type GetKbOutcomesStatsResponse200 = {
+  total: number;
+  byState: Record<string, number>;
+};
+
+export type GetKbOutcomesStatsResponse401 = CommonError;
+
+/** Request parts for `POST /kb/providers/verify` (schema/http/providers-usage.schema.json). */
+export type PostKbProvidersVerifyRequest = {
+  body: {
+    provider?: string;
+    /** key | cli */
+    mode?: string;
+    /** placeholder in fixtures; never a real key */
+    apiKey?: string;
+    baseUrl?: string;
+  };
+};
+
+/** Always 200 unless the request is invalid. ok true is answered only after a live model listing, which the capture does not reach (no external network); the true shape is the same. */
+export type PostKbProvidersVerifyResponse200 = {
+  ok: boolean;
+  detail: string;
+};
+
+export type PostKbProvidersVerifyResponse400 = CommonError;
+
+export type PostKbProvidersVerifyResponse401 = CommonError;
+
+export type PostKbProvidersVerifyResponse429 = CommonError;
+
+/** Request parts for `POST /kb/providers/models` (schema/http/providers-usage.schema.json). */
+export type PostKbProvidersModelsRequest = {
+  body: {
+    provider?: string;
+  };
+};
+
+/** The live chat models for a provider, or [] with a detail. entries and source are the Claude SDK variant (anthropic only, server API v57+ / v63+): entries carries display names and effort levels. The SDK variant is not captured (it needs the local Claude CLI login), so entries and source are optional and not covered by a fixture. */
+export type PostKbProvidersModelsResponse200 = {
+  models: string[];
+  /** why nothing was listed */
+  detail?: string;
+  entries?: ({
+    id: string;
+    displayName?: string | null;
+    effortLevels?: string[];
+  })[];
+  source?: "sdk";
+};
+
+export type PostKbProvidersModelsResponse400 = CommonError;
+
+export type PostKbProvidersModelsResponse401 = CommonError;
+
+export type PostKbProvidersModelsResponse429 = CommonError;
+
+/** Request parts for `GET /kb/agent-sdk` (schema/http/providers-usage.schema.json). */
+export type GetKbAgentSdkRequest = {
+  query: {
+    /** 1 bypasses the one-hour registry cache */
+    force?: string;
+  };
+};
+
+/** Claude Agent SDK version status (llm_agent/sdk/updater.mjs sdkStatus). The 200 fixture is produced in-process with an offline registry stub; the route itself reads the npm registry. */
+export type GetKbAgentSdkResponse200 = {
+  package: string;
+  running: string | null;
+  installed: string | null;
+  declared: string | null;
+  restartNeeded: boolean;
+  latest: string | null;
+  updateAvailable: boolean;
+  updating: boolean;
+  canUpdate: boolean;
+  error: string | null;
+};
+
+export type GetKbAgentSdkResponse401 = CommonError;
+
+/** Request parts for `POST /kb/agent-sdk/update` (schema/http/providers-usage.schema.json). */
+export type PostKbAgentSdkUpdateRequest = Record<string, never>;
+
+/** Always 200: ok says whether the SDK was updated; a refusal or rollback is a normal answer. The 200 fixture is a refusal (a chat turn running), produced in-process; an install would run npm in the server checkout and reach the registry, so no install is captured. */
+export type PostKbAgentSdkUpdateResponse200 = {
+  ok: boolean;
+  from: string | null;
+  to: string | null;
+  rolledBack: boolean;
+  restartNeeded: boolean;
+  log: string | null;
+};
+
+export type PostKbAgentSdkUpdateResponse401 = CommonError;
+
+/** Request parts for `POST /kb/custom-providers` (schema/http/providers-usage.schema.json). */
+export type PostKbCustomProvidersRequest = {
+  body: {
+    providers?: ({
+      id?: string;
+      name?: string;
+      baseURL?: string;
+      /** vault key path */
+      apiKey?: string;
+      models?: {
+        id: string;
+        displayName?: string;
+        [key: string]: unknown;
+      }[];
+      isOpenAICompatible?: boolean;
+      isEnabled?: boolean;
+      /** Anthropic-format endpoint for the Agent engine; null when absent */
+      anthropicBaseURL?: string | null;
+    })[];
+  };
+};
+
+export type PostKbCustomProvidersResponse200 = {
+  success: boolean;
+  count: number;
+};
+
+export type PostKbCustomProvidersResponse400 = CommonError;
+
+export type PostKbCustomProvidersResponse401 = CommonError;
+
+/** Request parts for `GET /kb/routing-tiers` (schema/http/providers-usage.schema.json). */
+export type GetKbRoutingTiersRequest = Record<string, never>;
+
+/** The stored tier routing (tiers, features) plus each tier's usability by the server's own resolver (status) and each configured role's (featureStatus). A keyless openai or google tier answers after a short CLI health probe. */
+export type GetKbRoutingTiersResponse200 = {
+  /** Keys strong | standard | cheap. */
+  tiers: Record<string, {
+      /** anthropic | openai | google | deepseek | jev | custom:<id> */
+      provider: string;
+      model: string;
+    }>;
+  /** Role -> tier. */
+  features: Record<string, string>;
+  /** Keys: configured tiers, plus unset ones (reason unset) when a tier is absent. */
+  status: Record<string, {
+      usable: boolean;
+      /** set when unusable: unset | no_key | no_key_or_cli | cli_unverified | cli_failed | route_failed | not_found | disabled | error */
+      reason?: string;
+      agentCapable: boolean;
+      /** why the Agent engine cannot run a usable tier, e.g. not_agent_capable */
+      agentReason?: string;
+      via?: "key" | "cli";
+    }>;
+  featureStatus: Record<string, {
+      usable: boolean;
+      /** set when unusable: a tier reason, cli_untrusted_input, or decision_only */
+      reason?: string;
+    }>;
+};
+
+export type GetKbRoutingTiersResponse401 = CommonError;
+
+/** Request parts for `POST /kb/routing-tiers` (schema/http/providers-usage.schema.json). */
+export type PostKbRoutingTiersRequest = {
+  body: {
+    tiers?: Record<string, {
+        /** anthropic | openai | google | deepseek | jev | custom:<id> */
+        provider: string;
+        model: string;
+      }>;
+    features?: Record<string, string>;
+  };
+};
+
+export type PostKbRoutingTiersResponse200 = {
+  success: boolean;
+  dropped: ({
+    /** tiers.<name> or features.<name> */
+    entry: string;
+    reason: "invalid_shape" | "invalid_provider" | "invalid_model" | "unknown_tier" | "unknown_feature";
+  })[];
+};
+
+export type PostKbRoutingTiersResponse400 = CommonError;
+
+export type PostKbRoutingTiersResponse401 = CommonError;
+
+/** Request parts for `GET /kb/usage/limits` (schema/http/providers-usage.schema.json). */
+export type GetKbUsageLimitsRequest = {
+  query: {
+    /** anthropic | openai | google | custom; restricts chains to that provider */
+    provider?: string;
+  };
+};
+
+export type GetKbUsageLimitsResponse200 = {
+  /** Per provider, the chain of models with their caps. GET lists the built-in chain merged with the user's overrides, sorted by priority. */
+  chains: Record<string, ({
+      provider: string;
+      model: string;
+      label: string;
+      priority: number;
+      enabled: boolean;
+      limit_value: number;
+      unit: "runs" | "tokens";
+      window_kind: "daily" | "monthly";
+      threshold_pct: number;
+      custom: boolean;
+    })[]>;
+};
+
+export type GetKbUsageLimitsResponse401 = CommonError;
+
+/** Request parts for `PUT /kb/usage/limits` (schema/http/providers-usage.schema.json). */
+export type PutKbUsageLimitsRequest = {
+  body: {
+    chains?: Record<string, {
+        model?: string;
+        priority?: number;
+        enabled?: boolean;
+        limit_value?: number;
+        unit?: string;
+        window_kind?: string;
+        threshold_pct?: number;
+      }[]>;
+  };
+};
+
+export type PutKbUsageLimitsResponse200 = {
+  ok: boolean;
+  /** Per provider, the chain of models with their caps. GET lists the built-in chain merged with the user's overrides, sorted by priority. */
+  chains: Record<string, ({
+      provider: string;
+      model: string;
+      label: string;
+      priority: number;
+      enabled: boolean;
+      limit_value: number;
+      unit: "runs" | "tokens";
+      window_kind: "daily" | "monthly";
+      threshold_pct: number;
+      custom: boolean;
+    })[]>;
+};
+
+export type PutKbUsageLimitsResponse400 = CommonError;
+
+export type PutKbUsageLimitsResponse401 = CommonError;
+
+export type PutKbUsageLimitsResponse429 = CommonError;
+
+/** Request parts for `GET /kb/usage/summary` (schema/http/providers-usage.schema.json). */
+export type GetKbUsageSummaryRequest = {
+  query: {
+    /** restricts providers to one */
+    provider?: string;
+  };
+};
+
+export type GetKbUsageSummaryResponse200 = {
+  providers: Record<string, {
+      /** The resolver verdict (kb/usage.mjs resolveModel). used, limit, pct and unit are present only when a model was picked (ok or degraded); a paused or unconfigured verdict has no pick. */
+      active: {
+        provider: string;
+        /** null when paused or unconfigured */
+        model: string | null;
+        status: "ok" | "degraded" | "paused" | "unconfigured";
+        /** ISO-8601 window reset; null when there is no chain */
+        resetAt: string | null;
+        reason: string;
+        used?: number;
+        limit?: number;
+        pct?: number;
+        unit?: string;
+        engaged: boolean;
+      };
+      models: ({
+        model: string;
+        label: string;
+        enabled: boolean;
+        custom: boolean;
+        priority: number;
+        unit: string;
+        window_kind: string;
+        limit: number;
+        threshold_pct: number;
+        used: number;
+        pct: number | null;
+        state: "ok" | "warning" | "exhausted";
+        quota: boolean;
+        tokens: {
+          input: number;
+          output: number;
+          cacheRead: number;
+          cacheCreation: number;
+          totalInput: number;
+          cacheHitPct: number | null;
+          unknownRows: number;
+        };
+        resetAt: string;
+      })[];
+    }>;
+};
+
+export type GetKbUsageSummaryResponse401 = CommonError;
+
+/** Request parts for `GET /kb/usage/resolve` (schema/http/providers-usage.schema.json). */
+export type GetKbUsageResolveRequest = {
+  query: {
+    /** anthropic | openai | google | custom; default anthropic */
+    provider?: string;
+    /** the caller's desired model, kept when healthy */
+    prefer?: string;
+  };
+};
+
+export type GetKbUsageResolveResponse200 = Resolution;
+
+export type GetKbUsageResolveResponse400 = CommonError;
+
+export type GetKbUsageResolveResponse401 = CommonError;
+
+/** Request parts for `GET /kb/usage/ratelimits` (schema/http/providers-usage.schema.json). */
+export type GetKbUsageRatelimitsRequest = {
+  query: {
+    /** default anthropic */
+    provider?: string;
+  };
+};
+
+export type GetKbUsageRatelimitsResponse200 = {
+  /** The latest Anthropic/OpenAI-compatible rate-limit snapshot from a live response's headers (in-memory, per server run). null when only the CLI path ran, which is always the case offline. The object shape (capturedAt, provider, model, requests, tokens, inputTokens, outputTokens; each bucket limit/remaining/reset) is described but not covered: no live response is captured. */
+  ratelimits?: {
+    capturedAt?: string;
+    provider?: string;
+    model?: string | null;
+    requests?: Record<string, unknown> | null;
+    tokens?: Record<string, unknown> | null;
+    inputTokens?: Record<string, unknown> | null;
+    outputTokens?: Record<string, unknown> | null;
+  } | null;
+};
+
+export type GetKbUsageRatelimitsResponse401 = CommonError;
+
+/** Request parts for `GET /kb/usage/turn-composition` (schema/http/providers-usage.schema.json). */
+export type GetKbUsageTurnCompositionRequest = {
+  query: {
+    /** 1-200, default 50 */
+    limit?: string;
+  };
+};
+
+export type GetKbUsageTurnCompositionResponse200 = {
+  turns: ({
+    turnId: string;
+    mode?: string | null;
+    model?: string | null;
+    resumed?: 0 | 1;
+    systemPromptKind?: string | null;
+    systemChars?: number | null;
+    promptChars?: number | null;
+    attachedFiles?: number | null;
+    attachmentChars?: number | null;
+    images?: number | null;
+    tools?: number | null;
+    mcpTools?: number | null;
+    /** comma-separated server names */
+    mcpServers?: string | null;
+    agents?: number | null;
+    skills?: number | null;
+    slashCommands?: number | null;
+    claudeCodeVersion?: string | null;
+    apiCalls?: number | null;
+    firstCallPromptTokens?: number | null;
+    firstCallCacheReadTokens?: number | null;
+    firstCallCacheCreationTokens?: number | null;
+    /** SQLite-stored ISO timestamp */
+    createdAt: string;
+    systemPromptTokens?: number | null;
+    skillsAppendTokens?: number | null;
+    llmideToolTokens?: number | null;
+    userMcpServers?: number | null;
+    contextFenceTokens?: number | null;
+    memoryFenceTokens?: number | null;
+    skillsFenceTokens?: number | null;
+    toolResultChars?: number | null;
+    toolResultTokens?: number | null;
+    sdkContextTotalTokens?: number | null;
+    sdkSystemPromptTokens?: number | null;
+    sdkSystemToolsTokens?: number | null;
+    sdkMcpToolsTokens?: number | null;
+    sdkMemoryTokens?: number | null;
+    sdkMessagesTokens?: number | null;
+    sdkDeferredToolsTokens?: number | null;
+    sdkCategories?: string | null;
+  })[];
+};
+
+export type GetKbUsageTurnCompositionResponse401 = CommonError;
+
+/** Request parts for `POST /kb/usage/record` (schema/http/providers-usage.schema.json). */
+export type PostKbUsageRecordRequest = {
+  body: {
+    provider?: string;
+    model?: string;
+    source?: string;
+    endpoint?: string;
+    runs?: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    turns?: number;
+    stopReason?: string;
+    requestId?: string;
+  };
+};
+
+/** ok is false and id null when the ledger write failed (best effort). */
+export type PostKbUsageRecordResponse200 = {
+  ok: boolean;
+  id: number | null;
+};
+
+export type PostKbUsageRecordResponse400 = CommonError;
+
+export type PostKbUsageRecordResponse401 = CommonError;
+
+export type PostKbUsageRecordResponse429 = CommonError;
+
+/** Request parts for `POST /kb/review/submit` (schema/http/review.schema.json). */
+export type PostKbReviewSubmitRequest = {
+  body: {
+    /** dispatch or codegen-apply. */
+    kind?: string;
+    planId?: string;
+    taskId?: string;
+    /** Stored up to 500 characters; defaults to '<kind> review'. */
+    title?: string;
+    payload?: Payload;
+  };
+};
+
+export type PostKbReviewSubmitResponse200 = ReviewItem;
+
+export type PostKbReviewSubmitResponse400 = CommonError;
+
+export type PostKbReviewSubmitResponse401 = CommonError;
+
+export type PostKbReviewSubmitResponse429 = CommonError;
+
+/** Request parts for `GET /kb/review/list` (schema/http/review.schema.json). */
+export type GetKbReviewListRequest = {
+  query: {
+    status?: "pending" | "approved" | "rejected" | "executed" | "failed" | "expired";
+    limit?: string;
+  };
+};
+
+export type GetKbReviewListResponse200 = {
+  items: ReviewSummary[];
+  count: number;
+};
+
+export type GetKbReviewListResponse401 = CommonError;
+
+/** Request parts for `GET /kb/review/get/:id` (schema/http/review.schema.json). */
+export type GetKbReviewGetIdRequest = {
+  params: {
+    /** The review item id (rev-…). */
+    id: string;
+  };
+};
+
+export type GetKbReviewGetIdResponse200 = ReviewItem;
+
+export type GetKbReviewGetIdResponse401 = CommonError;
+
+export type GetKbReviewGetIdResponse404 = CommonError;
+
+/** Request parts for `POST /kb/review/approve` (schema/http/review.schema.json). */
+export type PostKbReviewApproveRequest = {
+  body: {
+    id?: string;
+    /** Stored as reviewerNote. */
+    note?: string;
+    /** Tracker credentials for this approval, e.g. token, apiKey. */
+    config?: Record<string, unknown>;
+    /** Pull-request credentials for this approval, e.g. ghToken. */
+    pr?: Record<string, unknown>;
+  };
+};
+
+export type PostKbReviewApproveResponse200 = ReviewItem;
+
+export type PostKbReviewApproveResponse400 = CommonError;
+
+export type PostKbReviewApproveResponse401 = CommonError;
+
+export type PostKbReviewApproveResponse404 = CommonError;
+
+export type PostKbReviewApproveResponse409 = CommonError;
+
+export type PostKbReviewApproveResponse422 = GuardrailRejection;
+
+export type PostKbReviewApproveResponse429 = CommonError;
+
+export type PostKbReviewApproveResponse500 = ExecutionFailure;
+
+/** Request parts for `POST /kb/review/reject` (schema/http/review.schema.json). */
+export type PostKbReviewRejectRequest = {
+  body: {
+    id?: string;
+    /** Stored as reviewerNote. */
+    note?: string;
+  };
+};
+
+export type PostKbReviewRejectResponse200 = ReviewItem;
+
+export type PostKbReviewRejectResponse400 = CommonError;
+
+export type PostKbReviewRejectResponse401 = CommonError;
+
+export type PostKbReviewRejectResponse404 = CommonError;
+
+export type PostKbReviewRejectResponse409 = CommonError;
+
+export type PostKbReviewRejectResponse429 = CommonError;
+
+/** Request parts for `DELETE /kb/review/delete` (schema/http/review.schema.json). */
+export type DeleteKbReviewDeleteRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type DeleteKbReviewDeleteResponse200 = ReviewOk;
+
+export type DeleteKbReviewDeleteResponse400 = CommonError;
+
+export type DeleteKbReviewDeleteResponse401 = CommonError;
+
+/** Request parts for `POST /kb/review/delete` (schema/http/review.schema.json). */
+export type PostKbReviewDeleteRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostKbReviewDeleteResponse200 = ReviewOk;
+
+export type PostKbReviewDeleteResponse401 = CommonError;
+
+export type PostKbReviewDeleteResponse429 = CommonError;
+
+/** Typed map of every endpoint: request parts and each declared response, by status. */
+export interface ApiEndpoints {
+  "POST /agent/v2/stream": {
+    request: PostAgentV2StreamRequest;
+    responses: {
+      200: PostAgentV2StreamResponse200;
+      400: PostAgentV2StreamResponse400;
+    };
+  };
+  "POST /agent/v2/decision": {
+    request: PostAgentV2DecisionRequest;
+    responses: {
+      200: PostAgentV2DecisionResponse200;
+      404: PostAgentV2DecisionResponse404;
+    };
+  };
+  "DELETE /agent/v2/session": {
+    request: DeleteAgentV2SessionRequest;
+    responses: {
+      200: DeleteAgentV2SessionResponse200;
+      400: DeleteAgentV2SessionResponse400;
+    };
+  };
+  "POST /agent/v2/cancel": {
+    request: PostAgentV2CancelRequest;
+    responses: {
+      200: PostAgentV2CancelResponse200;
+      400: PostAgentV2CancelResponse400;
+    };
+  };
+  "POST /kb/agent/dispatch": {
+    request: PostKbAgentDispatchRequest;
+    responses: {
+      200: PostKbAgentDispatchResponse200;
+    };
+  };
+  "POST /kb/agent/stop": {
+    request: PostKbAgentStopRequest;
+    responses: {
+      200: PostKbAgentStopResponse200;
+      400: PostKbAgentStopResponse400;
+    };
+  };
+  "GET /kb/agent/runs": {
+    request: GetKbAgentRunsRequest;
+    responses: {
+      200: GetKbAgentRunsResponse200;
+    };
+  };
+  "POST /kb/agent/feedback": {
+    request: PostKbAgentFeedbackRequest;
+    responses: {
+      200: PostKbAgentFeedbackResponse200;
+      400: PostKbAgentFeedbackResponse400;
+    };
+  };
+  "GET /kb/agent/feedback/stats": {
+    request: GetKbAgentFeedbackStatsRequest;
+    responses: {
+      200: GetKbAgentFeedbackStatsResponse200;
+    };
+  };
+  "GET /kb/agent/feedback/by-task": {
+    request: GetKbAgentFeedbackByTaskRequest;
+    responses: {
+      200: GetKbAgentFeedbackByTaskResponse200;
+    };
+  };
+  "GET /kb/agent/persona": {
+    request: GetKbAgentPersonaRequest;
+    responses: {
+      200: GetKbAgentPersonaResponse200;
+    };
+  };
+  "PUT /kb/agent/persona": {
+    request: PutKbAgentPersonaRequest;
+    responses: {
+      200: PutKbAgentPersonaResponse200;
+    };
+  };
+  "GET /kb/agent/personas": {
+    request: GetKbAgentPersonasRequest;
+    responses: {
+      200: GetKbAgentPersonasResponse200;
+    };
+  };
+  "POST /kb/agent/personas": {
+    request: PostKbAgentPersonasRequest;
+    responses: {
+      200: PostKbAgentPersonasResponse200;
+    };
+  };
+  "PUT /kb/agent/personas/active": {
+    request: PutKbAgentPersonasActiveRequest;
+    responses: {
+      200: PutKbAgentPersonasActiveResponse200;
+      404: PutKbAgentPersonasActiveResponse404;
+    };
+  };
+  "PUT /kb/agent/personas/:id": {
+    request: PutKbAgentPersonasIdRequest;
+    responses: {
+      200: PutKbAgentPersonasIdResponse200;
+      404: PutKbAgentPersonasIdResponse404;
+    };
+  };
+  "DELETE /kb/agent/personas/:id": {
+    request: DeleteKbAgentPersonasIdRequest;
+    responses: {
+      200: DeleteKbAgentPersonasIdResponse200;
+      400: DeleteKbAgentPersonasIdResponse400;
+    };
+  };
+  "GET /kb/agent/catalog": {
+    request: GetKbAgentCatalogRequest;
+    responses: {
+      200: GetKbAgentCatalogResponse200;
+    };
+  };
+  "GET /kb/agent/commands": {
+    request: GetKbAgentCommandsRequest;
+    responses: {
+      200: GetKbAgentCommandsResponse200;
+    };
+  };
+  "GET /kb/agent/generation-library": {
+    request: GetKbAgentGenerationLibraryRequest;
+    responses: {
+      200: GetKbAgentGenerationLibraryResponse200;
+    };
+  };
+  "GET /kb/agent/skill-library": {
+    request: GetKbAgentSkillLibraryRequest;
+    responses: {
+      200: GetKbAgentSkillLibraryResponse200;
+    };
+  };
+  "GET /kb/agent/project-memory": {
+    request: GetKbAgentProjectMemoryRequest;
+    responses: {
+      200: GetKbAgentProjectMemoryResponse200;
+    };
+  };
+  "DELETE /kb/agent/project-memory": {
+    request: DeleteKbAgentProjectMemoryRequest;
+    responses: {
+      200: DeleteKbAgentProjectMemoryResponse200;
+      404: DeleteKbAgentProjectMemoryResponse404;
+    };
+  };
+  "GET /kb/agent/tool-approvals": {
+    request: GetKbAgentToolApprovalsRequest;
+    responses: {
+      200: GetKbAgentToolApprovalsResponse200;
+    };
+  };
+  "DELETE /kb/agent/tool-approvals": {
+    request: DeleteKbAgentToolApprovalsRequest;
+    responses: {
+      200: DeleteKbAgentToolApprovalsResponse200;
+      400: DeleteKbAgentToolApprovalsResponse400;
+    };
+  };
+  "GET /kb/agent/session-memory": {
+    request: GetKbAgentSessionMemoryRequest;
+    responses: {
+      200: GetKbAgentSessionMemoryResponse200;
+      400: GetKbAgentSessionMemoryResponse400;
+    };
+  };
+  "DELETE /kb/agent/session-memory": {
+    request: DeleteKbAgentSessionMemoryRequest;
+    responses: {
+      200: DeleteKbAgentSessionMemoryResponse200;
+      400: DeleteKbAgentSessionMemoryResponse400;
+    };
+  };
+  "POST /kb/agent/ask": {
+    request: PostKbAgentAskRequest;
+    responses: {
+      200: PostKbAgentAskResponse200;
+      400: PostKbAgentAskResponse400;
+    };
+  };
+  "GET /kb/agent/ask/history": {
+    request: GetKbAgentAskHistoryRequest;
+    responses: {
+      200: GetKbAgentAskHistoryResponse200;
+    };
+  };
+  "DELETE /kb/agent/ask/history": {
+    request: DeleteKbAgentAskHistoryRequest;
+    responses: {
+      200: DeleteKbAgentAskHistoryResponse200;
+    };
+  };
+  "GET /kb/chat/sessions": {
+    request: GetKbChatSessionsRequest;
+    responses: {
+      200: GetKbChatSessionsResponse200;
+    };
+  };
+  "POST /kb/chat/sessions": {
+    request: PostKbChatSessionsRequest;
+    responses: {
+      201: PostKbChatSessionsResponse201;
+    };
+  };
+  "GET /kb/chat/sessions/:id": {
+    request: GetKbChatSessionsIdRequest;
+    responses: {
+      200: GetKbChatSessionsIdResponse200;
+      404: GetKbChatSessionsIdResponse404;
+    };
+  };
+  "PATCH /kb/chat/sessions/:id": {
+    request: PatchKbChatSessionsIdRequest;
+    responses: {
+      200: PatchKbChatSessionsIdResponse200;
+      400: PatchKbChatSessionsIdResponse400;
+      404: PatchKbChatSessionsIdResponse404;
+    };
+  };
+  "DELETE /kb/chat/sessions/:id": {
+    request: DeleteKbChatSessionsIdRequest;
+    responses: {
+      200: DeleteKbChatSessionsIdResponse200;
+      404: DeleteKbChatSessionsIdResponse404;
+    };
+  };
+  "POST /kb/chat/sessions/:id/messages": {
+    request: PostKbChatSessionsIdMessagesRequest;
+    responses: {
+      201: PostKbChatSessionsIdMessagesResponse201;
+      400: PostKbChatSessionsIdMessagesResponse400;
+      404: PostKbChatSessionsIdMessagesResponse404;
+    };
+  };
+  "DELETE /kb/chat/sessions/:id/messages": {
+    request: DeleteKbChatSessionsIdMessagesRequest;
+    responses: {
+      200: DeleteKbChatSessionsIdMessagesResponse200;
+    };
+  };
+  "GET /": {
+    request: GetRequest;
+    responses: {
+      200: GetResponse200;
+    };
+  };
+  "GET /health": {
+    request: GetHealthRequest;
+    responses: {
+      200: GetHealthResponse200;
+    };
+  };
+  "GET /launch-app": {
+    request: GetLaunchAppRequest;
+    responses: {
+      302: GetLaunchAppResponse302;
+    };
+  };
+  "GET /auth/well-known": {
+    request: GetAuthWellKnownRequest;
+    responses: {
+      200: GetAuthWellKnownResponse200;
+    };
+  };
+  "POST /auth/register": {
+    request: PostAuthRegisterRequest;
+    responses: {
+      201: PostAuthRegisterResponse201;
+      400: PostAuthRegisterResponse400;
+      403: PostAuthRegisterResponse403;
+      409: PostAuthRegisterResponse409;
+      429: PostAuthRegisterResponse429;
+    };
+  };
+  "POST /auth/login": {
+    request: PostAuthLoginRequest;
+    responses: {
+      200: PostAuthLoginResponse200;
+      401: PostAuthLoginResponse401;
+      429: PostAuthLoginResponse429;
+    };
+  };
+  "POST /auth/refresh": {
+    request: PostAuthRefreshRequest;
+    responses: {
+      200: PostAuthRefreshResponse200;
+      401: PostAuthRefreshResponse401;
+      429: PostAuthRefreshResponse429;
+    };
+  };
+  "POST /auth/logout": {
+    request: PostAuthLogoutRequest;
+    responses: {
+      200: PostAuthLogoutResponse200;
+      401: PostAuthLogoutResponse401;
+    };
+  };
+  "POST /auth/reset-request": {
+    request: PostAuthResetRequestRequest;
+    responses: {
+      200: PostAuthResetRequestResponse200;
+      429: PostAuthResetRequestResponse429;
+    };
+  };
+  "POST /auth/reset-confirm": {
+    request: PostAuthResetConfirmRequest;
+    responses: {
+      200: PostAuthResetConfirmResponse200;
+      400: PostAuthResetConfirmResponse400;
+      401: PostAuthResetConfirmResponse401;
+      429: PostAuthResetConfirmResponse429;
+    };
+  };
+  "POST /auth/google/start": {
+    request: PostAuthGoogleStartRequest;
+    responses: {
+      200: PostAuthGoogleStartResponse200;
+      401: PostAuthGoogleStartResponse401;
+      503: PostAuthGoogleStartResponse503;
+    };
+  };
+  "GET /auth/google/status": {
+    request: GetAuthGoogleStatusRequest;
+    responses: {
+      200: GetAuthGoogleStatusResponse200;
+      401: GetAuthGoogleStatusResponse401;
+    };
+  };
+  "GET /auth/google/callback": {
+    request: GetAuthGoogleCallbackRequest;
+    responses: {
+      200: GetAuthGoogleCallbackResponse200;
+      429: GetAuthGoogleCallbackResponse429;
+    };
+  };
+  "POST /auth/slack/start": {
+    request: PostAuthSlackStartRequest;
+    responses: {
+      200: PostAuthSlackStartResponse200;
+      401: PostAuthSlackStartResponse401;
+      503: PostAuthSlackStartResponse503;
+    };
+  };
+  "GET /auth/slack/status": {
+    request: GetAuthSlackStatusRequest;
+    responses: {
+      200: GetAuthSlackStatusResponse200;
+      401: GetAuthSlackStatusResponse401;
+    };
+  };
+  "GET /auth/slack/callback": {
+    request: GetAuthSlackCallbackRequest;
+    responses: {
+      200: GetAuthSlackCallbackResponse200;
+    };
+  };
+  "GET /auth/mcp-connector/callback": {
+    request: GetAuthMcpConnectorCallbackRequest;
+    responses: {
+      200: GetAuthMcpConnectorCallbackResponse200;
+    };
+  };
+  "GET /auth/me": {
+    request: GetAuthMeRequest;
+    responses: {
+      200: GetAuthMeResponse200;
+      401: GetAuthMeResponse401;
+    };
+  };
+  "POST /auth/me/password": {
+    request: PostAuthMePasswordRequest;
+    responses: {
+      200: PostAuthMePasswordResponse200;
+      400: PostAuthMePasswordResponse400;
+      401: PostAuthMePasswordResponse401;
+    };
+  };
+  "GET /auth/me/prefs": {
+    request: GetAuthMePrefsRequest;
+    responses: {
+      200: GetAuthMePrefsResponse200;
+      401: GetAuthMePrefsResponse401;
+    };
+  };
+  "PUT /auth/me/prefs": {
+    request: PutAuthMePrefsRequest;
+    responses: {
+      200: PutAuthMePrefsResponse200;
+      401: PutAuthMePrefsResponse401;
+    };
+  };
+  "GET /auth/me/secrets": {
+    request: GetAuthMeSecretsRequest;
+    responses: {
+      200: GetAuthMeSecretsResponse200;
+      401: GetAuthMeSecretsResponse401;
+    };
+  };
+  "POST /auth/me/secrets": {
+    request: PostAuthMeSecretsRequest;
+    responses: {
+      200: PostAuthMeSecretsResponse200;
+      400: PostAuthMeSecretsResponse400;
+      401: PostAuthMeSecretsResponse401;
+    };
+  };
+  "POST /auth/me/repos": {
+    request: PostAuthMeReposRequest;
+    responses: {
+      200: PostAuthMeReposResponse200;
+      400: PostAuthMeReposResponse400;
+      401: PostAuthMeReposResponse401;
+    };
+  };
+  "GET /auth/me/plugins": {
+    request: GetAuthMePluginsRequest;
+    responses: {
+      200: GetAuthMePluginsResponse200;
+      401: GetAuthMePluginsResponse401;
+    };
+  };
+  "POST /auth/me/plugins/toggle": {
+    request: PostAuthMePluginsToggleRequest;
+    responses: {
+      200: PostAuthMePluginsToggleResponse200;
+      400: PostAuthMePluginsToggleResponse400;
+      401: PostAuthMePluginsToggleResponse401;
+    };
+  };
+  "POST /auth/me/plugins/hook-trust": {
+    request: PostAuthMePluginsHookTrustRequest;
+    responses: {
+      200: PostAuthMePluginsHookTrustResponse200;
+      400: PostAuthMePluginsHookTrustResponse400;
+      401: PostAuthMePluginsHookTrustResponse401;
+    };
+  };
+  "POST /auth/me/plugins/reload": {
+    request: PostAuthMePluginsReloadRequest;
+    responses: {
+      200: PostAuthMePluginsReloadResponse200;
+      401: PostAuthMePluginsReloadResponse401;
+    };
+  };
+  "POST /auth/me/plugins/install": {
+    request: PostAuthMePluginsInstallRequest;
+    responses: {
+      200: PostAuthMePluginsInstallResponse200;
+      400: PostAuthMePluginsInstallResponse400;
+      401: PostAuthMePluginsInstallResponse401;
+    };
+  };
+  "DELETE /auth/me/plugins/uninstall/:name": {
+    request: DeleteAuthMePluginsUninstallNameRequest;
+    responses: {
+      200: DeleteAuthMePluginsUninstallNameResponse200;
+      401: DeleteAuthMePluginsUninstallNameResponse401;
+    };
+  };
+  "GET /auth/me/claude-plugins/installed": {
+    request: GetAuthMeClaudePluginsInstalledRequest;
+    responses: {
+      200: GetAuthMeClaudePluginsInstalledResponse200;
+      401: GetAuthMeClaudePluginsInstalledResponse401;
+    };
+  };
+  "GET /auth/me/claude-plugins/marketplace": {
+    request: GetAuthMeClaudePluginsMarketplaceRequest;
+    responses: {
+      200: GetAuthMeClaudePluginsMarketplaceResponse200;
+      401: GetAuthMeClaudePluginsMarketplaceResponse401;
+    };
+  };
+  "POST /auth/me/claude-plugins/import": {
+    request: PostAuthMeClaudePluginsImportRequest;
+    responses: {
+      200: PostAuthMeClaudePluginsImportResponse200;
+      400: PostAuthMeClaudePluginsImportResponse400;
+      401: PostAuthMeClaudePluginsImportResponse401;
+      404: PostAuthMeClaudePluginsImportResponse404;
+    };
+  };
+  "POST /auth/me/claude-plugins/refresh": {
+    request: PostAuthMeClaudePluginsRefreshRequest;
+    responses: {
+      200: PostAuthMeClaudePluginsRefreshResponse200;
+      401: PostAuthMeClaudePluginsRefreshResponse401;
+    };
+  };
+  "GET /auth/me/claude-plugins/updates": {
+    request: GetAuthMeClaudePluginsUpdatesRequest;
+    responses: {
+      200: GetAuthMeClaudePluginsUpdatesResponse200;
+      401: GetAuthMeClaudePluginsUpdatesResponse401;
+    };
+  };
+  "POST /auth/me/claude-plugins/update": {
+    request: PostAuthMeClaudePluginsUpdateRequest;
+    responses: {
+      200: PostAuthMeClaudePluginsUpdateResponse200;
+      401: PostAuthMeClaudePluginsUpdateResponse401;
+      404: PostAuthMeClaudePluginsUpdateResponse404;
+    };
+  };
+  "GET /auth/me/codex-plugins/installed": {
+    request: GetAuthMeCodexPluginsInstalledRequest;
+    responses: {
+      200: GetAuthMeCodexPluginsInstalledResponse200;
+      401: GetAuthMeCodexPluginsInstalledResponse401;
+    };
+  };
+  "GET /auth/me/codex-plugins/marketplace": {
+    request: GetAuthMeCodexPluginsMarketplaceRequest;
+    responses: {
+      200: GetAuthMeCodexPluginsMarketplaceResponse200;
+      401: GetAuthMeCodexPluginsMarketplaceResponse401;
+    };
+  };
+  "POST /auth/me/codex-plugins/import": {
+    request: PostAuthMeCodexPluginsImportRequest;
+    responses: {
+      200: PostAuthMeCodexPluginsImportResponse200;
+      400: PostAuthMeCodexPluginsImportResponse400;
+      401: PostAuthMeCodexPluginsImportResponse401;
+      404: PostAuthMeCodexPluginsImportResponse404;
+    };
+  };
+  "POST /auth/me/codex-plugins/refresh": {
+    request: PostAuthMeCodexPluginsRefreshRequest;
+    responses: {
+      200: PostAuthMeCodexPluginsRefreshResponse200;
+      401: PostAuthMeCodexPluginsRefreshResponse401;
+    };
+  };
+  "GET /auth/me/codex-plugins/updates": {
+    request: GetAuthMeCodexPluginsUpdatesRequest;
+    responses: {
+      200: GetAuthMeCodexPluginsUpdatesResponse200;
+      401: GetAuthMeCodexPluginsUpdatesResponse401;
+    };
+  };
+  "GET /auth/me/llm-sources": {
+    request: GetAuthMeLlmSourcesRequest;
+    responses: {
+      200: GetAuthMeLlmSourcesResponse200;
+      401: GetAuthMeLlmSourcesResponse401;
+    };
+  };
+  "GET /auth/me/llm-sources/updates": {
+    request: GetAuthMeLlmSourcesUpdatesRequest;
+    responses: {
+      200: GetAuthMeLlmSourcesUpdatesResponse200;
+      401: GetAuthMeLlmSourcesUpdatesResponse401;
+    };
+  };
+  "POST /auth/me/llm-sources/toggle": {
+    request: PostAuthMeLlmSourcesToggleRequest;
+    responses: {
+      200: PostAuthMeLlmSourcesToggleResponse200;
+      400: PostAuthMeLlmSourcesToggleResponse400;
+      401: PostAuthMeLlmSourcesToggleResponse401;
+    };
+  };
+  "POST /auth/me/llm-sources/items": {
+    request: PostAuthMeLlmSourcesItemsRequest;
+    responses: {
+      200: PostAuthMeLlmSourcesItemsResponse200;
+      401: PostAuthMeLlmSourcesItemsResponse401;
+    };
+  };
+  "POST /auth/me/llm-sources/add": {
+    request: PostAuthMeLlmSourcesAddRequest;
+    responses: {
+      200: PostAuthMeLlmSourcesAddResponse200;
+      400: PostAuthMeLlmSourcesAddResponse400;
+      401: PostAuthMeLlmSourcesAddResponse401;
+    };
+  };
+  "POST /auth/me/llm-sources/update": {
+    request: PostAuthMeLlmSourcesUpdateRequest;
+    responses: {
+      200: PostAuthMeLlmSourcesUpdateResponse200;
+      401: PostAuthMeLlmSourcesUpdateResponse401;
+      404: PostAuthMeLlmSourcesUpdateResponse404;
+    };
+  };
+  "DELETE /auth/me/llm-sources/:id": {
+    request: DeleteAuthMeLlmSourcesIdRequest;
+    responses: {
+      200: DeleteAuthMeLlmSourcesIdResponse200;
+      400: DeleteAuthMeLlmSourcesIdResponse400;
+      401: DeleteAuthMeLlmSourcesIdResponse401;
+    };
+  };
+  "GET /auth/me/llm-sources/:id/discovery": {
+    request: GetAuthMeLlmSourcesIdDiscoveryRequest;
+    responses: {
+      200: GetAuthMeLlmSourcesIdDiscoveryResponse200;
+      401: GetAuthMeLlmSourcesIdDiscoveryResponse401;
+      404: GetAuthMeLlmSourcesIdDiscoveryResponse404;
+    };
+  };
+  "GET /auth/me/mcp-plugins": {
+    request: GetAuthMeMcpPluginsRequest;
+    responses: {
+      200: GetAuthMeMcpPluginsResponse200;
+      401: GetAuthMeMcpPluginsResponse401;
+    };
+  };
+  "GET /auth/me/mcp-plugins/catalog": {
+    request: GetAuthMeMcpPluginsCatalogRequest;
+    responses: {
+      200: GetAuthMeMcpPluginsCatalogResponse200;
+      401: GetAuthMeMcpPluginsCatalogResponse401;
+    };
+  };
+  "GET /auth/me/mcp-plugins/claude-sources": {
+    request: GetAuthMeMcpPluginsClaudeSourcesRequest;
+    responses: {
+      200: GetAuthMeMcpPluginsClaudeSourcesResponse200;
+      401: GetAuthMeMcpPluginsClaudeSourcesResponse401;
+    };
+  };
+  "GET /auth/me/mcp-plugins/codex-sources": {
+    request: GetAuthMeMcpPluginsCodexSourcesRequest;
+    responses: {
+      200: GetAuthMeMcpPluginsCodexSourcesResponse200;
+      401: GetAuthMeMcpPluginsCodexSourcesResponse401;
+    };
+  };
+  "GET /auth/me/mcp-plugins/updates": {
+    request: GetAuthMeMcpPluginsUpdatesRequest;
+    responses: {
+      200: GetAuthMeMcpPluginsUpdatesResponse200;
+      401: GetAuthMeMcpPluginsUpdatesResponse401;
+    };
+  };
+  "POST /auth/me/mcp-plugins/add": {
+    request: PostAuthMeMcpPluginsAddRequest;
+    responses: {
+      200: PostAuthMeMcpPluginsAddResponse200;
+      400: PostAuthMeMcpPluginsAddResponse400;
+      401: PostAuthMeMcpPluginsAddResponse401;
+    };
+  };
+  "POST /auth/me/mcp-plugins/consent": {
+    request: PostAuthMeMcpPluginsConsentRequest;
+    responses: {
+      200: PostAuthMeMcpPluginsConsentResponse200;
+      401: PostAuthMeMcpPluginsConsentResponse401;
+    };
+  };
+  "POST /auth/me/mcp-plugins/toggle": {
+    request: PostAuthMeMcpPluginsToggleRequest;
+    responses: {
+      200: PostAuthMeMcpPluginsToggleResponse200;
+      401: PostAuthMeMcpPluginsToggleResponse401;
+      409: PostAuthMeMcpPluginsToggleResponse409;
+    };
+  };
+  "GET /auth/me/mcp-plugins/:id/resync": {
+    request: GetAuthMeMcpPluginsIdResyncRequest;
+    responses: {
+      200: GetAuthMeMcpPluginsIdResyncResponse200;
+      400: GetAuthMeMcpPluginsIdResyncResponse400;
+      401: GetAuthMeMcpPluginsIdResyncResponse401;
+      404: GetAuthMeMcpPluginsIdResyncResponse404;
+    };
+  };
+  "POST /auth/me/mcp-plugins/:id/resync": {
+    request: PostAuthMeMcpPluginsIdResyncRequest;
+    responses: {
+      200: PostAuthMeMcpPluginsIdResyncResponse200;
+      400: PostAuthMeMcpPluginsIdResyncResponse400;
+      401: PostAuthMeMcpPluginsIdResyncResponse401;
+      404: PostAuthMeMcpPluginsIdResyncResponse404;
+    };
+  };
+  "POST /auth/me/mcp-plugins/:id/update": {
+    request: PostAuthMeMcpPluginsIdUpdateRequest;
+    responses: {
+      200: PostAuthMeMcpPluginsIdUpdateResponse200;
+      401: PostAuthMeMcpPluginsIdUpdateResponse401;
+      404: PostAuthMeMcpPluginsIdUpdateResponse404;
+    };
+  };
+  "DELETE /auth/me/mcp-plugins/:id": {
+    request: DeleteAuthMeMcpPluginsIdRequest;
+    responses: {
+      200: DeleteAuthMeMcpPluginsIdResponse200;
+      401: DeleteAuthMeMcpPluginsIdResponse401;
+      404: DeleteAuthMeMcpPluginsIdResponse404;
+    };
+  };
+  "GET /auth/me/connectors": {
+    request: GetAuthMeConnectorsRequest;
+    responses: {
+      200: GetAuthMeConnectorsResponse200;
+      401: GetAuthMeConnectorsResponse401;
+    };
+  };
+  "GET /auth/me/connectors/catalog": {
+    request: GetAuthMeConnectorsCatalogRequest;
+    responses: {
+      200: GetAuthMeConnectorsCatalogResponse200;
+      401: GetAuthMeConnectorsCatalogResponse401;
+    };
+  };
+  "POST /auth/me/connectors/add": {
+    request: PostAuthMeConnectorsAddRequest;
+    responses: {
+      200: PostAuthMeConnectorsAddResponse200;
+      400: PostAuthMeConnectorsAddResponse400;
+      401: PostAuthMeConnectorsAddResponse401;
+    };
+  };
+  "DELETE /auth/me/connectors/:id": {
+    request: DeleteAuthMeConnectorsIdRequest;
+    responses: {
+      200: DeleteAuthMeConnectorsIdResponse200;
+      401: DeleteAuthMeConnectorsIdResponse401;
+    };
+  };
+  "GET /kb/search": {
+    request: GetKbSearchRequest;
+    responses: {
+      200: GetKbSearchResponse200;
+      401: GetKbSearchResponse401;
+    };
+  };
+  "GET /kb/issues": {
+    request: GetKbIssuesRequest;
+    responses: {
+      200: GetKbIssuesResponse200;
+      401: GetKbIssuesResponse401;
+    };
+  };
+  "GET /kb/meeting/:id": {
+    request: GetKbMeetingIdRequest;
+    responses: {
+      200: GetKbMeetingIdResponse200;
+      400: GetKbMeetingIdResponse400;
+      401: GetKbMeetingIdResponse401;
+      404: GetKbMeetingIdResponse404;
+    };
+  };
+  "GET /kb/entity/:id": {
+    request: GetKbEntityIdRequest;
+    responses: {
+      200: GetKbEntityIdResponse200;
+      400: GetKbEntityIdResponse400;
+      401: GetKbEntityIdResponse401;
+      404: GetKbEntityIdResponse404;
+    };
+  };
+  "GET /kb/project/:id/export": {
+    request: GetKbProjectIdExportRequest;
+    responses: {
+      200: GetKbProjectIdExportResponse200;
+      400: GetKbProjectIdExportResponse400;
+      401: GetKbProjectIdExportResponse401;
+    };
+  };
+  "POST /kb/project/install-skills": {
+    request: PostKbProjectInstallSkillsRequest;
+    responses: {
+      200: PostKbProjectInstallSkillsResponse200;
+      400: PostKbProjectInstallSkillsResponse400;
+      401: PostKbProjectInstallSkillsResponse401;
+      404: PostKbProjectInstallSkillsResponse404;
+    };
+  };
+  "GET /kb/stats": {
+    request: GetKbStatsRequest;
+    responses: {
+      200: GetKbStatsResponse200;
+      401: GetKbStatsResponse401;
+    };
+  };
+  "GET /kb/system/status": {
+    request: GetKbSystemStatusRequest;
+    responses: {
+      200: GetKbSystemStatusResponse200;
+      401: GetKbSystemStatusResponse401;
+    };
+  };
+  "GET /kb/export-all": {
+    request: GetKbExportAllRequest;
+    responses: {
+      200: GetKbExportAllResponse200;
+      401: GetKbExportAllResponse401;
+    };
+  };
+  "POST /kb/delete": {
+    request: PostKbDeleteRequest;
+    responses: {
+      200: PostKbDeleteResponse200;
+      400: PostKbDeleteResponse400;
+      401: PostKbDeleteResponse401;
+    };
+  };
+  "DELETE /kb/delete": {
+    request: DeleteKbDeleteRequest;
+    responses: {
+      200: DeleteKbDeleteResponse200;
+      400: DeleteKbDeleteResponse400;
+      401: DeleteKbDeleteResponse401;
+    };
+  };
+  "POST /kb/ingest": {
+    request: PostKbIngestRequest;
+    responses: {
+      200: PostKbIngestResponse200;
+      400: PostKbIngestResponse400;
+      401: PostKbIngestResponse401;
+    };
+  };
+  "POST /kb/connect-git": {
+    request: PostKbConnectGitRequest;
+    responses: {
+      200: PostKbConnectGitResponse200;
+      400: PostKbConnectGitResponse400;
+      401: PostKbConnectGitResponse401;
+      403: PostKbConnectGitResponse403;
+    };
+  };
+  "POST /kb/ingest-scip": {
+    request: PostKbIngestScipRequest;
+    responses: {
+      200: PostKbIngestScipResponse200;
+      400: PostKbIngestScipResponse400;
+      401: PostKbIngestScipResponse401;
+      403: PostKbIngestScipResponse403;
+    };
+  };
+  "POST /kb/connect-github-issues": {
+    request: PostKbConnectGithubIssuesRequest;
+    responses: {
+      200: PostKbConnectGithubIssuesResponse200;
+      400: PostKbConnectGithubIssuesResponse400;
+      401: PostKbConnectGithubIssuesResponse401;
+    };
+  };
+  "POST /kb/connect-tickets-json": {
+    request: PostKbConnectTicketsJsonRequest;
+    responses: {
+      200: PostKbConnectTicketsJsonResponse200;
+      400: PostKbConnectTicketsJsonResponse400;
+      401: PostKbConnectTicketsJsonResponse401;
+    };
+  };
+  "POST /kb/connect-qa": {
+    request: PostKbConnectQaRequest;
+    responses: {
+      200: PostKbConnectQaResponse200;
+      400: PostKbConnectQaResponse400;
+      401: PostKbConnectQaResponse401;
+    };
+  };
+  "POST /kb/email/test": {
+    request: PostKbEmailTestRequest;
+    responses: {
+      200: PostKbEmailTestResponse200;
+      400: PostKbEmailTestResponse400;
+      401: PostKbEmailTestResponse401;
+      502: PostKbEmailTestResponse502;
+    };
+  };
+  "POST /kb/email/fetch": {
+    request: PostKbEmailFetchRequest;
+    responses: {
+      200: PostKbEmailFetchResponse200;
+      400: PostKbEmailFetchResponse400;
+      401: PostKbEmailFetchResponse401;
+      502: PostKbEmailFetchResponse502;
+    };
+  };
+  "POST /kb/email/seen": {
+    request: PostKbEmailSeenRequest;
+    responses: {
+      200: PostKbEmailSeenResponse200;
+      401: PostKbEmailSeenResponse401;
+    };
+  };
+  "POST /kb/email/classify": {
+    request: PostKbEmailClassifyRequest;
+    responses: {
+      200: PostKbEmailClassifyResponse200;
+      400: PostKbEmailClassifyResponse400;
+      401: PostKbEmailClassifyResponse401;
+    };
+  };
+  "POST /kb/slack/test": {
+    request: PostKbSlackTestRequest;
+    responses: {
+      200: PostKbSlackTestResponse200;
+      400: PostKbSlackTestResponse400;
+      401: PostKbSlackTestResponse401;
+      502: PostKbSlackTestResponse502;
+    };
+  };
+  "POST /kb/slack/fetch": {
+    request: PostKbSlackFetchRequest;
+    responses: {
+      200: PostKbSlackFetchResponse200;
+      400: PostKbSlackFetchResponse400;
+      401: PostKbSlackFetchResponse401;
+      502: PostKbSlackFetchResponse502;
+    };
+  };
+  "POST /kb/slack/seen": {
+    request: PostKbSlackSeenRequest;
+    responses: {
+      200: PostKbSlackSeenResponse200;
+      401: PostKbSlackSeenResponse401;
+    };
+  };
+  "GET /kb/slack/conversations": {
+    request: GetKbSlackConversationsRequest;
+    responses: {
+      200: GetKbSlackConversationsResponse200;
+      400: GetKbSlackConversationsResponse400;
+      401: GetKbSlackConversationsResponse401;
+    };
+  };
+  "POST /kb/box/test": {
+    request: PostKbBoxTestRequest;
+    responses: {
+      200: PostKbBoxTestResponse200;
+      400: PostKbBoxTestResponse400;
+      401: PostKbBoxTestResponse401;
+      502: PostKbBoxTestResponse502;
+    };
+  };
+  "POST /kb/connect-box": {
+    request: PostKbConnectBoxRequest;
+    responses: {
+      200: PostKbConnectBoxResponse200;
+      400: PostKbConnectBoxResponse400;
+      401: PostKbConnectBoxResponse401;
+      502: PostKbConnectBoxResponse502;
+    };
+  };
+  "POST /kb/mcp-connector/test": {
+    request: PostKbMcpConnectorTestRequest;
+    responses: {
+      200: PostKbMcpConnectorTestResponse200;
+      400: PostKbMcpConnectorTestResponse400;
+      401: PostKbMcpConnectorTestResponse401;
+      502: PostKbMcpConnectorTestResponse502;
+    };
+  };
+  "POST /kb/mcp-connector/fetch": {
+    request: PostKbMcpConnectorFetchRequest;
+    responses: {
+      200: PostKbMcpConnectorFetchResponse200;
+      400: PostKbMcpConnectorFetchResponse400;
+      401: PostKbMcpConnectorFetchResponse401;
+      502: PostKbMcpConnectorFetchResponse502;
+    };
+  };
+  "POST /kb/mcp-connector/seen": {
+    request: PostKbMcpConnectorSeenRequest;
+    responses: {
+      200: PostKbMcpConnectorSeenResponse200;
+      401: PostKbMcpConnectorSeenResponse401;
+    };
+  };
+  "POST /kb/mcp-connector/classify": {
+    request: PostKbMcpConnectorClassifyRequest;
+    responses: {
+      200: PostKbMcpConnectorClassifyResponse200;
+      400: PostKbMcpConnectorClassifyResponse400;
+      401: PostKbMcpConnectorClassifyResponse401;
+      502: PostKbMcpConnectorClassifyResponse502;
+    };
+  };
+  "GET /kb/activity": {
+    request: GetKbActivityRequest;
+    responses: {
+      200: GetKbActivityResponse200;
+      401: GetKbActivityResponse401;
+    };
+  };
+  "POST /kb/activity": {
+    request: PostKbActivityRequest;
+    responses: {
+      200: PostKbActivityResponse200;
+      400: PostKbActivityResponse400;
+      401: PostKbActivityResponse401;
+    };
+  };
+  "POST /kb/activity/seen": {
+    request: PostKbActivitySeenRequest;
+    responses: {
+      200: PostKbActivitySeenResponse200;
+      401: PostKbActivitySeenResponse401;
+    };
+  };
+  "POST /kb/loop/agent-run": {
+    request: PostKbLoopAgentRunRequest;
+    responses: {
+      200: PostKbLoopAgentRunResponse200;
+      400: PostKbLoopAgentRunResponse400;
+      401: PostKbLoopAgentRunResponse401;
+      404: PostKbLoopAgentRunResponse404;
+      502: PostKbLoopAgentRunResponse502;
+      503: PostKbLoopAgentRunResponse503;
+      504: PostKbLoopAgentRunResponse504;
+    };
+  };
+  "POST /kb/ingest-code-graph": {
+    request: PostKbIngestCodeGraphRequest;
+    responses: {
+      200: PostKbIngestCodeGraphResponse200;
+      400: PostKbIngestCodeGraphResponse400;
+      401: PostKbIngestCodeGraphResponse401;
+      403: PostKbIngestCodeGraphResponse403;
+      404: PostKbIngestCodeGraphResponse404;
+    };
+  };
+  "GET /kb/issue-schedule": {
+    request: GetKbIssueScheduleRequest;
+    responses: {
+      200: GetKbIssueScheduleResponse200;
+      400: GetKbIssueScheduleResponse400;
+      401: GetKbIssueScheduleResponse401;
+      404: GetKbIssueScheduleResponse404;
+    };
+  };
+  "PUT /kb/issue-schedule": {
+    request: PutKbIssueScheduleRequest;
+    responses: {
+      200: PutKbIssueScheduleResponse200;
+      400: PutKbIssueScheduleResponse400;
+      401: PutKbIssueScheduleResponse401;
+      404: PutKbIssueScheduleResponse404;
+    };
+  };
+  "DELETE /kb/issue-schedule": {
+    request: DeleteKbIssueScheduleRequest;
+    responses: {
+      200: DeleteKbIssueScheduleResponse200;
+      400: DeleteKbIssueScheduleResponse400;
+      401: DeleteKbIssueScheduleResponse401;
+      404: DeleteKbIssueScheduleResponse404;
+    };
+  };
+  "GET /kb/live/sessions": {
+    request: GetKbLiveSessionsRequest;
+    responses: {
+      200: GetKbLiveSessionsResponse200;
+      401: GetKbLiveSessionsResponse401;
+    };
+  };
+  "GET /kb/live/:id": {
+    request: GetKbLiveIdRequest;
+    responses: {
+      200: GetKbLiveIdResponse200;
+      401: GetKbLiveIdResponse401;
+    };
+  };
+  "POST /kb/live/:id/append": {
+    request: PostKbLiveIdAppendRequest;
+    responses: {
+      200: PostKbLiveIdAppendResponse200;
+      400: PostKbLiveIdAppendResponse400;
+      401: PostKbLiveIdAppendResponse401;
+      429: PostKbLiveIdAppendResponse429;
+    };
+  };
+  "POST /kb/live/:id/finalize": {
+    request: PostKbLiveIdFinalizeRequest;
+    responses: {
+      200: PostKbLiveIdFinalizeResponse200;
+      401: PostKbLiveIdFinalizeResponse401;
+    };
+  };
+  "GET /kb/live/:id/stream": {
+    request: GetKbLiveIdStreamRequest;
+    responses: {
+      200: GetKbLiveIdStreamResponse200;
+      401: GetKbLiveIdStreamResponse401;
+      429: GetKbLiveIdStreamResponse429;
+    };
+  };
+  "GET /auth/me/audit": {
+    request: GetAuthMeAuditRequest;
+    responses: {
+      200: GetAuthMeAuditResponse200;
+      401: GetAuthMeAuditResponse401;
+    };
+  };
+  "POST /auth/me/delete": {
+    request: PostAuthMeDeleteRequest;
+    responses: {
+      200: PostAuthMeDeleteResponse200;
+      401: PostAuthMeDeleteResponse401;
+    };
+  };
+  "POST /auth/mcp-connector/start": {
+    request: PostAuthMcpConnectorStartRequest;
+    responses: {
+      200: PostAuthMcpConnectorStartResponse200;
+      400: PostAuthMcpConnectorStartResponse400;
+      401: PostAuthMcpConnectorStartResponse401;
+      502: PostAuthMcpConnectorStartResponse502;
+    };
+  };
+  "GET /auth/mcp-connector/status": {
+    request: GetAuthMcpConnectorStatusRequest;
+    responses: {
+      200: GetAuthMcpConnectorStatusResponse200;
+      400: GetAuthMcpConnectorStatusResponse400;
+      401: GetAuthMcpConnectorStatusResponse401;
+    };
+  };
+  "POST /generate-notes": {
+    request: PostGenerateNotesRequest;
+    responses: {
+      200: PostGenerateNotesResponse200;
+      400: PostGenerateNotesResponse400;
+      401: PostGenerateNotesResponse401;
+      429: PostGenerateNotesResponse429;
+      500: PostGenerateNotesResponse500;
+    };
+  };
+  "POST /generate-questions": {
+    request: PostGenerateQuestionsRequest;
+    responses: {
+      200: PostGenerateQuestionsResponse200;
+      400: PostGenerateQuestionsResponse400;
+      401: PostGenerateQuestionsResponse401;
+      429: PostGenerateQuestionsResponse429;
+      500: PostGenerateQuestionsResponse500;
+    };
+  };
+  "POST /extract-entities": {
+    request: PostExtractEntitiesRequest;
+    responses: {
+      200: PostExtractEntitiesResponse200;
+      400: PostExtractEntitiesResponse400;
+      401: PostExtractEntitiesResponse401;
+      429: PostExtractEntitiesResponse429;
+      500: PostExtractEntitiesResponse500;
+    };
+  };
+  "POST /generate-doc": {
+    request: PostGenerateDocRequest;
+    responses: {
+      200: PostGenerateDocResponse200;
+      400: PostGenerateDocResponse400;
+      401: PostGenerateDocResponse401;
+      429: PostGenerateDocResponse429;
+      500: PostGenerateDocResponse500;
+    };
+  };
+  "POST /generate-docx": {
+    request: PostGenerateDocxRequest;
+    responses: {
+      200: PostGenerateDocxResponse200;
+      400: PostGenerateDocxResponse400;
+      401: PostGenerateDocxResponse401;
+      429: PostGenerateDocxResponse429;
+      500: PostGenerateDocxResponse500;
+    };
+  };
+  "POST /chat": {
+    request: PostChatRequest;
+    responses: {
+      200: PostChatResponse200;
+      400: PostChatResponse400;
+      401: PostChatResponse401;
+      429: PostChatResponse429;
+      500: PostChatResponse500;
+    };
+  };
+  "POST /code-assist": {
+    request: PostCodeAssistRequest;
+    responses: {
+      200: PostCodeAssistResponse200;
+      400: PostCodeAssistResponse400;
+      401: PostCodeAssistResponse401;
+      429: PostCodeAssistResponse429;
+      502: PostCodeAssistResponse502;
+    };
+  };
+  "POST /code-assist/decision": {
+    request: PostCodeAssistDecisionRequest;
+    responses: {
+      200: PostCodeAssistDecisionResponse200;
+      401: PostCodeAssistDecisionResponse401;
+      403: PostCodeAssistDecisionResponse403;
+      404: PostCodeAssistDecisionResponse404;
+    };
+  };
+  "POST /agent-sdk/spike": {
+    request: PostAgentSdkSpikeRequest;
+    responses: {
+      200: PostAgentSdkSpikeResponse200;
+      400: PostAgentSdkSpikeResponse400;
+      401: PostAgentSdkSpikeResponse401;
+    };
+  };
+  "POST /kb/generate-plan": {
+    request: PostKbGeneratePlanRequest;
+    responses: {
+      200: PostKbGeneratePlanResponse200;
+      400: PostKbGeneratePlanResponse400;
+      401: PostKbGeneratePlanResponse401;
+      429: PostKbGeneratePlanResponse429;
+      500: PostKbGeneratePlanResponse500;
+    };
+  };
+  "POST /kb/analyze-risks": {
+    request: PostKbAnalyzeRisksRequest;
+    responses: {
+      200: PostKbAnalyzeRisksResponse200;
+      400: PostKbAnalyzeRisksResponse400;
+      401: PostKbAnalyzeRisksResponse401;
+      404: PostKbAnalyzeRisksResponse404;
+      429: PostKbAnalyzeRisksResponse429;
+      500: PostKbAnalyzeRisksResponse500;
+    };
+  };
+  "POST /kb/code-sync": {
+    request: PostKbCodeSyncRequest;
+    responses: {
+      200: PostKbCodeSyncResponse200;
+      400: PostKbCodeSyncResponse400;
+      401: PostKbCodeSyncResponse401;
+      404: PostKbCodeSyncResponse404;
+    };
+  };
+  "GET /kb/plans": {
+    request: GetKbPlansRequest;
+    responses: {
+      200: GetKbPlansResponse200;
+      401: GetKbPlansResponse401;
+    };
+  };
+  "GET /kb/plan/:id": {
+    request: GetKbPlanIdRequest;
+    responses: {
+      200: GetKbPlanIdResponse200;
+      401: GetKbPlanIdResponse401;
+      404: GetKbPlanIdResponse404;
+    };
+  };
+  "POST /kb/plan/save": {
+    request: PostKbPlanSaveRequest;
+    responses: {
+      200: PostKbPlanSaveResponse200;
+      400: PostKbPlanSaveResponse400;
+      401: PostKbPlanSaveResponse401;
+      500: PostKbPlanSaveResponse500;
+    };
+  };
+  "DELETE /kb/plan/delete": {
+    request: DeleteKbPlanDeleteRequest;
+    responses: {
+      200: DeleteKbPlanDeleteResponse200;
+      400: DeleteKbPlanDeleteResponse400;
+      401: DeleteKbPlanDeleteResponse401;
+    };
+  };
+  "POST /kb/plan/delete": {
+    request: PostKbPlanDeleteRequest;
+    responses: {
+      200: PostKbPlanDeleteResponse200;
+      400: PostKbPlanDeleteResponse400;
+      401: PostKbPlanDeleteResponse401;
+    };
+  };
+  "PATCH /kb/plan-task/update": {
+    request: PatchKbPlanTaskUpdateRequest;
+    responses: {
+      200: PatchKbPlanTaskUpdateResponse200;
+      400: PatchKbPlanTaskUpdateResponse400;
+      401: PatchKbPlanTaskUpdateResponse401;
+      404: PatchKbPlanTaskUpdateResponse404;
+    };
+  };
+  "POST /kb/plan-task/update": {
+    request: PostKbPlanTaskUpdateRequest;
+    responses: {
+      200: PostKbPlanTaskUpdateResponse200;
+      400: PostKbPlanTaskUpdateResponse400;
+      401: PostKbPlanTaskUpdateResponse401;
+      404: PostKbPlanTaskUpdateResponse404;
+    };
+  };
+  "POST /kb/dispatch": {
+    request: PostKbDispatchRequest;
+    responses: {
+      200: PostKbDispatchResponse200;
+      400: PostKbDispatchResponse400;
+      401: PostKbDispatchResponse401;
+      403: PostKbDispatchResponse403;
+      429: PostKbDispatchResponse429;
+    };
+  };
+  "POST /kb/generate-code": {
+    request: PostKbGenerateCodeRequest;
+    responses: {
+      200: PostKbGenerateCodeResponse200;
+      400: PostKbGenerateCodeResponse400;
+      401: PostKbGenerateCodeResponse401;
+      429: PostKbGenerateCodeResponse429;
+      500: PostKbGenerateCodeResponse500;
+    };
+  };
+  "POST /kb/summarize": {
+    request: PostKbSummarizeRequest;
+    responses: {
+      200: PostKbSummarizeResponse200;
+      400: PostKbSummarizeResponse400;
+      401: PostKbSummarizeResponse401;
+      429: PostKbSummarizeResponse429;
+      500: PostKbSummarizeResponse500;
+      502: PostKbSummarizeResponse502;
+    };
+  };
+  "POST /kb/conflict-questions": {
+    request: PostKbConflictQuestionsRequest;
+    responses: {
+      200: PostKbConflictQuestionsResponse200;
+      401: PostKbConflictQuestionsResponse401;
+      429: PostKbConflictQuestionsResponse429;
+      500: PostKbConflictQuestionsResponse500;
+    };
+  };
+  "POST /kb/notify/slack": {
+    request: PostKbNotifySlackRequest;
+    responses: {
+      200: PostKbNotifySlackResponse200;
+      400: PostKbNotifySlackResponse400;
+      401: PostKbNotifySlackResponse401;
+      404: PostKbNotifySlackResponse404;
+      429: PostKbNotifySlackResponse429;
+    };
+  };
+  "POST /kb/outcomes/refresh": {
+    request: PostKbOutcomesRefreshRequest;
+    responses: {
+      200: PostKbOutcomesRefreshResponse200;
+      401: PostKbOutcomesRefreshResponse401;
+      429: PostKbOutcomesRefreshResponse429;
+    };
+  };
+  "POST /kb/outcomes/retry-failed": {
+    request: PostKbOutcomesRetryFailedRequest;
+    responses: {
+      200: PostKbOutcomesRetryFailedResponse200;
+      401: PostKbOutcomesRetryFailedResponse401;
+    };
+  };
+  "GET /kb/outcomes/task/:id": {
+    request: GetKbOutcomesTaskIdRequest;
+    responses: {
+      200: GetKbOutcomesTaskIdResponse200;
+      400: GetKbOutcomesTaskIdResponse400;
+      401: GetKbOutcomesTaskIdResponse401;
+    };
+  };
+  "GET /kb/outcomes/stats": {
+    request: GetKbOutcomesStatsRequest;
+    responses: {
+      200: GetKbOutcomesStatsResponse200;
+      401: GetKbOutcomesStatsResponse401;
+    };
+  };
+  "POST /kb/providers/verify": {
+    request: PostKbProvidersVerifyRequest;
+    responses: {
+      200: PostKbProvidersVerifyResponse200;
+      400: PostKbProvidersVerifyResponse400;
+      401: PostKbProvidersVerifyResponse401;
+      429: PostKbProvidersVerifyResponse429;
+    };
+  };
+  "POST /kb/providers/models": {
+    request: PostKbProvidersModelsRequest;
+    responses: {
+      200: PostKbProvidersModelsResponse200;
+      400: PostKbProvidersModelsResponse400;
+      401: PostKbProvidersModelsResponse401;
+      429: PostKbProvidersModelsResponse429;
+    };
+  };
+  "GET /kb/agent-sdk": {
+    request: GetKbAgentSdkRequest;
+    responses: {
+      200: GetKbAgentSdkResponse200;
+      401: GetKbAgentSdkResponse401;
+    };
+  };
+  "POST /kb/agent-sdk/update": {
+    request: PostKbAgentSdkUpdateRequest;
+    responses: {
+      200: PostKbAgentSdkUpdateResponse200;
+      401: PostKbAgentSdkUpdateResponse401;
+    };
+  };
+  "POST /kb/custom-providers": {
+    request: PostKbCustomProvidersRequest;
+    responses: {
+      200: PostKbCustomProvidersResponse200;
+      400: PostKbCustomProvidersResponse400;
+      401: PostKbCustomProvidersResponse401;
+    };
+  };
+  "GET /kb/routing-tiers": {
+    request: GetKbRoutingTiersRequest;
+    responses: {
+      200: GetKbRoutingTiersResponse200;
+      401: GetKbRoutingTiersResponse401;
+    };
+  };
+  "POST /kb/routing-tiers": {
+    request: PostKbRoutingTiersRequest;
+    responses: {
+      200: PostKbRoutingTiersResponse200;
+      400: PostKbRoutingTiersResponse400;
+      401: PostKbRoutingTiersResponse401;
+    };
+  };
+  "GET /kb/usage/limits": {
+    request: GetKbUsageLimitsRequest;
+    responses: {
+      200: GetKbUsageLimitsResponse200;
+      401: GetKbUsageLimitsResponse401;
+    };
+  };
+  "PUT /kb/usage/limits": {
+    request: PutKbUsageLimitsRequest;
+    responses: {
+      200: PutKbUsageLimitsResponse200;
+      400: PutKbUsageLimitsResponse400;
+      401: PutKbUsageLimitsResponse401;
+      429: PutKbUsageLimitsResponse429;
+    };
+  };
+  "GET /kb/usage/summary": {
+    request: GetKbUsageSummaryRequest;
+    responses: {
+      200: GetKbUsageSummaryResponse200;
+      401: GetKbUsageSummaryResponse401;
+    };
+  };
+  "GET /kb/usage/resolve": {
+    request: GetKbUsageResolveRequest;
+    responses: {
+      200: GetKbUsageResolveResponse200;
+      400: GetKbUsageResolveResponse400;
+      401: GetKbUsageResolveResponse401;
+    };
+  };
+  "GET /kb/usage/ratelimits": {
+    request: GetKbUsageRatelimitsRequest;
+    responses: {
+      200: GetKbUsageRatelimitsResponse200;
+      401: GetKbUsageRatelimitsResponse401;
+    };
+  };
+  "GET /kb/usage/turn-composition": {
+    request: GetKbUsageTurnCompositionRequest;
+    responses: {
+      200: GetKbUsageTurnCompositionResponse200;
+      401: GetKbUsageTurnCompositionResponse401;
+    };
+  };
+  "POST /kb/usage/record": {
+    request: PostKbUsageRecordRequest;
+    responses: {
+      200: PostKbUsageRecordResponse200;
+      400: PostKbUsageRecordResponse400;
+      401: PostKbUsageRecordResponse401;
+      429: PostKbUsageRecordResponse429;
+    };
+  };
+  "POST /kb/review/submit": {
+    request: PostKbReviewSubmitRequest;
+    responses: {
+      200: PostKbReviewSubmitResponse200;
+      400: PostKbReviewSubmitResponse400;
+      401: PostKbReviewSubmitResponse401;
+      429: PostKbReviewSubmitResponse429;
+    };
+  };
+  "GET /kb/review/list": {
+    request: GetKbReviewListRequest;
+    responses: {
+      200: GetKbReviewListResponse200;
+      401: GetKbReviewListResponse401;
+    };
+  };
+  "GET /kb/review/get/:id": {
+    request: GetKbReviewGetIdRequest;
+    responses: {
+      200: GetKbReviewGetIdResponse200;
+      401: GetKbReviewGetIdResponse401;
+      404: GetKbReviewGetIdResponse404;
+    };
+  };
+  "POST /kb/review/approve": {
+    request: PostKbReviewApproveRequest;
+    responses: {
+      200: PostKbReviewApproveResponse200;
+      400: PostKbReviewApproveResponse400;
+      401: PostKbReviewApproveResponse401;
+      404: PostKbReviewApproveResponse404;
+      409: PostKbReviewApproveResponse409;
+      422: PostKbReviewApproveResponse422;
+      429: PostKbReviewApproveResponse429;
+      500: PostKbReviewApproveResponse500;
+    };
+  };
+  "POST /kb/review/reject": {
+    request: PostKbReviewRejectRequest;
+    responses: {
+      200: PostKbReviewRejectResponse200;
+      400: PostKbReviewRejectResponse400;
+      401: PostKbReviewRejectResponse401;
+      404: PostKbReviewRejectResponse404;
+      409: PostKbReviewRejectResponse409;
+      429: PostKbReviewRejectResponse429;
+    };
+  };
+  "DELETE /kb/review/delete": {
+    request: DeleteKbReviewDeleteRequest;
+    responses: {
+      200: DeleteKbReviewDeleteResponse200;
+      400: DeleteKbReviewDeleteResponse400;
+      401: DeleteKbReviewDeleteResponse401;
+    };
+  };
+  "POST /kb/review/delete": {
+    request: PostKbReviewDeleteRequest;
+    responses: {
+      200: PostKbReviewDeleteResponse200;
+      401: PostKbReviewDeleteResponse401;
+      429: PostKbReviewDeleteResponse429;
+    };
+  };
+}
+
+export type ApiEndpointKey = keyof ApiEndpoints;
+
+export type ApiResponse<K extends ApiEndpointKey, S extends keyof ApiEndpoints[K]['responses']> =
+  ApiEndpoints[K]['responses'][S];

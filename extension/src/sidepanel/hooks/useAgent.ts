@@ -6,6 +6,7 @@
 // reads from and writes back to that same stream).  No bot, no
 // third-party transport — just an LLM watching the transcript.
 
+import type { PostKbAgentDispatchResponse200 } from '../../lib/api-types';
 import { useCallback, useEffect, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 import { isSupportedUrl } from '../../lib/platforms';
@@ -22,13 +23,6 @@ export interface AgentRun {
   startedAt: number;
   lastTickAt: number | null;
   lastDecision: AgentDecision | null;
-}
-
-export interface AgentDispatchResponse {
-  sessionId: string;
-  planId: string | null;
-  attached: boolean;
-  reason?: string;
 }
 
 // Platform URL detection is now centralized in platforms.ts.
@@ -120,7 +114,7 @@ export function useAgent({
        *  send no URL (forces co-pilot mode).  When a string, that
        *  exact value is sent — the editor uses this. */
       meetingUrlOverride?: string | null,
-    ): Promise<AgentDispatchResponse | null> => {
+    ): Promise<PostKbAgentDispatchResponse200 | null> => {
       if (!isRecording) {
         setError('Start recording first — the agent attaches to your live capture.');
         return null;
@@ -148,7 +142,7 @@ export function useAgent({
           const text = await r.text().catch(() => '');
           throw new Error(`dispatch ${r.status}: ${text.slice(0, 200)}`);
         }
-        const json: AgentDispatchResponse = await r.json();
+        const json: PostKbAgentDispatchResponse200 = await r.json();
         setRuns((prev) => [
           ...prev,
           {

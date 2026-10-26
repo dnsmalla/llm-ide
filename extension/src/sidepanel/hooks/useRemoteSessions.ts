@@ -1,17 +1,9 @@
 import { useEffect, useState, useCallback } from 'react';
+import type { LiveSession } from '../../lib/api-types';
 import { authFetch, getServerUrl } from '../../lib/config';
 
-export interface RemoteSession {
-  sessionId: string;
-  meetingTitle: string;
-  startedAt: number;
-  lastWrite: number;
-  captionCount: number;
-  sequence: number;
-}
-
 export function useRemoteSessions() {
-  const [sessions, setSessions] = useState<RemoteSession[]>([]);
+  const [sessions, setSessions] = useState<LiveSession[]>([]);
   const [loading, setLoading] = useState(true);
 
   const refresh = useCallback(async () => {

@@ -1,12 +1,6 @@
 import React, { useCallback, useEffect, useState } from 'react';
-import {
-  connectGitRepo,
-  connectGithubIssues,
-  connectQA,
-  getKBStats,
-  type ConnectorResult,
-  type KBStats,
-} from '../../lib/kb';
+import type { GetKbStatsResponse200 } from '../../lib/api-types';
+import { connectGitRepo, connectGithubIssues, connectQA, getKBStats, type ConnectorResult } from '../../lib/kb';
 
 // All connector inputs (paths, repo names, tokens) live in
 // chrome.storage.local — never synced.  Tokens are only sent over the
@@ -53,7 +47,7 @@ function summarize(result: ConnectorResult): string {
 }
 
 export default function ConnectorsSettings() {
-  const [stats, setStats] = useState<KBStats | null>(null);
+  const [stats, setStats] = useState<GetKbStatsResponse200 | null>(null);
 
   const [repoPath, setRepoPath] = useStored(STORAGE_KEYS.repoPath);
   const [ghRepo, setGhRepo] = useStored(STORAGE_KEYS.ghRepo);
