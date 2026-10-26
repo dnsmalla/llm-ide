@@ -1,0 +1,7 @@
+[
+  {
+    "endpoint": "POST /kb/outcomes/refresh",
+    "key": "polled",
+    "reason": "The Mac shows only the refresh counts (pollCount, changedCount, byState); the per-task polled list is for the extension side panel."
+  }
+]

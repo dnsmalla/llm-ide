@@ -335,6 +335,7 @@ let package = Package(
         .executable(name: "chat-contract-lab", targets: ["ChatContractLab"]),
         .executable(name: "generation-contract-lab", targets: ["GenerationContractLab"]),
         .executable(name: "loop-contract-lab", targets: ["LoopContractLab"]),
+        .executable(name: "api-contract-lab", targets: ["APIContractLab"]),
     ],
     dependencies: [
         .package(url: "https://github.com/jpsim/Yams.git", from: "5.1.0"),
@@ -435,6 +436,14 @@ let package = Package(
             // Package.swift's `libExcludes.append(..., "Features/Loop")`.
             // Without this the lab could not even name LoopStageDetector in
             // the reduced builds.
+            swiftSettings: featureDefines
+        ),
+        .executableTarget(
+            // Decodes every 2xx HTTP contract fixture with the Mac client's
+            // real Codable models (Phase 1 P12). Routed models are public.
+            name: "APIContractLab",
+            dependencies: ["LlmIdeMacLib"],
+            path: "Sources/APIContractLab",
             swiftSettings: featureDefines
         ),
         .testTarget(
