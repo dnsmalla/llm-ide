@@ -55,7 +55,7 @@ function Totals({ totals }: { totals: UsageCounts }) {
 export function TokenFlow({ tokens }: { tokens: Tokens }) {
   const { totals, turnComposition: turns } = tokens;
   const promptTokens = totals.input + totals.cacheRead + totals.cacheWrite;
-  const windowLabel = tokens.window === 'day' ? 'last 24 hours' : 'last 7 days';
+  const windowLabel = tokens.window === 'day' ? 'today (since midnight)' : 'the last 7 days (incl. today)';
 
   // Per-turn split, from the first call's real prompt size. The static prefix and the
   // injected context are chars/4 estimates, so the remainder is an estimate too.
