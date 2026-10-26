@@ -99,6 +99,8 @@ __pycache__/
 # IDE git panel or the agent's git status.
 graphify-out/
 system/
+# ...but not the Mac app's System feature (os-kit), which is source.
+!mac/Sources/LlmIdeMac/Features/System/
 .code-notes/
 .understand-anything/
 
