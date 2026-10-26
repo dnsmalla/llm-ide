@@ -2,64 +2,68 @@
    DESIGN TOKENS
    ============================================================ */
 :root {
+  /* Colours, spacing and radii come from the shared design tokens
+     (schema/design/tokens.json -> tokens.generated.css), so the side panel
+     matches the Mac app. Names below are kept so existing rules keep working. */
+
   /* Brand / interactive */
-  --color-primary: #8ab4f8;
-  --color-primary-hover: #aecbfa;
-  --color-primary-dim: rgba(138, 180, 248, 0.12);
-  --color-primary-border: rgba(138, 180, 248, 0.35);
+  --color-primary: var(--tok-color-accent);
+  --color-primary-hover: color-mix(in srgb, var(--tok-color-accent), white 18%);
+  --color-primary-dim: color-mix(in srgb, var(--tok-color-accent) 12%, transparent);
+  --color-primary-border: color-mix(in srgb, var(--tok-color-accent) 35%, transparent);
 
   /* Semantic */
-  --color-success: #81c995;
-  --color-success-dim: rgba(129, 201, 149, 0.15);
-  --color-danger: #f28b82;
-  --color-danger-bright: #ea4335;
-  --color-danger-dim: rgba(234, 67, 53, 0.15);
-  --color-danger-border: rgba(234, 67, 53, 0.35);
-  --color-warning: #fbbc04;
-  --color-warning-dim: rgba(251, 188, 4, 0.14);
+  --color-success: var(--tok-color-accent3);
+  --color-success-dim: color-mix(in srgb, var(--tok-color-accent3) 15%, transparent);
+  --color-danger: var(--tok-color-danger);
+  --color-danger-bright: var(--tok-color-danger);
+  --color-danger-dim: color-mix(in srgb, var(--tok-color-danger) 15%, transparent);
+  --color-danger-border: color-mix(in srgb, var(--tok-color-danger) 35%, transparent);
+  --color-warning: var(--tok-color-accent4);
+  --color-warning-dim: color-mix(in srgb, var(--tok-color-accent4) 14%, transparent);
 
   /* Surfaces — three elevation levels */
-  --color-bg: #202124; /* page / deepest */
-  --color-bg-1: #28292d; /* card / section */
-  --color-bg-2: #303134; /* input / elevated */
-  --color-bg-hover: #3a3c40;
-  --color-bg-active: #42444a;
+  --color-bg: var(--tok-color-body); /* page / deepest */
+  --color-bg-1: var(--tok-color-surface); /* card / section */
+  --color-bg-2: var(--tok-color-surface2); /* input / elevated */
+  --color-bg-hover: color-mix(in srgb, var(--tok-color-surface2), white 6%);
+  --color-bg-active: color-mix(in srgb, var(--tok-color-surface2), white 10%);
 
   /* Aliases used in older selectors */
   --color-bg-elevated: var(--color-bg-2);
   --color-bg-sidebar: var(--color-bg-1);
 
   /* Borders */
-  --color-border: #3c4043;
-  --color-border-strong: #5f6368;
+  --color-border: var(--tok-color-border);
+  --color-border-strong: color-mix(in srgb, var(--tok-color-border), white 25%);
   --color-border-focus: var(--color-primary);
 
   /* Text */
-  --color-text: #e8eaed;
-  --color-text-muted: #9aa0a6;
-  --color-text-subtle: #6b7075;
+  --color-text: var(--tok-color-text);
+  --color-text-muted: var(--tok-color-text-muted);
+  --color-text-subtle: color-mix(in srgb, var(--tok-color-text-muted) 65%, var(--tok-color-body));
   /* aliases for older references */
   --color-text-primary: var(--color-text);
   --color-text-secondary: var(--color-text-muted);
 
   /* Spacing */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
+  --space-1: var(--tok-space-xs);
+  --space-2: var(--tok-space-sm);
+  --space-3: var(--tok-space-md);
+  --space-4: var(--tok-space-lg);
+  --space-5: var(--tok-space-xl);
 
-  /* Radii */
-  --radius-xs: 3px;
-  --radius-sm: 4px;
-  --radius-md: 6px;
-  --radius-lg: 8px;
-  --radius-xl: 12px;
+  /* Radii (the side panel keeps a tighter xs step than the Mac scale) */
+  --radius-xs: 4px;
+  --radius-sm: var(--tok-radius-sm);
+  --radius-md: var(--tok-radius-sm);
+  --radius-lg: var(--tok-radius-md);
+  --radius-xl: var(--tok-radius-lg);
   --radius-pill: 999px;
 
   /* Typography */
   --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-  --font-mono: 'SF Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  --font-mono: var(--tok-type-mono-family);
   --text-xs: 11px;
   --text-sm: 12px;
   --text-base: 13px;
@@ -297,7 +301,7 @@ a:focus-visible {
   cursor: pointer;
   transition: background var(--transition-fast);
   background: var(--color-danger-bright);
-  color: #fff;
+  color: var(--color-text);
 }
 .btn-stop:hover:not(:disabled) {
   background: var(--color-danger);
@@ -365,7 +369,7 @@ a:focus-visible {
 }
 .btn-ghost:hover:not(:disabled),
 .btn-quiet:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.07);
+  background: color-mix(in srgb, var(--color-text) 7%, transparent);
   color: var(--color-text);
 }
 .btn-link {
@@ -571,10 +575,10 @@ a:focus-visible {
   color: var(--color-text-subtle);
 }
 .agent-status-dot--on {
-  color: #3da76a;
+  color: var(--color-success);
 }
 .agent-status-dot--standby {
-  color: #d9a93c;
+  color: var(--color-warning);
 }
 
 /* ============================================================
@@ -675,7 +679,7 @@ a:focus-visible {
 
 .success-message {
   background: var(--color-success-dim);
-  border: 1px solid rgba(129, 201, 149, 0.3);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
   color: var(--color-success);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
@@ -685,7 +689,7 @@ a:focus-visible {
 
 .quota-warning {
   background: var(--color-warning-dim);
-  border: 1px solid rgba(251, 188, 4, 0.3);
+  border: 1px solid color-mix(in srgb, var(--color-warning) 30%, transparent);
   color: var(--color-warning);
   padding: var(--space-2) var(--space-3);
   border-radius: var(--radius-md);
@@ -709,7 +713,7 @@ a:focus-visible {
   gap: var(--space-2);
 }
 .server-offline code {
-  background: rgba(234, 67, 53, 0.15);
+  background: var(--color-danger-dim);
   padding: 1px 6px;
   border-radius: var(--radius-xs);
   font-size: var(--text-xs);
@@ -803,7 +807,7 @@ a:focus-visible {
   white-space: nowrap;
 }
 .transcript-match {
-  background: rgba(251, 188, 5, 0.35);
+  background: color-mix(in srgb, var(--color-warning) 35%, transparent);
   color: inherit;
   border-radius: 2px;
   padding: 0 1px;
@@ -811,7 +815,7 @@ a:focus-visible {
 
 .transcript-group {
   padding: var(--space-2) 0;
-  border-bottom: 1px solid rgba(60, 64, 67, 0.4);
+  border-bottom: 1px solid var(--color-border);
 }
 .transcript-speaker-row {
   display: flex;
@@ -961,7 +965,7 @@ a:focus-visible {
   font-weight: 600;
 }
 .notes-content tr:nth-child(even) {
-  background: rgba(255, 255, 255, 0.02);
+  background: var(--tok-color-row-alt);
 }
 
 .btn-retry,
@@ -1220,8 +1224,8 @@ a:focus-visible {
   line-height: 1.55;
 }
 .chat-msg-user .chat-msg-content {
-  background: rgba(129, 201, 149, 0.08);
-  border-color: rgba(129, 201, 149, 0.25);
+  background: color-mix(in srgb, var(--color-success) 8%, transparent);
+  border-color: color-mix(in srgb, var(--color-success) 25%, transparent);
 }
 .chat-msg-content h2 {
   font-size: var(--text-md);
@@ -1329,7 +1333,7 @@ a:focus-visible {
     color var(--transition-fast);
 }
 .questions-customize-toggle:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: color-mix(in srgb, var(--color-text) 5%, transparent);
   color: var(--color-text);
 }
 .questions-customize-toggle[aria-expanded='true'] {
@@ -1344,7 +1348,7 @@ a:focus-visible {
   padding: var(--space-3);
   border: 1px dashed var(--color-border);
   border-radius: var(--radius-lg);
-  background: rgba(255, 255, 255, 0.015);
+  background: color-mix(in srgb, var(--color-text) 1.5%, transparent);
 }
 .questions-editor-actions {
   display: flex;
@@ -1457,7 +1461,7 @@ a:focus-visible {
   left: 2px;
   width: 16px;
   height: 16px;
-  background: #fff;
+  background: var(--color-text);
   border-radius: 50%;
   transition: transform var(--transition-base);
 }
@@ -1764,36 +1768,36 @@ a:focus-visible {
 }
 /* Kinds — dark-tinted */
 .meta-chip.kind-meeting {
-  background: rgba(13, 71, 161, 0.25);
-  color: #90caf9;
+  background: color-mix(in srgb, var(--tok-color-accent2) 25%, transparent);
+  color: var(--tok-color-accent2);
 }
 .meta-chip.kind-action {
-  background: rgba(27, 94, 32, 0.25);
-  color: #a5d6a7;
+  background: color-mix(in srgb, var(--tok-color-accent3) 25%, transparent);
+  color: var(--tok-color-accent3);
 }
 .meta-chip.kind-decision {
-  background: rgba(69, 39, 160, 0.25);
-  color: #ce93d8;
+  background: color-mix(in srgb, var(--tok-color-category-purple) 25%, transparent);
+  color: var(--tok-color-category-purple);
 }
 .meta-chip.kind-blocker {
   background: var(--color-danger-dim);
   color: var(--color-danger);
 }
 .meta-chip.kind-code {
-  background: rgba(179, 89, 0, 0.25);
-  color: #ffcc80;
+  background: color-mix(in srgb, var(--tok-color-category-amber) 25%, transparent);
+  color: var(--tok-color-category-amber);
 }
 .meta-chip.kind-ticket {
-  background: rgba(0, 96, 100, 0.25);
-  color: #80deea;
+  background: color-mix(in srgb, var(--tok-color-category-teal) 25%, transparent);
+  color: var(--tok-color-category-teal);
 }
 .meta-chip.kind-qa {
   background: rgba(136, 14, 79, 0.2);
   color: #f48fb1;
 }
 .meta-chip.kind-plan {
-  background: rgba(40, 53, 147, 0.25);
-  color: #9fa8da;
+  background: color-mix(in srgb, var(--tok-color-accent) 25%, transparent);
+  color: var(--tok-color-accent);
 }
 .meta-chip.kind-task {
   background: rgba(51, 105, 30, 0.25);
@@ -2387,7 +2391,7 @@ a:focus-visible {
 
 .help-callout-tip {
   background: var(--color-success-dim);
-  border-color: rgba(129, 201, 149, 0.3);
+  border-color: color-mix(in srgb, var(--color-success) 30%, transparent);
   border-left-color: var(--color-success);
 }
 .help-callout-tip .help-callout-icon,
@@ -2397,7 +2401,7 @@ a:focus-visible {
 
 .help-callout-note {
   background: var(--color-warning-dim);
-  border-color: rgba(251, 188, 4, 0.3);
+  border-color: color-mix(in srgb, var(--color-warning) 30%, transparent);
   border-left-color: var(--color-warning);
 }
 .help-callout-note .help-callout-icon,
@@ -2504,7 +2508,7 @@ a:focus-visible {
 }
 .help-compare-col.after {
   background: var(--color-success-dim);
-  border: 1px solid rgba(129, 201, 149, 0.3);
+  border: 1px solid color-mix(in srgb, var(--color-success) 30%, transparent);
 }
 .help-compare-label {
   font-size: var(--text-xs);
