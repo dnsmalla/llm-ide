@@ -15,6 +15,7 @@ import { openPullRequest } from '../agents/github-pr.mjs';
 import { runGuardrails } from '../guardrails/rules.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
+import { pickReviewPayload } from '../kb/review-payload.mjs';
 import { logger } from '../core/logger.mjs';
 import {
   stripReviewSecrets, redactReviewItem, holdSecrets, takeHeldSecrets, dropHeldSecrets,
@@ -62,7 +63,9 @@ export async function handleReviewRoutes(req, res, ctx) {
     // Credentials never reach the DB: strip them, judge guardrails with the
     // credentials this item would execute with (vault + any supplied now),
     // persist only the stripped payload.
-    const { payload: stripped, secrets } = stripReviewSecrets(body.payload);
+    // Only the keys this kind's consumers read are kept (pickReviewPayload);
+    // then credentials are removed at every depth and held for approval.
+    const { payload: stripped, secrets } = stripReviewSecrets(pickReviewPayload(body.kind, body.payload));
     const payload = withAuthoritativeData(userId, body.kind, stripped);
     const creds = resolveReviewCreds(kb.getDb(), userId, payload, { held: secrets });
     const guardrails = runGuardrails(body.kind, withCreds(payload, creds));

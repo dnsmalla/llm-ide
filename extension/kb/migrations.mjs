@@ -14,11 +14,19 @@
 import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { scrubReviewPayloadRows } from './review-payload.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
 
 const FILE_RE = /^(\d{3,4})_([\w.-]+)\.sql$/;
+
+// Data steps that SQL cannot express (recursive JSON rewrites). A migration
+// file still provides the version and checksum; when its version is listed
+// here, the step runs inside the same transaction right after its SQL.
+const JS_MIGRATIONS = new Map([
+  [45, (db) => scrubReviewPayloadRows(db)],
+]);
 
 // True when `sql` consists of exactly one effective statement and that
 // statement is an `ALTER TABLE … ADD COLUMN`. Used to bound the
@@ -107,6 +115,8 @@ export function applyMigrations(db, { logger } = {}) {
     }
     const tx = db.transaction(() => {
       db.exec(sql);
+      const step = JS_MIGRATIONS.get(version);
+      if (step) step(db);
       db.prepare(
         'INSERT INTO schema_migrations (version, name, checksum) VALUES (?, ?, ?)',
       ).run(version, name, sum);
