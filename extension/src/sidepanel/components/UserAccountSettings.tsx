@@ -23,16 +23,20 @@ interface Me {
   displayName: string;
   role: string;
   status: string;
-  createdAt: number;
-  lastLoginAt: number | null;
+  // SQLite datetime, UTC, e.g. "2026-10-26 04:31:31".
+  createdAt: string;
+  lastLoginAt: string | null;
 }
 
-function fmtDate(ts: number | null | undefined): string {
-  if (!ts) return '—';
+function fmtDate(s: string | null | undefined): string {
+  if (!s) return '—';
+  // SQLite emits "YYYY-MM-DD HH:MM:SS" in UTC; make it an ISO UTC string.
+  const d = new Date(s.replace(' ', 'T') + 'Z');
+  if (Number.isNaN(d.getTime())) return s;
   try {
-    return new Date(ts).toLocaleString();
+    return d.toLocaleString();
   } catch {
-    return '—';
+    return s;
   }
 }
 
