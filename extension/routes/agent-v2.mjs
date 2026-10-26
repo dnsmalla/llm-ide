@@ -37,7 +37,7 @@ import { recordToolEvents } from '../kb/tool-events.mjs';
 import { recordTurnComposition } from '../kb/turn-composition.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { isPluginUpdating } from '../plugins/claude-update.mjs';
-import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, readJsonObjectOr400, onClientDisconnect } from '../core/utils.mjs';
 import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
 
@@ -667,7 +667,8 @@ async function handleV2Cancel(req, res, userId) {
 }
 
 async function handleV2Decision(req, res, userId) {
-  const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+  const body = await readJsonObjectOr400(req, res, 64 * 1024);
+  if (body === null) return true;
   const out = answerDecision({
     requestId: body.requestId,
     sdkSessionId: body.sdkSessionId,

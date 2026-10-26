@@ -1,5 +1,5 @@
 import { runClaude, runClaudeStream, streamModelReply, resolveLanguage } from '../providers/runtime.mjs';
-import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON, onClientDisconnect } from '../core/utils.mjs';
+import { readBody, parseJSON, readJsonObjectOr400, sanitizeForPrompt, sanitizeLine, sendJSON, onClientDisconnect } from '../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText } from '../core/prompt-framing.mjs';
 import { handleCodeAssist } from '../llm_agent/runtime/route.mjs';
 import { makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
@@ -764,15 +764,8 @@ export async function handleAIRoutes(req, res) {
   // shape: the registry owns tenancy (deciding user AND session — here
   // the legacy chat's agentContext.sessionId — must match the parked entry).
   if (req.method === 'POST' && req.url === '/code-assist/decision') {
-    const raw = await readBody(req, 64 * 1024);
-    let body;
-    try {
-      body = JSON.parse(raw);
-    } catch {
-      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Request body must be valid JSON' } });
-      return true;
-    }
-    if (!body || typeof body !== 'object') body = {};
+    const body = await readJsonObjectOr400(req, res, 64 * 1024);
+    if (body === null) return true;
     const out = answerDecision({
       requestId: body.requestId,
       sdkSessionId: body.sdkSessionId,
