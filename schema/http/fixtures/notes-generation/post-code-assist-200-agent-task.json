@@ -1,0 +1,85 @@
+{
+  "endpoint": "POST /code-assist",
+  "status": 200,
+  "description": "Captured from the real handler (server/ai-routes.mjs handleAIRoutes) in-process on a temp DB: the server's own route code, with a loopback http wrapper and no auth middleware. The CLI is a local stub (no model call). The session holds one pending task (seeded with tasks.createTask, the same call the task-create tool makes), so the tasks items are real.",
+  "request": {
+    "body": {
+      "message": "Review this file.",
+      "history": [
+        {
+          "role": "user",
+          "content": "Hi"
+        }
+      ],
+      "attachments": [
+        {
+          "path": "src/app.ts",
+          "content": "export const x = 1;\n"
+        }
+      ],
+      "skills": [
+        "code-review"
+      ],
+      "language": "en",
+      "model": "claude-haiku-5-5",
+      "provider": "anthropic",
+      "tier": "subagent",
+      "mode": "auto",
+      "planExecute": false,
+      "planWrite": false,
+      "clientCaps": [
+        "ask_user"
+      ],
+      "agentContext": {
+        "sessionId": "legacy-session-1",
+        "chatSessionId": "chat-1",
+        "activeProject": {
+          "id": "proj-1",
+          "name": "Example"
+        },
+        "indexedRepos": [
+          {
+            "id": "repo-1",
+            "path": "/example/repo"
+          }
+        ],
+        "recentIssues": [
+          {
+            "id": "ISSUE-1",
+            "title": "Example issue"
+          }
+        ],
+        "workspaceRoot": "/example/repo",
+        "activeRepoRoot": "/example/repo"
+      }
+    }
+  },
+  "response": {
+    "reply": "Stub reply.",
+    "pendingTool": null,
+    "usage": {
+      "attachmentCount": 1,
+      "attachmentChars": 20,
+      "paths": [
+        "src/app.ts"
+      ],
+      "truncatedPaths": [],
+      "memoryChars": 106,
+      "memoryApproxTokens": 27,
+      "memoryHasChatMemory": false,
+      "inputTokens": 24,
+      "outputTokens": 16,
+      "modelCalls": 2
+    },
+    "continueNeeded": true,
+    "tasks": [
+      {
+        "id": "1",
+        "title": "Update the release notes",
+        "status": "pending",
+        "createdAt": 1792992812290
+      }
+    ],
+    "mode": "execute"
+  }
+}

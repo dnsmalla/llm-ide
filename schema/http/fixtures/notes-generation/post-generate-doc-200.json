@@ -1,0 +1,29 @@
+{
+  "endpoint": "POST /generate-doc",
+  "status": 200,
+  "description": "Captured from the real handler on a temp-DB server (node extension/server.mjs). The model's text is a canned local stub (CAPTURE_CLI), so no model call; the response construction is the server's.",
+  "request": {
+    "body": {
+      "templateName": "Meeting notes",
+      "sections": [
+        "Summary",
+        "Decisions"
+      ],
+      "command": "Summarise the discussion",
+      "prompt": "Keep it short",
+      "sources": [
+        {
+          "name": "notes.md",
+          "content": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday."
+        }
+      ]
+    }
+  },
+  "response": {
+    "content": "## Summary\nRelease planned for Friday.\n\n## Decisions\nShip on Friday.",
+    "truncated": [],
+    "truncatedCount": 0,
+    "omitted": [],
+    "omittedCount": 0
+  }
+}

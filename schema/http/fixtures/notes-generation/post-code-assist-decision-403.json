@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /code-assist/decision",
+  "status": 403,
+  "description": "Captured from the real handler (server/ai-routes.mjs handleAIRoutes) in-process on a temp DB: the server's own route code, with a loopback http wrapper and no auth middleware. The CLI is a local stub (no model call).",
+  "request": {
+    "body": {
+      "requestId": "054a2e45-5a63-4986-bdf6-0322a35a66d8",
+      "sdkSessionId": "legacy-session-1",
+      "action": "deny",
+      "feedback": "Use the other file.",
+      "answers": {
+        "Which file?": "app.ts"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "DECISION_FORBIDDEN",
+      "message": "This decision belongs to another user or session"
+    }
+  }
+}

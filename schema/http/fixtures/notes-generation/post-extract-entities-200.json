@@ -1,0 +1,43 @@
+{
+  "endpoint": "POST /extract-entities",
+  "status": 200,
+  "description": "Captured from the real handler on a temp-DB server (node extension/server.mjs). The model's text is a canned local stub (CAPTURE_CLI), so no model call; the response construction is the server's.",
+  "request": {
+    "body": {
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "participants": [
+        "Alice",
+        "Bob"
+      ],
+      "meetingTitle": "Weekly sync",
+      "language": "en"
+    }
+  },
+  "response": {
+    "actions": [
+      {
+        "text": "Update the release notes",
+        "owner": "Bob",
+        "due": "2026-10-29",
+        "quote": "I will update the release notes by Thursday."
+      }
+    ],
+    "decisions": [
+      {
+        "text": "Ship the release on Friday",
+        "participants": [
+          "Alice",
+          "Bob"
+        ],
+        "quote": "We agreed to ship the release on Friday."
+      }
+    ],
+    "blockers": [
+      {
+        "text": "Waiting on QA sign-off",
+        "severity": "med",
+        "quote": "ship the release on Friday"
+      }
+    ]
+  }
+}

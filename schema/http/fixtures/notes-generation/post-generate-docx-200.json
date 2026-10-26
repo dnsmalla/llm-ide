@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /generate-docx",
+  "status": 200,
+  "description": "Captured from the real handler on a temp-DB server (node extension/server.mjs). The model's text is a canned local stub (CAPTURE_CLI), so no model call; the response construction is the server's.",
+  "request": {
+    "body": {
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "meetingTitle": "Weekly sync",
+      "meetingId": "mtg-001",
+      "language": "en"
+    }
+  },
+  "response": {
+    "contentType": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    "description": "Attachment meeting-notes-2026-10-26.docx"
+  }
+}
