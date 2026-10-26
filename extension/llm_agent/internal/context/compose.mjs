@@ -77,7 +77,7 @@ function gitCount(v) {
 }
 
 function renderGitStatus(gs) {
-  if (typeof gs === 'string') return gs.trim() ? `Status: ${gs.trim()}` : '';
+  if (typeof gs === 'string') return oneLine(gs) ? `Status: ${oneLine(gs).slice(0, GIT_CONTEXT_CHARS)}` : '';
   if (!gs || typeof gs !== 'object') return '';
   const staged = gitCount(gs.staged);
   const unstaged = gitCount(gs.unstaged);
@@ -88,9 +88,15 @@ function renderGitStatus(gs) {
   return `Staged: ${staged}, unstaged: ${unstaged}; ${upstream}`;
 }
 
+// Git-supplied text is one line: a branch or status with newlines would let
+// a line start with a markdown heading or a fake instruction inside the fence.
+function oneLine(s) {
+  return s.replace(/\s+/g, ' ').trim();
+}
+
 function gitBranch(agentContext) {
   return typeof agentContext?.currentBranch === 'string'
-    ? agentContext.currentBranch.trim().slice(0, 200) : '';
+    ? oneLine(agentContext.currentBranch).slice(0, 200) : '';
 }
 
 /**
@@ -102,7 +108,7 @@ function gitBranch(agentContext) {
 export function gitStateKey(agentContext) {
   const gs = agentContext?.gitStatus;
   let dirty = 'unknown';
-  if (typeof gs === 'string') dirty = `text:${gs.trim()}`;
+  if (typeof gs === 'string') dirty = `text:${oneLine(gs)}`;
   else if (gs && typeof gs === 'object') {
     const counts = [gs.staged, gs.unstaged, gs.untracked].map(gitCount);
     if (counts[0] !== null && counts[1] !== null) {
