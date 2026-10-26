@@ -80,8 +80,8 @@ const SKIP_RULES = [
     when: (fx) => fx.status >= 500,
   },
   {
-    why: 'streaming or live engine: agent v2 SSE, agent SDK, Loop run, live stream',
-    when: (fx) => fx.status < 300 && /^(POST \/agent\/v2|POST \/agent-sdk|POST \/kb\/loop\/agent-run|GET \/kb\/live\/:id\/stream|POST \/kb\/agent\/(ask|dispatch|stop|feedback))/.test(fx.endpoint),
+    why: 'streaming or live engine: agent v2 SSE, agent SDK, Loop run, live stream, System view stream',
+    when: (fx) => fx.status < 300 && /^(POST \/agent\/v2|POST \/agent-sdk|POST \/kb\/loop\/agent-run|GET \/kb\/live\/:id\/stream|GET \/kb\/os\/stream|POST \/kb\/agent\/(ask|dispatch|stop|feedback))/.test(fx.endpoint),
   },
   {
     why: 'external service: OAuth provider, email/Slack/Box/MCP/git host, plugin marketplace',
