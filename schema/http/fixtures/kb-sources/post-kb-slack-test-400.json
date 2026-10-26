@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/slack/test",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "SLACK_NO_TOKEN",
+      "message": "No Slack connection saved. Connect Slack first."
+    }
+  }
+}

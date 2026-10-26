@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/mcp-connector/fetch",
+  "status": 400,
+  "request": {
+    "body": {
+      "id": "miro",
+      "limit": 5
+    }
+  },
+  "response": {
+    "error": {
+      "code": "MCP_UNAUTHORIZED",
+      "message": "Not connected to Miro. Connect it in Settings first."
+    }
+  }
+}

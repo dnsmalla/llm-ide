@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/project/:id/export",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "example-project"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

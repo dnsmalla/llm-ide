@@ -1,0 +1,34 @@
+{
+  "endpoint": "POST /kb/connect-tickets-json",
+  "status": 200,
+  "request": {
+    "body": {
+      "provider": "github",
+      "tickets": [
+        {
+          "id": "example-ticket-1",
+          "title": "Example search bug",
+          "body": "Search returns nothing for short queries.",
+          "url": "https://example.invalid/issues/1",
+          "meta": {
+            "repo": "example/repo",
+            "state": "open",
+            "number": 1,
+            "labels": [
+              "bug"
+            ],
+            "author": "example-user",
+            "createdAt": "2026-10-25T00:00:00Z",
+            "updatedAt": "2026-10-25T00:00:00Z",
+            "isPR": false
+          }
+        }
+      ]
+    }
+  },
+  "response": {
+    "ok": true,
+    "count": 1,
+    "chunks": 1
+  }
+}

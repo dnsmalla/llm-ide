@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /kb/project/:id/export",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "example-project"
+    }
+  },
+  "response": {
+    "projectId": "example-project",
+    "exportedAt": "2026-10-26T05:34:34.212Z",
+    "meetingCount": 0,
+    "planCount": 0,
+    "meetings": [],
+    "plans": []
+  }
+}

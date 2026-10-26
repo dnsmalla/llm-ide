@@ -1,0 +1,12 @@
+{
+  "endpoint": "DELETE /kb/delete",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "example-meeting-missing"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

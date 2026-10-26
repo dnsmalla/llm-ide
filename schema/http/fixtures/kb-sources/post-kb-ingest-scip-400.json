@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/ingest-scip",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "repoPath and scipPath are required"
+    }
+  }
+}

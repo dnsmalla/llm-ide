@@ -1,0 +1,33 @@
+{
+  "endpoint": "GET /kb/issues",
+  "status": 200,
+  "request": {
+    "query": {
+      "repo": "example/repo",
+      "state": "open",
+      "limit": "5",
+      "provider": "github"
+    }
+  },
+  "response": {
+    "issues": [
+      {
+        "id": "18",
+        "title": "Example search bug",
+        "body": "Search returns nothing for short queries.",
+        "url": "",
+        "provider": "github",
+        "repo": "example/repo",
+        "number": 1,
+        "state": "open",
+        "labels": [
+          "bug"
+        ],
+        "author": "example-user",
+        "createdAt": "2026-10-25T00:00:00Z",
+        "updatedAt": "2026-10-25T00:00:00Z",
+        "isPR": false
+      }
+    ]
+  }
+}

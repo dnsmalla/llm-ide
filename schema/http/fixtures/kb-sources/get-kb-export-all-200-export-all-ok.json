@@ -1,0 +1,10 @@
+{
+  "endpoint": "GET /kb/export-all",
+  "status": 200,
+  "request": {
+    "query": {
+      "limit": "5"
+    }
+  },
+  "response": "{\"meeting\":{\"id\":\"example-meeting-1\",\"user_id\":\"example-user-id\",\"title\":\"Example planning meeting\",\"started_at\":1792972800000,\"ended_at\":1792974600000,\"transcript\":\"Alice: we decided to ship the search fix on Friday.\",\"notes\":\"\",\"language\":\"en\",\"platform\":\"meet\",\"participants\":[\"Alice\",\"Bob\"]},\"entities\":[{\"id\":\"example-entity-1\",\"meeting_id\":\"example-meeting-1\",\"kind\":\"decision\",\"owner\":null,\"text\":\"Ship the search fix on Friday\",\"due\":null}]}\n{\"done\":true,\"next_cursor\":\"example-meeting-1\"}\n"
+}

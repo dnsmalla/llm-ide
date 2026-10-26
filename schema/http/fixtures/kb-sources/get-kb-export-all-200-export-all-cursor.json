@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/export-all",
+  "status": 200,
+  "request": {
+    "query": {
+      "cursor": "example-meeting-1",
+      "limit": "5"
+    }
+  },
+  "response": "{\"done\":true,\"next_cursor\":null}\n"
+}

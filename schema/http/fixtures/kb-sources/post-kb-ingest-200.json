@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /kb/ingest",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "example-meeting-1",
+      "title": "Example planning meeting",
+      "date": "2026-10-26",
+      "language": "en",
+      "participants": [
+        "Alice",
+        "Bob"
+      ],
+      "duration": 1800,
+      "transcript": "Alice: we decided to ship the search fix on Friday.",
+      "entities": [
+        {
+          "id": "example-entity-1",
+          "kind": "decision",
+          "text": "Ship the search fix on Friday",
+          "quote": "we decided to ship the search fix on Friday"
+        }
+      ]
+    }
+  },
+  "response": {
+    "ok": true,
+    "meetingId": "example-meeting-1",
+    "entityCount": 1
+  }
+}

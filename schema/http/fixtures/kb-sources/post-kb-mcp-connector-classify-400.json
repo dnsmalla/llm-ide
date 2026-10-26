@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/mcp-connector/classify",
+  "status": 400,
+  "request": {
+    "body": {
+      "body": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "body.text is required"
+    }
+  }
+}

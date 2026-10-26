@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/connect-box",
+  "status": 400,
+  "request": {
+    "body": {
+      "clientId": "example-client-id"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "clientId, subjectId and folderId are required"
+    }
+  }
+}

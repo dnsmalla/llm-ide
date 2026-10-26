@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/project/install-skills",
+  "status": 400,
+  "request": {
+    "body": {
+      "path": "/example/plain-dir"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_A_PROJECT",
+      "message": "path is not a LLM-IDE project (missing system/project.json)"
+    }
+  }
+}

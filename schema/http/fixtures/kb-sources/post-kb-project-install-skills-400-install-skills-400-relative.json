@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/project/install-skills",
+  "status": 400,
+  "request": {
+    "body": {
+      "path": "relative/dir"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_PATH",
+      "message": "path must be an absolute directory"
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/activity",
+  "status": 200,
+  "request": {
+    "body": {
+      "kind": "meeting_added",
+      "title": "Example activity",
+      "detail": {
+        "count": 1
+      }
+    }
+  },
+  "response": {
+    "ok": true,
+    "id": 10
+  }
+}

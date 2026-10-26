@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/ingest",
+  "status": 400,
+  "request": {
+    "body": {
+      "title": "no id"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Missing meeting id"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/meeting/:id",
+  "status": 401,
+  "request": {
+    "params": {
+      "id": "example-meeting-1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/search",
+  "status": 401,
+  "request": {
+    "query": {
+      "q": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

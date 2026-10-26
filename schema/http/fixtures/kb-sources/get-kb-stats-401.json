@@ -1,0 +1,10 @@
+{
+  "endpoint": "GET /kb/stats",
+  "status": 401,
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

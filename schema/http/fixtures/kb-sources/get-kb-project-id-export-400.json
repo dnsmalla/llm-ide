@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /kb/project/:id/export",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "bad.id"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_PROJECT_ID",
+      "message": "projectId must be 1–128 alphanumeric / _ / - characters"
+    }
+  }
+}

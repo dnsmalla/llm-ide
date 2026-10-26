@@ -1,0 +1,60 @@
+{
+  "endpoint": "GET /kb/system/status",
+  "status": 200,
+  "response": {
+    "stats": {
+      "meetings": 1,
+      "entities": 1,
+      "sources": {
+        "code": 1,
+        "ticket": 2,
+        "qa": 2,
+        "lastIndexed": {
+          "code": "2026-10-26 05:27:17",
+          "qa": "2026-10-26 05:32:07",
+          "ticket": "2026-10-26 05:34:34"
+        }
+      },
+      "plans": 0,
+      "tasks": 0,
+      "reviews": {
+        "pending": 0,
+        "approved": 0,
+        "rejected": 0,
+        "executed": 0,
+        "failed": 0,
+        "expired": 0
+      },
+      "outcomes": {
+        "total": 0,
+        "byState": {}
+      }
+    },
+    "flow": {
+      "capture": {
+        "activeCount": 0,
+        "sessions": []
+      },
+      "agent": {
+        "activeCount": 0,
+        "runs": []
+      },
+      "review": {
+        "pendingCount": 0,
+        "byStatus": {
+          "pending": 0,
+          "approved": 0,
+          "rejected": 0,
+          "executed": 0,
+          "failed": 0,
+          "expired": 0
+        },
+        "pendingItems": []
+      },
+      "outcomes": {
+        "total": 0,
+        "byState": {}
+      }
+    }
+  }
+}

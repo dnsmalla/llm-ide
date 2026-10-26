@@ -1,0 +1,10 @@
+{
+  "endpoint": "GET /kb/slack/conversations",
+  "status": 401,
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

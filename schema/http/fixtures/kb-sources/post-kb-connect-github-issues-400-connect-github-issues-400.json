@@ -1,0 +1,13 @@
+{
+  "endpoint": "POST /kb/connect-github-issues",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Missing repo (owner/name)"
+    }
+  }
+}

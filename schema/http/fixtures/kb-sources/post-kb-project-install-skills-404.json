@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/project/install-skills",
+  "status": 404,
+  "request": {
+    "body": {
+      "path": "/example/missing-dir"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PATH_NOT_FOUND",
+      "message": "path does not exist"
+    }
+  }
+}

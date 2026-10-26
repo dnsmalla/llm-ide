@@ -1,0 +1,19 @@
+{
+  "endpoint": "GET /kb/entity/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "example-entity-1"
+    }
+  },
+  "response": {
+    "id": "example-entity-1",
+    "meetingId": "example-meeting-1",
+    "meetingTitle": "Example planning meeting",
+    "date": "2026-10-26",
+    "kind": "decision",
+    "text": "Ship the search fix on Friday",
+    "quote": "we decided to ship the search fix on Friday",
+    "meta": {}
+  }
+}

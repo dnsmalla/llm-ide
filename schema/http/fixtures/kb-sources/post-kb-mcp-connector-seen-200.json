@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/mcp-connector/seen",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "miro",
+      "itemIds": [
+        "example-item-1"
+      ]
+    }
+  },
+  "response": {
+    "ok": true,
+    "marked": 1
+  }
+}

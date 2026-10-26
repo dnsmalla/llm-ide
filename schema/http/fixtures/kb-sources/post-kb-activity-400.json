@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/activity",
+  "status": 400,
+  "request": {
+    "body": {
+      "kind": "not_a_kind",
+      "title": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Invalid activity kind or title"
+    }
+  }
+}

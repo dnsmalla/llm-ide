@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /kb/delete",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Missing meeting id"
+    }
+  }
+}

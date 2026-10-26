@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/email/seen",
+  "status": 200,
+  "request": {
+    "body": {
+      "messageIds": [
+        "example-message-1@example.com"
+      ],
+      "lastFetchedAt": "2026-10-26T00:00:00Z"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

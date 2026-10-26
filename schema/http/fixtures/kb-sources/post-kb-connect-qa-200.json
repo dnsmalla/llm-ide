@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/connect-qa",
+  "status": 200,
+  "request": {
+    "body": {
+      "source": "example-junit",
+      "xml": "<testsuite name=\"example\" tests=\"2\" failures=\"1\"><testcase name=\"passes\" classname=\"example.Suite\" time=\"0.01\"/><testcase name=\"fails\" classname=\"example.Suite\" time=\"0.02\"><failure message=\"expected 1\">boom</failure></testcase></testsuite>"
+    }
+  },
+  "response": {
+    "ok": true,
+    "source": "example-junit",
+    "total": 2,
+    "failed": 1,
+    "chunks": 2
+  }
+}

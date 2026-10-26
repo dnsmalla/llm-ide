@@ -1,0 +1,10 @@
+{
+  "endpoint": "GET /kb/slack/conversations",
+  "status": 400,
+  "response": {
+    "error": {
+      "code": "SLACK_NO_TOKEN",
+      "message": "No Slack connection saved. Connect Slack first."
+    }
+  }
+}
