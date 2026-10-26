@@ -142,14 +142,7 @@ function skipReason(fx) {
 // says. Each is a finding, reported here and asserted to still reproduce, so a
 // fix (or a changed schema) makes the test fail until this entry is removed.
 // Server code is not changed by this test.
-const KNOWN_DRIFT = new Map([
-  ['health-auth/get-auth-me-plugins-200.json',
-    'server sends plugin fields the schema does not declare (name, version, enabled, hookCount, ...): server/auth-routes.mjs:981 listInstalledPlugins'],
-  ['health-auth/get-auth-me-llm-sources-200.json',
-    'server sends sources.lastUpdate and sources.knownItems, not declared: server/auth-routes.mjs:1462 listSourcesWithState'],
-  ['health-auth/get-auth-me-mcp-plugins-200.json',
-    'server sends plugins.package.version as null where the schema says string: server/auth-routes.mjs:1675'],
-]);
+const KNOWN_DRIFT = new Map([]);
 
 // ---------------------------------------------------------------- server
 

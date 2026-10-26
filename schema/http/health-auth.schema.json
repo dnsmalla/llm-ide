@@ -389,7 +389,10 @@
               "type": "string"
             },
             "version": {
-              "type": "string"
+              "type": [
+                "string",
+                "null"
+              ]
             },
             "tag": {
               "type": [
@@ -776,6 +779,60 @@
         "disabledItemCount": {
           "type": "integer",
           "description": "skills/agents/commands/templates this user unchecked inside the source"
+        },
+        "lastUpdate": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "x-optional": true,
+          "description": "the last update's diff; present only after an update ran",
+          "required": [
+            "at",
+            "fromRev",
+            "toRev",
+            "added",
+            "removed"
+          ],
+          "properties": {
+            "at": {
+              "type": "string"
+            },
+            "fromRev": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "toRev": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "added": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "kind:name keys added"
+            },
+            "removed": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "kind:name keys removed"
+            }
+          }
+        },
+        "knownItems": {
+          "type": "array",
+          "x-optional": true,
+          "items": {
+            "type": "string"
+          },
+          "description": "kind:name keys of the source's items as of the last scan; written for local sources only"
         }
       }
     },
@@ -1548,7 +1605,152 @@
               "type": "array",
               "items": {
                 "type": "object",
-                "description": "installed plugin row; not pinned in P3 (no plugin on disk in the capture)"
+                "description": "installed plugin row (one per plugin in the registry). Every field is x-optional: the P3/P11 capture has no plugin on disk, so no fixture carries a row and coverage cannot reach these fields. Types are checked whenever a row is present.",
+                "required": [
+                  "name",
+                  "enabled",
+                  "format"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "x-optional": true,
+                    "description": "plugin slug"
+                  },
+                  "version": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "x-optional": true,
+                    "description": "manifest version; null when the manifest declares none"
+                  },
+                  "displayName": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "x-optional": true
+                  },
+                  "description": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "x-optional": true
+                  },
+                  "author": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "x-optional": true
+                  },
+                  "enabled": {
+                    "type": "boolean",
+                    "x-optional": true,
+                    "description": "this user's enable state"
+                  },
+                  "sdkReadable": {
+                    "type": "boolean",
+                    "x-optional": true,
+                    "description": "true when the Agent SDK can load the plugin from its .claude-plugin manifest"
+                  },
+                  "nativePluginsOn": {
+                    "type": "boolean",
+                    "x-optional": true,
+                    "description": "this user's nativePlugins preference"
+                  },
+                  "skillCount": {
+                    "type": "integer",
+                    "x-optional": true
+                  },
+                  "commands": {
+                    "type": "array",
+                    "x-optional": true,
+                    "description": "{trigger, description} rows"
+                  },
+                  "subagents": {
+                    "type": "array",
+                    "x-optional": true,
+                    "description": "{name, description, allowedTools} rows"
+                  },
+                  "format": {
+                    "type": "string",
+                    "x-optional": true,
+                    "description": "llmide | claude | codex"
+                  },
+                  "origin": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "x-optional": true,
+                    "description": "'claude' | 'codex' when a vendor bridge imported it, else null"
+                  },
+                  "sourceVersion": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "x-optional": true
+                  },
+                  "installSource": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "x-optional": true,
+                    "description": "where git/marketplace/zip installs came from"
+                  },
+                  "unsupportedComponents": {
+                    "type": "array",
+                    "x-optional": true
+                  },
+                  "pendingComponents": {
+                    "type": "array",
+                    "x-optional": true
+                  },
+                  "hookCount": {
+                    "type": "integer",
+                    "x-optional": true,
+                    "description": "runnable hook handlers the plugin declares"
+                  },
+                  "declaresHooks": {
+                    "type": "boolean",
+                    "x-optional": true
+                  },
+                  "executableKinds": {
+                    "type": "array",
+                    "x-optional": true,
+                    "description": "hook kinds llm-ide will run"
+                  },
+                  "hookNotes": {
+                    "type": "array",
+                    "x-optional": true
+                  },
+                  "hooksTrusted": {
+                    "type": "boolean",
+                    "x-optional": true,
+                    "description": "effective trust"
+                  },
+                  "trustOutdated": {
+                    "type": "boolean",
+                    "x-optional": true
+                  },
+                  "trustOutdatedKinds": {
+                    "type": "array",
+                    "x-optional": true
+                  },
+                  "nativeDelivery": {
+                    "type": "boolean",
+                    "x-optional": true
+                  },
+                  "mcpServerCount": {
+                    "type": "integer",
+                    "x-optional": true
+                  }
+                }
               }
             }
           }
