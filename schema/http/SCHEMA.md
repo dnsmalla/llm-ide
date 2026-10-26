@@ -50,7 +50,7 @@ its fixture directory share that name. `_common.schema.json` is not a group.
   PUT, PATCH, DELETE, HEAD, OPTIONS. The path must be a literal entry of
   `ALL_ENDPOINTS` in `extension/server.mjs`.
 - **Path parameters** appear as `:name` in the key, matching the roster. Name them
-  as the roster does. P14 translates `:name` to the `{name}` form of the OpenAPI
+  as the roster does. The OpenAPI generator translates `:name` to the `{name}` form of the OpenAPI
   output. Do not write `{name}` in a key.
 - `request` is optional. Its keys are any of `query`, `params`, `body`; any other
   key is rejected. Each part is a JSON Schema for that part.
@@ -191,3 +191,16 @@ route as also answering this 400.
 whitelist, validity, coverage and report used here and by
 `scripts/conformance-agent-v2.mjs`. `scripts/lib/roster.mjs` holds the
 `ALL_ENDPOINTS` parser.
+
+## Generated outputs
+
+Two files are generated from this contract. Do not edit either by hand.
+
+- `extension/src/lib/api-types.ts`: `node scripts/gen-api-types.mjs` (`make api-types`).
+- `docs/reference/api/openapi.yaml`: `node scripts/gen-openapi.mjs` (`make openapi`). Human prose the group files do not carry (summaries, descriptions, response descriptions) lives in `docs/reference/api/openapi.overlay.json`, keyed by `METHOD /path` in OpenAPI form. The generator fails when an overlay entry names nothing the contract generates.
+
+`make contract-gates` runs both generators with `--check` and fails while either output is stale.
+
+## Version bump rule
+
+`SERVER_API_VERSION` in `extension/server.mjs` is bumped in the same commit as any change to the wire format: a request or response field added, removed, renamed or retyped, an endpoint added or removed, or a status code changed. Additive changes bump it too, because an older client cannot tell an added field from a missing one. The bump is what `GET /health` reports to clients for stale-server detection, and the generated OpenAPI document carries it as `info.x-api-version`.

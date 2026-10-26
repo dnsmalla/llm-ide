@@ -10,7 +10,7 @@ Human-readable summary of the LLM-IDE server API. For the machine-readable spec 
 
 - **Base URL** — `http://127.0.0.1:3456`
 - **Auth** — `Authorization: Bearer <access_token>` for everything except the public routes below
-- **Versioning** — `SERVER_API_VERSION` reported by `GET /health`; the client compares against its `REQUIRED_ENDPOINTS` allowlist and surfaces a "restart server" banner on mismatch
+- **Versioning** — `SERVER_API_VERSION` reported by `GET /health`; the client compares against its `REQUIRED_ENDPOINTS` allowlist and surfaces a "restart server" banner on mismatch. The bump rule is in `schema/http/SCHEMA.md`.
 - **Error envelope** — `{ "error": { "code": "...", "message": "...", "details": {} } }`
 - **Feature set** — `LLMIDE_FEATURES` (comma-separated enabled feature keys, the Mac app's build features; unset/empty = all) prunes feature-owned route groups. See [Feature-pruned routes](#feature-pruned-routes)
 
