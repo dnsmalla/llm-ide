@@ -61,6 +61,17 @@ test('the git block rides in the per-turn fence, sent once until it changes', ()
   assert.match(moved.prompt, /Current branch: main[\s\S]*Updated since your last view/);
 });
 
+test('a request that drops the git keys says once that the branch is stale', () => {
+  const first = turn({ currentBranch: 'feat/x', gitStatus: STATUS });
+  const gone = turn({ sessionId: 's' }, first.meta.delivered);
+  assert.equal(gone.prompt.split('Git state is unknown now').length - 1, 1, 'one note');
+  assert.equal(gone.meta.delivered.gitHash, null);
+  const again = turn({ sessionId: 's' }, gone.meta.delivered);
+  assert.ok(!again.prompt.includes('Git state is unknown now'), 'the note is not repeated');
+  const back = turn({ currentBranch: 'feat/x', gitStatus: STATUS }, again.meta.delivered);
+  assert.match(back.prompt, /Current branch: feat\/x/, 'a repo state that returns is sent again');
+});
+
 test('the git block is never in the system prompt', () => {
   const out = turn({ currentBranch: 'feat/x', gitStatus: STATUS });
   assert.ok(!JSON.stringify(out.queryOptions.systemPrompt ?? '').includes('feat/x'));

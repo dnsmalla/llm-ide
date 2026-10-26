@@ -722,17 +722,23 @@ export function buildEngineOptions(
     next.recentHash = recentHash;
   }
   // Active repo's branch and status: the same delivered-state rule as the
-  // recent list (sent when new or changed, not re-sent every turn). A request
-  // with neither key says nothing about the repo, so the record is kept.
-  if (agentContext && ('currentBranch' in agentContext || 'gitStatus' in agentContext)) {
+  // recent list (sent when new or changed, not re-sent every turn).
+  const carriesGit = !!agentContext && ('currentBranch' in agentContext || 'gitStatus' in agentContext);
+  if (carriesGit) {
     const gitText = composeGitContext(agentContext);
     const gitHash = gitText ? contentHash(gitText) : null;
     if (gitText && gitHash !== prev?.gitHash) {
       contextParts.push(prev?.gitHash ? `${gitText}\n\n(Updated since your last view of the repo state.)` : gitText);
     } else if (!gitText && next.gitHash) {
-      contextParts.push('## Git state (the active repo)\n(No repo state is known now — the branch shown earlier is out of date.)');
+      contextParts.push(GIT_UNKNOWN_NOTE);
+      next.gitHash = null;
     }
     next.gitHash = gitHash;
+  } else if (next.gitHash) {
+    // The request no longer says anything about the repo (the Mac omits
+    // nil optionals), so a branch shown earlier may be stale. Say so once.
+    contextParts.push(GIT_UNKNOWN_NOTE);
+    next.gitHash = null;
   }
   // Project memory summary: only the files that change rarely (repo.md, the
   // environment note, the graph overview) and no "(updated …)" age —
@@ -943,6 +949,8 @@ export function buildEngineOptions(
     },
   };
 }
+
+const GIT_UNKNOWN_NOTE = '## Git state (the active repo)\n(Git state is unknown now; any branch shown earlier is out of date.)';
 
 // The turn's context blocks ahead of what the user typed, fenced so the model
 // can tell app-supplied context from the user's words. The user's message
