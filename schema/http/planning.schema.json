@@ -556,7 +556,8 @@
           "description": "Exactly one of planId or plan is read (planId wins). Deterministic, no model call.",
           "properties": {
             "planId": {
-              "type": "string"
+              "type": "string",
+              "description": "ID of a stored plan — persists result"
             },
             "plan": {
               "type": "object",
@@ -680,7 +681,8 @@
           "properties": {
             "limit": {
               "type": "string",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Capped at 200; the default is 50."
             }
           }
         }
@@ -817,7 +819,8 @@
           "description": "savePlan input. id is optional (generated when absent). Tasks are replaced wholesale on every save.",
           "properties": {
             "id": {
-              "type": "string"
+              "type": "string",
+              "description": "Omit to create a new plan"
             },
             "title": {
               "type": "string"
@@ -1269,7 +1272,8 @@
             },
             "reviewId": {
               "type": "string",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Required when target != preview"
             },
             "config": {
               "type": "object",
@@ -1577,10 +1581,12 @@
           "type": "object",
           "properties": {
             "transcript": {
-              "type": "string"
+              "type": "string",
+              "description": "Current meeting transcript (max 40 000 chars)"
             },
             "fileContext": {
-              "type": "string"
+              "type": "string",
+              "description": "Attached code or notes (max 20 000 chars)"
             },
             "language": {
               "type": "string"
@@ -1620,7 +1626,8 @@
               "type": "string"
             },
             "webhookUrl": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional — vault key slack.webhookUrl is preferred"
             },
             "planId": {
               "type": "string"

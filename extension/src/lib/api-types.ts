@@ -8,7 +8,7 @@ export type CommonError = {
   error: {
     code: string;
     message: string;
-    /** Optional; shape depends on code. */
+    /** Code-specific structured detail (e.g. guardrail report) */
     details?: unknown;
   };
 };
@@ -81,6 +81,7 @@ export type SkillEntry = {
 
 /** A kit template or command (generation-library). surface divides the Doc Gen and Visual menus. */
 export type LibraryEntry = {
+  /** <family>/<file-stem> */
   id: string;
   family: string;
   name: string;
@@ -119,9 +120,13 @@ export type VerdictCounts = {
 };
 
 export type ToolRule = {
+  /** Absolute workspace root the rule applies to */
   projectRoot: string;
+  /** `Bash`, `run-bash`, or an act tool name */
   toolName: string;
+  /** Command prefix for shell tools; empty = the whole tool */
   pattern: string;
+  /** ISO-8601 timestamp */
   grantedAt: string;
 };
 
@@ -275,7 +280,9 @@ export type User = {
 
 export type Session = {
   user: User;
+  /** HS256 JWT, valid 15 min by default */
   accessToken: string;
+  /** Opaque, hashed in DB; rotate via /auth/refresh */
   refreshToken: string;
   accessTokenTTLSec: number;
 };
@@ -292,9 +299,9 @@ export type Health = {
   /** current migration number */
   schemaVersion: number;
   uptimeSec: number;
-  /** ALL_ENDPOINTS minus the paths of disabled features */
+  /** Endpoints this process serves — a feature disabled by LLMIDE_FEATURES drops its paths (v74) */
   endpoints: string[];
-  /** sorted LLMIDE_FEATURES keys; null means every feature */
+  /** LLMIDE_FEATURES as applied (v74): null = every feature; otherwise the enabled feature keys, sorted (agent_chat always present). */
   features: string[] | null;
   checks: {
     db: boolean;
@@ -548,6 +555,7 @@ export type KbSourcesOk = {
   ok: true;
 };
 
+/** Entity with kind, title, body, metadata */
 export type Entity = {
   id: string;
   meetingId: string;
@@ -572,6 +580,7 @@ export type MeetingEntity = {
   meta: Record<string, unknown>;
 };
 
+/** Meeting with entities, transcript, metadata */
 export type Meeting = {
   id: string;
   title: string;
@@ -744,9 +753,12 @@ export type LiveCaption = {
 export type LiveSession = {
   sessionId: string;
   meetingTitle: string;
+  /** Unix ms timestamp when session was created */
   startedAt: number;
+  /** Unix ms timestamp of last caption append */
   lastWrite: number;
   captionCount: number;
+  /** Highest sequence number written so far */
   sequence: number;
 };
 
@@ -757,6 +769,7 @@ export type RateLimited = {
   };
 };
 
+/** 404 body for a path owned by a feature the server was started without (LLMIDE_FEATURES). Deliberately not the Error envelope: a client can tell it from an unknown route without parsing a message. */
 export type FeatureDisabled = {
   error: "feature_disabled";
   feature: string;
@@ -787,8 +800,10 @@ export type CodeGraphNode = {
   /** Required by the server: a node without an id is dropped and counted in droppedNodes. */
   id?: string;
   title?: string;
+  /** CGNodeKind raw value, e.g. file / function / classType */
   kind?: string;
   metadata?: {
+    /** Repo-relative path; absolute or ..-bearing values are discarded */
     source_file?: string;
     /** Mac sends it as a string (CodeGraph metadata is [String:String]); the server normalises with String(). */
     line?: number | string;
@@ -800,6 +815,7 @@ export type CodeGraphNode = {
 export type CodeGraphEdge = {
   fromId?: string;
   toId?: string;
+  /** CGEdgeKind raw value, e.g. imports / calls / contains */
   kind?: string;
   confidence?: string;
 };
@@ -1132,22 +1148,32 @@ export type ReviewOk = {
 /** Request parts for `POST /agent/v2/stream` (schema/http/agent.schema.json). */
 export type PostAgentV2StreamRequest = {
   body: {
+    /** User message. Fence sentinels are neutralised, then capped at 120 000 chars; the message and attachments share one 150 000-char turn budget, message first. An over-cap message is truncated and the model is told so in-band, not rejected. */
     message: string;
     agentContext: {
+      /** Mac chat session id — the mapping key */
       chatSessionId: string;
+      /** Workspace the engine roots its reads in */
       workspaceRoot: string;
     };
+    /** Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions */
     mode?: string;
     language?: string;
+    /** Model id from the picker, passed to the SDK verbatim (an Anthropic id, or the custom provider's own id on a gateway turn); omitted = config default */
     model?: string;
-    /** anthropic (the default) or custom:<uuid> */
+    /** Provider the turn runs on (server v43+): `anthropic` (default when omitted) or an Anthropic-compatible custom provider `custom:<uuid>` registered with an `anthropicBaseURL`. The engine points the Agent SDK at that endpoint with the provider's own key and meters the turn under this id. Any other value fails before the SDK spawns with a terminal error event coded `PROVIDER_NOT_AGENT_CAPABLE` (no Anthropic-compatible endpoint) or `PROVIDER_UNAVAILABLE` (unregistered / disabled / no key). */
     provider?: string;
     effort?: string;
+    /** Invoked skill ids (max 5); bodies are prompt-injected */
     skills?: string[];
+    /** Set only by the Mac saved-plan card's "Execute plan" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request. */
     planExecute?: boolean;
     planWrite?: boolean;
+    /** Claude Code's modes. `ask` (default; `manual` is its old spelling): prompt-tier calls park an approval unless a saved project rule covers them. `accept-edits`: in-workspace Edit/Write run unasked, shell still asks. `bypass`: nothing that would park asks. No mode lifts the blocklist or write containment. */
     permissionMode?: string;
+    /** File attachments (max 30 files, 80 000 chars each, 200 000 total) */
     attachments?: Record<string, unknown>[];
+    /** Skip the recorded SDK session id and start a new one */
     fresh?: boolean;
     /** read only when fresh is true */
     history?: Record<string, unknown>[];
@@ -1161,13 +1187,14 @@ export type PostAgentV2StreamResponse400 = CommonError;
 /** Request parts for `POST /agent/v2/decision` (schema/http/agent.schema.json). */
 export type PostAgentV2DecisionRequest = {
   body: {
+    /** Id from the approval_request event */
     requestId: string;
     sdkSessionId: string;
     /** allow, deny or answer; may be omitted when answers is sent (the server then answers) */
     action?: string;
     /** question to answer (AskUserQuestion approval): question text to chosen answer */
     answers?: Record<string, string>;
-    /** the denial reason, on deny */
+    /** With `deny`: the user's instruction, handed to the model as the denial reason (max 2000 chars) */
     feedback?: string;
   };
 };
@@ -1278,7 +1305,7 @@ export type PostKbAgentFeedbackResponse400 = CommonError;
 /** Request parts for `GET /kb/agent/feedback/stats` (schema/http/agent.schema.json). */
 export type GetKbAgentFeedbackStatsRequest = {
   query: {
-    /** the window in days; default 30 */
+    /** the window in days; default 30 The default is 30 days. */
     sinceDays?: string;
   };
 };
@@ -1295,7 +1322,7 @@ export type GetKbAgentFeedbackStatsResponse200 = {
 /** Request parts for `GET /kb/agent/feedback/by-task` (schema/http/agent.schema.json). */
 export type GetKbAgentFeedbackByTaskRequest = {
   query: {
-    /** the window in days; default 30 */
+    /** the window in days; default 30 The default is 30 days. */
     sinceDays?: string;
   };
 };
@@ -1420,6 +1447,7 @@ export type GetKbAgentCommandsResponse200 = unknown;
 export type GetKbAgentGenerationLibraryRequest = Record<string, never>;
 
 export type GetKbAgentGenerationLibraryResponse200 = {
+  /** Built-in skills repo path */
   repo: string | null;
   templates: LibraryEntry[];
   commands: LibraryEntry[];
@@ -1429,6 +1457,7 @@ export type GetKbAgentGenerationLibraryResponse200 = {
 export type GetKbAgentSkillLibraryRequest = Record<string, never>;
 
 export type GetKbAgentSkillLibraryResponse200 = {
+  /** Central skills repo path */
   repo: string | null;
   skills: SkillLibraryEntry[];
 };
@@ -1452,6 +1481,7 @@ export type GetKbAgentProjectMemoryResponse200 = {
 /** Request parts for `DELETE /kb/agent/project-memory` (schema/http/agent.schema.json). */
 export type DeleteKbAgentProjectMemoryRequest = {
   body: {
+    /** Absolute root from the GET above */
     repo: string;
     workspaceRoot?: string;
     /** one fact to remove, by its identity */
@@ -1480,7 +1510,7 @@ export type DeleteKbAgentToolApprovalsRequest = {
     /** alone: one legacy global grant */
     toolName?: string;
     pattern?: string;
-    /** true revokes everything */
+    /** Revoke every rule and legacy grant */
     all?: boolean;
   };
 };
@@ -1510,6 +1540,7 @@ export type GetKbAgentSessionMemoryResponse400 = CommonError;
 /** Request parts for `DELETE /kb/agent/session-memory` (schema/http/agent.schema.json). */
 export type DeleteKbAgentSessionMemoryRequest = {
   body: {
+    /** Chat session UUID (AgentContext.chatSessionId) */
     sessionId: string;
   };
 };
@@ -1523,6 +1554,7 @@ export type DeleteKbAgentSessionMemoryResponse400 = CommonError;
 /** Request parts for `POST /kb/agent/ask` (schema/http/agent.schema.json). */
 export type PostKbAgentAskRequest = {
   body: {
+    /** User message (max 8 000 chars after sanitization) */
     message?: string;
     /** one base64 image, capped per image; not exercised offline */
     image?: Record<string, unknown>;
@@ -1546,7 +1578,7 @@ export type PostKbAgentAskResponse400 = CommonError;
 /** Request parts for `GET /kb/agent/ask/history` (schema/http/agent.schema.json). */
 export type GetKbAgentAskHistoryRequest = {
   query: {
-    /** newest N, within the server's hard cap; default 50 */
+    /** newest N, within the server's hard cap; default 50 The default is 50; reads are capped at 500. */
     limit?: string;
   };
 };
@@ -1569,6 +1601,7 @@ export type GetKbChatSessionsRequest = {
     surface?: string;
     /** ask, agent or transcript */
     mode?: string;
+    /** The default is 50, with a minimum of 1 and a cap of 200. */
     limit?: string;
   };
 };
@@ -1948,6 +1981,7 @@ export type GetAuthMeSecretsResponse401 = CommonError;
 export type PostAuthMeSecretsRequest = {
   body: {
     key: string;
+    /** null/empty deletes */
     value?: string;
   };
 };
@@ -2539,11 +2573,11 @@ export type DeleteAuthMeConnectorsIdResponse401 = CommonError;
 export type GetKbSearchRequest = {
   query: {
     q?: string;
-    /** one of the allowed kinds; any other value searches every kind */
+    /** Limits results to one kind from the list; any other value searches every kind. */
     kind?: string;
-    /** 1 to 100; anything else is the default 20 */
+    /** Capped at 100; zero, negative or non-numeric values give the default 20. */
     limit?: string;
-    /** project scope; ignored unless it is a safe id */
+    /** project scope; ignored unless it is a safe id Ignored unless it matches ^[A-Za-z0-9_-]{1,128}$. */
     projectId?: string;
   };
 };
@@ -2558,10 +2592,11 @@ export type GetKbSearchResponse401 = CommonError;
 export type GetKbIssuesRequest = {
   query: {
     repo?: string;
-    /** default open; all disables the filter */
+    /** default open; all disables the filter Defaults to open. */
     state?: string;
-    /** default github */
+    /** default github Defaults to github. */
     provider?: string;
+    /** Capped at 100; zero or negative gives the default 20. */
     limit?: string;
   };
 };
@@ -2655,7 +2690,7 @@ export type GetKbExportAllRequest = {
   query: {
     /** meeting id to resume after */
     cursor?: string;
-    /** 1 to 500, default 100 */
+    /** 1 to 500, default 100 Capped at 500; the default is 100. */
     limit?: string;
   };
 };
@@ -2726,9 +2761,9 @@ export type PostKbIngestResponse401 = CommonError;
 /** Request parts for `POST /kb/connect-git` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectGitRequest = {
   body: {
-    /** absolute repo path; must be on the user's repo allow-list */
+    /** Absolute path to the repo root (must be on user allow-list) */
     path?: string;
-    /** default true */
+    /** Replace existing code chunks for this repo */
     replace?: boolean;
   };
 };
@@ -2746,8 +2781,9 @@ export type PostKbIngestScipRequest = {
   body: {
     /** must be on the user's repo allow-list */
     repoPath?: string;
+    /** Path to the SCIP index file */
     scipPath?: string;
-    /** default true */
+    /** Replace the repo's existing graph rows */
     replace?: boolean;
   };
 };
@@ -2765,7 +2801,7 @@ export type PostKbConnectGithubIssuesRequest = {
   body: {
     /** owner/name */
     repo?: string;
-    /** GitHub token; the success path needs the network */
+    /** GitHub PAT (optional — vault github.token used otherwise) */
     token?: string;
     state?: string;
   };
@@ -2780,8 +2816,9 @@ export type PostKbConnectGithubIssuesResponse401 = CommonError;
 /** Request parts for `POST /kb/connect-tickets-json` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectTicketsJsonRequest = {
   body: {
-    /** default manual */
+    /** Source label stored on each ticket entity */
     provider?: string;
+    /** Array of ticket objects (max 8 MB body) */
     tickets?: {
       id?: string;
       title?: string;
@@ -2802,8 +2839,9 @@ export type PostKbConnectTicketsJsonResponse401 = CommonError;
 /** Request parts for `POST /kb/connect-qa` (schema/http/kb-sources.schema.json). */
 export type PostKbConnectQaRequest = {
   body: {
-    /** JUnit XML */
+    /** JUnit XML string */
     xml?: string;
+    /** Optional label for the test run source */
     source?: string;
   };
 };
@@ -2847,9 +2885,11 @@ export type PostKbEmailFetchRequest = {
     mailbox?: string;
     /** password | google */
     authMethod?: string;
+    /** How many days back to look */
     lookbackDays?: number;
     /** default true */
     unreadOnly?: boolean;
+    /** Filter by sender address substring */
     fromFilter?: string;
     markRead?: boolean;
   };
@@ -2866,6 +2906,7 @@ export type PostKbEmailFetchResponse502 = CommonError;
 /** Request parts for `POST /kb/email/seen` (schema/http/kb-sources.schema.json). */
 export type PostKbEmailSeenRequest = {
   body: {
+    /** IMAP message IDs to mark as seen */
     messageIds?: string[];
     /** advances the forward-only high-water mark when it parses as a date */
     lastFetchedAt?: string;
@@ -3026,7 +3067,7 @@ export type PostKbMcpConnectorSeenRequest = {
 
 export type PostKbMcpConnectorSeenResponse200 = {
   ok: true;
-  /** items newly marked as seen */
+  /** Rows actually inserted; re-marking is a no-op */
   marked: number;
 };
 
@@ -3055,9 +3096,9 @@ export type PostKbMcpConnectorClassifyResponse502 = unknown;
 /** Request parts for `GET /kb/activity` (schema/http/kb-sources.schema.json). */
 export type GetKbActivityRequest = {
   query: {
-    /** return items with an id greater than this */
+    /** return items with an id greater than this An absent or non-numeric value means 0. */
     since?: string;
-    /** 1 to 200, default 100 */
+    /** 1 to 200, default 100 Clamped to 1-200; the default is 100 when absent or zero. */
     limit?: string;
   };
 };
@@ -3109,14 +3150,17 @@ export type PostKbActivitySeenResponse401 = CommonError;
 /** Request parts for `POST /kb/loop/agent-run` (schema/http/live-loop-misc.schema.json). */
 export type PostKbLoopAgentRunRequest = {
   body: {
+    /** The composed Loop instruction (max 200000 chars) */
     message?: string;
     /** a string is refused with 400 (must be an array of ids) */
     skills?: string[] | string;
+    /** Absolute path of the run's git root (the worktree in worktree mode) */
     repoRoot?: string;
+    /** Absolute paths of project llm-doc/ directories the run may also read and edit (split layout) */
     extraRoots?: string[];
     language?: string;
     model?: string;
-    /** anthropic or a custom:<id> provider */
+    /** "anthropic" or an Anthropic-compatible "custom:<id>" (one with an anthropicBaseURL). Absent = first-party Anthropic */
     provider?: string;
     timeoutMs?: number;
   };
@@ -3124,25 +3168,27 @@ export type PostKbLoopAgentRunRequest = {
 
 /** The Loop step's result. The 200 fixtures are produced in-process (routes/loop-agent.mjs with the engine seam stubbed). The result fields are the engine's runLoopAgent return, forwarded verbatim by the route. */
 export type PostKbLoopAgentRunResponse200 = {
+  /** The agent's closing summary */
   reply: string;
-  /** repo-relative */
+  /** Repo-relative paths the agent's Edit/Write calls changed */
   changedPaths: string[];
-  /** absolute paths under the extra roots */
+  /** Absolute paths changed inside an accepted extra root */
   changedExtraPaths: string[];
-  /** the subset of changedPaths that a Write created */
+  /** The subset of changedPaths a Write created (the file did not exist before the call) */
   createdPaths: string[];
   usage: LoopUsage;
   resolvedSkills: string[];
   unresolvedSkills: string[];
+  /** Resolved skills longer than the cap; only their head was sent */
   truncatedSkills: string[];
   ran: boolean;
-  /** success, timeout, aborted, no_progress, or null */
+  /** The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step because it was repeating itself (the same call again with no file changed) or 5 tool calls in a row failed */
   resultSubtype: string | null;
   denied: {
     toolName: string;
     reason: string;
   }[];
-  /** Set with resultSubtype no_progress. */
+  /** Present only with resultSubtype no_progress — why the step was stopped */
   noProgressReason?: string;
 };
 
@@ -3161,13 +3207,17 @@ export type PostKbLoopAgentRunResponse504 = CommonError;
 /** Request parts for `POST /kb/ingest-code-graph` (schema/http/live-loop-misc.schema.json). */
 export type PostKbIngestCodeGraphRequest = {
   body: {
+    /** Absolute path to the repo root (must be on user allow-list) */
     repoPath?: string;
     graph?: {
       nodes?: CodeGraphNode[];
       edges?: CodeGraphEdge[];
     };
+    /** Clear this producer's existing rows for the repo first (first batch only) */
     replace?: boolean;
+    /** Git commit the graph was generated from (7-64 hex); find-code compares it to HEAD to warn about a stale graph */
     commitSha?: string;
+    /** ISO-8601 time the graph was generated */
     generatedAt?: string;
   };
 };
@@ -3216,11 +3266,15 @@ export type GetKbIssueScheduleResponse404 = FeatureDisabled;
 export type PutKbIssueScheduleRequest = {
   body: {
     provider?: string;
+    /** "owner/name" */
     repo?: string;
     issueNumber?: number;
+    /** YYYY-MM-DD or null to clear */
     startDate?: string | null;
+    /** YYYY-MM-DD or null to clear */
     dueDate?: string | null;
     estimateDays?: number | null;
+    /** issue numbers */
     dependsOn?: number[];
   };
 };
@@ -3278,9 +3332,10 @@ export type GetKbLiveIdResponse200 = {
   captions: LiveCaption[];
   sequence: number;
   finalized: boolean;
-  /** false for an unknown session id */
+  /** false when the sessionId is unknown (never had captions appended) */
   exists: boolean;
   meetingTitle?: string;
+  /** Unix ms timestamp when session was created */
   startedAt?: number;
 };
 
@@ -3292,6 +3347,7 @@ export type PostKbLiveIdAppendRequest = {
     id: string;
   };
   body: {
+    /** Array of caption objects (text, speaker, timestamp, etc.) */
     captions?: {
       speaker?: string;
       text?: string;
@@ -3308,12 +3364,13 @@ export type PostKbLiveIdAppendRequest = {
 };
 
 export type PostKbLiveIdAppendResponse200 = {
+  /** Highest sequence number in the session after this append */
   sequence: number;
-  /** captions stored; 0 for duplicates, empty input or a finalized session */
+  /** Number of caption items accepted (0 when session is already finalized) */
   accepted: number;
-  /** true when the ring buffer is nearly full */
+  /** Advisory — true when the ring buffer is ≥90% full; callers should throttle */
   backpressure?: boolean;
-  /** true when the session was already finalized; late writes are dropped */
+  /** Present (true) when the session was already finalized; all captions were dropped */
   finalized?: boolean;
 };
 
@@ -3362,7 +3419,7 @@ export type GetKbLiveIdStreamResponse429 = CommonError;
 /** Request parts for `GET /auth/me/audit` (schema/http/live-loop-misc.schema.json). */
 export type GetAuthMeAuditRequest = {
   query: {
-    /** capped at 1000; default 100 */
+    /** capped at 1000; default 100 Capped at 500; the default is 100 when absent or zero. */
     limit?: string;
     action?: string;
   };
@@ -3431,9 +3488,12 @@ export type GetAuthMcpConnectorStatusResponse401 = CommonError;
 /** Request parts for `POST /generate-notes` (schema/http/notes-generation.schema.json). */
 export type PostGenerateNotesRequest = {
   body: {
+    /** Raw meeting transcript text */
     transcript?: string;
     meetingTitle?: string;
+    /** Optional — used to scope KB ingest ref */
     meetingId?: string;
+    /** BCP-47 locale or display name (e.g. "ja", "Japanese") */
     language?: string;
   };
 };
@@ -3456,7 +3516,9 @@ export type PostGenerateNotesResponse500 = CommonError;
 export type PostGenerateQuestionsRequest = {
   body: {
     transcript?: string;
+    /** Names to target; empty = any participant */
     participants?: string[];
+    /** At least one type required */
     types?: string[];
     language?: string;
   };
@@ -3504,20 +3566,30 @@ export type PostExtractEntitiesResponse500 = CommonError;
 /** Request parts for `POST /generate-doc` (schema/http/notes-generation.schema.json). */
 export type PostGenerateDocRequest = {
   body: {
+    /** Document title / template identifier */
     templateName?: string;
+    /** Ordered list of section headings (max 30); required together with templateName */
     sections?: string[];
+    /** Reusable instruction text from a Doc Gen "command" .md file; alone satisfies the templateName+sections requirement */
     command?: string;
+    /** Freeform one-off instructions from the prompt bar; combined with template/command, never required on its own */
     prompt?: string;
+    /** Source material; non-empty is required, not just present. No item-count limit — sources are capped at 50 000 chars each and the RENDERED source block (headings included) is fitted to a 400 000-char total budget by equal-share water-filling; anything shortened is named in the response's truncated array, and anything that could not be given at least 200 chars is named in omitted */
     sources?: Source[];
   };
 };
 
 /** The generated Markdown and what the source budget could not give the model: names are capped at 50 per list, the counts are exact. The Mac client reads truncated and omitted; their absence would mean an older server. */
 export type PostGenerateDocResponse200 = {
+  /** Full markdown document */
   content: string;
+  /** Names of the sources the total-character budget forced short, capped at 50 entries (server API v52; absent on older servers, which silently kept only the first 20 sources) */
   truncated: string[];
+  /** Exact number of shortened sources; never capped, so it can exceed truncated.length */
   truncatedCount: number;
+  /** Names of the sources that did not fit the budget at all and were not sent, capped at 50 entries (server API v52). Dropped from the end of the request array, so the client decides what survives by the order it sends */
   omitted: string[];
+  /** Exact number of omitted sources; never capped, so it can exceed omitted.length */
   omittedCount: number;
 };
 
@@ -3554,8 +3626,10 @@ export type PostGenerateDocxResponse500 = CommonError;
 /** Request parts for `POST /chat` (schema/http/notes-generation.schema.json). */
 export type PostChatRequest = {
   body: {
+    /** User message (max 10 000 chars after sanitization) */
     message?: string;
     transcript?: string;
+    /** Prior turns (last 10 used); each item has role and content */
     history?: Turn[];
     language?: string;
   };
@@ -3577,8 +3651,10 @@ export type PostChatResponse500 = CommonError;
 /** Request parts for `POST /code-assist` (schema/http/notes-generation.schema.json). */
 export type PostCodeAssistRequest = {
   body: {
+    /** User message (max 20 000 chars after sanitization) */
     message?: string;
     history?: Turn[];
+    /** File attachments (max 30 files, 80 000 chars each, 200 000 total) */
     attachments?: Attachment[];
     skills?: string[];
     language?: string;
@@ -3587,8 +3663,9 @@ export type PostCodeAssistRequest = {
     provider?: string;
     /** 'subagent' or absent. */
     tier?: string;
-    /** The chat mode the picker sent (auto, plan, assist_plan, review, document, execute). */
+    /** Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions */
     mode?: string;
+    /** Set only by the Mac saved-plan card's "Execute plan" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request. */
     planExecute?: boolean;
     planWrite?: boolean;
     clientCaps?: string[];
@@ -3625,11 +3702,13 @@ export type PostCodeAssistResponse502 = CommonError;
 /** Request parts for `POST /code-assist/decision` (schema/http/notes-generation.schema.json). */
 export type PostCodeAssistDecisionRequest = {
   body: {
+    /** Id from the approval_request progress event */
     requestId?: string;
     /** The legacy chat's agentContext.sessionId. */
     sdkSessionId?: string;
+    /** 'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once. */
     action?: "answer" | "allow" | "deny" | "always-allow";
-    /** Kept on a deny only; capped at 2 000 characters. */
+    /** With `deny` only: the user's instruction ("No, and do this instead"), handed to the model as the denial reason. Max 2000 chars. */
     feedback?: string;
     /** AskUserQuestion answers, forwarded to the engine unchanged. */
     answers?: Record<string, unknown>;
@@ -3647,7 +3726,9 @@ export type PostCodeAssistDecisionResponse404 = CommonError;
 /** Request parts for `POST /agent-sdk/spike` (schema/http/notes-generation.schema.json). */
 export type PostAgentSdkSpikeRequest = {
   body: {
+    /** Raw prompt (max 4 000 chars) */
     prompt?: string;
+    /** SDK session id to resume */
     resume?: string;
   };
 };
@@ -3742,6 +3823,7 @@ export type PostKbAnalyzeRisksResponse500 = CommonError;
 /** Request parts for `POST /kb/code-sync` (schema/http/planning.schema.json). */
 export type PostKbCodeSyncRequest = {
   body: {
+    /** ID of a stored plan — persists result */
     planId?: string;
     /** A client-supplied plan draft. The server reads title, goal, language, meetingId and each task's id, title, description, owner, estimateDays, dependsOn, status. */
     plan?: {
@@ -3785,6 +3867,7 @@ export type PostKbCodeSyncResponse404 = CommonError;
 /** Request parts for `GET /kb/plans` (schema/http/planning.schema.json). */
 export type GetKbPlansRequest = {
   query: {
+    /** Capped at 200; the default is 50. */
     limit?: string;
   };
 };
@@ -3831,6 +3914,7 @@ export type GetKbPlanIdResponse404 = CommonError;
 /** Request parts for `POST /kb/plan/save` (schema/http/planning.schema.json). */
 export type PostKbPlanSaveRequest = {
   body: {
+    /** Omit to create a new plan */
     id?: string;
     title?: string;
     goal?: string;
@@ -3984,6 +4068,7 @@ export type PostKbDispatchRequest = {
     planId?: string;
     target?: "preview" | "github" | "backlog" | "linear";
     taskIds?: string[];
+    /** Required when target != preview */
     reviewId?: string;
     /** Destination and credential keys for the target (repo/owner for github, space/projectId for backlog, teamId/projectId for linear). Credentials come from the vault unless sent here. Open: the keys are per target. */
     config?: {
@@ -4089,7 +4174,9 @@ export type PostKbSummarizeResponse502 = CommonError;
 /** Request parts for `POST /kb/conflict-questions` (schema/http/planning.schema.json). */
 export type PostKbConflictQuestionsRequest = {
   body: {
+    /** Current meeting transcript (max 40 000 chars) */
     transcript?: string;
+    /** Attached code or notes (max 20 000 chars) */
     fileContext?: string;
     language?: string;
   };
@@ -4109,6 +4196,7 @@ export type PostKbConflictQuestionsResponse500 = CommonError;
 export type PostKbNotifySlackRequest = {
   body: {
     kind?: string;
+    /** Optional — vault key slack.webhookUrl is preferred */
     webhookUrl?: string;
     planId?: string;
     /** Per kind: a plan, a dispatch result, a review, or {text} for custom. */
@@ -4213,11 +4301,13 @@ export type GetKbOutcomesStatsResponse401 = CommonError;
 /** Request parts for `POST /kb/providers/verify` (schema/http/providers-usage.schema.json). */
 export type PostKbProvidersVerifyRequest = {
   body: {
+    /** Provider ID (e.g. anthropic, openai, custom) */
     provider?: string;
     /** key | cli */
     mode?: string;
     /** placeholder in fixtures; never a real key */
     apiKey?: string;
+    /** Required for provider=custom */
     baseUrl?: string;
   };
 };
@@ -4244,13 +4334,15 @@ export type PostKbProvidersModelsRequest = {
 /** The live chat models for a provider, or [] with a detail. entries and source are the Claude SDK variant (anthropic only, server API v57+ / v63+): entries carries display names and effort levels. The SDK variant is not captured (it needs the local Claude CLI login), so entries and source are optional and not covered by a fixture. */
 export type PostKbProvidersModelsResponse200 = {
   models: string[];
-  /** why nothing was listed */
+  /** Human-readable reason when models is empty */
   detail?: string;
+  /** anthropic via the Agent SDK only */
   entries?: ({
     id: string;
     displayName?: string | null;
     effortLevels?: string[];
   })[];
+  /** Present when the list came from the Agent SDK */
   source?: "sdk";
 };
 
@@ -4279,6 +4371,7 @@ export type GetKbAgentSdkResponse200 = {
   updateAvailable: boolean;
   updating: boolean;
   canUpdate: boolean;
+  /** Why the registry could not be checked */
   error: string | null;
 };
 
@@ -4346,13 +4439,15 @@ export type GetKbRoutingTiersResponse200 = {
   /** Keys: configured tiers, plus unset ones (reason unset) when a tier is absent. */
   status: Record<string, {
       usable: boolean;
-      /** set when unusable: unset | no_key | no_key_or_cli | cli_unverified | cli_failed | route_failed | not_found | disabled | error */
+      /** unset | not_found | disabled | no_key | no_key_or_cli (OpenAI/Google, v68+) | cli_unverified (CLI health probe not run yet, v69+) | cli_failed / route_failed (the route failed at runtime in the last ~10 min, v69+) | error (only when usable is false) */
       reason?: string;
       agentCapable: boolean;
       /** why the Agent engine cannot run a usable tier, e.g. not_agent_capable */
       agentReason?: string;
+      /** API v68+, only when usable. `key` = runs on an API key (user vault or operator env; custom providers always), `cli` = runs on the provider's logged-in CLI subscription (claude / codex / gemini). A key wins when both exist. */
       via?: "key" | "cli";
     }>;
+  /** API v69+. One entry per CONFIGURED feature. `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`. */
   featureStatus: Record<string, {
       usable: boolean;
       /** set when unusable: a tier reason, cli_untrusted_input, or decision_only */
@@ -4365,17 +4460,20 @@ export type GetKbRoutingTiersResponse401 = CommonError;
 /** Request parts for `POST /kb/routing-tiers` (schema/http/providers-usage.schema.json). */
 export type PostKbRoutingTiersRequest = {
   body: {
+    /** Keys strong | standard | cheap */
     tiers?: Record<string, {
         /** anthropic | openai | google | deepseek | jev | custom:<id> */
         provider: string;
         model: string;
       }>;
+    /** Keys subagents | loop | autoTasks | quickChat | pipeline | internal | decisions (API v73+); values a tier name */
     features?: Record<string, string>;
   };
 };
 
 export type PostKbRoutingTiersResponse200 = {
   success: boolean;
+  /** Entries that were not stored (API v67+) */
   dropped: ({
     /** tiers.<name> or features.<name> */
     entry: string;
@@ -4416,6 +4514,7 @@ export type GetKbUsageLimitsResponse401 = CommonError;
 /** Request parts for `PUT /kb/usage/limits` (schema/http/providers-usage.schema.json). */
 export type PutKbUsageLimitsRequest = {
   body: {
+    /** { provider: [ { model, priority, enabled, limit_value, unit, window_kind, threshold_pct } ] } */
     chains?: Record<string, {
         model?: string;
         priority?: number;
@@ -4548,7 +4647,7 @@ export type GetKbUsageRatelimitsResponse401 = CommonError;
 /** Request parts for `GET /kb/usage/turn-composition` (schema/http/providers-usage.schema.json). */
 export type GetKbUsageTurnCompositionRequest = {
   query: {
-    /** 1-200, default 50 */
+    /** 1-200, default 50 Clamped to 1-200; the default is 50. */
     limit?: string;
   };
 };
@@ -4606,6 +4705,7 @@ export type PostKbUsageRecordRequest = {
   body: {
     provider?: string;
     model?: string;
+    /** api|cli|auto-task */
     source?: string;
     endpoint?: string;
     runs?: number;
@@ -4656,6 +4756,7 @@ export type PostKbReviewSubmitResponse429 = CommonError;
 export type GetKbReviewListRequest = {
   query: {
     status?: "pending" | "approved" | "rejected" | "executed" | "failed" | "expired";
+    /** Capped at 200; the default is 50. */
     limit?: string;
   };
 };
@@ -4687,9 +4788,9 @@ export type PostKbReviewApproveRequest = {
     id?: string;
     /** Stored as reviewerNote. */
     note?: string;
-    /** Tracker credentials for this approval, e.g. token, apiKey. */
+    /** API v75+. Credentials for the dispatch target (github token / backlog or linear apiKey); highest precedence, never persisted. Without one the server uses a value held from submit, then the per-user vault. */
     config?: Record<string, unknown>;
-    /** Pull-request credentials for this approval, e.g. ghToken. */
+    /** API v75+. codegen-apply only: PR credentials (ghToken); same precedence as config. */
     pr?: Record<string, unknown>;
   };
 };

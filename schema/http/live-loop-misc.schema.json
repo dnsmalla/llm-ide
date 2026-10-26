@@ -61,16 +61,19 @@
           "type": "string"
         },
         "startedAt": {
-          "type": "number"
+          "type": "number",
+          "description": "Unix ms timestamp when session was created"
         },
         "lastWrite": {
-          "type": "number"
+          "type": "number",
+          "description": "Unix ms timestamp of last caption append"
         },
         "captionCount": {
           "type": "integer"
         },
         "sequence": {
-          "type": "integer"
+          "type": "integer",
+          "description": "Highest sequence number written so far"
         }
       }
     },
@@ -110,7 +113,8 @@
         "feature": {
           "type": "string"
         }
-      }
+      },
+      "description": "404 body for a path owned by a feature the server was started without (LLMIDE_FEATURES). Deliberately not the Error envelope: a client can tell it from an unknown route without parsing a message.\n"
     },
     "ScheduleItem": {
       "type": "object",
@@ -206,13 +210,15 @@
           "type": "string"
         },
         "kind": {
-          "type": "string"
+          "type": "string",
+          "description": "CGNodeKind raw value, e.g. file / function / classType"
         },
         "metadata": {
           "type": "object",
           "properties": {
             "source_file": {
-              "type": "string"
+              "type": "string",
+              "description": "Repo-relative path; absolute or ..-bearing values are discarded"
             },
             "line": {
               "type": [
@@ -241,7 +247,8 @@
           "type": "string"
         },
         "kind": {
-          "type": "string"
+          "type": "string",
+          "description": "CGEdgeKind raw value, e.g. imports / calls / contains"
         },
         "confidence": {
           "type": "string"
@@ -308,7 +315,8 @@
           "type": "object",
           "properties": {
             "message": {
-              "type": "string"
+              "type": "string",
+              "description": "The composed Loop instruction (max 200000 chars)"
             },
             "skills": {
               "type": [
@@ -321,14 +329,16 @@
               "description": "a string is refused with 400 (must be an array of ids)"
             },
             "repoRoot": {
-              "type": "string"
+              "type": "string",
+              "description": "Absolute path of the run's git root (the worktree in worktree mode)"
             },
             "extraRoots": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "x-optional": true
+              "x-optional": true,
+              "description": "Absolute paths of project llm-doc/ directories the run may also read and edit (split layout)"
             },
             "language": {
               "type": "string",
@@ -340,7 +350,7 @@
             },
             "provider": {
               "type": "string",
-              "description": "anthropic or a custom:<id> provider"
+              "description": "\"anthropic\" or an Anthropic-compatible \"custom:<id>\" (one with an anthropicBaseURL). Absent = first-party Anthropic"
             },
             "timeoutMs": {
               "type": "number"
@@ -367,28 +377,29 @@
           ],
           "properties": {
             "reply": {
-              "type": "string"
+              "type": "string",
+              "description": "The agent's closing summary"
             },
             "changedPaths": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "repo-relative"
+              "description": "Repo-relative paths the agent's Edit/Write calls changed"
             },
             "changedExtraPaths": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "absolute paths under the extra roots"
+              "description": "Absolute paths changed inside an accepted extra root"
             },
             "createdPaths": {
               "type": "array",
               "items": {
                 "type": "string"
               },
-              "description": "the subset of changedPaths that a Write created"
+              "description": "The subset of changedPaths a Write created (the file did not exist before the call)"
             },
             "usage": {
               "$ref": "#/$defs/LoopUsage"
@@ -409,7 +420,8 @@
               "type": "array",
               "items": {
                 "type": "string"
-              }
+              },
+              "description": "Resolved skills longer than the cap; only their head was sent"
             },
             "ran": {
               "type": "boolean"
@@ -419,7 +431,7 @@
                 "string",
                 "null"
               ],
-              "description": "success, timeout, aborted, no_progress, or null"
+              "description": "The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step because it was repeating itself (the same call again with no file changed) or 5 tool calls in a row failed"
             },
             "denied": {
               "type": "array",
@@ -442,7 +454,7 @@
             "noProgressReason": {
               "type": "string",
               "x-optional": true,
-              "description": "Set with resultSubtype no_progress."
+              "description": "Present only with resultSubtype no_progress — why the step was stopped"
             }
           }
         },
@@ -472,7 +484,8 @@
           "type": "object",
           "properties": {
             "repoPath": {
-              "type": "string"
+              "type": "string",
+              "description": "Absolute path to the repo root (must be on user allow-list)"
             },
             "graph": {
               "type": "object",
@@ -492,13 +505,16 @@
               }
             },
             "replace": {
-              "type": "boolean"
+              "type": "boolean",
+              "description": "Clear this producer's existing rows for the repo first (first batch only)"
             },
             "commitSha": {
-              "type": "string"
+              "type": "string",
+              "description": "Git commit the graph was generated from (7-64 hex); find-code compares it to HEAD to warn about a stale graph"
             },
             "generatedAt": {
-              "type": "string"
+              "type": "string",
+              "description": "ISO-8601 time the graph was generated"
             }
           }
         }
@@ -609,7 +625,8 @@
               "type": "string"
             },
             "repo": {
-              "type": "string"
+              "type": "string",
+              "description": "\"owner/name\""
             },
             "issueNumber": {
               "type": "integer"
@@ -618,13 +635,15 @@
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "YYYY-MM-DD or null to clear"
             },
             "dueDate": {
               "type": [
                 "string",
                 "null"
-              ]
+              ],
+              "description": "YYYY-MM-DD or null to clear"
             },
             "estimateDays": {
               "type": [
@@ -636,7 +655,8 @@
               "type": "array",
               "items": {
                 "type": "integer"
-              }
+              },
+              "description": "issue numbers"
             }
           }
         }
@@ -769,7 +789,7 @@
             },
             "exists": {
               "type": "boolean",
-              "description": "false for an unknown session id"
+              "description": "false when the sessionId is unknown (never had captions appended)"
             },
             "meetingTitle": {
               "type": "string",
@@ -777,7 +797,8 @@
             },
             "startedAt": {
               "type": "number",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Unix ms timestamp when session was created"
             }
           }
         },
@@ -835,7 +856,8 @@
                     }
                   }
                 }
-              }
+              },
+              "description": "Array of caption objects (text, speaker, timestamp, etc.)"
             },
             "meetingTitle": {
               "type": "string"
@@ -852,21 +874,22 @@
           ],
           "properties": {
             "sequence": {
-              "type": "integer"
+              "type": "integer",
+              "description": "Highest sequence number in the session after this append"
             },
             "accepted": {
               "type": "integer",
-              "description": "captions stored; 0 for duplicates, empty input or a finalized session"
+              "description": "Number of caption items accepted (0 when session is already finalized)"
             },
             "backpressure": {
               "type": "boolean",
               "x-optional": true,
-              "description": "true when the ring buffer is nearly full"
+              "description": "Advisory — true when the ring buffer is ≥90% full; callers should throttle"
             },
             "finalized": {
               "type": "boolean",
               "x-optional": true,
-              "description": "true when the session was already finalized; late writes are dropped"
+              "description": "Present (true) when the session was already finalized; all captions were dropped"
             }
           }
         },
@@ -989,7 +1012,7 @@
           "properties": {
             "limit": {
               "type": "string",
-              "description": "capped at 1000; default 100"
+              "description": "capped at 1000; default 100 Capped at 500; the default is 100 when absent or zero."
             },
             "action": {
               "type": "string",

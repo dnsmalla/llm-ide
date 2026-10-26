@@ -143,7 +143,7 @@
       "summary": "List the authenticated user's activity feed",
       "parameters": {
         "query.since": "Return only items with id > this value (incremental poll cursor)",
-        "query.limit": "Maximum number of items to return"
+        "query.limit": "Maximum number of items to return. Clamped to 1-200; the default is 100 when absent or zero."
       },
       "responses": {
         "200": "Activity items + unread count"
@@ -247,7 +247,7 @@
     "GET /kb/chat/sessions/{id}": {
       "summary": "Fetch one chat session with its messages",
       "parameters": {
-        "query.limit": "Max messages returned"
+        "query.limit": "Max messages returned. The default is 50, with a minimum of 1 and a cap of 200."
       },
       "responses": {
         "200": "The session",

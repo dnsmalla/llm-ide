@@ -63,7 +63,8 @@
           "additionalProperties": true,
           "description": "kind-specific metadata; open set (owner, due, ...)"
         }
-      }
+      },
+      "description": "Entity with kind, title, body, metadata"
     },
     "MeetingEntity": {
       "type": "object",
@@ -144,7 +145,8 @@
           "x-optional": true,
           "description": "present only with ?include=transcript"
         }
-      }
+      },
+      "description": "Meeting with entities, transcript, metadata"
     },
     "SearchHit": {
       "type": "object",
@@ -672,15 +674,15 @@
             },
             "kind": {
               "type": "string",
-              "description": "one of the allowed kinds; any other value searches every kind"
+              "description": "Limits results to one kind from the list; any other value searches every kind."
             },
             "limit": {
               "type": "string",
-              "description": "1 to 100; anything else is the default 20"
+              "description": "Capped at 100; zero, negative or non-numeric values give the default 20."
             },
             "projectId": {
               "type": "string",
-              "description": "project scope; ignored unless it is a safe id"
+              "description": "project scope; ignored unless it is a safe id Ignored unless it matches ^[A-Za-z0-9_-]{1,128}$."
             }
           }
         }
@@ -715,14 +717,15 @@
             },
             "state": {
               "type": "string",
-              "description": "default open; all disables the filter"
+              "description": "default open; all disables the filter Defaults to open."
             },
             "provider": {
               "type": "string",
-              "description": "default github"
+              "description": "default github Defaults to github."
             },
             "limit": {
-              "type": "string"
+              "type": "string",
+              "description": "Capped at 100; zero or negative gives the default 20."
             }
           }
         }
@@ -908,7 +911,7 @@
             },
             "limit": {
               "type": "string",
-              "description": "1 to 500, default 100"
+              "description": "1 to 500, default 100 Capped at 500; the default is 100."
             }
           }
         }
@@ -1055,12 +1058,12 @@
           "properties": {
             "path": {
               "type": "string",
-              "description": "absolute repo path; must be on the user's repo allow-list"
+              "description": "Absolute path to the repo root (must be on user allow-list)"
             },
             "replace": {
               "type": "boolean",
               "x-optional": true,
-              "description": "default true"
+              "description": "Replace existing code chunks for this repo"
             }
           }
         }
@@ -1090,12 +1093,13 @@
               "description": "must be on the user's repo allow-list"
             },
             "scipPath": {
-              "type": "string"
+              "type": "string",
+              "description": "Path to the SCIP index file"
             },
             "replace": {
               "type": "boolean",
               "x-optional": true,
-              "description": "default true"
+              "description": "Replace the repo's existing graph rows"
             }
           }
         }
@@ -1127,7 +1131,7 @@
             "token": {
               "type": "string",
               "x-optional": true,
-              "description": "GitHub token; the success path needs the network"
+              "description": "GitHub PAT (optional — vault github.token used otherwise)"
             },
             "state": {
               "type": "string",
@@ -1155,7 +1159,7 @@
           "properties": {
             "provider": {
               "type": "string",
-              "description": "default manual"
+              "description": "Source label stored on each ticket entity"
             },
             "tickets": {
               "type": "array",
@@ -1180,7 +1184,8 @@
                     "description": "provider-specific ticket fields, merged into the stored meta"
                   }
                 }
-              }
+              },
+              "description": "Array of ticket objects (max 8 MB body)"
             }
           }
         }
@@ -1204,10 +1209,11 @@
           "properties": {
             "xml": {
               "type": "string",
-              "description": "JUnit XML"
+              "description": "JUnit XML string"
             },
             "source": {
-              "type": "string"
+              "type": "string",
+              "description": "Optional label for the test run source"
             }
           }
         }
@@ -1300,7 +1306,8 @@
             },
             "lookbackDays": {
               "type": "number",
-              "x-optional": true
+              "x-optional": true,
+              "description": "How many days back to look"
             },
             "unreadOnly": {
               "type": "boolean",
@@ -1309,7 +1316,8 @@
             },
             "fromFilter": {
               "type": "string",
-              "x-optional": true
+              "x-optional": true,
+              "description": "Filter by sender address substring"
             },
             "markRead": {
               "type": "boolean",
@@ -1342,7 +1350,8 @@
               "type": "array",
               "items": {
                 "type": "string"
-              }
+              },
+              "description": "IMAP message IDs to mark as seen"
             },
             "lastFetchedAt": {
               "type": "string",
@@ -1652,7 +1661,7 @@
             },
             "marked": {
               "type": "integer",
-              "description": "items newly marked as seen"
+              "description": "Rows actually inserted; re-marking is a no-op"
             }
           }
         },
@@ -1712,11 +1721,11 @@
           "properties": {
             "since": {
               "type": "string",
-              "description": "return items with an id greater than this"
+              "description": "return items with an id greater than this An absent or non-numeric value means 0."
             },
             "limit": {
               "type": "string",
-              "description": "1 to 200, default 100"
+              "description": "1 to 200, default 100 Clamped to 1-200; the default is 100 when absent or zero."
             }
           }
         }

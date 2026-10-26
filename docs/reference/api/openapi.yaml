@@ -55,8 +55,10 @@ paths:
               properties:
                 prompt:
                   type: "string"
+                  description: "Raw prompt (max 4 000 chars)"
                 resume:
                   type: "string"
+                  description: "SDK session id to resume"
       responses:
         "200":
           description: "SSE stream of spike events"
@@ -124,6 +126,7 @@ paths:
               properties:
                 requestId:
                   type: "string"
+                  description: "Id from the approval_request event"
                 sdkSessionId:
                   type: "string"
                 action:
@@ -136,7 +139,7 @@ paths:
                   description: "question to answer (AskUserQuestion approval): question text to chosen answer"
                 feedback:
                   type: "string"
-                  description: "the denial reason, on deny"
+                  description: "With `deny`: the user's instruction, handed to the model as the denial reason (max 2000 chars)"
       responses:
         "200":
           description: "Decision delivered; the stream emits approval_resolved and the turn continues"
@@ -210,6 +213,7 @@ paths:
               properties:
                 message:
                   type: "string"
+                  description: "User message. Fence sentinels are neutralised, then capped at 120 000 chars; the message and attachments share one 150 000-char turn budget, message first. An over-cap message is truncated and the model is told so in-band, not rejected."
                 agentContext:
                   type: "object"
                   required:
@@ -218,35 +222,44 @@ paths:
                   properties:
                     chatSessionId:
                       type: "string"
+                      description: "Mac chat session id — the mapping key"
                     workspaceRoot:
                       type: "string"
+                      description: "Workspace the engine roots its reads in"
                 mode:
                   type: "string"
+                  description: "Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions"
                 language:
                   type: "string"
                 model:
                   type: "string"
+                  description: "Model id from the picker, passed to the SDK verbatim (an Anthropic id, or the custom provider's own id on a gateway turn); omitted = config default"
                 provider:
                   type: "string"
-                  description: "anthropic (the default) or custom:<uuid>"
+                  description: "Provider the turn runs on (server v43+): `anthropic` (default when omitted) or an Anthropic-compatible custom provider `custom:<uuid>` registered with an `anthropicBaseURL`. The engine points the Agent SDK at that endpoint with the provider's own key and meters the turn under this id. Any other value fails before the SDK spawns with a terminal error event coded `PROVIDER_NOT_AGENT_CAPABLE` (no Anthropic-compatible endpoint) or `PROVIDER_UNAVAILABLE` (unregistered / disabled / no key)."
                 effort:
                   type: "string"
                 skills:
                   type: "array"
                   items:
                     type: "string"
+                  description: "Invoked skill ids (max 5); bodies are prompt-injected"
                 planExecute:
                   type: "boolean"
+                  description: "Set only by the Mac saved-plan card's \"Execute plan\" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request."
                 planWrite:
                   type: "boolean"
                 permissionMode:
                   type: "string"
+                  description: "Claude Code's modes. `ask` (default; `manual` is its old spelling): prompt-tier calls park an approval unless a saved project rule covers them. `accept-edits`: in-workspace Edit/Write run unasked, shell still asks. `bypass`: nothing that would park asks. No mode lifts the blocklist or write containment.\n"
                 attachments:
                   type: "array"
                   items:
                     type: "object"
+                  description: "File attachments (max 30 files, 80 000 chars each, 200 000 total)"
                 fresh:
                   type: "boolean"
+                  description: "Skip the recorded SDK session id and start a new one"
                 history:
                   type: "array"
                   items:
@@ -574,7 +587,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
-          description: "capped at 1000; default 100"
+          description: "capped at 1000; default 100 Capped at 500; the default is 100 when absent or zero."
           schema:
             type: "string"
         - name: "action"
@@ -2142,6 +2155,7 @@ paths:
                   type: "string"
                 value:
                   type: "string"
+                  description: "null/empty deletes"
               required:
                 - "key"
               description: "A missing or non-string `value` deletes the secret (auth-routes.mjs: deleted = !value) — by design today; an explicit delete would be clearer."
@@ -2450,12 +2464,14 @@ paths:
               properties:
                 message:
                   type: "string"
+                  description: "User message (max 10 000 chars after sanitization)"
                 transcript:
                   type: "string"
                 history:
                   type: "array"
                   items:
                     "$ref": "#/components/schemas/Turn"
+                  description: "Prior turns (last 10 used); each item has role and content"
                 language:
                   type: "string"
       responses:
@@ -2511,6 +2527,7 @@ paths:
               properties:
                 message:
                   type: "string"
+                  description: "User message (max 20 000 chars after sanitization)"
                 history:
                   type: "array"
                   items:
@@ -2519,6 +2536,7 @@ paths:
                   type: "array"
                   items:
                     "$ref": "#/components/schemas/Attachment"
+                  description: "File attachments (max 30 files, 80 000 chars each, 200 000 total)"
                 skills:
                   type: "array"
                   items:
@@ -2535,9 +2553,10 @@ paths:
                   description: "'subagent' or absent."
                 mode:
                   type: "string"
-                  description: "The chat mode the picker sent (auto, plan, assist_plan, review, document, execute)."
+                  description: "Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions"
                 planExecute:
                   type: "boolean"
+                  description: "Set only by the Mac saved-plan card's \"Execute plan\" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request."
                 planWrite:
                   type: "boolean"
                 clientCaps:
@@ -2632,6 +2651,7 @@ paths:
               properties:
                 requestId:
                   type: "string"
+                  description: "Id from the approval_request progress event"
                 sdkSessionId:
                   type: "string"
                   description: "The legacy chat's agentContext.sessionId."
@@ -2641,9 +2661,10 @@ paths:
                     - "allow"
                     - "deny"
                     - "always-allow"
+                  description: "'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once.\n"
                 feedback:
                   type: "string"
-                  description: "Kept on a deny only; capped at 2 000 characters."
+                  description: "With `deny` only: the user's instruction (\"No, and do this instead\"), handed to the model as the denial reason. Max 2000 chars."
                 answers:
                   type: "object"
                   additionalProperties: true
@@ -2759,18 +2780,23 @@ paths:
               properties:
                 templateName:
                   type: "string"
+                  description: "Document title / template identifier"
                 sections:
                   type: "array"
                   items:
                     type: "string"
+                  description: "Ordered list of section headings (max 30); required together with templateName"
                 command:
                   type: "string"
+                  description: "Reusable instruction text from a Doc Gen \"command\" .md file; alone satisfies the templateName+sections requirement"
                 prompt:
                   type: "string"
+                  description: "Freeform one-off instructions from the prompt bar; combined with template/command, never required on its own"
                 sources:
                   type: "array"
                   items:
                     "$ref": "#/components/schemas/Source"
+                  description: "Source material; non-empty is required, not just present. No item-count limit — sources are capped at 50 000 chars each and the RENDERED source block (headings included) is fitted to a 400 000-char total budget by equal-share water-filling; anything shortened is named in the response's truncated array, and anything that could not be given at least 200 chars is named in omitted"
       responses:
         "200":
           description: "Generated markdown document"
@@ -2787,18 +2813,23 @@ paths:
                 properties:
                   content:
                     type: "string"
+                    description: "Full markdown document"
                   truncated:
                     type: "array"
                     items:
                       type: "string"
+                    description: "Names of the sources the total-character budget forced short, capped at 50 entries (server API v52; absent on older servers, which silently kept only the first 20 sources)"
                   truncatedCount:
                     type: "integer"
+                    description: "Exact number of shortened sources; never capped, so it can exceed truncated.length"
                   omitted:
                     type: "array"
                     items:
                       type: "string"
+                    description: "Names of the sources that did not fit the budget at all and were not sent, capped at 50 entries (server API v52). Dropped from the end of the request array, so the client decides what survives by the order it sends"
                   omittedCount:
                     type: "integer"
+                    description: "Exact number of omitted sources; never capped, so it can exceed omitted.length"
         "400":
           description: "Validation error"
           content:
@@ -2891,12 +2922,15 @@ paths:
               properties:
                 transcript:
                   type: "string"
+                  description: "Raw meeting transcript text"
                 meetingTitle:
                   type: "string"
                 meetingId:
                   type: "string"
+                  description: "Optional — used to scope KB ingest ref"
                 language:
                   type: "string"
+                  description: "BCP-47 locale or display name (e.g. \"ja\", \"Japanese\")"
       responses:
         "200":
           description: "Notes generated (JSON or SSE depending on Accept header)"
@@ -2953,10 +2987,12 @@ paths:
                   type: "array"
                   items:
                     type: "string"
+                  description: "Names to target; empty = any participant"
                 types:
                   type: "array"
                   items:
                     type: "string"
+                  description: "At least one type required"
                 language:
                   type: "string"
       responses:
@@ -3024,7 +3060,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
-          description: "Maximum number of items to return"
+          description: "Maximum number of items to return. Clamped to 1-200; the default is 100 when absent or zero."
           schema:
             type: "string"
       responses:
@@ -3199,6 +3235,7 @@ paths:
                     type:
                       - "string"
                       - "null"
+                    description: "Why the registry could not be checked"
         "401":
           description: "Unauthorized"
           content:
@@ -3264,6 +3301,7 @@ paths:
               properties:
                 message:
                   type: "string"
+                  description: "User message (max 8 000 chars after sanitization)"
                 image:
                   type: "object"
                   description: "one base64 image, capped per image; not exercised offline"
@@ -3318,7 +3356,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
-          description: "newest N, within the server's hard cap; default 50"
+          description: "newest N, within the server's hard cap; default 50 The default is 50; reads are capped at 500."
           schema:
             type: "string"
       responses:
@@ -3522,7 +3560,7 @@ paths:
         - name: "sinceDays"
           in: "query"
           required: false
-          description: "the window in days; default 30"
+          description: "the window in days; default 30 The default is 30 days."
           schema:
             type: "string"
       responses:
@@ -3548,7 +3586,7 @@ paths:
         - name: "sinceDays"
           in: "query"
           required: false
-          description: "the window in days; default 30"
+          description: "the window in days; default 30 The default is 30 days."
           schema:
             type: "string"
       responses:
@@ -3604,6 +3642,7 @@ paths:
                     type:
                       - "string"
                       - "null"
+                    description: "Built-in skills repo path"
                   templates:
                     type: "array"
                     items:
@@ -3885,6 +3924,7 @@ paths:
               properties:
                 repo:
                   type: "string"
+                  description: "Absolute root from the GET above"
                 workspaceRoot:
                   type: "string"
                 fact:
@@ -4017,6 +4057,7 @@ paths:
               properties:
                 sessionId:
                   type: "string"
+                  description: "Chat session UUID (AgentContext.chatSessionId)"
       responses:
         "200":
           description: "How many facts were dropped"
@@ -4056,6 +4097,7 @@ paths:
                     type:
                       - "string"
                       - "null"
+                    description: "Central skills repo path"
                   skills:
                     type: "array"
                     items:
@@ -4130,7 +4172,7 @@ paths:
                   type: "string"
                 all:
                   type: "boolean"
-                  description: "true revokes everything"
+                  description: "Revoke every rule and legacy grant"
       responses:
         "200":
           description: "The remaining rules and grants, and how many were removed"
@@ -4336,6 +4378,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
+          description: "The default is 50, with a minimum of 1 and a cap of 200."
           schema:
             type: "string"
       responses:
@@ -4400,7 +4443,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
-          description: "Max messages returned"
+          description: "Max messages returned. The default is 50, with a minimum of 1 and a cap of 200."
           schema:
             type: "string"
       responses:
@@ -4605,6 +4648,7 @@ paths:
               properties:
                 planId:
                   type: "string"
+                  description: "ID of a stored plan — persists result"
                 plan:
                   type: "object"
                   description: "A client-supplied plan draft. The server reads title, goal, language, meetingId and each task's id, title, description, owner, estimateDays, dependsOn, status."
@@ -4711,8 +4755,10 @@ paths:
               properties:
                 transcript:
                   type: "string"
+                  description: "Current meeting transcript (max 40 000 chars)"
                 fileContext:
                   type: "string"
+                  description: "Attached code or notes (max 20 000 chars)"
                 language:
                   type: "string"
       responses:
@@ -4797,10 +4843,10 @@ paths:
               properties:
                 path:
                   type: "string"
-                  description: "absolute repo path; must be on the user's repo allow-list"
+                  description: "Absolute path to the repo root (must be on user allow-list)"
                 replace:
                   type: "boolean"
-                  description: "default true"
+                  description: "Replace existing code chunks for this repo"
       responses:
         "200":
           description: "Indexing summary"
@@ -4843,7 +4889,7 @@ paths:
                   description: "owner/name"
                 token:
                   type: "string"
-                  description: "GitHub token; the success path needs the network"
+                  description: "GitHub PAT (optional — vault github.token used otherwise)"
                 state:
                   type: "string"
       responses:
@@ -4875,9 +4921,10 @@ paths:
               properties:
                 xml:
                   type: "string"
-                  description: "JUnit XML"
+                  description: "JUnit XML string"
                 source:
                   type: "string"
+                  description: "Optional label for the test run source"
       responses:
         "200":
           description: "Indexing summary"
@@ -4911,7 +4958,7 @@ paths:
               properties:
                 provider:
                   type: "string"
-                  description: "default manual"
+                  description: "Source label stored on each ticket entity"
                 tickets:
                   type: "array"
                   items:
@@ -4929,6 +4976,7 @@ paths:
                         type: "object"
                         additionalProperties: true
                         description: "provider-specific ticket fields, merged into the stored meta"
+                  description: "Array of ticket objects (max 8 MB body)"
       responses:
         "200":
           description: "Indexing summary"
@@ -5124,6 +5172,7 @@ paths:
                     type: "string"
                 reviewId:
                   type: "string"
+                  description: "Required when target != preview"
                 config:
                   type: "object"
                   description: "Destination and credential keys for the target (repo/owner for github, space/projectId for backlog, teamId/projectId for linear). Credentials come from the vault unless sent here. Open: the keys are per target."
@@ -5276,11 +5325,13 @@ paths:
                   description: "password | google"
                 lookbackDays:
                   type: "number"
+                  description: "How many days back to look"
                 unreadOnly:
                   type: "boolean"
                   description: "default true"
                 fromFilter:
                   type: "string"
+                  description: "Filter by sender address substring"
                 markRead:
                   type: "boolean"
       responses:
@@ -5320,6 +5371,7 @@ paths:
                   type: "array"
                   items:
                     type: "string"
+                  description: "IMAP message IDs to mark as seen"
                 lastFetchedAt:
                   type: "string"
                   description: "advances the forward-only high-water mark when it parses as a date"
@@ -5436,7 +5488,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
-          description: "1 to 500, default 100"
+          description: "1 to 500, default 100 Capped at 500; the default is 100."
           schema:
             type: "string"
       responses:
@@ -5700,6 +5752,7 @@ paths:
               properties:
                 repoPath:
                   type: "string"
+                  description: "Absolute path to the repo root (must be on user allow-list)"
                 graph:
                   type: "object"
                   properties:
@@ -5713,10 +5766,13 @@ paths:
                         "$ref": "#/components/schemas/CodeGraphEdge"
                 replace:
                   type: "boolean"
+                  description: "Clear this producer's existing rows for the repo first (first batch only)"
                 commitSha:
                   type: "string"
+                  description: "Git commit the graph was generated from (7-64 hex); find-code compares it to HEAD to warn about a stale graph"
                 generatedAt:
                   type: "string"
+                  description: "ISO-8601 time the graph was generated"
       responses:
         "200":
           description: "Stored counts for this batch, plus entries dropped as malformed"
@@ -5792,9 +5848,10 @@ paths:
                   description: "must be on the user's repo allow-list"
                 scipPath:
                   type: "string"
+                  description: "Path to the SCIP index file"
                 replace:
                   type: "boolean"
-                  description: "default true"
+                  description: "Replace the repo's existing graph rows"
       responses:
         "200":
           description: "Ingest counts"
@@ -5884,16 +5941,19 @@ paths:
                   type: "string"
                 repo:
                   type: "string"
+                  description: "\"owner/name\""
                 issueNumber:
                   type: "integer"
                 startDate:
                   type:
                     - "string"
                     - "null"
+                  description: "YYYY-MM-DD or null to clear"
                 dueDate:
                   type:
                     - "string"
                     - "null"
+                  description: "YYYY-MM-DD or null to clear"
                 estimateDays:
                   type:
                     - "number"
@@ -5902,6 +5962,7 @@ paths:
                   type: "array"
                   items:
                     type: "integer"
+                  description: "issue numbers"
       responses:
         "200":
           description: "ok"
@@ -5992,18 +6053,19 @@ paths:
         - name: "state"
           in: "query"
           required: false
-          description: "default open; all disables the filter"
+          description: "default open; all disables the filter Defaults to open."
           schema:
             type: "string"
         - name: "provider"
           in: "query"
           required: false
-          description: "default github"
+          description: "default github Defaults to github."
           schema:
             type: "string"
         - name: "limit"
           in: "query"
           required: false
+          description: "Capped at 100; zero or negative gives the default 20."
           schema:
             type: "string"
       responses:
@@ -6092,11 +6154,12 @@ paths:
                     type: "boolean"
                   exists:
                     type: "boolean"
-                    description: "false for an unknown session id"
+                    description: "false when the sessionId is unknown (never had captions appended)"
                   meetingTitle:
                     type: "string"
                   startedAt:
                     type: "number"
+                    description: "Unix ms timestamp when session was created"
         "401":
           description: "Unauthorized"
           content:
@@ -6143,6 +6206,7 @@ paths:
                             type: "number"
                           reason:
                             type: "string"
+                  description: "Array of caption objects (text, speaker, timestamp, etc.)"
                 meetingTitle:
                   type: "string"
       responses:
@@ -6158,15 +6222,16 @@ paths:
                 properties:
                   sequence:
                     type: "integer"
+                    description: "Highest sequence number in the session after this append"
                   accepted:
                     type: "integer"
-                    description: "captions stored; 0 for duplicates, empty input or a finalized session"
+                    description: "Number of caption items accepted (0 when session is already finalized)"
                   backpressure:
                     type: "boolean"
-                    description: "true when the ring buffer is nearly full"
+                    description: "Advisory — true when the ring buffer is ≥90% full; callers should throttle"
                   finalized:
                     type: "boolean"
-                    description: "true when the session was already finalized; late writes are dropped"
+                    description: "Present (true) when the session was already finalized; all captions were dropped"
         "400":
           description: "Missing sessionId or captions"
           content:
@@ -6285,6 +6350,7 @@ paths:
               properties:
                 message:
                   type: "string"
+                  description: "The composed Loop instruction (max 200000 chars)"
                 skills:
                   type:
                     - "array"
@@ -6294,17 +6360,19 @@ paths:
                   description: "a string is refused with 400 (must be an array of ids)"
                 repoRoot:
                   type: "string"
+                  description: "Absolute path of the run's git root (the worktree in worktree mode)"
                 extraRoots:
                   type: "array"
                   items:
                     type: "string"
+                  description: "Absolute paths of project llm-doc/ directories the run may also read and edit (split layout)"
                 language:
                   type: "string"
                 model:
                   type: "string"
                 provider:
                   type: "string"
-                  description: "anthropic or a custom:<id> provider"
+                  description: "\"anthropic\" or an Anthropic-compatible \"custom:<id>\" (one with an anthropicBaseURL). Absent = first-party Anthropic"
                 timeoutMs:
                   type: "number"
       responses:
@@ -6329,21 +6397,22 @@ paths:
                 properties:
                   reply:
                     type: "string"
+                    description: "The agent's closing summary"
                   changedPaths:
                     type: "array"
                     items:
                       type: "string"
-                    description: "repo-relative"
+                    description: "Repo-relative paths the agent's Edit/Write calls changed"
                   changedExtraPaths:
                     type: "array"
                     items:
                       type: "string"
-                    description: "absolute paths under the extra roots"
+                    description: "Absolute paths changed inside an accepted extra root"
                   createdPaths:
                     type: "array"
                     items:
                       type: "string"
-                    description: "the subset of changedPaths that a Write created"
+                    description: "The subset of changedPaths a Write created (the file did not exist before the call)"
                   usage:
                     "$ref": "#/components/schemas/LoopUsage"
                   resolvedSkills:
@@ -6358,13 +6427,14 @@ paths:
                     type: "array"
                     items:
                       type: "string"
+                    description: "Resolved skills longer than the cap; only their head was sent"
                   ran:
                     type: "boolean"
                   resultSubtype:
                     type:
                       - "string"
                       - "null"
-                    description: "success, timeout, aborted, no_progress, or null"
+                    description: "The SDK result subtype (success, error_max_turns, …), or no_progress when LLM-IDE stopped the step because it was repeating itself (the same call again with no file changed) or 5 tool calls in a row failed"
                   denied:
                     type: "array"
                     items:
@@ -6379,7 +6449,7 @@ paths:
                           type: "string"
                   noProgressReason:
                     type: "string"
-                    description: "Set with resultSubtype no_progress."
+                    description: "Present only with resultSubtype no_progress — why the step was stopped"
         "400":
           description: "VALIDATION_FAILED, REPO_ROOT_NOT_ALLOWED — repoRoot outside the allow-list, EXTRA_ROOT_NOT_ALLOWED — an extraRoots entry is not the project's llm-doc, PROVIDER_UNAVAILABLE — the custom provider is missing, disabled or keyless, or PROVIDER_NOT_AGENT_CAPABLE — the provider has no Anthropic-compatible endpoint"
           content:
@@ -6524,7 +6594,7 @@ paths:
                     const: true
                   marked:
                     type: "integer"
-                    description: "items newly marked as seen"
+                    description: "Rows actually inserted; re-marking is a no-op"
         "400":
           description: "Unknown connector id"
           x-undeclared: true
@@ -6626,6 +6696,7 @@ paths:
                   type: "string"
                 webhookUrl:
                   type: "string"
+                  description: "Optional — vault key slack.webhookUrl is preferred"
                 planId:
                   type: "string"
                 payload:
@@ -7123,6 +7194,7 @@ paths:
               properties:
                 id:
                   type: "string"
+                  description: "Omit to create a new plan"
                 title:
                   type: "string"
                 goal:
@@ -7336,6 +7408,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
+          description: "Capped at 200; the default is 50."
           schema:
             type: "string"
       responses:
@@ -7484,7 +7557,7 @@ paths:
                       type: "string"
                   detail:
                     type: "string"
-                    description: "why nothing was listed"
+                    description: "Human-readable reason when models is empty"
                   entries:
                     type: "array"
                     items:
@@ -7502,8 +7575,10 @@ paths:
                           type: "array"
                           items:
                             type: "string"
+                    description: "anthropic via the Agent SDK only"
                   source:
                     const: "sdk"
+                    description: "Present when the list came from the Agent SDK"
         "400":
           description: "Unknown provider"
           content:
@@ -7537,6 +7612,7 @@ paths:
               properties:
                 provider:
                   type: "string"
+                  description: "Provider ID (e.g. anthropic, openai, custom)"
                 mode:
                   type: "string"
                   description: "key | cli"
@@ -7545,6 +7621,7 @@ paths:
                   description: "placeholder in fixtures; never a real key"
                 baseUrl:
                   type: "string"
+                  description: "Required for provider=custom"
       responses:
         "200":
           description: "Verification result (always 200; check ok field)"
@@ -7599,11 +7676,11 @@ paths:
                 config:
                   type: "object"
                   additionalProperties: true
-                  description: "Tracker credentials for this approval, e.g. token, apiKey."
+                  description: "API v75+. Credentials for the dispatch target (github token / backlog or linear apiKey); highest precedence, never persisted. Without one the server uses a value held from submit, then the per-user vault."
                 pr:
                   type: "object"
                   additionalProperties: true
-                  description: "Pull-request credentials for this approval, e.g. ghToken."
+                  description: "API v75+. codegen-apply only: PR credentials (ghToken); same precedence as config."
       responses:
         "200":
           description: "executed. API v75+: review payloads in all /kb/review/* responses are redacted (token/apiKey/secret/password leaves removed)"
@@ -7774,6 +7851,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
+          description: "Capped at 200; the default is 50."
           schema:
             type: "string"
       responses:
@@ -7955,7 +8033,7 @@ paths:
                           type: "boolean"
                         reason:
                           type: "string"
-                          description: "set when unusable: unset | no_key | no_key_or_cli | cli_unverified | cli_failed | route_failed | not_found | disabled | error"
+                          description: "unset | not_found | disabled | no_key | no_key_or_cli (OpenAI/Google, v68+) | cli_unverified (CLI health probe not run yet, v69+) | cli_failed / route_failed (the route failed at runtime in the last ~10 min, v69+) | error (only when usable is false)"
                         agentCapable:
                           type: "boolean"
                         agentReason:
@@ -7966,6 +8044,7 @@ paths:
                           enum:
                             - "key"
                             - "cli"
+                          description: "API v68+, only when usable. `key` = runs on an API key (user vault or operator env; custom providers always), `cli` = runs on the provider's logged-in CLI subscription (claude / codex / gemini). A key wins when both exist.\n"
                     description: "Keys: configured tiers, plus unset ones (reason unset) when a tier is absent."
                   featureStatus:
                     type: "object"
@@ -7979,6 +8058,7 @@ paths:
                         reason:
                           type: "string"
                           description: "set when unusable: a tier reason, cli_untrusted_input, or decision_only"
+                    description: "API v69+. One entry per CONFIGURED feature. `usable: false` with the tier's own reason when the tier is unusable, or `cli_untrusted_input` when the tier runs on a keyless codex/gemini CLI and the feature is `internal` or `pipeline` (untrusted email/connector/transcript input; pipeline output is dispatched to issue trackers), or `decision_only` (API v73+) when the tier runs on `jev` and the feature is anything but `decisions`.\n"
         "401":
           description: "Unauthorized"
           content:
@@ -8010,10 +8090,12 @@ paths:
                         description: "anthropic | openai | google | deepseek | jev | custom:<id>"
                       model:
                         type: "string"
+                  description: "Keys strong | standard | cheap"
                 features:
                   type: "object"
                   additionalProperties:
                     type: "string"
+                  description: "Keys subagents | loop | autoTasks | quickChat | pipeline | internal | decisions (API v73+); values a tier name"
       responses:
         "200":
           description: "Synced"
@@ -8046,6 +8128,7 @@ paths:
                             - "invalid_model"
                             - "unknown_tier"
                             - "unknown_feature"
+                    description: "Entries that were not stored (API v67+)"
         "400":
           description: "Body is not a JSON object"
           content:
@@ -8078,19 +8161,19 @@ paths:
         - name: "kind"
           in: "query"
           required: false
-          description: "one of the allowed kinds; any other value searches every kind"
+          description: "Limits results to one kind from the list; any other value searches every kind."
           schema:
             type: "string"
         - name: "limit"
           in: "query"
           required: false
-          description: "1 to 100; anything else is the default 20"
+          description: "Capped at 100; zero, negative or non-numeric values give the default 20."
           schema:
             type: "string"
         - name: "projectId"
           in: "query"
           required: false
-          description: "project scope; ignored unless it is a safe id"
+          description: "project scope; ignored unless it is a safe id Ignored unless it matches ^[A-Za-z0-9_-]{1,128}$."
           schema:
             type: "string"
       responses:
@@ -8493,6 +8576,7 @@ paths:
                           type: "string"
                         threshold_pct:
                           type: "integer"
+                  description: "{ provider: [ { model, priority, enabled, limit_value, unit, window_kind, threshold_pct } ] }"
       responses:
         "200":
           description: "Saved; returns the merged chains"
@@ -8646,6 +8730,7 @@ paths:
                   type: "string"
                 source:
                   type: "string"
+                  description: "api|cli|auto-task"
                 endpoint:
                   type: "string"
                 runs:
@@ -8905,7 +8990,7 @@ paths:
         - name: "limit"
           in: "query"
           required: false
-          description: "1-200, default 50"
+          description: "1-200, default 50 Clamped to 1-200; the default is 50."
           schema:
             type: "string"
       responses:
@@ -9918,6 +10003,7 @@ components:
           type: "string"
         kind:
           type: "string"
+          description: "CGEdgeKind raw value, e.g. imports / calls / contains"
         confidence:
           type: "string"
     CodeGraphNode:
@@ -9930,11 +10016,13 @@ components:
           type: "string"
         kind:
           type: "string"
+          description: "CGNodeKind raw value, e.g. file / function / classType"
         metadata:
           type: "object"
           properties:
             source_file:
               type: "string"
+              description: "Repo-relative path; absolute or ..-bearing values are discarded"
             line:
               type:
                 - "integer"
@@ -10096,6 +10184,7 @@ components:
           type: "object"
           additionalProperties: true
           description: "kind-specific metadata; open set (owner, due, ...)"
+      description: "Entity with kind, title, body, metadata"
     EntityAction:
       type: "object"
       required:
@@ -10169,7 +10258,7 @@ components:
             message:
               type: "string"
             details:
-              description: "Optional; shape depends on code."
+              description: "Code-specific structured detail (e.g. guardrail report)"
     ExecutionFailure:
       type: "object"
       description: "The 500 body of approve when execution throws. The item is already marked failed, and result.error holds the message."
@@ -10336,14 +10425,14 @@ components:
           type: "array"
           items:
             type: "string"
-          description: "ALL_ENDPOINTS minus the paths of disabled features"
+          description: "Endpoints this process serves — a feature disabled by LLMIDE_FEATURES drops its paths (v74)"
         features:
           type:
             - "array"
             - "null"
           items:
             type: "string"
-          description: "sorted LLMIDE_FEATURES keys; null means every feature"
+          description: "LLMIDE_FEATURES as applied (v74): null = every feature; otherwise the enabled feature keys, sorted (agent_chat always present).\n"
         checks:
           type: "object"
           required:
@@ -10480,6 +10569,7 @@ components:
       properties:
         id:
           type: "string"
+          description: "<family>/<file-stem>"
         family:
           type: "string"
         name:
@@ -10544,12 +10634,15 @@ components:
           type: "string"
         startedAt:
           type: "number"
+          description: "Unix ms timestamp when session was created"
         lastWrite:
           type: "number"
+          description: "Unix ms timestamp of last caption append"
         captionCount:
           type: "integer"
         sequence:
           type: "integer"
+          description: "Highest sequence number written so far"
     LlmSource:
       type: "object"
       required:
@@ -10857,6 +10950,7 @@ components:
         transcript:
           type: "string"
           description: "present only with ?include=transcript"
+      description: "Meeting with entities, transcript, metadata"
     MeetingEntity:
       type: "object"
       required:
@@ -11640,8 +11734,10 @@ components:
           "$ref": "#/components/schemas/User"
         accessToken:
           type: "string"
+          description: "HS256 JWT, valid 15 min by default"
         refreshToken:
           type: "string"
+          description: "Opaque, hashed in DB; rotate via /auth/refresh"
         accessTokenTTLSec:
           type: "integer"
     SkillEntry:
@@ -11914,12 +12010,16 @@ components:
       properties:
         projectRoot:
           type: "string"
+          description: "Absolute workspace root the rule applies to"
         toolName:
           type: "string"
+          description: "`Bash`, `run-bash`, or an act tool name"
         pattern:
           type: "string"
+          description: "Command prefix for shell tools; empty = the whole tool"
         grantedAt:
           type: "string"
+          description: "ISO-8601 timestamp"
     Turn:
       type: "object"
       description: "One prior chat turn. role is 'user' or 'assistant'; the server maps any other role to 'Assistant' in the /chat prompt."

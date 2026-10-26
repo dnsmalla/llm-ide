@@ -55,10 +55,12 @@
           "$ref": "#/$defs/User"
         },
         "accessToken": {
-          "type": "string"
+          "type": "string",
+          "description": "HS256 JWT, valid 15 min by default"
         },
         "refreshToken": {
-          "type": "string"
+          "type": "string",
+          "description": "Opaque, hashed in DB; rotate via /auth/refresh"
         },
         "accessTokenTTLSec": {
           "type": "integer"
@@ -111,7 +113,7 @@
           "items": {
             "type": "string"
           },
-          "description": "ALL_ENDPOINTS minus the paths of disabled features"
+          "description": "Endpoints this process serves — a feature disabled by LLMIDE_FEATURES drops its paths (v74)"
         },
         "features": {
           "type": [
@@ -121,7 +123,7 @@
           "items": {
             "type": "string"
           },
-          "description": "sorted LLMIDE_FEATURES keys; null means every feature"
+          "description": "LLMIDE_FEATURES as applied (v74): null = every feature; otherwise the enabled feature keys, sorted (agent_chat always present).\n"
         },
         "checks": {
           "type": "object",
@@ -1528,7 +1530,8 @@
               "type": "string"
             },
             "value": {
-              "type": "string"
+              "type": "string",
+              "description": "null/empty deletes"
             }
           },
           "required": [
