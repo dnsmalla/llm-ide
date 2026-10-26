@@ -153,8 +153,7 @@
         "meetingId",
         "entityId",
         "title",
-        "body",
-        "rank"
+        "body"
       ],
       "properties": {
         "kind": {
@@ -181,7 +180,8 @@
         },
         "rank": {
           "type": "number",
-          "description": "FTS5 bm25 rank (lower is a better match)"
+          "x-optional": true,
+          "description": "FTS5 bm25 rank (lower is a better match); set on full-text hits only, absent on the empty-query listing and the entity/outcome fallbacks"
         },
         "ref": {
           "type": "string",
@@ -203,6 +203,11 @@
           "type": "string",
           "x-optional": true,
           "description": "meeting date, or the index time for tickets"
+        },
+        "durationSec": {
+          "type": "number",
+          "x-optional": true,
+          "description": "meetings, empty-query listing only"
         }
       }
     },
@@ -749,7 +754,9 @@
           "properties": {
             "include": {
               "type": "string",
-              "enum": ["transcript"]
+              "enum": [
+                "transcript"
+              ]
             }
           }
         },
