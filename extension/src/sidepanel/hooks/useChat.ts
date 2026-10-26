@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { listIssues } from '../../lib/kb';
+import { errorText } from '../../lib/server-error';
 import {
   ensureTranscriptSessionId,
   loadTranscriptMessages,
@@ -154,8 +155,8 @@ export function useChat() {
         });
 
         if (!response.ok) {
-          const err = await response.json().catch(() => ({ error: 'Server error' }));
-          throw new Error(err.error || `Server error: ${response.status}`);
+          const err = await response.json().catch(() => ({}));
+          throw new Error(errorText(err, response.status));
         }
 
         const data = await response.json();

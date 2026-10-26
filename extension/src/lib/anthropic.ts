@@ -1,4 +1,5 @@
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from './config';
+import { errorText } from './server-error';
 
 /**
  * Generate meeting notes — streaming variant.
@@ -34,7 +35,7 @@ export async function generateMeetingNotesStream(
 
     if (!response.ok) {
       const error = await response.json().catch(() => ({}));
-      throw new Error(error.error || `Server error: ${response.status}`);
+      throw new Error(errorText(error, response.status));
     }
 
     const contentType = response.headers.get('content-type') || '';
@@ -80,7 +81,7 @@ export async function generateMeetingNotesStream(
               fullText = parsed.text;
             }
           } else if (parsed.type === 'error') {
-            throw new Error(typeof parsed.error === 'string' ? parsed.error : 'Server streaming error');
+            throw new Error(errorText(parsed, undefined, 'Server streaming error'));
           }
         }
       }
