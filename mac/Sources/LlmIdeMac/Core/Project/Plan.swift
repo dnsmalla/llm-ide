@@ -46,12 +46,12 @@ struct Plan: Codable, Identifiable, Equatable {
 /// varies per task.  Decodes any JSON scalar/array/object; encodes back
 /// in the same shape.  Tiny implementation — we don't need full
 /// JSONValue sophistication, just round-trippable opaque storage.
-struct AnyCodable: Codable, Equatable {
+public struct AnyCodable: Codable, Equatable {
     let value: Any?
 
     init(_ value: Any?) { self.value = value }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.singleValueContainer()
         if c.decodeNil() {
             self.value = nil
@@ -72,7 +72,7 @@ struct AnyCodable: Codable, Equatable {
         }
     }
 
-    func encode(to encoder: Encoder) throws {
+    public func encode(to encoder: Encoder) throws {
         var c = encoder.singleValueContainer()
         switch value {
         case nil: try c.encodeNil()
@@ -86,7 +86,7 @@ struct AnyCodable: Codable, Equatable {
         }
     }
 
-    static func == (lhs: AnyCodable, rhs: AnyCodable) -> Bool {
+    public static func == (lhs: AnyCodable, rhs: AnyCodable) -> Bool {
         // Equality is best-effort by JSON serialization — sufficient
         // for SwiftUI diffing, which is the only caller.
         let l = (try? AppJSON.encoder.encode(lhs)) ?? Data()

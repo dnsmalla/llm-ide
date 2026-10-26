@@ -71,7 +71,7 @@ extension LlmIdeAPIClient {
 
     /// Result of `/auth/slack/start` — the browser URL to open plus the
     /// opaque state token used to poll for completion.
-    struct SlackConnectStartResult: Decodable { let authUrl: String; let state: String }
+    public struct SlackConnectStartResult: Decodable { let authUrl: String; let state: String }
 
     /// Result of `/auth/slack/status` — `status` is one of
     /// pending|complete|error|unknown (unknown = expired/never-existed state,
@@ -82,7 +82,7 @@ extension LlmIdeAPIClient {
     /// to 90s under Slack rate-limiting); callers fetch the channel list
     /// separately via `fetchSlackConversations()` right after seeing
     /// `status == "complete"`.
-    struct SlackConnectStatusResult: Decodable {
+    public struct SlackConnectStatusResult: Decodable {
         let status: String
         let teamName: String?
         let message: String?

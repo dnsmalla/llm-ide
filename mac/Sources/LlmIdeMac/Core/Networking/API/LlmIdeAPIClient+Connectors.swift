@@ -3,8 +3,8 @@ import Foundation
 /// One connector-catalog entry — the Library's "Add from catalog…" list and
 /// the Settings → Connections selection both read this shape. Mirrors
 /// `extension/connectors/connector-catalog.mjs`.
-struct ConnectorCatalogEntry: Decodable, Identifiable, Equatable {
-    let id: String
+public struct ConnectorCatalogEntry: Decodable, Identifiable, Equatable {
+    public let id: String
     let name: String
     let description: String
     let icon: String          // SF Symbol name
@@ -20,7 +20,7 @@ struct ConnectorCatalogEntry: Decodable, Identifiable, Equatable {
         case id, name, description, icon, authKind, docsUrl, pipelineReady, selected
     }
 
-    init(from decoder: Decoder) throws {
+    public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         self.id = try c.decode(String.self, forKey: .id)
         self.name = try c.decode(String.self, forKey: .name)

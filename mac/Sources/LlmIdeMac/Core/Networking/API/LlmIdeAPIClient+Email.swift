@@ -124,11 +124,11 @@ extension LlmIdeAPIClient {
 
     /// Result of `/auth/google/start` — the browser URL to open plus the
     /// opaque state token used to poll for completion.
-    struct GoogleStartResult: Decodable { let authUrl: String; let state: String }
+    public struct GoogleStartResult: Decodable { let authUrl: String; let state: String }
 
     /// Result of `/auth/google/status` — `status` is one of
     /// pending|complete|error; `email` is populated once complete.
-    struct GoogleStatusResult: Decodable { let status: String; let email: String?; let message: String? }
+    public struct GoogleStatusResult: Decodable { let status: String; let email: String?; let message: String? }
 
     /// Kick off the Google OAuth loopback flow: the server stashes the
     /// bring-your-own client id/secret in the vault and returns a browser

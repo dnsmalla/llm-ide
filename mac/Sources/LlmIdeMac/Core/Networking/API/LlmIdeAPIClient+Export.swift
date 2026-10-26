@@ -4,7 +4,7 @@ import Foundation
 
 extension LlmIdeAPIClient {
 
-    struct OutcomeRefreshSummary: Codable {
+    public struct OutcomeRefreshSummary: Codable {
         let pollCount: Int
         let pollErroredCount: Int
         let changedCount: Int

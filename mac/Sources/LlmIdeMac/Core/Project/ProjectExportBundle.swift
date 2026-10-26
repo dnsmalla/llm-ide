@@ -3,7 +3,7 @@ import Foundation
 /// Full project export returned by GET /kb/project/:projectId/export.
 /// Decoded by LlmIdeAPIClient, then written to the local folder tree
 /// by ProjectExporter.
-struct ProjectExportBundle: Decodable {
+public struct ProjectExportBundle: Decodable {
     let projectId: String
     let exportedAt: String
     let meetingCount: Int
