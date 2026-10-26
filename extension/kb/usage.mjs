@@ -16,6 +16,7 @@
 
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ANTHROPIC_MODELS, canonicalModel, modelAliases } from './model-ids.mjs';
+import { emitOsEvent } from '../core/os-events.mjs';
 
 // ---------------------------------------------------------------------------
 // Built-in fallback chains. Order = default priority (lower index tried first).
@@ -401,6 +402,7 @@ export function recordUsage(db, {
       turns == null ? null : tokenCountOrNull(turns), clampStr(stopReason, 40),
     );
     maybePruneLedger(db);
+    emitOsEvent(userId, 'usage');
     return Number(info.lastInsertRowid);
   } catch {
     return null;

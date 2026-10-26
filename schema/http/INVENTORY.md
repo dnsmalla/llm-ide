@@ -11,11 +11,11 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 
 ## Summary
 
-- Endpoints in `ALL_ENDPOINTS`: **111**
+- Endpoints in `ALL_ENDPOINTS`: **112**
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
-- Auth: 165 token, 12 public
-- Handler found: 175; no handler found: 2
-- No Mac and no extension caller: 36 (tests only: 23, comments/docs only: 13, no reference: 0)
+- Auth: 166 token, 12 public
+- Handler found: 176; no handler found: 2
+- No Mac and no extension caller: 37 (tests only: 24, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -33,19 +33,19 @@ By first path segment:
 | `/generate-notes` | 1 |
 | `/generate-questions` | 1 |
 | `/health` | 1 |
-| `/kb` | 98 |
+| `/kb` | 99 |
 | `/launch-app` | 1 |
 
 By feature group (LLMIDE_FEATURES key; `core` = always on):
 
 | group | endpoints |
 |---|---:|
-| core | 174 |
+| core | 175 |
 | code_graph_3d | 1 |
 | gantt_issues | 1 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (36):
+Endpoints with no client caller (37):
 
 - `/agent-sdk/spike` — tests only
 - `/kb/entity/:id` — tests only
@@ -73,6 +73,7 @@ Endpoints with no client caller (36):
 - `/kb/agent/ask` — tests only
 - `/kb/agent/ask/history` — comments/docs only
 - `/kb/os/state` — tests only
+- `/kb/os/stream` — tests only
 - `/` — tests only
 - `/auth/reset-request` — tests only
 - `/auth/reset-confirm` — tests only
@@ -95,10 +96,10 @@ Endpoints with no client caller (36):
 | `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:449` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:766` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/agent-sdk/spike` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:398` | - | - | tests only |
-| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:276` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
-| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:279` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
-| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:282` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
-| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:285` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
+| `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:277` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
+| `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:280` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
+| `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:283` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
+| `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:286` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:105` | `LlmIdeAPIClient+LoopAgent.swift` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:792` | - | `App.tsx`, `useQuestions.ts` | - |
 | `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:862` | - | `App.tsx` | - |
@@ -198,9 +199,10 @@ Endpoints with no client caller (36):
 | `/kb/chat/sessions` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/chat.mjs:21` | - | `App.tsx`, `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id` | ALL_ENDPOINTS | DELETE, GET, PATCH | token | core | `extension/routes/chat.mjs:44` | - | `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id/messages` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/chat.mjs:101` | - | `unified-chat.ts` | - |
-| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:53` | - | - | tests only |
+| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:168` | - | - | tests only |
+| `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:165` | - | - | tests only |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:61` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:632` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:633` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:270` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:282` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:307` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -210,7 +212,7 @@ Endpoints with no client caller (36):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:456` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:506` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:551` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:656` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:657` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:598` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:780` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:795` | - | - | tests only |
@@ -268,7 +270,7 @@ Endpoints with no client caller (36):
 
 ## Consistency
 
-Checked: 177 roster entries, 698 Swift files, 46 extension source files.
+Checked: 178 roster entries, 698 Swift files, 46 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 

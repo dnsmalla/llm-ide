@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://llm-ide.local/schema/os-events.schema.json",
+  "title": "os/stream SSE wire event",
+  "description": "One data: payload on GET /kb/os/stream (os-kit OS-2). Events carry only the type and the time, never data: they tell the System view when to re-fetch GET /kb/os/state. The stream opens with one hello event. The SSE event: line equals type. Every variant sets additionalProperties:false, so a field added server-side must be added here in the same edit.",
+  "type": "object",
+  "required": ["type", "at"],
+  "oneOf": [
+    {
+      "title": "hello",
+      "description": "The first event on connect: the stream is open.",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "hello" },
+        "at": { "type": "string", "description": "ISO 8601 time the stream opened." }
+      }
+    },
+    {
+      "title": "activity",
+      "description": "An activity row was recorded (kb/activity.mjs). Carries no payload; the client re-fetches GET /kb/os/state. Bursts of one type are coalesced to at most one event per 250 ms per stream.",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "activity" },
+        "at": { "type": "string", "description": "ISO 8601 time the change was published to the stream." }
+      }
+    },
+    {
+      "title": "usage",
+      "description": "A usage_ledger row was recorded (kb/usage.mjs). Carries no payload; coalesced as above.",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "usage" },
+        "at": { "type": "string", "description": "ISO 8601 time the change was published to the stream." }
+      }
+    },
+    {
+      "title": "turn-start",
+      "description": "A chat turn began (routes/agent-v2.mjs). Carries no payload; coalesced as above.",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "turn-start" },
+        "at": { "type": "string", "description": "ISO 8601 time the change was published to the stream." }
+      }
+    },
+    {
+      "title": "turn-end",
+      "description": "A chat turn ended (routes/agent-v2.mjs). Carries no payload; coalesced as above.",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "turn-end" },
+        "at": { "type": "string", "description": "ISO 8601 time the change was published to the stream." }
+      }
+    },
+    {
+      "title": "agent-run",
+      "description": "A meeting-agent run started or stopped (agents/meeting-agent.mjs). Carries no payload; coalesced as above.",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "agent-run" },
+        "at": { "type": "string", "description": "ISO 8601 time the change was published to the stream." }
+      }
+    },
+    {
+      "title": "live-session",
+      "description": "The live capture session list changed (agents/live-sessions.mjs). Carries no payload; coalesced as above.",
+      "additionalProperties": false,
+      "required": ["type", "at"],
+      "properties": {
+        "type": { "const": "live-session" },
+        "at": { "type": "string", "description": "ISO 8601 time the change was published to the stream." }
+      }
+    }
+  ]
+}

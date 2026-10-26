@@ -959,6 +959,37 @@ export type UsageCounts = {
   billable: number;
 };
 
+/** One data: payload on GET /kb/os/stream (os-kit OS-2). Events carry only the type and the time, never data: they tell the System view when to re-fetch GET /kb/os/state. The stream opens with one hello event. The SSE event: line equals type. Every variant sets additionalProperties:false, so a field added server-side must be added here in the same edit. */
+export type OsEventsEvent = {
+  type: "hello";
+  /** ISO 8601 time the stream opened. */
+  at: string;
+} | {
+  type: "activity";
+  /** ISO 8601 time the change was published to the stream. */
+  at: string;
+} | {
+  type: "usage";
+  /** ISO 8601 time the change was published to the stream. */
+  at: string;
+} | {
+  type: "turn-start";
+  /** ISO 8601 time the change was published to the stream. */
+  at: string;
+} | {
+  type: "turn-end";
+  /** ISO 8601 time the change was published to the stream. */
+  at: string;
+} | {
+  type: "agent-run";
+  /** ISO 8601 time the change was published to the stream. */
+  at: string;
+} | {
+  type: "live-session";
+  /** ISO 8601 time the change was published to the stream. */
+  at: string;
+};
+
 /** A plan task. Stored tasks (getPlan, getTaskById) carry every field; a draft task returned by analyze-risks or code-sync carries the fields the client sent, plus risk and files/symbols. */
 export type PlanningTask = {
   id: string;
@@ -3939,6 +3970,15 @@ export type GetKbOsStateResponse400 = CommonError;
 
 export type GetKbOsStateResponse401 = CommonError;
 
+/** Request parts for `GET /kb/os/stream` (schema/http/os.schema.json). */
+export type GetKbOsStreamRequest = Record<string, never>;
+
+export type GetKbOsStreamResponse200 = ReadonlyArray<OsEventsEvent>;
+
+export type GetKbOsStreamResponse401 = CommonError;
+
+export type GetKbOsStreamResponse429 = CommonError;
+
 /** Request parts for `POST /kb/generate-plan` (schema/http/planning.schema.json). */
 export type PostKbGeneratePlanRequest = {
   body: {
@@ -6272,6 +6312,14 @@ export interface ApiEndpoints {
       200: GetKbOsStateResponse200;
       400: GetKbOsStateResponse400;
       401: GetKbOsStateResponse401;
+    };
+  };
+  "GET /kb/os/stream": {
+    request: GetKbOsStreamRequest;
+    responses: {
+      200: GetKbOsStreamResponse200;
+      401: GetKbOsStreamResponse401;
+      429: GetKbOsStreamResponse429;
     };
   };
   "POST /kb/generate-plan": {

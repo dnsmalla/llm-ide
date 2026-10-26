@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/os/stream",
+  "status": 200,
+  "description": "The stream's first event, as the handler writes it on connect (routes/os.mjs handleOsStream): an event: hello line with a data payload of type and at only. Produced by running the handler in-process against a fake response (the same bytes a client reads on the wire, minus the HTTP framing), so no socket is needed.",
+  "response": [
+    {
+      "type": "hello",
+      "at": "2026-10-26T09:00:00.000Z"
+    }
+  ]
+}

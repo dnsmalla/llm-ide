@@ -5,6 +5,7 @@
 // All functions are best-effort: callers wrap in try/catch and a failure here
 // must never throw into the operation that triggered the event.
 import { redact } from '../core/redact-object.mjs';
+import { emitOsEvent } from '../core/os-events.mjs';
 
 // The v1 event-kind allow-list (shared contract; Swift mirrors this).
 export const ACTIVITY_KINDS = new Set([
@@ -72,6 +73,7 @@ export function recordActivity(db, { userId, kind, title, detail, link } = {}) {
         WHERE user_id = ?
           AND id NOT IN (SELECT id FROM activity WHERE user_id = ? ORDER BY id DESC LIMIT ?)`
     ).run(userId, userId, KEEP_PER_USER);
+    emitOsEvent(userId, 'activity');
     return id;
   } catch {
     return null;

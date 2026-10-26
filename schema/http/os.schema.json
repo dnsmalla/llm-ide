@@ -793,6 +793,20 @@
           "$ref": "_common#/$defs/Error"
         }
       }
+    },
+    "GET /kb/os/stream": {
+      "responses": {
+        "200": {
+          "x-content": "sse",
+          "x-events": "schema/os/os-events.schema.json"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
     }
   }
 }

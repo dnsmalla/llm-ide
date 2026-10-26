@@ -40,6 +40,7 @@ import { isPluginUpdating } from '../plugins/claude-update.mjs';
 import { sendJSON, readBody, parseJSON, readJsonObjectOr400, onClientDisconnect } from '../core/utils.mjs';
 import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
+import { emitOsEvent } from '../core/os-events.mjs';
 
 const log = logger.child({ component: 'agent-v2' });
 
@@ -433,12 +434,14 @@ async function handleV2Stream(req, res, userId, deps) {
   }
   inFlightChatSessions.add(lockKey);
   inFlightTurns.set(lockKey, { userId, chatSessionId, startedAt: turnStartedAt });
+  emitOsEvent(userId, 'turn-start');
   try {
     return await runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, effectiveMessage, body, deps, turnStartedAt);
   } finally {
     inFlightChatSessions.delete(lockKey);
     inFlightAborts.delete(lockKey);
     inFlightTurns.delete(lockKey);
+    emitOsEvent(userId, 'turn-end');
   }
 }
 
