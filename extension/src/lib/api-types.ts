@@ -3838,7 +3838,10 @@ export type GetKbOsStateResponse200 = {
   };
   tokens: {
     window: "day" | "week";
-    windowHours: 24 | 168;
+    /** Calendar days in the window: 1 = today since local midnight (same as the daily model-limit cap), 7 = the last 7 days including today. */
+    windowDays: 1 | 7;
+    /** Window start, server-local time 'YYYY-MM-DD HH:MM:SS' (the usage ledger's format). */
+    since: string;
     totals: {
       calls: number;
       runs: number;

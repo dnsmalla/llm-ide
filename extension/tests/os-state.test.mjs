@@ -115,7 +115,8 @@ test('empty DB — the response has the full shape with zero counts', async () =
   assert.deepEqual(s.running, { chatTurns: [], meetingAgentRuns: [], liveSessions: [] });
   assert.deepEqual(s.activity, { unread: 0, items: [] });
   assert.equal(s.tokens.window, 'day');
-  assert.equal(s.tokens.windowHours, 24);
+  assert.equal(s.tokens.windowDays, 1);
+  assert.match(s.tokens.since, /^\d{4}-\d{2}-\d{2} 00:00:00$/);
   assert.deepEqual(s.tokens.totals, { calls: 0, runs: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, billable: 0 });
   assert.deepEqual(s.tokens.byModel, []);
   assert.equal(s.knowledge.sources.total, 0);
@@ -148,7 +149,7 @@ test('token math — billable = input + output + 0.1 cache read + 1.25 cache wri
   assert.ok(s.tokens.byEndpoint.some((e) => e.endpoint === '/agent/v2/stream'));
 });
 
-test('window filter — day excludes a row older than 24 h; week includes it', async () => {
+test('window filter — day excludes a row from 3 days ago; week includes it', async () => {
   const { db, userA } = await setup();
   insertUsage(db, userA, { provider: 'anthropic', model: 'm-1', source: 'api', endpoint: '/a', input: 10, output: 0 });
   insertUsage(db, userA, { provider: 'anthropic', model: 'm-1', source: 'api', endpoint: '/a', input: 100, output: 0,
@@ -159,7 +160,7 @@ test('window filter — day excludes a row older than 24 h; week includes it', a
   assert.equal(day.window, 'day');
   assert.equal(day.totals.input, 10);
   assert.equal(week.window, 'week');
-  assert.equal(week.windowHours, 168);
+  assert.equal(week.windowDays, 7);
   assert.equal(week.totals.input, 110);
 });
 

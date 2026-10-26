@@ -20,10 +20,10 @@ const TURN_COMPOSITION_LIMIT = 50;
 
 // Set by server.mjs at boot (configureOsRoutes): the API version this server
 // reports, and the same health probes /health runs. Until configured the
-// route answers an honest "unknown" health rather than inventing one.
+// route reports "degraded" with every check false rather than inventing health.
 let serverInfo = {
   apiVersion: null,
-  health: async () => ({ status: 'unknown', checks: { db: false, claude: false, skills: false } }),
+  health: async () => ({ status: 'degraded', checks: { db: false, claude: false, skills: false } }),
 };
 
 /** Install the API version and the health probe source (server.mjs boot). */

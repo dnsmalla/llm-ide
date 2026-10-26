@@ -5,12 +5,22 @@
 // 0.1 x cache read + 1.25 x cache write. A NULL token count (a CLI run that
 // reported none) counts as 0; the row still counts as one call and its runs.
 
+import { windowStart, toSqliteLocal } from './usage.mjs';
+
 export const CACHE_READ_WEIGHT = 0.1;
 export const CACHE_WRITE_WEIGHT = 1.25;
+// Calendar windows from local midnight, like the model-limit caps
+// (kb/usage.mjs windowStart): `day` is today, `week` the last 7 days incl. today.
 export const TOKEN_WINDOWS = Object.freeze({
-  day: Object.freeze({ hours: 24, sqlModifier: '-1 day' }),
-  week: Object.freeze({ hours: 168, sqlModifier: '-7 days' }),
+  day: Object.freeze({ days: 1 }),
+  week: Object.freeze({ days: 7 }),
 });
+
+function windowSince(spec, now) {
+  const d = windowStart('daily', now);
+  d.setDate(d.getDate() - (spec.days - 1));
+  return toSqliteLocal(d);
+}
 
 // The kit table of docs/superpowers/plans/2026-10-27-kit-by-kit-migration.md.
 // `features` are the LLMIDE_FEATURES keys the kit's server routes depend on;
@@ -73,7 +83,7 @@ function finish(map) {
  * Usage for one window, grouped by model, by source and by endpoint.
  * `window` is a key of TOKEN_WINDOWS; an unknown value falls back to day.
  */
-export function usageForWindow(db, userId, window) {
+export function usageForWindow(db, userId, window, now = new Date()) {
   const key = Object.hasOwn(TOKEN_WINDOWS, window) ? window : 'day';
   const spec = TOKEN_WINDOWS[key];
   const rows = db.prepare(
@@ -85,9 +95,9 @@ export function usageForWindow(db, userId, window) {
             COALESCE(SUM(cache_read_tokens), 0) AS cacheRead,
             COALESCE(SUM(cache_creation_tokens), 0) AS cacheWrite
        FROM usage_ledger
-      WHERE user_id = ? AND ts >= datetime('now', 'localtime', ?)
+      WHERE user_id = ? AND ts >= ?
       GROUP BY provider, model, source, endpoint`,
-  ).all(userId, spec.sqlModifier);
+  ).all(userId, windowSince(spec, now));
 
   const totals = emptyAgg();
   const byModel = new Map();
@@ -101,7 +111,8 @@ export function usageForWindow(db, userId, window) {
   }
   return {
     window: key,
-    windowHours: spec.hours,
+    windowDays: spec.days,
+    since: windowSince(spec, now),
     totals: { ...totals, billable: billableOf(totals) },
     byModel: finish(byModel),
     bySource: finish(bySource),

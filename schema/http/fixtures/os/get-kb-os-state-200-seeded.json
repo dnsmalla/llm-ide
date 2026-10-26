@@ -151,7 +151,8 @@
     },
     "tokens": {
       "window": "day",
-      "windowHours": 24,
+      "windowDays": 1,
+      "since": "2026-10-27 00:00:00",
       "totals": {
         "calls": 2,
         "runs": 2,
