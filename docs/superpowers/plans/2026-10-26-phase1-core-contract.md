@@ -16,6 +16,22 @@ things the user asked to protect — **consistent appearance** and **code
 reuse** — on the same footing: one source for design tokens, one generated
 type layer for the TypeScript clients.
 
+## North star: fast and few tokens
+
+The product's main objective (user, 2026-10-26) is **speed and minimal token
+use**, built by combining the best features from every source. Every task in
+every phase states what it costs and saves in tokens and latency. Baseline
+from the usage ledger, 2026-10-01 → 26 (billable-weighted: cache read 0.1×,
+cache write 1.25×):
+
+| Path | Turns | Avg per turn | Dominated by |
+|---|---|---|---|
+| `/agent/v2/stream` | 9 | 34 350 | ~125 k cached context re-read per turn |
+| `/code-assist` (classic) | 4 | 19 296 | ~13.7 k setup re-written per turn (no cache reuse) |
+| background (classifier, memory) | 59 | 3 099 | many small calls |
+
+The lever is context size per turn, not model choice alone.
+
 ## Principles (apply to every task)
 
 1. **Reuse the pattern that already works.** `schema/agent-v2/` (JSON Schema +
@@ -53,6 +69,7 @@ files, the Chrome extension hooks in `extension/src/`.
 | P13 | **Generated TypeScript types** | `schema/http` → `extension/src/lib/api-types.ts` (+ the same file consumed by `desktop/` later); replace hand-written response types in extension hooks where they exist | `tsc` green; no duplicated response interfaces left (grep gate) |
 | P14 | **OpenAPI + docs** | the repo already hand-maintains `docs/reference/api/openapi.yaml` with an API-coverage check in `make docs-check` — reuse it: generate it from `schema/http` (keeping its existing descriptions) instead of adding a second OpenAPI file; `SERVER_API_VERSION` bump rule documented | `make docs-check` |
 | P15 | **Shared design tokens** | `schema/design/tokens.json` (the three themes, spacing, type scale, category/status colours, moved from `Theme.swift`); generators → `mac/…/Core/Platform/ThemeTokens.swift` (Theme.swift reads it) and CSS (`desktop/`, Chrome extension) | Mac app pixel-identical (screenshot diff of Library + Chat in 3 themes); `--check` gates in all three |
+| P17 | **Token & speed gate** | `scripts/token-bench.mjs`: a fixed scenario set (greeting, explain one file, one small edit, one plan step) run against a temp-DB server on the cheapest capable model, recording per scenario: billable tokens, cache read/write, turns, time to first token, total time → `schema/bench/token-baseline.json`; fails when a scenario regresses > 15 % vs the committed baseline. Run on demand / nightly, not on every push (it spends tokens) | first baseline committed; a deliberate prompt bloat makes it fail |
 | P16 | **CI + pre-push** | `make contract-gates` in `make regression` and CI | push gate green |
 
 Order: P1 → P2 → P3–P10 (can run two at a time; disjoint files) → P11–P13
