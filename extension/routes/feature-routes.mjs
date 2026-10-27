@@ -11,9 +11,9 @@
 // A group belongs here only when EVERY caller of its paths is the feature it
 // names (or Mac code that feature's build exclusion removes). Routes with a
 // caller outside the feature stay always-on in router.mjs / server.mjs:
-//   - doc_gen → /generate-doc + /generate-docx (server/export-routes.mjs) are
-//     also called by the Chrome extension's ExportMenu, and /generate-docx is
-//     in its REQUIRED_ENDPOINTS, so they are not pruned.
+//   - doc_gen → /generate-doc only (routes/doc-gen.mjs). /generate-docx stays
+//     always-on (server/export-routes.mjs): the Chrome extension's ExportMenu
+//     calls it and lists it in REQUIRED_ENDPOINTS.
 //   - planning / review / agent / agent-v2 / chat / live serve Chat, which
 //     cannot be excluded.
 //
@@ -34,6 +34,12 @@ export const FEATURE_ROUTE_GROUPS = Object.freeze({
   gantt_issues: Object.freeze({
     prefixes: Object.freeze(['/kb/issue-schedule']),
     load: async () => (await import('./issue-schedule.mjs')).handleIssueScheduleRoutes,
+  }),
+  // Doc Gen's /generate-doc (Features/Generation, Mac only). Prefix-matched
+  // exactly: /generate-docx is a different, always-on route.
+  doc_gen: Object.freeze({
+    prefixes: Object.freeze(['/generate-doc']),
+    load: async () => (await import('./doc-gen.mjs')).handleDocGenRoutes,
   }),
   // Loop / Auto-Tasks / Self-Heal headless agent step (Features/Loop +
   // Features/AutoTask). The largest group: llm_agent/sdk/loop-agent.mjs.
@@ -63,12 +69,26 @@ function isEnabled(features, key) {
  */
 export function featureDisabledFor(pathname, features) {
   if (features == null) return null;
-  const path = String(pathname || '').split('?')[0];
   for (const [key, group] of Object.entries(FEATURE_ROUTE_GROUPS)) {
     if (features.has(key)) continue;
-    if (group.prefixes.some((prefix) => path.startsWith(prefix))) return key;
+    if (group.prefixes.some((prefix) => routePathMatches(pathname, prefix))) return key;
   }
   return null;
+}
+
+/**
+ * Whether `pathname` (query string ignored) is served by `prefix`. A prefix
+ * ending in '/' matches anything under it; any other prefix matches itself and
+ * its sub-paths only, so '/generate-doc' does not match '/generate-docx'.
+ *
+ * @param {string} pathname request URL
+ * @param {string} prefix a FEATURE_ROUTE_GROUPS prefix
+ * @returns {boolean}
+ */
+export function routePathMatches(pathname, prefix) {
+  const path = String(pathname || '').split('?')[0];
+  if (prefix.endsWith('/')) return path.startsWith(prefix);
+  return path === prefix || path.startsWith(`${prefix}/`);
 }
 
 /**

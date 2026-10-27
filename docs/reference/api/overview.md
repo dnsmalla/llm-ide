@@ -157,7 +157,7 @@ with status `404`. The body is deliberately not the usual error envelope, so a c
 | `gantt_issues` | `/kb/issue-schedule` |
 | `code_graph_3d` | `/kb/ingest-code-graph` |
 
-`GET /health` reports the applied set as `features` (`null` = every feature, otherwise the sorted enabled keys) and leaves the disabled paths out of `endpoints`. The Chrome extension's `REQUIRED_ENDPOINTS` are all always-on, so any feature set satisfies it. `doc_gen` prunes nothing on the server: the Chrome extension also calls `/generate-doc` and `/generate-docx`. Unknown keys are ignored with one warning line. `code_graph_3d`, `gantt_issues` and `doc_gen` are dropped when `file_explorer` is not enabled, the same rule `mac/Package.swift` applies.
+`GET /health` reports the applied set as `features` (`null` = every feature, otherwise the sorted enabled keys) and leaves the disabled paths out of `endpoints`. The Chrome extension's `REQUIRED_ENDPOINTS` are all always-on, so any feature set satisfies it. `doc_gen` prunes `/generate-doc` only (its module is `routes/doc-gen.mjs`); `/generate-docx` is always on because the Chrome extension's ExportMenu calls it. Unknown keys are ignored with one warning line. `code_graph_3d`, `gantt_issues` and `doc_gen` are dropped when `file_explorer` is not enabled, the same rule `mac/Package.swift` applies.
 
 ## Rate limits
 

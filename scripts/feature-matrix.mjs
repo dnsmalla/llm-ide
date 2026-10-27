@@ -53,7 +53,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { parseRoster } from './lib/roster.mjs';
-import { FEATURE_ROUTE_GROUPS } from '../extension/routes/feature-routes.mjs';
+import { FEATURE_ROUTE_GROUPS, routePathMatches } from '../extension/routes/feature-routes.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EXT = path.join(ROOT, 'extension');
@@ -139,7 +139,7 @@ function requiredEndpoints() {
 /** Feature key whose route group owns this path (matrix-side mapping), or null. */
 export function groupOf(routePath) {
   for (const [key, group] of Object.entries(FEATURE_ROUTE_GROUPS)) {
-    if (group.prefixes.some((pre) => routePath.startsWith(pre))) return key;
+    if (group.prefixes.some((pre) => routePathMatches(routePath, pre))) return key;
   }
   return null;
 }

@@ -77,6 +77,7 @@ test('groupOf maps feature-owned route prefixes and leaves always-on routes alon
   assert.equal(groupOf('/kb/loop/agent-run'), 'auto_tasks');
   assert.equal(groupOf('/kb/issue-schedule'), 'gantt_issues');
   assert.equal(groupOf('/kb/ingest-code-graph'), 'code_graph_3d');
+  assert.equal(groupOf('/generate-doc'), 'doc_gen');
   assert.equal(groupOf('/generate-docx'), null);
   assert.equal(groupOf('/kb/dispatch'), null);
 });

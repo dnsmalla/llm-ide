@@ -41,9 +41,10 @@ Xcode and its macOS SDK), so they use the same toolchain as `make regression`.
 Each full build takes minutes; the first run per row is a cold build.
 `--mac-only` runs only this side (no server or live rows).
 
-Routes owned by `doc_gen` (`/generate-doc`, `/generate-docx`) are not gated:
-the Chrome extension calls them. So `doc_gen` off leaves the server's routes
-unchanged, and only its Mac build changes.
+`doc_gen` owns `/generate-doc` (the Mac's Doc Gen is its only caller), so with
+`doc_gen` off that path answers `404 feature_disabled` and `/health` omits it.
+`/generate-docx` is not gated: the Chrome extension's ExportMenu calls it, so
+it stays on whatever the feature set.
 
 ## Commands
 

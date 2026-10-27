@@ -136,8 +136,9 @@ test('with only agent_chat, the disabled route modules were never imported', { s
 });
 
 test('enabledEndpoints drops a disabled group\'s endpoints and keeps the rest', () => {
-  const all = ['/kb/search', '/kb/loop/agent-run', '/kb/issue-schedule', '/kb/ingest-code-graph', '/generate-doc'];
-  assert.deepEqual(enabledEndpoints(all, CHAT_ONLY), ['/kb/search', '/generate-doc']);
+  const all = ['/kb/search', '/kb/loop/agent-run', '/kb/issue-schedule', '/kb/ingest-code-graph', '/generate-doc', '/generate-docx'];
+  // /generate-doc is doc_gen-owned; /generate-docx (ExportMenu) is always on.
+  assert.deepEqual(enabledEndpoints(all, CHAT_ONLY), ['/kb/search', '/generate-docx']);
   assert.deepEqual(enabledEndpoints(all, null), all);
 });
 

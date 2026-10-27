@@ -6,7 +6,7 @@ import path from 'path';
 import fs from 'fs';
 import { handleKB, initFeatureRoutes } from './routes/router.mjs';
 import { prewarmAgentEngine, benchFakeEngineEnabled } from './routes/agent-v2.mjs';
-import { enabledEndpoints } from './routes/feature-routes.mjs';
+import { enabledEndpoints, featureDisabledFor, sendFeatureDisabled } from './routes/feature-routes.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
 import { handleExportRoutes } from './server/export-routes.mjs';
 
@@ -274,8 +274,9 @@ const HOST = config.host;
 //   v76 — ALL_ENDPOINTS now lists /kb/issues, /kb/export-all, /kb/live/:id/stream and /kb/email/classify (already served by routes/router.mjs and routes/live.mjs; /health ENDPOINTS advertises them). No request or response shape change.
 //   v77 — GET /kb/usage/turn-composition?limit= → { turns: [...] }: the caller's newest v2 chat turns' measured context split (migration 0044): LLM-IDE parts as approximate tokens (chars/4), the SDK's own end-of-turn categories (sdk_*), tool-result size and user MCP server count. Additive; read-only.
 //   v78 — GET /kb/meeting/:id?include=transcript adds `transcript` (the stored transcript text) to the record; the default response is unchanged (no transcript). Used by the Mac's Doc Gen.
+//   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
 //   v79 — GET /kb/os/state: the read-only System view aggregate (feature set + kit table, health checks, this user's running chat turns / meeting-agent runs / live sessions with their cancel routes, activity, token usage by window, turn composition, knowledge counts). No model call, no write. Additive. Also GET /kb/os/stream: a per-user SSE change channel (hello, then activity / usage / turn-start / turn-end / agent-run / live-session events carrying only {type, at}; the client re-fetches /kb/os/state).
-const SERVER_API_VERSION = 79;
+const SERVER_API_VERSION = 80;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -393,6 +394,8 @@ const ALL_ENDPOINTS = [
   '/kb/os/stream',
 ];
 const ENDPOINTS = enabledEndpoints(ALL_ENDPOINTS, config.features);
+// Feature route-group handlers, filled at boot (see initFeatureRoutes below).
+let featureHandlers = {};
 
 // Map a route URL to a rate-limit profile (see server/rate-limit.mjs).
 // Anything not listed has no limit applied.
@@ -851,7 +854,13 @@ const server = http.createServer(async (req, res) => {
   }
 
   try {
+    const featureOff = featureDisabledFor(req.url, config.features);
+    if (featureOff) {
+      sendFeatureDisabled(res, featureOff);
+      return;
+    }
     if (await handleAIRoutes(req, res)) return;
+    if (await featureHandlers.doc_gen?.(req, res)) return;
     if (await handleExportRoutes(req, res)) return;
 
     sendError(res, new AppError('NOT_FOUND', `No route for ${req.method} ${req.url}`, {
@@ -1136,7 +1145,7 @@ if (!IS_LOOPBACK && !config.allowRemote) {
 // Import the enabled feature route groups BEFORE accepting traffic: a broken
 // route module then fails the boot (as its static import used to) instead of
 // the first request, and no request pays the import cost.
-await initFeatureRoutes(config.features);
+({ handlers: featureHandlers } = await initFeatureRoutes(config.features));
 
 server.listen(PORT, HOST, () => {
   // Even when remote binding is explicitly allowed, warn loudly so the

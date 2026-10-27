@@ -12,7 +12,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY  = 'b'.repeat(48);
 process.env.NODE_ENV = 'test';
 
-// export-routes.mjs imports kb/db.mjs transitively. Point it at a scratch DB so
+// doc-gen.mjs imports kb/db.mjs transitively (via export-routes.mjs). Point it at a scratch DB so
 // the suite can never touch the developer's real one, even though every case
 // here returns before any KB write.
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -20,9 +20,9 @@ const tmpDb = path.join(__dirname, '_generate-doc-prompt-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-const { buildDocPrompt, handleExportRoutes, validateDocRequest, buildDocRef,
+const { buildDocPrompt, handleDocGenRoutes: handleExportRoutes, validateDocRequest, buildDocRef,
         packSources, MAX_SOURCE_CONTENT, MAX_TOTAL_SOURCE_CHARS,
-        MIN_SOURCE_CONTENT, MAX_REPORTED_NAMES } = await import('../server/export-routes.mjs');
+        MIN_SOURCE_CONTENT, MAX_REPORTED_NAMES } = await import('../routes/doc-gen.mjs');
 
 function makeReq({ method, url, body, userId = 'u1' }) {
   const chunks = body == null ? [] : [Buffer.from(JSON.stringify(body))];
