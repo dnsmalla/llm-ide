@@ -175,6 +175,18 @@ contract-gates:
 	node scripts/gen-design-tokens.mjs --check
 	$(MAKE) os-view-check
 
+# Feature matrix (Phase 1 kit gates): every removable Mac feature switched off,
+# one row at a time — server side (feature_disabled 404s, /health features and
+# endpoints, extension REQUIRED_ENDPOINTS, live contract in assert mode) and,
+# with FM_ARGS=--mac, the reduced Mac builds. Not in `regression`: it boots a
+# server per row (~40 s) and the Mac rows take a full Swift build each, so the
+# nightly job runs it (.github/workflows/feature-matrix.yml).
+#   make feature-matrix                       every row, server side
+#   make feature-matrix FM_ARGS="--key doc_gen --mac"
+.PHONY: feature-matrix
+feature-matrix:
+	node scripts/feature-matrix.mjs $(FM_ARGS)
+
 # System view (ui/os-view): the React page the Mac app shows in a web view. The
 # build writes the committed bundle to mac/Sources/LlmIdeMac/Resources/os-view
 # (Monaco precedent). Fixed file names, no hashes, so rebuilds are deterministic.

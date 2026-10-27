@@ -36,6 +36,13 @@ const FIXTURE_DIR = join(SCHEMA_DIR, 'fixtures');
 const SERVER = join(ROOT, 'extension/server.mjs');
 const STUB_CLI = join(HERE, 'fixtures/stub-claude-cli.mjs');
 const COVERAGE_TARGET = 0.6;
+// Assert mode (feature matrix, scripts/feature-matrix.mjs): CONTRACT_FEATURES is
+// the LLMIDE_FEATURES value the server boots with, and CONTRACT_EXPECT_DISABLED=1
+// turns the skip of disabled-feature routes into an assertion: a fixture whose
+// path belongs to a feature the server reports disabled must answer
+// 404 { error: 'feature_disabled', feature } (401 fixtures still answer 401 first).
+const EXPECT_DISABLED = process.env.CONTRACT_EXPECT_DISABLED === '1';
+const CONTRACT_FEATURES = process.env.CONTRACT_FEATURES;
 const BOOT_TIMEOUT_MS = 20_000;
 const REQUEST_TIMEOUT_MS = 10_000;
 const PASSWORD = 'example-password';
@@ -150,6 +157,8 @@ let child;
 let baseUrl;
 let tmpDir;
 let serverLog = '';
+let healthFeatures = null;   // /health `features` of the booted server (null = all)
+let featureGate = null;      // routes/feature-routes.mjs, assert mode only
 const tokenFor = new Map(); // fixture -> access token (unique user per fixture)
 
 function freePort() {
@@ -181,6 +190,7 @@ function childEnv(port, secrets) {
     LLMIDE_VAULT_KEY: secrets.vault,
     LLMIDE_BCRYPT_COST: '10',
     LLMIDE_ANTHROPIC_CLI: STUB_CLI,
+    ...(CONTRACT_FEATURES !== undefined ? { LLMIDE_FEATURES: CONTRACT_FEATURES } : {}),
   };
 }
 
@@ -240,7 +250,10 @@ before(async () => {
   chmodSync(STUB_CLI, 0o755);
   tmpDir = mkdtempSync(join(tmpdir(), 'llmide-http-contract-'));
   const secrets = { jwt: randomBytes(48).toString('base64url'), vault: randomBytes(48).toString('base64url') };
-  await seedUsers(fixtures.filter((fx) => !skipReason(fx)), secrets);
+  // Assert mode replays the feature-gated fixtures too, so it seeds every fixture's user.
+  await seedUsers(EXPECT_DISABLED ? fixtures : fixtures.filter((fx) => !skipReason(fx)), secrets);
+  // Imported after seedUsers, which sets LLMIDE_DB_PATH before config is first loaded.
+  if (EXPECT_DISABLED) featureGate = await import('../routes/feature-routes.mjs');
 
   const port = await freePort();
   baseUrl = `http://127.0.0.1:${port}`;
@@ -257,7 +270,7 @@ before(async () => {
     if (child.exitCode !== null) throw new Error(`server exited during boot:\n${serverLog}`);
     try {
       const h = await request('GET', '/health');
-      if (h.status === 200) break;
+      if (h.status === 200) { healthFeatures = h.body?.features ?? null; break; }
     } catch { /* not listening yet */ }
     if (Date.now() > deadline) throw new Error(`server did not answer /health within ${BOOT_TIMEOUT_MS} ms:\n${serverLog}`);
     await new Promise((r) => setTimeout(r, 100));
@@ -312,16 +325,33 @@ const drifting = [];            // { file, reason, message } known drifts that s
 
 for (const fx of fixtures) {
   const reason = skipReason(fx);
-  if (reason) {
+  // Normal mode skips here. Assert mode decides per fixture inside the test, once the
+  // server's /health features are known, so a disabled route is asserted, not skipped.
+  if (reason && !EXPECT_DISABLED) {
     skipped.push({ file: fx.file, endpoint: fx.endpoint, status: fx.status, reason });
     continue;
   }
   const [method, pathTpl] = fx.endpoint.split(' ');
   const ep = endpoints.get(fx.endpoint);
-  test(`${fx.endpoint} -> ${fx.status} (${fx.file})`, async () => {
+  test(`${fx.endpoint} -> ${fx.status} (${fx.file})`, async (t) => {
     assert.ok(ep, `${fx.endpoint} is not declared`);
     const path = pathFor(fx, pathTpl);
     const token = fx.status === 401 ? undefined : tokenFor.get(fx);
+    const owner = EXPECT_DISABLED && fx.status !== 401 && featureGate
+      ? featureGate.featureDisabledFor(path, healthFeatures ? new Set(healthFeatures) : null)
+      : null;
+    if (owner) {
+      const off = await request(method, path, { token, body: fx.request?.body, query: fx.request?.query });
+      assert.equal(off.status, 404, `${fx.file}: disabled feature ${owner} must answer 404, got ${off.status}: ${off.text.slice(0, 200)}`);
+      assert.deepEqual(off.body, { error: 'feature_disabled', feature: owner }, `${fx.file}: wrong feature_disabled body`);
+      replayed.add(pairOf(fx.endpoint, fx.status));
+      return;
+    }
+    if (reason) {
+      skipped.push({ file: fx.file, endpoint: fx.endpoint, status: fx.status, reason });
+      t.skip(reason);
+      return;
+    }
     const res = await request(method, path, { token, body: fx.request?.body, query: fx.request?.query });
     const problems = [];
     if (res.status !== fx.status) problems.push(`answered ${res.status}, fixture says ${fx.status}: ${res.text.slice(0, 200)}`);
