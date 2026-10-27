@@ -104,7 +104,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout feature-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
+regression: graph-kit-checkout feature-gates contract-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
 
 .PHONY: feature-gates
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
@@ -163,8 +163,9 @@ chat-gates:
 	node scripts/conformance-agent-v2.mjs
 
 # HTTP endpoint contract (schema/http): request and response shapes per route
-# group, checked against the roster. Deliberately NOT in `regression` yet: the
-# route-group specs land in P3-P10 of the Phase 1 plan, and P16 wires this in.
+# group, checked against the roster. Part of `regression` (Phase 1 P16) and
+# run by the pre-push hook for mac/ pushes through `regression`; it is fast
+# (node only), so it runs right after feature-gates, before the Swift builds.
 .PHONY: contract-gates
 contract-gates:
 	node scripts/conformance-http.mjs

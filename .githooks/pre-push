@@ -5,7 +5,8 @@
 #   - changes under mac/        → `make regression` (Swift build + tests)
 #   - changes under extension/  → `make test`       (backend node --test)
 #   - HTTP contract changes     → `make contract-gates` (schema/http fixtures,
-#                                 generated api-types.ts; skipped otherwise)
+#                                 generated api-types.ts; skipped otherwise;
+#                                 already inside `make regression` for mac/ pushes)
 # so a broken build or a regressed test never reaches the remote. A push
 # that touches neither tree skips the gate and returns immediately.
 #
@@ -123,7 +124,9 @@ if [ "$mac_changed" -eq 1 ]; then
     rm -f "$gate_log"
 fi
 
-if [ "$contract_changed" -eq 1 ]; then
+# A mac/ push already ran contract-gates inside `make regression` (P16), so only
+# non-mac contract changes (extension/, schema/, docs/reference/api/ alone) run it here.
+if [ "$contract_changed" -eq 1 ] && [ "$mac_changed" -eq 0 ]; then
     echo "pre-push: HTTP contract changed — running contract gates (make contract-gates)…"
     if ! make contract-gates; then
         echo "pre-push: contract gate FAILED — push aborted." >&2
