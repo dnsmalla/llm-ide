@@ -17,9 +17,10 @@ struct ServerDocFilesTests {
     final class Wire: @unchecked Sendable {
         private let lock = NSLock()
         private var seen: [URLRequest] = []
-        private let answer: @Sendable (URLRequest) -> (status: Int, body: Data)
+        private let answer: @Sendable (URLRequest) throws -> (status: Int, body: Data)
 
-        init(_ answer: @escaping @Sendable (URLRequest) -> (status: Int, body: Data)) {
+        /// A throwing answer stands for a transport failure (no HTTP response).
+        init(_ answer: @escaping @Sendable (URLRequest) throws -> (status: Int, body: Data)) {
             self.answer = answer
         }
 
@@ -47,7 +48,7 @@ struct ServerDocFilesTests {
                 lock.lock()
                 seen.append(request)
                 lock.unlock()
-                let (status, body) = answer(request)
+                let (status, body) = try answer(request)
                 let url = request.url ?? URL(string: "http://test.invalid")!
                 let response = HTTPURLResponse(url: url, statusCode: status, httpVersion: "HTTP/1.1",
                                                headerFields: ["Content-Type": "application/json"])!
@@ -242,8 +243,8 @@ struct ServerDocFilesTests {
         let sent = try #require(JSONSerialization.jsonObject(with: put.httpBody ?? Data()) as? [String: Any])
         #expect(sent["rawContent"] as? String == Self.weekly().renderedMarkdown())
         #expect(sent["surface"] as? String == "doc")
-        // The server did the write, so nothing was written locally.
-        #expect(!h.fileExists("templates/weekly/template.md"))
+        // Write-through (docs-kit §8, K1b review): the same bytes are on disk too.
+        #expect(h.fileExists("templates/weekly/template.md"))
     }
 
     @Test func deleteSendsOnlyTheFolder() async throws {

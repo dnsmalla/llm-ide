@@ -164,28 +164,103 @@ struct LocalDocFiles: DocFilesBackend {
 
     // MARK: - Delete (fallback rule)
 
-    /// Remove `template.md`, then the folder if that left it empty. Never
-    /// recursive: a user's extra files in the folder survive.
+    /// Remove the entry the scan lists (`template.md`, else the first `.md`,
+    /// as `templateMarkdownURL` picks it), then the folder if that left it
+    /// empty. Never recursive: a user's extra files in the folder survive.
     static func removeTemplateEntry(folderName: String, at root: URL) throws {
-        try removeEntry(file: "template.md",
-                        folder: ProjectLayout(root: root).templateDir(named: folderName))
+        try removeEntry(folder: ProjectLayout(root: root).templateDir(named: folderName),
+                        entry: templateMarkdownURL)
     }
 
     /// The command counterpart of `removeTemplateEntry`.
     static func removeCommandEntry(folderName: String, at root: URL) throws {
-        try removeEntry(file: "command.md",
-                        folder: ProjectLayout(root: root).commandDir(named: folderName))
+        try removeEntry(folder: ProjectLayout(root: root).commandDir(named: folderName),
+                        entry: commandMarkdownURL)
     }
 
-    private static func removeEntry(file: String, folder: URL) throws {
+    private static func removeEntry(folder: URL, entry pick: (URL) -> URL?) throws {
         let fm = FileManager.default
-        let entry = folder.appendingPathComponent(file)
-        if fm.fileExists(atPath: entry.path) {
+        if let entry = pick(folder), fm.fileExists(atPath: entry.path) {
             try fm.removeItem(at: entry)
         }
         // Empty means no entry at all, hidden files included, as rmdir sees it.
         if let rest = try? fm.contentsOfDirectory(atPath: folder.path), rest.isEmpty {
             try fm.removeItem(at: folder)
+        }
+    }
+
+    // MARK: - Write-through snapshots (docGenUseServerStore)
+
+    /// What one folder's entry file held before an optimistic write or delete,
+    /// so a server refusal can be undone. `written` is the text the write put
+    /// there, or nil for a delete (the file is expected to stay absent).
+    struct EntrySnapshot {
+        let folder: URL
+        let folderExisted: Bool
+        let file: URL
+        /// The bytes before the change, nil when there was no file.
+        let previous: Data?
+        let written: Data?
+    }
+
+    /// Before a template save: the `template.md` the write will replace.
+    static func snapshotTemplateWrite(at root: URL, folderName: String, written: String) -> EntrySnapshot {
+        snapshot(folder: ProjectLayout(root: root).templateDir(named: folderName),
+                 file: "template.md", written: Data(written.utf8))
+    }
+
+    /// Before a template delete: the entry the scan lists (`templateMarkdownURL`).
+    static func snapshotTemplateDelete(at root: URL, folderName: String) -> EntrySnapshot {
+        let folder = ProjectLayout(root: root).templateDir(named: folderName)
+        return snapshotEntry(folder: folder, entry: templateMarkdownURL(in: folder))
+    }
+
+    /// Before a command save: the `command.md` the write will replace.
+    static func snapshotCommandWrite(at root: URL, folderName: String, written: String) -> EntrySnapshot {
+        snapshot(folder: ProjectLayout(root: root).commandDir(named: folderName),
+                 file: "command.md", written: Data(written.utf8))
+    }
+
+    /// Before a command delete: the entry the scan lists (`commandMarkdownURL`).
+    static func snapshotCommandDelete(at root: URL, folderName: String) -> EntrySnapshot {
+        let folder = ProjectLayout(root: root).commandDir(named: folderName)
+        return snapshotEntry(folder: folder, entry: commandMarkdownURL(in: folder))
+    }
+
+    private static func snapshot(folder: URL, file: String, written: Data?) -> EntrySnapshot {
+        let fm = FileManager.default
+        let target = folder.appendingPathComponent(file)
+        return EntrySnapshot(folder: folder,
+                             folderExisted: fm.fileExists(atPath: folder.path),
+                             file: target,
+                             previous: fm.contents(atPath: target.path),
+                             written: written)
+    }
+
+    private static func snapshotEntry(folder: URL, entry: URL?) -> EntrySnapshot {
+        let fm = FileManager.default
+        let target = entry ?? folder.appendingPathComponent("template.md")
+        return EntrySnapshot(folder: folder,
+                             folderExisted: fm.fileExists(atPath: folder.path),
+                             file: target,
+                             previous: fm.contents(atPath: target.path),
+                             written: nil)
+    }
+
+    /// Undo a change the server refused. Only applies when the file still holds
+    /// what this change left there (the written text, or absence after a delete),
+    /// so a later change to the same folder is never overwritten by an old rollback.
+    static func restore(_ snap: EntrySnapshot) {
+        let fm = FileManager.default
+        guard fm.contents(atPath: snap.file.path) == snap.written else { return }
+        if let previous = snap.previous {
+            try? previous.write(to: snap.file, options: .atomic)
+            return
+        }
+        if snap.written != nil { try? fm.removeItem(at: snap.file) }
+        if !snap.folderExisted,
+           let rest = try? fm.contentsOfDirectory(atPath: snap.folder.path), rest.isEmpty {
+            try? fm.removeItem(at: snap.folder)
         }
     }
 

@@ -229,9 +229,10 @@ final class ServerDocFiles {
 }
 
 /// Asks the server first and answers from `LocalDocFiles` for any call the
-/// server cannot serve (down, feature off, refused folder, truncated listing).
-/// The fallback is logged once per distinct failure, and a write is never
-/// dropped: if the server write fails, the file is written locally.
+/// server cannot serve (transport failure, 5xx, feature off, refused folder,
+/// truncated listing). A validation answer (4xx: TOO_LARGE, INVALID_FOLDER,
+/// RESERVED_FOLDER, UNSAFE_PATH, ...) is thrown instead, and nothing is written
+/// locally, so the caller can show it. See docs-kit §8 (K1b review).
 @MainActor
 struct DocFilesWithFallback: DocFilesBackend {
     let server: ServerDocFiles
@@ -242,11 +243,16 @@ struct DocFilesWithFallback: DocFilesBackend {
         self.local = local ?? LocalDocFiles()
     }
 
+    /// Runs the server call; on a failure that `DocFilesServerError.answersLocally`
+    /// names, answers from the local files. Any other typed error (a validation
+    /// answer) is thrown to the caller with nothing written locally.
     private func attempt<T>(_ operation: String,
                             server serverCall: () async throws -> T,
                             local localCall: () async throws -> T) async throws -> T {
         do {
             return try await serverCall()
+        } catch let error as DocFilesServerError where !error.answersLocally {
+            throw error
         } catch {
             server.noteFallback(operation, error)
             return try await localCall()
@@ -295,5 +301,24 @@ struct DocFilesWithFallback: DocFilesBackend {
         try await attempt("seed",
                           server: { try await server.seed(root: root) },
                           local: { try await local.seed(root: root, templateKit: templateKit, commandKit: commandKit) })
+    }
+}
+
+extension DocFilesServerError {
+    /// True when the local files should answer a call that failed with this
+    /// error: the server is unreachable or failing (a transport error, which is
+    /// not a `DocFilesServerError` at all, or 5xx), the feature is off, the
+    /// project is not registered, or the folder was refused. Everything else is
+    /// a validation answer the caller must see, and it writes nothing locally.
+    var answersLocally: Bool {
+        switch self {
+        case .featureDisabled, .projectNotRegistered, .invalidRoot, .tooManyProjects,
+             .notServing, .truncated:
+            return true
+        case .other(let status, _, _):
+            return status >= 500
+        case .reservedFolder, .unsafePath, .invalidFolder, .notFound, .tooLarge:
+            return false
+        }
     }
 }

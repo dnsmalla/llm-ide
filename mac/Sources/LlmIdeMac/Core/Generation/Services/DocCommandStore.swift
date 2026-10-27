@@ -8,6 +8,12 @@ private let logger = Logger(subsystem: "com.llmide.macapp", category: "DocComman
 @MainActor
 final class DocCommandStore: ObservableObject {
     @Published private(set) var projectCommands: [DocCommand] = []
+    /// The last validation answer the server gave a command write. See `DocTemplateStore.serverError`.
+    @Published private(set) var serverError: String?
+    /// Bumped on every optimistic mutation. See `DocTemplateStore.epoch`.
+    private var epoch = 0
+    /// Folders with a queued server write or delete not yet finished. See `DocTemplateStore.pendingFolders`.
+    private var pendingFolders: [String: Int] = [:]
 
     /// Project `commands/` when a project is open; otherwise the built-ins.
     /// Project `commands/` when a project is open; otherwise the kit's
@@ -108,8 +114,12 @@ final class DocCommandStore: ObservableObject {
               let command = projectCommands.first(where: { $0.id == id }),
               let folder = command.folderName else { return }
         if let server, let backend = server.backend(for: root) {
+            // Write-through: the entry is removed on disk first, then the server call is queued.
+            let snap = LocalDocFiles.snapshotCommandDelete(at: root, folderName: folder)
+            try? LocalDocFiles.removeCommandEntry(folderName: folder, at: root)
             projectCommands.removeAll { $0.id == id }
-            enqueueServerWrite(root, server: server) {
+            epoch += 1
+            enqueueServerWrite(root, server: server, folder: folder, rollback: snap, isDelete: true) {
                 try await backend.deleteCommand(folderName: folder, root: root)
             }
             return
@@ -147,42 +157,81 @@ final class DocCommandStore: ObservableObject {
             reloadProjectCommands(at: root)
             return
         }
+        // Write-through: the file is on disk before the call is queued. See DocTemplateStore.
+        let snap = LocalDocFiles.snapshotCommandWrite(at: root, folderName: folderName,
+                                                      written: command.renderedMarkdown())
+        write(command, at: root, folderName: folderName)
         var next = projectCommands.filter { $0.folderName != folderName }
         next.append(command)
         projectCommands = next.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-        enqueueServerWrite(root, server: server) {
+        epoch += 1
+        enqueueServerWrite(root, server: server, folder: folderName, rollback: snap, isDelete: false) {
             try await backend.saveCommand(command, folderName: folderName, root: root)
         }
     }
 
-    private func enqueueServerWrite(_ root: URL, server: ServerDocFiles,
+    /// See `DocTemplateStore.enqueueServerWrite`.
+    private func enqueueServerWrite(_ root: URL, server: ServerDocFiles, folder: String,
+                                    rollback: LocalDocFiles.EntrySnapshot?, isDelete: Bool,
                                     _ write: @escaping @MainActor () async throws -> Void) {
+        pendingFolders[folder, default: 0] += 1
         server.enqueue { [weak self] in
             do {
                 try await write()
+                self?.serverError = nil
+            } catch let error as DocFilesServerError where !(isDelete && error == .notFound) {
+                if let rollback { LocalDocFiles.restore(rollback) }
+                self?.serverError = error.errorDescription
+                logger.error("doc command write refused: \(error.localizedDescription, privacy: .public)")
             } catch {
                 logger.error("doc command write failed: \(error.localizedDescription, privacy: .public)")
+            }
+            if let self {
+                let left = (self.pendingFolders[folder] ?? 1) - 1
+                self.pendingFolders[folder] = left > 0 ? left : nil
             }
             self?.refreshFromServer(at: root)
         }
     }
 
-    /// Replaces the published commands with the server's list for `root`.
+    /// Replaces the published commands with the server's list for `root`, unless a
+    /// mutation ran after this refresh was queued (then a fresh refresh is queued).
     private func refreshFromServer(at root: URL) {
         guard let server, let backend = server.backend(for: root) else { return }
+        let queuedEpoch = epoch
         server.enqueue { [weak self] in
-            guard let list = try? await backend.listCommands(root: root) else { return }
+            let list: [DocCommand]
+            do {
+                list = try await backend.listCommands(root: root)
+            } catch let error as DocFilesServerError {
+                self?.serverError = error.errorDescription
+                return
+            } catch {
+                return
+            }
             guard let self, self.currentProjectRoot?.path == root.path else { return }
+            guard self.epoch == queuedEpoch else {
+                self.refreshFromServer(at: root)
+                return
+            }
             self.projectCommands = list
         }
     }
 
     /// Append `-2`, `-3`, … until the folder name is free.
+    /// See `DocTemplateStore.uniqueFolderSlug`: with the server path on, a name held by
+    /// the optimistic list or a queued write is taken too.
     private func uniqueFolderSlug(base: String, root: URL) -> String {
         let layout = ProjectLayout(root: root)
+        let serving = server?.serves(root) == true
+        func taken(_ slug: String) -> Bool {
+            if FileManager.default.fileExists(atPath: layout.commandDir(named: slug).path) { return true }
+            guard serving else { return false }
+            return pendingFolders[slug] != nil || projectCommands.contains { $0.folderName == slug }
+        }
         var slug = base
         var n = 2
-        while FileManager.default.fileExists(atPath: layout.commandDir(named: slug).path) {
+        while taken(slug) {
             slug = "\(base)-\(n)"
             n += 1
         }

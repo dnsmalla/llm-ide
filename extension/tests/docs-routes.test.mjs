@@ -391,3 +391,42 @@ test.after(() => {
     try { fs.rmSync(f, { force: true }); } catch { /* ignore */ }
   }
 });
+
+test('delete: a folder with no template.md deletes the file the list shows (its first .md), not a 404', async () => {
+  reset();
+  const u = mkUser('stray');
+  const root = makeProject();
+  try {
+    const id = await registered(u, root);
+    const dir = path.join(root, 'templates', 'stray');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'notes.md'), '# Stray\n\n## A\n');
+    const list = await call(u, 'GET', `/kb/docs/templates?project=${id}`);
+    assert.deepEqual(list.json().templates.map((t) => t.folderName), ['stray']);
+    const del = await call(u, 'DELETE', `/kb/docs/templates/stray?project=${id}`);
+    assert.equal(del.statusCode, 200, del._body);
+    assert.equal(del.json().folderRemoved, true);
+    assert.ok(!fs.existsSync(dir), 'the stray entry and its empty folder should be gone');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('delete: other .md files beside template.md are kept; the folder then lists the next .md (documented, docs-kit §8)', async () => {
+  reset();
+  const u = mkUser('extra');
+  const root = makeProject();
+  try {
+    const id = await registered(u, root);
+    assert.equal((await call(u, 'PUT', `/kb/docs/templates/retro?project=${id}`, { name: 'Retro', sections: ['A'] })).statusCode, 200);
+    const dir = path.join(root, 'templates', 'retro');
+    fs.writeFileSync(path.join(dir, 'README.md'), 'my notes\n');
+    const del = await call(u, 'DELETE', `/kb/docs/templates/retro?project=${id}`);
+    assert.equal(del.statusCode, 200, del._body);
+    assert.equal(del.json().folderRemoved, false);
+    assert.ok(!fs.existsSync(path.join(dir, 'template.md')));
+    assert.equal(fs.readFileSync(path.join(dir, 'README.md'), 'utf8'), 'my notes\n', 'the user file must survive');
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});

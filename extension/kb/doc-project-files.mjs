@@ -555,7 +555,10 @@ export function deleteFolder(root, family, folderName) {
   const real = realpathSync(dir);
   if (!insideRoot(root, real)) throw new DocFilesError('UNSAFE_PATH', 'folder resolves outside the project');
   const preferred = family === 'templates' ? 'template.md' : 'command.md';
-  const file = join(dir, preferred);
+  // The entry the scan lists: the preferred file, else the first `.md` (the
+  // same rule `scanFamily` uses), so a folder the list shows can always be deleted.
+  const file = entryFile(root, dir, preferred);
+  if (!file) return null;
   let fst;
   try {
     fst = lstatSync(file);

@@ -63,6 +63,16 @@ struct GenerationTemplateSection: View {
             }
 
             if isExpanded {
+                // The server's refusal of a template or command write (docs-kit K1b review).
+                // The write was undone; this says why.
+                if let message = templateStore.serverError ?? commandStore.serverError {
+                    Text(message)
+                        .font(.caption)
+                        .foregroundStyle(.red)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 4)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
                 templatesGroup
                 commandsGroup
             }

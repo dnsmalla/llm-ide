@@ -7,6 +7,16 @@ private let logger = Logger(subsystem: "com.llmide.macapp", category: "DocTempla
 final class DocTemplateStore: ObservableObject {
     @Published private(set) var customTemplates: [DocTemplate] = []
     @Published private(set) var projectTemplates: [DocTemplate] = []
+    /// The last validation answer the server gave a template write (TOO_LARGE,
+    /// INVALID_FOLDER, ...). The write was undone locally. Nil when the last
+    /// server write was accepted. Shown by the Doc Gen template section.
+    @Published private(set) var serverError: String?
+    /// Bumped on every optimistic mutation. A refresh queued before a mutation
+    /// does not replace the list the mutation published (docs-kit §8, K1b review).
+    private var epoch = 0
+    /// Folders with a queued server write or delete not yet finished, with counts.
+    /// A new template may not take one of these names (docs-kit §8, K1b review).
+    private var pendingFolders: [String: Int] = [:]
 
     /// Project `templates/` when a project is open; otherwise the kit's
     /// defaults + app-support customs.
@@ -198,7 +208,13 @@ final class DocTemplateStore: ObservableObject {
            let folder = template.folderName {
             if let server, let backend = server.backend(for: root) {
                 projectTemplates.removeAll { $0.id == id }
-                enqueueServerWrite(root, server: server) {
+                // Write-through: the entry is removed on disk first (the same
+                // rule as the server's delete), then the server call is queued.
+                let snap = LocalDocFiles.snapshotTemplateDelete(at: root, folderName: folder)
+                try? LocalDocFiles.removeTemplateEntry(folderName: folder, at: root)
+                projectTemplates.removeAll { $0.id == id }
+                epoch += 1
+                enqueueServerWrite(root, server: server, folder: folder, rollback: snap, isDelete: true) {
                     try await backend.deleteTemplate(folderName: folder, root: root)
                 }
                 return
@@ -227,12 +243,22 @@ final class DocTemplateStore: ObservableObject {
         }
     }
 
+    /// The first `base`, `base-2`, `base-3`, ... that no folder holds. With the
+    /// server path on, a name is also taken while the optimistic list or a
+    /// queued write holds it, so two quick saves of one name get two folders.
     private func uniqueFolderSlug(base: String, root: URL) -> String {
         let layout = ProjectLayout(root: root)
         let fm = FileManager.default
+        let serving = server?.serves(root) == true
+        func taken(_ slug: String) -> Bool {
+            if fm.fileExists(atPath: layout.templateDir(named: slug).path) { return true }
+            guard serving else { return false }
+            return pendingFolders[slug] != nil
+                || projectTemplates.contains { $0.folderName == slug }
+        }
         var slug = base
         var n = 2
-        while fm.fileExists(atPath: layout.templateDir(named: slug).path) {
+        while taken(slug) {
             slug = "\(base)-\(n)"
             n += 1
         }
@@ -250,8 +276,14 @@ final class DocTemplateStore: ObservableObject {
             reloadProjectTemplates(at: root)
             return
         }
+        // Write-through: the file is on disk before the call is queued, so a
+        // quit inside the queue window keeps the edit. The server write mirrors it.
+        let text = template.renderedMarkdown()
+        let snap = LocalDocFiles.snapshotTemplateWrite(at: root, folderName: folderName, written: text)
+        writeProjectTemplate(template, at: root, folderName: folderName)
         upsertProjectTemplate(template)
-        enqueueServerWrite(root, server: server) {
+        epoch += 1
+        enqueueServerWrite(root, server: server, folder: folderName, rollback: snap, isDelete: false) {
             try await backend.saveTemplate(template, folderName: folderName, root: root)
         }
     }
@@ -265,25 +297,56 @@ final class DocTemplateStore: ObservableObject {
     /// Queues one server write and then a list, so the published templates end
     /// up as the server holds them. A write that the server cannot take is
     /// written locally by the fallback inside `DocFilesWithFallback`.
-    private func enqueueServerWrite(_ root: URL, server: ServerDocFiles,
+    /// A write the server refuses with a validation answer is undone on disk
+    /// (`rollback`) and reported in `serverError`. A delete the server says is
+    /// already absent is not an error.
+    private func enqueueServerWrite(_ root: URL, server: ServerDocFiles, folder: String,
+                                    rollback: LocalDocFiles.EntrySnapshot?, isDelete: Bool,
                                     _ write: @escaping @MainActor () async throws -> Void) {
+        pendingFolders[folder, default: 0] += 1
         server.enqueue { [weak self] in
             do {
                 try await write()
+                self?.serverError = nil
+            } catch let error as DocFilesServerError where !(isDelete && error == .notFound) {
+                if let rollback { LocalDocFiles.restore(rollback) }
+                self?.serverError = error.errorDescription
+                logger.error("doc template write refused: \(error.localizedDescription, privacy: .public)")
             } catch {
                 logger.error("doc template write failed: \(error.localizedDescription, privacy: .public)")
             }
+            self?.finishPending(folder)
             self?.refreshFromServer(at: root)
         }
+    }
+
+    private func finishPending(_ folder: String) {
+        let left = (pendingFolders[folder] ?? 1) - 1
+        pendingFolders[folder] = left > 0 ? left : nil
     }
 
     /// Replaces the published templates with the server's list for `root`,
     /// unless the project has changed in the meantime.
     private func refreshFromServer(at root: URL) {
         guard let server, let backend = server.backend(for: root) else { return }
+        let queuedEpoch = epoch
         server.enqueue { [weak self] in
-            guard let list = try? await backend.listTemplates(root: root) else { return }
+            let list: [DocTemplate]
+            do {
+                list = try await backend.listTemplates(root: root)
+            } catch let error as DocFilesServerError {
+                self?.serverError = error.errorDescription
+                return
+            } catch {
+                return
+            }
             guard let self, self.currentProjectRoot?.path == root.path else { return }
+            // A mutation ran while this list was on its way: its list is newer.
+            // Ask again so the server's answer is applied once it is current.
+            guard self.epoch == queuedEpoch else {
+                self.refreshFromServer(at: root)
+                return
+            }
             self.projectTemplates = list
         }
     }

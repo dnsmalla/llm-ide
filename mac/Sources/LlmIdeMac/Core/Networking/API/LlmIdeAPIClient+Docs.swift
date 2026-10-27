@@ -96,6 +96,16 @@ extension LlmIdeAPIClient {
         let count: Int
         let truncated: Bool
         let scannedFolders: Int
+
+        /// `truncated` and `scannedFolders` default to false and 0 when absent,
+        /// so an older or newer server cannot force a fallback by omitting them.
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            templates = try c.decode([DocTemplate].self, forKey: .templates)
+            count = try c.decode(Int.self, forKey: .count)
+            truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+            scannedFolders = try c.decodeIfPresent(Int.self, forKey: .scannedFolders) ?? 0
+        }
     }
 
     /// `GET /kb/docs/commands` answer. See `DocTemplatesPage`.
@@ -104,6 +114,14 @@ extension LlmIdeAPIClient {
         let count: Int
         let truncated: Bool
         let scannedFolders: Int
+
+        public init(from decoder: Decoder) throws {
+            let c = try decoder.container(keyedBy: CodingKeys.self)
+            commands = try c.decode([DocCommand].self, forKey: .commands)
+            count = try c.decode(Int.self, forKey: .count)
+            truncated = try c.decodeIfPresent(Bool.self, forKey: .truncated) ?? false
+            scannedFolders = try c.decodeIfPresent(Int.self, forKey: .scannedFolders) ?? 0
+        }
     }
 
     /// `PUT /kb/docs/templates/:folder` body. `rawContent`, when present, is

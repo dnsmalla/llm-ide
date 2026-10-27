@@ -72,6 +72,8 @@ struct DocGenServerStoreParityTests {
             #expect(mine.surface == theirs.surface, "surface for \(theirs.folderName ?? "?")")
             #expect(mine.sections == theirs.sections, "sections for \(theirs.folderName ?? "?")")
             #expect(mine.rawContent == theirs.rawContent, "rawContent for \(theirs.folderName ?? "?")")
+            #expect(mine.isBuiltin == theirs.isBuiltin, "isBuiltin for \(theirs.folderName ?? "?")")
+            #expect(mine.isProjectTemplate == theirs.isProjectTemplate, "isProjectTemplate for \(theirs.folderName ?? "?")")
         }
     }
 
@@ -90,6 +92,8 @@ struct DocGenServerStoreParityTests {
             #expect(mine.surface == theirs.surface)
             #expect(mine.instruction == theirs.instruction)
             #expect(mine.rawContent == theirs.rawContent)
+            #expect(mine.isBuiltin == theirs.isBuiltin, "isBuiltin for \(theirs.folderName ?? "?")")
+            #expect(mine.isProjectCommand == theirs.isProjectCommand, "isProjectCommand for \(theirs.folderName ?? "?")")
         }
     }
 
