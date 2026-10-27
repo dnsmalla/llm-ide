@@ -343,7 +343,7 @@ final class SystemBridgeFileTests: XCTestCase {
     }
 
     func testSecretFragmentsAreRefusedForTheFileCallOnly() throws {
-        let names = ["docs/my-token.txt", "config/secrets.md", "client-SECRET.json", "tokens.txt"]
+        let names = ["docs/my-token.txt", "config/secrets.yaml", "client-SECRET.json", "tokens.txt", "api_token"]
         for (index, name) in names.enumerated() {
             try makeFile("frag\(index)/\(name)")
             XCTAssertNotNil(SystemBridge.confinedFile(relativePath: "frag\(index)/\(name)", repoRoot: root),
@@ -352,6 +352,15 @@ final class SystemBridgeFileTests: XCTestCase {
                          "file refuses \(name)")
         }
         XCTAssertEqual(SystemBridge.fileNativeReply(relativePath: "docs/my-token.txt", repoRoot: root).status, 404)
+    }
+
+    func testSourceFilesNamedLikeSecretsStillPreview() throws {
+        let names = ["src/tokenizer.ts", "src/token-bucket.mjs", "docs/secrets-manager.md", "Sources/TokenCounter.swift"]
+        for name in names {
+            try makeFile(name)
+            XCTAssertNotNil(SystemBridge.confinedFile(relativePath: name, repoRoot: root, forText: true),
+                            "source/prose files are not caught by the fragment rule: \(name)")
+        }
     }
 
     func testOrdinaryNamesThatLookSimilarAreStillAllowed() throws {

@@ -107,8 +107,10 @@ struct SystemBridgeRequest: Equatable {
 ///   - Last component refused by glob: `.env` `.env.*` `*.pem` `*.key` `*.p12` `*.pfx`
 ///     `id_rsa*` `id_ed25519*` `id_ecdsa*` `id_dsa*` `*.keychain*` `.netrc` `.npmrc`
 ///     `.pypirc` `credentials*` `*.mobileprovision`.
-///   - `file` only (it returns text to the page): a last component containing `secret`
-///     or `token` is also refused. `openFile` does not apply this fragment rule.
+///   - `file` only (it returns text to the page): a data-like last component (no
+///     extension, or `sensitiveDataExtensions`) containing `secret` or `token` is also
+///     refused; source files such as `tokenizer.ts` stay readable. `openFile` does not
+///     apply this fragment rule.
 ///   - Known limit, accepted: a hard link to a file inside the root is followed like any
 ///     regular file, so a link made inside the repo can expose content it names outside
 ///     it. Symlinks are refused; hard links cannot be told apart from the file itself.
@@ -515,6 +517,14 @@ enum SystemBridge {
     /// Name fragments the last component may not contain, for the `file` call only.
     static let sensitiveTextFragments: [String] = ["secret", "token"]
 
+    /// Extensions of data-like files the fragment rule applies to (plus no extension).
+    /// Source and prose files are left alone so `tokenizer.ts` or `secrets-manager.md`
+    /// still preview.
+    static let sensitiveDataExtensions: Set<String> = [
+        "json", "txt", "yaml", "yml", "toml", "ini", "cfg", "conf", "properties",
+        "env", "plist", "csv", "xml", "dat", "db", "sqlite",
+    ]
+
     /// Paths that are never a repo root, whatever they resolve to.
     static let refusedRootPaths: Set<String> = [
         "/", "/Users", "/Volumes", "/private", "/System", "/Library", "/Applications",
@@ -529,7 +539,10 @@ enum SystemBridge {
         guard let name = components.last else { return true }
         if components.contains(where: sensitiveDirectoryNames.contains) { return true }
         if sensitiveFilePatterns.contains(where: { fnmatch($0, name, 0) == 0 }) { return true }
-        if forText, sensitiveTextFragments.contains(where: { name.contains($0) }) { return true }
+        if forText, sensitiveTextFragments.contains(where: { name.contains($0) }) {
+            let ext = (name as NSString).pathExtension
+            if ext.isEmpty || sensitiveDataExtensions.contains(ext) { return true }
+        }
         return false
     }
 
