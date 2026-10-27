@@ -122,6 +122,9 @@ final class MobileGenerationBridge: MobileFeatureBridge {
         guard projectRoot != nil else {
             return GenerationOptions(available: false, projectName: nil, templates: [], commands: [], saveFolder: folder)
         }
+        // The phone can list before the Mac's Doc Gen was ever opened for this
+        // project, so seed first (first-open seeding, same as the Mac surface).
+        generation?.seedProjectFiles(at: projectRoot)
         func choices<T>(_ items: [T], id: (T) -> UUID, name: (T) -> String, surface: TemplateSurface) -> [GenerationChoice] {
             items.map { GenerationChoice(id: id($0).uuidString, name: name($0), surface: surface.rawValue) }
         }
@@ -145,6 +148,7 @@ final class MobileGenerationBridge: MobileFeatureBridge {
         guard let notes = notesDir else { return fail(run, "Open a project on the Mac first.") }
         guard let api = manager.api else { return fail(run, "The Mac isn't ready to generate yet — its backend isn't connected.") }
         guard let generation else { return fail(run, "Doc Gen isn't ready on the Mac yet. Try again in a moment.") }
+        generation.seedProjectFiles(at: projectRoot)
         let surface = TemplateSurface(rawValue: run.surface) ?? .doc
         let template = run.templateId.flatMap { generation.templateRef(id: $0, surface: surface) }
         let command = run.commandRefId.flatMap { generation.commandRef(id: $0, surface: surface) }

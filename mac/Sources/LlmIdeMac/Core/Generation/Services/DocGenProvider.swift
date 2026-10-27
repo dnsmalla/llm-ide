@@ -26,6 +26,28 @@ final class DocGenProvider: GenerationProviding {
         commands.reloadProjectCommands(at: projectRoot)
     }
 
+    func seedProjectFiles(at projectRoot: URL?) {
+        guard let root = projectRoot else {
+            reloadProjectFiles(at: nil)
+            return
+        }
+        let kit = GenerationLibraryStore.shared
+        Self.seedProjectFiles(at: root, templateKit: kit.templates, commandKit: kit.commands)
+        reloadProjectFiles(at: root)
+    }
+
+    /// The first-open seeding, with the kit passed in so tests can supply
+    /// fixtures. Ingest templates first (app machinery, same as project
+    /// activation), then Doc Gen templates and commands. Every write is
+    /// `writeIfAbsent`, so a second run changes nothing.
+    static func seedProjectFiles(at root: URL,
+                                 templateKit: [LlmIdeAPIClient.GenerationLibraryEntry],
+                                 commandKit: [LlmIdeAPIClient.GenerationLibraryEntry]) {
+        IngestTemplateSeeder.seedIfNeeded(at: root)
+        ProjectDocTemplatesSeeder.seedIfNeeded(at: root, kit: templateKit)
+        ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: commandKit)
+    }
+
     func templateRefs(surface: TemplateSurface) -> [GenerationTemplateRef] {
         templates.templates(for: surface).map {
             GenerationTemplateRef(id: $0.id, name: $0.name, sections: $0.sections)

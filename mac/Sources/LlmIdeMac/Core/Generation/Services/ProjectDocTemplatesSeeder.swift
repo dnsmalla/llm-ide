@@ -2,14 +2,17 @@ import Foundation
 import os.log
 
 /// Seeds and maintains `<projectRoot>/templates/<folder-name>/template.md`
-/// for Doc Gen. Idempotent — only writes files that don't exist yet.
+/// for Doc Gen and Visual, from the kit. Idempotent: only writes files that
+/// don't exist yet. Runs on first open of Doc Gen or Visual, not at project
+/// create (`DocGenProvider.seedProjectFiles`). The ingest templates
+/// (meeting-note, email-note) are seeded by `IngestTemplateSeeder` instead.
 enum ProjectDocTemplatesSeeder {
 
     private static let log = Logger(
         subsystem: "com.llmide.macapp",
         category: "ProjectDocTemplatesSeeder")
 
-    /// Create `templates/` and seed default template folders + README.
+    /// Create `templates/`, write the README, and seed one folder per kit entry.
     ///
     /// `kit` is the default set from `dnsmalla/agent-kit`
     /// (`GenerationLibraryStore`). It used to be a Swift constant list, so
@@ -34,13 +37,8 @@ enum ProjectDocTemplatesSeeder {
             at: layout.templatesDir.appendingPathComponent("README.md"),
             content: templatesReadme)
 
-        // Ingest templates (meeting-note / email-note) stay in the app: they
-        // are {{placeholder}} layouts rendered by IngestTemplateRenderer for
-        // auto-generated notes, not Doc Gen material a user picks from a menu.
-        for def in DocTemplate.seedDefinitions {
-            write(folderName: def.folderName, content: def.markdown(), layout: layout, fm: fm)
-        }
-        // Everything a user actually picks comes from the kit.
+        // Everything a user actually picks comes from the kit. The ingest
+        // templates are not here: see IngestTemplateSeeder.
         for entry in kit where !entry.folderName.isEmpty {
             write(folderName: entry.folderName,
                   content: Self.projectMarkdown(for: entry),

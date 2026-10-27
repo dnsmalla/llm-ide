@@ -23,6 +23,12 @@ protocol GenerationProviding: AnyObject {
     /// them (no project open).
     func reloadProjectFiles(at projectRoot: URL?)
 
+    /// First open of Doc Gen or Visual, or a phone request that needs the
+    /// project's templates: seed the project's Doc Gen templates and commands
+    /// from the kit, then reload. Existing files are never overwritten. `nil`
+    /// is a no-op.
+    func seedProjectFiles(at projectRoot: URL?)
+
     /// Templates offered for `surface` to the phone.
     func templateRefs(surface: TemplateSurface) -> [GenerationTemplateRef]
 

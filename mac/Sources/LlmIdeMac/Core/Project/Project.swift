@@ -67,8 +67,9 @@ extension Project.LoadError: Equatable {
 /// sync with owners that already exist:
 /// - CLI + lookback → `AppConfig` / `AutoTaskSettings`
 /// - agent persona → server agent persona API
-/// - doc templates → seeded on disk under `templates/` by
-///   `ProjectDocTemplatesSeeder`, which is the real source
+/// - doc templates → seeded on disk under `templates/` on first open of Doc
+///   Gen or Visual (`ProjectDocTemplatesSeeder`, via `GenerationProviding`),
+///   which is the real source
 /// - plugins → Library plugin install state
 ///
 /// Decoding ignores those keys where they linger in existing files, and they

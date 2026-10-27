@@ -76,11 +76,9 @@ enum ProjectScaffolder {
     ///   (e.g. read-only volume, permissions issue). `.gitignore` / `.gitkeep`
     ///   / README write failures are logged but do not propagate — they are
     ///   non-critical and will succeed on the next open.
-    /// `@MainActor` because seeding now reads `GenerationLibraryStore`, which
-    /// is main-actor state. Every caller is already on it (`ProjectStore` is
-    /// `@MainActor`), so this constrains nothing today — and it makes a future
-    /// off-main caller a compile error instead of the runtime trap an
-    /// `assumeIsolated` here would have been.
+    /// `@MainActor` kept from when seeding read `GenerationLibraryStore`. Every
+    /// caller is on the main actor (`ProjectStore` is `@MainActor`), so the
+    /// annotation makes a future off-main caller a compile error.
     @MainActor
     static func scaffold(at folderURL: URL, project: Project) throws {
         let fm = FileManager.default
@@ -143,15 +141,11 @@ enum ProjectScaffolder {
         //    filled later by ProjectSkillsInstaller; these point agents there.
         ensureAgentEntryFiles(at: folderURL, project: project)
 
-        // 7. Templates + commands. The defaults come from the kit
-        //    (`GenerationLibraryStore`, cached on disk) rather than from
-        //    app constants, so adding one never needs an app release. A
-        //    scaffold that runs before the first successful fetch seeds only
-        //    the app-owned ingest layouts; opening the project tops it up,
-        //    because every seed write is `writeIfAbsent`.
-        let kit = GenerationLibraryStore.shared
-        ProjectDocTemplatesSeeder.seedIfNeeded(at: folderURL, kit: kit.templates)
-        ProjectDocCommandsSeeder.seedIfNeeded(at: folderURL, kit: kit.commands)
+        // 7. Ingest templates only. Doc Gen and Visual templates and commands
+        //    are not seeded here: they are seeded on first open of either
+        //    surface (`GenerationProviding.seedProjectFiles`), from the kit.
+        //    This keeps Core/Project free of Doc Gen types.
+        IngestTemplateSeeder.seedIfNeeded(at: folderURL)
 
         log.info("scaffold complete: \(folderURL.lastPathComponent, privacy: .public)")
     }

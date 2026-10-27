@@ -12,6 +12,7 @@ final class GenerationProviderRegistryTests: XCTestCase {
         func resetForSignOut() { signOutResets += 1 }
         func resetForProjectChange() { projectResets += 1 }
         func reloadProjectFiles(at projectRoot: URL?) {}
+        func seedProjectFiles(at projectRoot: URL?) {}
         func templateRefs(surface: TemplateSurface) -> [GenerationTemplateRef] { [] }
         func commandRefs(surface: TemplateSurface) -> [GenerationCommandRef] { [] }
         func templateRef(id: String, surface: TemplateSurface) -> GenerationTemplateRef? { nil }

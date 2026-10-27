@@ -150,6 +150,12 @@ struct AppShell: View {
             reconcileSectionAfterFeatureChange()
         }
         .onChange(of: shell.section) { _, section in
+            // Doc Gen and Visual seed their project files on first open, not at
+            // project activation (see GenerationProviding.seedProjectFiles).
+            if section == .docGen || section == .visual {
+                GenerationProviderRegistry.shared.provider?.seedProjectFiles(
+                    at: projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) })
+            }
             guard projectStore.activeProject == nil else { return }
             if section == .settings {
                 initWelcomeEnv()
@@ -1074,29 +1080,25 @@ struct AppShell: View {
         itemStore.setExternalCodeFolders(config.localCodeFolders)
     }
 
-    /// Seed the open project's `templates/`/`commands/` from the kit and
-    /// republish both stores. Split out of
-    /// `reloadDocTemplatesForActiveProject()` so the kit arriving late can
-    /// re-run JUST this, without the project-activation side effects around
-    /// it — see the `.generationLibraryChanged` observer.
+    /// Bring the open project's generation files up to date and republish the
+    /// stores. Split out of `reloadDocTemplatesForActiveProject()` so the kit
+    /// arriving late can re-run JUST this, without the project-activation side
+    /// effects around it — see the `.generationLibraryChanged` observer.
+    ///
+    /// Ingest templates are seeded here, always. Doc Gen's templates and
+    /// commands are seeded only while Doc Gen or Visual is the open section,
+    /// so an idle project never gets them until first open.
     private func seedAndReloadGenerationFiles() {
         let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
-        // `root` is optional (nil when no project is open); guard the seeder
-        // (which requires a concrete URL) but still pass the optional through
-        // to reloadProjectCommands so closing a project clears them.
+        let generation = GenerationProviderRegistry.shared.provider
         if let root {
-            // BOTH seeders, not just commands. `seedIfNeeded` is per-folder
-            // `writeIfAbsent`, so it is how a project picks up seeds added
-            // after it was created — but only the commands seeder ran here,
-            // and the templates seeder ran solely in `ProjectScaffolder` at
-            // New Project time. Every template seed added since a project was
-            // created has therefore never reached it (the Meeting Note and
-            // Email Note ingest seeds, and now the Visual ones).
-            let kit = GenerationLibraryStore.shared
-            ProjectDocTemplatesSeeder.seedIfNeeded(at: root, kit: kit.templates)
-            ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: kit.commands)
+            IngestTemplateSeeder.seedIfNeeded(at: root)
         }
-        GenerationProviderRegistry.shared.provider?.reloadProjectFiles(at: root)
+        if shell.section == .docGen || shell.section == .visual {
+            generation?.seedProjectFiles(at: root)
+        } else {
+            generation?.reloadProjectFiles(at: root)
+        }
     }
 
     private func reloadDocTemplatesForActiveProject() {
