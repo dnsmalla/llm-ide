@@ -9,14 +9,13 @@ private let sumLog = Logger(subsystem: "com.llmide.macapp", category: "Summariza
 /// Lives in Core (the notes capability) rather than Library because Live's
 /// capture pipeline and Library's meeting detail both run it, and features
 /// may not name each other. Its whole closure (`MeetingFileStore`,
-/// `MeetingNoteWriter`, `MeetingNoteGenerator`, `IngestNoteDedup`) is Core.
+/// `MeetingNoteWriter`, `IngestNoteDedup`) is Core.
 ///
-/// Produces **two** llm-doc outputs per meeting:
-///   1. `.docx` via bundled `note_template.docx` + Python (existing polished note)
-///   2. `.md`  via `<project>/templates/meeting-note/template.md` (editable layout)
+/// Produces one llm-doc output per meeting: a `.md` via
+/// `<project>/templates/meeting-note/template.md` (editable layout).
 enum MeetingSummarizationService {
 
-    /// Run summarisation, then write both the `.docx` and template-based `.md` notes.
+    /// Run summarisation, then write the template-based `.md` note.
     /// Skips when an llm-doc note already exists for `rawFile`, unless `forceRegenerate`.
     @discardableResult
     static func run(
@@ -64,8 +63,8 @@ enum MeetingSummarizationService {
             summary = s
         } catch {
             // Write no NOTE on failure. This path used to store the whole
-            // transcript as the "summary" (into the raw file and as the .docx
-            // and .md notes), and the note it left behind made `hasNote`
+            // transcript as the "summary" (into the raw file and as the .md
+            // note), and the note it left behind made `hasNote`
             // suppress every later summary — the meeting was stuck with a
             // transcript-as-summary. Nothing retries automatically, so the
             // failure is recorded in the raw file's frontmatter (body and
@@ -88,32 +87,7 @@ enum MeetingSummarizationService {
                 generatedAt: Date())
         }
 
-        // ── Step 2a: polished .docx (existing pipeline) ──
-        let tempDocx = FileManager.default.temporaryDirectory
-            .appendingPathComponent("llmide-meeting-\(UUID().uuidString).docx")
-        MeetingNoteGenerator.generateDocx(
-            summary: summary,
-            title: title,
-            startedAt: startedAt,
-            participants: participants,
-            outputURL: tempDocx)
-        if let docxData = try? Data(contentsOf: tempDocx) {
-            do {
-                _ = try await writer.writeDocxNote(
-                    docxContent: docxData,
-                    title: title,
-                    startedAt: startedAt,
-                    participants: participants,
-                    rawFile: rawFile)
-                try? FileManager.default.removeItem(at: tempDocx)
-            } catch {
-                // Keep the temp .docx on failure — it is the only copy of the
-                // polished note (the .md below is a separate layout).
-                sumLog.error("writeDocxNote failed, keeping \(tempDocx.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
-            }
-        }
-
-        // ── Step 2b: template .md (project templates/meeting-note/) ──
+        // ── Template .md (project templates/meeting-note/) ──
         let markdown = IngestTemplateRenderer.renderMeetingNote(
             projectRoot: projectRoot,
             summary: summary,

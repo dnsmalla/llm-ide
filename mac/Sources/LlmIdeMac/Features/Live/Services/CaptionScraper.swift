@@ -324,7 +324,7 @@ final class CaptionOrchestrator: ObservableObject {
                 let summarizeParticipants = participants
                 let summarizeTitle = request.title
                 Task.detached(priority: .background) { [api] in
-                    // Build the .docx output path before entering the service.
+                    // Build the raw-file path (the note's dedup key) before entering the service.
                     let projectRoot = root.deletingLastPathComponent()
                     let rawFileName = url.lastPathComponent
                     let monthPath = AppDateFormatter.yearMonthPath(summarizeFM.startedAt)

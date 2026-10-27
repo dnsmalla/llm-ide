@@ -28,7 +28,7 @@ The macOS app (`LlmIdeMac`) is the primary IDE client — a single-window SwiftU
 | SwiftTerm | `from: "1.2.0"` |
 | graph-kit (`GraphKit` + `GraphCore`) | `.package(url: "https://github.com/dnsmalla/graph-kit.git", revision: …)` — a **remote** dependency pinned by commit in `Package.swift`, so SwiftPM fetches and caches it and the build does **not** depend on the submodule at `mac/LocalPackages/graph-kit` being checked out. That submodule still exists (same repo, same commit) as the working tree for editing the engine and running its labs. Two pins to keep in step when bumping the engine: the `revision:` here and the submodule gitlink. The repo is public — a cold resolve needs only network access, no credentials. `make regression`'s `graph-gates` still runs from the submodule (guarded by the `graph-kit-checkout` target) |
 
-**Bundled resources** (lines 28–35): `note_template.docx`, `generate_meeting_note.py`, vendored highlight.js v11.9.0 (`highlight.min.js`), and two highlight.js themes (`atom-one-dark.min.css`, `atom-one-light.min.css`).
+**Bundled resources** (lines 28–35): vendored highlight.js v11.9.0 (`highlight.min.js`), and two highlight.js themes (`atom-one-dark.min.css`, `atom-one-light.min.css`).
 
 **Not bundled — mermaid (on-demand optional component).** mermaid.js (3.4 MB), which draws ```` ```mermaid ```` fences in the markdown previews that opt in (`MarkdownWebView(enableMermaid: true)`: Library/Explorer/Search/Review file preview, plan editor, Doc Gen/Visual), is no longer shipped in the app: `Package.swift` declares no `Resources/mermaid` and `Scripts/build.sh` rsyncs Resources with `--exclude '/mermaid/'`.
 
@@ -379,7 +379,7 @@ Two sessions are created in `init()` (lines 153–169):
 
 The `llmSession` has **no wall clock**: both `timeoutIntervalForRequest` and `timeoutIntervalForResource` are set to 30 days (`LlmIdeAPIClient.swift`), which is indistinguishable from "none" for any real session while remaining a value URLSession handles normally. They were 620 s / 15 min, sized against server deadlines that no longer exist (see [agent-runtime](agent-runtime.md)); with the server now running a turn to completion, a client-side clock would only cut the socket while the work continued, turning a slow answer into a connection error. Cancellation is the control (the chat Stop button cancels the `URLSessionTask`), and `ResourceGuardService` stops work when the machine is at risk. `authSession` keeps its short 10 s / 15 s timeouts — those are liveness probes for `/auth/*`, not work.
 
-**`ResourceGuardService`** (`Core/Platform/ResourceGuard.swift`) is what stops long-running local work now that no deadline does. It subscribes to `DispatchSource.makeMemoryPressureSource` and stops registered jobs only when macOS reports **`.critical` pressure continuously for 30 s** (`MemoryPressureTracker`, a pure state machine so the sustained rule is unit-testable; a drop below critical clears the episode). It takes **one victim per episode, newest first** — the most recently started job is the likeliest culprit and stopping one may be enough to recover — then re-arms. **CPU load is deliberately not a trigger**: a healthy `swift build` or `npm test` pegs every core, so acting on CPU would kill exactly the work the app exists to run. Registered by `BashService`, `CodeWorkflowService`, `AutoCodeUpdateService+CLI`, `ShellFaultVerifier`, `RepoManager`'s git runner, `PluginGitInstaller`, and `MeetingNoteGenerator`; monitoring starts with the first registration and stops with the last, so an idle app pays nothing.
+**`ResourceGuardService`** (`Core/Platform/ResourceGuard.swift`) is what stops long-running local work now that no deadline does. It subscribes to `DispatchSource.makeMemoryPressureSource` and stops registered jobs only when macOS reports **`.critical` pressure continuously for 30 s** (`MemoryPressureTracker`, a pure state machine so the sustained rule is unit-testable; a drop below critical clears the episode). It takes **one victim per episode, newest first** — the most recently started job is the likeliest culprit and stopping one may be enough to recover — then re-arms. **CPU load is deliberately not a trigger**: a healthy `swift build` or `npm test` pegs every core, so acting on CPU would kill exactly the work the app exists to run. Registered by `BashService`, `CodeWorkflowService`, `AutoCodeUpdateService+CLI`, `ShellFaultVerifier`, `RepoManager`'s git runner, `PluginGitInstaller`; monitoring starts with the first registration and stops with the last, so an idle app pays nothing.
 
 Route selection happens in `session(for: path)` (line 392): paths with prefix `/auth/` use `authSession`; everything else uses `llmSession`.
 
@@ -610,8 +610,6 @@ The single executable target in `Package.swift` (lines 28–35) copies the follo
 
 | Resource file | Declared at | Purpose |
 |---|---|---|
-| `Resources/note_template.docx` | line 29 | Base template for meeting-note DOCX generation |
-| `Resources/generate_meeting_note.py` | line 30 | Python helper invoked during DOCX generation |
 | `Resources/highlight.min.js` | line 33 | Vendored highlight.js v11.9.0 (BSD-3) — syntax highlighting without a CDN |
 | `Resources/atom-one-dark.min.css` | line 34 | highlight.js dark theme |
 | `Resources/atom-one-light.min.css` | line 35 | highlight.js light theme |

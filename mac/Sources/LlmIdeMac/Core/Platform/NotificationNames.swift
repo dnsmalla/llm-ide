@@ -88,7 +88,7 @@ extension Notification.Name {
     static let deleteMeeting         = Notification.Name("deleteMeeting")
     /// Posted by the Meetings file-tree context menu to re-summarize a
     /// transcript .md file. `object` is the file URL. AppShell observes
-    /// and triggers the summarise → .docx pipeline directly.
+    /// and triggers the summarise → note pipeline directly.
     static let resummarizeMeetingFile = Notification.Name("resummarizeMeetingFile")
 
     /// Posted by LiveSessionMirror when it detects that the Chrome

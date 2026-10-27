@@ -208,7 +208,7 @@ private struct FSNodeRow: View {
 
     @ViewBuilder
     private var meetingFileContextMenu: some View {
-        // Primary action: generate a polished .docx note from this transcript.
+        // Primary action: generate the meeting note (.md) from this transcript.
         Button {
             if let item = node.item {
                 NotificationCenter.default.post(

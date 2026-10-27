@@ -92,7 +92,7 @@ and the Library UI labels the section "LLM Doc".
 
 | `NoteType` | Directory | Filename pattern |
 |---|---|---|
-| `meeting` | `meetings/` | `<YYYY-MM-DD-HHmmss>-<slug>-meeting-notes.docx` and `-meeting-notes.md` |
+| `meeting` | `meetings/` | `<YYYY-MM-DD-HHmmss>-<slug>-meeting-notes.md` |
 | `email` | `emails/` | `<YYYY-MM-DD-HHmmss>-<slug>.md` |
 | `document` | `documents/` | `<YYYY-MM-DD-HHmmss>-<slug>.md` |
 | any other (`slack/`, …) | `<rawValue>/` | writer-defined |
@@ -101,7 +101,6 @@ and the Library UI labels the section "LLM Doc".
 
 | Writer | Produces | Input |
 |---|---|---|
-| `MeetingNoteGenerator` + `MeetingNoteWriter` | meeting `.docx` via bundled Python (`generate_meeting_note.py`) | transcript + AI summary |
 | `MeetingNoteWriter` + `IngestTemplateRenderer` | meeting `.md` from `templates/meeting-note/template.md` | same summary (parallel output) |
 | `EmailNoteWriter` + `IngestTemplateRenderer` | email `.md` from `templates/email-note/template.md` | classified email |
 | `SourceConnectorNoteWriter` | connector notes (e.g. `slack/`) | fetched + classified source items |

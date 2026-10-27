@@ -366,8 +366,6 @@ let package = Package(
             path: "Sources/LlmIdeMac",
             exclude: libExcludes,
             resources: [
-                .copy("Resources/note_template.docx"),
-                .copy("Resources/generate_meeting_note.py"),
                 .copy("Resources/highlight.min.js"),
                 .copy("Resources/atom-one-dark.min.css"),
                 .copy("Resources/atom-one-light.min.css"),

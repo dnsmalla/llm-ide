@@ -1,7 +1,6 @@
 // Meeting note writer using unified NoteService
 // Writes generated meeting notes to llm-doc/meetings/ via NoteService.
-//   • `.docx` — bundled Word template (existing polished note)
-//   • `.md`   — project template at templates/meeting-note/template.md
+//   • `.md` — project template at templates/meeting-note/template.md
 
 import Foundation
 import os.log
@@ -15,24 +14,6 @@ struct MeetingNoteWriter {
     init(repoRoot: URL) {
         self.repoRoot = repoRoot
         self.noteService = NoteService(repoRoot: repoRoot)
-    }
-
-    /// Write a generated meeting note (`.docx` content) to the unified notes structure.
-    @discardableResult
-    func writeDocxNote(
-        docxContent: Data,
-        title: String,
-        startedAt: Date,
-        participants: [String],
-        rawFile: String
-    ) async throws -> URL {
-        try await saveNote(
-            content: docxContent,
-            filename: Self.docxFilename(startedAt: startedAt, title: title),
-            title: title,
-            startedAt: startedAt,
-            participants: participants,
-            rawFile: rawFile)
     }
 
     /// Write a template-rendered meeting note (`.md` content).
@@ -100,10 +81,6 @@ struct MeetingNoteWriter {
     }
 
     // MARK: - Filenames
-
-    private static func docxFilename(startedAt: Date, title: String) -> String {
-        baseFilename(startedAt: startedAt, title: title, suffix: "meeting-notes.docx")
-    }
 
     private static func markdownFilename(startedAt: Date, title: String) -> String {
         baseFilename(startedAt: startedAt, title: title, suffix: "meeting-notes.md")

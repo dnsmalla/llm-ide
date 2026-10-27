@@ -166,7 +166,7 @@ llm-ide/
 │   │   │   │                #   folder migrations (NotesToLlmDoc, SourceFolder, SourceNestedLlmDoc),
 │   │   │   │                #   meeting files + summarization shared by Live and Library:
 │   │   │   │                #   MeetingFileStore, PartialRecovery, MeetingSummarizationService,
-│   │   │   │                #   MeetingNoteWriter, MeetingNoteGenerator, IngestNoteDedup
+│   │   │   │                #   MeetingNoteWriter, IngestNoteDedup
 │   │   │   ├── Platform/    #   App lifecycle + shared utilities: AppDelegate (+ AppTerminationHooks:
 │   │   │   │                #   quit-time flushes Shell registers, e.g. Chat's), FeatureCacheHooks
 │   │   │   │                #   (graph/Mobile-PIN cache seams Shell installs), BashService, Config,

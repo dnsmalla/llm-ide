@@ -337,7 +337,7 @@ struct LibraryView: View {
 
             // ── Meetings (transcripts) — like NOTES but for .md files ──
             // Auto-synced from meetings/ AND accepts manually added files.
-            // Right-click any transcript → Generate Note to produce a .docx.
+            // Right-click any transcript → Generate Note to produce its .md note.
             fileTreeSection(.meetings)
 
             // ── Code section (file tree) ───────────────────────────────
