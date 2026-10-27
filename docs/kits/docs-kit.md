@@ -1,6 +1,6 @@
 # docs-kit
 
-Status: **K0 Map**, reviewed 2026-10-27 (review fixes applied; decisions in §7). Pre-K1 steps 1, 2, 4 and 5 are done (§7, §8); step 3 is open.
+Status: **K0 Map**, reviewed 2026-10-27 (review fixes applied; decisions in §7). Pre-K1 steps 1 to 5 are done (§7, §8); the K1a migration test (step 3) is done in `8d23d62e`, with the K1a bug fixes in `9c7ec5af` (§5a).
 The map was written before the pre-K1 code changes; §8 records them. Citations are `path:line`, re-checked 2026-10-27 at the pre-K1 close-out.
 
 ## 1. Purpose
@@ -236,7 +236,7 @@ Rule (plan): *does it get better on its own when the model/SDK improves?* → de
 - Seed-source comment: `Core/Project/Project.swift:70-71` says doc templates are "seeded on disk under `templates/` by `ProjectDocTemplatesSeeder`", which is the real source.
 
 **Application Support** (`~/Library/Application Support/com.llmide.macapp/`):
-- `doc-templates.json` (legacy/global store, `DocTemplateStore.swift:57-63`; corrupt copies `doc-templates.json.corrupt-<ts>` at `:285`). **Still read on launch**: `Shell/LlmIdeMacApp.swift:371` → `DocTemplateStore.bootstrap()` (`:76-80`) → `load()` (`:274-281`), which accepts the current `StoreFile` envelope and falls back to a bare array (`:280-281`). Checked 2026-10-27.
+- `doc-templates.json` (legacy/global store, `DocTemplateStore.swift:59-69`; corrupt copies `doc-templates.json.corrupt-<ts>` via `DamagedFileQuarantine.swift:9-22`, called from `load()` at `DocTemplateStore.swift:299`). **Still read on launch**: `Shell/LlmIdeMacApp.swift:371` → `DocTemplateStore.bootstrap()` (`:91`) → `load()` (`DocTemplateStore.swift:289-307`), which accepts the current `StoreFile` envelope and falls back to a bare array (`:295-296`). Checked 2026-10-27; re-cited after `9c7ec5af`.
 - `doc-gen-output.json` (`DocGenOutputStore.swift:19-28`).
 - `generation-library.json` (cache of `/kb/agent/generation-library`, `GenerationLibraryStore.swift:31-34`).
 
@@ -293,14 +293,31 @@ Swift scanner reads it unchanged after the flip.
 
 **What K1a pins (for K1 to keep green).** Bare-array and envelope
 `doc-templates.json` load with defaults; unknown fields are ignored; a corrupt
-file is renamed to `doc-templates.json.corrupt-<ts>` and the store starts empty
-and writable; a missing file loads as empty and writes nothing; a legacy file is
+file is renamed to `doc-templates.json.corrupt-<ts>` (then `-2`, `-3`, ... if that
+name is taken) and the store starts empty; if the rename fails, saves are blocked
+for the run so the damaged file is never overwritten; a missing file loads as empty and writes nothing; a legacy file is
 rewritten only on the next save and then as the envelope. The same matrix holds
 for `doc-gen-output.json` (a save never drops another project's entry; an
 unreadable file moves aside before any write) and the `generation-library.json`
 cache (corrupt starts empty and is not quarantined, since it is re-fetchable).
 Project template and command files with the bare marker, the `surface=visual`
 marker, and the `auto_task/` and ingest skips all parse as before.
+
+**Bugs found and fixed in K1a** (fix commit `9c7ec5af`; K1 must keep both fixes):
+- **`DocCommand` dropped every `# ` line.** `DocCommand.instruction(from:)`
+  (`Core/Generation/Models/DocCommand.swift`) removed each line starting with
+  `# `, so a markdown H1 or a fenced `# install deps` in a command body never
+  reached the model. Now only the first `# ` line is the title, and
+  `displayName(from:folderName:)` reads that same line. CRLF bodies also stop
+  gaining doubled blank lines. Tests: `DocCommandTests`.
+- **Quarantine could overwrite a damaged file.** Two corruptions in the same
+  second gave the same `corrupt-<ts>` name, the second move failed, and the next
+  save replaced the still-damaged original. `DamagedFileQuarantine.setAside`
+  (`Core/Generation/Services/DamagedFileQuarantine.swift`) now picks a free name,
+  and a failed move sets `saveBlocked` in `DocTemplateStore` and
+  `DocGenOutputStore`, so `save()` skips with an error log. Tests:
+  `DocGenLegacyStateTests` (`testDocTemplateQuarantine...`,
+  `testDocGenOutputQuarantine...`, `...FailedQuarantineBlocksSave...`).
 
 ## 6. What K1 would move (proposal, not done)
 
@@ -345,7 +362,7 @@ These replace the earlier open-question list. Items 1–9 are user decisions. It
 2. **`/generate-doc` becomes gated by `doc_gen`** (only the Mac calls it). Feature-matrix expectations change accordingly (§2e: today's "not server-gated" exception is for `/generate-docx`, which stays always-on for the extension). **Done (`c6e350e0`):** `routes/doc-gen.mjs` is a `doc_gen` route group; see §2e.
 3. **Template and command routes take a project id, never a raw path.** The server resolves the project's root itself.
 4. **Doc Gen seeds templates and commands lazily on first open**, not in `ProjectScaffolder`. This removes the Core/Project ↔ Core/Generation cycle (E12; was `ProjectScaffolder.swift:152-154`). Done, pre-K1 step 2 (`e1525074`); see §8 for the deviation from the "missing or empty" gate.
-5. **Legacy `doc-templates.json`: still read** (checked 2026-10-27; §5). K1a adds a migration test with a real old file (both the envelope and the bare-array fallback at `DocTemplateStore.swift:274-281`). **K1a done:** tests and fixtures pinned; the data plan is §5a.
+5. **Legacy `doc-templates.json`: still read** (checked 2026-10-27; §5). K1a adds a migration test with a real old file (both the envelope and the bare-array fallback in `load()`, `DocTemplateStore.swift:289-307`). **K1a done** (`8d23d62e`; bug fixes `9c7ec5af`): tests and fixtures pinned; the data plan is §5a.
 6. **Visual stays inside docs-kit for now.**
 7. **The Python meeting-docx path is retired** (§6 item 3). **Done (`53804a47`).**
 8. **Add a `Core/Contracts` seam for the direct Core/other-kit → Generation references (E8–E12) before K1.** Done, pre-K1 step 1 (`c62c9e6a`): `GenerationProviding` + `GenerationProviderRegistry` (`Core/Contracts/GenerationProviding.swift`), `LibrarySourceFeed` (`Core/Contracts/LibrarySourceFeed.swift`).
@@ -366,13 +383,13 @@ In order:
 
 1. [x] **Seam (8) + `GenerationConformance` move (11).** Done: `c62c9e6a` (seam), `0e7a985d` (move).
 2. [x] **Lazy seeding (4).** Done: `e1525074`. Ingest templates stay eager (`IngestTemplateSeeder`); Doc Gen seeds on first open. Kit-arrival reseed while open: `8ee96783`.
-3. **Legacy-file check (5).** Check done (still read). Remaining: the K1a migration test with a real old `doc-templates.json`. Not started.
+3. [x] **Legacy-file check (5).** Check done (still read). K1a migration test with a real old `doc-templates.json` done (`8d23d62e`; bug fixes `9c7ec5af`).
 4. [x] **Gate `/generate-doc` (2).** Done: `c6e350e0` (`routes/doc-gen.mjs` as a `doc_gen` group; `/generate-docx` stays always-on). Contract fixtures and changelog for API v80: `ad9664b2`.
 5. [x] **Retire the Python path (7).** Done: `53804a47`.
 
 ## 8. Pre-K1 work: what was done (2026-10-27)
 
-Steps 1, 2, 4 and 5 of "Next: pre-K1 work" are done (step 3 is not started). The sections below record each step. Gates at the end of the work: `bash mac/Scripts/feature-boundaries.sh` exit 0; `make build-mac-min`, `make build-mac-lite`, `make chat-gates`, `make generation-gates` all pass; full `LLMIDE_KEYCHAIN_BACKEND=memory swift test`: 2352 tests, 0 failures, 1 skipped.
+Steps 1 to 5 of "Next: pre-K1 work" are done. Step 3 (the K1a migration test) was finished after this close-out; see §5a and the K1a bug notes. The sections below record each step. Gates at the end of the work: `bash mac/Scripts/feature-boundaries.sh` exit 0; `make build-mac-min`, `make build-mac-lite`, `make chat-gates`, `make generation-gates` all pass; full `LLMIDE_KEYCHAIN_BACKEND=memory swift test`: 2352 tests, 0 failures, 1 skipped.
 
 **Seam (decision 8), `c62c9e6a`.**
 - `Core/Contracts/GenerationProviding.swift`: protocol `GenerationProviding` (sign-out reset, project-change reset, project file reload, first-open seed, phone template/command lookup, fit notice) with value types `GenerationTemplateRef` and `GenerationCommandRef`, plus `GenerationProviderRegistry` (`install`/`uninstall`, `provider` optional).
@@ -400,5 +417,5 @@ Steps 1, 2, 4 and 5 of "Next: pre-K1 work" are done (step 3 is not started). The
 - Contract (`ad9664b2`): health and root fixtures to apiVersion 80; `SERVER_API_VERSION` changelog v79 before v80; `schema/http/INVENTORY.md` regenerated for the new Swift file. `make contract-gates` passes.
 - Python path (decision 7, `53804a47`): `MeetingNoteGenerator`, the Python script, `note_template.docx`, the Step 2a caller and the Package.swift copy lines are gone.
 
-**Not done here.** Step 3 (legacy-file check, the K1a migration test with a real `doc-templates.json`) is not started. Decisions 1, 3, 5, 6, 9, 10, 12, 13 are untouched. Open question 14 (the K0 rule for model types) is recorded in §7 and not decided.
+**Not done here.** Step 3 (legacy-file check, the K1a migration test with a real `doc-templates.json`) was finished after this close-out (`8d23d62e`; bug fixes `9c7ec5af`). Decisions 1, 3, 5, 6, 9, 10, 12, 13 are untouched. Open question 14 (the K0 rule for model types) is recorded in §7 and not decided.
 
