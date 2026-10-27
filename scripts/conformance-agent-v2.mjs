@@ -161,6 +161,7 @@ const NON_WIRE_TYPE_LITERALS = new Set([
   'image',                    // sdk/engine.mjs buildPromptInput — Anthropic image block
   'user',                     // sdk/engine.mjs buildPromptInput — SDKUserMessage envelope
   'noul', 'choice', 'score',  // runtime/decide.mjs — Jev answer shapes inside the `decide` tool result, never stream events
+  'hello',                    // routes/os.mjs — first event of GET /kb/os/stream (the System view change feed), a separate wire
   // JSON-Schema fragments inside tool definitions.
   'text', 'object', 'string', 'boolean', 'number', 'integer', 'array',
 ]);
