@@ -9,9 +9,14 @@
 //   page -> native   window.webkit.messageHandlers.llmide.postMessage(msg)
 //     { type: 'ready' }                              on load
 //     { type: 'open', target }                       navigate: loop | autoTasks | settings | library
+//                                                    | explorer | codeGraph (a target whose feature is off is ignored)
+//     { type: 'openFile', path, line? }              show a repo file in Explorer (no reply; line is 1-based)
 //     { type: 'request', id, method, path, body? }   one allowlisted server call (native SystemBridge)
 //     { type: 'native', id, name }                   native-only data: projectGraph | routines
 //                                                    (answered like a request; unknown name = 400 not_allowed)
+//     { type: 'native', id, name: 'file', path }     one repo file's text for the code preview
+//                                                    (200 {path,text,truncated,bytes,language} or
+//                                                    200 {path,binary:true,bytes}; 404 not_found; 400 not_allowed)
 //     { type: 'subscribe' } / { type: 'unsubscribe' } the change feed (GET /kb/os/stream) on or off
 //   native -> page   window.llmideConfigure({ theme, projectName })
 //     may be called again (theme or project change); each call applies.
@@ -25,16 +30,21 @@
 export const THEMES = ['dark', 'light', 'midnight'] as const;
 export type ThemeId = (typeof THEMES)[number];
 
-export type ViewTarget = 'loop' | 'autoTasks' | 'settings' | 'library';
+export type ViewTarget = 'loop' | 'autoTasks' | 'settings' | 'library' | 'explorer' | 'codeGraph';
 
 /** The native-only data sets the page can ask for. Each is answered by native, not by the server. */
 export type NativeName = 'projectGraph' | 'routines';
 
+/** A native call that carries a repo-relative file path: the text of one file for the code preview. */
+export type NativeFileCall = { name: 'file'; path: string };
+
 export type ToNative =
   | { type: 'ready' }
   | { type: 'open'; target: ViewTarget }
+  | { type: 'openFile'; path: string; line?: number }
   | { type: 'request'; id: string; method: 'GET' | 'POST'; path: string; body?: Record<string, string> }
   | { type: 'native'; id: string; name: NativeName }
+  | ({ type: 'native'; id: string } & NativeFileCall)
   | { type: 'subscribe' }
   | { type: 'unsubscribe' };
 
@@ -112,6 +122,11 @@ export class NativeRequests {
   /** Asks native for one native-only data set. Rejects on timeout or when there is no bridge. */
   native(name: NativeName): Promise<NativeReply> {
     return this.dispatch((id) => ({ type: 'native', id, name }));
+  }
+
+  /** Asks native for the text of one repo file (the code preview). Rejects on timeout or when there is no bridge. */
+  file(path: string): Promise<NativeReply> {
+    return this.dispatch((id) => ({ type: 'native', id, name: 'file', path }));
   }
 
   private dispatch(build: (id: string) => ToNative): Promise<NativeReply> {

@@ -538,6 +538,71 @@ describe('dev connect form', () => {
   });
 });
 
+describe('code preview and file open (openFile, loadFile)', () => {
+  it('openFile posts the exact message, with line only when given, and returns native\'s boolean', () => {
+    const bridge = nativeBridge();
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    assert.equal(host.openFile('mac/Sources/A.swift'), true);
+    assert.deepEqual(bridge.sent[0], { type: 'openFile', path: 'mac/Sources/A.swift' });
+    assert.equal(host.openFile('mac/Sources/A.swift', 12), true);
+    assert.deepEqual(bridge.sent[1], { type: 'openFile', path: 'mac/Sources/A.swift', line: 12 });
+
+    const nowhere = api.hosts.createNativeHost({ requests: bridge.requests, post: () => false });
+    assert.equal(nowhere.openFile('mac/Sources/A.swift'), false, 'no bridge means the file did not open');
+  });
+
+  it('loadFile posts the native file call with the path and maps a text reply', async () => {
+    const body = { path: 'a.swift', text: 'let x = 1\n', truncated: false, bytes: 10, language: 'swift' };
+    const bridge = nativeAll(() => ({ status: 200, body }));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    assert.deepEqual(await host.loadFile('a.swift'), body);
+    assert.deepEqual(bridge.sent[0], { type: 'native', id: bridge.sent[0].id, name: 'file', path: 'a.swift' });
+  });
+
+  it('loadFile maps a binary reply, a 404 to null, a 401 to OsAuthError, and other failures to Error', async () => {
+    const binary = nativeAll(() => ({ status: 200, body: { path: 'logo.png', binary: true, bytes: 2048 } }));
+    const hostB = api.hosts.createNativeHost({ requests: binary.requests, post: binary.post });
+    assert.deepEqual(await hostB.loadFile('logo.png'), { path: 'logo.png', binary: true, bytes: 2048 });
+
+    const missing = nativeAll(() => ({ status: 404, error: 'not_found' }));
+    const hostM = api.hosts.createNativeHost({ requests: missing.requests, post: missing.post });
+    assert.equal(await hostM.loadFile('gone.swift'), null);
+
+    const refused = nativeAll(() => ({ status: 401 }));
+    const hostR = api.hosts.createNativeHost({ requests: refused.requests, post: refused.post });
+    await assert.rejects(hostR.loadFile('a.swift'), api.graphKit.OsAuthError);
+
+    const broken = nativeAll(() => ({ status: 500, error: 'boom' }));
+    const hostE = api.hosts.createNativeHost({ requests: broken.requests, post: broken.post });
+    await assert.rejects(hostE.loadFile('a.swift'), (err) => !(err instanceof api.graphKit.OsAuthError) && /boom/.test(err.message));
+
+    const bad400 = nativeAll(() => ({ status: 400, error: 'not_allowed' }));
+    const host4 = api.hosts.createNativeHost({ requests: bad400.requests, post: bad400.post });
+    await assert.rejects(host4.loadFile('../x'), (err) => err instanceof Error && /not_allowed/.test(err.message));
+
+    const empty = nativeAll(() => ({ status: 200 }));
+    const hostN = api.hosts.createNativeHost({ requests: empty.requests, post: empty.post });
+    await assert.rejects(hostN.loadFile('a.swift'), /no content/);
+  });
+
+  it('dev host: openFile returns false and loadFile resolves null, with no request made', async () => {
+    const conn = { baseURL: BASE, token: TOKEN };
+    const mock = mockFetch(standardRoutes());
+    const host = api.hosts.createDevHost({ conn, fetch: mock.fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    assert.equal(host.openFile('a.swift', 3), false);
+    assert.equal(await host.loadFile('a.swift'), null);
+    assert.equal(mock.calls.length, 0, 'a browser has no file access, so nothing is fetched');
+  });
+
+  it('the open target type takes the Mac bridge\'s explorer and codeGraph targets', () => {
+    const bridge = nativeBridge();
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    assert.equal(host.open('explorer'), true);
+    assert.equal(host.open('codeGraph'), true);
+    assert.deepEqual(bridge.sent.map((m) => m.target), ['explorer', 'codeGraph']);
+  });
+});
+
 describe('wiring', () => {
   it('the moved files are gone from ui/os-view: the page lives in graph-kit', () => {
     for (const gone of ['controller.ts', 'App.tsx', 'format.ts', 'styles.css']) {

@@ -13,6 +13,7 @@
 import {
   OsAuthError,
   type OsCancel,
+  type OsFileContent,
   type OsHost,
   type OsLiveStatus,
   type OsOpenTarget,
@@ -52,9 +53,21 @@ function nativeBody(reply: NativeReply, what: string): unknown {
   return reply.body ?? null;
 }
 
+/**
+ * A file reply for the code preview: 200 carries the content (text or binary), 404 means the file is
+ * not there (null), 401 signs the user out, and anything else is a failure.
+ */
+function fileBody(reply: NativeReply): OsFileContent | null {
+  if (reply.status === 401) throw new OsAuthError();
+  if (reply.status === 404) return null;
+  if (reply.status !== 200) throw new Error(`The file could not be loaded (${reply.error ?? reply.status})`);
+  if (!reply.body || typeof reply.body !== 'object') throw new Error('The file reply had no content');
+  return reply.body as OsFileContent;
+}
+
 export type NativeHostDeps = {
   /** The bridge's request/response map. */
-  requests: Pick<NativeRequests, 'call' | 'native'>;
+  requests: Pick<NativeRequests, 'call' | 'native' | 'file'>;
   /** Posts one message to native. false when there is no bridge. */
   post: (message: ToNative) => boolean;
 };
@@ -86,6 +99,9 @@ export function createNativeHost({ requests, post }: NativeHostDeps): NativeHost
       };
     },
     open: (target: OsOpenTarget): boolean => post({ type: 'open', target }),
+    openFile: (path: string, line?: number): boolean =>
+      post(line === undefined ? { type: 'openFile', path } : { type: 'openFile', path, line }),
+    loadFile: async (path: string): Promise<OsFileContent | null> => fileBody(await requests.file(path)),
     loadProjectGraph: async (): Promise<unknown | null> =>
       nativeBody(await requests.native('projectGraph'), 'The project graph'),
     loadSkills: (): Promise<OsSkill[]> => refusedAsAuthError(fetchSkills(requester)),
@@ -131,6 +147,8 @@ export function createDevHost({ conn, fetch, setTimer, clearTimer }: DevHostDeps
       return () => stream.stop();
     },
     open: (): boolean => false,
+    openFile: (): boolean => false,
+    loadFile: async (): Promise<OsFileContent | null> => null,
     loadSkills: (): Promise<OsSkill[]> => refusedAsAuthError(fetchSkills(requester)),
   };
 }
