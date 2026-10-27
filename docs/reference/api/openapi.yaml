@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 81
+  x-api-version: 82
 servers:
   - url: "https://{host}"
     variables:
@@ -5385,6 +5385,8 @@ paths:
                 required:
                   - "commands"
                   - "count"
+                  - "truncated"
+                  - "scannedFolders"
                 properties:
                   commands:
                     type: "array"
@@ -5392,6 +5394,12 @@ paths:
                       "$ref": "#/components/schemas/Command"
                   count:
                     type: "integer"
+                  truncated:
+                    type: "boolean"
+                    description: "True when the commands/ family holds more than 2000 folder entries; only the first 2000 by name were examined."
+                  scannedFolders:
+                    type: "integer"
+                    description: "Folder entries examined, at most 2000."
         "400":
           description: "Bad Request"
           content:
@@ -5511,6 +5519,8 @@ paths:
                 required:
                   - "templates"
                   - "count"
+                  - "truncated"
+                  - "scannedFolders"
                 properties:
                   templates:
                     type: "array"
@@ -5518,6 +5528,12 @@ paths:
                       "$ref": "#/components/schemas/Template"
                   count:
                     type: "integer"
+                  truncated:
+                    type: "boolean"
+                    description: "True when the templates/ family holds more than 2000 folder entries; only the first 2000 by name were examined."
+                  scannedFolders:
+                    type: "integer"
+                    description: "Folder entries examined, at most 2000."
         "400":
           description: "Bad Request"
           content:
@@ -5571,6 +5587,12 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
     delete:
       tags:
         - "docs"
@@ -5596,6 +5618,12 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "404":
           description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
           content:
             application/json:
               schema:
@@ -8500,6 +8528,12 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/providers/models:
     post:
       summary: "Fetch the current chat model list for a provider"
@@ -11161,11 +11195,16 @@ components:
       required:
         - "deleted"
         - "folderName"
+        - "folderRemoved"
       properties:
         deleted:
           const: true
         folderName:
           type: "string"
+          description: "The true directory entry name (case may differ from the request)."
+        folderRemoved:
+          type: "boolean"
+          description: "True when the folder was empty after the template or command file was removed and was removed too. False when user files remain in it."
     Discovery:
       type: "object"
       required:
@@ -12665,7 +12704,7 @@ components:
           description: "The project id (1 to 128 letters, digits, _ or -)."
         root:
           type: "string"
-          description: "Absolute path of the project folder. Must exist, must not be a symlink, must not be the filesystem root, the home directory or an ancestor of it, and must contain system/project.json."
+          description: "Absolute path of the project folder. Must be an existing directory that is not a symlink, is not a system folder (/, /Users, /private, /etc, /var, /usr, /System, /Library, /Applications, /Volumes, /opt, /bin, /sbin and their /private twins), is not the home directory or an ancestor of it, has no .git, .ssh, .gnupg, .aws, .kube or .docker component, and contains system/project.json. Any refusal answers the same INVALID_ROOT 400."
     RegisterResult:
       type: "object"
       required:
@@ -13231,10 +13270,10 @@ components:
           description: "doc (default) or visual. Any other value answers 400 VALIDATION_FAILED."
         rawContent:
           type: "string"
-          description: "The whole file text. When present it is written as-is (the Swift renderedMarkdown rule)."
+          description: "The whole file text. When present it is written as-is (the Swift renderedMarkdown rule), and it wins over rewrite."
         rewrite:
           type: "boolean"
-          description: "With no rawContent: apply name and sections to the existing file and keep its body text (DocTemplate.rewriting)."
+          description: "Apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). Precedence: rawContent wins. When rawContent is present it is written as-is and rewrite is ignored."
     TicketIndex:
       type: "object"
       required:

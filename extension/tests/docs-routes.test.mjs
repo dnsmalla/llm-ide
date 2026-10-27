@@ -102,7 +102,7 @@ test('register: refuses an over-broad root, a missing marker, a bad id and a rel
   const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-bare-'));
   try {
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: '/' })).statusCode, 400);
-    assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: bare })).json().error.code, 'NOT_A_PROJECT');
+    assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: bare })).json().error.code, 'INVALID_ROOT');
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: '../x', root: makeProject() })).json().error.code, 'INVALID_PROJECT_ID');
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: 'relative' })).statusCode, 400);
     assert.equal((await call(u, 'POST', '/kb/projects/register', { id: 'x', root: os.homedir() })).statusCode, 400);
@@ -288,6 +288,98 @@ test('latency: a list call through the route (200 templates) answers in under 20
     t.diagnostic(`GET /kb/docs/templates (200) took ${ms.toFixed(1)} ms`);
     assert.equal(res.json().count, 200);
     assert.ok(ms < 200, `${ms.toFixed(1)} ms`);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('register oracle: a missing folder, a folder with no marker and an over-broad root answer one code and one message', async () => {
+  reset();
+  const u = mkUser('oracle');
+  const bare = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-bare-')));
+  try {
+    const answers = [
+      path.join(bare, 'missing'),
+      bare,
+      os.homedir(),
+      '/private',
+    ].map(async (root) => {
+      const res = await call(u, 'POST', '/kb/projects/register', { id: 'probe', root });
+      return { status: res.statusCode, error: res.json().error };
+    });
+    const got = await Promise.all(answers);
+    for (const g of got) {
+      assert.equal(g.status, 400);
+      assert.equal(g.error.code, 'INVALID_ROOT');
+      assert.equal(g.error.message, got[0].error.message);
+    }
+  } finally {
+    fs.rmSync(bare, { recursive: true, force: true });
+  }
+});
+
+test('register cap: 200 projects per user, a re-registration does not count, the 201st new id is 409', async () => {
+  reset();
+  const u = mkUser('cap');
+  const root = makeProject();
+  try {
+    const db = kb.getDb();
+    const insert = db.prepare('INSERT INTO doc_project_roots (user_id, project_id, root) VALUES (?, ?, ?)');
+    for (let i = 0; i < 199; i++) insert.run(u, `filler-${i}`, `/nonexistent/${i}`);
+    await registered(u, root, 'real-200');
+    const over = await call(u, 'POST', '/kb/projects/register', { id: 'real-201', root });
+    assert.equal(over.statusCode, 409);
+    assert.equal(over.json().error.code, 'TOO_MANY_PROJECTS');
+    const again = await call(u, 'POST', '/kb/projects/register', { id: 'real-200', root });
+    assert.equal(again.statusCode, 200, 're-registering an existing id was refused at the cap');
+    const count = db.prepare('SELECT COUNT(*) AS n FROM doc_project_roots WHERE user_id = ?').get(u).n;
+    assert.equal(count, 200);
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('ingest layouts over HTTP: the reserved names are 400, an ingest file in another folder is 409, and the delete result says what was removed', async () => {
+  reset();
+  const u = mkUser('ingest');
+  const root = makeProject();
+  try {
+    const id = await registered(u, root);
+    assert.equal((await call(u, 'PUT', `/kb/docs/templates/meeting-note?project=${id}`, { name: 'M' })).json().error.code, 'RESERVED_FOLDER');
+    assert.equal((await call(u, 'DELETE', `/kb/docs/templates/email-note?project=${id}`)).json().error.code, 'RESERVED_FOLDER');
+    const dir = path.join(root, 'templates', 'house-meeting');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, 'template.md'), '<!-- llmide:ingest-template source=meeting -->\n# {{title}}\n');
+    const del = await call(u, 'DELETE', `/kb/docs/templates/house-meeting?project=${id}`);
+    assert.equal(del.statusCode, 409);
+    assert.equal(del.json().error.code, 'RESERVED_FOLDER');
+    const put = await call(u, 'PUT', `/kb/docs/templates/house-meeting?project=${id}`, { name: 'X', sections: ['A'] });
+    assert.equal(put.statusCode, 409);
+    assert.ok(fs.readFileSync(path.join(dir, 'template.md'), 'utf8').includes('{{title}}'), 'the ingest layout was overwritten');
+    await call(u, 'PUT', `/kb/docs/templates/retro?project=${id}`, { name: 'Retro', sections: ['A'] });
+    fs.writeFileSync(path.join(root, 'templates', 'retro', 'extra.txt'), 'keep');
+    const d2 = await call(u, 'DELETE', `/kb/docs/templates/retro?project=${id}`);
+    assert.deepEqual(d2.json(), { deleted: true, folderName: 'retro', folderRemoved: false });
+    assert.ok(fs.existsSync(path.join(root, 'templates', 'retro', 'extra.txt')));
+  } finally {
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('list: the response carries truncated and scannedFolders; a PUT answers the true folder name', async () => {
+  reset();
+  const u = mkUser('list');
+  const root = makeProject();
+  try {
+    const id = await registered(u, root);
+    await call(u, 'PUT', `/kb/docs/templates/Case-Two?project=${id}`, { name: 'C', sections: ['A'] });
+    const list = (await call(u, 'GET', `/kb/docs/templates?project=${id}`)).json();
+    assert.equal(list.truncated, false);
+    assert.equal(list.scannedFolders, 1);
+    const put = await call(u, 'PUT', `/kb/docs/templates/case-two?project=${id}`, { name: 'C2', sections: ['B'] });
+    assert.equal(put.json().template.folderName, 'Case-Two');
+    const cmds = (await call(u, 'GET', `/kb/docs/commands?project=${id}`)).json();
+    assert.equal(cmds.truncated, false);
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
   }

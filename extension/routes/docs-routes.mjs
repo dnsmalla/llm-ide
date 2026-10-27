@@ -23,7 +23,7 @@ import { AppError } from '../core/errors.mjs';
 import { readBody, parseJSON, sendJSON } from '../core/utils.mjs';
 import { listGenerationLibrary } from '../llm_agent/skills/generation-library.mjs';
 import {
-  DocFilesError, deleteFolder, scanCommands, scanTemplates,
+  DocFilesError, deleteFolder, scanCommandsPage, scanTemplatesPage,
   seedProjectFiles, writeCommand, writeTemplate,
 } from '../kb/doc-project-files.mjs';
 import { SURFACES } from '../kb/doc-templates.mjs';
@@ -42,13 +42,15 @@ const MAX_INSTRUCTION = 20_000;
 
 const FAIL = {
   INVALID_ROOT: 400, INVALID_PROJECT_ID: 400, INVALID_FOLDER: 400, RESERVED_FOLDER: 400,
-  NOT_A_PROJECT: 400, UNSAFE_PATH: 400, TOO_LARGE: 413,
-  ROOT_NOT_FOUND: 404, PROJECT_NOT_REGISTERED: 404,
+  UNSAFE_PATH: 400, TOO_LARGE: 413, TOO_MANY_PROJECTS: 409,
+  PROJECT_NOT_REGISTERED: 404,
 };
 
 function fail(res, err) {
   if (err instanceof DocFilesError) {
-    sendJSON(res, FAIL[err.code] ?? 400, { error: { code: err.code, message: err.message } });
+    // A DocFilesError may carry its own status (409 for an ingest layout).
+    const status = err.status ?? FAIL[err.code] ?? 400;
+    sendJSON(res, status, { error: { code: err.code, message: err.message } });
     return;
   }
   if (err instanceof AppError) {
@@ -123,14 +125,14 @@ export async function handleDocsRoutes(req, res, ctx) {
   // Collection and seed routes.
   if (path === '/kb/docs/templates' && req.method === 'GET') {
     return withProject(req, res, url, userId, (root) => {
-      const templates = scanTemplates(root);
-      sendJSON(res, 200, { templates, count: templates.length });
+      const { templates, truncated, scannedFolders } = scanTemplatesPage(root);
+      sendJSON(res, 200, { templates, count: templates.length, truncated, scannedFolders });
     });
   }
   if (path === '/kb/docs/commands' && req.method === 'GET') {
     return withProject(req, res, url, userId, (root) => {
-      const commands = scanCommands(root);
-      sendJSON(res, 200, { commands, count: commands.length });
+      const { commands, truncated, scannedFolders } = scanCommandsPage(root);
+      sendJSON(res, 200, { commands, count: commands.length, truncated, scannedFolders });
     });
   }
   if (path === '/kb/docs/seed' && req.method === 'POST') {
@@ -164,12 +166,12 @@ export async function handleDocsRoutes(req, res, ctx) {
 
   if (req.method === 'DELETE') {
     return withProject(req, res, url, userId, (root) => {
-      const deleted = deleteFolder(root, family, folder);
-      if (!deleted) {
+      const result = deleteFolder(root, family, folder);
+      if (!result) {
         sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: `no ${isTemplate ? 'template' : 'command'} "${folder}"` } });
         return;
       }
-      sendJSON(res, 200, { deleted: true, folderName: folder });
+      sendJSON(res, 200, { deleted: true, folderName: result.folderName, folderRemoved: result.folderRemoved });
     });
   }
 
@@ -186,6 +188,7 @@ export async function handleDocsRoutes(req, res, ctx) {
     if (problem) return invalid(res, problem);
     return withProject(req, res, url, userId, (root) => {
       const name = body.name?.trim() || folder;
+      // The write answers with the true folder name (case may differ from the request).
       if (isTemplate) {
         const template = writeTemplate(root, folder, {
           name, sections: body.sections, surface: body.surface,

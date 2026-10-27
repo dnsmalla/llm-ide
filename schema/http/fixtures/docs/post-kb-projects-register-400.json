@@ -1,7 +1,7 @@
 {
   "endpoint": "POST /kb/projects/register",
   "status": 400,
-  "description": "Captured by calling the real handler. The filesystem root is refused as over-broad.",
+  "description": "Captured by calling the real handler. The filesystem root is refused as over-broad; every refused root gets this same code and message.",
   "request": {
     "body": {
       "id": "x",
@@ -11,7 +11,7 @@
   "response": {
     "error": {
       "code": "INVALID_ROOT",
-      "message": "root is too broad (home, an ancestor of home, or a system folder)"
+      "message": "root is not a usable LLM-IDE project folder"
     }
   }
 }

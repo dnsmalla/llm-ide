@@ -1,0 +1,19 @@
+{
+  "endpoint": "DELETE /kb/docs/templates/:folder",
+  "status": 409,
+  "description": "Written from the handler's error path (tests/docs-routes.test.mjs covers it): the template file is an ingest layout, so nothing is removed.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "house-meeting"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RESERVED_FOLDER",
+      "message": "this folder holds an ingest layout, not a Doc Gen template"
+    }
+  }
+}

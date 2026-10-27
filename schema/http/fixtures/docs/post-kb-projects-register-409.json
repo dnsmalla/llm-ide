@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/projects/register",
+  "status": 409,
+  "description": "Written from the handler's error path (tests/docs-routes.test.mjs covers it): the user already holds 200 registered projects and this id is new.",
+  "request": {
+    "body": {
+      "id": "project-201",
+      "root": "/Users/example/projects/project-201"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "TOO_MANY_PROJECTS",
+      "message": "at most 200 registered projects per user"
+    }
+  }
+}

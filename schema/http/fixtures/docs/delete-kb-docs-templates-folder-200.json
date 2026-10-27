@@ -12,6 +12,7 @@
   },
   "response": {
     "deleted": true,
-    "folderName": "retro"
+    "folderName": "retro",
+    "folderRemoved": true
   }
 }

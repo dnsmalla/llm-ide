@@ -1,0 +1,25 @@
+{
+  "endpoint": "PUT /kb/docs/templates/:folder",
+  "status": 409,
+  "description": "Written from the handler's error path (tests/docs-routes.test.mjs covers it): the folder already holds an ingest layout (template.md carrying llmide:ingest-template), which the write refuses.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "house-meeting"
+    },
+    "body": {
+      "name": "House Meeting",
+      "sections": [
+        "Summary"
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RESERVED_FOLDER",
+      "message": "this folder holds an ingest layout, not a Doc Gen template"
+    }
+  }
+}

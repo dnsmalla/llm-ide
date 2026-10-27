@@ -1,7 +1,7 @@
 {
   "endpoint": "GET /kb/docs/commands",
   "status": 200,
-  "description": "Captured by calling the real handler: the commands on disk, sorted by display name.",
+  "description": "Captured by calling the real handler: the commands on disk, sorted by display name. truncated is false: the family is within the 2000-folder scan cap.",
   "request": {
     "query": {
       "project": "alpha"
@@ -90,6 +90,8 @@
         "surface": "visual"
       }
     ],
-    "count": 8
+    "count": 8,
+    "truncated": false,
+    "scannedFolders": 8
   }
 }

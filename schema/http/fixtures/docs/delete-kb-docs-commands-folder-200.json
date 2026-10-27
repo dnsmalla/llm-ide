@@ -12,6 +12,7 @@
   },
   "response": {
     "deleted": true,
-    "folderName": "summarize"
+    "folderName": "summarize",
+    "folderRemoved": true
   }
 }

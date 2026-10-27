@@ -97,11 +97,11 @@ Endpoints with no client caller (41):
 | `/generate-notes` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:247` | - | `App.tsx`, `anthropic.ts` | - |
 | `/generate-docx` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/server/export-routes.mjs:130` | - | `App.tsx`, `ExportMenu.tsx` | - |
 | `/generate-doc` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Export.swift` | - | - |
-| `/kb/docs/templates` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:124` | - | - | tests only |
+| `/kb/docs/templates` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:126` | - | - | tests only |
 | `/kb/docs/templates/:folder` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | - | - | tests only |
-| `/kb/docs/commands` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:130` | - | - | tests only |
+| `/kb/docs/commands` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:132` | - | - | tests only |
 | `/kb/docs/commands/:folder` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | - | - | tests only |
-| `/kb/docs/seed` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/docs-routes.mjs:136` | - | - | tests only |
+| `/kb/docs/seed` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/docs-routes.mjs:138` | - | - | tests only |
 | `/kb/projects/register` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | - | - | tests only |
 | `/chat` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:348` | - | `App.tsx`, `useChat.ts` | - |
 | `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:449` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
@@ -213,7 +213,7 @@ Endpoints with no client caller (41):
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:169` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:166` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:61` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:645` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:646` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:270` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:282` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:307` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -223,7 +223,7 @@ Endpoints with no client caller (41):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:456` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:506` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:551` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:669` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:670` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:598` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:780` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:795` | - | - | tests only |

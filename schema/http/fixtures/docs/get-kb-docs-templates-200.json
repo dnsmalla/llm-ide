@@ -1,7 +1,7 @@
 {
   "endpoint": "GET /kb/docs/templates",
   "status": 200,
-  "description": "Captured by calling the real handler: both templates on disk, sorted by display name, with the surface read from each file marker.",
+  "description": "Captured by calling the real handler: both templates on disk, sorted by display name, with the surface read from each file marker. truncated is false: the family is within the 2000-folder scan cap.",
   "request": {
     "query": {
       "project": "alpha"
@@ -158,6 +158,8 @@
         "surface": "doc"
       }
     ],
-    "count": 10
+    "count": 10,
+    "truncated": false,
+    "scannedFolders": 10
   }
 }

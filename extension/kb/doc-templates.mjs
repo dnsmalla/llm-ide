@@ -343,6 +343,14 @@ export function isIngestTemplate(markdown) {
 /** Folder names a project template or command may not use (`auto_task` is Auto Task's). */
 export const RESERVED_TEMPLATE_FOLDERS = Object.freeze(['auto_task']);
 
+/**
+ * Folder names of the ingest layouts (`IngestTemplateKind.folderName` in
+ * Core/Notes/Services/IngestTemplateSeeder.swift). A Doc Gen write or delete
+ * may not use these names under templates/: the Mac's ingest renderer reads
+ * `templates/<kind>/template.md` from them.
+ */
+export const INGEST_TEMPLATE_FOLDERS = Object.freeze(['meeting-note', 'email-note']);
+
 /** Shape of a folder name a route may write: letters/digits first, then letters, digits, `_`, `-`. */
 export const FOLDER_NAME_RE = /^[\p{L}\p{N}][\p{L}\p{N}_-]{0,79}$/u;
 

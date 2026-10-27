@@ -10,7 +10,8 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { spawn } from 'node:child_process';
 
 import * as T from '../kb/doc-templates.mjs';
 import * as F from '../kb/doc-project-files.mjs';
@@ -282,7 +283,7 @@ test('testDeleteRemovesTheFolder', () => {
     F.seedProjectFiles(root, { commands: [kitEntry('commands/summarize', '# Summarize\n\nShorten it.')] });
     const target = F.scanCommands(root).find((c) => c.folderName === 'summarize');
     assert.ok(target);
-    assert.equal(F.deleteFolder(root, 'commands', target.folderName), true);
+    assert.deepEqual(F.deleteFolder(root, 'commands', target.folderName), { folderName: 'summarize', folderRemoved: true });
     assert.ok(!F.scanCommands(root).some((c) => c.folderName === 'summarize'));
     assert.ok(!fs.existsSync(path.join(root, 'commands', 'summarize')));
   } finally {
@@ -775,4 +776,248 @@ test('isOverBroadRoot mirrors SystemBridge.isOverBroadRoot', () => {
 
 test('resolveOutputDirectory: explicit path wins over the project data folder', () => {
   assert.equal(F.resolveOutputDirectory({ localFolderPath: '/x', projectRoot: '/p' }), '/x');
+});
+
+// ---------------------------------------------------------------------------
+// Hardening (docs-kit K1 review): ingest layouts, delete scope, races, caps,
+// root denylist, case-insensitive names, temp-file cleanup.
+// ---------------------------------------------------------------------------
+
+const INGEST_LAYOUT = '<!-- llmide:ingest-template source=meeting -->\n# {{title}}\n\n{{full}}\n';
+
+function codeOf(fn) {
+  try { fn(); return null; } catch (e) { return e; }
+}
+
+test('M1: an ingest layout in a non-reserved folder is refused by write and delete, and kept', () => {
+  const root = tmpProject();
+  try {
+    write(root, 'templates/house-meeting/template.md', INGEST_LAYOUT);
+    const before = fs.readFileSync(path.join(root, 'templates/house-meeting/template.md'), 'utf8');
+    const del = codeOf(() => F.deleteFolder(root, 'templates', 'house-meeting'));
+    assert.equal(del?.code, 'RESERVED_FOLDER');
+    assert.equal(del?.status, 409);
+    const put = codeOf(() => F.writeTemplate(root, 'house-meeting', { name: 'X', sections: ['A'] }));
+    assert.equal(put?.code, 'RESERVED_FOLDER');
+    assert.equal(put?.status, 409);
+    assert.equal(fs.readFileSync(path.join(root, 'templates/house-meeting/template.md'), 'utf8'), before, 'the ingest layout was changed');
+    assert.equal(F.scanTemplates(root).length, 0, 'the layout is still hidden from the scan');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('M1: the ingest folder names are reserved for templates (any casing), with 400', () => {
+  const root = tmpProject();
+  try {
+    for (const name of ['meeting-note', 'email-note', 'Meeting-Note', 'EMAIL-NOTE', 'auto_task', 'Auto_Task']) {
+      const put = codeOf(() => F.writeTemplate(root, name, { name: 'X' }));
+      assert.equal(put?.code, 'RESERVED_FOLDER', `wrote ${name}`);
+      assert.equal(put?.status, 400);
+      assert.equal(codeOf(() => F.deleteFolder(root, 'templates', name))?.code, 'RESERVED_FOLDER', `deleted ${name}`);
+    }
+    assert.ok(!fs.existsSync(path.join(root, 'templates', 'meeting-note')));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('M1: delete removes only the template file and the folder only when it is empty', () => {
+  const root = tmpProject();
+  try {
+    F.writeTemplate(root, 'retro', { name: 'Retro', sections: ['A'] });
+    write(root, 'templates/retro/notes.txt', 'the user kept this');
+    write(root, 'templates/retro/sub/deep.md', 'nested');
+    const kept = F.deleteFolder(root, 'templates', 'retro');
+    assert.deepEqual(kept, { folderName: 'retro', folderRemoved: false });
+    assert.ok(!fs.existsSync(path.join(root, 'templates/retro/template.md')));
+    assert.equal(fs.readFileSync(path.join(root, 'templates/retro/notes.txt'), 'utf8'), 'the user kept this');
+    assert.ok(fs.existsSync(path.join(root, 'templates/retro/sub/deep.md')), 'nested user files were removed');
+    F.writeTemplate(root, 'empty-one', { name: 'E', sections: ['A'] });
+    assert.deepEqual(F.deleteFolder(root, 'templates', 'empty-one'), { folderName: 'empty-one', folderRemoved: true });
+    assert.ok(!fs.existsSync(path.join(root, 'templates/empty-one')));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('M1: a delete with no template file answers null (absent), and never touches the folder', () => {
+  const root = tmpProject();
+  try {
+    write(root, 'templates/only-notes/notes.txt', 'x');
+    assert.equal(F.deleteFolder(root, 'templates', 'only-notes'), null);
+    assert.equal(F.deleteFolder(root, 'templates', 'missing'), null);
+    assert.ok(fs.existsSync(path.join(root, 'templates/only-notes/notes.txt')));
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('L2: a folder that is a symlink out of the project is refused, and nothing is written outside', () => {
+  const root = tmpProject();
+  const outside = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-outside-')));
+  try {
+    fs.mkdirSync(path.join(root, 'templates'));
+    fs.symlinkSync(outside, path.join(root, 'templates', 'retro'));
+    const err = codeOf(() => F.writeTemplate(root, 'retro', { name: 'R', sections: ['A'] }));
+    assert.equal(err?.code, 'UNSAFE_PATH');
+    assert.deepEqual(fs.readdirSync(outside), [], 'wrote through the symlink');
+    assert.equal(codeOf(() => F.deleteFolder(root, 'templates', 'retro'))?.code, 'UNSAFE_PATH');
+    assert.ok(fs.existsSync(outside));
+  } finally {
+    cleanup(root);
+    cleanup(outside);
+  }
+});
+
+test('L2: the write path creates one segment at a time and leaves no temp file behind', () => {
+  const root = tmpProject();
+  try {
+    F.writeTemplate(root, 'step-by-step', { name: 'S', sections: ['A'] });
+    assert.deepEqual(fs.readdirSync(path.join(root, 'templates', 'step-by-step')), ['template.md']);
+    assert.deepEqual(fs.readdirSync(path.join(root, 'templates')).sort(), ['step-by-step']);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('L7: a failed rename is reported as UNSAFE_PATH and leaves no .tmp file', () => {
+  const root = tmpProject();
+  try {
+    // A non-empty directory at template.md: the rename cannot replace it.
+    write(root, 'templates/blocked/template.md/inner.txt', 'occupied');
+    const err = codeOf(() => F.writeTemplate(root, 'blocked', { name: 'B', sections: ['A'] }));
+    assert.equal(err?.code, 'UNSAFE_PATH');
+    const names = fs.readdirSync(path.join(root, 'templates', 'blocked'));
+    assert.deepEqual(names, ['template.md'], `temp file left behind: ${names.join(', ')}`);
+    assert.equal(fs.readFileSync(path.join(root, 'templates/blocked/template.md/inner.txt'), 'utf8'), 'occupied');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('L8: seeding over a name that appears between the check and the link keeps the existing entry', () => {
+  const root = tmpProject();
+  try {
+    // A directory already at the seed's file name: the link fails with EEXIST,
+    // the seed reports nothing written, and no temp file is left.
+    write(root, 'templates/retro/template.md/keep.txt', 'user');
+    const written = F.seedProjectFiles(root, {
+      templates: [kitEntry('templates/retro', '# Retro\n\n## A\n')],
+    });
+    assert.ok(!written.includes('templates/retro/template.md'));
+    assert.deepEqual(fs.readdirSync(path.join(root, 'templates', 'retro')), ['template.md']);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('L8: two overlapping seeds and a PUT loop in other processes never lose the last PUT', async () => {
+  const root = tmpProject();
+  const mod = pathToFileURL(path.join(here, '..', 'kb', 'doc-project-files.mjs')).href;
+  const script = `
+    const F = await import(${JSON.stringify(mod)});
+    const kit = { templates: [{ id: 'templates/race', body: '# Race\\n\\n## A\\n', surface: 'doc' }] };
+    for (let i = 0; i < 150; i++) { try { F.seedProjectFiles(process.env.ROOT, kit); } catch { /* a concurrent delete */ } }
+  `;
+  const child = () => new Promise((resolve, reject) => {
+    const p = spawn(process.execPath, ['--input-type=module', '-e', script], {
+      env: { ...process.env, ROOT: root }, stdio: 'ignore',
+    });
+    p.on('error', reject);
+    p.on('close', (code) => resolve(code));
+  });
+  try {
+    const runs = [child(), child()];
+    let last = '';
+    for (let i = 0; i < 60; i++) {
+      try { F.deleteFolder(root, 'templates', 'race'); } catch { /* a concurrent seed */ }
+      last = `# Race\n\nuser version ${i}\n`;
+      F.writeTemplate(root, 'race', { rawContent: last });
+    }
+    const codes = await Promise.all(runs);
+    assert.deepEqual(codes, [0, 0]);
+    assert.equal(fs.readFileSync(path.join(root, 'templates', 'race', 'template.md'), 'utf8'), last, 'a seed replaced the user PUT');
+    assert.deepEqual(fs.readdirSync(path.join(root, 'templates', 'race')).filter((n) => n.endsWith('.tmp')), [], 'temp files left');
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('L9: a family with 2100 folders is scanned to 2000 and reports truncated', () => {
+  const root = tmpProject();
+  try {
+    const base = path.join(root, 'templates');
+    fs.mkdirSync(base, { recursive: true });
+    for (let i = 0; i < 2100; i++) {
+      const dir = path.join(base, `t-${String(i).padStart(4, '0')}`);
+      fs.mkdirSync(dir);
+      fs.writeFileSync(path.join(dir, 'template.md'), `# T ${i}\n\n## A\n`);
+    }
+    const page = F.scanTemplatesPage(root);
+    assert.equal(page.truncated, true);
+    assert.equal(page.scannedFolders, 2000);
+    assert.equal(page.templates.length, 2000);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('L9: a family within the cap is not truncated', () => {
+  const root = tmpProject();
+  try {
+    write(root, 'templates/a/template.md', '# A\n\n## X\n');
+    const page = F.scanTemplatesPage(root);
+    assert.equal(page.truncated, false);
+    assert.equal(page.scannedFolders, 1);
+  } finally {
+    cleanup(root);
+  }
+});
+
+test('L5: a root under a credential or tooling folder is refused, in any casing', () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-home-')));
+  const base = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-sens-')));
+  try {
+    for (const dir of ['.git', '.ssh', '.gnupg', '.aws', '.kube', '.docker', '.SSH', '.Aws']) {
+      const proj = path.join(base, dir, 'proj');
+      fs.mkdirSync(path.join(proj, 'system'), { recursive: true });
+      fs.writeFileSync(path.join(proj, 'system', 'project.json'), '{}');
+      const err = codeOf(() => F.validateProjectRoot(proj, { home }));
+      assert.equal(err?.code, 'INVALID_ROOT', `accepted a root under ${dir}`);
+    }
+  } finally {
+    cleanup(base);
+    cleanup(home);
+  }
+});
+
+test('L5: each system folder is refused as a root (exact path only)', () => {
+  const home = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'docgen-home-')));
+  try {
+    for (const p of F.REFUSED_SYSTEM_ROOTS) {
+      const err = codeOf(() => F.validateProjectRoot(p, { home }));
+      assert.ok(err instanceof F.DocFilesError, `accepted ${p}`);
+    }
+    for (const p of ['/etc', '/private/etc', '/var', '/private/var', '/usr', '/bin', '/sbin', '/opt',
+      '/System', '/Library', '/Applications', '/Volumes', '/Users', '/private']) {
+      assert.ok(F.REFUSED_SYSTEM_ROOTS.includes(p), `${p} is not in the denylist`);
+    }
+  } finally {
+    cleanup(home);
+  }
+});
+
+test('L6: a request that differs only by case writes into the existing folder and names it', () => {
+  const root = tmpProject();
+  try {
+    const first = F.writeTemplate(root, 'Case-Test', { name: 'One', sections: ['A'] });
+    assert.equal(first.folderName, 'Case-Test');
+    const second = F.writeTemplate(root, 'case-test', { name: 'Two', sections: ['B'] });
+    assert.equal(second.folderName, 'Case-Test', 'the response names the directory entry, not the request');
+    assert.equal(F.scanTemplates(root).length, 1, 'a second folder was created');
+    assert.equal(F.deleteFolder(root, 'templates', 'CASE-TEST').folderName, 'Case-Test');
+  } finally {
+    cleanup(root);
+  }
 });

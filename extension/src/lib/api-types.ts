@@ -306,9 +306,9 @@ export type TemplateWrite = {
   sections?: string[];
   /** doc (default) or visual. Any other value answers 400 VALIDATION_FAILED. */
   surface?: string;
-  /** The whole file text. When present it is written as-is (the Swift renderedMarkdown rule). */
+  /** The whole file text. When present it is written as-is (the Swift renderedMarkdown rule), and it wins over rewrite. */
   rawContent?: string;
-  /** With no rawContent: apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). */
+  /** Apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). Precedence: rawContent wins. When rawContent is present it is written as-is and rewrite is ignored. */
   rewrite?: boolean;
 };
 
@@ -325,7 +325,10 @@ export type CommandWrite = {
 
 export type DeleteResult = {
   deleted: true;
+  /** The true directory entry name (case may differ from the request). */
   folderName: string;
+  /** True when the folder was empty after the template or command file was removed and was removed too. False when user files remain in it. */
+  folderRemoved: boolean;
 };
 
 export type SeedResult = {
@@ -337,7 +340,7 @@ export type SeedResult = {
 export type RegisterRequest = {
   /** The project id (1 to 128 letters, digits, _ or -). */
   id?: string;
-  /** Absolute path of the project folder. Must exist, must not be a symlink, must not be the filesystem root, the home directory or an ancestor of it, and must contain system/project.json. */
+  /** Absolute path of the project folder. Must be an existing directory that is not a symlink, is not a system folder (/, /Users, /private, /etc, /var, /usr, /System, /Library, /Applications, /Volumes, /opt, /bin, /sbin and their /private twins), is not the home directory or an ancestor of it, has no .git, .ssh, .gnupg, .aws, .kube or .docker component, and contains system/project.json. Any refusal answers the same INVALID_ROOT 400. */
   root?: string;
 };
 
@@ -1862,6 +1865,10 @@ export type GetKbDocsTemplatesRequest = {
 export type GetKbDocsTemplatesResponse200 = {
   templates: Template[];
   count: number;
+  /** True when the templates/ family holds more than 2000 folder entries; only the first 2000 by name were examined. */
+  truncated: boolean;
+  /** Folder entries examined, at most 2000. */
+  scannedFolders: number;
 };
 
 export type GetKbDocsTemplatesResponse400 = CommonError;
@@ -1876,6 +1883,10 @@ export type GetKbDocsCommandsRequest = {
 export type GetKbDocsCommandsResponse200 = {
   commands: Command[];
   count: number;
+  /** True when the commands/ family holds more than 2000 folder entries; only the first 2000 by name were examined. */
+  truncated: boolean;
+  /** Folder entries examined, at most 2000. */
+  scannedFolders: number;
 };
 
 export type GetKbDocsCommandsResponse400 = CommonError;
@@ -1900,6 +1911,9 @@ export type PutKbDocsTemplatesFolderResponse400 = CommonError;
 
 export type PutKbDocsTemplatesFolderResponse404 = CommonError;
 
+/** RESERVED_FOLDER: the folder holds an ingest layout. */
+export type PutKbDocsTemplatesFolderResponse409 = CommonError;
+
 /** Request parts for `DELETE /kb/docs/templates/:folder` (schema/http/docs.schema.json). */
 export type DeleteKbDocsTemplatesFolderRequest = {
   query: ProjectQuery;
@@ -1914,6 +1928,9 @@ export type DeleteKbDocsTemplatesFolderResponse200 = DeleteResult;
 export type DeleteKbDocsTemplatesFolderResponse400 = CommonError;
 
 export type DeleteKbDocsTemplatesFolderResponse404 = CommonError;
+
+/** RESERVED_FOLDER: the template file is an ingest layout; nothing is removed. */
+export type DeleteKbDocsTemplatesFolderResponse409 = CommonError;
 
 /** Request parts for `PUT /kb/docs/commands/:folder` (schema/http/docs.schema.json). */
 export type PutKbDocsCommandsFolderRequest = {
@@ -1966,7 +1983,11 @@ export type PostKbProjectsRegisterRequest = {
 
 export type PostKbProjectsRegisterResponse200 = RegisterResult;
 
+/** INVALID_PROJECT_ID, or INVALID_ROOT for every refused root (one message, no existence or type oracle). */
 export type PostKbProjectsRegisterResponse400 = CommonError;
+
+/** TOO_MANY_PROJECTS: the user already holds 200 registered projects. */
+export type PostKbProjectsRegisterResponse409 = CommonError;
 
 /** Request parts for `GET /` (schema/http/health-auth.schema.json). */
 export type GetRequest = Record<string, never>;
@@ -5560,6 +5581,7 @@ export interface ApiEndpoints {
       200: PutKbDocsTemplatesFolderResponse200;
       400: PutKbDocsTemplatesFolderResponse400;
       404: PutKbDocsTemplatesFolderResponse404;
+      409: PutKbDocsTemplatesFolderResponse409;
     };
   };
   "DELETE /kb/docs/templates/:folder": {
@@ -5568,6 +5590,7 @@ export interface ApiEndpoints {
       200: DeleteKbDocsTemplatesFolderResponse200;
       400: DeleteKbDocsTemplatesFolderResponse400;
       404: DeleteKbDocsTemplatesFolderResponse404;
+      409: DeleteKbDocsTemplatesFolderResponse409;
     };
   };
   "PUT /kb/docs/commands/:folder": {
@@ -5599,6 +5622,7 @@ export interface ApiEndpoints {
     responses: {
       200: PostKbProjectsRegisterResponse200;
       400: PostKbProjectsRegisterResponse400;
+      409: PostKbProjectsRegisterResponse409;
     };
   };
   "GET /": {
