@@ -357,7 +357,7 @@ let package = Package(
         // submodule was never initialized — SwiftPM fetches/caches it into
         // .build/checkouts itself. Pinned to the exact commit currently
         // checked out locally; bump this when graph-kit cuts a new release.
-        .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "0bf3abe8665fe4c000a7b0e80fb9ffaabd5e4507"),
+        .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "f94a7c2a12fc961c20ac47af61fcf18b9a38c476"),
     ] + sharedProtocolPackage,
     targets: [
         .target(
