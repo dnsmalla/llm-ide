@@ -7,9 +7,9 @@
 //   dev     `npm run dev`. Calls and the change feed go straight to the server with
 //           a pasted token (see DevConnect).
 //
-// The page itself (graph-kit web/) has no transport. The data sets beyond the
-// state, cancel, watch and open calls (graph, skills, routines) are not supplied
-// by either host yet; the Mac side adds them with the native bridge in step G2.
+// The page itself (graph-kit web/) has no transport. Native supplies the project
+// graph and routines (native-only data, `{type:'native'}`); skills come from the
+// server's skill library, through native in the app and direct in dev.
 import {
   OsAuthError,
   type OsCancel,
@@ -17,10 +17,22 @@ import {
   type OsLiveStatus,
   type OsOpenTarget,
   type OsRange,
+  type OsRoutine,
+  type OsSkill,
   type OsSnapshot,
 } from '@dnsmalla/graph-kit-web';
-import { HttpError, directRequester, fetchOsState, sendCancel, type Connection, type FetchLike, type Requester } from './api';
-import type { NativeEvent, NativeFeedStatus, NativeRequests, ToNative } from './bridge';
+import {
+  HttpError,
+  directRequester,
+  fetchOsState,
+  fetchSkills,
+  sendCancel,
+  toOsRoutines,
+  type Connection,
+  type FetchLike,
+  type Requester,
+} from './api';
+import type { NativeEvent, NativeFeedStatus, NativeReply, NativeRequests, ToNative } from './bridge';
 import { OsStream } from './stream';
 
 /** Maps the server's 401 to the error graph-kit reads as "session refused". Other errors pass through. */
@@ -33,9 +45,16 @@ async function refusedAsAuthError<T>(call: Promise<T>): Promise<T> {
   }
 }
 
+/** A native-only reply: 200 with the body, 401 when the session is refused, anything else is a failure. */
+function nativeBody(reply: NativeReply, what: string): unknown {
+  if (reply.status === 401) throw new OsAuthError();
+  if (reply.status !== 200) throw new Error(`${what} could not be loaded (${reply.error ?? reply.status})`);
+  return reply.body ?? null;
+}
+
 export type NativeHostDeps = {
   /** The bridge's request/response map. */
-  requests: Pick<NativeRequests, 'call'>;
+  requests: Pick<NativeRequests, 'call' | 'native'>;
   /** Posts one message to native. false when there is no bridge. */
   post: (message: ToNative) => boolean;
 };
@@ -67,6 +86,11 @@ export function createNativeHost({ requests, post }: NativeHostDeps): NativeHost
       };
     },
     open: (target: OsOpenTarget): boolean => post({ type: 'open', target }),
+    loadProjectGraph: async (): Promise<unknown | null> =>
+      nativeBody(await requests.native('projectGraph'), 'The project graph'),
+    loadSkills: (): Promise<OsSkill[]> => refusedAsAuthError(fetchSkills(requester)),
+    loadRoutines: async (): Promise<OsRoutine[]> =>
+      toOsRoutines(nativeBody(await requests.native('routines'), 'The routines')),
     nativeEvent(event) {
       if (!event || typeof event.type !== 'string' || event.type === 'hello') return;
       current?.onChange();
@@ -74,7 +98,6 @@ export function createNativeHost({ requests, post }: NativeHostDeps): NativeHost
     nativeStatus(status, detail) {
       current?.onStatus(status, detail);
     },
-    // loadProjectGraph / loadSkills / loadRoutines: added with the native bridge (step G2).
   };
 }
 
@@ -108,5 +131,6 @@ export function createDevHost({ conn, fetch, setTimer, clearTimer }: DevHostDeps
       return () => stream.stop();
     },
     open: (): boolean => false,
+    loadSkills: (): Promise<OsSkill[]> => refusedAsAuthError(fetchSkills(requester)),
   };
 }

@@ -579,3 +579,110 @@ describe('styles', () => {
     assert.ok(generated.includes(':root[data-theme="light"]'));
   });
 });
+
+/** A bridge that answers both request and native messages, the way the Mac app does. */
+function nativeAll(answer) {
+  const sent = [];
+  const timers = fakeTimers();
+  let requests;
+  const post = (message) => {
+    sent.push(message);
+    if (message.type === 'request' || message.type === 'native') {
+      const reply = answer(message);
+      if (reply !== undefined) queueMicrotask(() => requests.settle(message.id, reply));
+    }
+    return true;
+  };
+  requests = new api.bridge.NativeRequests(post, timers.setTimer, timers.clearTimer);
+  return { sent, requests, post };
+}
+
+describe('native data sets (graph, skills, routines)', () => {
+  it('loadProjectGraph asks native for projectGraph and passes the graph body through', async () => {
+    const graph = { schemaVersion: 1, nodes: [{ id: 'a.swift', title: 'a.swift', kind: 'file', metadata: {} }], edges: [] };
+    const bridge = nativeAll(() => ({ status: 200, body: graph }));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    const out = await host.loadProjectGraph();
+    assert.deepEqual(bridge.sent[0], { type: 'native', id: bridge.sent[0].id, name: 'projectGraph' });
+    assert.deepEqual(out, graph);
+  });
+
+  it('loadProjectGraph resolves null when native has no graph', async () => {
+    const bridge = nativeAll(() => ({ status: 200, body: null }));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    assert.equal(await host.loadProjectGraph(), null);
+  });
+
+  it('loadRoutines asks native for routines and keeps only an array', async () => {
+    const routines = [
+      { id: 'builtin.reviewCode', title: 'Review Code', schedule: '0 * * * *', nextRunAt: '2026-10-27T10:00:00Z', lastRunAt: null, enabled: true },
+    ];
+    const bridge = nativeAll(() => ({ status: 200, body: routines }));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    assert.deepEqual(await host.loadRoutines(), routines);
+    assert.deepEqual(bridge.sent[0], { type: 'native', id: bridge.sent[0].id, name: 'routines' });
+
+    const odd = nativeAll(() => ({ status: 200, body: { nope: 1 } }));
+    const host2 = api.hosts.createNativeHost({ requests: odd.requests, post: odd.post });
+    assert.deepEqual(await host2.loadRoutines(), []);
+  });
+
+  it('a 401 on a native data set is OsAuthError; any other failure is an ordinary error', async () => {
+    const refused = nativeAll(() => ({ status: 401 }));
+    const host = api.hosts.createNativeHost({ requests: refused.requests, post: refused.post });
+    await assert.rejects(host.loadRoutines(), api.graphKit.OsAuthError);
+
+    const broken = nativeAll(() => ({ status: 500, error: 'boom' }));
+    const host2 = api.hosts.createNativeHost({ requests: broken.requests, post: broken.post });
+    await assert.rejects(host2.loadProjectGraph(), (err) => !(err instanceof api.graphKit.OsAuthError) && /boom/.test(err.message));
+  });
+
+  it('loadSkills goes through the bridge as the skill-library GET and maps only the fields the page shows', async () => {
+    const library = {
+      repo: '/abs/repo',
+      skills: [
+        { id: 's1', family: 'f', name: 'Alpha', description: 'does a', path: '/abs/SKILL.md', repo: '/abs', sourceId: 'k', sourceName: 'Kit' },
+        { id: 7, name: 'not a string id' },
+        { id: 's2', name: 'Beta' },
+      ],
+    };
+    const bridge = nativeAll(() => ({ status: 200, body: library }));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    const skills = await host.loadSkills();
+    assert.deepEqual(bridge.sent[0], { type: 'request', id: bridge.sent[0].id, method: 'GET', path: '/kb/agent/skill-library' });
+    assert.ok(!('body' in bridge.sent[0]));
+    assert.deepEqual(skills, [
+      { id: 's1', name: 'Alpha', description: 'does a', source: 'Kit' },
+      { id: 's2', name: 'Beta' },
+    ]);
+  });
+
+  it('a 401 on the skill library is OsAuthError', async () => {
+    const refused = nativeAll(() => ({ status: 401 }));
+    const host = api.hosts.createNativeHost({ requests: refused.requests, post: refused.post });
+    await assert.rejects(host.loadSkills(), api.graphKit.OsAuthError);
+  });
+
+  it('toOsSkills tolerates a missing or malformed list', () => {
+    assert.deepEqual(api.api.toOsSkills(undefined), []);
+    assert.deepEqual(api.api.toOsSkills({ skills: 'nope' }), []);
+    assert.deepEqual(api.api.toOsSkills({ skills: [null, 3, { id: 'x', name: 'X' }] }), [{ id: 'x', name: 'X' }]);
+  });
+});
+
+describe('dev host skills', () => {
+  const conn = { baseURL: BASE, token: TOKEN };
+
+  it('loadSkills fetches the skill library with the token in the header and maps it', async () => {
+    const m = mockFetch(() => ({ body: { skills: [{ id: 's1', name: 'Alpha', sourceName: 'Kit', path: '/x' }] } }));
+    const host = api.hosts.createDevHost({ conn, fetch: m.fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    assert.deepEqual(await host.loadSkills(), [{ id: 's1', name: 'Alpha', source: 'Kit' }]);
+    assert.equal(m.calls[0].url, `${BASE}/kb/agent/skill-library`);
+    assert.equal(m.calls[0].headers.Authorization, `Bearer ${TOKEN}`);
+    assert.ok(!m.calls[0].url.includes(TOKEN));
+
+    const refused = mockFetch(() => ({ status: 401, body: {} }));
+    const host2 = api.hosts.createDevHost({ conn, fetch: refused.fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    await assert.rejects(host2.loadSkills(), api.graphKit.OsAuthError);
+  });
+});

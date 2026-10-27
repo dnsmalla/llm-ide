@@ -10,6 +10,8 @@
 //     { type: 'ready' }                              on load
 //     { type: 'open', target }                       navigate: loop | autoTasks | settings | library
 //     { type: 'request', id, method, path, body? }   one allowlisted server call (native SystemBridge)
+//     { type: 'native', id, name }                   native-only data: projectGraph | routines
+//                                                    (answered like a request; unknown name = 400 not_allowed)
 //     { type: 'subscribe' } / { type: 'unsubscribe' } the change feed (GET /kb/os/stream) on or off
 //   native -> page   window.llmideConfigure({ theme, projectName })
 //     may be called again (theme or project change); each call applies.
@@ -25,10 +27,14 @@ export type ThemeId = (typeof THEMES)[number];
 
 export type ViewTarget = 'loop' | 'autoTasks' | 'settings' | 'library';
 
+/** The native-only data sets the page can ask for. Each is answered by native, not by the server. */
+export type NativeName = 'projectGraph' | 'routines';
+
 export type ToNative =
   | { type: 'ready' }
   | { type: 'open'; target: ViewTarget }
   | { type: 'request'; id: string; method: 'GET' | 'POST'; path: string; body?: Record<string, string> }
+  | { type: 'native'; id: string; name: NativeName }
   | { type: 'subscribe' }
   | { type: 'unsubscribe' };
 
@@ -98,15 +104,24 @@ export class NativeRequests {
 
   /** Sends one allowlisted call to native. Rejects on timeout or when there is no bridge. */
   call(method: 'GET' | 'POST', path: string, body?: Record<string, string>): Promise<NativeReply> {
+    return this.dispatch((id) =>
+      body === undefined ? { type: 'request', id, method, path } : { type: 'request', id, method, path, body },
+    );
+  }
+
+  /** Asks native for one native-only data set. Rejects on timeout or when there is no bridge. */
+  native(name: NativeName): Promise<NativeReply> {
+    return this.dispatch((id) => ({ type: 'native', id, name }));
+  }
+
+  private dispatch(build: (id: string) => ToNative): Promise<NativeReply> {
     const id = `r${this.nextId++}`;
     return new Promise<NativeReply>((resolve, reject) => {
       const timer = this.setTimer(() => {
         if (this.pending.delete(id)) reject(new Error('LLM-IDE did not answer in time'));
       }, NATIVE_REQUEST_TIMEOUT_MS);
       this.pending.set(id, { resolve, timer });
-      const message: ToNative =
-        body === undefined ? { type: 'request', id, method, path } : { type: 'request', id, method, path, body };
-      if (!this.post(message)) {
+      if (!this.post(build(id))) {
         this.clearTimer(timer);
         this.pending.delete(id);
         reject(new Error('The LLM-IDE bridge is not available'));

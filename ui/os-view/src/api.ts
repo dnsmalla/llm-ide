@@ -2,6 +2,7 @@
 // native bridge (native holds the token and the allowlist). In `npm run dev` they
 // go straight to the server with a pasted token, which only ever travels in the
 // Authorization header, never in a URL.
+import type { OsRoutine, OsSkill } from '@dnsmalla/graph-kit-web';
 import type { Cancel, OsState } from './types';
 
 export type Connection = { baseURL: string; token: string };
@@ -73,6 +74,39 @@ export async function fetchOsState(req: Requester, range: Range): Promise<OsStat
   const reply = await req('GET', `/kb/os/state?window=${range}`);
   ensureOk(reply, 'GET /kb/os/state');
   return reply.body as OsState;
+}
+
+/**
+ * Maps the server's skill library (`{ skills: [{ id, name, description, sourceName, ... }] }`)
+ * to the page's OsSkill list. Entries without a string id and name are dropped; `path`
+ * and `repo` never reach the page.
+ */
+export function toOsSkills(body: unknown): OsSkill[] {
+  const list = body && typeof body === 'object' ? (body as { skills?: unknown }).skills : undefined;
+  if (!Array.isArray(list)) return [];
+  const skills: OsSkill[] = [];
+  for (const entry of list) {
+    if (!entry || typeof entry !== 'object') continue;
+    const e = entry as Record<string, unknown>;
+    if (typeof e.id !== 'string' || typeof e.name !== 'string') continue;
+    const skill: OsSkill = { id: e.id, name: e.name };
+    if (typeof e.description === 'string') skill.description = e.description;
+    if (typeof e.sourceName === 'string') skill.source = e.sourceName;
+    skills.push(skill);
+  }
+  return skills;
+}
+
+/** The skills deck: GET /kb/agent/skill-library, mapped by toOsSkills. */
+export async function fetchSkills(req: Requester): Promise<OsSkill[]> {
+  const reply = await req('GET', '/kb/agent/skill-library');
+  ensureOk(reply, 'GET /kb/agent/skill-library');
+  return toOsSkills(reply.body);
+}
+
+/** Routines arrive as a JSON array from native; anything else is no routines. */
+export function toOsRoutines(body: unknown): OsRoutine[] {
+  return Array.isArray(body) ? (body as OsRoutine[]) : [];
 }
 
 /**

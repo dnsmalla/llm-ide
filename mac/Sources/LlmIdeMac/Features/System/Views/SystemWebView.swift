@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Combine
+import GraphCore
 
 /// Hosts the bundled OS page (`Resources/os-view/index.html`) in a `WKWebView`.
 ///
@@ -24,6 +25,10 @@ struct SystemWebView: NSViewRepresentable {
     let session: SessionStore
     let theme: Theme
     let projectName: String?
+    /// The active project's folder, for the native graph call. nil when no project is open.
+    let projectRoot: URL?
+    /// The active project's id, for the native routines call (custom tasks are per project).
+    let projectId: String?
     /// Called with a section the page asked to open (already checked against
     /// the feature registry). The shell decides how to show it.
     let onOpen: (ShellSection) -> Void
@@ -161,6 +166,8 @@ struct SystemWebView: NSViewRepresentable {
                 parent.onOpen(section)
             case .request(let request):
                 perform(request)
+            case .native(let request):
+                performNative(request)
             case .subscribe:
                 if feed == nil {
                     feed = SystemEventStream(
@@ -197,6 +204,54 @@ struct SystemWebView: NSViewRepresentable {
                     self?.reply(id: id, status: 0, body: nil, error: "unreachable")
                 }
             }
+        }
+
+        /// Answers a native-only data call. The graph is the Graph feature's cached
+        /// graph when one exists, else the project's graph.json; both are encoded off
+        /// the main thread. Routines come from the installed `RoutinesRegistry`.
+        @MainActor
+        private func performNative(_ request: SystemBridgeNativeRequest) {
+            guard let call = request.call else {
+                reply(id: request.id, status: 400, body: nil, error: "not_allowed")
+                return
+            }
+            let id = request.id
+            switch call {
+            case .projectGraph:
+                let root = parent.projectRoot
+                Task { @MainActor [weak self] in
+                    var found: CGData?
+                    if let root {
+                        found = await ProjectGraphRegistry.shared.graph(forProjectRoot: root)
+                        if found == nil {
+                            found = await Task.detached(priority: .utility) {
+                                ProjectGraphFile.load(projectRoot: root)
+                            }.value
+                        }
+                    }
+                    let graph = found
+                    let body = await Task.detached(priority: .utility) {
+                        SystemBridge.graphBodyJSON(graph)
+                    }.value
+                    self?.replyRaw(id: id, bodyJSON: body)
+                }
+            case .routines:
+                let routines = RoutinesRegistry.shared.routines(projectId: parent.projectId)
+                Task { @MainActor [weak self] in
+                    let body = await Task.detached(priority: .utility) {
+                        SystemBridge.routinesBodyJSON(routines)
+                    }.value
+                    self?.replyRaw(id: id, bodyJSON: body)
+                }
+            }
+        }
+
+        /// Replies with a body that is already JSON text.
+        @MainActor
+        private func replyRaw(id: String, bodyJSON: String) {
+            guard let web = webView,
+                  let script = SystemBridge.responseScript(id: id, status: 200, bodyJSON: bodyJSON, error: nil) else { return }
+            web.evaluateJavaScript(script, completionHandler: nil)
         }
 
         @MainActor

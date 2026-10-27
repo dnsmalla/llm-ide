@@ -301,6 +301,15 @@ enum FeatureCatalog {
             terminalPanel(projectDirectory: directory)
         }
         #endif
+        #if FEATURE_GRAPH
+        // The System view's project graph: the code graph the Graph view has
+        // cached for the project's repo. Read at call time and never triggers a
+        // scan; the System view falls back to system/graph/graph.json on nil.
+        ProjectGraphRegistry.shared.install { root in
+            guard let repo = RepoGraphLocator.repoToGraph(projectRoot: root) else { return nil }
+            return graphSessionStore?.entry(repo: repo, mode: "code")?.graph
+        }
+        #endif
     }
 
     // MARK: - Live seams
@@ -484,6 +493,42 @@ enum FeatureCatalog {
             capture: capture,
             schedulerEnabled: { settings.enabled },
             isAuthenticated: isAuthenticated))
+
+        // The System view's Routines panel: built-in tasks that are enabled or
+        // scheduled, plus the project's custom tasks. Read from the same settings
+        // and run history the scheduler uses, so the page never disagrees with it.
+        RoutinesRegistry.shared.install { projectId in
+            let masterOn = settings.enabled
+            let recent = runHistory.recentEntries(limit: 200)
+            func lastRun(_ taskId: String) -> Date? {
+                recent.first { $0.taskId == taskId }?.finishedAt
+            }
+            var routines: [RoutineSummary] = []
+            for task in AutoTask.allCases {
+                let scheduled = settings.isScheduleActive(for: task)
+                let taskOn = settings.isEnabled(task: task)
+                guard taskOn || scheduled else { continue }
+                routines.append(RoutineSummary(
+                    id: "builtin.\(task.rawValue)",
+                    title: task.label,
+                    schedule: scheduled ? settings.cron(for: task) : nil,
+                    nextRunAt: scheduled ? settings.nextFireAt(for: task) : nil,
+                    lastRunAt: lastRun(task.rawValue),
+                    enabled: masterOn && taskOn && scheduled))
+            }
+            for custom in CustomAutoTask.loadAll(forProject: projectId) {
+                let cron = custom.cron.flatMap { $0.isEmpty ? nil : $0 }
+                let scheduled = cron != nil
+                routines.append(RoutineSummary(
+                    id: "custom.\(custom.id)",
+                    title: custom.name,
+                    schedule: cron,
+                    nextRunAt: scheduled ? settings.customNextFireAt(for: custom.id) : nil,
+                    lastRunAt: lastRun(custom.id),
+                    enabled: masterOn && custom.isEnabled && scheduled))
+            }
+            return routines
+        }
         #endif
     }
 

@@ -21,6 +21,8 @@ struct SystemView: View {
             session: session,
             theme: theme.current,
             projectName: projectStore.activeProject?.bundle.displayName,
+            projectRoot: projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath, isDirectory: true) },
+            projectId: projectStore.activeProject?.bundle.id,
             onOpen: onOpen)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }

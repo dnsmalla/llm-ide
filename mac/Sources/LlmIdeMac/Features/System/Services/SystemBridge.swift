@@ -1,4 +1,5 @@
 import Foundation
+import GraphCore
 
 /// The server calls the OS page may ask native to make. Native makes them with
 /// its authenticated client; the page never holds the token and never talks to
@@ -10,10 +11,12 @@ enum SystemAllowedCall: Equatable {
     case cancelChat(chatSessionId: String)
     /// `POST /kb/agent/stop` with `{sessionId}`
     case stopAgentRun(sessionId: String)
+    /// `GET /kb/agent/skill-library` (no query, no body)
+    case skillLibrary
 
     var method: String {
         switch self {
-        case .state: return "GET"
+        case .state, .skillLibrary: return "GET"
         case .cancelChat, .stopAgentRun: return "POST"
         }
     }
@@ -29,17 +32,35 @@ enum SystemAllowedCall: Equatable {
             return "/agent/v2/cancel"
         case .stopAgentRun:
             return "/kb/agent/stop"
+        case .skillLibrary:
+            return "/kb/agent/skill-library"
         }
     }
 
     /// The JSON body, or nil for a GET.
     var body: [String: String]? {
         switch self {
-        case .state: return nil
+        case .state, .skillLibrary: return nil
         case .cancelChat(let id): return ["chatSessionId": id]
         case .stopAgentRun(let id): return ["sessionId": id]
         }
     }
+}
+
+/// The native-only data the page may ask for with `{type:'native', id, name}`.
+/// These are not server calls: native assembles the answer from app state.
+enum SystemNativeCall: String, Equatable, CaseIterable {
+    /// The active project's code graph (`CGData`, as graph-kit's canonical JSON).
+    case projectGraph
+    /// The active project's scheduled routines (`[RoutineSummary]`).
+    case routines
+}
+
+/// One `native` message from the page: a call id and the named call, or nil
+/// when the name is not one of `SystemNativeCall` (the page still gets a 400).
+struct SystemBridgeNativeRequest: Equatable {
+    let id: String
+    let call: SystemNativeCall?
 }
 
 /// One `request` message from the page: a call id and the validated call, or
@@ -57,11 +78,15 @@ struct SystemBridgeRequest: Equatable {
 /// - `{type:'open', target}`: the page asks the shell to show a section.
 /// - `{type:'request', id, method, path, body?}`: one allowlisted server call.
 ///   Swift answers with `llmideResponse(id, {status, body?, error?})`.
+/// - `{type:'native', id, name}`: one native-only data set, `name` one of
+///   `projectGraph` | `routines` (see `SystemNativeCall`). Answered with the same
+///   `llmideResponse(id, {status, body?, error?})`; an unknown name is `400 not_allowed`.
 /// - `{type:'subscribe'}` / `{type:'unsubscribe'}`: the change feed on or off.
 enum SystemBridgeInbound: Equatable {
     case ready
     case open(target: String)
     case request(SystemBridgeRequest)
+    case native(SystemBridgeNativeRequest)
     case subscribe
     case unsubscribe
 
@@ -97,6 +122,10 @@ enum SystemBridgeInbound: Equatable {
             }
             let call = SystemBridge.validate(method: method, path: path, body: bodyObject)
             return .request(SystemBridgeRequest(id: id, call: call))
+        case "native":
+            guard let id = dict["id"] as? String, SystemBridge.isValidRequestId(id) else { return nil }
+            let name = (dict["name"] as? String).flatMap(SystemNativeCall.init(rawValue:))
+            return .native(SystemBridgeNativeRequest(id: id, call: name))
         default:
             return nil
         }
@@ -154,6 +183,9 @@ enum SystemBridge {
         case ("POST", "/kb/agent/stop"):
             guard query == nil, let id = singleId(body, key: "sessionId") else { return nil }
             return .stopAgentRun(sessionId: id)
+        case ("GET", "/kb/agent/skill-library"):
+            guard body == nil, query == nil else { return nil }
+            return .skillLibrary
         default:
             return nil
         }
@@ -228,6 +260,43 @@ enum SystemBridge {
         ]
         guard let idJSON = jsonFragment(id), let replyJSON = jsonObjectFragment(reply) else { return nil }
         return "window.llmideResponse(\(idJSON), \(replyJSON));"
+    }
+
+    /// `llmideResponse` for a body that is already JSON text (a graph or a
+    /// routine list encoded off the main thread). `bodyJSON` must be a valid
+    /// JSON fragment; it is spliced in as is, so the caller encodes it.
+    static func responseScript(id: String, status: Int, bodyJSON: String, error: String?) -> String? {
+        guard let idJSON = jsonFragment(id) else { return nil }
+        let errorJSON: String
+        if let error {
+            guard let encoded = jsonFragment(error) else { return nil }
+            errorJSON = encoded
+        } else {
+            errorJSON = "null"
+        }
+        return "window.llmideResponse(\(idJSON), {\"status\":\(status),\"body\":\(bodyJSON),\"error\":\(errorJSON)});"
+    }
+
+    // MARK: Native bodies
+
+    /// The graph body: graph-kit's canonical `GraphDocument` JSON, or `null`
+    /// when there is no graph. Above `ProjectGraphCap.maxNodes` the graph is
+    /// capped first (see `ProjectGraphCap`).
+    static func graphBodyJSON(_ graph: CGData?) -> String {
+        guard let graph else { return "null" }
+        let capped = ProjectGraphCap.capped(graph)
+        guard let data = try? JSONEncoder().encode(GraphDocument(capped)),
+              let text = String(data: data, encoding: .utf8) else { return "null" }
+        return text
+    }
+
+    /// The routines body: a JSON array of `RoutineSummary` with ISO-8601 dates.
+    static func routinesBodyJSON(_ routines: [RoutineSummary]) -> String {
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        guard let data = try? encoder.encode(routines),
+              let text = String(data: data, encoding: .utf8) else { return "[]" }
+        return text
     }
 
     /// `window.llmideEvent({type, at})`: only the type and the time cross over.
