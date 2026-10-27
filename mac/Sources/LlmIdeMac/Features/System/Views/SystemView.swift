@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// The OS view: the bundled React page, shown as the Home landing when a
-/// project is open (see `AppShell.effectiveHome()`). Not a menu item.
+/// The OS view: graph-kit's bundled page. It is the Graph section's default
+/// page (Shell's `GraphSectionView`) and the standalone Home fallback when the
+/// Graph section is hidden or compiled out (`ShellSection.resolveHome`). Not a
+/// menu item of its own.
 ///
 /// Takes its session, theme and project from the environment and passes plain
 /// values down to `SystemWebView`. The shell is reached only through `onOpen`,

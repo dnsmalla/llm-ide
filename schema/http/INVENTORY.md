@@ -187,7 +187,7 @@ Endpoints with no client caller (35):
 | `/kb/agent/personas/active` | ALL_ENDPOINTS | PUT | token | core | `extension/routes/agent.mjs:153` | - | - | comments/docs only |
 | `/kb/agent/catalog` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:343` | `LlmIdeAPIClient+Agent.swift` | - | - |
 | `/kb/agent/commands` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:367` | `LlmIdeAPIClient+AgentMeta.swift` | - | - |
-| `/kb/agent/skill-library` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:407` | `LlmIdeAPIClient+AgentMeta.swift` | - | - |
+| `/kb/agent/skill-library` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:407` | `LlmIdeAPIClient+AgentMeta.swift`, `SystemBridge.swift` | - | - |
 | `/kb/agent/generation-library` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:396` | `LlmIdeAPIClient+AgentMeta.swift` | - | - |
 | `/kb/agent/project-memory` | ALL_ENDPOINTS | DELETE, GET | token | core | `extension/routes/agent.mjs:419` | `LlmIdeAPIClient+AgentMeta.swift` | - | - |
 | `/kb/agent/session-memory` | ALL_ENDPOINTS | DELETE, GET | token | core | `extension/routes/agent.mjs:517` | `LlmIdeAPIClient+AgentMeta.swift` | - | - |
@@ -268,7 +268,7 @@ Endpoints with no client caller (35):
 
 ## Consistency
 
-Checked: 178 roster entries, 703 Swift files, 46 extension source files.
+Checked: 178 roster entries, 708 Swift files, 46 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
