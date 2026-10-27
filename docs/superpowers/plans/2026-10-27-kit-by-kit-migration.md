@@ -193,6 +193,8 @@ piece the SDK already does is retired, not ported.
   - **nightly / CI (P16):** all 7 single-off rows, closure rows, and the pair
     quadrants (`build-mac-lite`, `build-mac-min`, `build-mac-mobile-only`),
     plus `make test-shared-protocol`.
+  Status: **landed on `feat/phase1-gates`.** `make feature-matrix` (`scripts/feature-matrix.mjs`) covers the 7 single-off rows, the file_explorer closure row and the three quadrants; the server side runs per row (feature_disabled 404s, `/health` features + endpoints, REQUIRED_ENDPOINTS, live contract in assert mode `CONTRACT_EXPECT_DISABLED=1`); `--mac` adds the reduced Swift builds. Per merge: `--key <row>`. Nightly: `.github/workflows/feature-matrix.yml` (server rows; Mac rows on workflow_dispatch). The kit-local 'reduced Mac build' still needs `--mac`, so it is not automatic on push.
+
 - **Tauri feature-off mechanism** decided before the first K3: build-time
   tree-shake by key vs runtime `/health features` (recommend both: runtime for
   hiding, build-time for the reduced bundles).

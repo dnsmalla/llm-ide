@@ -72,6 +72,9 @@ files, the Chrome extension hooks in `extension/src/`.
 | P17 | **Token & speed gate** | `scripts/token-bench.mjs`: a fixed scenario set (greeting, explain one file, one small edit, one plan step) run against a temp-DB server on the cheapest capable model, recording per scenario: billable tokens, cache read/write, turns, time to first token, total time → `schema/bench/token-baseline.json`; fails when a scenario regresses > 15 % vs the committed baseline. Run on demand / nightly, not on every push (it spends tokens) | first baseline committed; a deliberate prompt bloat makes it fail |
 | P16 | **CI + pre-push** | `make contract-gates` in `make regression` and CI | push gate green |
 
+P16 status: **landed on `feat/phase1-gates`.** `contract-gates` runs in `make regression` right after `feature-gates` (before the Swift builds); the pre-push hook no longer runs it a second time for a mac/ push (regression already covers it); `contract-ci.yml` still runs it on push/PR. Also landed with it: `make feature-matrix` (see `docs/how-to/run-the-feature-matrix.md`) and the nightly `.github/workflows/feature-matrix.yml`, which is the kit gate's nightly half.
+
+
 Order: P1 → P2 → P3–P10 (can run two at a time; disjoint files) → P11–P13
 → P14 → P15 (independent, can start after P2) → P16.
 
