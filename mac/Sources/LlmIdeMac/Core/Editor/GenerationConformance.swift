@@ -4,6 +4,10 @@ import Foundation
 /// `GenerationRegistry`'s one guarantee: a generation outlives the view that
 /// started it.
 ///
+/// Lives in `Core/Editor` beside `MermaidConformance`: the Mermaid and
+/// Markdown-preview helpers are editor code, and the registry probes sit with
+/// them because the labs read both through this one enum.
+///
 /// Same reasoning as `ChatMessageConformance` — the registry and its view model
 /// stay internal, and this toolchain has no XCTest, so a separate executable
 /// target is the only place these can actually be asserted.
@@ -19,7 +23,9 @@ public enum GenerationConformance {
     /// reverting them to `@StateObject private var vm = GenerationViewModel()`
     /// leaves every assertion in this file green, which was demonstrated in
     /// review. What guards the view side is the source check in
-    /// `scripts/conformance-agent-v2.mjs` (`generationViewOwnership`) — there is
+    /// `scripts/conformance-agent-v2.mjs` (the "generation ownership" section,
+    /// which requires Doc Gen and Visual to resolve their model from
+    /// `GenerationRegistry`) — there is
     /// no UI test harness here to do better, and `swift test` does not run on
     /// this toolchain at all.
     @MainActor
