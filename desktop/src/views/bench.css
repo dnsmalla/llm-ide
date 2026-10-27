@@ -1,0 +1,27 @@
+/* Bench tab: colours and spacing come from the shared design tokens only. */
+.bench-view { display: flex; flex-direction: column; height: 100%; min-height: 0; width: 100%; background: var(--body); color: var(--text); }
+.bench-bar {
+  display: flex; align-items: center; gap: var(--space-md); padding: var(--space-sm) var(--space-md);
+  border-bottom: 1px solid var(--border); flex: none;
+}
+.bench-title { font-family: var(--font-section-family); font-size: var(--font-section-size); font-weight: var(--font-section-weight); }
+.bench-meta { font-size: var(--font-caption-size); color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.bench-spacer { flex: 1; min-width: 0; }
+.bench-run {
+  font-family: var(--font-button-family); font-size: var(--font-button-size); font-weight: var(--font-button-weight);
+  padding: 4px var(--space-md); border-radius: var(--radius-sm); border: 1px solid var(--accent); background: var(--accent);
+  color: var(--body); cursor: pointer;
+}
+.bench-run:disabled { opacity: 0.5; cursor: default; }
+.bench-body { flex: 1; min-height: 0; overflow: auto; padding: var(--space-md); display: flex; flex-direction: column; gap: var(--space-md); }
+.bench-empty { color: var(--text-muted); font-size: var(--font-body-size); max-width: 560px; line-height: 1.5; }
+.bench-table { border-collapse: collapse; width: 100%; font-size: var(--font-caption-size); }
+.bench-table th, .bench-table td { text-align: left; padding: 4px var(--space-sm); border-bottom: 1px solid var(--border); vertical-align: top; }
+.bench-table th { color: var(--text-muted); font-weight: var(--font-caption-strong-weight); position: sticky; top: 0; background: var(--body); }
+.bench-name, .bench-detail { font-family: var(--font-mono-family); font-size: var(--font-mono-size); }
+.bench-detail { color: var(--text-muted); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bench-num { font-family: var(--font-mono-family); font-variant-numeric: tabular-nums; }
+.bench-verdict { font-weight: var(--font-caption-strong-weight); }
+.bench-verdict[data-verdict="pass"] { color: var(--success); }
+.bench-verdict[data-verdict="fail"] { color: var(--danger); }
+.bench-verdict[data-verdict="info"] { color: var(--text-muted); }

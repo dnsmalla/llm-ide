@@ -1,0 +1,13 @@
+:root { color-scheme: light dark; font-family: -apple-system, system-ui, sans-serif; }
+body { margin: 0; }
+
+
+.graph-view { display: flex; flex-direction: column; height: 100%; }
+.graph-controls { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 6px 12px; font: 13px system-ui, sans-serif; }
+.graph-status { font: 12px ui-monospace, Menlo, monospace; opacity: 0.8; }
+.graph-canvas { flex: 1; min-height: 300px; position: relative; border-top: 1px solid #8884; }
+
+.editor-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.editor-host { flex: 1 1 auto; min-height: 0; position: relative; }
+.terminal-view { display: flex; flex-direction: column; height: 100%; min-height: 0; }
+.terminal-host { flex: 1 1 auto; min-height: 0; position: relative; box-sizing: border-box; padding: var(--space-sm) var(--space-md) 0; background: var(--body); }

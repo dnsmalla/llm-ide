@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Merged into the bundle's Info.plist by Tauri. Without these, a
+       Finder-launched app is silently denied ~/Desktop, ~/Documents and
+       ~/Downloads (TCC) and macOS never asks; a terminal-launched app only
+       worked because it inherited the terminal's grant. -->
+  <key>NSDesktopFolderUsageDescription</key>
+  <string>LLM-IDE reads project files and code graphs you keep on the Desktop.</string>
+  <key>NSDocumentsFolderUsageDescription</key>
+  <string>LLM-IDE reads project files and code graphs you keep in Documents.</string>
+  <key>NSDownloadsFolderUsageDescription</key>
+  <string>LLM-IDE reads project files you keep in Downloads.</string>
+</dict>
+</plist>

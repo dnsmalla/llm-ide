@@ -1,0 +1,29 @@
+[package]
+name = "llmide-desktop-poc"
+version = "0.0.0"
+description = "LLM-IDE Desktop Tauri PoC (throwaway)"
+edition = "2021"
+rust-version = "1.84"
+resolver = "3"
+publish = false
+
+[lib]
+name = "llmide_desktop_poc_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.6", features = [] }
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.145"
+ureq = { version = "=2.12.1", default-features = false }
+ctrlc = { version = "=3.5.2", features = ["termination"] }
+libc = "=0.2.191"
+portable-pty = "=0.9.0"
+
+# Autobench runs bring the app frontmost (activateIgnoringOtherApps); same versions tao already locks.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "=0.6.5"
+objc2-app-kit = { version = "=0.3.2", features = ["NSApplication"] }

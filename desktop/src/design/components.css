@@ -1,0 +1,430 @@
+/* Shared chrome, styled only with the generated tokens (tokens.css).
+ * Metrics mirror mac/Sources/LlmIdeMac/Core/DesignSystem/* and Shell/*. */
+
+body {
+  margin: 0;
+  background: var(--body);
+  color: var(--text);
+  font-family: var(--font-sans);
+  font-size: var(--font-body-size);
+  -webkit-font-smoothing: antialiased;
+}
+
+button { font: inherit; color: inherit; }
+
+.placeholder { padding: var(--space-xl); color: var(--text-muted); font-size: var(--font-body-size); }
+
+/* ---- App shell (mirrors Shell/AppShell.swift, Chrome/StatusBar.swift,
+ *      Chrome/ToolbarToolButton.swift, Features/Library/Views/LibraryView.swift).
+ *      Metrics are CSS px at a 1600 px wide window. ------------------------ */
+
+.shell { display: flex; flex-direction: column; height: 100vh; overflow: hidden; background: var(--body); }
+
+/* Unified toolbar in the title-bar row (titleBarStyle Overlay: traffic lights sit at the left). */
+.ui-toolbar {
+  height: 73px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 12px 0 84px; /* clears the traffic lights */
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ui-toolbar-brand { display: flex; align-items: center; gap: 10px; flex: none; }
+.ui-toolbar-home { display: inline-flex; color: var(--text-muted); }
+.ui-toolbar-title { font-size: 16px; font-weight: 500; color: var(--text-muted); white-space: nowrap; }
+.ui-toolbar-tabs { display: flex; align-items: center; gap: 6px; flex: 1; min-width: 0; justify-content: center; overflow: hidden; }
+.ui-toolbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 8px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: color-mix(in srgb, var(--text) 82%, transparent);
+  font-size: 12px;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui-toolbar-item:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.ui-toolbar-item[aria-selected="true"] {
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  color: var(--accent);
+  font-weight: 600;
+}
+.ui-toolbar-overflow { flex: none; color: var(--text-muted); display: inline-flex; opacity: 0.7; }
+
+/* Secondary bar under the toolbar (sidebar toggle). */
+.shell-secondary .ui-chrome-bar { height: 44px; background: var(--surface); border-bottom: 1px solid var(--border); padding: 0 12px; }
+
+.shell-body { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.shell-content {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  background: var(--body);
+}
+.shell-content > * { flex: 1 1 auto; min-width: 0; min-height: 0; width: 100%; }
+
+/* Library sidebar (LibraryView: 368 px at this width). */
+.ui-library {
+  width: 368px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  overflow-y: auto;
+}
+.ui-lib-search {
+  height: 44px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--text-muted);
+}
+.ui-lib-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+}
+.ui-lib-search-input::placeholder { color: var(--text-muted); opacity: 0.8; }
+.ui-lib-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 16px; text-align: center; color: var(--text-muted); }
+.ui-lib-empty-title { font-size: 14px; font-weight: 500; color: var(--text-muted); }
+.ui-lib-empty-hint { font-size: 12px; line-height: 1.4; opacity: 0.8; max-width: 300px; }
+.ui-lib-sections { display: flex; flex-direction: column; padding: 0 22px; }
+.ui-lib-section { display: flex; flex-direction: column; }
+.ui-lib-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 0 3px;
+  border-bottom: 1px solid var(--border);
+}
+.ui-lib-header-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.ui-lib-chevron { width: 10px; display: inline-flex; justify-content: center; color: var(--text-muted); opacity: 0.6; transition: transform 0.18s ease-in-out; }
+.ui-lib-chevron[data-open="true"] { transform: rotate(90deg); }
+.ui-lib-chevron svg { width: 8px; height: 8px; }
+.ui-lib-chip { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+.ui-lib-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+.ui-lib-count { font-size: 9px; font-weight: 600; }
+.ui-lib-plus { width: 20px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; cursor: pointer; }
+.ui-lib-section-body { padding: 6px 0 8px 34px; font-size: 11px; color: var(--text-muted); opacity: 0.8; }
+
+/* Empty "Select an Item" state (LibraryDetailView). */
+.ui-select-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--text-muted);
+}
+.ui-select-empty-icon { opacity: 0.4; display: inline-flex; }
+.ui-select-empty-title { font-size: 28px; font-weight: 600; opacity: 0.6; }
+.ui-select-empty-hint { font-size: 14px; opacity: 0.6; }
+
+/* Bottom status bar (StatusBar.swift: 24-28 pt, surface, hairline on top). */
+.ui-statusbar {
+  flex: none;
+  box-sizing: border-box;
+  height: 28px;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 0 10px;
+  background: var(--surface);
+  border-top: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-muted);
+  position: relative;
+}
+.ui-statusbar[data-state="failed"] .ui-statusbar-core { color: var(--danger); }
+.ui-statusbar[data-state="ready"] .ui-statusbar-core { color: var(--success); }
+.ui-statusbar-core { font-family: var(--font-mono); font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ui-statusbar-spacer { flex: 1; min-width: 0; }
+.ui-statusbar-project,
+.ui-statusbar-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.ui-statusbar-project:hover,
+.ui-statusbar-item:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+.ui-statusbar-caret { display: inline-flex; color: var(--text-muted); }
+.ui-statusbar-caret svg { width: 8px; height: 8px; transform: rotate(90deg); }
+.ui-statusbar-chat { font-weight: 600; }
+.ui-statusbar .ui-icon-button { width: 20px; height: 20px; }
+.ui-statusbar-theme { position: relative; display: inline-flex; }
+.ui-statusbar-menu {
+  position: absolute;
+  bottom: calc(100% + 6px);
+  right: 0;
+  z-index: 10;
+  min-width: 120px;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface2);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+}
+.ui-statusbar-menu-item {
+  padding: 5px 8px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.ui-statusbar-menu-item:hover { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ui-statusbar-menu-item[aria-checked="true"] { color: var(--accent); font-weight: 600; }
+
+.ui-section-label {
+  font-size: var(--font-tree-header-size);
+  font-weight: var(--font-tree-header-weight);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ---- Editor tab strip (EditorTabBar.swift) --------------------------- */
+
+.ui-tabbar {
+  height: 35px;
+  flex: none;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+}
+.ui-tabbar::-webkit-scrollbar { display: none; }
+.ui-tab {
+  position: relative;
+  flex: none;
+  height: 35px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 6px 0 12px;
+  color: var(--text-muted);
+  background: transparent;
+}
+.ui-tab:hover { background: color-mix(in srgb, var(--text) 6%, transparent); }
+.ui-tab[aria-selected="true"] { background: var(--body); color: var(--text); }
+.ui-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--accent);
+}
+.ui-tab-select {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--font-filename-size);
+  cursor: pointer;
+  min-width: 0;
+}
+.ui-tab-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.ui-tab-dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); flex: none; }
+.ui-tab-close {
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 9px;
+  line-height: 16px;
+  opacity: 0;
+  cursor: pointer;
+}
+.ui-tab:hover .ui-tab-close,
+.ui-tab[aria-selected="true"] .ui-tab-close { opacity: 1; }
+.ui-tab-close:hover { color: var(--text); background: color-mix(in srgb, var(--text) 15%, transparent); }
+.ui-tab-divider { width: 1px; height: 18px; margin-left: 6px; align-self: center; background: var(--border); flex: none; }
+
+/* ---- File tree rows (TreeRowLabel.swift) ------------------------------ */
+
+.ui-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--space-xs) 2px 0;
+  font-size: var(--font-filename-size);
+  color: var(--text);
+  cursor: default;
+  user-select: none;
+  min-width: 0;
+}
+.ui-tree-row:hover { background: color-mix(in srgb, var(--text) 5%, transparent); }
+.ui-tree-row[aria-selected="true"] { background: color-mix(in srgb, var(--accent) 14%, transparent); }
+.ui-tree-guides { display: flex; align-self: stretch; }
+.ui-tree-guide { width: 1px; margin: 0 7px 0 6px; background: color-mix(in srgb, var(--text-muted) 18%, transparent); }
+.ui-tree-chevron { width: 10px; flex: none; display: inline-flex; justify-content: center; color: var(--text-muted); font-size: 9px; font-weight: 600; background: none; border: 0; padding: 0; cursor: pointer; }
+.ui-tree-chevron-static { width: 10px; flex: none; }
+.ui-tree-icon { width: 16px; flex: none; display: inline-flex; justify-content: center; color: var(--text-muted); }
+.ui-tree-icon-file { font-size: 11px; }
+.ui-tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ui-tree-badge { font-size: 9px; font-weight: 600; color: var(--text-muted); margin-left: 4px; }
+.ui-tree-spacer { flex: 1; }
+.ui-tree-git-letter { font-size: var(--font-file-meta-size); font-weight: 600; opacity: 0.7; padding-right: 2px; }
+.ui-tree-row[data-deleted="true"] .ui-tree-name { text-decoration: line-through; }
+/* Git status palette: same mapping as Theme.color(for: GitTruthStore.Decoration). */
+.ui-tree-row[data-git="added"],
+.ui-tree-row[data-git="untracked"] { color: var(--success); }
+.ui-tree-row[data-git="deleted"] { color: var(--danger); }
+.ui-tree-row[data-git="conflicted"] { color: var(--warning); }
+.ui-tree-row[data-git="modified"] { color: var(--info); }
+.ui-tree-row[data-git] .ui-tree-git-letter { color: inherit; }
+
+/* ---- Settings section card (SettingsSectionCard.swift) ---------------- */
+
+.ui-settings-section { display: flex; flex-direction: column; gap: var(--space-sm); }
+.ui-settings-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ui-settings-icon { font-size: 13px; font-weight: 600; color: var(--info); display: inline-flex; }
+.ui-settings-title {
+  font-size: var(--font-section-size);
+  font-weight: var(--font-section-weight);
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ui-settings-spacer { flex: 1; }
+.ui-settings-chevron { display: inline-flex; color: var(--text-muted); transition: transform 0.18s ease-in-out; }
+.ui-settings-chevron[data-open="true"] { transform: rotate(90deg); }
+.ui-card {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--space-lg);
+  background: var(--surface);
+  border: 0.5px solid var(--border);
+  border-radius: var(--radius-md);
+}
+
+/* ---- Chip (Components/Chip.swift) ------------------------------------- */
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: default;
+}
+.ui-chip[data-compact="true"] { padding: 4px 5px; }
+.ui-chip[data-active="true"] {
+  background: color-mix(in srgb, var(--accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+  font-weight: 500;
+}
+button.ui-chip { cursor: pointer; }
+.ui-chip-label { overflow: hidden; text-overflow: ellipsis; }
+.ui-chip-trailing { font-size: 8px; }
+
+/* ---- Status banner (Components/StatusBanner.swift) -------------------- */
+
+.ui-banner {
+  --tint: var(--info);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-sm);
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tint) 8%, transparent);
+  color: var(--text);
+  font-size: var(--font-section-size);
+  line-height: 1.4;
+}
+.ui-banner[data-severity="error"] { --tint: var(--danger); }
+.ui-banner[data-severity="warning"] { --tint: var(--warning); }
+.ui-banner[data-severity="info"] { --tint: var(--info); }
+.ui-banner-icon { color: var(--tint); flex: none; font-size: 13px; line-height: 1.4; }
+.ui-banner-message { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ui-banner-dismiss { flex: none; color: var(--text-muted); }
+
+/* ---- Resizable divider (Components/ResizableDivider.swift) ------------ */
+
+.ui-divider { position: relative; flex: none; width: 1px; background: var(--border); }
+.ui-divider-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.ui-divider-handle[data-dragging="true"] { background: color-mix(in srgb, var(--accent) 25%, transparent); }
