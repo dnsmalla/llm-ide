@@ -37,6 +37,7 @@ zero=0000000000000000000000000000000000000000
 mac_changed=0
 contract_changed=0
 ext_changed=0
+docs_changed=0
 ios_changed=0
 
 # stdin: <local_ref> <local_sha> <remote_ref> <remote_sha> per pushed ref.
@@ -67,6 +68,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     # so run it whenever any of them changed rather than list each path.
     if printf '%s\n' "$files" | grep -qE '^(mac/|extension/|schema/|scripts/|docs/reference/api/)'; then
         contract_changed=1
+    fi
+    if printf '%s\n' "$files" | grep -qE '^docs/.*\.md$' && printf '%s\n' "$files" | grep -E '^docs/.*\.md$' | grep -qv '^docs/superpowers/'; then
+        docs_changed=1
     fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then
         ext_changed=1
@@ -138,6 +142,33 @@ if [ "$contract_changed" -eq 1 ] && [ "$mac_changed" -eq 0 ]; then
     if ! make contract-gates; then
         echo "pre-push: contract gate FAILED — push aborted." >&2
         echo "          Fix the failure, or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+fi
+
+# CI (extension-ci) fails on any ESLint warning or Prettier drift, and docs-ci on any
+# markdownlint finding; the per-gate runs above never exercised either, so main went
+# red twice on lint alone. Run the same commands CI runs.
+if [ "$ext_changed" -eq 1 ]; then
+    echo "pre-push: extension/ changed — running lint (make lint)…"
+    if ! make lint; then
+        echo "pre-push: extension lint FAILED — push aborted (CI would fail the same way)." >&2
+        echo "          Fix with: make format   (then re-push), or bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+fi
+
+if [ "$docs_changed" -eq 1 ]; then
+    echo "pre-push: docs/ changed — running markdown lint (same command as docs-ci)…"
+    if command -v markdownlint-cli2 >/dev/null 2>&1; then
+        mdlint=(markdownlint-cli2)
+    else
+        mdlint=(npx --yes markdownlint-cli2)
+    fi
+    if ! "${mdlint[@]}" "docs/**/*.md" "!docs/superpowers/**"; then
+        echo "pre-push: markdown lint FAILED — push aborted (docs-ci would fail the same way)." >&2
+        echo "          Auto-fix most findings: npx markdownlint-cli2 --fix 'docs/**/*.md' '!docs/superpowers/**'" >&2
+        echo "          or bypass with: git push --no-verify" >&2
         exit 1
     fi
 fi

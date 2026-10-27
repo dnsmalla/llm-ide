@@ -9,7 +9,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
-  ALL_KEYS, EXCLUDABLE, ROWS, cleanInherited, enabledAfter, groupOf, isFailed,
+  ALL_KEYS, ROWS, cleanInherited, enabledAfter, groupOf, isFailed,
   liveEnv, parseArgs, select, serverEnv, table,
 } from '../../scripts/feature-matrix.mjs';
 

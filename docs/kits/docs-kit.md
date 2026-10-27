@@ -188,6 +188,7 @@ Legend: **C** = through `Core/Contracts` or an HTTP route; **D** = direct type/m
 | E16 | extension → docs | `ExportMenu` → `POST /generate-docx` (always on) | C | `ExportMenu.tsx:86` |
 
 **Cycles.**
+
 - No kit-level cycle found on the server: nothing in `kb/`, `llm_agent/`, `agents/` imports `export-routes.mjs` (only `server.mjs:11` and `routes/doc-gen.mjs:9`, which sits behind the `doc_gen` group).
 - **Cycle inside `Core` (resolved, pre-K1 step 3):** the `ProjectScaffolder` → `GenerationLibraryStore` edge is gone; Core/Project no longer names any Doc Gen type. The reverse edge (`DocTemplateStore` → `ProjectLayout`) is an ordinary dependency and stays.
 
@@ -229,6 +230,7 @@ Rule (plan): *does it get better on its own when the model/SDK improves?* → de
 ## 5. State and data (feeds K1a)
 
 **Project folder** (per project, `ProjectLayout`, `Core/Project/ProjectLayout.swift:21-22, 43, 51`):
+
 - `templates/<folder>/template.md` plus `templates/README.md` (`Core/Generation/Services/DocTemplateStore.swift:175-245`, `ProjectDocTemplatesSeeder.swift:24-71`). Surface marker in the file header (`TemplateSurface.swift`, `GenerationConformance.swift`).
 - `commands/<folder>/command.md` plus `commands/README.md` (`DocCommandStore.swift:101-170`, `ProjectDocCommandsSeeder.swift:19-53`).
 - Output: `data/` (`DocGenOutputConfig.swift:54`; `ProjectLayout.dataDir`). Phone saves go to `llm-doc/generated/` (`MobileControlManager.swift:756`).
@@ -236,6 +238,7 @@ Rule (plan): *does it get better on its own when the model/SDK improves?* → de
 - Seed-source comment: `Core/Project/Project.swift:70-71` says doc templates are "seeded on disk under `templates/` by `ProjectDocTemplatesSeeder`", which is the real source.
 
 **Application Support** (`~/Library/Application Support/com.llmide.macapp/`):
+
 - `doc-templates.json` (legacy/global store, `DocTemplateStore.swift:59-69`; corrupt copies `doc-templates.json.corrupt-<ts>` via `DamagedFileQuarantine.swift:9-22`, called from `load()` at `DocTemplateStore.swift:299`). **Still read on launch**: `Shell/LlmIdeMacApp.swift:371` → `DocTemplateStore.bootstrap()` (`:91`) → `load()` (`DocTemplateStore.swift:289-307`), which accepts the current `StoreFile` envelope and falls back to a bare array (`:295-296`). Checked 2026-10-27; re-cited after `9c7ec5af`.
 - `doc-gen-output.json` (`DocGenOutputStore.swift:19-28`).
 - `generation-library.json` (cache of `/kb/agent/generation-library`, `GenerationLibraryStore.swift:31-34`).
@@ -273,6 +276,7 @@ defaults (writeIfAbsent), as it does today.
 
 **N-1 readability (an older Mac build must read everything a newer build
 writes).** Holds by construction, and must be pinned when K1 lands:
+
 - Project files: the Node writer must produce the same bytes as
   `DocTemplate.renderedMarkdown()` / `DocCommand.renderedMarkdown()` for the
   same input (marker line, `surface=` only when not `doc`, trailing newline).
@@ -304,10 +308,11 @@ Project template and command files with the bare marker, the `surface=visual`
 marker, and the `auto_task/` and ingest skips all parse as before.
 
 **Bugs found and fixed in K1a** (fix commit `9c7ec5af`; K1 must keep both fixes):
-- **`DocCommand` dropped every `# ` line.** `DocCommand.instruction(from:)`
+
+- **`DocCommand` dropped every `#` line.** `DocCommand.instruction(from:)`
   (`Core/Generation/Models/DocCommand.swift`) removed each line starting with
-  `# `, so a markdown H1 or a fenced `# install deps` in a command body never
-  reached the model. Now only the first `# ` line is the title, and
+  `#`, so a markdown H1 or a fenced `# install deps` in a command body never
+  reached the model. Now only the first `#` line is the title, and
   `displayName(from:folderName:)` reads that same line. CRLF bodies also stop
   gaining doubled blank lines. Tests: `DocCommandTests`.
 - **Quarantine could overwrite a damaged file.** Two corruptions in the same
@@ -327,6 +332,7 @@ marker, and the `auto_task/` and ingest skips all parse as before.
 **Decision (flagged for the user).** Minimal safe design, as the brief asked. No raw client path reaches a template route. The Mac registers `{ id, root }` once per project open with `POST /kb/projects/register`. The server validates the root (`kb/doc-project-files.mjs` `validateProjectRoot`) and stores it in `doc_project_roots` (migration `0048`, keyed by `(user_id, project_id)`). Every later use re-validates the stored root, so a folder moved, replaced by a symlink, or stripped of its marker fails closed. The rules mirror `SystemBridge.isOverBroadRoot` and `confinedFile`. Alternatives considered: (a) an in-memory map, which is lost on restart, so the Mac would re-register on every open; (b) a path on every docs call, which decision 3 forbids; (c) deriving the folder from meeting metadata, which holds no folder. The register route sits in the `doc_gen` group for now. If project registration should be always-on, move it out of that group (`routes/feature-routes.mjs`).
 
 **Server write rules the Mac switch must keep (K1 hardening, 2026-10-27).**
+
 - **Symlinks: one real difference, merged on the Mac (K1b).** The Node scanner and writer never follow a symlink. The Swift scanner does not list a symlinked *folder* either (`isDirectory` is false for a link; checked on macOS 26 on 2026-10-27, so this section's earlier claim that Swift follows folder links was wrong). A linked folder is skipped on both sides. The real difference is a `template.md` or `command.md` that is itself a link: Swift reads it and the server refuses it (`O_NOFOLLOW`). The server path merges those in from the local scan (§8, K1b). Parity is pinned by `DocGenServerStoreParityTests`.
 - **Ingest layouts are not Doc Gen files.** `templates/meeting-note`, `templates/email-note` and any `template.md` carrying `llmide:ingest-template` are refused for write and delete (409 `RESERVED_FOLDER`, or 400 for the two reserved names in any casing). The scan hides them, as before.
 - **DELETE removes one file.** It removes `template.md` (or `command.md`), then the folder only if that left it empty (`folderRemoved`). Nothing is removed recursively, so a user's extra files survive.
@@ -338,7 +344,6 @@ marker, and the `auto_task/` and ingest skips all parse as before.
 ## 6. What K1 would move (proposal; server half done)
 
 **Status (2026-10-27):** K1b (the Mac half, behind `docGenUseServerStore`) is done; see §8. The server half of this table is done (`routes/docs-routes.mjs`, `kb/doc-templates.mjs`, `kb/doc-project-files.mjs`, `kb/project-roots.mjs`; see §8, "K1 server half"). The Swift stores, seeders and models are **not** removed; the Mac switch is a separate step behind `docGenUseServerStore`. Seeding is server-side from the same generation library (`llm_agent/skills/generation-library.mjs`), so `POST /kb/docs/seed` takes no kit list.
-
 
 **Move to Node (business logic, not UI state):**
 
@@ -354,6 +359,7 @@ marker, and the `auto_task/` and ingest skips all parse as before.
 Estimated size: **~1.5 k Swift lines out** (models 657 + stores 578 + seeders 194 + ~100 of ViewModel/bridge; of 2 320 in Core/Generation), **~550 Node lines in** (routes, marker/seed logic, template scan) plus **~400 lines of Node tests**. The `Features/Generation` views (3 271) stay until K3.
 
 **Swift tests that move with the logic** (ported to node tests **before** the Swift test is deleted):
+
 - `DocCommandTests` (7), `DocCommandStoreTests` (6), `DocTemplateRewriteTests` (6), `DocGenOutputConfigTests` (7) → `extension/tests/docs-templates.test.mjs` (≈26).
 - `GenerationContractLab` marker assertions (19 `expect` call sites) → same node tests (the lab stays until K4).
 - `LlmDocBrowserTests` (10; phone helpers) → follow the bridge decision.
@@ -361,6 +367,7 @@ Estimated size: **~1.5 k Swift lines out** (models 657 + stores 578 + seeders 19
 - Stay in Swift: `GenerationViewModelTests` (state machine; 9 of 12 after the `applyEdit` tests go), `GenerationTreeSelectionTests` (11, UI selection), `GenerationMessagesTests` (12, wire types in SharedProtocol, sync-kit).
 
 **Retire instead of port (SDK/model or a duplicate path already does it):**
+
 1. `applyEdit` revision path (`GenerationViewModel.swift:284-378`) → send the document to the chat engine (agent-kit). Delete ~95 Swift lines and its prompt. Retiring it also deletes or rewrites its callers:
    - UI: `Features/Generation/Views/GenerationPromptBar.swift:290` (`vm.applyEdit(api: api)`) → the "Use chat" route replaces it.
    - Tests: `GenerationViewModelTests.swift:127` (`testFailedRevisionPreservesDocument`), `:152` (`testCancelledRevisionRestoresPriorDocument`), `:173` (`testOversizedDocumentRefusesRevisionWithoutSending`); calls at `:133`, `:158`, `:179`. Rewrite as chat-path tests, or delete with the path. The failure-preserves-document invariant should survive in the chat path.
@@ -388,13 +395,13 @@ These replace the earlier open-question list. Items 1–9 are user decisions. It
 9. **Server in-process imports that follow the existing ESLint layering count as allowed edges** (E2–E4).
 10. **Open (not user-decided): comment drift.** `Core/Generation/Services/GenerationConformance.swift:22` names `generationViewOwnership`, which no code declares; the check is a section comment in `scripts/conformance-agent-v2.mjs:237`. Recommended: correct the comment when `GenerationConformance` moves to `Core/Editor` (item 11), so it is fixed once. **Resolved** in pre-K1 step 2 (`0e7a985d`): the comment now names the "generation ownership" section.
 
-14. **Open (not user-decided): the K0 rule for model types.** May other kits name docs-kit *data/model* types (`LibraryItem`, `LlmIdeAPIClient.GeneratedDoc`), or only seams? Recommendation: data types allowed; stores and services reached only via seams (`Core/Contracts`). Raised by §8's seam note and by E8 and E9.
+11. **Open (not user-decided): the K0 rule for model types.** May other kits name docs-kit *data/model* types (`LibraryItem`, `LlmIdeAPIClient.GeneratedDoc`), or only seams? Recommendation: data types allowed; stores and services reached only via seams (`Core/Contracts`). Raised by §8's seam note and by E8 and E9.
 
 Additional decisions from the review:
 
-11. **`GenerationConformance` / Mermaid helpers belong to the editor/UI side.** They stay in Swift Core and move out of `Core/Generation` into `Core/Editor` (beside `MermaidConformance.swift`) during the seam work. They are not a Node concern. `ChatContractLab` keeps calling them from the new location. Done, pre-K1 step 2 (`0e7a985d`).
-12. **The `/generate-docx` notes-JSON prompt has no caller besides ExportMenu.** It is retired with the capture-kit move. ExportMenu uses `/generate-notes` output instead.
-13. **The iOS `GenerateSheet` wire (SharedProtocol `generation_*` messages) stays unchanged.** When the phone bridge moves, it keeps the same messages and calls the new routes behind them.
+ 1. **`GenerationConformance` / Mermaid helpers belong to the editor/UI side.** They stay in Swift Core and move out of `Core/Generation` into `Core/Editor` (beside `MermaidConformance.swift`) during the seam work. They are not a Node concern. `ChatContractLab` keeps calling them from the new location. Done, pre-K1 step 2 (`0e7a985d`).
+ 2. **The `/generate-docx` notes-JSON prompt has no caller besides ExportMenu.** It is retired with the capture-kit move. ExportMenu uses `/generate-notes` output instead.
+ 3. **The iOS `GenerateSheet` wire (SharedProtocol `generation_*` messages) stays unchanged.** When the phone bridge moves, it keeps the same messages and calls the new routes behind them.
 
 ### Next: pre-K1 work
 
@@ -411,6 +418,7 @@ In order:
 Steps 1 to 5 of "Next: pre-K1 work" are done. Step 3 (the K1a migration test) was finished after this close-out; see §5a and the K1a bug notes. The sections below record each step. Gates at the end of the work: `bash mac/Scripts/feature-boundaries.sh` exit 0; `make build-mac-min`, `make build-mac-lite`, `make chat-gates`, `make generation-gates` all pass; full `LLMIDE_KEYCHAIN_BACKEND=memory swift test`: 2352 tests, 0 failures, 1 skipped.
 
 **Seam (decision 8), `c62c9e6a`.**
+
 - `Core/Contracts/GenerationProviding.swift`: protocol `GenerationProviding` (sign-out reset, project-change reset, project file reload, first-open seed, phone template/command lookup, fit notice) with value types `GenerationTemplateRef` and `GenerationCommandRef`, plus `GenerationProviderRegistry` (`install`/`uninstall`, `provider` optional).
 - `Core/Generation/Services/DocGenProvider.swift`: the one conformer. Installed by `FeatureCatalog.provideGenerationStores` at app init. Unlike the phone bridge wiring, this is not behind `FEATURE_DOCGEN`, because Core/Generation is always compiled.
 - `Core/Contracts/LibrarySourceFeed.swift`: an environment value that lets Doc Gen's source tree read Library items without naming `LibraryItemStore`. AppShell injects it over the live store. Reading inside a view body keeps `@Observable` tracking.
@@ -420,6 +428,7 @@ Steps 1 to 5 of "Next: pre-K1 work" are done. Step 3 (the K1a migration test) wa
 **GenerationConformance move (decision 11), `0e7a985d`.** `Core/Generation/Services/GenerationConformance.swift` → `Core/Editor/GenerationConformance.swift` (`git mv`, public API unchanged). Comment drift at the old `:22` fixed to point at the "generation ownership" section of `scripts/conformance-agent-v2.mjs`.
 
 **Lazy seeding (decision 4), `e1525074`.**
+
 - `ProjectScaffolder` seeds only the ingest templates, through `IngestTemplateSeeder` (`Core/Notes/Services/IngestTemplateSeeder.swift`). Core/Project no longer names any Doc Gen type. E12 is gone.
 - The ingest templates stay eager because `IngestTemplateRenderer` reads `templates/meeting-note` and `templates/email-note` from disk for auto-generated notes. Moving them lazily would have broken meeting and email note rendering for projects where Doc Gen was never opened.
 - Doc Gen and Visual seed the kit's templates, commands and README on first open of either section (`AppShell` `.onChange(of: shell.section)`), and before the phone lists or runs a template (`MobileGenerationBridge`), through `GenerationProviding.seedProjectFiles`.
@@ -431,6 +440,7 @@ Steps 1 to 5 of "Next: pre-K1 work" are done. Step 3 (the K1a migration test) wa
 **Kit arrives while open (`8ee96783`).** The `.generationLibraryChanged` observer already re-ran the seed with the section read at call time, but the logic was inline in `AppShell` and untested. It is now `GenerationFilesRefresh.run` (`Core/Generation/Services/GenerationFilesRefresh.swift`), called by the observer (`AppShell.swift:518`) and by project open. `DocGenLazySeedingTests` gained 3 cases (10 total): kit arrives while Doc Gen is open → templates appear; while Visual is open → seeds; while elsewhere → reload only.
 
 **Steps 4 and 5 (`c6e350e0`, `53804a47`, `ad9664b2`, `8ee96783`).**
+
 - Gate `/generate-doc` (decision 2): `extension/routes/doc-gen.mjs` owns the route; `feature-routes.mjs` lists the `doc_gen` group; `/generate-docx` stays in `server/export-routes.mjs`, always on. Feature-matrix expectations, spec and how-to updated in the same commit.
 - Client error (`8ee96783`): a 404 `feature_disabled`/`doc_gen` from `/generate-doc` shows "The connected server has Doc Gen turned off." (`LlmIdeAPIClient.generateDocFailure`, `LlmIdeAPIClient+Export.swift:168`; tests in `GenerateDocFailureTests`).
 - Contract (`ad9664b2`): health and root fixtures to apiVersion 80; `SERVER_API_VERSION` changelog v79 before v80; `schema/http/INVENTORY.md` regenerated for the new Swift file. `make contract-gates` passes.
@@ -469,13 +479,14 @@ Confinement (the server enforces what the Mac got from the file system): the roo
 | `DocGenLegacyStateTests` (project-folder cases) | 2 | 2, read from the K1a fixtures copied to `tests/fixtures/docgen/project/` | the other cases are app-support stores, which stay in Swift |
 | `AutoTaskTemplateStoreTests` (`auto_task` skip, line 325) | 1 | 1 | the rest of that file is Auto Task's |
 | `GenerationContractLab` | 19 `expect` calls | 18 tests covering 19 calls (one test checks two) | none |
-| K1a bug fix: only the first `# ` line is the title (`9c7ec5af`) | 2 | 2 (`testSecondH1InBodyIsKept`, `testOnlyTheFirstTitleLineIsDropped`) | the quarantine fix is Swift-only (n/a) |
+| K1a bug fix: only the first `#` line is the title (`9c7ec5af`) | 2 | 2 (`testSecondH1InBodyIsKept`, `testOnlyTheFirstTitleLineIsDropped`) | the quarantine fix is Swift-only (n/a) |
 
 New Node tests with no Swift twin: the golden bytes (6), the confinement and folder-rule cases (about 12), and the latency check. Route tests are in `extension/tests/docs-routes.test.mjs` (13): tenancy in both directions, traversal and encoded separators, symlinked folders, the 512 KB body cap (413), the bad-field 400s, missing-project 400, the 405 for an unknown method, the `AUTH_REQUIRED` 401 through `handleKB`, and the feature gate.
 
 **Byte parity (the rollback guarantee).** `renderTemplateMarkdown` / `renderCommandMarkdown` produce the bytes Swift's `renderedMarkdown()` produces. The same literals are asserted on both sides: `extension/tests/fixtures/docgen/golden.mjs` (Node) and `mac/Tests/LlmIdeMacTests/DocGenServerParityTests.swift` (Swift, 7 tests, passing). The stable ids match too: `DocTemplate.stableID(forFolder:"retro")` and the Node `stableId('retro','template')` are both `65A8ADFC-2236-44D5-A676-C0DA368BBC91`.
 
 **Gates (2026-10-27).**
+
 - `make test`: 3512 tests, 3509 pass, 0 fail, 3 skipped. Exit 0. Run with the sandbox off (port binding).
 - `node scripts/feature-matrix.mjs --all`: all 10 rows ok for the server and the live contract (sandbox off).
 - `make contract-gates`: exit 0 (HTTP conformance 620 fixtures, api-types, OpenAPI, inventory, design tokens, os-view).
@@ -486,6 +497,7 @@ New Node tests with no Swift twin: the golden bytes (6), the confinement and fol
 **Latency.** A list of 200 templates: 7 to 8 ms through the route, 8 ms for the bare scan (budget 50 ms; the test asserts under 200 ms).
 
 **Deviations and surprises.**
+
 - **Symlinks are skipped, not followed.** The Swift scanner follows them. This is deliberate (the brief asks for symlink-out refusal), but a user who symlinks a template folder into a project sees it vanish on the Node path. Flag it for the Mac switch.
 - **`rewrite` was not in the §6 table.** It is needed for the manager-sheet save (`DocTemplate.rewriting`). `rawContent`, when present, wins over `rewrite`, as the schema says.
 - **The K1a visual fixture has one blank line too many.** `project/template-md.v2-visual-marker.md` ends `## Decisions\n\n`. HEAD's `markdownBody` writes `## Decisions\n`, and the Swift parity test confirms it. The K1a README calls the fixture "output of HEAD". It is a historical file and I did not change it. The golden bytes are in `golden.mjs`.
@@ -514,11 +526,13 @@ New Node tests with no Swift twin: the golden bytes (6), the confinement and fol
 **Commits.** `f7eedf1f` refactor (backend protocol, no behaviour change); `4b83a785` feat (the server path behind the preference); `a9ce209c` tests (parity golden, `ServerDocFiles` tests); the docs commit after them.
 
 **Backend.** `DocFilesBackend` (`Core/Generation/Services/DocFilesBackend.swift`) is the seam for a project's template and command files: list, save, delete, seed. Three types implement the path:
+
 - `LocalDocFiles` (`LocalDocFiles.swift`): the scan and write bodies that `DocTemplateStore` and `DocCommandStore` always ran, moved out unchanged. The stores call them on the preference-off path.
 - `ServerDocFiles` (`ServerDocFiles.swift`): the `/kb/docs/*` routes, through `LlmIdeAPIClient+Docs.swift`. Every HTTP failure becomes a `DocFilesServerError` case (`featureDisabled`, `projectNotRegistered`, `invalidRoot`, `tooManyProjects`, `reservedFolder`, `unsafePath`, `invalidFolder`, `notFound`, `tooLarge`, `truncated`, `notServing`, or `other`).
 - `DocFilesWithFallback`: asks the server first and answers from `LocalDocFiles` for any call the server cannot serve.
 
 **The switch.** `docGenUseServerStore` (`DocGenServerStorePreference`, default off). Two ways to flip it, and both are supported:
+
 - Settings → App → "Doc Gen files" (`DocGenServerStoreCard`, the new `SettingsSectionSlot.docGen`, registered by Shell under `FEATURE_DOCGEN`).
 - `defaults write <bundle id> docGenUseServerStore -bool YES` (a lite or min build has no card, so this is the only way there).
 
@@ -527,6 +541,7 @@ The preference is read each time a project's files are loaded, so reopen the pro
 **Gating.** The server answers for a root only when all of these hold: the preference is on, the root is the active project's folder, and the folder has not been refused this session. With the preference off, `serves` is false for every root, so no request is made. `ServerDocFilesTests` checks this across a full open, list, save, delete and seed.
 
 **Sync and async (the choice).** The stores and their callers are synchronous and `@MainActor`. Views call `add`, `update` and `delete` without awaiting, so making the views async would have changed several views for one store. Instead:
+
 - The server path publishes the local scan first (instant, no network), then replaces it with the server's list when a queued refresh returns.
 - Writes update the in-memory list at once and queue the server call. A refresh queued after a write therefore sees it.
 - Every server operation runs on one serial queue (`ServerDocFiles.enqueue`), in the order the user made them.
@@ -548,12 +563,14 @@ Known consequence: the phone's `MobileGenerationBridge` reads templates synchron
 **Stays Swift (until K3).** The app-support state (no-project templates, `doc-gen-output.json`, the kit cache) is not on this seam (§5a). The views and the output folder stay Swift too.
 
 **K4 retire list** (after `docGenUseServerStore` has defaulted on for one release and the fallback has had no reports):
+
 - `LocalDocFiles`'s scan and write helpers, and the store code that calls them on the preference-off path (`DocTemplateStore` and `DocCommandStore` `scanProject*`, `writeProjectTemplate`, `write`, and the `removeItem` deletes). The fallback then needs its own rule, which is the server's.
 - `ProjectDocTemplatesSeeder`, `ProjectDocCommandsSeeder` and their README literals (the Node side already has them in `kb/doc-readmes.mjs`).
 - Tests that only cover the retired Swift path: the project-folder cases of `DocGenLegacyStateTests`, the file-level cases of `DocGenLazySeedingTests`, and the project-folder cases of `AutoTaskTemplateStoreTests`. `DocGenServerStoreParityTests` and `ServerDocFilesTests` stay, since they pin the server contract.
 - The `docGenUseServerStore` preference, the Settings card, and the `DocFilesWithFallback` wrapper, once the server path is the only path.
 
 **Gates (2026-10-27, sandbox off).**
+
 - `swift build` passes. `make build-mac-min` and `make build-mac-lite` pass.
 - `bash mac/Scripts/feature-boundaries.sh` passes.
 - `swift run api-contract-lab` prints `PASS`.
