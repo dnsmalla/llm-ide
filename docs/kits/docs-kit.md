@@ -1,6 +1,6 @@
 # docs-kit
 
-Status: **K0 Map**, reviewed 2026-10-27 (review fixes applied; decisions in §7). Pre-K1 steps 1 to 5 are done (§7, §8); the K1a migration test (step 3) is done in `8d23d62e`, with the K1a bug fixes in `9c7ec5af` (§5a).
+Status: **K0 Map**, reviewed 2026-10-27; **K1 server half landed 2026-10-27** (§8) (review fixes applied; decisions in §7). Pre-K1 steps 1 to 5 are done (§7, §8); the K1a migration test (step 3) is done in `8d23d62e`, with the K1a bug fixes in `9c7ec5af` (§5a).
 The map was written before the pre-K1 code changes; §8 records them. Citations are `path:line`, re-checked 2026-10-27 at the pre-K1 close-out.
 
 ## 1. Purpose
@@ -318,8 +318,18 @@ marker, and the `auto_task/` and ingest skips all parse as before.
   `DocGenOutputStore`, so `save()` skips with an error log. Tests:
   `DocGenLegacyStateTests` (`testDocTemplateQuarantine...`,
   `testDocGenOutputQuarantine...`, `...FailedQuarantineBlocksSave...`).
+**Project id resolution (K1 finding, 2026-10-27).** The server had no way to map a project id to a folder. Evidence:
+- `kb/project-export.mjs` `exportProject(userId, projectId)` uses the id only to filter `meta.projectId` rows. It never touches a folder.
+- `GET /kb/project/:id/export` (`routes/router.mjs`) checks the id's shape and passes it on. No folder is involved.
+- `POST /kb/project/install-skills` takes a raw `{ path }`, not an id. `kb/install-project-skills.mjs` `assertInstallableProjectPath` checks it: absolute, realpath, a directory, and `system/project.json` present.
+- The Mac's `ProjectStore.ActiveProject` carries `id` and `localPath` (`Core/Project/ProjectStore.swift:14-20`).
 
-## 6. What K1 would move (proposal, not done)
+**Decision (flagged for the user).** Minimal safe design, as the brief asked. No raw client path reaches a template route. The Mac registers `{ id, root }` once per project open with `POST /kb/projects/register`. The server validates the root (`kb/doc-project-files.mjs` `validateProjectRoot`) and stores it in `doc_project_roots` (migration `0048`, keyed by `(user_id, project_id)`). Every later use re-validates the stored root, so a folder moved, replaced by a symlink, or stripped of its marker fails closed. The rules mirror `SystemBridge.isOverBroadRoot` and `confinedFile`. Alternatives considered: (a) an in-memory map, which is lost on restart, so the Mac would re-register on every open; (b) a path on every docs call, which decision 3 forbids; (c) deriving the folder from meeting metadata, which holds no folder. The register route sits in the `doc_gen` group for now. If project registration should be always-on, move it out of that group (`routes/feature-routes.mjs`).
+
+## 6. What K1 would move (proposal; server half done)
+
+**Status (2026-10-27):** the server half of this table is done (`routes/docs-routes.mjs`, `kb/doc-templates.mjs`, `kb/doc-project-files.mjs`, `kb/project-roots.mjs`; see §8, "K1 server half"). The Swift stores, seeders and models are **not** removed; the Mac switch is a separate step behind `docGenUseServerStore`. Seeding is server-side from the same generation library (`llm_agent/skills/generation-library.mjs`), so `POST /kb/docs/seed` takes no kit list.
+
 
 **Move to Node (business logic, not UI state):**
 
@@ -419,3 +429,59 @@ Steps 1 to 5 of "Next: pre-K1 work" are done. Step 3 (the K1a migration test) wa
 
 **Not done here.** Step 3 (legacy-file check, the K1a migration test with a real `doc-templates.json`) was finished after this close-out (`8d23d62e`; bug fixes `9c7ec5af`). Decisions 1, 3, 5, 6, 9, 10, 12, 13 are untouched. Open question 14 (the K0 rule for model types) is recorded in §7 and not decided.
 
+**K1 server half (2026-10-27).** Node owns the project-folder files; the Mac still owns its stores until the switch.
+
+Routes (all in the `doc_gen` group, so with `doc_gen` off each answers `404 feature_disabled`; every route takes `?project=<id>` except the register call; schema in `schema/http/docs.schema.json`, 27 fixtures in `schema/http/fixtures/docs/`):
+
+| Route | Does |
+|---|---|
+| `POST /kb/projects/register` `{id, root}` | validates the folder and stores the id → folder map (per user) |
+| `GET /kb/docs/templates?project=` | scans `templates/<folder>/template.md`; skips `auto_task` and ingest layouts |
+| `GET /kb/docs/commands?project=` | scans `commands/<folder>/command.md` |
+| `PUT /kb/docs/templates/:folder?project=` | writes `template.md` (`rawContent` as-is, else the rendered body; `rewrite: true` keeps the body text) |
+| `DELETE /kb/docs/templates/:folder?project=` | removes the folder |
+| `PUT` / `DELETE /kb/docs/commands/:folder?project=` | the same for `command.md` |
+| `POST /kb/docs/seed?project=` | writes the two README files and the kit's templates and commands, write-if-absent |
+
+Versions: `SERVER_API_VERSION` 81 (changelog line in `server.mjs`). Migration `0048_doc_project_roots.sql` (head is now `0048`). `ALL_ENDPOINTS` lists the eight paths. Rate limit: PUT and DELETE under `/kb/docs/` and the two POSTs share `kbWrite`. `minimumServerApiVersion` is unchanged.
+
+Node modules: `kb/doc-templates.mjs` (pure: parse, render, slug, stable id, `rewriteTemplateMarkdown`, surface marker), `kb/doc-project-files.mjs` (confined disk IO), `kb/doc-readmes.mjs` (the two README texts, extracted from the Swift literals by script), `kb/project-roots.mjs` (registry). Layering: all four are in `kb/`, which imports only `core/` and `kb/`. `eslint --max-warnings 0` is clean.
+
+Confinement (the server enforces what the Mac got from the file system): the root must be a real directory, not a symlink, not over-broad, with `system/project.json`. Reads resolve the realpath, stay inside the root, open with `O_NOFOLLOW`, and must be regular files. Dotfiles, files over 256 KB and invalid UTF-8 are skipped. A symlinked folder or file is skipped, never followed. Writes go through a temp file and a rename, and refuse a `templates/` or `commands/` folder that is a symlink.
+
+**Test mapping** (Swift test → `extension/tests/docs-templates.test.mjs` unless noted; each Node test names the Swift test in a `// ported from` comment):
+
+| Swift suite | Swift cases | Node | Gap |
+|---|---|---|---|
+| `DocCommandTests` | 13 | 13 (one `test.skip`, as in Swift: `seedDefinitions` is empty) | none |
+| `DocCommandStoreTests` | 6 | 6 (four full; `testFallsBackToBuiltinsWithNoProject` and `testImportWritesIntoProjectAndSelectsIt` partial) | the fallback is the Swift kit cache (client-side); import reads an `.md` file in Swift, the server takes the text |
+| `DocTemplateRewriteTests` | 6 | 6 | none |
+| `DocGenOutputConfigTests` | 7 | 3 (the resolution rule, via `resolveOutputDirectory`) | the other four are enum and store tests; the output config stays in Swift until K3 (§5a) |
+| `DocGenLegacyStateTests` (project-folder cases) | 2 | 2, read from the K1a fixtures copied to `tests/fixtures/docgen/project/` | the other cases are app-support stores, which stay in Swift |
+| `AutoTaskTemplateStoreTests` (`auto_task` skip, line 325) | 1 | 1 | the rest of that file is Auto Task's |
+| `GenerationContractLab` | 19 `expect` calls | 18 tests covering 19 calls (one test checks two) | none |
+| K1a bug fix: only the first `# ` line is the title (`9c7ec5af`) | 2 | 2 (`testSecondH1InBodyIsKept`, `testOnlyTheFirstTitleLineIsDropped`) | the quarantine fix is Swift-only (n/a) |
+
+New Node tests with no Swift twin: the golden bytes (6), the confinement and folder-rule cases (about 12), and the latency check. Route tests are in `extension/tests/docs-routes.test.mjs` (13): tenancy in both directions, traversal and encoded separators, symlinked folders, the 512 KB body cap (413), the bad-field 400s, missing-project 400, the 405 for an unknown method, the `AUTH_REQUIRED` 401 through `handleKB`, and the feature gate.
+
+**Byte parity (the rollback guarantee).** `renderTemplateMarkdown` / `renderCommandMarkdown` produce the bytes Swift's `renderedMarkdown()` produces. The same literals are asserted on both sides: `extension/tests/fixtures/docgen/golden.mjs` (Node) and `mac/Tests/LlmIdeMacTests/DocGenServerParityTests.swift` (Swift, 7 tests, passing). The stable ids match too: `DocTemplate.stableID(forFolder:"retro")` and the Node `stableId('retro','template')` are both `65A8ADFC-2236-44D5-A676-C0DA368BBC91`.
+
+**Gates (2026-10-27).**
+- `make test`: 3512 tests, 3509 pass, 0 fail, 3 skipped. Exit 0. Run with the sandbox off (port binding).
+- `node scripts/feature-matrix.mjs --all`: all 10 rows ok for the server and the live contract (sandbox off).
+- `make contract-gates`: exit 0 (HTTP conformance 620 fixtures, api-types, OpenAPI, inventory, design tokens, os-view).
+- `make docs-check`: exit 0 (after the version and migration-head references and the `kbWrite` line were updated).
+- `bash mac/Scripts/feature-boundaries.sh`: exit 0.
+- `swift test --filter DocGenServerParity`: 7 pass (sandbox off; SwiftPM's manifest step needs `sandbox-exec`).
+
+**Latency.** A list of 200 templates: 7 to 8 ms through the route, 8 ms for the bare scan (budget 50 ms; the test asserts under 200 ms).
+
+**Deviations and surprises.**
+- **Symlinks are skipped, not followed.** The Swift scanner follows them. This is deliberate (the brief asks for symlink-out refusal), but a user who symlinks a template folder into a project sees it vanish on the Node path. Flag it for the Mac switch.
+- **`rewrite` was not in the §6 table.** It is needed for the manager-sheet save (`DocTemplate.rewriting`). `rawContent`, when present, wins over `rewrite`, as the schema says.
+- **The K1a visual fixture has one blank line too many.** `project/template-md.v2-visual-marker.md` ends `## Decisions\n\n`. HEAD's `markdownBody` writes `## Decisions\n`, and the Swift parity test confirms it. The K1a README calls the fixture "output of HEAD". It is a historical file and I did not change it. The golden bytes are in `golden.mjs`.
+- The two old `*-v0-bare-marker` fixtures use older wording and cannot be reproduced by HEAD. They are read fixtures only.
+- The live contract (`tests/http-contract-live.test.mjs`) got one skip rule, "needs a project folder registered ... on the host". Project-scoped successes and folder-level 400s replay against a fresh server with no project. The 404 and missing-project 400 replays stand.
+- `kbWrite` and the rate-limit mapping in `docs/spec/api-server.md` were updated to match `server.mjs`.
+
+**Not done.** The Mac switch (`docGenUseServerStore`, the Swift calls to these routes, and the register call at project open). Nothing in `mac/` was changed except the new parity test file, and no Swift code or Swift test was deleted. The Swift stores, seeders and models are still the live path. Open: the Mac's `Project.id` must match `^[A-Za-z0-9_-]{1,128}$`, or the register call will be refused. I did not check how `Project.id` is generated.
