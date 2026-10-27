@@ -91,7 +91,10 @@ extension ShellSection {
     /// Resolve the effective Home landing: the chosen section if it's a real
     /// case, not currently hidden, and its `backingFeature` (if any) is
     /// compiled into this build, else `.library` (always visible — Library
-    /// isn't in `userHideable` and carries no `backingFeature`). Pure so the
+    /// isn't in `userHideable` and carries no `backingFeature`). The one
+    /// exception is Graph: when it is hidden or its feature is not compiled,
+    /// Home falls back to `.system` (the standalone System view, which is
+    /// always compiled) rather than Library. Pure so the
     /// shell and tests share one definition of "where Home goes." `compiled`
     /// is a parameter rather than a `FeatureRegistry.shared` read so this
     /// stays trivially testable — callers pass
@@ -100,8 +103,15 @@ extension ShellSection {
     /// `.explorer` with Explorer excluded) would land on the "not
     /// installed" placeholder instead of a usable page.
     static func resolveHome(_ rawValue: String, hidden: Set<String>, compiled: Set<AppFeature>) -> ShellSection {
-        guard let chosen = ShellSection(rawValue: rawValue),
-              !hidden.contains(chosen.rawValue) else { return .library }
+        guard let chosen = ShellSection(rawValue: rawValue) else { return .library }
+        if chosen == .codeGraph {
+            // Graph's default page is the System view, so when Graph itself is
+            // unavailable Home lands on System, not Library.
+            guard !hidden.contains(chosen.rawValue),
+                  let feature = chosen.backingFeature, compiled.contains(feature) else { return .system }
+            return chosen
+        }
+        guard !hidden.contains(chosen.rawValue) else { return .library }
         if let feature = chosen.backingFeature, !compiled.contains(feature) {
             return .library
         }

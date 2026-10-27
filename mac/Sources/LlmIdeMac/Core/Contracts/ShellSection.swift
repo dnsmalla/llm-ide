@@ -20,9 +20,10 @@ import Foundation
 /// migration, not a refactor.
 enum ShellSection: String, Hashable, CaseIterable {
     case library, live, explorer, search, conflicts, sourceControl, issues, gantt, visual, docGen, autoCode, codeGraph, loopEngine, settings
-    /// The OS view (React bundle in a WKWebView). Not a menu item: it is
-    /// reached only as the Home landing (Settings → Home opens → System, which
-    /// is also the default). Always compiled — `backingFeature` is nil.
+    /// The OS view (React bundle in a WKWebView). Not a menu item: it is the
+    /// default page of the Graph section (`GraphSectionView`, Shell), and the
+    /// Home landing when Graph is hidden or its feature is not compiled.
+    /// Always compiled — `backingFeature` is nil.
     case system
 
     /// User-friendly label — single source of truth so the sidebar
@@ -40,7 +41,7 @@ enum ShellSection: String, Hashable, CaseIterable {
         case .visual:    return "Visual"
         case .docGen:    return "Doc Gen"
         case .autoCode:  return "Auto Tasks"
-        case .codeGraph: return "Code Graph"
+        case .codeGraph: return "Graph"
         case .loopEngine: return "Loop"
         case .settings:  return "Settings"
         case .system:    return "System"
@@ -69,9 +70,11 @@ enum ShellSection: String, Hashable, CaseIterable {
 
     /// The top-bar tool buttons, in display order. `.live` appears only while a
     /// session runs (AppShell filters it), and `.system` is deliberately absent:
-    /// it is the Home landing, never a menu item.
+    /// it lives inside the Graph section, never as a menu item of its own.
+    /// Explorer is an ordinary menu item (it also keeps its panel-header
+    /// switcher with Source Control and Search).
     static let toolbarOrder: [ShellSection] = [
-        .codeGraph, .autoCode, .conflicts, .issues,
+        .explorer, .codeGraph, .autoCode, .conflicts, .issues,
         .gantt, .loopEngine, .docGen, .visual, .library, .live,
     ]
 

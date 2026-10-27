@@ -25,12 +25,13 @@ final class SystemViewTests: XCTestCase {
 
     // MARK: Home routing
 
-    func testSystemIsTheDefaultHomeWhenNothingWasChosen() {
+    func testGraphIsTheDefaultHomeWhenNothingWasChosen() {
         // A fresh install has no stored homeSection, so the fallback applies.
+        // Graph's default page is the System view, so Home opens Graph.
         let config = AppConfig(userDefaults: suite)
-        XCTAssertEqual(config.homeSection, ShellSection.system.rawValue)
+        XCTAssertEqual(config.homeSection, ShellSection.codeGraph.rawValue)
         XCTAssertEqual(
-            ShellSection.resolveHome(config.homeSection, hidden: [], compiled: allCompiled), .system)
+            ShellSection.resolveHome(config.homeSection, hidden: [], compiled: allCompiled), .codeGraph)
     }
 
     func testExplicitlyChosenHomeIsKept() {
@@ -39,10 +40,10 @@ final class SystemViewTests: XCTestCase {
         XCTAssertEqual(config.homeSection, "gantt", "an explicit user choice must not be overwritten by the new default")
     }
 
-    func testStaleHomeValueFallsBackToSystem() {
+    func testStaleHomeValueFallsBackToGraph() {
         suite.set("regression", forKey: "homeSection")
         let config = AppConfig(userDefaults: suite)
-        XCTAssertEqual(config.homeSection, ShellSection.system.rawValue)
+        XCTAssertEqual(config.homeSection, ShellSection.codeGraph.rawValue)
     }
 
     func testResolveHomeReturnsSystemWithoutAnyFeature() {
@@ -69,6 +70,7 @@ final class SystemViewTests: XCTestCase {
         // in it so the user can choose it.
         XCTAssertTrue(ShellSection.allCases.contains(.system))
         XCTAssertEqual(ShellSection.system.label, "System")
+        XCTAssertEqual(ShellSection.codeGraph.label, "Graph")
         XCTAssertNil(ShellSection.system.backingFeature)
     }
 

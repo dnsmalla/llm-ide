@@ -33,6 +33,13 @@ final class ShellStateSectionTests: XCTestCase {
         XCTAssertTrue(ShellState.Section.allCases.contains(.loopEngine))
     }
 
+    /// Explorer is an ordinary top-menu item (first in the toolbar) and stays
+    /// hideable like any other tool section.
+    func testExplorerIsAFirstToolbarItemAndHideable() {
+        XCTAssertEqual(ShellState.Section.toolbarOrder.first, .explorer)
+        XCTAssertTrue(ShellState.Section.userHideable.contains(.explorer))
+    }
+
     /// Home falls back to Library when the chosen landing is hidden — so picking
     /// Loop as Home and then hiding it lands somewhere real instead of nowhere.
     func testHomeFallsBackToLibraryWhenLoopIsHiddenAndWasHome() {

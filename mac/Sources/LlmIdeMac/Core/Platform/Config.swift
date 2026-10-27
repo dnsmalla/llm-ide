@@ -674,9 +674,10 @@ final class AppConfig: ObservableObject {
     }
 
     /// The section the Home toolbar button opens — a `ShellSection`
-    /// rawValue, default `.system` (the OS view). Only the fallback default
-    /// changed: a value the user stored explicitly is kept. Sanitized on read
-    /// so a stale value from an enum-rename refactor falls back to System.
+    /// rawValue, default `.codeGraph` (the Graph section, whose default page is
+    /// the System view). Only the fallback default changed: a value the user
+    /// stored explicitly is kept. Sanitized on read so a stale value from an
+    /// enum-rename refactor falls back to Graph.
     /// Hidden landings are substituted by `AppShell.effectiveHome()`.
     @Published var homeSection: String {
         didSet {
@@ -926,8 +927,8 @@ final class AppConfig: ObservableObject {
             self.hiddenSidebarSections = []
         }
 
-        let homeRaw = defaults.object(forKey: "homeSection") as? String ?? ShellSection.system.rawValue
-        self.homeSection = ShellSection(rawValue: homeRaw) != nil ? homeRaw : ShellSection.system.rawValue
+        let homeRaw = defaults.object(forKey: "homeSection") as? String ?? ShellSection.codeGraph.rawValue
+        self.homeSection = ShellSection(rawValue: homeRaw) != nil ? homeRaw : ShellSection.codeGraph.rawValue
     }
 
     /// Validates the server URL before persisting it.  Only localhost /

@@ -10,8 +10,28 @@ final class ShellStateHomeTests: XCTestCase {
     /// `resolveHome` took a `compiled` parameter.
     private let allCompiled = Set(AppFeature.allCases)
 
-    func testDefaultExplorerWhenNothingHidden() {
+    func testVisibleExplorerIsKeptAsHome() {
         XCTAssertEqual(ShellState.Section.resolveHome("explorer", hidden: [], compiled: allCompiled), .explorer)
+    }
+
+    func testVisibleGraphIsKeptAsHome() {
+        XCTAssertEqual(ShellState.Section.resolveHome("codeGraph", hidden: [], compiled: allCompiled), .codeGraph)
+    }
+
+    /// Graph is the Home landing, and its default page is the System view, so
+    /// hiding Graph (or building without `code_graph_3d`) lands on System, not
+    /// Library. Every other fallback still lands on Library.
+    func testHiddenGraphHomeFallsBackToSystem() {
+        XCTAssertEqual(ShellState.Section.resolveHome("codeGraph", hidden: ["codeGraph"], compiled: allCompiled), .system)
+    }
+
+    func testGraphHomeFallsBackToSystemWhenCodeGraph3DIsNotCompiled() {
+        let withoutGraph = allCompiled.subtracting([.codeGraph3D])
+        XCTAssertEqual(ShellState.Section.resolveHome("codeGraph", hidden: [], compiled: withoutGraph), .system)
+    }
+
+    func testStaleHomeValueResolvesToLibrary() {
+        XCTAssertEqual(ShellState.Section.resolveHome("regression", hidden: [], compiled: allCompiled), .library)
     }
 
     func testChosenSectionReturnedWhenVisible() {
@@ -58,6 +78,17 @@ final class ShellStateHomeTests: XCTestCase {
     func testBackingFeatureMappingIsPinned() {
         let mapped = Set(ShellState.Section.allCases.compactMap(\.backingFeature))
         XCTAssertEqual(mapped, [.codeGraph3D, .autoTasks, .ganttIssues, .docGen, .fileExplorer])
+    }
+
+    /// The Graph section's page toggle: the persisted key and the default page.
+    /// Anything unknown reads as System, so a corrupt value never blanks the page.
+    func testGraphSectionPageDefaultsToSystemAndPersistsUnderItsKey() {
+        XCTAssertEqual(GraphSectionPage.storageKey, "graphSectionPage")
+        XCTAssertEqual(GraphSectionPage.default, .system)
+        XCTAssertEqual(GraphSectionPage.resolve(""), .system)
+        XCTAssertEqual(GraphSectionPage.resolve("bogus"), .system)
+        XCTAssertEqual(GraphSectionPage.resolve("code"), .code)
+        XCTAssertEqual(GraphSectionPage.resolve(GraphSectionPage.code.rawValue), .code)
     }
 
     /// `.loopEngine` gained `.autoTasks` as its backingFeature (Phase2c Task 2)

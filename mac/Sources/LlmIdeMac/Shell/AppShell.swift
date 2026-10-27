@@ -603,10 +603,9 @@ struct AppShell: View {
 
     @ToolbarContentBuilder
     private func shellToolbar() -> some ToolbarContent {
-        // Leading "Home" button — always returns to Explorer (the default
-        // home). Explorer/Source Control/Search live only in the panel-header
-        // switcher, so from a tool section (Issues, Gantt, …) this is the way
-        // back without hunting for the switcher.
+        // Leading "Home" button — returns to the configured landing (Graph by
+        // default, which opens the System view). From any tool section (Issues,
+        // Gantt, …) this is the way back to the landing.
         ToolbarItem(placement: .navigation) {
             Button { shell.section = effectiveHome() } label: {
                 Label("Home", systemImage: "house")
@@ -772,7 +771,7 @@ struct AppShell: View {
             }
         case .codeGraph:
             if registry.isEnabled(.codeGraph3D) {
-                FeatureCatalog.graphMainPane()
+                GraphSectionView(api: api) { target in shell.section = target }
             } else {
                 DisabledFeaturePlaceholderView(
                     featureName: "3D Code Graph",
