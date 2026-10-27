@@ -3,7 +3,8 @@
 // and Explorer → "Project folders" (ProjectPathsSheet). Lives in Core because
 // two peer features render it and a feature may not name another feature's
 // type; every dependency (ProjectStore, ProjectLayout, AppEnvironment,
-// NotesFolderConfig, DocTemplateStore/DocCommandStore) is Core.
+// NotesFolderConfig) is Core. Doc Gen's template folders reload through
+// `GenerationProviderRegistry`, so the panel names no docs-kit type.
 
 import SwiftUI
 import AppKit
@@ -11,8 +12,6 @@ import AppKit
 struct ProjectPathsPanel: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
-    @EnvironmentObject var templateStore: DocTemplateStore
-    @EnvironmentObject var commandStore: DocCommandStore
     @Environment(AppEnvironment.self) private var env
 
     @State private var createStatus: String?
@@ -182,8 +181,7 @@ struct ProjectPathsPanel: View {
         do {
             try projectStore.rebuildActiveProjectFolders()
             if let root = projectStore.activeProject.map({ URL(fileURLWithPath: $0.localPath) }) {
-                templateStore.reloadProjectTemplates(at: root)
-                commandStore.reloadProjectCommands(at: root)
+                GenerationProviderRegistry.shared.provider?.reloadProjectFiles(at: root)
             }
             createStatus = "Project folders rebuilt. Agent skills refreshing…"
         } catch {

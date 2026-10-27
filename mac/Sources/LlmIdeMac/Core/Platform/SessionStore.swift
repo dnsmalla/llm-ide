@@ -240,7 +240,7 @@ final class SessionStore: ObservableObject {
         // ReconnectView), and the first version of this fix remembered only
         // two. A server change in particular is a plausible move to a
         // different org's account.
-        GenerationRegistry.shared.reset()
+        GenerationProviderRegistry.shared.provider?.resetForSignOut()
         // Per-account state held by other long-lived stores (activity feed
         // cursor, desktop Loop runs). clear() runs only on a definitive
         // sign-out / auth rejection, never on a transient refresh failure.

@@ -16,17 +16,18 @@ import SharedProtocol
 @MainActor
 final class MobileGenerationBridge: MobileFeatureBridge {
     weak var manager: MobileControlManager?
-    private let templates: DocTemplateStore
-    private let commands: DocCommandStore
 
     /// Subfolder of `llm-doc/` phone runs are saved into.
     static let saveSubfolder = "generated"
 
-    init(manager: MobileControlManager, templates: DocTemplateStore, commands: DocCommandStore) {
+    init(manager: MobileControlManager) {
         self.manager = manager
-        self.templates = templates
-        self.commands = commands
     }
+
+    /// Doc Gen's templates, commands and fit notice, through the Core seam
+    /// (`Core/Contracts/GenerationProviding.swift`). Nil only before Shell has
+    /// installed it, which happens at launch.
+    private var generation: (any GenerationProviding)? { GenerationProviderRegistry.shared.provider }
 
     // MARK: - MobileFeatureBridge
 
@@ -127,8 +128,8 @@ final class MobileGenerationBridge: MobileFeatureBridge {
         var templateChoices: [GenerationChoice] = []
         var commandChoices: [GenerationChoice] = []
         for surface in TemplateSurface.allCases {
-            templateChoices += choices(templates.templates(for: surface), id: { $0.id }, name: { $0.name }, surface: surface)
-            commandChoices += choices(commands.commands(for: surface), id: { $0.id }, name: { $0.name }, surface: surface)
+            templateChoices += choices(generation?.templateRefs(surface: surface) ?? [], id: { $0.id }, name: { $0.name }, surface: surface)
+            commandChoices += choices(generation?.commandRefs(surface: surface) ?? [], id: { $0.id }, name: { $0.name }, surface: surface)
         }
         return GenerationOptions(available: true,
                                  projectName: manager?.projectStore?.activeProject?.bundle.displayName,
@@ -143,9 +144,10 @@ final class MobileGenerationBridge: MobileFeatureBridge {
         guard let manager else { return }
         guard let notes = notesDir else { return fail(run, "Open a project on the Mac first.") }
         guard let api = manager.api else { return fail(run, "The Mac isn't ready to generate yet — its backend isn't connected.") }
+        guard let generation else { return fail(run, "Doc Gen isn't ready on the Mac yet. Try again in a moment.") }
         let surface = TemplateSurface(rawValue: run.surface) ?? .doc
-        let template = run.templateId.flatMap { id in templates.templates(for: surface).first { $0.id.uuidString == id } }
-        let command = run.commandRefId.flatMap { id in commands.commands(for: surface).first { $0.id.uuidString == id } }
+        let template = run.templateId.flatMap { generation.templateRef(id: $0, surface: surface) }
+        let command = run.commandRefId.flatMap { generation.commandRef(id: $0, surface: surface) }
         // A stale id (the project or its templates changed since the phone listed them) must
         // say so, not quietly run with whichever of the two still resolves.
         if run.templateId != nil && template == nil {
@@ -186,7 +188,7 @@ final class MobileGenerationBridge: MobileFeatureBridge {
             manager.reply(GenerationResult(
                 commandId: run.commandId, ok: true, title: base, markdown: result.content,
                 savedPath: savedPath, skipped: [],
-                notice: GenerationViewModel.sourceFitNotice(for: result, sentCount: sources.count),
+                notice: generation.sourceFitNotice(for: result, sentCount: sources.count),
                 error: saveError))
         } catch {
             guard !Task.isCancelled else { return }

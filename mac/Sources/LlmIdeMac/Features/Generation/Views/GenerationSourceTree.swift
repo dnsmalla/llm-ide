@@ -34,7 +34,7 @@ struct GenerationSourceTree: View {
     /// `VisualView.treeSelectedURL`.
     let selectedURL: Binding<URL?>?
 
-    @Environment(LibraryItemStore.self) private var itemStore
+    @Environment(\.librarySourceFeed) private var sourceFeed
 
     /// `@AppStorage` key for the selected tab, caller-supplied so each host
     /// keeps its own persisted choice — Doc Gen keeps `"docgen.sourceTab"`
@@ -120,7 +120,7 @@ struct GenerationSourceTree: View {
     /// Code and llm-doc render as real nested hierarchies keyed on `treePath`;
     /// data keeps the flat folder grouping. Same split as `FileTreePanel`.
     private func buildTrees(for category: LibraryItem.Category) -> [FSNode] {
-        let items = itemStore.items(for: category)
+        let items = sourceFeed.items(category)
         return category.rendersNestedTree
             ? buildCodeTrees(items: items)
             : buildCategoryTrees(items: items)

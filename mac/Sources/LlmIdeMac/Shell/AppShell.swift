@@ -14,8 +14,6 @@ struct AppShell: View {
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     @EnvironmentObject var projectStore: ProjectStore
-    @EnvironmentObject var templateStore: DocTemplateStore
-    @EnvironmentObject var commandStore: DocCommandStore
     @EnvironmentObject var docGenOutputStore: DocGenOutputStore
     @State private var shell = ShellState()
     @State private var itemStore = LibraryItemStore(sourceClassifier: SourceRegistryClassifier())
@@ -390,6 +388,7 @@ struct AppShell: View {
         // layouts.
         .environment(shell)
         .environment(itemStore)
+        .environment(\.librarySourceFeed, LibrarySourceFeed { itemStore.items(for: $0) })
         // The folder watcher is started by initEnv() for EVERY AppEnvironment
         // it creates (see startWatching(_:)). It used to start here, in a
         // one-shot .task that ran once on appear — often before initEnv had
@@ -492,7 +491,7 @@ struct AppShell: View {
             // project's directory. The old view-owned lifetime discarded all of
             // that by accident on every section switch; registry ownership has
             // to do it deliberately. Covers close too (path → nil).
-            GenerationRegistry.shared.reset()
+            GenerationProviderRegistry.shared.provider?.resetForProjectChange()
             generationEpoch &+= 1
             reloadDocTemplatesForActiveProject()
         }
@@ -1097,8 +1096,7 @@ struct AppShell: View {
             ProjectDocTemplatesSeeder.seedIfNeeded(at: root, kit: kit.templates)
             ProjectDocCommandsSeeder.seedIfNeeded(at: root, kit: kit.commands)
         }
-        templateStore.reloadProjectTemplates(at: root)
-        commandStore.reloadProjectCommands(at: root)
+        GenerationProviderRegistry.shared.provider?.reloadProjectFiles(at: root)
     }
 
     private func reloadDocTemplatesForActiveProject() {

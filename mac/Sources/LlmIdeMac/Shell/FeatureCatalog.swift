@@ -615,33 +615,22 @@ enum FeatureCatalog {
     #if FEATURE_MOBILE
     private static var mobileControlManager: MobileControlManager?
     #endif
-    #if FEATURE_DOCGEN && FEATURE_MOBILE
-    private static var generationTemplates: DocTemplateStore?
-    private static var generationCommands: DocCommandStore?
-    #endif
-
-    /// Hand the Doc Gen template/command stores to the phone bridge. The
-    /// stores are SwiftUI `@StateObject`s owned by the app root, so they reach
-    /// here from its first `.task` — and `bootMobile` may run before or after
-    /// that, so both call `wireGenerationBridge()`, which is idempotent.
-    /// A no-op unless Doc Gen AND Mobile are both compiled in; otherwise the
-    /// manager's slot stays nil and the phone is told "Doc Gen not installed".
+    /// Install the Doc Gen seam over the template/command stores. Core/Generation
+    /// is always compiled, so this runs in every build. The stores are SwiftUI
+    /// `@StateObject`s built at app init, and the phone bridge reads them only
+    /// through `GenerationProviderRegistry`. `bootMobile` may run before or after
+    /// this, so it also calls `wireGenerationBridge()`, which is idempotent.
     static func provideGenerationStores(templates: DocTemplateStore, commands: DocCommandStore) {
-        #if FEATURE_DOCGEN && FEATURE_MOBILE
-        generationTemplates = templates
-        generationCommands = commands
+        GenerationProviderRegistry.shared.install(
+            DocGenProvider(templates: templates, commands: commands))
         wireGenerationBridge()
-        #endif
     }
 
     private static func wireGenerationBridge() {
         #if FEATURE_DOCGEN && FEATURE_MOBILE
         guard let mobile = mobileControlManager,
-              let templates = generationTemplates,
-              let commands = generationCommands,
               mobile.generationBridge == nil else { return }
-        mobile.generationBridge = MobileGenerationBridge(
-            manager: mobile, templates: templates, commands: commands)
+        mobile.generationBridge = MobileGenerationBridge(manager: mobile)
         #endif
     }
 
