@@ -1,0 +1,82 @@
+name: feature-matrix
+
+# Nightly feature matrix (Phase 1 kit gates; `make feature-matrix`): every
+# removable Mac feature switched off, one row at a time. The server rows run on
+# Linux every night: a fresh server per row with its LLMIDE_FEATURES set, the
+# feature_disabled 404s, /health features + endpoints, the extension's
+# REQUIRED_ENDPOINTS, and the live contract test in assert mode.
+#
+# The Mac rows (a reduced `swift build` per row plus the three quadrant targets)
+# take a full Swift build each, so they run only on workflow_dispatch with
+# `mac: true`, on macos-15 like mac-ci.yml.
+
+on:
+  schedule:
+    - cron: '23 3 * * *'   # 03:23 UTC nightly
+  workflow_dispatch:
+    inputs:
+      mac:
+        description: 'Also run the Mac rows (reduced swift builds; slow)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: feature-matrix-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  server-rows:
+    name: Server rows (ubuntu)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      # The server rows boot extension/server.mjs, so they need its npm deps.
+      # The graph-kit submodule and `.skills` are not used here (see
+      # contract-ci.yml for the same reasoning).
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci --no-audit --no-fund
+
+      - name: make feature-matrix (server rows)
+        run: make feature-matrix
+
+  mac-rows:
+    name: Mac rows (macos)
+    if: github.event_name == 'workflow_dispatch' && inputs.mac
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      # As in mac-ci.yml: no submodules — mac/Package.swift fetches graph-kit by
+      # its pinned revision, and the server rows need only extension/.
+      - uses: actions/checkout@v7
+
+      - name: Select latest stable Xcode
+        run: sudo xcode-select -s /Applications/Xcode.app
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: extension/package-lock.json
+
+      - name: Install dependencies
+        working-directory: extension
+        run: npm ci --no-audit --no-fund
+
+      - name: Cache SwiftPM
+        uses: actions/cache@v6
+        with:
+          path: mac/.build-fm-*
+          key: fm-spm-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}
+          restore-keys: |
+            fm-spm-${{ runner.os }}-
+
+      - name: make feature-matrix (server + Mac rows)
+        run: make feature-matrix FM_ARGS="--all --mac"
