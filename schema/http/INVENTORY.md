@@ -269,7 +269,7 @@ Endpoints with no client caller (35):
 
 ## Consistency
 
-Checked: 178 roster entries, 712 Swift files, 46 extension source files.
+Checked: 178 roster entries, 713 Swift files, 46 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
