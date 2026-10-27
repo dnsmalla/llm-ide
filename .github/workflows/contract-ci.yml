@@ -15,6 +15,8 @@ on:
       - 'scripts/**'
       - 'extension/**'
       - 'mac/Sources/**'
+      - 'mac/LocalPackages/graph-kit'
+      - 'ui/**'
       - 'docs/reference/api/**'
       - 'Makefile'
       - '.github/workflows/contract-ci.yml'
@@ -24,6 +26,8 @@ on:
       - 'scripts/**'
       - 'extension/**'
       - 'mac/Sources/**'
+      - 'mac/LocalPackages/graph-kit'
+      - 'ui/**'
       - 'docs/reference/api/**'
       - 'Makefile'
       - '.github/workflows/contract-ci.yml'
@@ -39,11 +43,19 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # os-view-check builds the System page from the graph-kit submodule
+      # (mac/LocalPackages/graph-kit/web). Only that submodule: `.skills` is
+      # private and not needed here (see mac-ci.yml's checkout note).
+      - name: Check out graph-kit submodule
+        run: git submodule update --init mac/LocalPackages/graph-kit
+
       - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
-          cache-dependency-path: extension/package-lock.json
+          cache-dependency-path: |
+            extension/package-lock.json
+            ui/os-view/package-lock.json
 
       - name: Install dependencies
         working-directory: extension

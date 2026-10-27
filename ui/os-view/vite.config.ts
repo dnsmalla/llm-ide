@@ -9,6 +9,11 @@ const outDir =
   process.env.OS_VIEW_OUT ??
   fileURLToPath(new URL('../../mac/Sources/LlmIdeMac/Resources/os-view', import.meta.url));
 
+// The page itself is graph-kit's (mac/LocalPackages/graph-kit/web). This package is the
+// host: it supplies graph-kit's OsHost over the native bridge and over HTTP.
+const graphKitRoot = fileURLToPath(new URL('../../mac/LocalPackages/graph-kit', import.meta.url));
+const graphKitWeb = fileURLToPath(new URL('../../mac/LocalPackages/graph-kit/web/src/index.ts', import.meta.url));
+
 // The page is opened from file:// inside a WKWebView. A module script or a
 // crossorigin attribute is refused for file:// origins, so the build emits
 // one classic IIFE script, deferred, and a plain stylesheet link.
@@ -30,6 +35,14 @@ function classicPage(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [react(), classicPage()],
+  resolve: {
+    alias: { '@dnsmalla/graph-kit-web': graphKitWeb },
+    // The submodule has no node_modules in CI: its files resolve these from here.
+    dedupe: ['react', 'react-dom', 'three'],
+  },
+  server: {
+    fs: { allow: ['.', graphKitRoot] },
+  },
   build: {
     outDir,
     emptyOutDir: true,

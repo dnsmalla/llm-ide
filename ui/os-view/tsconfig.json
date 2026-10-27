@@ -10,7 +10,17 @@
     "isolatedModules": true,
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
-    "types": []
+    "types": [],
+    "paths": {
+      "@dnsmalla/graph-kit-web": ["../../mac/LocalPackages/graph-kit/web/src/index.ts"],
+      "react": ["./node_modules/@types/react"],
+      "react/jsx-runtime": ["./node_modules/@types/react/jsx-runtime"],
+      "react-dom": ["./node_modules/@types/react-dom"],
+      "react-dom/client": ["./node_modules/@types/react-dom/client"],
+      "three": ["./node_modules/@types/three"],
+      "three/*": ["./node_modules/three/*"],
+      "zod": ["./node_modules/zod"]
+    }
   },
   "include": ["src", "vite.config.ts"]
 }

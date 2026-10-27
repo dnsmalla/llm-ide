@@ -1,0 +1,90 @@
+/* Styles for the dev-only connect form (DevConnect). The page itself is graph-kit's;
+   this sheet only covers the form LLM-IDE shows outside the Mac app. Colours, spacing
+   and type come only from the --tok-* variables in tokens.generated.css. */
+
+.dev-connect {
+  padding: var(--tok-space-lg);
+  font-size: var(--tok-type-body-size);
+  color: var(--tok-color-text);
+}
+
+.dev-connect .card {
+  min-width: 0;
+  background: var(--tok-color-surface);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-md);
+  padding: var(--tok-space-lg);
+  display: flex;
+  flex-direction: column;
+  gap: var(--tok-space-md);
+}
+
+.dev-connect .card-title {
+  margin: 0;
+  font-size: var(--tok-type-section-size);
+  font-weight: var(--tok-type-section-weight);
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--tok-color-text-muted);
+}
+
+.dev-connect .meta {
+  margin: 0;
+  color: var(--tok-color-text-muted);
+  font-size: var(--tok-type-caption-size);
+}
+
+.dev-connect .banner {
+  margin: 0;
+  padding: var(--tok-space-md);
+  border-radius: var(--tok-radius-sm);
+  border: 1px solid var(--tok-color-border);
+  background: var(--tok-color-surface2);
+}
+
+.dev-connect .banner-error {
+  color: var(--tok-color-danger);
+}
+
+.dev-connect .field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--tok-space-xs);
+  font-size: var(--tok-type-caption-size);
+  color: var(--tok-color-text-muted);
+}
+
+.dev-connect .field input,
+.dev-connect .field select {
+  font: inherit;
+  font-size: var(--tok-type-body-size);
+  color: var(--tok-color-text);
+  background: var(--tok-color-body);
+  border: 1px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-sm);
+  padding: var(--tok-space-xs) var(--tok-space-sm);
+}
+
+.dev-connect .btn {
+  font: inherit;
+  font-size: var(--tok-type-body-size);
+  font-weight: var(--tok-type-button-weight);
+  align-self: flex-start;
+  padding: var(--tok-space-xs) var(--tok-space-md);
+  border-radius: var(--tok-radius-sm);
+  border: 1px solid var(--tok-color-accent);
+  background: var(--tok-color-surface2);
+  color: var(--tok-color-accent);
+  cursor: pointer;
+}
+
+.dev-connect button:focus-visible,
+.dev-connect input:focus-visible,
+.dev-connect select:focus-visible {
+  outline: 2px solid var(--tok-color-accent);
+  outline-offset: 2px;
+}
+
+.dev-form {
+  max-width: 480px;
+}

@@ -8,7 +8,8 @@
 //   extension/src/styles/tokens.generated.css              the same CSS, bundled by the
 //                                                           side panel (Vite)
 //   ui/os-view/src/tokens.generated.css                    the same CSS, bundled by the
-//                                                           System view (Vite)
+//                                                           System view host (Vite); the
+//                                                           page itself is graph-kit's web/
 //
 //   node scripts/gen-design-tokens.mjs           write the files
 //   node scripts/gen-design-tokens.mjs --check   exit 1 when a file is stale, or when

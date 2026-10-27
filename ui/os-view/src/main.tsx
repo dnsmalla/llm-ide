@@ -1,62 +1,32 @@
 import { createRoot } from 'react-dom/client';
-import { App } from './App';
-import {
-  NativeRequests,
-  applyTheme,
-  hasNativeBridge,
-  postToNative,
-  type NativeConfig,
-  type NativeEvent,
-  type NativeFeedStatus,
-} from './bridge';
-import { OsController } from './controller';
-import './styles.css';
-
-// Default is the dark theme; native sends the real one with llmideConfigure.
-applyTheme(undefined, document.documentElement);
-
-const native = hasNativeBridge();
-const requests = new NativeRequests(
-  (message) => postToNative(message),
-  (fn, ms) => window.setTimeout(fn, ms),
-  (handle) => window.clearTimeout(handle as number),
-);
-
-const controller = new OsController({
-  mode: native ? 'native' : 'dev',
-  requester: native ? (method, path, body) => requests.call(method, path, body) : undefined,
-  fetch: (input, init) => fetch(input, init),
-  post: (message) => postToNative(message),
-  applyTheme: (theme) => {
-    applyTheme(theme, document.documentElement);
-  },
-  setTimer: (fn, ms) => window.setTimeout(fn, ms),
-  clearTimer: (handle) => window.clearTimeout(handle as number),
-});
-
-// Native calls these; each is installed before "ready" is posted, so a configure
-// sent straight back is not lost.
-const bridge = window as unknown as {
-  llmideConfigure: (cfg: NativeConfig) => void;
-  llmideResponse: (id: string, reply: unknown) => void;
-  llmideEvent: (event: NativeEvent) => void;
-  llmideStatus: (status: { status: NativeFeedStatus; detail?: string }) => void;
-};
-bridge.llmideConfigure = (cfg) => {
-  controller.configure(cfg);
-};
-bridge.llmideResponse = (id, reply) => {
-  requests.settle(id, reply);
-};
-bridge.llmideEvent = (event) => {
-  controller.nativeEvent(event);
-};
-bridge.llmideStatus = (status) => {
-  if (status && typeof status === 'object') controller.nativeStatus(status.status, status.detail);
-};
+import { mountOsView } from '@dnsmalla/graph-kit-web';
+import { bootNative, type NativeSurface } from './boot';
+import { hasNativeBridge, postToNative } from './bridge';
+import { createDevHost } from './hosts';
+import { DevConnect, type DevConnection } from './components/DevConnect';
+// The page's own sheets come with the graph-kit import above; LLM-IDE's token sheet
+// follows, so its values override graph-kit's defaults.
+import './tokens.generated.css';
+import './dev.css';
 
 const root = document.getElementById('root');
 if (!root) throw new Error('System view: #root is missing from index.html');
-createRoot(root).render(<App controller={controller} />);
 
-controller.start();
+if (hasNativeBridge()) {
+  // Native installs its callbacks on the window before it is told we are ready.
+  bootNative(window as unknown as Partial<NativeSurface>, { root, post: postToNative });
+} else {
+  // Outside the app: the form connects straight to a server with a pasted token.
+  const form = createRoot(root);
+  const connect = (cfg: DevConnection) => {
+    form.unmount();
+    const host = createDevHost({
+      conn: { baseURL: cfg.baseURL, token: cfg.token },
+      fetch: (input, init) => fetch(input, init),
+      setTimer: (fn, ms) => window.setTimeout(fn, ms),
+      clearTimer: (handle) => window.clearTimeout(handle as number),
+    });
+    mountOsView(root, host, { theme: cfg.theme, projectName: cfg.projectName ?? null });
+  };
+  form.render(<DevConnect onConnect={connect} />);
+}

@@ -1,16 +1,18 @@
-// System view tests: `npm test`. The TypeScript sources load through Vite's SSR
-// loader (the same pipeline as the build), so no extra test framework is needed.
-// Timers are fake and fetch is mocked, so the suite never waits on the network.
+// System view (host) tests: `npm test`. The TypeScript sources load through Vite's SSR
+// loader with the same config as the build (alias to graph-kit, dedupe), so the page
+// the host mounts is graph-kit's real code. Timers are fake and fetch is mocked; the
+// suite never waits on the network.
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import { createServer } from 'vite';
-import react from '@vitejs/plugin-react';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const FIXTURES = path.resolve(ROOT, '../../schema/http/fixtures/os');
+const GRAPH_KIT_INDEX = path.resolve(ROOT, '../../mac/LocalPackages/graph-kit/web/src/index.ts');
+const BUNDLE = path.resolve(ROOT, '../../mac/Sources/LlmIdeMac/Resources/os-view');
 const BASE = 'http://127.0.0.1:3456';
 const TOKEN = 'test-token-123';
 
@@ -21,10 +23,10 @@ let server;
 let api;
 
 before(async () => {
+  // The real vite config: the graph-kit alias and dedupe come from it, as in the build.
   server = await createServer({
     root: ROOT,
-    configFile: false,
-    plugins: [react()],
+    configFile: path.join(ROOT, 'vite.config.ts'),
     logLevel: 'silent',
     appType: 'custom',
     server: { middlewareMode: true, hmr: false, watch: null },
@@ -32,12 +34,15 @@ before(async () => {
   });
   const load = (p) => server.ssrLoadModule(p);
   api = {
-    OsController: (await load('/src/controller.ts')).OsController,
     api: await load('/src/api.ts'),
     sse: await load('/src/sse.ts'),
     stream: await load('/src/stream.ts'),
     bridge: await load('/src/bridge.ts'),
+    hosts: await load('/src/hosts.ts'),
+    boot: await load('/src/boot.ts'),
+    devConnect: await load('/src/components/DevConnect.tsx'),
     render: await load('/tests/support/render.tsx'),
+    graphKit: await load('@dnsmalla/graph-kit-web'),
   };
 });
 
@@ -81,10 +86,11 @@ const sseBody = (...events) =>
   );
 
 const HELLO = 'event: hello\ndata: {"type":"hello","at":"2026-10-26T13:56:08.000Z"}\n\n';
+const CHANGE = 'event: change\ndata: {"type":"chat_turn","at":"2026-10-26T13:57:00.000Z"}\n\n';
 
 /**
  * Routes mock fetch calls by URL. `state` answers GET /kb/os/state; `stream`
- * answers GET /kb/os/stream; `cancel` answers the POST for a Stop.
+ * answers GET /kb/os/stream; anything else is answered with an ok body.
  */
 function mockFetch(routes) {
   const calls = [];
@@ -97,32 +103,19 @@ function mockFetch(routes) {
   return { fetchImpl, calls };
 }
 
-const applied = [];
-
-/** Dev-browser controller: connects straight to the server with a pasted token. */
-function makeDev({ fetchImpl, timers, post = [] } = {}) {
-  const t = timers ?? fakeTimers();
-  const controller = new api.OsController({
-    mode: 'dev',
-    fetch: fetchImpl,
-    post: (message) => {
-      post.push(message);
-      return false;
-    },
-    applyTheme: (theme) => {
-      applied.push(theme);
-    },
-    setTimer: t.setTimer,
-    clearTimer: t.clearTimer,
-  });
-  return { controller, timers: t, post };
+function standardRoutes(state = seeded()) {
+  return (url) => {
+    if (url.includes('/kb/os/state')) return { body: state };
+    if (url.includes('/kb/os/stream')) return sseBody(HELLO);
+    return { body: { ok: true } };
+  };
 }
 
-/**
- * A simulated Mac app bridge. `answer(message)` plays native: it returns the
- * reply for a `request` message (undefined = never answer, so the page times
- * out). The reply is delivered on a microtask, as the real bridge does.
- */
+const flush = async () => {
+  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
+};
+
+/** A simulated Mac app bridge. `answer(message)` plays native; undefined = never answer. */
 function nativeBridge(answer = () => undefined) {
   const sent = [];
   const timers = fakeTimers();
@@ -136,44 +129,15 @@ function nativeBridge(answer = () => undefined) {
     return true;
   };
   requests = new api.bridge.NativeRequests(post, timers.setTimer, timers.clearTimer);
-  const requester = (method, p, body) => requests.call(method, p, body);
-  return { sent, timers, requests, requester, post };
-}
-
-function makeNative(answer) {
-  const bridge = nativeBridge(answer);
-  const controller = new api.OsController({
-    mode: 'native',
-    requester: bridge.requester,
-    fetch: undefined,
-    post: bridge.post,
-    applyTheme: (theme) => {
-      applied.push(theme);
-    },
-    setTimer: bridge.timers.setTimer,
-    clearTimer: bridge.timers.clearTimer,
-  });
-  return { controller, ...bridge };
+  return { sent, timers, requests, post };
 }
 
 /** Answers the native requests the way the Mac app does for the allowlisted calls. */
-function nativeAnswers(state, { cancelStatus = 200 } = {}) {
+function nativeAnswers(state, { stateStatus = 200, cancelStatus = 200 } = {}) {
   return (message) => {
-    if (message.path.startsWith('/kb/os/state')) return { status: 200, body: state };
+    if (message.path.startsWith('/kb/os/state')) return { status: stateStatus, body: state };
     if (message.method === 'POST') return { status: cancelStatus, body: { ok: true } };
     return { status: 400, error: 'not_allowed' };
-  };
-}
-
-const flush = async () => {
-  for (let i = 0; i < 20; i++) await new Promise((resolve) => setImmediate(resolve));
-};
-
-function standardRoutes(state = seeded()) {
-  return (url) => {
-    if (url.includes('/kb/os/state')) return { body: state };
-    if (url.includes('/kb/os/stream')) return sseBody(HELLO);
-    return { body: { ok: true } };
   };
 }
 
@@ -320,274 +284,291 @@ describe('dev requests', () => {
   });
 });
 
-describe('native controller', () => {
-  it('configure takes only theme and project, subscribes once, and never carries a token', async () => {
+
+describe('native host', () => {
+  it('loadState goes through the bridge as one GET with no body, and returns the snapshot', async () => {
     const state = seeded();
-    const { controller, sent } = makeNative(nativeAnswers(state));
-    controller.start();
-    assert.deepEqual(sent[0], { type: 'ready' });
-    controller.configure({ theme: 'light', projectName: 'Demo' });
-    controller.configure({ theme: 'midnight', projectName: 'Demo' });
-    await flush();
-    assert.equal(sent.filter((m) => m.type === 'subscribe').length, 1, 'one feed per view');
-    assert.equal(applied.at(-1), 'midnight');
-    const snap = controller.getSnapshot();
-    assert.equal(snap.connected, true);
-    assert.equal(snap.projectName, 'Demo');
-    assert.ok(snap.data, 'the first configure fetches the state over the bridge');
-    assert.ok(!JSON.stringify(sent).includes('token'), 'no token crosses the bridge');
-    assert.ok(!JSON.stringify(sent).includes('baseURL'), 'no server address crosses the bridge');
-    assert.ok(!sent.some((m) => m.type === 'needToken'), 'native handles auth; the page never asks for a token');
-    controller.dispose();
-    assert.equal(sent.at(-1).type, 'unsubscribe');
+    const bridge = nativeBridge(nativeAnswers(state));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    const snap = await host.loadState('week');
+    assert.deepEqual(bridge.sent[0], { type: 'request', id: bridge.sent[0].id, method: 'GET', path: '/kb/os/state?window=week' });
+    assert.ok(!('body' in bridge.sent[0]));
+    assert.equal(snap.apiVersion, state.apiVersion);
   });
 
-  it('a real project change re-fetches; a theme-only configure does not', async () => {
-    const state = seeded();
-    const { controller, sent } = makeNative(nativeAnswers(state));
-    controller.configure({ theme: 'dark', projectName: 'A' });
-    await flush();
-    const count = () => sent.filter((m) => m.type === 'request').length;
-    const before = count();
-    controller.configure({ theme: 'light', projectName: 'A' });
-    await flush();
-    assert.equal(count(), before, 'same project: no refetch');
-    controller.configure({ theme: 'light', projectName: 'B' });
-    await flush();
-    assert.equal(count(), before + 1, 'new project: refetch');
-    controller.dispose();
+  it('a 401 from native becomes graph-kit OsAuthError; other failures pass through', async () => {
+    const refused = nativeBridge(() => ({ status: 401 }));
+    const host = api.hosts.createNativeHost({ requests: refused.requests, post: refused.post });
+    await assert.rejects(host.loadState('day'), api.graphKit.OsAuthError);
+
+    const broken = nativeBridge(() => ({ status: 500 }));
+    const host2 = api.hosts.createNativeHost({ requests: broken.requests, post: broken.post });
+    await assert.rejects(host2.loadState('day'), (err) => !(err instanceof api.graphKit.OsAuthError) && /\(500\)/.test(err.message));
   });
 
-  it('a feed event re-fetches once, debounced to 300 ms', async () => {
-    const state = seeded();
-    const { controller, sent, timers } = makeNative(nativeAnswers(state));
-    controller.configure({ theme: 'dark', projectName: 'A' });
-    await flush();
-    const count = () => sent.filter((m) => m.type === 'request').length;
-    const before = count();
-    controller.nativeEvent({ type: 'activity', at: '2026-10-26T13:56:08.000Z' });
-    controller.nativeEvent({ type: 'usage', at: '2026-10-26T13:56:09.000Z' });
-    assert.deepEqual(timers.pendingMs(), [300], 'a burst leaves one pending refresh');
-    timers.runTimers(300);
-    await flush();
-    assert.equal(count(), before + 1, 'one debounced refresh');
-    controller.nativeEvent({ type: 'hello', at: 'x' });
-    assert.equal(timers.count(), 0, 'hello is not a change');
-    controller.dispose();
+  it('cancel posts the declared request exactly (method, path, body) and maps 401 the same way', async () => {
+    const bridge = nativeBridge(nativeAnswers(seeded()));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    await host.cancel({ method: 'POST', path: '/kb/agent/stop', body: { sessionId: 's1' } });
+    assert.deepEqual(bridge.sent[0], {
+      type: 'request',
+      id: bridge.sent[0].id,
+      method: 'POST',
+      path: '/kb/agent/stop',
+      body: { sessionId: 's1' },
+    });
+
+    const refused = nativeBridge(() => ({ status: 401 }));
+    const host2 = api.hosts.createNativeHost({ requests: refused.requests, post: refused.post });
+    await assert.rejects(
+      host2.cancel({ method: 'POST', path: '/kb/agent/stop', body: { sessionId: 's1' } }),
+      api.graphKit.OsAuthError,
+    );
   });
 
-  it('forwards the feed status to the banner', () => {
-    const { controller } = makeNative(() => undefined);
-    controller.nativeStatus('reconnecting', 'Too many System views are open; retrying later');
-    assert.equal(controller.getSnapshot().live, 'reconnecting');
-    assert.equal(controller.getSnapshot().notice, 'Too many System views are open; retrying later');
-    controller.nativeStatus('live');
-    assert.equal(controller.getSnapshot().notice, null);
+  it('cancel refuses a request that is not a POST to an absolute path', async () => {
+    const bridge = nativeBridge(nativeAnswers(seeded()));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    await assert.rejects(host.cancel({ method: 'GET', path: '/x' }), /Unsupported cancel request/);
+    assert.equal(bridge.sent.length, 0, 'nothing is sent for a refused cancel');
   });
 
-  it('sends a running item\'s declared cancel request exactly, through the bridge', async () => {
-    const state = seeded();
-    const cancel = state.running.chatTurns[0].cancel;
-    const { controller, sent } = makeNative(nativeAnswers(state));
-    controller.configure({ theme: 'dark', projectName: 'A' });
-    await flush();
-    await controller.stopItem(cancel, 'chat-chat-1');
-    await flush();
-    const stop = sent.find((m) => m.type === 'request' && m.method === 'POST');
-    assert.equal(stop.path, '/agent/v2/cancel');
-    assert.deepEqual(stop.body, cancel.body);
-    assert.ok(sent.some((m) => m.type === 'request' && m.method === 'GET'), 'refreshes after the stop');
-    assert.equal(controller.getSnapshot().stopping, null);
-    controller.dispose();
+  it('watch posts subscribe, forwards events (hello ignored) and status, and unwatch posts unsubscribe once', () => {
+    const bridge = nativeBridge();
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    const changes = [];
+    const statuses = [];
+    const unwatch = host.watch(
+      () => changes.push('change'),
+      (status, detail) => statuses.push([status, detail ?? null]),
+    );
+    assert.deepEqual(bridge.sent, [{ type: 'subscribe' }]);
+
+    host.nativeEvent({ type: 'hello', at: null });
+    assert.deepEqual(changes, [], 'hello is ignored');
+    host.nativeEvent({ type: 'chat_turn', at: '2026-10-27T00:00:00Z' });
+    assert.deepEqual(changes, ['change']);
+
+    host.nativeStatus('live');
+    host.nativeStatus('reconnecting', 'Too many System views are open; retrying later');
+    assert.deepEqual(statuses, [
+      ['live', null],
+      ['reconnecting', 'Too many System views are open; retrying later'],
+    ]);
+
+    unwatch();
+    unwatch();
+    assert.deepEqual(bridge.sent.slice(1), [{ type: 'unsubscribe' }], 'unsubscribe is sent once');
+    host.nativeEvent({ type: 'chat_turn' });
+    host.nativeStatus('live');
+    assert.deepEqual(changes, ['change'], 'nothing is forwarded after unwatch');
+    assert.equal(statuses.length, 2);
   });
 
-  it('a 401 from native marks the view signed out, with no token request', async () => {
-    const { controller, sent, timers } = makeNative(() => ({ status: 401, body: {} }));
-    controller.configure({ theme: 'dark', projectName: 'A' });
-    await flush();
-    const snap = controller.getSnapshot();
-    assert.equal(snap.signedOut, true);
-    assert.equal(snap.live, 'stopped');
-    assert.equal(timers.count(), 0, 'no retry is scheduled after a 401');
-    assert.ok(!sent.some((m) => m.type === 'needToken'));
-    controller.dispose();
+  it('nativeEvent and nativeStatus with no watch attached do nothing', () => {
+    const bridge = nativeBridge();
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    assert.doesNotThrow(() => {
+      host.nativeEvent({ type: 'chat_turn' });
+      host.nativeStatus('live');
+    });
   });
 
-  it('a request native cannot answer shows the timeout as an error', async () => {
-    const { controller, timers } = makeNative(() => undefined);
-    controller.configure({ theme: 'dark', projectName: 'A' });
-    await flush();
-    timers.runTimers(15_000);
-    await flush();
-    assert.match(controller.getSnapshot().error ?? '', /did not answer in time/);
-    controller.dispose();
-  });
+  it('open posts the target and returns native\'s boolean', () => {
+    const bridge = nativeBridge();
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    assert.equal(host.open('loop'), true);
+    assert.deepEqual(bridge.sent[0], { type: 'open', target: 'loop' });
 
-  it('asks native to open a screen', () => {
-    const { controller, sent } = makeNative(() => undefined);
-    controller.open('autoTasks');
-    assert.deepEqual(sent.at(-1), { type: 'open', target: 'autoTasks' });
-    const dev = makeDev({ fetchImpl: mockFetch(standardRoutes()).fetchImpl });
-    dev.controller.open('loop');
-    assert.equal(dev.controller.getSnapshot().notice, 'Open this in the LLM-IDE app.');
+    const nowhere = api.hosts.createNativeHost({ requests: bridge.requests, post: () => false });
+    assert.equal(nowhere.open('settings'), false, 'no bridge means nowhere to go');
   });
 });
 
-describe('dev controller', () => {
-  it('posts nothing and keeps the token in its own requests', async () => {
-    const { fetchImpl, calls } = mockFetch(standardRoutes());
-    const { controller, post } = makeDev({ fetchImpl });
-    controller.connectDev({ baseURL: BASE, token: TOKEN, theme: 'light', projectName: 'Demo' });
-    await flush();
-    assert.deepEqual(post, [], 'dev mode never talks to the bridge');
-    assert.equal(applied.at(-1), 'light');
-    assert.ok(calls.every((c) => c.headers.Authorization === `Bearer ${TOKEN}`));
-    controller.dispose();
+describe('dev host', () => {
+  const conn = { baseURL: BASE, token: TOKEN };
+
+  it('loadState fetches the server with the token in the header, and a 401 becomes OsAuthError', async () => {
+    const ok = mockFetch(standardRoutes());
+    const host = api.hosts.createDevHost({ conn, fetch: ok.fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    const snap = await host.loadState('week');
+    assert.equal(snap.apiVersion, 79);
+    assert.equal(ok.calls[0].url, `${BASE}/kb/os/state?window=week`);
+    assert.equal(ok.calls[0].headers.Authorization, `Bearer ${TOKEN}`);
+    assert.ok(!ok.calls[0].url.includes(TOKEN));
+
+    const refused = mockFetch(() => ({ status: 401, body: {} }));
+    const host2 = api.hosts.createDevHost({ conn, fetch: refused.fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    await assert.rejects(host2.loadState('day'), api.graphKit.OsAuthError);
   });
 
-  it('a 401 marks the view signed out; a new token recovers it', async () => {
-    let refusing = true;
-    const { fetchImpl, calls } = mockFetch((url) => {
-      if (url.includes('/kb/os/state')) return refusing ? { status: 401, body: {} } : { body: seeded() };
-      if (url.includes('/kb/os/stream')) return refusing ? { status: 401, body: {} } : sseBody(HELLO);
-      return { body: {} };
-    });
-    const { controller, timers } = makeDev({ fetchImpl });
-    controller.connectDev({ baseURL: BASE, token: 'stale' });
-    await flush();
+  it('cancel sends the declared POST with its body; a 401 becomes OsAuthError', async () => {
+    const m = mockFetch(standardRoutes());
+    const host = api.hosts.createDevHost({ conn, fetch: m.fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    await host.cancel({ method: 'POST', path: '/kb/agent/stop', body: { sessionId: 's1' } });
+    assert.equal(m.calls[0].method, 'POST');
+    assert.equal(m.calls[0].url, `${BASE}/kb/agent/stop`);
+    assert.equal(m.calls[0].body, JSON.stringify({ sessionId: 's1' }));
 
-    assert.equal(controller.getSnapshot().signedOut, true);
-    assert.equal(controller.getSnapshot().live, 'stopped');
-    assert.equal(timers.count(), 0, 'no reconnect is scheduled after a 401');
-
-    refusing = false;
-    controller.connectDev({ baseURL: BASE, token: 'fresh', theme: 'light', projectName: 'Demo' });
-    await flush();
-    const snap = controller.getSnapshot();
-    assert.equal(snap.signedOut, false);
-    assert.ok(snap.data, 'data loads after the new token');
-    assert.equal(calls.at(-1).headers.Authorization, 'Bearer fresh');
-    controller.dispose();
+    const refused = mockFetch(() => ({ status: 401, body: {} }));
+    const host2 = api.hosts.createDevHost({ conn, fetch: refused.fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    await assert.rejects(host2.cancel({ method: 'POST', path: '/kb/agent/stop' }), api.graphKit.OsAuthError);
   });
 
-  it('sends a running item\'s declared cancel request exactly, then refreshes', async () => {
-    const state = seeded();
-    const cancel = state.running.chatTurns[0].cancel;
-    const { fetchImpl, calls } = mockFetch((url, init) => {
-      if (init.method === 'POST') return { body: { ok: true } };
-      if (url.includes('/kb/os/stream')) return sseBody(HELLO);
-      return { body: state };
-    });
-    const { controller, timers } = makeDev({ fetchImpl });
-    controller.connectDev({ baseURL: BASE, token: TOKEN });
-    await flush();
-    await controller.stopItem(cancel, 'chat-chat-1');
-    await flush();
+  it('open returns false: a browser has nowhere to navigate', () => {
+    const host = api.hosts.createDevHost({ conn, fetch: mockFetch(standardRoutes()).fetchImpl, setTimer: () => null, clearTimer: () => {} });
+    assert.equal(host.open('library'), false);
+  });
 
-    const post = calls.find((c) => c.method === 'POST');
-    assert.equal(post.url, `${BASE}/agent/v2/cancel`);
-    assert.equal(post.headers.Authorization, `Bearer ${TOKEN}`);
-    assert.equal(post.body, JSON.stringify(cancel.body));
-    assert.ok(calls.some((c) => c.method === 'GET' && c.url.includes('/kb/os/state')), 'refreshes after the stop');
-    assert.equal(controller.getSnapshot().stopping, null);
+  it('watch streams the feed: hello is ignored, a change is forwarded, unwatch stops the stream', async () => {
+    const timers = fakeTimers();
+    const m = mockFetch((url) => (url.includes('/kb/os/stream') ? sseBody(HELLO, CHANGE) : { body: {} }));
+    const host = api.hosts.createDevHost({ conn, fetch: m.fetchImpl, setTimer: timers.setTimer, clearTimer: timers.clearTimer });
+    const changes = [];
+    const statuses = [];
+    const unwatch = host.watch(() => changes.push(1), (s) => statuses.push(s));
+    await flush();
+    assert.deepEqual(changes, [1], 'the hello event does not count, the change does');
+    assert.ok(statuses.includes('connecting') && statuses.includes('live'));
+    const streams = m.calls.filter((c) => c.url.endsWith('/kb/os/stream')).length;
+    unwatch();
     timers.runTimers();
-    controller.dispose();
+    await flush();
+    assert.equal(m.calls.filter((c) => c.url.endsWith('/kb/os/stream')).length, streams, 'no reconnect after unwatch');
   });
 
-  it('re-fetches 300 ms after a stream event, debounced', async () => {
-    const { fetchImpl, calls } = mockFetch((url) => {
-      if (url.includes('/kb/os/stream')) {
-        return sseBody(HELLO, 'event: activity\ndata: {"type":"activity","at":"t"}\n\n');
-      }
-      return { body: seeded() };
-    });
-    const { controller, timers } = makeDev({ fetchImpl });
-    controller.connectDev({ baseURL: BASE, token: TOKEN });
+  it('a stream 401 reports stopped and asks graph-kit to re-fetch, which then shows the signed-out state', async () => {
+    const timers = fakeTimers();
+    const m = mockFetch((url) => (url.includes('/kb/os/stream') ? new Response('', { status: 401 }) : { status: 401, body: {} }));
+    const host = api.hosts.createDevHost({ conn, fetch: m.fetchImpl, setTimer: timers.setTimer, clearTimer: timers.clearTimer });
+    const changes = [];
+    const statuses = [];
+    host.watch(() => changes.push(1), (s) => statuses.push(s));
     await flush();
-    const before = calls.filter((c) => c.url.includes('/kb/os/state')).length;
-    timers.runTimers(300);
-    await flush();
-    const after = calls.filter((c) => c.url.includes('/kb/os/state')).length;
-    assert.equal(after, before + 1, 'one debounced refresh');
-    controller.dispose();
+    assert.ok(statuses.includes('stopped'));
+    assert.deepEqual(changes, [1]);
+    assert.equal(timers.count(), 0, 'a refused stream does not reconnect');
   });
 });
 
-describe('rendering', () => {
-  async function renderSeeded(state) {
-    const { fetchImpl } = mockFetch(standardRoutes(state));
-    const { controller } = makeDev({ fetchImpl });
-    controller.connectDev({ baseURL: BASE, token: TOKEN, projectName: 'Demo project' });
-    await flush();
-    return { html: api.render.renderApp(controller), controller };
+describe('native boot', () => {
+  /** Boots against a fake page: records the order of ready and what the mount receives. */
+  function boot() {
+    const scope = {};
+    const root = { textContent: '' };
+    const sent = [];
+    const mounts = [];
+    const handles = [];
+    let installedAtReady = null;
+    const timers = fakeTimers();
+    const post = (message) => {
+      sent.push(message);
+      if (message.type === 'ready') installedAtReady = typeof scope.llmideConfigure === 'function';
+      return true;
+    };
+    const mount = (_root, host, opts) => {
+      mounts.push({ host, opts });
+      const handle = {
+        configured: [],
+        configure(cfg) {
+          this.configured.push(cfg);
+        },
+      };
+      handles.push(handle);
+      return handle;
+    };
+    const requests = new api.bridge.NativeRequests(post, timers.setTimer, timers.clearTimer);
+    const host = api.boot.bootNative(scope, { root, post, mount, requests });
+    return { scope, root, sent, mounts, handles, host, installedAtReady: () => installedAtReady };
   }
 
-  it('renders every section with the seeded fixture', async () => {
-    const { html, controller } = await renderSeeded(seeded());
-    for (const heading of [
-      'System map',
-      'Running now',
-      'Activity timeline',
-      'Token flow',
-      'Memory and knowledge',
-      'On this Mac',
-    ]) {
-      assert.ok(html.includes(heading), `section "${heading}" is rendered`);
+  it('installs every llmide* function before "ready" is posted', () => {
+    const b = boot();
+    assert.equal(b.installedAtReady(), true);
+    for (const name of ['llmideConfigure', 'llmideResponse', 'llmideEvent', 'llmideStatus']) {
+      assert.equal(typeof b.scope[name], 'function', name);
     }
-    assert.ok(html.includes('Demo project'));
-    assert.ok(html.includes('aria-label="Stop chat turn"'), 'chat turn has a Stop button');
-    assert.ok(html.includes('aria-label="Stop meeting agent"'), 'meeting agent has a Stop button');
-    assert.ok(html.includes('Stop it in the Mac app'), 'live capture has no Stop (cancel is null)');
-    assert.ok(html.includes('Open Loop') && html.includes('Open Auto Tasks'));
-    assert.ok(html.includes('aria-pressed="true"'), 'the day toggle is pressed');
-    controller.dispose();
+    assert.deepEqual(b.sent, [{ type: 'ready' }]);
   });
 
-  it('shows the empty states on a fresh install', async () => {
-    const empty = seeded();
-    empty.running = { chatTurns: [], meetingAgentRuns: [], liveSessions: [] };
-    empty.activity = { unread: 0, items: [] };
-    empty.tokens.totals = { calls: 0, runs: 0, input: 0, output: 0, cacheRead: 0, cacheWrite: 0, billable: 0 };
-    empty.tokens.byModel = [];
-    empty.tokens.bySource = [];
-    empty.tokens.byEndpoint = [];
-    empty.tokens.turnComposition = { turns: 0, avgFirstCallPromptTokens: null, avgPrefixTokens: null, avgFenceTokens: null, avgToolResultTokens: null };
-    empty.knowledge = {
-      sources: { total: 0, byKind: [] },
-      meetings: { count: 0 },
-      pendingReviews: 0,
-      outcomes: { total: 0, terminal: 0, byState: {} },
-      codeGraph: [],
-      projectMemory: [],
-    };
-    const { html, controller } = await renderSeeded(empty);
-    assert.ok(html.includes('Nothing is running'));
-    assert.ok(html.includes('No activity yet'));
-    assert.ok(html.includes('No model calls in this window'));
-    assert.ok(html.includes('Nothing indexed yet'));
-    assert.ok(html.includes('Open Library'));
-    controller.dispose();
+  it('shows the waiting text until the first configure, which mounts once with the native notices', () => {
+    const b = boot();
+    assert.equal(b.root.textContent, api.boot.WAITING_TEXT);
+    b.scope.llmideConfigure(null);
+    assert.equal(b.mounts.length, 0, 'an unusable configure is ignored');
+    b.scope.llmideConfigure({ theme: 'light', projectName: 'Alpha' });
+    assert.equal(b.mounts.length, 1);
+    assert.equal(b.mounts[0].opts.theme, 'light');
+    assert.equal(b.mounts[0].opts.projectName, 'Alpha');
+    assert.equal(b.mounts[0].opts.signedOutNotice, 'Your LLM-IDE session has ended. Sign in to LLM-IDE again.');
+    assert.equal(b.mounts[0].opts.openFallbackNotice, 'Open this in the LLM-IDE app.');
+    b.scope.llmideConfigure({ theme: 'midnight', projectName: 'Beta' });
+    assert.equal(b.mounts.length, 1, 'later configures do not mount again');
+    assert.deepEqual(b.handles[0].configured, [{ theme: 'midnight', projectName: 'Beta' }]);
   });
 
-  it('shows the connect form outside the Mac app', () => {
-    const { controller } = makeDev({ fetchImpl: mockFetch(standardRoutes()).fetchImpl });
-    const html = api.render.renderApp(controller);
+  it('the mounted host subscribes, and llmideEvent / llmideStatus reach its watch callbacks', () => {
+    const b = boot();
+    b.scope.llmideConfigure({ theme: 'dark', projectName: 'Alpha' });
+    const changes = [];
+    const statuses = [];
+    b.mounts[0].host.watch(() => changes.push(1), (s) => statuses.push(s));
+    assert.deepEqual(b.sent.at(-1), { type: 'subscribe' });
+    b.scope.llmideEvent({ type: 'hello' });
+    b.scope.llmideEvent({ type: 'chat_turn' });
+    b.scope.llmideStatus({ status: 'live' });
+    b.scope.llmideStatus(null);
+    assert.deepEqual(changes, [1]);
+    assert.deepEqual(statuses, ['live']);
+    assert.doesNotThrow(() => b.scope.llmideResponse('unknown-id', { status: 200 }));
+  });
+});
+
+describe('dev connect form', () => {
+  it('refuses a missing server address or token, and accepts a complete one', () => {
+    assert.match(api.devConnect.devConnectionError({ baseURL: '', token: 'x' }), /missing the server address or the token/);
+    assert.match(api.devConnect.devConnectionError({ baseURL: BASE, token: '' }), /missing the server address or the token/);
+    assert.equal(api.devConnect.devConnectionError({ baseURL: BASE, token: TOKEN }), null);
+  });
+
+  it('renders the connect form with a masked token field', () => {
+    const html = api.render.renderDevConnect();
     assert.ok(html.includes('Connect to a local server'));
     assert.ok(html.includes('type="password"'), 'the token field is masked');
-    controller.dispose();
+  });
+});
+
+describe('wiring', () => {
+  it('the moved files are gone from ui/os-view: the page lives in graph-kit', () => {
+    for (const gone of ['controller.ts', 'App.tsx', 'format.ts', 'styles.css']) {
+      assert.equal(existsSync(path.join(ROOT, 'src', gone)), false, `src/${gone} was removed`);
+    }
+    assert.deepEqual(readdirSync(path.join(ROOT, 'src/components')), ['DevConnect.tsx']);
   });
 
-  it('waits for native inside the Mac app until it configures the view', () => {
-    const { controller } = makeNative(() => undefined);
-    const html = api.render.renderApp(controller);
-    assert.ok(html.includes('Waiting for LLM-IDE to send the connection.'));
-    assert.ok(!html.includes('Connect to a local server'), 'the token form never shows inside the app');
+  it('vite aliases @dnsmalla/graph-kit-web to the submodule and dedupes react, react-dom and three', () => {
+    const alias = server.config.resolve.alias.find((a) => a.find === '@dnsmalla/graph-kit-web');
+    assert.ok(alias, 'the graph-kit alias is set');
+    assert.equal(alias.replacement, GRAPH_KIT_INDEX);
+    assert.ok(existsSync(GRAPH_KIT_INDEX), 'the aliased page source exists');
+    assert.deepEqual(
+      [...server.config.resolve.dedupe].sort(),
+      ['react', 'react-dom', 'three'],
+    );
+  });
+
+  it('the committed bundle is the host plus graph-kit, behind the file:// entry point', () => {
+    const html = readFileSync(path.join(BUNDLE, 'index.html'), 'utf8');
+    assert.ok(html.includes('<script defer src="./assets/index.js">'), 'classic deferred script, no module');
+    const js = readFileSync(path.join(BUNDLE, 'assets/index.js'), 'utf8');
+    assert.ok(js.includes('Your LLM-IDE session has ended'), 'the host notice is bundled');
+    assert.ok(js.includes('OsAuthError'), 'graph-kit page code is bundled');
   });
 });
 
 describe('styles', () => {
-  it('uses only --tok-* colours (no literal colours in styles.css)', () => {
-    const css = readFileSync(path.join(ROOT, 'src/styles.css'), 'utf8');
+  it('uses only --tok-* colours in the dev form (no literal colours in dev.css)', () => {
+    const css = readFileSync(path.join(ROOT, 'src/dev.css'), 'utf8');
     const literal = css.match(/#[0-9a-fA-F]{3,8}\b|\brgba?\(|\bhsla?\(/g) ?? [];
     assert.deepEqual(literal, []);
   });
