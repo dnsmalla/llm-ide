@@ -87,12 +87,15 @@ struct LocalDocFiles: DocFilesBackend {
             atomically: true, encoding: .utf8)
     }
 
-    /// Templates that are symlinked folders. The server never lists these
-    /// (it does not follow links), so the server path merges them in from here.
+    /// Templates whose `template.md` is itself a symbolic link inside a real
+    /// folder. The Swift scan reads them; the server refuses to (`O_NOFOLLOW`),
+    /// so the server path merges these in from here. A symlinked folder is
+    /// skipped by both sides, so it needs no merge.
     static func symlinkedTemplates(at root: URL) -> [DocTemplate] {
-        let links = Set(symlinkedFolders(in: ProjectLayout(root: root).templatesDir))
-        guard !links.isEmpty else { return [] }
-        return scanTemplates(at: root).filter { links.contains($0.folderName ?? "") }
+        let names = folderNamesWithLinkedEntryFile(
+            in: ProjectLayout(root: root).templatesDir, file: "template.md")
+        guard !names.isEmpty else { return [] }
+        return scanTemplates(at: root).filter { names.contains($0.folderName ?? "") }
     }
 
     // MARK: - Commands
@@ -151,11 +154,12 @@ struct LocalDocFiles: DocFilesBackend {
             atomically: true, encoding: .utf8)
     }
 
-    /// Commands that are symlinked folders. See `symlinkedTemplates`.
+    /// Commands whose `command.md` is a symbolic link. See `symlinkedTemplates`.
     static func symlinkedCommands(at root: URL) -> [DocCommand] {
-        let links = Set(symlinkedFolders(in: ProjectLayout(root: root).commandsDir))
-        guard !links.isEmpty else { return [] }
-        return scanCommands(at: root).filter { links.contains($0.folderName ?? "") }
+        let names = folderNamesWithLinkedEntryFile(
+            in: ProjectLayout(root: root).commandsDir, file: "command.md")
+        guard !names.isEmpty else { return [] }
+        return scanCommands(at: root).filter { names.contains($0.folderName ?? "") }
     }
 
     // MARK: - Delete (fallback rule)
@@ -187,18 +191,23 @@ struct LocalDocFiles: DocFilesBackend {
 
     // MARK: - Helpers
 
-    /// Folders directly under `dir` that are symlinks (the entry itself is a link).
-    private static func symlinkedFolders(in dir: URL) -> [String] {
+    /// Names of the real folders under `dir` whose `file` is a symbolic link.
+    /// `isDirectory` is false for a link to a folder, so a symlinked folder
+    /// never reaches this set (both the scan and the server skip it).
+    private static func folderNamesWithLinkedEntryFile(in dir: URL, file: String) -> Set<String> {
         let fm = FileManager.default
         guard let entries = try? fm.contentsOfDirectory(
             at: dir,
-            includingPropertiesForKeys: [.isSymbolicLinkKey],
+            includingPropertiesForKeys: [.isDirectoryKey],
             options: [.skipsHiddenFiles]) else { return [] }
-        return entries.compactMap { entry in
-            let isLink = (try? entry.resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
-            let isFolder = (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true
-            return isLink && isFolder ? entry.lastPathComponent : nil
+        var names = Set<String>()
+        for entry in entries {
+            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else { continue }
+            let linked = (try? entry.appendingPathComponent(file)
+                .resourceValues(forKeys: [.isSymbolicLinkKey]).isSymbolicLink) == true
+            if linked { names.insert(entry.lastPathComponent) }
         }
+        return names
     }
 
     // MARK: - DocFilesBackend

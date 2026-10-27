@@ -180,7 +180,7 @@ public struct LlmIdeMacApp: App {
         // opened would otherwise answer "Doc Gen not installed" until the first `.task` ran.
         let docTemplateStore = DocTemplateStore()
         let docCommandStore = DocCommandStore()
-        FeatureCatalog.provideGenerationStores(templates: docTemplateStore, commands: docCommandStore)
+        FeatureCatalog.provideGenerationStores(templates: docTemplateStore, commands: docCommandStore, api: client)
         self._templateStore = StateObject(wrappedValue: docTemplateStore)
         self._commandStore = StateObject(wrappedValue: docCommandStore)
         self._docGenOutputStore = StateObject(wrappedValue: DocGenOutputStore())

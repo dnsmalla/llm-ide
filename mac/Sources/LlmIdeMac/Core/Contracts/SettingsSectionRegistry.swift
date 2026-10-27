@@ -23,6 +23,8 @@ enum SettingsSectionSlot: String, CaseIterable, Sendable {
     case sourceControl
     /// Project group, after Memory: the Code Graph auto-update card.
     case graph
+    /// App group, after Loop defaults: Doc Gen's server-files switch (beta).
+    case docGen
 }
 
 /// Scroll anchors a deep link can post with `.scrollSettingsToCard`.

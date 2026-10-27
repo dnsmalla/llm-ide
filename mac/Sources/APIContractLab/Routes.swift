@@ -67,6 +67,14 @@ let apiRoutes: [Route] = [
     route("GET /kb/agent/catalog", "AgentSkillCatalog", LlmIdeAPIClient.AgentSkillCatalog.self),  // listAgentSkillCatalog
     route("GET /kb/agent/skill-library", "SkillLibraryWrap", SkillLibraryWrap.self),  // skillLibrary
     route("GET /kb/agent/generation-library", "GenerationLibrary", LlmIdeAPIClient.GenerationLibrary.self),  // generationLibrary
+    route("POST /kb/projects/register", "DocProjectRegistration", LlmIdeAPIClient.DocProjectRegistration.self),  // registerProject
+    route("GET /kb/docs/templates", "DocTemplatesPage", LlmIdeAPIClient.DocTemplatesPage.self),  // listDocTemplates
+    route("GET /kb/docs/commands", "DocCommandsPage", LlmIdeAPIClient.DocCommandsPage.self),  // listDocCommands
+    route("PUT /kb/docs/templates/:folder", "DocTemplateSaved", LlmIdeAPIClient.DocTemplateSaved.self),  // saveDocTemplate
+    route("DELETE /kb/docs/templates/:folder", "DocDeleteResult", LlmIdeAPIClient.DocDeleteResult.self),  // deleteDocTemplate
+    route("PUT /kb/docs/commands/:folder", "DocCommandSaved", LlmIdeAPIClient.DocCommandSaved.self),  // saveDocCommand
+    route("DELETE /kb/docs/commands/:folder", "DocDeleteResult", LlmIdeAPIClient.DocDeleteResult.self),  // deleteDocCommand
+    route("POST /kb/docs/seed", "DocSeedResult", LlmIdeAPIClient.DocSeedResult.self),  // seedDocFiles
     route("GET /kb/agent/runs", "RunsWrap", RunsWrap.self),  // listAgentRuns
     route("POST /kb/agent/dispatch", "AgentDispatchResponse", LlmIdeAPIClient.AgentDispatchResponse.self),  // dispatchAgent
     route("POST /kb/agent/stop", "AgentStopResponse", LlmIdeAPIClient.AgentStopResponse.self),  // stopAgent
@@ -94,14 +102,6 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("DELETE /kb/agent/ask/history", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("GET /kb/os/state", "no Mac caller yet (os-kit OS-3)"),
     ("GET /kb/os/stream", "server-sent event stream; consumed by the System web view (os-kit OS-3)"),
-    ("POST /kb/projects/register", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
-    ("GET /kb/docs/templates", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
-    ("GET /kb/docs/commands", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
-    ("PUT /kb/docs/templates/:folder", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
-    ("DELETE /kb/docs/templates/:folder", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
-    ("PUT /kb/docs/commands/:folder", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
-    ("DELETE /kb/docs/commands/:folder", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
-    ("POST /kb/docs/seed", "no Mac caller yet (docs-kit K1 server half; the Mac switch, docGenUseServerStore, routes this in K1b)"),
     ("DELETE /kb/agent/personas/:id", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("DELETE /kb/agent/project-memory", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("DELETE /kb/agent/session-memory", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),

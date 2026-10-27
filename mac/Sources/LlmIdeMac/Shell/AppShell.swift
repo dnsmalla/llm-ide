@@ -1090,7 +1090,9 @@ struct AppShell: View {
     /// so an idle project never gets them until first open.
     private func seedAndReloadGenerationFiles() {
         let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
-        GenerationFilesRefresh.run(projectRoot: root, visibleSection: shell.section,
+        GenerationFilesRefresh.run(projectRoot: root,
+                                   projectId: projectStore.activeProject?.bundle.id,
+                                   visibleSection: shell.section,
                                    provider: GenerationProviderRegistry.shared.provider)
     }
 

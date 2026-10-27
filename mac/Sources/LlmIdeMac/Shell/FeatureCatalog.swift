@@ -130,6 +130,12 @@ enum FeatureCatalog {
         #endif
         // App-wide Loop defaults card (new-project budgets/policy + the stage
         // timeouts every run falls back to). Loop ships with Auto Tasks.
+        // Doc Gen's server-files switch (docGenUseServerStore, docs-kit K1b).
+        #if FEATURE_DOCGEN
+        registry.register(slot: .docGen, id: "doc-gen-server-store") {
+            AnyView(DocGenServerStoreCard())
+        }
+        #endif
         #if FEATURE_AUTOTASK
         registry.register(slot: .loopDefaults, id: "loop-defaults") {
             AnyView(LoopNewProjectDefaultsPanel())
@@ -620,9 +626,15 @@ enum FeatureCatalog {
     /// `@StateObject`s built at app init, and the phone bridge reads them only
     /// through `GenerationProviderRegistry`. `bootMobile` may run before or after
     /// this, so it also calls `wireGenerationBridge()`, which is idempotent.
-    static func provideGenerationStores(templates: DocTemplateStore, commands: DocCommandStore) {
+    static func provideGenerationStores(templates: DocTemplateStore, commands: DocCommandStore,
+                                        api: LlmIdeAPIClient) {
+        // One server path for both stores (docGenUseServerStore; see
+        // ServerDocFiles). It answers nothing while the preference is off.
+        let server = ServerDocFiles(api: api)
+        templates.attachServer(server)
+        commands.attachServer(server)
         GenerationProviderRegistry.shared.install(
-            DocGenProvider(templates: templates, commands: commands))
+            DocGenProvider(templates: templates, commands: commands, server: server))
         wireGenerationBridge()
     }
 

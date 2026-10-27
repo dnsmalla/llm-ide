@@ -29,6 +29,11 @@ protocol GenerationProviding: AnyObject {
     /// is a no-op.
     func seedProjectFiles(at projectRoot: URL?)
 
+    /// The project the app has open, by its registered id and folder. Used by
+    /// the server path (docGenUseServerStore) to register and address the
+    /// project; a no-op for a provider with no server path.
+    func activateProject(id: String, root: URL)
+
     /// Templates offered for `surface` to the phone.
     func templateRefs(surface: TemplateSurface) -> [GenerationTemplateRef]
 
@@ -44,6 +49,10 @@ protocol GenerationProviding: AnyObject {
     /// The "the server could not fit every source" line for a finished
     /// generation, or `nil` when everything fit.
     func sourceFitNotice(for result: LlmIdeAPIClient.GeneratedDoc, sentCount: Int) -> String?
+}
+
+extension GenerationProviding {
+    func activateProject(id: String, root: URL) {}
 }
 
 /// A template as the generation flow needs it: its name and section headings.

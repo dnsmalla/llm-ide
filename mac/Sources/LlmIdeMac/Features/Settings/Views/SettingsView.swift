@@ -48,6 +48,7 @@ struct SettingsView: View {
                             CustomProvidersSection(api: api)
                             TierRoutingSection(api: api)
                             SettingsSlotView(slot: .loopDefaults)
+                            SettingsSlotView(slot: .docGen)
                             OptionalComponentsSettingsSection()
                             if AppSourceRoot.gitRoot != nil {
                                 SelfHealSettingsSection()

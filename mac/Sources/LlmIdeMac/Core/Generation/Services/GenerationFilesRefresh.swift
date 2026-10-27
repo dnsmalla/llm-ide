@@ -12,9 +12,13 @@ import Foundation
 @MainActor
 enum GenerationFilesRefresh {
     static func run(projectRoot: URL?,
+                    projectId: String? = nil,
                     visibleSection: ShellSection,
                     provider: (any GenerationProviding)?) {
         if let projectRoot {
+            if let projectId {
+                provider?.activateProject(id: projectId, root: projectRoot)
+            }
             IngestTemplateSeeder.seedIfNeeded(at: projectRoot)
         }
         if visibleSection == .docGen || visibleSection == .visual {

@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 172 token, 12 public
 - Handler found: 182; no handler found: 2
-- No Mac and no extension caller: 41 (tests only: 28, comments/docs only: 13, no reference: 0)
+- No Mac and no extension caller: 35 (tests only: 22, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -46,14 +46,8 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (41):
+Endpoints with no client caller (35):
 
-- `/kb/docs/templates` — tests only
-- `/kb/docs/templates/:folder` — tests only
-- `/kb/docs/commands` — tests only
-- `/kb/docs/commands/:folder` — tests only
-- `/kb/docs/seed` — tests only
-- `/kb/projects/register` — tests only
 - `/agent-sdk/spike` — tests only
 - `/kb/entity/:id` — tests only
 - `/kb/system/status` — tests only
@@ -97,12 +91,12 @@ Endpoints with no client caller (41):
 | `/generate-notes` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:247` | - | `App.tsx`, `anthropic.ts` | - |
 | `/generate-docx` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/server/export-routes.mjs:130` | - | `App.tsx`, `ExportMenu.tsx` | - |
 | `/generate-doc` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Export.swift` | - | - |
-| `/kb/docs/templates` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:126` | - | - | tests only |
-| `/kb/docs/templates/:folder` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | - | - | tests only |
-| `/kb/docs/commands` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:132` | - | - | tests only |
-| `/kb/docs/commands/:folder` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | - | - | tests only |
-| `/kb/docs/seed` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/docs-routes.mjs:138` | - | - | tests only |
-| `/kb/projects/register` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | - | - | tests only |
+| `/kb/docs/templates` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:126` | `LlmIdeAPIClient+Docs.swift` | - | - |
+| `/kb/docs/templates/:folder` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Docs.swift` | - | - |
+| `/kb/docs/commands` | ALL_ENDPOINTS | GET | token | doc_gen | `extension/routes/docs-routes.mjs:132` | `LlmIdeAPIClient+Docs.swift` | - | - |
+| `/kb/docs/commands/:folder` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Docs.swift` | - | - |
+| `/kb/docs/seed` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/docs-routes.mjs:138` | `LlmIdeAPIClient+Docs.swift` | - | - |
+| `/kb/projects/register` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Docs.swift` | - | - |
 | `/chat` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:348` | - | `App.tsx`, `useChat.ts` | - |
 | `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:449` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
 | `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:766` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
@@ -281,7 +275,7 @@ Endpoints with no client caller (41):
 
 ## Consistency
 
-Checked: 184 roster entries, 713 Swift files, 46 extension source files.
+Checked: 184 roster entries, 719 Swift files, 46 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 

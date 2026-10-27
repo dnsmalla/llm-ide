@@ -54,6 +54,17 @@ final class DocTemplateStore: ObservableObject {
 
     private var currentProjectRoot: URL?
 
+    /// The server path (docGenUseServerStore), attached by `FeatureCatalog`.
+    /// `server.backend(for:)` is nil unless the preference is on and `root` is
+    /// the active project, so every method below takes its local path then.
+    private var server: ServerDocFiles?
+
+    /// Attaches the server path. Nothing changes until the preference is on
+    /// and a project is open.
+    func attachServer(_ server: ServerDocFiles) {
+        self.server = server
+    }
+
     /// Test seam: lets a test point the app-support store at a temp file.
     /// Production passes nothing and gets the Application Support path.
     private let storeURLOverride: URL?
@@ -102,6 +113,7 @@ final class DocTemplateStore: ObservableObject {
             return
         }
         projectTemplates = scanProjectTemplates(at: root)
+        refreshFromServer(at: root)
     }
 
     /// Import an `.md` file as a template. Parses `## ` headings as sections.
@@ -120,7 +132,7 @@ final class DocTemplateStore: ObservableObject {
             folderName: url.deletingPathExtension().lastPathComponent)
         if let root = currentProjectRoot {
             let slug = uniqueFolderSlug(base: DocTemplate.slug(for: name), root: root)
-            writeProjectTemplate(
+            persistProjectTemplate(
                 DocTemplate(
                     id: DocTemplate.stableID(forFolder: slug),
                     name: name,
@@ -131,7 +143,6 @@ final class DocTemplateStore: ObservableObject {
                     surface: surface),
                 at: root,
                 folderName: slug)
-            reloadProjectTemplates(at: root)
             return projectTemplates.first { $0.folderName == slug }
         }
         let template = DocTemplate(
@@ -151,7 +162,7 @@ final class DocTemplateStore: ObservableObject {
             let slug = uniqueFolderSlug(
                 base: template.folderName ?? DocTemplate.slug(for: template.name),
                 root: root)
-            writeProjectTemplate(
+            persistProjectTemplate(
                 DocTemplate(
                     id: DocTemplate.stableID(forFolder: slug),
                     name: template.name,
@@ -162,7 +173,6 @@ final class DocTemplateStore: ObservableObject {
                     surface: template.surface),
                 at: root,
                 folderName: slug)
-            reloadProjectTemplates(at: root)
             return projectTemplates.first { $0.folderName == slug }
                 ?? template
         }
@@ -173,8 +183,7 @@ final class DocTemplateStore: ObservableObject {
 
     func update(_ template: DocTemplate) {
         if template.isProjectTemplate, let root = currentProjectRoot, let folder = template.folderName {
-            writeProjectTemplate(template, at: root, folderName: folder)
-            reloadProjectTemplates(at: root)
+            persistProjectTemplate(template, at: root, folderName: folder)
             return
         }
         guard !template.isBuiltin else { return }
@@ -187,6 +196,13 @@ final class DocTemplateStore: ObservableObject {
         if let root = currentProjectRoot,
            let template = projectTemplates.first(where: { $0.id == id }),
            let folder = template.folderName {
+            if let server, let backend = server.backend(for: root) {
+                projectTemplates.removeAll { $0.id == id }
+                enqueueServerWrite(root, server: server) {
+                    try await backend.deleteTemplate(folderName: folder, root: root)
+                }
+                return
+            }
             let dir = ProjectLayout(root: root).templateDir(named: folder)
             try? FileManager.default.removeItem(at: dir)
             reloadProjectTemplates(at: root)
@@ -221,6 +237,55 @@ final class DocTemplateStore: ObservableObject {
             n += 1
         }
         return slug
+    }
+
+    // MARK: - Server path (docGenUseServerStore)
+
+    /// Writes one project template. With the server serving the root, the list
+    /// is updated at once and the write is queued; otherwise the local write
+    /// and rescan run as they always have.
+    private func persistProjectTemplate(_ template: DocTemplate, at root: URL, folderName: String) {
+        guard let server, let backend = server.backend(for: root) else {
+            writeProjectTemplate(template, at: root, folderName: folderName)
+            reloadProjectTemplates(at: root)
+            return
+        }
+        upsertProjectTemplate(template)
+        enqueueServerWrite(root, server: server) {
+            try await backend.saveTemplate(template, folderName: folderName, root: root)
+        }
+    }
+
+    private func upsertProjectTemplate(_ template: DocTemplate) {
+        var next = projectTemplates.filter { $0.folderName != template.folderName }
+        next.append(template)
+        projectTemplates = next.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
+    }
+
+    /// Queues one server write and then a list, so the published templates end
+    /// up as the server holds them. A write that the server cannot take is
+    /// written locally by the fallback inside `DocFilesWithFallback`.
+    private func enqueueServerWrite(_ root: URL, server: ServerDocFiles,
+                                    _ write: @escaping @MainActor () async throws -> Void) {
+        server.enqueue { [weak self] in
+            do {
+                try await write()
+            } catch {
+                logger.error("doc template write failed: \(error.localizedDescription, privacy: .public)")
+            }
+            self?.refreshFromServer(at: root)
+        }
+    }
+
+    /// Replaces the published templates with the server's list for `root`,
+    /// unless the project has changed in the meantime.
+    private func refreshFromServer(at root: URL) {
+        guard let server, let backend = server.backend(for: root) else { return }
+        server.enqueue { [weak self] in
+            guard let list = try? await backend.listTemplates(root: root) else { return }
+            guard let self, self.currentProjectRoot?.path == root.path else { return }
+            self.projectTemplates = list
+        }
     }
 
     // MARK: - App-support persistence (no project open)

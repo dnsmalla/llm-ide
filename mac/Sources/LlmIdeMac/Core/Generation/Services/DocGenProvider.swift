@@ -1,4 +1,7 @@
 import Foundation
+import os.log
+
+private let logger = Logger(subsystem: "com.llmide.macapp", category: "DocGenProvider")
 
 /// The app's `GenerationProviding`. It answers from the Doc Gen stores and
 /// `GenerationRegistry`, and Shell builds it once at boot, when the stores are
@@ -7,10 +10,21 @@ import Foundation
 final class DocGenProvider: GenerationProviding {
     private let templates: DocTemplateStore
     private let commands: DocCommandStore
+    /// The server path (docGenUseServerStore), or nil when the app has none.
+    private let server: ServerDocFiles?
 
-    init(templates: DocTemplateStore, commands: DocCommandStore) {
+    init(templates: DocTemplateStore, commands: DocCommandStore, server: ServerDocFiles? = nil) {
         self.templates = templates
         self.commands = commands
+        self.server = server
+    }
+
+    /// Records the open project for the server path and registers it ahead of
+    /// its first call. With the preference off this makes no request.
+    func activateProject(id: String, root: URL) {
+        guard let server else { return }
+        server.activate(projectId: id, root: root)
+        server.enqueue { await server.prepare(root) }
     }
 
     func resetForSignOut() {
@@ -32,7 +46,21 @@ final class DocGenProvider: GenerationProviding {
             return
         }
         let kit = GenerationLibraryStore.shared
-        Self.seedProjectFiles(at: root, templateKit: kit.templates, commandKit: kit.commands)
+        if let server, let backend = server.backend(for: root) {
+            // Ingest templates stay local (app machinery). The Doc Gen files
+            // are seeded by the server, queued so the reload that follows
+            // sees them.
+            IngestTemplateSeeder.seedIfNeeded(at: root)
+            server.enqueue {
+                do {
+                    try await backend.seed(root: root, templateKit: kit.templates, commandKit: kit.commands)
+                } catch {
+                    logger.error("doc files seed failed: \(error.localizedDescription, privacy: .public)")
+                }
+            }
+        } else {
+            Self.seedProjectFiles(at: root, templateKit: kit.templates, commandKit: kit.commands)
+        }
         reloadProjectFiles(at: root)
     }
 
