@@ -13,6 +13,7 @@ Internal engineering documentation. End-user docs and customer/admin docs live e
 - Looking for the API? → [API overview](reference/api/overview.md)
 - About to change a hot path? → [Engineering invariants](explanation/invariants.md)
 - Wondering why X is the way it is? → [Decisions](decisions/)
+- Migrating a capability kit by kit? → [Kits](kits/README.md) (docs-kit K0 map: [docs-kit](kits/docs-kit.md))
 
 ## How this site is organised
 
