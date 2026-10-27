@@ -247,6 +247,61 @@ Rule (plan): *does it get better on its own when the model/SDK improves?* → de
 
 **Keychain / secrets:** none.
 
+## 5a. K1a data plan (where each piece of state lives after K1)
+
+K1a adds tests and fixtures only; no behaviour changes. The tests are
+`mac/Tests/LlmIdeMacTests/DocGenLegacyStateTests.swift`, the fixtures and their
+provenance are in `mac/Tests/LlmIdeMacTests/Fixtures/docgen/README.md`.
+
+**Placement after K1.** Project-folder files stay the source of truth and are
+read and written by the Node routes, addressed by project id (decision 3).
+App-support state is split by whether a project exists:
+
+| State | Lives in | After K1 | Why |
+|---|---|---|---|
+| `templates/<folder>/template.md`, `commands/<folder>/command.md` | project folder | **Node** (scan, marker parse, write) | Shared with the user's repo and with older Mac builds; the file is the contract. |
+| `templates/README.md`, `commands/README.md`, seeded defaults | project folder | **Node** (`POST /kb/docs/seed`) | Same files the Swift seeders write today. |
+| Doc Gen output folder (`doc-gen-output.json`, keyed by project path) | app support | **Swift** until K3 | It is a per-machine preference: the key is an absolute path that differs across machines, so it must not go into the project folder. Swift resolves the output directory and passes it to `/generate-doc` as a request value. |
+| `doc-templates.json` (no-project templates: customs and kit fallback) | app support | **Swift** until K3 | With no project open there is no project id, and decision 3 makes every template route project-scoped. Node has nothing to address. The file stays Swift-owned (load, quarantine, envelope save). |
+| `generation-library.json` (kit cache) | app support | **Swift** (unchanged, §6) | Cache of `/kb/agent/generation-library`; it must work when the backend is down. |
+
+**One-way migration.** None needed. K1 does not move or rewrite any file: the
+Node routes read and write the same project-folder files that the Swift
+scanners read today, and the app-support files are not touched by the server
+path. The first time a project is opened under K1, the seeder tops up missing
+defaults (writeIfAbsent), as it does today.
+
+**N-1 readability (an older Mac build must read everything a newer build
+writes).** Holds by construction, and must be pinned when K1 lands:
+- Project files: the Node writer must produce the same bytes as
+  `DocTemplate.renderedMarkdown()` / `DocCommand.renderedMarkdown()` for the
+  same input (marker line, `surface=` only when not `doc`, trailing newline).
+  Add a Node test that compares against the golden files in
+  `Fixtures/docgen/project/` (`template-md.v0-bare-marker.md`,
+  `template-md.v2-visual-marker.md`, `command-md.v0-bare-marker.md`).
+- App-support files: unchanged writers, so nothing new to read. The envelope
+  has been the write format since `ed5b1802`; `DocGenLegacyStateTests` decodes
+  a save with the original model shape to prove it.
+
+**Rollback switch.** Preference `docGenUseServerStore` (UserDefaults, Boolean,
+default **off** until K1 ships). Off: Swift stores run exactly as today. On:
+the Swift stores call the Node routes for project-folder state and nothing
+else changes. Flipping it back loses nothing: both paths write the same project
+files, and the app-support files were never on the server path. Only a
+template or command created while the flag was on is written by Node, and the
+Swift scanner reads it unchanged after the flip.
+
+**What K1a pins (for K1 to keep green).** Bare-array and envelope
+`doc-templates.json` load with defaults; unknown fields are ignored; a corrupt
+file is renamed to `doc-templates.json.corrupt-<ts>` and the store starts empty
+and writable; a missing file loads as empty and writes nothing; a legacy file is
+rewritten only on the next save and then as the envelope. The same matrix holds
+for `doc-gen-output.json` (a save never drops another project's entry; an
+unreadable file moves aside before any write) and the `generation-library.json`
+cache (corrupt starts empty and is not quarantined, since it is re-fetchable).
+Project template and command files with the bare marker, the `surface=visual`
+marker, and the `auto_task/` and ingest skips all parse as before.
+
 ## 6. What K1 would move (proposal, not done)
 
 **Move to Node (business logic, not UI state):**
@@ -290,7 +345,7 @@ These replace the earlier open-question list. Items 1–9 are user decisions. It
 2. **`/generate-doc` becomes gated by `doc_gen`** (only the Mac calls it). Feature-matrix expectations change accordingly (§2e: today's "not server-gated" exception is for `/generate-docx`, which stays always-on for the extension). **Done (`c6e350e0`):** `routes/doc-gen.mjs` is a `doc_gen` route group; see §2e.
 3. **Template and command routes take a project id, never a raw path.** The server resolves the project's root itself.
 4. **Doc Gen seeds templates and commands lazily on first open**, not in `ProjectScaffolder`. This removes the Core/Project ↔ Core/Generation cycle (E12; was `ProjectScaffolder.swift:152-154`). Done, pre-K1 step 2 (`e1525074`); see §8 for the deviation from the "missing or empty" gate.
-5. **Legacy `doc-templates.json`: still read** (checked 2026-10-27; §5). K1a adds a migration test with a real old file (both the envelope and the bare-array fallback at `DocTemplateStore.swift:274-281`).
+5. **Legacy `doc-templates.json`: still read** (checked 2026-10-27; §5). K1a adds a migration test with a real old file (both the envelope and the bare-array fallback at `DocTemplateStore.swift:274-281`). **K1a done:** tests and fixtures pinned; the data plan is §5a.
 6. **Visual stays inside docs-kit for now.**
 7. **The Python meeting-docx path is retired** (§6 item 3). **Done (`53804a47`).**
 8. **Add a `Core/Contracts` seam for the direct Core/other-kit → Generation references (E8–E12) before K1.** Done, pre-K1 step 1 (`c62c9e6a`): `GenerationProviding` + `GenerationProviderRegistry` (`Core/Contracts/GenerationProviding.swift`), `LibrarySourceFeed` (`Core/Contracts/LibrarySourceFeed.swift`).

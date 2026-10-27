@@ -28,13 +28,22 @@ final class GenerationLibraryStore: ObservableObject {
     /// tell "nothing yet" from "genuinely empty".
     var isLoaded: Bool { !templates.isEmpty || !commands.isEmpty }
 
+    /// Test seam: a temp cache file. Production passes nothing.
+    private let cacheURLOverride: URL?
+
     private var cacheURL: URL? {
-        FileManager.default
+        if let override = cacheURLOverride { return override }
+        return FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first?
             .appendingPathComponent("com.llmide.macapp/generation-library.json")
     }
 
-    private init() { loadCache() }
+    /// `shared` is the only production instance; the parameter exists so
+    /// tests can read a cache file they wrote.
+    init(cacheURL: URL? = nil) {
+        self.cacheURLOverride = cacheURL
+        loadCache()
+    }
 
     /// Test seam: set the in-memory entries directly — no server, no disk
     /// cache write, no `.generationLibraryChanged` post. The library is

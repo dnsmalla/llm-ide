@@ -1,0 +1,21 @@
+[
+  {
+    "id" : "11111111-2222-4333-8444-555555555555",
+    "isBuiltin" : false,
+    "name" : "Sprint Review",
+    "rawContent" : "# Sprint Review\n\n## Summary\n\nWhat shipped this sprint.\n\n## Decisions\n\n",
+    "sections" : [
+      "Summary",
+      "Decisions"
+    ]
+  },
+  {
+    "id" : "66666666-7777-4888-8999-000000000000",
+    "isBuiltin" : false,
+    "name" : "Retro",
+    "sections" : [
+      "Went well",
+      "Improve"
+    ]
+  }
+]

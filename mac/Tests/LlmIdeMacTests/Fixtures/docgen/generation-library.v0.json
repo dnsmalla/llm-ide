@@ -1,0 +1,27 @@
+{
+  "commands" : [
+    {
+      "body" : "# Summarize\n\n<!-- llmide:doc-command -->\n\nSummarize the source into five bullet points.",
+      "description" : "Five bullets",
+      "id" : "commands\/doc\/summarize",
+      "name" : "Summarize",
+      "surface" : "doc"
+    }
+  ],
+  "templates" : [
+    {
+      "body" : "# Sprint Review\n\n## Summary\n\n## Decisions\n\n",
+      "description" : "Sprint review notes",
+      "id" : "templates\/doc\/sprint-review",
+      "name" : "Sprint Review",
+      "surface" : "doc"
+    },
+    {
+      "body" : "# Storyboard\n\n<!-- llmide:doc-template surface=visual -->\n\n## Frames\n\n",
+      "description" : "Frame-by-frame layout",
+      "id" : "templates\/visual\/storyboard",
+      "name" : "Storyboard",
+      "surface" : "visual"
+    }
+  ]
+}

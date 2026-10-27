@@ -1,0 +1,11 @@
+{
+  "\/Users\/example\/projects\/alpha" : {
+    "destination" : "localFolder",
+    "localFolderPath" : "\/Users\/example\/projects\/alpha\/exports",
+    "sendCopyToEmail" : false
+  },
+  "\/Users\/example\/projects\/beta" : {
+    "destination" : "localFolder",
+    "sendCopyToEmail" : false
+  }
+}

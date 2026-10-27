@@ -43,7 +43,7 @@ let mobileIncluded = includedFeatures.contains("mobile_sync")
 // runtime, so tell SwiftPM it is not a resource — otherwise every build warns
 // "found 2 file(s) which are unhandled" for index.html / bootstrap.js.
 var libExcludes: [String] = ["Resources/monaco-src"]
-var testExcludes: [String] = ["README-truncated-tests.md"]
+var testExcludes: [String] = ["README-truncated-tests.md", "Fixtures"]
 var featureDefines: [SwiftSetting] = []
 if graphIncluded {
     featureDefines.append(.define("FEATURE_GRAPH"))

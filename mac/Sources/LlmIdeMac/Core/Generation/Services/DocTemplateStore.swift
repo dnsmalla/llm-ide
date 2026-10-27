@@ -54,7 +54,12 @@ final class DocTemplateStore: ObservableObject {
 
     private var currentProjectRoot: URL?
 
+    /// Test seam: lets a test point the app-support store at a temp file.
+    /// Production passes nothing and gets the Application Support path.
+    private let storeURLOverride: URL?
+
     private var storeURL: URL {
+        if let override = storeURLOverride { return override }
         guard let support = FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask).first else {
             return URL(fileURLWithPath: NSTemporaryDirectory())
@@ -63,7 +68,8 @@ final class DocTemplateStore: ObservableObject {
         return support.appendingPathComponent("com.llmide.macapp/doc-templates.json")
     }
 
-    init() {
+    init(storeURL: URL? = nil) {
+        self.storeURLOverride = storeURL
         // Disk read deferred until `bootstrap()` is called from the
         // AppShell's first `.task` tick so LlmIdeMacApp.init stays
         // cheap and the first SwiftUI frame isn't blocked on JSON

@@ -1,0 +1,28 @@
+{
+  "storeVersion" : 1,
+  "templates" : [
+    {
+      "folderName" : "sprint-review",
+      "id" : "11111111-2222-4333-8444-555555555555",
+      "isBuiltin" : false,
+      "isProjectTemplate" : false,
+      "name" : "Sprint Review",
+      "rawContent" : "# Sprint Review\n\n## Summary\n\nWhat shipped this sprint.\n\n## Decisions\n\n",
+      "sections" : [
+        "Summary",
+        "Decisions"
+      ]
+    },
+    {
+      "folderName" : "retro",
+      "id" : "66666666-7777-4888-8999-000000000000",
+      "isBuiltin" : false,
+      "isProjectTemplate" : true,
+      "name" : "Retro",
+      "sections" : [
+        "Went well",
+        "Improve"
+      ]
+    }
+  ]
+}
