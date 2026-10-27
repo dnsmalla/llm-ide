@@ -54,7 +54,7 @@ row with `kind='doc'`, `ref = u:<userId>:doc:<title>[:<hash>]:<sourceNames>`
 | Core | Stores | `DocTemplateStore.swift` (307), `DocCommandStore.swift` (179), `DocGenOutputStore.swift` (92), `GenerationLibraryStore.swift` (138) | 716 |
 | Core | Seeders | `ProjectDocTemplatesSeeder.swift` (108), `ProjectDocCommandsSeeder.swift` (88) | 196 |
 | Core | Models | `DocTemplate.swift` (318), `DocCommand.swift` (168), `TemplateSurface.swift` (115), `DocGenOutputConfig.swift` (56) | 657 |
-| Core | Mermaid/render helpers (not docs-only) | `Core/Generation/Services/GenerationConformance.swift` (115) | 115 |
+| Core | Mermaid/render helpers (not docs-only) | `Core/Editor/GenerationConformance.swift` (115; moved from `Core/Generation` in pre-K1 step 2) | 115 |
 | Core | **Total** | `Core/Generation/` (13 files) | **2 337** |
 | Core | HTTP client | `Core/Networking/API/LlmIdeAPIClient+Export.swift` (285 file; `GenerateDocRequest` `:53`, `GenerateDocResponse` `:70`, `GeneratedDoc` `:88`, `generateDoc` `:115`, `exportMarkdown` `:173`) | lines 51–171 are docs-only |
 | Core | Library catalogue client | `Core/Networking/API/LlmIdeAPIClient+AgentMeta.swift:107` (`generationLibrary()` → `GET /kb/agent/generation-library`) | — |
@@ -70,7 +70,7 @@ The `Core/Generation` side has **no SwiftUI views** but three `NSAlert` calls
 (`GenerationViewModel.swift:527`, `:572`) and `GenerationViewModel.save` /
 `saveChatOutput` (`:502`, `:555`) present UI from Core.
 
-`GenerationConformance.swift` is **not docs-only**: `mac/Sources/ChatContractLab/main.swift:90-245`
+`Core/Editor/GenerationConformance.swift` (moved from `Core/Generation`) is **not docs-only**: `mac/Sources/ChatContractLab/main.swift:90-245`
 calls it 16 times (Mermaid fence detection, rendered HTML, preview gating, per-scope
 model memory). It is the Doc Gen twin of `Core/Editor/MermaidConformance.swift`.
 
@@ -179,7 +179,11 @@ Legend: **C** = through `Core/Contracts` or an HTTP route; **D** = direct type/m
 
 **Cycles.**
 - No kit-level cycle found on the server: nothing in `kb/`, `llm_agent/`, `agents/` imports `export-routes.mjs` (only `server.mjs:11`).
-- **Cycle inside `Core`:** `Core/Project/ProjectScaffolder.swift:152` → `Core/Generation/...GenerationLibraryStore`, and `Core/Generation/Services/DocTemplateStore.swift:175` → `Core/Project/ProjectLayout.swift`. Core/Project and Core/Generation depend on each other. This is invisible to the feature gate (both are Core).
+- **Cycle inside `Core` (resolved, pre-K1 step 3):** the `ProjectScaffolder` → `GenerationLibraryStore` edge is gone; Core/Project no longer names any Doc Gen type. The reverse edge (`DocTemplateStore` → `ProjectLayout`) is an ordinary dependency and stays.
+
+**Original finding:** `Core/Project/ProjectScaffolder.swift:152` → `Core/Generation/...GenerationLibraryStore`, and `Core/Generation/Services/DocTemplateStore.swift:175` → `Core/Project/ProjectLayout.swift`. Core/Project and Core/Generation depend on each other. This is invisible to the feature gate (both are Core).
+
+**Resolved before K1 (pre-K1 steps 1–2, see §8).** E8 through E12 and the Core/Project ↔ Core/Generation cycle are fixed; the rows above keep their original evidence for the record.
 
 **Violations to fix before K1** (E8–E12): direct references that the K0 rule forbids. E9 and E10 also break the "Core is the seam" rule. Fixes: a `Core/Contracts` seam for templates, commands and `sourceFitNotice` (decision 8); a Core hook for session reset. `Core/Contracts/SessionScoped.swift:23-24` explains why Core uses a notification (`accountCredentialsRevoked`, `:25`) so it never names a feature type; the precedent for a registry is `SessionScopedRegistry` (`:33`). Moving `ProjectScaffolder`'s seeding out (`:152-154`) is decision 4.
 
@@ -275,17 +279,17 @@ These replace the earlier open-question list. Items 1–9 are user decisions. It
 1. **`/generate-docx` (meeting → Word) moves to capture-kit ownership.** Plan and ownership change only; the code moves during capture-kit's K1, not now.
 2. **`/generate-doc` becomes gated by `doc_gen`** (only the Mac calls it). Feature-matrix expectations change accordingly (§2e: today's "not server-gated" exception is for `/generate-docx`, which stays always-on for the extension).
 3. **Template and command routes take a project id, never a raw path.** The server resolves the project's root itself.
-4. **Doc Gen seeds templates and commands lazily on first open**, not in `ProjectScaffolder`. This removes the Core/Project ↔ Core/Generation cycle (E12; `ProjectScaffolder.swift:152-154`).
+4. **Doc Gen seeds templates and commands lazily on first open**, not in `ProjectScaffolder`. This removes the Core/Project ↔ Core/Generation cycle (E12; `ProjectScaffolder.swift:152-154`). Done, pre-K1 step 3 (`e1525074`); see §8 for the deviation from the "missing or empty" gate.
 5. **Legacy `doc-templates.json`: still read** (checked 2026-10-27; §5). K1a adds a migration test with a real old file (both the envelope and the bare-array fallback at `DocTemplateStore.swift:274-281`).
 6. **Visual stays inside docs-kit for now.**
 7. **The Python meeting-docx path is retired** (§6 item 3).
-8. **Add a `Core/Contracts` seam for the direct Core/other-kit → Generation references (E8–E12) before K1.**
+8. **Add a `Core/Contracts` seam for the direct Core/other-kit → Generation references (E8–E12) before K1.** Done, pre-K1 step 1 (`c62c9e6a`): `GenerationProviding` + `GenerationProviderRegistry` (`Core/Contracts/GenerationProviding.swift`), `LibrarySourceFeed` (`Core/Contracts/LibrarySourceFeed.swift`).
 9. **Server in-process imports that follow the existing ESLint layering count as allowed edges** (E2–E4).
-10. **Open (not user-decided): comment drift.** `Core/Generation/Services/GenerationConformance.swift:22` names `generationViewOwnership`, which no code declares; the check is a section comment in `scripts/conformance-agent-v2.mjs:237`. Recommended: correct the comment when `GenerationConformance` moves to `Core/Editor` (item 11), so it is fixed once.
+10. **Open (not user-decided): comment drift.** `Core/Generation/Services/GenerationConformance.swift:22` names `generationViewOwnership`, which no code declares; the check is a section comment in `scripts/conformance-agent-v2.mjs:237`. Recommended: correct the comment when `GenerationConformance` moves to `Core/Editor` (item 11), so it is fixed once. **Resolved** in pre-K1 step 2 (`0e7a985d`): the comment now names the "generation ownership" section.
 
 Additional decisions from the review:
 
-11. **`GenerationConformance` / Mermaid helpers belong to the editor/UI side.** They stay in Swift Core and move out of `Core/Generation` into `Core/Editor` (beside `MermaidConformance.swift`) during the seam work. They are not a Node concern. `ChatContractLab` keeps calling them from the new location.
+11. **`GenerationConformance` / Mermaid helpers belong to the editor/UI side.** They stay in Swift Core and move out of `Core/Generation` into `Core/Editor` (beside `MermaidConformance.swift`) during the seam work. They are not a Node concern. `ChatContractLab` keeps calling them from the new location. Done, pre-K1 step 2 (`0e7a985d`).
 12. **The `/generate-docx` notes-JSON prompt has no caller besides ExportMenu.** It is retired with the capture-kit move. ExportMenu uses `/generate-notes` output instead.
 13. **The iOS `GenerateSheet` wire (SharedProtocol `generation_*` messages) stays unchanged.** When the phone bridge moves, it keeps the same messages and calls the new routes behind them.
 
@@ -293,8 +297,33 @@ Additional decisions from the review:
 
 In order:
 
-1. **Seam (8) + `GenerationConformance` move (11).** Add the `Core/Contracts` seam for E8–E12; move `GenerationConformance` to `Core/Editor` and repoint `ChatContractLab` (`:90-245`).
-2. **Lazy seeding (4).** Move `ProjectScaffolder` seeding (`:152-154`) to first Doc Gen open, behind the seam.
+1. [x] **Seam (8) + `GenerationConformance` move (11).** Done: `c62c9e6a` (seam), `0e7a985d` (move).
+2. [x] **Lazy seeding (4).** Done: `e1525074`. Ingest templates stay eager (`IngestTemplateSeeder`); Doc Gen seeds on first open.
 3. **Legacy-file check (5).** Check done (still read). Remaining: the K1a migration test with a real old `doc-templates.json`.
 4. **Gate `/generate-doc` (2).** Add the `doc_gen` route group for `/generate-doc` only; keep `/generate-docx` always-on; update the feature-matrix expectations.
 5. **Retire the Python path (7).** Delete the §6 item 3 files and call sites.
+
+## 8. Pre-K1 work: what was done (2026-10-27)
+
+Steps 1–3 of "Next: pre-K1 work". Gates at the end of the work: `bash mac/Scripts/feature-boundaries.sh` exit 0; `make build-mac-min`, `make build-mac-lite`, `make chat-gates`, `make generation-gates` all pass; full `LLMIDE_KEYCHAIN_BACKEND=memory swift test`: 2352 tests, 0 failures, 1 skipped.
+
+**Seam (decision 8), `c62c9e6a`.**
+- `Core/Contracts/GenerationProviding.swift`: protocol `GenerationProviding` (sign-out reset, project-change reset, project file reload, first-open seed, phone template/command lookup, fit notice) with value types `GenerationTemplateRef` and `GenerationCommandRef`, plus `GenerationProviderRegistry` (`install`/`uninstall`, `provider` optional).
+- `Core/Generation/Services/DocGenProvider.swift`: the one conformer. Installed by `FeatureCatalog.provideGenerationStores` at app init. Unlike the phone bridge wiring, this is not behind `FEATURE_DOCGEN`, because Core/Generation is always compiled.
+- `Core/Contracts/LibrarySourceFeed.swift`: an environment value that lets Doc Gen's source tree read Library items without naming `LibraryItemStore`. AppShell injects it over the live store. Reading inside a view body keeps `@Observable` tracking.
+- Edges: E8 (source tree → `LibraryItemStore`) → `LibrarySourceFeed`. E9 (phone bridge → stores, `sourceFitNotice`) → registry. E10 (`ProjectPathsPanel` → stores) → registry reload. E11 (`SessionStore` → `GenerationRegistry`) → registry `resetForSignOut`. E11b (AppShell) → registry `resetForProjectChange`.
+- Note: the source tree still names the `LibraryItem` model type, and the phone bridge still names `LlmIdeAPIClient.GeneratedDoc` in the seam signature. Both are data types, not backing stores. Say so if K0 is meant to forbid model types too.
+
+**GenerationConformance move (decision 11), `0e7a985d`.** `Core/Generation/Services/GenerationConformance.swift` → `Core/Editor/GenerationConformance.swift` (`git mv`, public API unchanged). Comment drift at the old `:22` fixed to point at the "generation ownership" section of `scripts/conformance-agent-v2.mjs`.
+
+**Lazy seeding (decision 4), `e1525074`.**
+- `ProjectScaffolder` seeds only the ingest templates, through `IngestTemplateSeeder` (`Core/Notes/Services/IngestTemplateSeeder.swift`). Core/Project no longer names any Doc Gen type. E12 is gone.
+- The ingest templates stay eager because `IngestTemplateRenderer` reads `templates/meeting-note` and `templates/email-note` from disk for auto-generated notes. Moving them lazily would have broken meeting and email note rendering for projects where Doc Gen was never opened.
+- Doc Gen and Visual seed the kit's templates, commands and README on first open of either section (`AppShell` `.onChange(of: shell.section)`), and before the phone lists or runs a template (`MobileGenerationBridge`), through `GenerationProviding.seedProjectFiles`.
+- Deviation from the brief: seeding is per-file `writeIfAbsent`, not gated on "folders missing or empty". Gating on empty would stop kit seeds added later from reaching existing projects, which is the top-up behaviour the kit-arrival observer exists for. Trade-off: a user who deletes one kit template gets it back on the next Doc Gen open. Say if you want the gate instead.
+- `ProjectDocTemplatesSeeder` no longer writes the ingest files (they moved to `IngestTemplateSeeder`). `DocGenProvider.seedProjectFiles(at:templateKit:commandKit:)` runs the ingest seeder, the template seeder and the command seeder in that order.
+
+**Tests added.** `GenerationProviderRegistryTests` (7 cases, including install, uninstall and replace, plus an empty `LibrarySourceFeed`). `DocGenLazySeedingTests` (7 cases: a new project gets no Doc Gen files; the ingest files exist; first open seeds exactly the expected file set; the kit folders match `projectMarkdown`; a second open rewrites nothing, checked by mtime; a user-edited Doc Gen template and a user-edited ingest template both survive).
+
+**Not done here.** Step 3 of "Next: pre-K1 work" (legacy-file check, the K1a migration test with a real `doc-templates.json`) is not part of this work and is not ticked. Steps 4 and 5 (gate `/generate-doc`, retire the Python path) are untouched. Decisions 1, 3, 5, 6, 9, 10, 12, 13 are untouched by this work. Decisions 2 and 7 were implemented by a concurrent change (`c6e350e0`, `53804a47`), not by these steps.
+
