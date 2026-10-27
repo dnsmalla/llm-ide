@@ -14,3 +14,4 @@ a design: it changes no code, and it is revised as each later step lands.
 | Kit | Key | Status | README |
 |---|---|---|---|
 | docs-kit (Doc Gen, Visual, `/generate-doc(x)`) | `doc_gen` | K0 map | [docs-kit.md](docs-kit.md) |
+| graph-kit (Code Graph, OS view, graph engine plugin) | `code_graph_3d` | K0 map | [graph-kit.md](graph-kit.md) |
