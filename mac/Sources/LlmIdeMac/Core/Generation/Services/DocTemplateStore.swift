@@ -200,65 +200,12 @@ final class DocTemplateStore: ObservableObject {
     // MARK: - Project disk I/O
 
     private func scanProjectTemplates(at root: URL) -> [DocTemplate] {
-        let layout = ProjectLayout(root: root)
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: layout.templatesDir.path),
-              let entries = try? fm.contentsOfDirectory(
-                at: layout.templatesDir,
-                includingPropertiesForKeys: [.isDirectoryKey],
-                options: [.skipsHiddenFiles]) else {
-            return []
-        }
-
-        var templates: [DocTemplate] = []
-        for entry in entries {
-            guard (try? entry.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) == true else {
-                continue
-            }
-            let folderName = entry.lastPathComponent
-            // `templates/auto_task/` is a flat bag of Auto Task prompts, not a
-            // Doc Gen template folder — scanning it would surface whichever
-            // prompt sorted first as a bogus document template.
-            if folderName == ProjectLayout.autoTaskTemplatesFolderName { continue }
-            guard let mdURL = templateMarkdownURL(in: entry),
-                  let content = try? String(contentsOf: mdURL, encoding: .utf8) else {
-                continue
-            }
-            // Ingest templates (meeting-note/email-note) are rendered by
-            // IngestTemplateRenderer with {{placeholders}} — not Doc Gen
-            // material, and their `# {{title}}` heading would surface as a
-            // literal "{{title}}" entry in the template picker.
-            if content.contains("llmide:ingest-template") { continue }
-            templates.append(DocTemplate(
-                id: DocTemplate.stableID(forFolder: folderName),
-                name: DocTemplate.displayName(from: content, folderName: folderName),
-                sections: DocTemplate.sections(from: content),
-                rawContent: content,
-                folderName: folderName,
-                isProjectTemplate: true,
-                surface: DocTemplate.surface(from: content)))
-        }
-        return templates.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-    }
-
-    private func templateMarkdownURL(in folder: URL) -> URL? {
-        let preferred = folder.appendingPathComponent("template.md")
-        if FileManager.default.fileExists(atPath: preferred.path) { return preferred }
-        guard let files = try? FileManager.default.contentsOfDirectory(
-            at: folder,
-            includingPropertiesForKeys: nil,
-            options: [.skipsHiddenFiles]) else { return nil }
-        return files.first { $0.pathExtension.lowercased() == "md" }
+        LocalDocFiles.scanTemplates(at: root)
     }
 
     private func writeProjectTemplate(_ template: DocTemplate, at root: URL, folderName: String) {
-        let layout = ProjectLayout(root: root)
-        let dir = layout.templateDir(named: folderName)
-        let fm = FileManager.default
         do {
-            try fm.createDirectory(at: dir, withIntermediateDirectories: true)
-            let url = dir.appendingPathComponent("template.md")
-            try template.renderedMarkdown().write(to: url, atomically: true, encoding: .utf8)
+            try LocalDocFiles.writeTemplate(template, at: root, folderName: folderName)
         } catch {
             logger.error("failed to write project template \(folderName, privacy: .public): \(error.localizedDescription, privacy: .public)")
         }
