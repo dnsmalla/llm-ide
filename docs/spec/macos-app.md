@@ -85,7 +85,7 @@ Most objects are constructed once in `init()` and injected at lines 142–156. T
 | Object | Type | Role |
 |---|---|---|
 | `theme` | `ThemeStore` | Active colour palette |
-| `templateStore` | `DocTemplateStore` | Doc templates (lazy-loaded from disk) |
+| `templateStore` | `DocTemplateStore` | Doc templates (lazy-loaded from disk; with `docGenUseServerStore` on, listed, saved and deleted through `/kb/docs/*`, see docs-kit §8 K1b) |
 | `session` | `SessionStore` | Auth state + live access token |
 | `config` | `AppConfig` | User settings (singleton) |
 | `capture` | `CaptionOrchestrator` | AX scraper / caption state |

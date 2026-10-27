@@ -327,7 +327,7 @@ marker, and the `auto_task/` and ingest skips all parse as before.
 **Decision (flagged for the user).** Minimal safe design, as the brief asked. No raw client path reaches a template route. The Mac registers `{ id, root }` once per project open with `POST /kb/projects/register`. The server validates the root (`kb/doc-project-files.mjs` `validateProjectRoot`) and stores it in `doc_project_roots` (migration `0048`, keyed by `(user_id, project_id)`). Every later use re-validates the stored root, so a folder moved, replaced by a symlink, or stripped of its marker fails closed. The rules mirror `SystemBridge.isOverBroadRoot` and `confinedFile`. Alternatives considered: (a) an in-memory map, which is lost on restart, so the Mac would re-register on every open; (b) a path on every docs call, which decision 3 forbids; (c) deriving the folder from meeting metadata, which holds no folder. The register route sits in the `doc_gen` group for now. If project registration should be always-on, move it out of that group (`routes/feature-routes.mjs`).
 
 **Server write rules the Mac switch must keep (K1 hardening, 2026-10-27).**
-- **Symlinks are skipped on Node and followed on Swift, on purpose.** The Node scanner and writer never follow a symlink (a folder, the file, or a path segment); the Swift scanner follows them. A user who links a template folder into a project sees it on the Mac and not through the server. This is the one intended behaviour difference; the switch must decide whether to keep the Mac behaviour or document the skip to users.
+- **Symlinks: one real difference, merged on the Mac (K1b).** The Node scanner and writer never follow a symlink. The Swift scanner does not list a symlinked *folder* either (`isDirectory` is false for a link; checked on macOS 26 on 2026-10-27, so this section's earlier claim that Swift follows folder links was wrong). A linked folder is skipped on both sides. The real difference is a `template.md` or `command.md` that is itself a link: Swift reads it and the server refuses it (`O_NOFOLLOW`). The server path merges those in from the local scan (§8, K1b). Parity is pinned by `DocGenServerStoreParityTests`.
 - **Ingest layouts are not Doc Gen files.** `templates/meeting-note`, `templates/email-note` and any `template.md` carrying `llmide:ingest-template` are refused for write and delete (409 `RESERVED_FOLDER`, or 400 for the two reserved names in any casing). The scan hides them, as before.
 - **DELETE removes one file.** It removes `template.md` (or `command.md`), then the folder only if that left it empty (`folderRemoved`). Nothing is removed recursively, so a user's extra files survive.
 - **Caps.** A family is scanned to 2000 folder entries (`truncated`, `scannedFolders`); a user may hold 200 registered projects (409 `TOO_MANY_PROJECTS`; re-registering an id is not new).
@@ -337,7 +337,7 @@ marker, and the `auto_task/` and ingest skips all parse as before.
 
 ## 6. What K1 would move (proposal; server half done)
 
-**Status (2026-10-27):** the server half of this table is done (`routes/docs-routes.mjs`, `kb/doc-templates.mjs`, `kb/doc-project-files.mjs`, `kb/project-roots.mjs`; see §8, "K1 server half"). The Swift stores, seeders and models are **not** removed; the Mac switch is a separate step behind `docGenUseServerStore`. Seeding is server-side from the same generation library (`llm_agent/skills/generation-library.mjs`), so `POST /kb/docs/seed` takes no kit list.
+**Status (2026-10-27):** K1b (the Mac half, behind `docGenUseServerStore`) is done; see §8. The server half of this table is done (`routes/docs-routes.mjs`, `kb/doc-templates.mjs`, `kb/doc-project-files.mjs`, `kb/project-roots.mjs`; see §8, "K1 server half"). The Swift stores, seeders and models are **not** removed; the Mac switch is a separate step behind `docGenUseServerStore`. Seeding is server-side from the same generation library (`llm_agent/skills/generation-library.mjs`), so `POST /kb/docs/seed` takes no kit list.
 
 
 **Move to Node (business logic, not UI state):**
@@ -509,3 +509,56 @@ New Node tests with no Swift twin: the golden bytes (6), the confinement and fol
 
 **Schema and docs.** `schema/http/docs.schema.json` declares the new codes and fields and the rawContent-over-rewrite precedence (`rawContent` wins; `rewrite` is ignored when it is present). Fixtures: three new (`put-kb-docs-templates-folder-409`, `delete-kb-docs-templates-folder-409`, `post-kb-projects-register-409`), and the register 400, GET list and DELETE 200 fixtures updated. The three new fixtures are hand-written from the handler's error path (no capture script exists for this family), and the route tests cover the same paths. `docs/reference/api/openapi.yaml`, `extension/src/lib/api-types.ts` and `schema/http/INVENTORY.md` are regenerated.
 
+### K1b: the Mac half (2026-10-27)
+
+**Commits.** `f7eedf1f` refactor (backend protocol, no behaviour change); `4b83a785` feat (the server path behind the preference); `a9ce209c` tests (parity golden, `ServerDocFiles` tests); the docs commit after them.
+
+**Backend.** `DocFilesBackend` (`Core/Generation/Services/DocFilesBackend.swift`) is the seam for a project's template and command files: list, save, delete, seed. Three types implement the path:
+- `LocalDocFiles` (`LocalDocFiles.swift`): the scan and write bodies that `DocTemplateStore` and `DocCommandStore` always ran, moved out unchanged. The stores call them on the preference-off path.
+- `ServerDocFiles` (`ServerDocFiles.swift`): the `/kb/docs/*` routes, through `LlmIdeAPIClient+Docs.swift`. Every HTTP failure becomes a `DocFilesServerError` case (`featureDisabled`, `projectNotRegistered`, `invalidRoot`, `tooManyProjects`, `reservedFolder`, `unsafePath`, `invalidFolder`, `notFound`, `tooLarge`, `truncated`, `notServing`, or `other`).
+- `DocFilesWithFallback`: asks the server first and answers from `LocalDocFiles` for any call the server cannot serve.
+
+**The switch.** `docGenUseServerStore` (`DocGenServerStorePreference`, default off). Two ways to flip it, and both are supported:
+- Settings → App → "Doc Gen files" (`DocGenServerStoreCard`, the new `SettingsSectionSlot.docGen`, registered by Shell under `FEATURE_DOCGEN`).
+- `defaults write <bundle id> docGenUseServerStore -bool YES` (a lite or min build has no card, so this is the only way there).
+
+The preference is read each time a project's files are loaded, so reopen the project after flipping it.
+
+**Gating.** The server answers for a root only when all of these hold: the preference is on, the root is the active project's folder, and the folder has not been refused this session. With the preference off, `serves` is false for every root, so no request is made. `ServerDocFilesTests` checks this across a full open, list, save, delete and seed.
+
+**Sync and async (the choice).** The stores and their callers are synchronous and `@MainActor`. Views call `add`, `update` and `delete` without awaiting, so making the views async would have changed several views for one store. Instead:
+- The server path publishes the local scan first (instant, no network), then replaces it with the server's list when a queued refresh returns.
+- Writes update the in-memory list at once and queue the server call. A refresh queued after a write therefore sees it.
+- Every server operation runs on one serial queue (`ServerDocFiles.enqueue`), in the order the user made them.
+
+Known consequence: the phone's `MobileGenerationBridge` reads templates synchronously right after a seed. On a fresh project under the server path it can see the local snapshot before the server's seed lands. The next read is correct.
+
+**Registration.** `GenerationFilesRefresh.run(projectId:)` calls `activateProject` when a project opens. That records the id and queues `prepare`, which registers the (id, folder) pair. Each later operation ensures registration (cached per pair), so a restarted server or a missed open is covered. A 404 `PROJECT_NOT_REGISTERED` re-registers and retries once. `INVALID_ROOT` and `TOO_MANY_PROJECTS` are remembered for the session, and the folder stays local. An id that does not match the server's `PROJECT_ID_RE` is never sent (`RandomID` ids match it).
+
+**Fallback.** Any server failure answers that one call from `LocalDocFiles`, logged once per distinct failure. A write is never dropped, since a failed server write is written locally. A truncated listing falls back to the full local listing. A local fallback delete follows the server rule (remove the entry file, then the folder only if empty), so a failure never removes a user's extra files. The preference-off store path still removes the whole folder, as it always has; this difference goes when the store path is retired (K4).
+
+**Symlinks (decision).** Folder links: both sides skip them, so nothing is merged. Entry-file links (a `template.md` or `command.md` that is a symlink in a real folder): the Swift scan reads them and the server refuses them. The server path merges them from the local scan, so they still show. Both decisions are pinned by tests (§5a has the corrected note).
+
+**Seeding.** The server seeds from its own generation library, which is the same source the Mac's kit cache comes from, so the kits passed in are not sent. Ingest templates (`meeting-note`, `email-note`) stay local: they are app machinery, and `IngestTemplateRenderer` reads them from disk.
+
+**Parity.** `scripts/docs-kit-parity-golden.mjs` builds a temp project from the K1a fixtures (the `LAYOUT` list, which includes an `auto_task` folder both sides must skip), runs the Node scan, and writes `mac/Tests/LlmIdeMacTests/Fixtures/docgen/server-scan.golden.json` (the response bodies, as the server gives them). `extension/tests/docs-server-golden.test.mjs` fails when the file is stale. `DocGenServerStoreParityTests` builds the same project in Swift, runs the local scan, and decodes the golden through the Mac's `DocTemplatesPage` and `DocCommandsPage`. It asserts equal ids, names, folder names, surfaces, sections and raw text. The byte parity of the renderers is unchanged (`DocGenServerParityTests`).
+
+**Contract lab.** The eight skip rows are now `route(...)` entries decoding the fixtures with the new response types (`api-contract-lab: PASS`, with the dropped-key check on). `schema/http/INVENTORY.md` is regenerated (184 endpoints).
+
+**Stays Swift (until K3).** The app-support state (no-project templates, `doc-gen-output.json`, the kit cache) is not on this seam (§5a). The views and the output folder stay Swift too.
+
+**K4 retire list** (after `docGenUseServerStore` has defaulted on for one release and the fallback has had no reports):
+- `LocalDocFiles`'s scan and write helpers, and the store code that calls them on the preference-off path (`DocTemplateStore` and `DocCommandStore` `scanProject*`, `writeProjectTemplate`, `write`, and the `removeItem` deletes). The fallback then needs its own rule, which is the server's.
+- `ProjectDocTemplatesSeeder`, `ProjectDocCommandsSeeder` and their README literals (the Node side already has them in `kb/doc-readmes.mjs`).
+- Tests that only cover the retired Swift path: the project-folder cases of `DocGenLegacyStateTests`, the file-level cases of `DocGenLazySeedingTests`, and the project-folder cases of `AutoTaskTemplateStoreTests`. `DocGenServerStoreParityTests` and `ServerDocFilesTests` stay, since they pin the server contract.
+- The `docGenUseServerStore` preference, the Settings card, and the `DocFilesWithFallback` wrapper, once the server path is the only path.
+
+**Gates (2026-10-27, sandbox off).**
+- `swift build` passes. `make build-mac-min` and `make build-mac-lite` pass.
+- `bash mac/Scripts/feature-boundaries.sh` passes.
+- `swift run api-contract-lab` prints `PASS`.
+- `make chat-gates generation-gates` pass.
+- The filtered Doc Gen runs pass (110 for `DocGen|DocCommand|DocTemplate|GenerationProvider|GenerationFiles|AutoTaskTemplate`, and the 20 new `DocGenServerStore|ServerDocFiles` cases).
+- `make contract-gates` passes.
+- `make test` passes: 3532 Node tests, 3529 pass, 0 fail, 3 skipped.
+- The full `LLMIDE_KEYCHAIN_BACKEND=memory swift test`: 2393 XCTest cases executed (1 skipped, 0 failures) and 760 Swift Testing cases passing.
