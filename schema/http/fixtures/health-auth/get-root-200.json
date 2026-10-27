@@ -3,7 +3,7 @@
   "status": 200,
   "response": {
     "status": "degraded",
-    "apiVersion": 77,
+    "apiVersion": 80,
     "schemaVersion": 44,
     "uptimeSec": 0,
     "endpoints": [

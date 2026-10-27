@@ -274,8 +274,8 @@ const HOST = config.host;
 //   v76 — ALL_ENDPOINTS now lists /kb/issues, /kb/export-all, /kb/live/:id/stream and /kb/email/classify (already served by routes/router.mjs and routes/live.mjs; /health ENDPOINTS advertises them). No request or response shape change.
 //   v77 — GET /kb/usage/turn-composition?limit= → { turns: [...] }: the caller's newest v2 chat turns' measured context split (migration 0044): LLM-IDE parts as approximate tokens (chars/4), the SDK's own end-of-turn categories (sdk_*), tool-result size and user MCP server count. Additive; read-only.
 //   v78 — GET /kb/meeting/:id?include=transcript adds `transcript` (the stored transcript text) to the record; the default response is unchanged (no transcript). Used by the Mac's Doc Gen.
-//   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
 //   v79 — GET /kb/os/state: the read-only System view aggregate (feature set + kit table, health checks, this user's running chat turns / meeting-agent runs / live sessions with their cancel routes, activity, token usage by window, turn composition, knowledge counts). No model call, no write. Additive. Also GET /kb/os/stream: a per-user SSE change channel (hello, then activity / usage / turn-start / turn-end / agent-run / live-session events carrying only {type, at}; the client re-fetches /kb/os/state).
+//   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
 const SERVER_API_VERSION = 80;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
