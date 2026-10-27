@@ -102,6 +102,21 @@ extension ShellSection {
     /// lite build whose home section names a compiled-out feature (e.g.
     /// `.explorer` with Explorer excluded) would land on the "not
     /// installed" placeholder instead of a usable page.
+    /// The sections the "Home opens" picker offers. The resolved Home is always
+    /// offered (a selection missing from the options would render blank). Other
+    /// sections need to be visible and their feature compiled in. Settings and
+    /// Live are never offered, and System only as the resolved Home: it is the
+    /// Graph section's default page, not a landing of its own.
+    static func homeChoices(resolved: ShellSection, hidden: Set<String>, compiled: Set<AppFeature>) -> [ShellSection] {
+        ShellSection.allCases.filter { section in
+            if section == resolved { return true }
+            guard section != .system, section != .settings, section != .live else { return false }
+            guard !hidden.contains(section.rawValue) else { return false }
+            guard let feature = section.backingFeature else { return true }
+            return compiled.contains(feature)
+        }
+    }
+
     static func resolveHome(_ rawValue: String, hidden: Set<String>, compiled: Set<AppFeature>) -> ShellSection {
         guard let chosen = ShellSection(rawValue: rawValue) else { return .library }
         if chosen == .codeGraph {

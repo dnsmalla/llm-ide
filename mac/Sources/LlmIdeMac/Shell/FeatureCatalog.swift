@@ -306,8 +306,11 @@ enum FeatureCatalog {
         // cached for the project's repo. Read at call time and never triggers a
         // scan; the System view falls back to system/graph/graph.json on nil.
         ProjectGraphRegistry.shared.install { root in
-            guard let repo = RepoGraphLocator.repoToGraph(projectRoot: root) else { return nil }
-            return graphSessionStore?.entry(repo: repo, mode: "code")?.graph
+            guard let repo = RepoGraphLocator.repoToGraph(projectRoot: root),
+                  let graph = graphSessionStore?.entry(repo: repo, mode: "code")?.graph else { return nil }
+            // GraphDocument JSON; nil when it cannot be encoded, so the caller falls
+            // back to the project's graph.json.
+            return ProjectGraphExport.documentJSON(graph)
         }
         #endif
     }
@@ -499,9 +502,10 @@ enum FeatureCatalog {
         // and run history the scheduler uses, so the page never disagrees with it.
         RoutinesRegistry.shared.install { projectId in
             let masterOn = settings.enabled
-            let recent = runHistory.recentEntries(limit: 200)
+            // The active project's run first, then a run with no project; never
+            // another project's run.
             func lastRun(_ taskId: String) -> Date? {
-                recent.first { $0.taskId == taskId }?.finishedAt
+                runHistory.lastFinishedAt(taskId: taskId, projectId: projectId)
             }
             var routines: [RoutineSummary] = []
             for task in AutoTask.allCases {

@@ -1,5 +1,4 @@
 import Foundation
-import GraphCore
 
 /// The server calls the OS page may ask native to make. Native makes them with
 /// its authenticated client; the page never holds the token and never talks to
@@ -241,7 +240,7 @@ enum SystemBridge {
     /// The JavaScript that hands the page its configuration.
     static func configureScript(_ config: SystemBridgeConfig) -> String? {
         guard let json = jsonFragment(config) else { return nil }
-        return "window.llmideConfigure(\(json));"
+        return jsSafe("window.llmideConfigure(\(json));")
     }
 
     /// `window.llmideResponse(id, {status, body, error})`. The body is the
@@ -259,7 +258,7 @@ enum SystemBridge {
             "error": nullable(error),
         ]
         guard let idJSON = jsonFragment(id), let replyJSON = jsonObjectFragment(reply) else { return nil }
-        return "window.llmideResponse(\(idJSON), \(replyJSON));"
+        return jsSafe("window.llmideResponse(\(idJSON), \(replyJSON));")
     }
 
     /// `llmideResponse` for a body that is already JSON text (a graph or a
@@ -274,20 +273,66 @@ enum SystemBridge {
         } else {
             errorJSON = "null"
         }
-        return "window.llmideResponse(\(idJSON), {\"status\":\(status),\"body\":\(bodyJSON),\"error\":\(errorJSON)});"
+        return jsSafe("window.llmideResponse(\(idJSON), {\"status\":\(status),\"body\":\(bodyJSON),\"error\":\(errorJSON)});")
+    }
+
+    /// U+2028 and U+2029 are legal raw inside JSON strings but were line
+    /// terminators in older JavaScript engines, which breaks a script that
+    /// carries them. Escaping them keeps the script valid everywhere; the
+    /// escape decodes to the same character in JSON.
+    static func jsSafe(_ script: String) -> String {
+        script
+            .replacingOccurrences(of: "\u{2028}", with: "\\u2028")
+            .replacingOccurrences(of: "\u{2029}", with: "\\u2029")
     }
 
     // MARK: Native bodies
 
-    /// The graph body: graph-kit's canonical `GraphDocument` JSON, or `null`
-    /// when there is no graph. Above `ProjectGraphCap.maxNodes` the graph is
-    /// capped first (see `ProjectGraphCap`).
-    static func graphBodyJSON(_ graph: CGData?) -> String {
-        guard let graph else { return "null" }
-        let capped = ProjectGraphCap.capped(graph)
-        guard let data = try? JSONEncoder().encode(GraphDocument(capped)),
-              let text = String(data: data, encoding: .utf8) else { return "null" }
-        return text
+    /// The outcome of one native answer: the status, the JSON body text and an error code.
+    struct NativeReply: Equatable {
+        let status: Int
+        let bodyJSON: String
+        let error: String?
+    }
+
+    /// Answers `projectGraph`. `provided` is the Graph feature's cached graph as
+    /// `GraphDocument` JSON (`ProjectGraphRegistry`); when nil, `loadFile` reads the
+    /// project's v1.1 graph.json. The graph is capped (`ProjectGraphCap`) and
+    /// encoded in the canonical shape. No graph is `200 null`. Bytes that cannot
+    /// be read as a graph document, or a graph that cannot be encoded, are
+    /// `500 graph_encode_failed`, never a silent null.
+    static func projectGraphReply(provided: Data?, loadFile: () -> ProjectGraphDocument?) -> NativeReply {
+        let document: ProjectGraphDocument?
+        if let provided {
+            guard let decoded = ProjectGraphDocument.decode(graphDocumentJSON: provided) else {
+                return graphEncodeFailed
+            }
+            document = decoded
+        } else {
+            document = loadFile()
+        }
+        guard let document else { return NativeReply(status: 200, bodyJSON: "null", error: nil) }
+        let capped = ProjectGraphCap.capped(document)
+        guard let data = capped.jsonData(), let text = String(data: data, encoding: .utf8) else {
+            return graphEncodeFailed
+        }
+        return NativeReply(status: 200, bodyJSON: text, error: nil)
+    }
+
+    private static let graphEncodeFailed = NativeReply(status: 500, bodyJSON: "null", error: "graph_encode_failed")
+
+    /// The skill library as the page may see it: `repo` (a local path) is dropped
+    /// at the top level, and each skill keeps only `id`, `family`, `name`,
+    /// `description`, `sourceId` and `sourceName` (`path` is a local file path).
+    /// Other top-level keys pass through. nil when the body is not a JSON object.
+    static func sanitizeSkillLibrary(_ body: Data) -> Data? {
+        guard var object = (try? JSONSerialization.jsonObject(with: body)) as? [String: Any] else { return nil }
+        object.removeValue(forKey: "repo")
+        let keep: Set<String> = ["id", "family", "name", "description", "sourceId", "sourceName"]
+        if let skills = object["skills"] as? [[String: Any]] {
+            object["skills"] = skills.map { $0.filter { keep.contains($0.key) } }
+        }
+        return try? JSONSerialization.data(withJSONObject: object, options: [.sortedKeys])
     }
 
     /// The routines body: a JSON array of `RoutineSummary` with ISO-8601 dates.
@@ -299,18 +344,36 @@ enum SystemBridge {
         return text
     }
 
+    /// What a change of the active project means for the open page. The page's
+    /// controller can see only the project's name, so a switch that keeps the
+    /// name (or changes only the root or id) needs a fresh page load.
+    enum ProjectChange: Equatable {
+        case none
+        /// The name changed: the page is configured and its extras reload itself; the feed restarts.
+        case renamed
+        /// Only the root or id changed: reload the page so nothing from the old project survives.
+        case reloadPage
+    }
+
+    static func projectChange(fromName oldName: String?, fromRoot oldRoot: URL?, fromId oldId: String?,
+                              toName newName: String?, toRoot newRoot: URL?, toId newId: String?) -> ProjectChange {
+        if newName != oldName { return .renamed }
+        if newRoot != oldRoot || newId != oldId { return .reloadPage }
+        return .none
+    }
+
     /// `window.llmideEvent({type, at})`: only the type and the time cross over.
     static func eventScript(_ event: SystemFeedEvent) -> String? {
         let payload: [String: Any] = ["type": event.type, "at": nullable(event.at)]
         guard let json = jsonObjectFragment(payload) else { return nil }
-        return "window.llmideEvent(\(json));"
+        return jsSafe("window.llmideEvent(\(json));")
     }
 
     /// `window.llmideStatus({status, detail})` for the feed's state.
     static func statusScript(status: String, detail: String?) -> String? {
         let payload: [String: Any] = ["status": status, "detail": nullable(detail)]
         guard let json = jsonObjectFragment(payload) else { return nil }
-        return "window.llmideStatus(\(json));"
+        return jsSafe("window.llmideStatus(\(json));")
     }
 
     /// Encodes a value as a JSON fragment for `evaluateJavaScript`. Values are

@@ -146,6 +146,7 @@ if autoTasksIncluded {
         "AutoTaskModuleTests.swift",
         "AutoTaskPromptComposerTests.swift",
         "AutoTaskRunHistoryTests.swift",
+        "AutoTaskRunHistoryLastFinishedTests.swift",
         "AutoTaskRunTriggerTests.swift",
         "AutoTaskSettingsCronTests.swift",
         "AutoTaskSettingsLoopEngineeringTests.swift",

@@ -107,18 +107,12 @@ struct FeatureProfileSettingsSection: View {
                     // "not installed" placeholder every launch. Same
                     // section → feature mapping AppShell's toolbar filter
                     // uses (ShellState.Section.backingFeature).
-                    ForEach(ShellState.Section.allCases.filter { section in
-                        // WHY always keep the resolved home: if Library is
-                        // hidden the fallback is still what opens, and a
-                        // selection missing from the options renders blank.
-                        if section == resolvedHome { return true }
-                        guard section != .settings, section != .live else { return false }
-                        // Hidden sections resolve to Library at launch
-                        // (resolveHome), so offering them is a lie.
-                        guard !config.hiddenSidebarSections.contains(section.rawValue) else { return false }
-                        guard let feature = section.backingFeature else { return true }
-                        return registry.compiledFeatures.contains(feature)
-                    }, id: \.self) { section in
+                    // The choices live in `ShellSection.homeChoices` (tested), so the
+                    // rule for hidden, compiled-out and System stays in one place.
+                    ForEach(ShellState.Section.homeChoices(
+                        resolved: resolvedHome,
+                        hidden: config.hiddenSidebarSections,
+                        compiled: registry.compiledFeatures), id: \.self) { section in
                         let isHiddenFallback = config.hiddenSidebarSections.contains(section.rawValue)
                         Text(isHiddenFallback ? "\(section.label) (hidden)" : section.label)
                             .tag(section.rawValue)

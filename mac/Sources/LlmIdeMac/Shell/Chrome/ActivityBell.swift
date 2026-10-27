@@ -116,6 +116,10 @@ struct ActivityRow: View {
     var body: some View {
         Button {
             if let raw = navigationTarget(for: item) {
+                // A code-graph link lands on the code graph, not the System page.
+                if raw == ShellState.Section.codeGraph.rawValue {
+                    GraphSectionPage.request(.code)
+                }
                 NotificationCenter.default.post(name: .openSection, object: raw)
             }
         } label: {

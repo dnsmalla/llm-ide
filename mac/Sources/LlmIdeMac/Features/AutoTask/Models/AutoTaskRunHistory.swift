@@ -72,6 +72,18 @@ final class AutoTaskRunHistory {
         return Array(records.prefix(limit))
     }
 
+    /// The finish time of the newest run of `taskId` in `projectId`, else of the
+    /// newest run of `taskId` with no project. The store holds at most
+    /// `maxRecords` runs in all, so this looks back no further than that.
+    func lastFinishedAt(taskId: String, projectId: String?) -> Date? {
+        bootstrap()
+        let sameTask = records.filter { $0.taskId == taskId }
+        if let projectId, let hit = sameTask.first(where: { $0.projectId == projectId }) {
+            return hit.finishedAt
+        }
+        return sameTask.first(where: { $0.projectId == nil })?.finishedAt
+    }
+
     // MARK: - Persistence
 
     private struct HistoryFile: Codable {

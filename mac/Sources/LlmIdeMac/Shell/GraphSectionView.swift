@@ -13,6 +13,14 @@ enum GraphSectionPage: String, CaseIterable {
         GraphSectionPage(rawValue: raw) ?? .default
     }
 
+    /// Asks the Graph section to show `page` the next time it is shown, or now
+    /// when it is already mounted (the view reads the same key through AppStorage).
+    /// Call it before navigating to `ShellSection.codeGraph` for a code-graph
+    /// intent, so the link lands on the code graph and not on the System page.
+    static func request(_ page: GraphSectionPage, defaults: UserDefaults = .standard) {
+        defaults.set(page.rawValue, forKey: storageKey)
+    }
+
     var label: String {
         switch self {
         case .system: return "System"
@@ -41,9 +49,17 @@ struct GraphSectionView: View {
     var body: some View {
         VStack(spacing: 0) {
             SectionChromeBar(toggles: [], leading: {
-                GraphPageTabs(selection: Binding(
+                Picker("Graph page", selection: Binding(
                     get: { page },
-                    set: { pageRaw = $0.rawValue }))
+                    set: { pageRaw = $0.rawValue })) {
+                    ForEach(GraphSectionPage.allCases, id: \.self) { option in
+                        Text(option.label).tag(option)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .fixedSize()
+                .accessibilityLabel("Graph page")
             }, trailing: { EmptyView() })
 
             Group {
@@ -56,36 +72,5 @@ struct GraphSectionView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-    }
-}
-
-/// Segmented "System | Code graph" switch, styled like `PanelSectionTabs`.
-private struct GraphPageTabs: View {
-    @Binding var selection: GraphSectionPage
-    @EnvironmentObject private var theme: ThemeStore
-
-    var body: some View {
-        HStack(spacing: 4) {
-            ForEach(GraphSectionPage.allCases, id: \.self) { tab($0) }
-        }
-    }
-
-    private func tab(_ page: GraphSectionPage) -> some View {
-        let isActive = selection == page
-        let tint = ShellSection.codeGraph.tint(theme.current)
-        return Button { selection = page } label: {
-            Text(page.label)
-                .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-                .foregroundStyle(isActive ? tint : Color.primary.opacity(0.7))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 3)
-                .background(RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? tint.opacity(0.16) : Color.clear))
-                .contentShape(RoundedRectangle(cornerRadius: 6))
-        }
-        .buttonStyle(.plain)
-        .help(page.label)
-        .accessibilityLabel(page.label)
-        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }

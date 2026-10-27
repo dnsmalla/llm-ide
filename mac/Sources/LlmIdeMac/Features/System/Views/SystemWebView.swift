@@ -1,7 +1,6 @@
 import SwiftUI
 import WebKit
 import Combine
-import GraphCore
 
 /// Hosts the bundled OS page (`Resources/os-view/index.html`) in a `WKWebView`.
 ///
@@ -85,8 +84,12 @@ struct SystemWebView: NSViewRepresentable {
             self.parent = parent
         }
 
+        /// Whether the native change feed exists (it is created on the page's `subscribe`).
+        var hasFeed: Bool { feed != nil }
+
+        /// Internal, not private, so the teardown test can drive the page without a window.
         @MainActor
-        fileprivate func attach(_ web: WKWebView, indexURL: URL?) {
+        func attach(_ web: WKWebView, indexURL: URL?) {
             webView = web
             self.indexURL = indexURL
             hadSession = parent.session.accessToken != nil
@@ -98,23 +101,45 @@ struct SystemWebView: NSViewRepresentable {
             loadPage()
         }
 
+        /// Called from `dismantleNSView`. Stops the native change feed first (its
+        /// `/kb/os/stream` connection is what the server caps at 4 per user), then
+        /// stops the page: no more loads, no delegate, and about:blank so the old
+        /// document's scripts stop running.
         @MainActor
-        fileprivate func detach() {
+        func detach() {
             feed?.stop()
             feed = nil
             sessionCancellable = nil
+            pageReady = false
+            if let web = webView {
+                web.stopLoading()
+                web.navigationDelegate = nil
+                if let blank = URL(string: "about:blank") {
+                    web.load(URLRequest(url: blank))
+                }
+            }
             webView = nil
         }
 
         /// Called from `updateNSView` on every SwiftUI pass: picks up a new
-        /// theme or project name and pushes it if it changed. A project change
-        /// restarts the change feed.
+        /// theme or project and pushes it if it changed. A name change restarts
+        /// the change feed; a root or id change with the same name reloads the
+        /// page, because the page's controller sees only the name.
         @MainActor
         fileprivate func update(_ newParent: SystemWebView) {
-            let projectChanged = newParent.projectName != parent.projectName
+            let change = SystemBridge.projectChange(
+                fromName: parent.projectName, fromRoot: parent.projectRoot, fromId: parent.projectId,
+                toName: newParent.projectName, toRoot: newParent.projectRoot, toId: newParent.projectId)
             parent = newParent
-            pushConfigure()
-            if projectChanged { feed?.restart() }
+            switch change {
+            case .none:
+                pushConfigure()
+            case .renamed:
+                pushConfigure()
+                feed?.restart()
+            case .reloadPage:
+                loadPage()
+            }
         }
 
         @MainActor
@@ -154,8 +179,9 @@ struct SystemWebView: NSViewRepresentable {
             web.evaluateJavaScript(script, completionHandler: nil)
         }
 
+        /// Internal for the coordinator tests; the script-message path is the only caller in the app.
         @MainActor
-        private func handle(_ inbound: SystemBridgeInbound) {
+        func handle(_ inbound: SystemBridgeInbound) {
             switch inbound {
             case .ready:
                 pageReady = true
@@ -197,7 +223,12 @@ struct SystemWebView: NSViewRepresentable {
                     let (status, data) = try await client.sendReturningStatus(
                         path: call.path, method: call.method, body: call.body, timeout: timeout)
                     let error: String? = (200..<300).contains(status) ? nil : "HTTP \(status)"
-                    self?.reply(id: id, status: status, body: data, error: error)
+                    // The skill library's local paths never reach the page.
+                    var body: Data? = data
+                    if case .skillLibrary = call, (200..<300).contains(status) {
+                        body = SystemBridge.sanitizeSkillLibrary(data)
+                    }
+                    self?.reply(id: id, status: status, body: body, error: error)
                 } catch APIError.noSession {
                     self?.reply(id: id, status: 401, body: nil, error: "signed_out")
                 } catch {
@@ -220,20 +251,20 @@ struct SystemWebView: NSViewRepresentable {
             case .projectGraph:
                 let root = parent.projectRoot
                 Task { @MainActor [weak self] in
-                    var found: CGData?
+                    // The provider runs on the main actor (it reads the Graph view's
+                    // cache); the file read and the encoding run off it.
+                    let provided: Data?
                     if let root {
-                        found = await ProjectGraphRegistry.shared.graph(forProjectRoot: root)
-                        if found == nil {
-                            found = await Task.detached(priority: .utility) {
-                                ProjectGraphFile.load(projectRoot: root)
-                            }.value
-                        }
+                        provided = await ProjectGraphRegistry.shared.graph(forProjectRoot: root)
+                    } else {
+                        provided = nil
                     }
-                    let graph = found
-                    let body = await Task.detached(priority: .utility) {
-                        SystemBridge.graphBodyJSON(graph)
+                    let reply = await Task.detached(priority: .utility) {
+                        SystemBridge.projectGraphReply(provided: provided, loadFile: {
+                            root.flatMap { ProjectGraphFile.load(projectRoot: $0) }
+                        })
                     }.value
-                    self?.replyRaw(id: id, bodyJSON: body)
+                    self?.replyRaw(id: id, reply: reply)
                 }
             case .routines:
                 let routines = RoutinesRegistry.shared.routines(projectId: parent.projectId)
@@ -241,16 +272,17 @@ struct SystemWebView: NSViewRepresentable {
                     let body = await Task.detached(priority: .utility) {
                         SystemBridge.routinesBodyJSON(routines)
                     }.value
-                    self?.replyRaw(id: id, bodyJSON: body)
+                    self?.replyRaw(id: id, reply: SystemBridge.NativeReply(status: 200, bodyJSON: body, error: nil))
                 }
             }
         }
 
         /// Replies with a body that is already JSON text.
         @MainActor
-        private func replyRaw(id: String, bodyJSON: String) {
+        private func replyRaw(id: String, reply: SystemBridge.NativeReply) {
             guard let web = webView,
-                  let script = SystemBridge.responseScript(id: id, status: 200, bodyJSON: bodyJSON, error: nil) else { return }
+                  let script = SystemBridge.responseScript(id: id, status: reply.status,
+                                                           bodyJSON: reply.bodyJSON, error: reply.error) else { return }
             web.evaluateJavaScript(script, completionHandler: nil)
         }
 
