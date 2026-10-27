@@ -8,7 +8,11 @@ name: feature-matrix
 #
 # The Mac rows (a reduced `swift build` per row plus the three quadrant targets)
 # take a full Swift build each, so they run only on workflow_dispatch with
-# `mac: true`, on macos-15 like mac-ci.yml.
+# `mac: true`, on macos-15 like mac-ci.yml, and run ONLY the Mac side (--mac-only).
+#
+# Failure notification: a scheduled run that fails is reported by GitHub's
+# default workflow-failure email to the repository's notification recipients.
+# No issue is opened, so this workflow needs no `issues: write`.
 
 on:
   schedule:
@@ -20,6 +24,10 @@ on:
         type: boolean
         default: false
 
+# Read-only: the matrix only reads the repo and writes to temp dirs.
+permissions:
+  contents: read
+
 concurrency:
   group: feature-matrix-${{ github.ref }}
   cancel-in-progress: true
@@ -28,6 +36,7 @@ jobs:
   server-rows:
     name: Server rows (ubuntu)
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v7
 
@@ -54,7 +63,8 @@ jobs:
     timeout-minutes: 120
     steps:
       # As in mac-ci.yml: no submodules — mac/Package.swift fetches graph-kit by
-      # its pinned revision, and the server rows need only extension/.
+      # its pinned revision. The Mac rows need no server, but the matrix script
+      # imports extension/routes, so extension/ and its npm deps are installed.
       - uses: actions/checkout@v7
 
       - name: Select latest stable Xcode
@@ -70,13 +80,7 @@ jobs:
         working-directory: extension
         run: npm ci --no-audit --no-fund
 
-      - name: Cache SwiftPM
-        uses: actions/cache@v6
-        with:
-          path: mac/.build-fm-*
-          key: fm-spm-${{ runner.os }}-${{ hashFiles('mac/Package.resolved') }}
-          restore-keys: |
-            fm-spm-${{ runner.os }}-
-
-      - name: make feature-matrix (server + Mac rows)
-        run: make feature-matrix FM_ARGS="--all --mac"
+      # No SwiftPM cache: the per-row scratch paths (mac/.build-fm-*) are cold
+      # builds on every run, which keeps the job simple and the cache honest.
+      - name: make feature-matrix (Mac rows only)
+        run: make feature-matrix FM_ARGS="--all --mac-only"

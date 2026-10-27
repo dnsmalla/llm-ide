@@ -81,9 +81,16 @@ if [ "$mac_changed" -eq 1 ]; then
     # build-mac-lite/min/mobile-only), so a build busy in ANY of them wedges the gate.
     mac_root="$(git rev-parse --show-toplevel)/mac"
     busy_dir=""
+    # .build-fm-* are the feature matrix's per-row scratch paths (scripts/feature-matrix.mjs --mac).
     for d in "$mac_root/.build" "$mac_root/.build-lite" "$mac_root/.build-min" "$mac_root/.build-mobile"; do
         if mac_build_busy "$d"; then busy_dir="$d"; break; fi
     done
+    if [ -z "$busy_dir" ]; then
+        for d in "$mac_root"/.build-fm-*; do
+            [ -e "$d" ] || continue
+            if mac_build_busy "$d"; then busy_dir="$d"; break; fi
+        done
+    fi
     if [ -n "$busy_dir" ]; then
         echo "pre-push: a SwiftPM build/test is already using ${busy_dir#"$mac_root"/} — not starting" >&2
         echo "          a second (it would block on the .build lock and wedge the push)." >&2

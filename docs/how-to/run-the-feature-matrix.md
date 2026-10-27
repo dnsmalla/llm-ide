@@ -33,10 +33,13 @@ the row's list, then asserts:
    with `CONTRACT_EXPECT_DISABLED=1` and `CONTRACT_FEATURES=<list>` expects
    `404 feature_disabled` for fixtures of disabled routes instead of skipping them.
 
-**Mac** (only with `--mac`, slow): `swift build --manifest-cache none` with the
-row's `LLMIDE_FEATURES` and its own `--scratch-path mac/.build-fm-<row>`, or
-`make build-mac-<quadrant>` for the three quadrants. Each full build takes
-minutes; the first run per row is a cold build.
+**Mac** (only with `--mac` or `--mac-only`, slow): `swift build --manifest-cache none`
+with the row's `LLMIDE_FEATURES` and its own `--scratch-path mac/.build-fm-<row>`, or
+`make build-mac-<quadrant>` for the three quadrants. The `swift build` rows get
+the same `DEVELOPER_DIR` and `SDKROOT` the Makefile pins (the system-selected
+Xcode and its macOS SDK), so they use the same toolchain as `make regression`.
+Each full build takes minutes; the first run per row is a cold build.
+`--mac-only` runs only this side (no server or live rows).
 
 Routes owned by `doc_gen` (`/generate-doc`, `/generate-docx`) are not gated:
 the Chrome extension calls them. So `doc_gen` off leaves the server's routes
@@ -45,9 +48,10 @@ unchanged, and only its Mac build changes.
 ## Commands
 
 ```bash
-make feature-matrix                                  # every row, server side (~40 s)
+make feature-matrix                                  # every row, server side (~30 s)
 node scripts/feature-matrix.mjs --key doc_gen        # one row, server side
 node scripts/feature-matrix.mjs --key doc_gen --mac  # one row, plus its Mac build
+make feature-matrix FM_ARGS="--all --mac-only"       # every Mac build, no server rows
 make feature-matrix FM_ARGS="--all --mac"            # everything, including Mac builds
 ```
 
@@ -56,15 +60,39 @@ The summary table names the failing rows, and the per-row lines above it give
 the first problems. A failing Mac build writes its full log to the system temp
 directory and names the path.
 
+A server that fails to boot fails only its own row: the reason (the child's
+output tail) is printed, the row is marked failed, and the remaining rows still
+run. Each server is stopped with SIGTERM and SIGKILLed after 5 seconds, and its
+temp directory is removed on every path. Ctrl-C (SIGINT/SIGTERM) stops any
+running servers and removes their temp directories too.
+
+The server environment is built from the operator's environment with every
+`LLMIDE_*`, `ANTHROPIC_*`, `NODE_TEST_CONTEXT` and `NODE_ENV` variable removed,
+then the matrix's own settings are added. The live contract test gets the same
+cleaned environment, so a developer's shell settings cannot change a row.
+
 Run the server rows with local listen permission (the sandbox must allow
 `127.0.0.1` binding).
+
+The pure logic (the closure, the row table, the quadrant selections checked
+against the Makefile's `build-mac-*` lines, the environments, argument parsing)
+is unit-tested in `extension/tests/feature-matrix.test.mjs`, which `make test`
+runs. It boots no servers.
+
+Test hook: `FM_SERVER_ENTRY=<file>` replaces `server.mjs` as the booted entry.
+Point it at a missing file to force every row's boot to fail and check the
+boot-failure summary and cleanup.
 
 ## When it runs
 
 - **Nightly**: `.github/workflows/feature-matrix.yml` runs the server rows on
-  Ubuntu at 03:23 UTC.
+  Ubuntu at 03:23 UTC, with a 15-minute timeout. The workflow has
+  `permissions: contents: read`.
 - **Manually**: `workflow_dispatch` with `mac: true` also runs every Mac row on
-  `macos-15`.
+  `macos-15` (`--mac-only`, 120-minute timeout). No SwiftPM cache is used.
+- **Failures**: a failed scheduled run triggers GitHub's default
+  workflow-failure email. The workflow opens no issue and needs no
+  `issues: write`.
 - **Per change**: not in `make regression` (it boots about ten servers and the
   Mac rows are slow). When a change touches a feature's routes or closure, run
   `--key <row>` for that row. That covers the kit-local check.
