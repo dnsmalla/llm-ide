@@ -46,13 +46,23 @@ enum SystemAllowedCall: Equatable {
     }
 }
 
-/// The native-only data the page may ask for with `{type:'native', id, name}`.
+/// The native-only data the page may ask for with `{type:'native', id, name, ...}`.
 /// These are not server calls: native assembles the answer from app state.
-enum SystemNativeCall: String, Equatable, CaseIterable {
+enum SystemNativeCall: Equatable {
     /// The active project's code graph (`CGData`, as graph-kit's canonical JSON).
     case projectGraph
     /// The active project's scheduled routines (`[RoutineSummary]`).
     case routines
+    /// One file's text from the graph repo, for the code preview. `path` is
+    /// relative to the repo root and already validated (`SystemBridge.validRelativePath`).
+    case file(path: String)
+}
+
+/// One `openFile` message from the page, validated: a repo-relative path and an
+/// optional 1-based line. Confinement to the repo root is checked on use.
+struct SystemOpenFileRequest: Equatable {
+    let path: String
+    let line: Int?
 }
 
 /// One `native` message from the page: a call id and the named call, or nil
@@ -74,16 +84,38 @@ struct SystemBridgeRequest: Equatable {
 ///
 /// Fixed contract shared with the React page (`mac/Sources/LlmIdeMac/Resources/os-view`):
 /// - `{type:'ready'}`: the page has loaded; Swift answers with `llmideConfigure`.
-/// - `{type:'open', target}`: the page asks the shell to show a section.
+/// - `{type:'open', target}`: the page asks the shell to show a place. `target` is one of
+///   `loop` | `autoTasks` | `settings` | `library` | `explorer` | `codeGraph`
+///   (see `SystemBridge.section(forOpenTarget:)`). `explorer` shows the Explorer;
+///   `codeGraph` shows the Graph section's code-graph page. A target whose feature is
+///   off or not compiled in, and any other `target`, is ignored.
+/// - `{type:'openFile', path, line?}`: the page asks Explorer to open a file of the
+///   project's graph repo. `path` is repo-relative (the same paths the graph nodes
+///   carry), `line` an optional 1-based line. Swift shows Explorer with the file open
+///   (at `line` when given). Nothing is answered. A refused message is ignored: `path`
+///   empty, longer than 1024 UTF-8 bytes, absolute, containing NUL or a `..` component,
+///   or `line` not an integer in 1...10000000; and a path that does not resolve (after
+///   symlinks) to a regular file inside the repo root.
 /// - `{type:'request', id, method, path, body?}`: one allowlisted server call.
 ///   Swift answers with `llmideResponse(id, {status, body?, error?})`.
-/// - `{type:'native', id, name}`: one native-only data set, `name` one of
-///   `projectGraph` | `routines` (see `SystemNativeCall`). Answered with the same
-///   `llmideResponse(id, {status, body?, error?})`; an unknown name is `400 not_allowed`.
+/// - `{type:'native', id, name, path?}`: one native-only data set. `name` is one of
+///   `projectGraph` | `routines` | `file` (see `SystemNativeCall`). Answered with the same
+///   `llmideResponse(id, {status, body?, error?})`:
+///   - `projectGraph`, `routines`: as before; an unknown name is `400 not_allowed`.
+///   - `file` (`path` as for `openFile`): read off the main thread, at most 256 KiB.
+///     `200 {path, text, truncated, bytes, language}` where `text` is UTF-8 decoded
+///     leniently, `truncated` is true when the file is larger than 256 KiB (`bytes`
+///     is then the total size), and `language` is one of `swift` `typescript`
+///     `javascript` `json` `markdown` `python` `rust` `go` `java` `kotlin` `c` `cpp`
+///     `css` `html` `yaml` `toml` `shell` from the extension, else null. A file whose
+///     first 8 KiB hold a NUL byte is `200 {path, binary: true, bytes}` with no text.
+///     A missing, refused or non-regular file is `404 not_found`; an invalid `path`
+///     (or missing) is `400 not_allowed`.
 /// - `{type:'subscribe'}` / `{type:'unsubscribe'}`: the change feed on or off.
 enum SystemBridgeInbound: Equatable {
     case ready
     case open(target: String)
+    case openFile(SystemOpenFileRequest)
     case request(SystemBridgeRequest)
     case native(SystemBridgeNativeRequest)
     case subscribe
@@ -101,6 +133,15 @@ enum SystemBridgeInbound: Equatable {
         case "open":
             guard let target = dict["target"] as? String, !target.isEmpty else { return nil }
             return .open(target: target)
+        case "openFile":
+            guard let path = (dict["path"] as? String).flatMap(SystemBridge.validRelativePath) else { return nil }
+            // An absent or null line means none; any other value must be a valid line.
+            var line: Int?
+            if let rawLine = dict["line"], !(rawLine is NSNull) {
+                guard let value = SystemBridge.validLine(rawLine) else { return nil }
+                line = value
+            }
+            return .openFile(SystemOpenFileRequest(path: path, line: line))
         case "subscribe":
             return .subscribe
         case "unsubscribe":
@@ -123,8 +164,16 @@ enum SystemBridgeInbound: Equatable {
             return .request(SystemBridgeRequest(id: id, call: call))
         case "native":
             guard let id = dict["id"] as? String, SystemBridge.isValidRequestId(id) else { return nil }
-            let name = (dict["name"] as? String).flatMap(SystemNativeCall.init(rawValue:))
-            return .native(SystemBridgeNativeRequest(id: id, call: name))
+            let call: SystemNativeCall?
+            switch dict["name"] as? String {
+            case "projectGraph": call = .projectGraph
+            case "routines": call = .routines
+            case "file":
+                // An invalid or missing path is refused with the id, like an unknown name.
+                call = (dict["path"] as? String).flatMap(SystemBridge.validRelativePath).map { .file(path: $0) }
+            default: call = nil
+            }
+            return .native(SystemBridgeNativeRequest(id: id, call: call))
         default:
             return nil
         }
@@ -394,6 +443,91 @@ enum SystemBridge {
         value.map { $0 as Any } ?? NSNull()
     }
 
+    // MARK: File access (openFile and native file)
+
+    /// Longest repo-relative path a page may send, in UTF-8 bytes.
+    static let maxFilePathBytes = 1024
+    /// Highest line an `openFile` may name.
+    static let maxLine = 10_000_000
+    /// Most bytes of one file the native `file` call returns.
+    static let maxFileReadBytes = 256 * 1024
+    /// The leading bytes searched for a NUL to call a file binary.
+    static let binarySniffBytes = 8 * 1024
+
+    /// The file extensions the code preview names a language for, and the
+    /// language each one is. Anything else (or no extension) is `null`.
+    static let languageByExtension: [String: String] = [
+        "swift": "swift", "ts": "typescript", "tsx": "typescript",
+        "js": "javascript", "mjs": "javascript", "json": "json", "md": "markdown",
+        "py": "python", "rs": "rust", "go": "go", "java": "java", "kt": "kotlin",
+        "c": "c", "h": "c", "cpp": "cpp", "css": "css", "html": "html",
+        "yml": "yaml", "yaml": "yaml", "toml": "toml", "sh": "shell",
+    ]
+
+    /// A path from the page, when it is a usable repo-relative path: non-empty,
+    /// at most `maxFilePathBytes` UTF-8 bytes, not absolute, no NUL, and no `..`
+    /// component. Nil otherwise. Whether it stays inside the repo is decided by
+    /// `confinedFile` against the real file system.
+    static func validRelativePath(_ raw: String) -> String? {
+        guard !raw.isEmpty, raw.utf8.count <= maxFilePathBytes else { return nil }
+        guard !raw.unicodeScalars.contains("\u{0}"), !raw.hasPrefix("/") else { return nil }
+        guard !raw.split(separator: "/", omittingEmptySubsequences: false).contains("..") else { return nil }
+        return raw
+    }
+
+    /// A line from the page: an integer (not a boolean, not fractional) in `1...maxLine`.
+    static func validLine(_ value: Any) -> Int? {
+        // JSON `true` bridges to an NSNumber whose type is CFBoolean; refuse it
+        // rather than read it as 1.
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let d = number.doubleValue
+        guard d.rounded() == d, d >= 1, d <= Double(maxLine) else { return nil }
+        return Int(d)
+    }
+
+    /// The file `relativePath` names under `repoRoot`, when it resolves (symlinks
+    /// followed on both sides) to a regular file inside the root. Nil for an escape
+    /// through a symlink or `..`, a missing file, a directory, or anything else.
+    static func confinedFile(relativePath: String, repoRoot: URL) -> URL? {
+        let root = repoRoot.resolvingSymlinksInPath().standardizedFileURL
+        let candidate = root.appendingPathComponent(relativePath)
+            .resolvingSymlinksInPath().standardizedFileURL
+        let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
+        guard candidate.path.hasPrefix(prefix), candidate.path != root.path else { return nil }
+        guard let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey]),
+              values.isRegularFile == true else { return nil }
+        return candidate
+    }
+
+    /// The answer to a native `file` call: the confined file's text, a binary marker,
+    /// or `404 not_found`. Reads at most `maxFileReadBytes`. Blocking file I/O: call
+    /// it off the main thread.
+    static func fileNativeReply(relativePath: String, repoRoot: URL?) -> NativeReply {
+        let notFound = NativeReply(status: 404, bodyJSON: "null", error: "not_found")
+        guard let repoRoot, let url = confinedFile(relativePath: relativePath, repoRoot: repoRoot),
+              let handle = try? FileHandle(forReadingFrom: url) else { return notFound }
+        defer { try? handle.close() }
+        let head = (try? handle.read(upToCount: maxFileReadBytes)) ?? Data()
+        let total = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? head.count
+        let body: [String: Any]
+        if head.prefix(binarySniffBytes).contains(0) {
+            body = ["path": relativePath, "binary": true, "bytes": total]
+        } else {
+            let ext = (relativePath as NSString).pathExtension.lowercased()
+            body = [
+                "path": relativePath,
+                "text": String(decoding: head, as: UTF8.self),
+                "truncated": total > maxFileReadBytes,
+                "bytes": total,
+                "language": nullable(languageByExtension[ext]),
+            ]
+        }
+        guard let json = jsonObjectFragment(body) else {
+            return NativeReply(status: 500, bodyJSON: "null", error: "encode_failed")
+        }
+        return NativeReply(status: 200, bodyJSON: json, error: nil)
+    }
+
     // MARK: open target mapping
 
     /// Maps a page's `open` target to a shell section. Returns `nil` for an
@@ -411,6 +545,8 @@ enum SystemBridge {
         case "autoTasks": section = .autoCode
         case "settings":  section = .settings
         case "library":   section = .library
+        case "explorer":  section = .explorer
+        case "codeGraph": section = .codeGraph
         default:          return nil
         }
         if let feature = section.backingFeature, !isEnabled(feature) { return nil }

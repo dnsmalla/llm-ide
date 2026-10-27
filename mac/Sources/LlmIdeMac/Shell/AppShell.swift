@@ -771,7 +771,7 @@ struct AppShell: View {
             }
         case .codeGraph:
             if registry.isEnabled(.codeGraph3D) {
-                GraphSectionView(api: api) { target in shell.section = target }
+                GraphSectionView(api: api, onOpen: openFromSystem, onOpenFile: openSystemFile)
             } else {
                 DisabledFeaturePlaceholderView(
                     featureName: "3D Code Graph",
@@ -787,8 +787,24 @@ struct AppShell: View {
             }
         case .settings:  SettingsView(api: api)
         case .system:
-            SystemView(api: api) { target in shell.section = target }
+            SystemView(api: api, onOpen: openFromSystem, onOpenFile: openSystemFile)
         }
+    }
+
+    // ── System page navigation ──────────────────────────────────
+    /// The System page's `open` target. `codeGraph` lands on the code-graph page
+    /// (the Graph section's other page), not on the System page.
+    private func openFromSystem(_ target: ShellSection) {
+        if target == .codeGraph { GraphSectionPage.request(.code) }
+        shell.section = target
+    }
+
+    /// The System page's `openFile`: Explorer opens the file. Ignored when the
+    /// File Explorer feature is off, so the page cannot route into a disabled one.
+    private func openSystemFile(_ url: URL, _ line: Int?) {
+        guard registry.isEnabled(.fileExplorer) else { return }
+        shell.pendingOpenFile = ShellState.PendingOpenFile(url: url, line: line)
+        shell.section = .explorer
     }
 
     // ── Issues / Gantt routing ──────────────────────────────────

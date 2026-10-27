@@ -12,6 +12,8 @@ struct SystemView: View {
     let api: LlmIdeAPIClient
     /// Shows a section the page asked for (`open` message). Shell wires it.
     let onOpen: (ShellSection) -> Void
+    /// Opens a file the page asked for in Explorer (`openFile` message). Shell wires it.
+    let onOpenFile: (URL, Int?) -> Void
 
     @EnvironmentObject var session: SessionStore
     @EnvironmentObject var theme: ThemeStore
@@ -25,7 +27,8 @@ struct SystemView: View {
             projectName: projectStore.activeProject?.bundle.displayName,
             projectRoot: projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath, isDirectory: true) },
             projectId: projectStore.activeProject?.bundle.id,
-            onOpen: onOpen)
+            onOpen: onOpen,
+            onOpenFile: onOpenFile)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }

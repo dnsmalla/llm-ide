@@ -56,6 +56,32 @@ final class ShellState {
     /// delivered before any observer existed.
     var pendingSearchInclude: String?
 
+    /// A file the System page asked to open in Explorer's editor (`openFile`),
+    /// with the 1-based line to reveal when given.
+    ///
+    /// A stored property for the same reason as `pendingSearchInclude`: switching
+    /// to Explorer is what mounts it, so Explorer reads this handoff when it
+    /// mounts (or on change, when already mounted) rather than from a notification.
+    struct PendingOpenFile: Equatable {
+        let url: URL
+        let line: Int?
+        /// Distinguishes two requests for the same file, so `onChange` fires for each.
+        let id = UUID()
+
+        init(url: URL, line: Int?) {
+            self.url = url
+            self.line = line
+        }
+    }
+
+    var pendingOpenFile: PendingOpenFile?
+
+    /// Read and clear in one step, so a handoff applies exactly once.
+    func takePendingOpenFile() -> PendingOpenFile? {
+        defer { pendingOpenFile = nil }
+        return pendingOpenFile
+    }
+
     /// Read and clear in one step, so a handoff applies exactly once and does
     /// not re-narrow the search every time the user returns to the panel.
     ///

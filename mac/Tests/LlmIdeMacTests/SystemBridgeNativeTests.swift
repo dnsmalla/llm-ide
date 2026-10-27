@@ -443,7 +443,7 @@ final class SystemBridgeNativeTests: XCTestCase {
         let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
         let session = SessionStore(server: "http://test-\(UUID().uuidString.lowercased()).invalid")
         let view = SystemWebView(api: api, session: session, theme: .dark, projectName: nil,
-                                 projectRoot: nil, projectId: nil, onOpen: { _ in })
+                                 projectRoot: nil, projectId: nil, onOpen: { _ in }, onOpenFile: { _, _ in })
         let coordinator = SystemWebView.Coordinator(view)
         let web = WKWebView(frame: .zero, configuration: WKWebViewConfiguration())
         web.navigationDelegate = coordinator

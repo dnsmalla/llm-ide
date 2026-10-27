@@ -41,6 +41,8 @@ struct GraphSectionView: View {
     let api: LlmIdeAPIClient
     /// Shows a section the System page asked for (`open` message). AppShell wires it.
     let onOpen: (ShellSection) -> Void
+    /// Opens a file the System page asked for in Explorer (`openFile`). AppShell wires it.
+    let onOpenFile: (URL, Int?) -> Void
 
     @AppStorage(GraphSectionPage.storageKey) private var pageRaw = GraphSectionPage.default.rawValue
 
@@ -65,7 +67,7 @@ struct GraphSectionView: View {
             Group {
                 switch page {
                 case .system:
-                    SystemView(api: api, onOpen: onOpen)
+                    SystemView(api: api, onOpen: onOpen, onOpenFile: onOpenFile)
                 case .code:
                     FeatureCatalog.graphMainPane()
                 }

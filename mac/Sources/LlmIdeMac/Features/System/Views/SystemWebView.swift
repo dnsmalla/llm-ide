@@ -1,6 +1,7 @@
 import SwiftUI
 import WebKit
 import Combine
+import OSLog
 
 /// Hosts the bundled OS page (`Resources/os-view/index.html`) in a `WKWebView`.
 ///
@@ -31,6 +32,10 @@ struct SystemWebView: NSViewRepresentable {
     /// Called with a section the page asked to open (already checked against
     /// the feature registry). The shell decides how to show it.
     let onOpen: (ShellSection) -> Void
+    /// Called with a file the page asked to open, already confined to the project's
+    /// graph repo (`SystemBridge.confinedFile`), and the line when given. The shell
+    /// shows Explorer with it open.
+    let onOpenFile: (URL, Int?) -> Void
 
     func makeCoordinator() -> Coordinator { Coordinator(self) }
 
@@ -83,6 +88,8 @@ struct SystemWebView: NSViewRepresentable {
         init(_ parent: SystemWebView) {
             self.parent = parent
         }
+
+        private static let log = Logger(subsystem: "com.llmide.macapp", category: "SystemBridge")
 
         /// Whether the native change feed exists (it is created on the page's `subscribe`).
         var hasFeed: Bool { feed != nil }
@@ -190,6 +197,14 @@ struct SystemWebView: NSViewRepresentable {
             case .open(let target):
                 guard let section = SystemBridge.section(forOpenTarget: target) else { return }
                 parent.onOpen(section)
+            case .openFile(let request):
+                // The page's path is confined to the graph repo before anything opens.
+                guard let repoRoot = graphRepoRoot(),
+                      let url = SystemBridge.confinedFile(relativePath: request.path, repoRoot: repoRoot) else {
+                    Self.log.debug("openFile refused: no file in the project's graph repo")
+                    return
+                }
+                parent.onOpenFile(url, request.line)
             case .request(let request):
                 perform(request)
             case .native(let request):
@@ -274,7 +289,23 @@ struct SystemWebView: NSViewRepresentable {
                     }.value
                     self?.replyRaw(id: id, reply: SystemBridge.NativeReply(status: 200, bodyJSON: body, error: nil))
                 }
+            case .file(let path):
+                // The read is blocking file I/O: it runs off the main thread.
+                let repoRoot = graphRepoRoot()
+                Task { @MainActor [weak self] in
+                    let reply = await Task.detached(priority: .utility) {
+                        SystemBridge.fileNativeReply(relativePath: path, repoRoot: repoRoot)
+                    }.value
+                    self?.replyRaw(id: id, reply: reply)
+                }
             }
+        }
+
+        /// The root the page's repo-relative paths are resolved against: the same
+        /// repo the code graph is built from. Nil when no project is open.
+        @MainActor
+        private func graphRepoRoot() -> URL? {
+            parent.projectRoot.flatMap { RepoGraphLocator.repoToGraph(projectRoot: $0) }
         }
 
         /// Replies with a body that is already JSON text.
@@ -309,7 +340,10 @@ struct SystemWebView: NSViewRepresentable {
         // MARK: WKScriptMessageHandler
 
         func userContentController(_ controller: WKUserContentController, didReceive message: WKScriptMessage) {
-            guard let inbound = SystemBridgeInbound.decode(message.body) else { return }
+            guard let inbound = SystemBridgeInbound.decode(message.body) else {
+                Self.log.debug("ignored a malformed or refused bridge message")
+                return
+            }
             Task { @MainActor [weak self] in self?.handle(inbound) }
         }
 

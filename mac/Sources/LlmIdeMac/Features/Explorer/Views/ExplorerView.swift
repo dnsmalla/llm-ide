@@ -57,6 +57,9 @@ struct ExplorerView: View {
     // Editor tabs.
     @State private var tabs: [URL] = []
     @State private var activeTab: URL?
+    /// A line to reveal in `revealTargetURL` (the System page's `openFile` with a line).
+    @State private var revealTarget: MonacoRevealRequest?
+    @State private var revealTargetURL: URL?
 
     // File-op prompt state: a create/rename sheet, a delete confirmation, and
     // an inline error for the sheet / an alert for delete failures.
@@ -238,6 +241,13 @@ struct ExplorerView: View {
             guard restored, treeRoot?.rawPath == root.path else { return }
             treeStateRestored = true
             store.startWatching(base)
+            // Taken only after the tabs were reset above for this root, so a file
+            // handed over with the switch (System's `openFile`) is not wiped.
+            openPendingFile()
+        }
+        // A file handed over while Explorer is already mounted (System's `openFile`).
+        .onChange(of: shell.pendingOpenFile) { _, _ in
+            openPendingFile()
         }
         // Persist expansion/selection as they change (cheap: one small JSON
         // blob), so a crash or a force-quit doesn't lose the tree's shape.
@@ -459,7 +469,8 @@ struct ExplorerView: View {
                 Divider()
             }
             if let url = activeTab {
-                FileDetailView(url: url)
+                FileDetailView(url: url,
+                               revealTarget: url == revealTargetURL ? revealTarget : nil)
                     .id(url)
             } else {
                 VStack(spacing: 16) {
@@ -493,6 +504,18 @@ struct ExplorerView: View {
     private func open(_ url: URL) {
         if !tabs.contains(url) { tabs.append(url) }
         activeTab = url
+    }
+
+    /// Opens the file the System page handed over (`ShellState.pendingOpenFile`),
+    /// at its line when it has one. Read and cleared in one step.
+    private func openPendingFile() {
+        guard let request = shell.takePendingOpenFile() else { return }
+        let url = ExplorerPaths.canonical(request.url)
+        open(url)
+        if let line = request.line {
+            revealTargetURL = url
+            revealTarget = MonacoRevealRequest(line: line)
+        }
     }
 
     private func refreshGit() async {
