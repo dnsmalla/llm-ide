@@ -59,4 +59,57 @@ final class DocCommandTests: XCTestCase {
     func testSlugSanitizes() {
         XCTAssertEqual(DocCommand.slug(for: "Release  Notes!"), "release-notes")
     }
+
+    // MARK: - Title line: only the first `# ` line is the title
+
+    func testSecondH1InBodyIsKept() {
+        let md = "# Summarize\n\n<!-- llmide:doc-command -->\n\nFirst point.\n# Second heading\nLast point."
+        XCTAssertEqual(DocCommand.instruction(from: md),
+                       "First point.\n# Second heading\nLast point.")
+        XCTAssertEqual(DocCommand.displayName(from: md, folderName: "summarize"), "Summarize")
+    }
+
+    func testOnlyTheFirstTitleLineIsDropped() {
+        let md = "# Title\n# Not a title\n\nBody."
+        XCTAssertEqual(DocCommand.instruction(from: md), "# Not a title\n\nBody.")
+        XCTAssertEqual(DocCommand.displayName(from: md, folderName: "x"), "Title")
+    }
+
+    func testFencedShellCommentIsKept() {
+        let md = """
+        # Install
+
+        Run these steps:
+
+        ```bash
+        # install deps
+        npm ci
+        # run tests
+        npm test
+        ```
+        """
+        let instruction = DocCommand.instruction(from: md)
+        XCTAssertTrue(instruction.contains("# install deps"), instruction)
+        XCTAssertTrue(instruction.contains("# run tests"), instruction)
+        XCTAssertFalse(instruction.hasPrefix("# Install"), instruction)
+        XCTAssertEqual(DocCommand.displayName(from: md, folderName: "install"), "Install")
+    }
+
+    func testBodyWithoutAnyHashLineIsUnchanged() {
+        let md = "Just a body.\nTwo lines, no heading."
+        XCTAssertEqual(DocCommand.instruction(from: md), "Just a body.\nTwo lines, no heading.")
+        XCTAssertEqual(DocCommand.displayName(from: md, folderName: "just-a-body"), "Just A Body")
+    }
+
+    func testCRLFBodyDropsOnlyTheTitleAndKeepsParagraphs() {
+        let md = "# Summarize\r\n\r\n<!-- llmide:doc-command -->\r\n\r\nFirst.\r\n# Kept\r\n\r\nLast."
+        XCTAssertEqual(DocCommand.instruction(from: md), "First.\n# Kept\n\nLast.")
+        XCTAssertEqual(DocCommand.displayName(from: md, folderName: "summarize"), "Summarize")
+    }
+
+    func testIndentedTitleIsTheSameLineForNameAndInstruction() {
+        let md = "   # Indented\n\nBody."
+        XCTAssertEqual(DocCommand.displayName(from: md, folderName: "x"), "Indented")
+        XCTAssertEqual(DocCommand.instruction(from: md), "Body.")
+    }
 }

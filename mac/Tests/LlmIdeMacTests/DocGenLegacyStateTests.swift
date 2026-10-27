@@ -460,4 +460,83 @@ final class DocGenLegacyStateTests: XCTestCase {
         XCTAssertEqual(brief.surface, .visual)
         XCTAssertEqual(store.commands(for: .doc).map(\.folderName), ["summarize"])
     }
+
+    // MARK: - Quarantine never overwrites an earlier damaged copy
+
+    private let fixedNow = Date(timeIntervalSince1970: 1_700_000_000)
+
+    private func directoryEntries(prefix: String) throws -> [String] {
+        try quarantined(prefix: prefix).map(\.lastPathComponent).sorted()
+    }
+
+    func testDocTemplateQuarantineTwoCorruptionsInOneSecondKeepBothCopies() throws {
+        let url = dir.appendingPathComponent("doc-templates.json")
+        let first = Data("first damage { ".utf8)
+        let second = Data("second damage [".utf8)
+
+        try first.write(to: url)
+        DocTemplateStore(storeURL: url, now: { self.fixedNow }).bootstrap()
+        try second.write(to: url)
+        DocTemplateStore(storeURL: url, now: { self.fixedNow }).bootstrap()
+
+        let names = try directoryEntries(prefix: "doc-templates.json.corrupt-")
+        XCTAssertEqual(names, ["doc-templates.json.corrupt-1700000000",
+                               "doc-templates.json.corrupt-1700000000-2"])
+        let contents = try names.map { try Data(contentsOf: dir.appendingPathComponent($0)) }
+        XCTAssertEqual(contents, [first, second], "both damaged files survive byte-exact, in order")
+    }
+
+    func testDocTemplateFailedQuarantineBlocksSaveSoTheDamagedFileSurvives() throws {
+        let url = dir.appendingPathComponent("doc-templates.json")
+        let garbage = Data("{ damaged but the only copy".utf8)
+        try garbage.write(to: url)
+
+        // A read-only folder makes the move aside fail, so the damaged file stays.
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path) }
+        let store = templateStore()
+        store.bootstrap()
+        XCTAssertTrue(store.customTemplates.isEmpty)
+        XCTAssertEqual(try Data(contentsOf: url), garbage)
+
+        // Writable again: without the guard the next save would replace the file.
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        store.add(DocTemplate(id: UUID(), name: "Blocked", sections: ["A"]))
+
+        XCTAssertEqual(try Data(contentsOf: url), garbage, "the damaged original is not overwritten")
+        XCTAssertTrue(try quarantined(prefix: "doc-templates.json.corrupt-").isEmpty)
+    }
+
+    func testDocGenOutputQuarantineTwoCorruptionsInOneSecondKeepBothCopies() throws {
+        let first = Data("first damage".utf8)
+        let second = Data("second damage".utf8)
+        let url = dir.appendingPathComponent("doc-gen-output.json")
+
+        try first.write(to: url)
+        DocGenOutputStore(storeDirectory: dir, now: { self.fixedNow }).activate(projectRoot: alphaRoot)
+        try second.write(to: url)
+        DocGenOutputStore(storeDirectory: dir, now: { self.fixedNow }).activate(projectRoot: alphaRoot)
+
+        let names = try directoryEntries(prefix: "doc-gen-output.json.corrupt-")
+        XCTAssertEqual(names, ["doc-gen-output.json.corrupt-1700000000",
+                               "doc-gen-output.json.corrupt-1700000000-2"])
+        let contents = try names.map { try Data(contentsOf: dir.appendingPathComponent($0)) }
+        XCTAssertEqual(contents, [first, second])
+    }
+
+    func testDocGenOutputFailedQuarantineBlocksSaveSoTheDamagedFileSurvives() throws {
+        let url = dir.appendingPathComponent("doc-gen-output.json")
+        let garbage = Data("not a dictionary".utf8)
+        try garbage.write(to: url)
+
+        try FileManager.default.setAttributes([.posixPermissions: 0o500], ofItemAtPath: dir.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path) }
+        let store = outputStore()
+        store.activate(projectRoot: alphaRoot)
+        try FileManager.default.setAttributes([.posixPermissions: 0o700], ofItemAtPath: dir.path)
+        store.update(DocGenOutputConfig(localFolderPath: "/Users/example/new"))
+
+        XCTAssertEqual(try Data(contentsOf: url), garbage, "the damaged original is not overwritten")
+        XCTAssertTrue(try quarantined(prefix: "doc-gen-output.json.corrupt-").isEmpty)
+    }
 }

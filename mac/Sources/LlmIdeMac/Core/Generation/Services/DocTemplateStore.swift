@@ -68,8 +68,17 @@ final class DocTemplateStore: ObservableObject {
         return support.appendingPathComponent("com.llmide.macapp/doc-templates.json")
     }
 
-    init(storeURL: URL? = nil) {
+    /// Set when a damaged store file could not be moved aside. The file is
+    /// then the only copy of the user's templates, so `save()` is blocked for
+    /// the rest of this run rather than overwriting it.
+    private var saveBlocked = false
+
+    /// Clock for the quarantine file name. Tests inject a fixed date.
+    private let now: () -> Date
+
+    init(storeURL: URL? = nil, now: @escaping () -> Date = { Date() }) {
         self.storeURLOverride = storeURL
+        self.now = now
         // Disk read deferred until `bootstrap()` is called from the
         // AppShell's first `.task` tick so LlmIdeMacApp.init stays
         // cheap and the first SwiftUI frame isn't blocked on JSON
@@ -286,20 +295,22 @@ final class DocTemplateStore: ObservableObject {
         do {
             customTemplates = try AppJSON.decoder.decode([DocTemplate].self, from: data)
         } catch {
-            let ts = Int(Date().timeIntervalSince1970)
-            let backup = storeURL.deletingLastPathComponent()
-                .appendingPathComponent("doc-templates.json.corrupt-\(ts)")
             do {
-                try FileManager.default.moveItem(at: storeURL, to: backup)
-                logger.warning("Corrupt store renamed to \(backup.path): \(error.localizedDescription)")
-            } catch {
-                logger.error("Failed to rename corrupt store: \(error.localizedDescription)")
+                let aside = try DamagedFileQuarantine.setAside(storeURL, now: now())
+                logger.warning("Corrupt store moved to \(aside.lastPathComponent, privacy: .public): \(error.localizedDescription, privacy: .public)")
+            } catch let moveError {
+                saveBlocked = true
+                logger.error("Corrupt store could not be moved aside, so saving is blocked: \(moveError.localizedDescription, privacy: .public)")
             }
             customTemplates = []
         }
     }
 
     private func save() {
+        guard !saveBlocked else {
+            logger.error("doc templates not saved: the damaged store file is still in place")
+            return
+        }
         let dir = storeURL.deletingLastPathComponent()
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
         let file = StoreFile(templates: customTemplates)

@@ -15,6 +15,11 @@ final class DocGenOutputStore: ObservableObject {
     private var currentKey: String?
     private var hasBootstrapped = false
     private let storeDirectory: URL?
+    /// Set when an unreadable file could not be moved aside. Saving is then
+    /// blocked for the rest of this run so the damaged file is not overwritten.
+    private var saveBlocked = false
+    /// Clock for the quarantine file name. Tests inject a fixed date.
+    private let now: () -> Date
 
     private var storeURL: URL {
         if let dir = storeDirectory {
@@ -28,8 +33,9 @@ final class DocGenOutputStore: ObservableObject {
         return support.appendingPathComponent("com.llmide.macapp/doc-gen-output.json")
     }
 
-    init(storeDirectory: URL? = nil) {
+    init(storeDirectory: URL? = nil, now: @escaping () -> Date = { Date() }) {
         self.storeDirectory = storeDirectory
+        self.now = now
         // Disk read deferred to `bootstrap()` so app init stays cheap — same
         // reasoning as DocTemplateStore.
     }
@@ -73,13 +79,21 @@ final class DocGenOutputStore: ObservableObject {
             // Move the unreadable file aside instead of letting the next
             // `update()` overwrite it with only the current project — that
             // silently deleted every other project's output settings.
-            let aside = storeURL.appendingPathExtension("corrupt-\(Int(Date().timeIntervalSince1970))")
-            try? FileManager.default.moveItem(at: storeURL, to: aside)
-            logger.error("load failed (moved to \(aside.lastPathComponent, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+            do {
+                let aside = try DamagedFileQuarantine.setAside(storeURL, now: now())
+                logger.error("load failed (moved to \(aside.lastPathComponent, privacy: .public)): \(error.localizedDescription, privacy: .public)")
+            } catch let moveError {
+                saveBlocked = true
+                logger.error("load failed and the file could not be moved aside, so saving is blocked: \(moveError.localizedDescription, privacy: .public)")
+            }
         }
     }
 
     private func save() {
+        guard !saveBlocked else {
+            logger.error("doc-gen output not saved: the damaged store file is still in place")
+            return
+        }
         do {
             try FileManager.default.createDirectory(
                 at: storeURL.deletingLastPathComponent(),

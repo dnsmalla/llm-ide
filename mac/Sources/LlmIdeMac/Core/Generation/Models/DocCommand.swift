@@ -74,13 +74,38 @@ struct DocCommand: Identifiable, Codable, Equatable {
 
     // MARK: - Markdown parsing
 
-    /// Instruction body: everything except the `# Title` line and the marker.
+    /// Lines of a command file. `Character.isNewline` treats a CRLF pair as one
+    /// separator, so CRLF files do not gain doubled blank lines.
+    private static func lines(of markdown: String) -> [String] {
+        markdown.split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
+            .map(String.init)
+    }
+
+    /// The title line is the FIRST line whose trimmed form starts with `# `.
+    /// Only that line is the title; any later `# ` line (a markdown H1 in the
+    /// body, or a `# comment` inside a fenced shell block) is content.
+    private static func isTitleLine(_ line: String) -> Bool {
+        line.trimmingCharacters(in: .whitespaces).hasPrefix("# ")
+    }
+
+    /// The title text of a title line, trimmed the same way for every caller.
+    private static func titleText(of line: String) -> String {
+        String(line.trimmingCharacters(in: .whitespaces).dropFirst(2))
+            .trimmingCharacters(in: .whitespaces)
+    }
+
+    /// Instruction body: everything except the title line and the marker.
     static func instruction(from markdown: String) -> String {
-        let body = markdown
-            .components(separatedBy: .newlines)
+        var titleDropped = false
+        let body = lines(of: markdown)
             .filter { line in
+                // Drop only the first `# ` line: that is the title that
+                // `displayName(from:folderName:)` also reads.
+                if !titleDropped && isTitleLine(line) {
+                    titleDropped = true
+                    return false
+                }
                 let trimmed = line.trimmingCharacters(in: .whitespaces)
-                if trimmed.hasPrefix("# ") { return false }
                 // Matches the marker in EITHER form — bare, or carrying
                 // `surface=visual`. An equality check against the bare marker
                 // left the attributed line in the instruction body, so the
@@ -93,13 +118,12 @@ struct DocCommand: Identifiable, Codable, Equatable {
         return body.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Display name from `# Title` or a humanized folder slug.
+    /// Display name from the title line or a humanized folder slug. Reads the
+    /// same first title line that `instruction(from:)` drops.
     static func displayName(from markdown: String, folderName: String) -> String {
-        for line in markdown.components(separatedBy: .newlines) {
-            if line.hasPrefix("# ") {
-                let title = String(line.dropFirst(2)).trimmingCharacters(in: .whitespaces)
-                if !title.isEmpty { return title }
-            }
+        if let line = lines(of: markdown).first(where: isTitleLine) {
+            let title = titleText(of: line)
+            if !title.isEmpty { return title }
         }
         return folderName
             .replacingOccurrences(of: "-", with: " ")
