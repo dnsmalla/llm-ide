@@ -23,7 +23,13 @@ final class ShellState {
     /// `Section.resolveHome(...)` right after a project becomes active (see
     /// `existingShellContent`'s `onAppear`), so this default never actually
     /// renders once a project is open.
-    var section: Section = .explorer
+    var section: Section = .explorer {
+        didSet {
+            // A file handed to Explorer is only for Explorer: leaving it for another
+            // section drops the handoff, so it cannot apply on a later visit.
+            if section != .explorer { pendingOpenFile = nil }
+        }
+    }
     var librarySelection: LibrarySelection?
 
     var selectedMeetingId: String? {
@@ -80,6 +86,12 @@ final class ShellState {
     func takePendingOpenFile() -> PendingOpenFile? {
         defer { pendingOpenFile = nil }
         return pendingOpenFile
+    }
+
+    /// Drops an unconsumed handoff, e.g. when Explorer's restore finds the project
+    /// has changed, so the file never opens in a project it was not chosen for.
+    func discardPendingOpenFile() {
+        pendingOpenFile = nil
     }
 
     /// Read and clear in one step, so a handoff applies exactly once and does

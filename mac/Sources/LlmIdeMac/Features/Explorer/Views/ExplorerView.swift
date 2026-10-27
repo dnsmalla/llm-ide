@@ -238,7 +238,14 @@ struct ExplorerView: View {
             // The Bool is the load-bearing signal now; the `rawPath` check
             // stays as defence in depth against an outright project switch.
             let restored = await store.restoreState(for: base)
-            guard restored, treeRoot?.rawPath == root.path else { return }
+            // The project changed under this restore: a handoff pending for the old
+            // project must not open in the new one. A superseded restore for the same
+            // root (`restored` false) leaves it for the newer run to apply.
+            guard treeRoot?.rawPath == root.path else {
+                shell.discardPendingOpenFile()
+                return
+            }
+            guard restored else { return }
             treeStateRestored = true
             store.startWatching(base)
             // Taken only after the tabs were reset above for this root, so a file
@@ -248,6 +255,11 @@ struct ExplorerView: View {
         // A file handed over while Explorer is already mounted (System's `openFile`).
         .onChange(of: shell.pendingOpenFile) { _, _ in
             openPendingFile()
+        }
+        // Switching to another tab ends a line reveal that belonged to the old one,
+        // so coming back to the file later does not jump to the stale line.
+        .onChange(of: activeTab) { _, tab in
+            if tab != revealTargetURL { clearReveal() }
         }
         // Persist expansion/selection as they change (cheap: one small JSON
         // blob), so a crash or a force-quit doesn't lose the tree's shape.
@@ -504,6 +516,18 @@ struct ExplorerView: View {
     private func open(_ url: URL) {
         if !tabs.contains(url) { tabs.append(url) }
         activeTab = url
+        // Any open ends the previous line reveal: a tree click on the same file
+        // must open it at the top, not at the stale line. `openPendingFile` sets
+        // a new reveal after this call.
+        clearReveal()
+    }
+
+    /// Forgets the line reveal. `FileDetailView` applies it inside its async load,
+    /// after this view has rendered, so the reveal is dropped on the next open or
+    /// tab switch rather than the instant it is applied.
+    private func clearReveal() {
+        revealTarget = nil
+        revealTargetURL = nil
     }
 
     /// Opens the file the System page handed over (`ShellState.pendingOpenFile`),

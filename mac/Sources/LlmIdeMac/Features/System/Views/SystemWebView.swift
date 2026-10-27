@@ -199,12 +199,24 @@ struct SystemWebView: NSViewRepresentable {
                 parent.onOpen(section)
             case .openFile(let request):
                 // The page's path is confined to the graph repo before anything opens.
-                guard let repoRoot = graphRepoRoot(),
-                      let url = SystemBridge.confinedFile(relativePath: request.path, repoRoot: repoRoot) else {
-                    Self.log.debug("openFile refused: no file in the project's graph repo")
+                // The check does file-system calls, so it runs off the main thread;
+                // navigation hops back to the main actor.
+                guard let repoRoot = graphRepoRoot() else {
+                    Self.log.debug("openFile refused: no project graph repo")
                     return
                 }
-                parent.onOpenFile(url, request.line)
+                let relativePath = request.path
+                let line = request.line
+                Task { @MainActor [weak self] in
+                    let url = await Task.detached(priority: .utility) {
+                        SystemBridge.confinedFile(relativePath: relativePath, repoRoot: repoRoot)
+                    }.value
+                    guard let url, let self else {
+                        Self.log.debug("openFile refused: no file in the project's graph repo")
+                        return
+                    }
+                    self.parent.onOpenFile(url, line)
+                }
             case .request(let request):
                 perform(request)
             case .native(let request):

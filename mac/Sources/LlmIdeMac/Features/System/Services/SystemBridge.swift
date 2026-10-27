@@ -95,7 +95,24 @@ struct SystemBridgeRequest: Equatable {
 ///   (at `line` when given). Nothing is answered. A refused message is ignored: `path`
 ///   empty, longer than 1024 UTF-8 bytes, absolute, containing NUL or a `..` component,
 ///   or `line` not an integer in 1...10000000; and a path that does not resolve (after
-///   symlinks) to a regular file inside the repo root.
+///   symlinks) to a regular file inside the repo root, or that is refused by the file
+///   rules below (`SystemBridge.confinedFile`). The check runs off the main thread.
+///
+///   File rules (`openFile` and `file`), applied to the request path AND to the path
+///   after symlinks, relative to the resolved root, component-wise and case-insensitively:
+///   - Root (`SystemBridge.isOverBroadRoot`): refused when the repo root is a symlink
+///     before resolution, or resolves to `/`, the user's home directory, any ancestor of
+///     it, or one of `/Users` `/Volumes` `/private` `/System` `/Library` `/Applications`.
+///   - Directories refused at any depth: `.git` `.ssh` `.gnupg` `.aws` `.kube` `.docker`.
+///   - Last component refused by glob: `.env` `.env.*` `*.pem` `*.key` `*.p12` `*.pfx`
+///     `id_rsa*` `id_ed25519*` `id_ecdsa*` `id_dsa*` `*.keychain*` `.netrc` `.npmrc`
+///     `.pypirc` `credentials*` `*.mobileprovision`.
+///   - `file` only (it returns text to the page): a last component containing `secret`
+///     or `token` is also refused. `openFile` does not apply this fragment rule.
+///   - Known limit, accepted: a hard link to a file inside the root is followed like any
+///     regular file, so a link made inside the repo can expose content it names outside
+///     it. Symlinks are refused; hard links cannot be told apart from the file itself.
+///   - Refusals are indistinguishable from a missing file: `404 not_found`, no hint.
 /// - `{type:'request', id, method, path, body?}`: one allowlisted server call.
 ///   Swift answers with `llmideResponse(id, {status, body?, error?})`.
 /// - `{type:'native', id, name, path?}`: one native-only data set. `name` is one of
@@ -485,30 +502,111 @@ enum SystemBridge {
         return Int(d)
     }
 
+    /// Directory names no path may pass through, at any depth (lowercase; matched case-insensitively).
+    static let sensitiveDirectoryNames: Set<String> = [".git", ".ssh", ".gnupg", ".aws", ".kube", ".docker"]
+
+    /// Glob patterns (`*` only, lowercase) the LAST path component may not match.
+    static let sensitiveFilePatterns: [String] = [
+        ".env", ".env.*", "*.pem", "*.key", "*.p12", "*.pfx",
+        "id_rsa*", "id_ed25519*", "id_ecdsa*", "id_dsa*", "*.keychain*",
+        ".netrc", ".npmrc", ".pypirc", "credentials*", "*.mobileprovision",
+    ]
+
+    /// Name fragments the last component may not contain, for the `file` call only.
+    static let sensitiveTextFragments: [String] = ["secret", "token"]
+
+    /// Paths that are never a repo root, whatever they resolve to.
+    static let refusedRootPaths: Set<String> = [
+        "/", "/Users", "/Volumes", "/private", "/System", "/Library", "/Applications",
+    ]
+
+    /// Whether `relativePath` (repo-relative) names a secret-bearing location. Checked
+    /// component-wise and case-insensitively, against `sensitiveDirectoryNames` at any
+    /// depth and `sensitiveFilePatterns` on the last component. With `forText`, the last
+    /// component is also refused when it contains a `sensitiveTextFragments` entry.
+    static func isSensitivePath(_ relativePath: String, forText: Bool) -> Bool {
+        let components = relativePath.lowercased().split(separator: "/").map(String.init)
+        guard let name = components.last else { return true }
+        if components.contains(where: sensitiveDirectoryNames.contains) { return true }
+        if sensitiveFilePatterns.contains(where: { fnmatch($0, name, 0) == 0 }) { return true }
+        if forText, sensitiveTextFragments.contains(where: { name.contains($0) }) { return true }
+        return false
+    }
+
+    /// Whether a resolved repo root is too broad to confine anything to: one of
+    /// `refusedRootPaths`, the home directory itself, or an ancestor of it.
+    static func isOverBroadRoot(_ rootPath: String, home homePath: String) -> Bool {
+        if refusedRootPaths.contains(rootPath) { return true }
+        let prefix = rootPath.hasSuffix("/") ? rootPath : rootPath + "/"
+        return homePath == rootPath || homePath.hasPrefix(prefix)
+    }
+
+    /// Whether the path itself is a symbolic link (not followed).
+    private static func isSymbolicLink(atPath path: String) -> Bool {
+        var info = stat()
+        guard lstat(path, &info) == 0 else { return false }
+        return (info.st_mode & S_IFMT) == S_IFLNK
+    }
+
+    /// The user's home directory, symlinks and dot-segments resolved.
+    private static var resolvedHomePath: String {
+        FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
     /// The file `relativePath` names under `repoRoot`, when it resolves (symlinks
-    /// followed on both sides) to a regular file inside the root. Nil for an escape
-    /// through a symlink or `..`, a missing file, a directory, or anything else.
-    static func confinedFile(relativePath: String, repoRoot: URL) -> URL? {
+    /// followed on both sides) to a regular file inside the root and is not refused
+    /// by the file rules (see the bridge contract). Nil for: a root that is a symlink
+    /// before resolution or is over-broad (`isOverBroadRoot`); an escape through a
+    /// symlink or `..`; a sensitive path (`isSensitivePath`, with `forText` for the
+    /// `file` call); a missing file, a directory, or anything else.
+    ///
+    /// The result is a validated location, not an open file: `openRegularFile` opens
+    /// it again with `O_NOFOLLOW` and checks the descriptor.
+    static func confinedFile(relativePath: String, repoRoot: URL, forText: Bool = false) -> URL? {
+        guard !isSymbolicLink(atPath: repoRoot.path) else { return nil }
         let root = repoRoot.resolvingSymlinksInPath().standardizedFileURL
+        guard !isOverBroadRoot(root.path, home: resolvedHomePath) else { return nil }
         let candidate = root.appendingPathComponent(relativePath)
             .resolvingSymlinksInPath().standardizedFileURL
         let prefix = root.path.hasSuffix("/") ? root.path : root.path + "/"
         guard candidate.path.hasPrefix(prefix), candidate.path != root.path else { return nil }
+        let inside = String(candidate.path.dropFirst(prefix.count))
+        guard !isSensitivePath(relativePath, forText: forText),
+              !isSensitivePath(inside, forText: forText) else { return nil }
         guard let values = try? candidate.resourceValues(forKeys: [.isRegularFileKey]),
               values.isRegularFile == true else { return nil }
         return candidate
     }
 
+    /// Opens a validated file for reading without following a symlink at the final
+    /// component (`O_NOFOLLOW`), without blocking on a FIFO or device (`O_NONBLOCK`),
+    /// and checks the open descriptor itself is a regular file (`fstat`). Reads then
+    /// come from that descriptor, so a path swapped after validation is refused.
+    /// Nil for anything else. The caller owns the handle (closed on dealloc).
+    static func openRegularFile(at url: URL) -> (handle: FileHandle, size: Int)? {
+        let fd = open(url.path, O_RDONLY | O_NOFOLLOW | O_NONBLOCK)
+        guard fd >= 0 else { return nil }
+        var info = stat()
+        guard fstat(fd, &info) == 0, (info.st_mode & S_IFMT) == S_IFREG else {
+            close(fd)
+            return nil
+        }
+        return (FileHandle(fileDescriptor: fd, closeOnDealloc: true), Int(info.st_size))
+    }
+
     /// The answer to a native `file` call: the confined file's text, a binary marker,
-    /// or `404 not_found`. Reads at most `maxFileReadBytes`. Blocking file I/O: call
-    /// it off the main thread.
+    /// or `404 not_found`. Reads at most `maxFileReadBytes` from the opened descriptor;
+    /// the binary sniff looks at the first `binarySniffBytes` of that same read.
+    /// Blocking file I/O: call it off the main thread.
     static func fileNativeReply(relativePath: String, repoRoot: URL?) -> NativeReply {
         let notFound = NativeReply(status: 404, bodyJSON: "null", error: "not_found")
-        guard let repoRoot, let url = confinedFile(relativePath: relativePath, repoRoot: repoRoot),
-              let handle = try? FileHandle(forReadingFrom: url) else { return notFound }
+        guard let repoRoot,
+              let url = confinedFile(relativePath: relativePath, repoRoot: repoRoot, forText: true),
+              let opened = openRegularFile(at: url) else { return notFound }
+        let handle = opened.handle
         defer { try? handle.close() }
         let head = (try? handle.read(upToCount: maxFileReadBytes)) ?? Data()
-        let total = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? head.count
+        let total = opened.size
         let body: [String: Any]
         if head.prefix(binarySniffBytes).contains(0) {
             body = ["path": relativePath, "binary": true, "bytes": total]

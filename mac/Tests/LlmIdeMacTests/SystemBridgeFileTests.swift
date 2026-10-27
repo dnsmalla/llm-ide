@@ -282,4 +282,157 @@ final class SystemBridgeFileTests: XCTestCase {
         let second = ShellState.PendingOpenFile(url: url, line: nil)
         XCTAssertNotEqual(first, second, "each request has its own id, so onChange fires for each")
     }
+
+    func testLeavingExplorerDropsAnUnconsumedHandoff() {
+        let shell = ShellState()
+        shell.section = .explorer
+        shell.pendingOpenFile = ShellState.PendingOpenFile(url: root.appendingPathComponent("src/a.swift"), line: 1)
+        shell.section = .library
+        XCTAssertNil(shell.pendingOpenFile, "a handoff must not survive a visit elsewhere")
+        XCTAssertNil(shell.takePendingOpenFile())
+    }
+
+    func testSettingExplorerKeepsTheHandoffForExplorer() {
+        let shell = ShellState()
+        shell.pendingOpenFile = ShellState.PendingOpenFile(url: root.appendingPathComponent("src/a.swift"), line: nil)
+        shell.section = .explorer
+        XCTAssertNotNil(shell.pendingOpenFile)
+    }
+
+    func testDiscardDropsTheHandoff() {
+        let shell = ShellState()
+        shell.pendingOpenFile = ShellState.PendingOpenFile(url: root.appendingPathComponent("src/a.swift"), line: nil)
+        shell.discardPendingOpenFile()
+        XCTAssertNil(shell.takePendingOpenFile())
+    }
+
+    // MARK: sensitive-file denylist
+
+    private func makeFile(_ relative: String, _ text: String = "x\n") throws {
+        let url = root.appendingPathComponent(relative)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data(text.utf8).write(to: url)
+    }
+
+    func testSecretNamesAreRefusedForBothCalls() throws {
+        let names = [
+            ".git/config", ".GIT/CONFIG", "src/.git/config", "a/b/.Git/HEAD",
+            ".ssh/known_hosts", ".gnupg/pubring.kbx", ".aws/credentials", ".kube/config",
+            ".docker/config.json", ".Docker/x",
+            ".env", "src/.env.local", "src/.ENV.Production",
+            "keys/server.pem", "cert.KEY", "a.p12", "a.pfx",
+            "id_rsa", "id_rsa.pub", "id_ed25519", "id_ecdsa-sk", "id_dsa", "ID_RSA.PUB",
+            "login.keychain-db", "x.keychain",
+            ".netrc", ".npmrc", ".pypirc", "credentials", "credentials.json", "app.mobileprovision",
+        ]
+        for (index, name) in names.enumerated() {
+            let dir = "case\(index)"
+            try makeFile("\(dir)/\(name)")
+            try makeFile("\(dir)/plain.txt")
+            let path = "\(dir)/\(name)"
+            XCTAssertNotNil(SystemBridge.confinedFile(relativePath: "\(dir)/plain.txt", repoRoot: root),
+                            "control for \(dir) must be allowed")
+            XCTAssertNil(SystemBridge.confinedFile(relativePath: path, repoRoot: root), "openFile must refuse \(path)")
+            XCTAssertNil(SystemBridge.confinedFile(relativePath: path, repoRoot: root, forText: true),
+                         "file must refuse \(path)")
+            let reply = SystemBridge.fileNativeReply(relativePath: path, repoRoot: root)
+            XCTAssertEqual(reply.status, 404, path)
+            XCTAssertEqual(reply.error, "not_found", path)
+            XCTAssertEqual(reply.bodyJSON, "null", path)
+        }
+    }
+
+    func testSecretFragmentsAreRefusedForTheFileCallOnly() throws {
+        let names = ["docs/my-token.txt", "config/secrets.md", "client-SECRET.json", "tokens.txt"]
+        for (index, name) in names.enumerated() {
+            try makeFile("frag\(index)/\(name)")
+            XCTAssertNotNil(SystemBridge.confinedFile(relativePath: "frag\(index)/\(name)", repoRoot: root),
+                            "openFile does not apply the fragment rule: \(name)")
+            XCTAssertNil(SystemBridge.confinedFile(relativePath: "frag\(index)/\(name)", repoRoot: root, forText: true),
+                         "file refuses \(name)")
+        }
+        XCTAssertEqual(SystemBridge.fileNativeReply(relativePath: "docs/my-token.txt", repoRoot: root).status, 404)
+    }
+
+    func testOrdinaryNamesThatLookSimilarAreStillAllowed() throws {
+        let names = ["src/environment.txt", "src/keyboard.swift", "src/idle.txt", "docs/readme.md", "src/key.swift"]
+        for name in names {
+            try makeFile(name)
+            XCTAssertNotNil(SystemBridge.confinedFile(relativePath: name, repoRoot: root), name)
+            XCTAssertNotNil(SystemBridge.confinedFile(relativePath: name, repoRoot: root, forText: true), name)
+        }
+    }
+
+    func testASymlinkIntoASensitivePathIsRefused() throws {
+        try makeFile(".git/config")
+        try makeFile(".env.local")
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("notes.txt"),
+                                                   withDestinationURL: root.appendingPathComponent(".git/config"))
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link-env.txt"),
+                                                   withDestinationURL: root.appendingPathComponent(".env.local"))
+        XCTAssertNil(SystemBridge.confinedFile(relativePath: "notes.txt", repoRoot: root))
+        XCTAssertNil(SystemBridge.confinedFile(relativePath: "link-env.txt", repoRoot: root, forText: true))
+    }
+
+    // MARK: root refusal
+
+    func testOverBroadRootsAreRefused() throws {
+        let home = FileManager.default.homeDirectoryForCurrentUser.resolvingSymlinksInPath().standardizedFileURL
+        var roots = [URL(fileURLWithPath: "/"), home, home.deletingLastPathComponent()]
+        roots += ["/Users", "/Volumes", "/private", "/System", "/Library", "/Applications"].map { URL(fileURLWithPath: $0) }
+        for candidate in roots {
+            XCTAssertNil(SystemBridge.confinedFile(relativePath: "src/a.swift", repoRoot: candidate), candidate.path)
+            XCTAssertEqual(SystemBridge.fileNativeReply(relativePath: "src/a.swift", repoRoot: candidate).status, 404,
+                           candidate.path)
+        }
+    }
+
+    func testOverBroadRootRulesInIsolation() {
+        let home = "/Users/someone"
+        XCTAssertTrue(SystemBridge.isOverBroadRoot("/", home: home))
+        XCTAssertTrue(SystemBridge.isOverBroadRoot("/Users/someone", home: home))
+        XCTAssertTrue(SystemBridge.isOverBroadRoot("/Users", home: home))
+        XCTAssertTrue(SystemBridge.isOverBroadRoot("/Volumes", home: home))
+        XCTAssertTrue(SystemBridge.isOverBroadRoot("/private", home: home))
+        XCTAssertFalse(SystemBridge.isOverBroadRoot("/Users/someone/code/repo", home: home), "inside home is fine")
+        XCTAssertFalse(SystemBridge.isOverBroadRoot("/Users/someone2", home: home), "a sibling is not an ancestor")
+        XCTAssertFalse(SystemBridge.isOverBroadRoot("/private/var/folders/x/repo", home: home))
+        XCTAssertFalse(SystemBridge.isOverBroadRoot("/tmp/repo", home: home))
+    }
+
+    func testASymlinkedRootIsRefusedAndTheRealRootStillWorks() throws {
+        let link = root.deletingLastPathComponent().appendingPathComponent("linked-repo")
+        try FileManager.default.createSymbolicLink(at: link, withDestinationURL: root)
+        XCTAssertNil(SystemBridge.confinedFile(relativePath: "src/a.swift", repoRoot: link), "a symlinked root")
+        XCTAssertEqual(SystemBridge.fileNativeReply(relativePath: "src/a.swift", repoRoot: link).status, 404)
+        XCTAssertNotNil(SystemBridge.confinedFile(relativePath: "src/a.swift", repoRoot: root), "control")
+    }
+
+    // MARK: open without following links, and never blocking
+
+    func testAFifoIsRefusedQuicklyAndNeverBlocks() throws {
+        let fifo = root.appendingPathComponent("pipe.fifo")
+        XCTAssertEqual(mkfifo(fifo.path, 0o600), 0)
+        let started = Date()
+        XCTAssertNil(SystemBridge.confinedFile(relativePath: "pipe.fifo", repoRoot: root), "not a regular file")
+        XCTAssertNil(SystemBridge.openRegularFile(at: fifo), "the descriptor is not regular")
+        XCTAssertEqual(SystemBridge.fileNativeReply(relativePath: "pipe.fifo", repoRoot: root).status, 404)
+        XCTAssertLessThan(Date().timeIntervalSince(started), 5, "a FIFO must not block the open")
+    }
+
+    func testARegularFileOpensWithItsSize() throws {
+        let url = try XCTUnwrap(SystemBridge.confinedFile(relativePath: "src/a.swift", repoRoot: root))
+        let opened = try XCTUnwrap(SystemBridge.openRegularFile(at: url))
+        XCTAssertEqual(opened.size, 20)
+        XCTAssertEqual(try opened.handle.readToEnd()?.count, 20)
+    }
+
+    func testAFileSwappedForASymlinkAfterValidationIsRefusedAtOpen() throws {
+        let url = try XCTUnwrap(SystemBridge.confinedFile(relativePath: "src/a.swift", repoRoot: root))
+        XCTAssertNotNil(SystemBridge.openRegularFile(at: url), "control: the file opens before the swap")
+        let secret = root.deletingLastPathComponent().appendingPathComponent("outside/secret.txt")
+        try FileManager.default.removeItem(at: url)
+        try FileManager.default.createSymbolicLink(at: url, withDestinationURL: secret)
+        XCTAssertNil(SystemBridge.openRegularFile(at: url), "O_NOFOLLOW refuses the swapped-in link")
+    }
 }
