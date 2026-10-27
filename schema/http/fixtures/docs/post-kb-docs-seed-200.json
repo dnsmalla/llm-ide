@@ -1,0 +1,33 @@
+{
+  "endpoint": "POST /kb/docs/seed",
+  "status": 200,
+  "description": "Captured by calling the real handler on a temp DB. The generation kit is the builtin kit in this checkout, so the call also writes one folder per kit template and command, and the two README files. Files that already exist are not listed.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    }
+  },
+  "response": {
+    "written": [
+      "templates/README.md",
+      "templates/action-plan/template.md",
+      "templates/decision-log/template.md",
+      "templates/design-feedback/template.md",
+      "templates/image-analysis/template.md",
+      "templates/incident-report/template.md",
+      "templates/meeting-summary/template.md",
+      "templates/screenshot-review/template.md",
+      "templates/sprint-review/template.md",
+      "templates/status-update/template.md",
+      "commands/README.md",
+      "commands/describe-image/command.md",
+      "commands/explain-code/command.md",
+      "commands/extract-text/command.md",
+      "commands/read-chart/command.md",
+      "commands/release-notes/command.md",
+      "commands/ship-it/command.md",
+      "commands/summarize/command.md"
+    ],
+    "count": 18
+  }
+}

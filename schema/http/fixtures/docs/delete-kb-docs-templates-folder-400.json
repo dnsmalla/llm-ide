@@ -1,0 +1,19 @@
+{
+  "endpoint": "DELETE /kb/docs/templates/:folder",
+  "status": 400,
+  "description": "Captured by calling the real handler: auto_task is reserved and never deleted from here.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "auto_task"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RESERVED_FOLDER",
+      "message": "folder name \"auto_task\" is reserved"
+    }
+  }
+}

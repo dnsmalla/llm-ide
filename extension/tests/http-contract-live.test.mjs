@@ -99,6 +99,16 @@ const SKIP_RULES = [
     when: (fx) => fx.status < 300 && (/:id|:name/.test(fx.endpoint) || /^(PUT \/kb\/agent\/personas\/active|POST \/kb\/code-sync|POST \/kb\/plan\/save|POST \/kb\/review\/|POST \/kb\/summarize|POST \/kb\/generate-code|POST \/kb\/generate-plan|POST \/kb\/analyze-risks|POST \/kb\/conflict-questions|POST \/kb\/dispatch|POST \/kb\/providers\/verify)/.test(fx.endpoint)),
   },
   {
+    // docs-kit K1: every project-scoped success, and every folder-level 400 (the
+    // folder is checked after the project resolves), needs a project folder
+    // registered through POST /kb/projects/register, which needs a real folder on
+    // the host. The 404 (unregistered project) and missing-project 400 replays stand.
+    why: 'needs a project folder registered through POST /kb/projects/register (a real folder on the host)',
+    when: (fx) => (/^(GET|PUT|DELETE|POST) \/kb\/docs\//.test(fx.endpoint)
+      && (fx.status < 300 || (fx.status === 400 && fx.request?.params !== undefined)))
+      || (fx.endpoint === 'POST /kb/projects/register' && fx.status === 200),
+  },
+  {
     why: 'handler parses structured JSON from the model; the canned stub replies in plain text',
     when: (fx) => fx.status === 200 && (fx.endpoint === 'POST /extract-entities' || fx.endpoint === 'POST /generate-docx'),
   },

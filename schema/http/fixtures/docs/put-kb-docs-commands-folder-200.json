@@ -1,0 +1,30 @@
+{
+  "endpoint": "PUT /kb/docs/commands/:folder",
+  "status": 200,
+  "description": "Captured by calling the real handler: a visual command written with its marker and instruction.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "visual-brief"
+    },
+    "body": {
+      "name": "Visual Brief",
+      "instruction": "Describe the frame.",
+      "surface": "visual"
+    }
+  },
+  "response": {
+    "command": {
+      "id": "7AF64F5E-0934-4DAA-B911-7DD6CEEBB1FB",
+      "name": "Visual Brief",
+      "instruction": "Describe the frame.",
+      "rawContent": "# Visual Brief\n\n<!-- llmide:doc-command surface=visual -->\n\nDescribe the frame.",
+      "isBuiltin": false,
+      "folderName": "visual-brief",
+      "isProjectCommand": true,
+      "surface": "visual"
+    }
+  }
+}

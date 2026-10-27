@@ -1,0 +1,22 @@
+{
+  "endpoint": "PUT /kb/docs/templates/:folder",
+  "status": 400,
+  "description": "Captured by calling the real handler: auto_task is reserved for Auto Task prompts.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "auto_task"
+    },
+    "body": {
+      "name": "Prompt"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RESERVED_FOLDER",
+      "message": "folder name \"auto_task\" is reserved"
+    }
+  }
+}

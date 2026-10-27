@@ -1,0 +1,17 @@
+{
+  "endpoint": "DELETE /kb/docs/commands/:folder",
+  "status": 200,
+  "description": "Captured by calling the real handler: the command folder is removed.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "summarize"
+    }
+  },
+  "response": {
+    "deleted": true,
+    "folderName": "summarize"
+  }
+}

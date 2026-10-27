@@ -1,0 +1,19 @@
+{
+  "endpoint": "DELETE /kb/docs/templates/:folder",
+  "status": 404,
+  "description": "Captured by calling the real handler on a folder that is already gone.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "retro"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "no template \"retro\""
+    }
+  }
+}

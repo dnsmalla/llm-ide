@@ -1,0 +1,23 @@
+{
+  "endpoint": "PUT /kb/docs/commands/:folder",
+  "status": 400,
+  "description": "Captured by calling the real handler with a surface the server does not know.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "bad"
+    },
+    "body": {
+      "name": "X",
+      "surface": "email"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "surface must be one of doc, visual"
+    }
+  }
+}

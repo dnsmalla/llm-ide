@@ -1,0 +1,36 @@
+{
+  "endpoint": "PUT /kb/docs/templates/:folder",
+  "status": 200,
+  "description": "Captured by calling the real handler. The folder sprint-review is written as a visual template; the file bytes are the Swift renderedMarkdown() output for the same inputs (see tests/fixtures/docgen/golden.mjs).",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "sprint-review"
+    },
+    "body": {
+      "name": "Sprint Review",
+      "sections": [
+        "Summary",
+        "Decisions"
+      ],
+      "surface": "visual"
+    }
+  },
+  "response": {
+    "template": {
+      "id": "AEBB5ABD-8E46-400F-8940-4AB4012097A7",
+      "name": "Sprint Review",
+      "sections": [
+        "Summary",
+        "Decisions"
+      ],
+      "rawContent": "# Sprint Review\n\n<!-- llmide:doc-template surface=visual -->\n\nTemplate for Visual. Edit the `##` sections below to change structure.\n\n## Summary\n\n## Decisions\n",
+      "isBuiltin": false,
+      "folderName": "sprint-review",
+      "isProjectTemplate": true,
+      "surface": "visual"
+    }
+  }
+}

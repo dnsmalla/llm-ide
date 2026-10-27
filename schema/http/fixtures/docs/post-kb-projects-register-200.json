@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/projects/register",
+  "status": 200,
+  "description": "Captured by calling the real handler (routes/docs-routes.mjs) on a temp DB. The root is the realpath of a temp project folder with the LLM-IDE marker; it is shown here as the example path /Users/example/projects/alpha.",
+  "request": {
+    "body": {
+      "id": "alpha",
+      "root": "/Users/example/projects/alpha"
+    }
+  },
+  "response": {
+    "id": "alpha",
+    "root": "/Users/example/projects/alpha"
+  }
+}

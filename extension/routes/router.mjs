@@ -130,6 +130,8 @@ export async function handleKB(req, res) {
       return true;
     }
     const { handlers: featureHandlers } = await (featureRoutes ?? initFeatureRoutes(activeFeatures));
+    // docs-kit K1 (doc_gen group): /kb/docs/* and /kb/projects/register.
+    if (await featureHandlers.doc_gen?.(req, res, { userId, url })) return true;
 
     if (req.method === 'POST' && url === '/kb/ingest') {
       const body = parseJSON(await readBody(req));

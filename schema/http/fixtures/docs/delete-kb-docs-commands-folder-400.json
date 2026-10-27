@@ -1,0 +1,19 @@
+{
+  "endpoint": "DELETE /kb/docs/commands/:folder",
+  "status": 400,
+  "description": "Captured by calling the real handler: a dotted folder name is refused before any disk access.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": ".hidden"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_FOLDER",
+      "message": "folder name must start with a letter or digit and use letters, digits, _ or - (max 80)"
+    }
+  }
+}

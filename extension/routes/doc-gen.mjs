@@ -7,6 +7,7 @@ import crypto from 'node:crypto';
 import { runClaude } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sanitizeLine, sendJSON } from '../core/utils.mjs';
 import { ingestGeneratedDoc, safeTruncate } from '../server/export-routes.mjs';
+import { handleDocsRoutes } from './docs-routes.mjs';
 
 /// Per-source ceiling. One file can never occupy more than this much of the
 /// prompt, however large it is on disk.
@@ -194,7 +195,11 @@ export function buildDocRef({ docTitle, command, sourceNames }) {
   return `doc:${docTitle}${hashSegment}:${sourceNames}`.slice(0, 1000);
 }
 
-export async function handleDocGenRoutes(req, res) {
+export async function handleDocGenRoutes(req, res, ctx) {
+  // docs-kit K1 routes (/kb/docs/*, /kb/projects/register) arrive here only
+  // from the router, which passes ctx = { userId, url } after the tenancy
+  // gate. server.mjs calls this with no ctx for /generate-doc alone.
+  if (ctx && await handleDocsRoutes(req, res, ctx)) return true;
   // Generate a structured Markdown document from a template and/or command
   if (req.method === 'POST' && req.url === '/generate-doc') {
     const body = parseJSON(await readBody(req, 8 * 1024 * 1024));

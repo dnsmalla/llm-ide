@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/projects/register",
+  "status": 400,
+  "description": "Captured by calling the real handler. The filesystem root is refused as over-broad.",
+  "request": {
+    "body": {
+      "id": "x",
+      "root": "/"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_ROOT",
+      "message": "root is too broad (home, an ancestor of home, or a system folder)"
+    }
+  }
+}

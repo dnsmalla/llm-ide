@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/docs/templates",
+  "status": 404,
+  "description": "Captured by calling the real handler with a project id this user never registered.",
+  "request": {
+    "query": {
+      "project": "nope"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROJECT_NOT_REGISTERED",
+      "message": "project is not registered on this server; the client must register it first"
+    }
+  }
+}

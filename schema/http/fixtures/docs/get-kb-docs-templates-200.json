@@ -1,0 +1,163 @@
+{
+  "endpoint": "GET /kb/docs/templates",
+  "status": 200,
+  "description": "Captured by calling the real handler: both templates on disk, sorted by display name, with the surface read from each file marker.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    }
+  },
+  "response": {
+    "templates": [
+      {
+        "id": "A338FFA2-1C4B-4003-87AE-EDB9DFD7558C",
+        "name": "Action Plan",
+        "sections": [
+          "Objective",
+          "Actions",
+          "Owners",
+          "Timeline",
+          "Success Criteria"
+        ],
+        "rawContent": "# Action Plan\n\n<!-- llmide:doc-template -->\n\n## Objective\n\n## Actions\n\n## Owners\n\n## Timeline\n\n## Success Criteria\n\n",
+        "isBuiltin": false,
+        "folderName": "action-plan",
+        "isProjectTemplate": true,
+        "surface": "doc"
+      },
+      {
+        "id": "9D9CC5EF-2DDC-4976-BF62-83A6D97B89EE",
+        "name": "Decision Log",
+        "sections": [
+          "Context",
+          "Decision",
+          "Rationale",
+          "Alternatives Considered",
+          "Follow-ups"
+        ],
+        "rawContent": "# Decision Log\n\n<!-- llmide:doc-template -->\n\n## Context\n\n## Decision\n\n## Rationale\n\n## Alternatives Considered\n\n## Follow-ups\n\n",
+        "isBuiltin": false,
+        "folderName": "decision-log",
+        "isProjectTemplate": true,
+        "surface": "doc"
+      },
+      {
+        "id": "7AD6F1F8-6C15-4B0B-8DBB-272B71CF4BA1",
+        "name": "Design Feedback",
+        "sections": [
+          "First Impression",
+          "Layout & Hierarchy",
+          "Accessibility",
+          "Specific Fixes"
+        ],
+        "rawContent": "# Design Feedback\n\n<!-- llmide:doc-template surface=visual -->\n\n## First Impression\n\n## Layout & Hierarchy\n\n## Accessibility\n\n## Specific Fixes\n\n",
+        "isBuiltin": false,
+        "folderName": "design-feedback",
+        "isProjectTemplate": true,
+        "surface": "visual"
+      },
+      {
+        "id": "8D105FB9-5C40-4088-B055-62E96229F189",
+        "name": "Image Analysis",
+        "sections": [
+          "What It Shows",
+          "Details Worth Noting",
+          "Questions It Raises"
+        ],
+        "rawContent": "# Image Analysis\n\n<!-- llmide:doc-template surface=visual -->\n\n## What It Shows\n\n## Details Worth Noting\n\n## Questions It Raises\n\n",
+        "isBuiltin": false,
+        "folderName": "image-analysis",
+        "isProjectTemplate": true,
+        "surface": "visual"
+      },
+      {
+        "id": "91CB9284-2C22-4E26-BA6B-38DB0E0778D7",
+        "name": "Incident Report",
+        "sections": [
+          "Summary",
+          "Timeline",
+          "Root cause",
+          "Impact",
+          "Resolution",
+          "Follow-up actions"
+        ],
+        "rawContent": "# Incident Report\n\n<!-- llmide:doc-template -->\n\n## Summary\n\n- **Date/time detected:**\n- **Duration:**\n- **Severity:**\n- **Services affected:**\n\n## Timeline\n\n| Time | Event |\n|---|---|\n|   |   |\n\n## Root cause\n\n_What actually caused the incident, not just the trigger._\n\n## Impact\n\n_Who/what was affected, and how badly._\n\n## Resolution\n\n_What fixed it._\n\n## Follow-up actions\n\n- [ ] Action item 1\n- [ ] Action item 2\n",
+        "isBuiltin": false,
+        "folderName": "incident-report",
+        "isProjectTemplate": true,
+        "surface": "doc"
+      },
+      {
+        "id": "954A7E0D-E386-42E3-9772-0AECC6D564AD",
+        "name": "Meeting Summary",
+        "sections": [
+          "Key Decisions",
+          "Action Items",
+          "Blockers",
+          "Next Steps"
+        ],
+        "rawContent": "# Meeting Summary\n\n<!-- llmide:doc-template -->\n\n## Key Decisions\n\n## Action Items\n\n## Blockers\n\n## Next Steps\n\n",
+        "isBuiltin": false,
+        "folderName": "meeting-summary",
+        "isProjectTemplate": true,
+        "surface": "doc"
+      },
+      {
+        "id": "65A8ADFC-2236-44D5-A676-C0DA368BBC91",
+        "name": "Retro (weekly)",
+        "sections": [
+          "Went well"
+        ],
+        "rawContent": "# Retro (weekly)\n\n<!-- llmide:doc-template -->\n\n## Went well\n",
+        "isBuiltin": false,
+        "folderName": "retro",
+        "isProjectTemplate": true,
+        "surface": "doc"
+      },
+      {
+        "id": "4680D261-036A-48BC-A1A2-E3F5BA6B5387",
+        "name": "Screenshot Review",
+        "sections": [
+          "What The Screen Does",
+          "Problems Spotted",
+          "Suggested Changes"
+        ],
+        "rawContent": "# Screenshot Review\n\n<!-- llmide:doc-template surface=visual -->\n\n## What The Screen Does\n\n## Problems Spotted\n\n## Suggested Changes\n\n",
+        "isBuiltin": false,
+        "folderName": "screenshot-review",
+        "isProjectTemplate": true,
+        "surface": "visual"
+      },
+      {
+        "id": "AEBB5ABD-8E46-400F-8940-4AB4012097A7",
+        "name": "Sprint Review",
+        "sections": [
+          "Summary",
+          "Decisions"
+        ],
+        "rawContent": "# Sprint Review\n\n<!-- llmide:doc-template surface=visual -->\n\nTemplate for Visual. Edit the `##` sections below to change structure.\n\n## Summary\n\n## Decisions\n",
+        "isBuiltin": false,
+        "folderName": "sprint-review",
+        "isProjectTemplate": true,
+        "surface": "visual"
+      },
+      {
+        "id": "57A0FBF6-D8A0-4FE9-A13C-C1727648A498",
+        "name": "Status Update",
+        "sections": [
+          "Summary",
+          "Completed This Period",
+          "In Progress",
+          "Risks",
+          "Next Period"
+        ],
+        "rawContent": "# Status Update\n\n<!-- llmide:doc-template -->\n\n## Summary\n\n## Completed This Period\n\n## In Progress\n\n## Risks\n\n## Next Period\n\n",
+        "isBuiltin": false,
+        "folderName": "status-update",
+        "isProjectTemplate": true,
+        "surface": "doc"
+      }
+    ],
+    "count": 10
+  }
+}

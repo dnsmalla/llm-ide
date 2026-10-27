@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/docs/templates",
+  "status": 400,
+  "description": "Captured by calling the real handler without the project query.",
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "project query parameter is required (a registered project id)"
+    }
+  }
+}

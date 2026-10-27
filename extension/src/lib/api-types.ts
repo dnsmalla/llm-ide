@@ -265,6 +265,88 @@ export type AgentV2Event = {
   retryable: boolean;
 };
 
+export type Template = {
+  /** Stable UUID for the folder (SHA-256 of llmide.doc-template.<folder>, uppercase). */
+  id: string;
+  /** The '# Title' line, or the humanized folder name. */
+  name: string;
+  /** The '## ' headings, or ['Content'] when there are none. */
+  sections: string[];
+  /** The file text exactly as stored. */
+  rawContent: string;
+  isBuiltin: false;
+  folderName: string;
+  isProjectTemplate: true;
+  surface: "doc" | "visual";
+};
+
+export type Command = {
+  /** Stable UUID for the folder (SHA-256 of llmide.doc-command.<folder>, uppercase). */
+  id: string;
+  /** The first '# ' line, or the humanized folder name. */
+  name: string;
+  /** The body without the first '# ' line and the marker line. */
+  instruction: string;
+  rawContent: string;
+  isBuiltin: false;
+  folderName: string;
+  isProjectCommand: true;
+  surface: "doc" | "visual";
+};
+
+export type ProjectQuery = {
+  /** A registered project id (1 to 128 letters, digits, _ or -). Required: a request without it answers 400 VALIDATION_FAILED. */
+  project?: string;
+};
+
+export type TemplateWrite = {
+  /** Title, at most 200 characters. Defaults to the folder name. */
+  name?: string;
+  /** Section headings, at most 100 of 200 characters each. Used when rawContent is absent. */
+  sections?: string[];
+  /** doc (default) or visual. Any other value answers 400 VALIDATION_FAILED. */
+  surface?: string;
+  /** The whole file text. When present it is written as-is (the Swift renderedMarkdown rule). */
+  rawContent?: string;
+  /** With no rawContent: apply name and sections to the existing file and keep its body text (DocTemplate.rewriting). */
+  rewrite?: boolean;
+};
+
+export type CommandWrite = {
+  /** Title, at most 200 characters. Defaults to the folder name. */
+  name?: string;
+  /** Instruction text, at most 20 000 characters. */
+  instruction?: string;
+  /** doc (default) or visual. Any other value answers 400 VALIDATION_FAILED. */
+  surface?: string;
+  /** The whole file text. When present it is written as-is. */
+  rawContent?: string;
+};
+
+export type DeleteResult = {
+  deleted: true;
+  folderName: string;
+};
+
+export type SeedResult = {
+  /** Relative paths created by this call (templates/README.md, templates/<folder>/template.md, ...). Files that already exist are not listed. */
+  written: string[];
+  count: number;
+};
+
+export type RegisterRequest = {
+  /** The project id (1 to 128 letters, digits, _ or -). */
+  id?: string;
+  /** Absolute path of the project folder. Must exist, must not be a symlink, must not be the filesystem root, the home directory or an ancestor of it, and must contain system/project.json. */
+  root?: string;
+};
+
+export type RegisterResult = {
+  id: string;
+  /** The validated realpath the server stored. */
+  root: string;
+};
+
 export type User = {
   id: string;
   email: string;
@@ -1771,6 +1853,120 @@ export type DeleteKbChatSessionsIdMessagesRequest = {
 export type DeleteKbChatSessionsIdMessagesResponse200 = {
   cleared: number;
 };
+
+/** Request parts for `GET /kb/docs/templates` (schema/http/docs.schema.json). */
+export type GetKbDocsTemplatesRequest = {
+  query: ProjectQuery;
+};
+
+export type GetKbDocsTemplatesResponse200 = {
+  templates: Template[];
+  count: number;
+};
+
+export type GetKbDocsTemplatesResponse400 = CommonError;
+
+export type GetKbDocsTemplatesResponse404 = CommonError;
+
+/** Request parts for `GET /kb/docs/commands` (schema/http/docs.schema.json). */
+export type GetKbDocsCommandsRequest = {
+  query: ProjectQuery;
+};
+
+export type GetKbDocsCommandsResponse200 = {
+  commands: Command[];
+  count: number;
+};
+
+export type GetKbDocsCommandsResponse400 = CommonError;
+
+export type GetKbDocsCommandsResponse404 = CommonError;
+
+/** Request parts for `PUT /kb/docs/templates/:folder` (schema/http/docs.schema.json). */
+export type PutKbDocsTemplatesFolderRequest = {
+  query: ProjectQuery;
+  params: {
+    /** A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task. */
+    folder: string;
+  };
+  body: TemplateWrite;
+};
+
+export type PutKbDocsTemplatesFolderResponse200 = {
+  template: Template;
+};
+
+export type PutKbDocsTemplatesFolderResponse400 = CommonError;
+
+export type PutKbDocsTemplatesFolderResponse404 = CommonError;
+
+/** Request parts for `DELETE /kb/docs/templates/:folder` (schema/http/docs.schema.json). */
+export type DeleteKbDocsTemplatesFolderRequest = {
+  query: ProjectQuery;
+  params: {
+    /** A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task. */
+    folder: string;
+  };
+};
+
+export type DeleteKbDocsTemplatesFolderResponse200 = DeleteResult;
+
+export type DeleteKbDocsTemplatesFolderResponse400 = CommonError;
+
+export type DeleteKbDocsTemplatesFolderResponse404 = CommonError;
+
+/** Request parts for `PUT /kb/docs/commands/:folder` (schema/http/docs.schema.json). */
+export type PutKbDocsCommandsFolderRequest = {
+  query: ProjectQuery;
+  params: {
+    /** A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task. */
+    folder: string;
+  };
+  body: CommandWrite;
+};
+
+export type PutKbDocsCommandsFolderResponse200 = {
+  command: Command;
+};
+
+export type PutKbDocsCommandsFolderResponse400 = CommonError;
+
+export type PutKbDocsCommandsFolderResponse404 = CommonError;
+
+/** Request parts for `DELETE /kb/docs/commands/:folder` (schema/http/docs.schema.json). */
+export type DeleteKbDocsCommandsFolderRequest = {
+  query: ProjectQuery;
+  params: {
+    /** A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task. */
+    folder: string;
+  };
+};
+
+export type DeleteKbDocsCommandsFolderResponse200 = DeleteResult;
+
+export type DeleteKbDocsCommandsFolderResponse400 = CommonError;
+
+export type DeleteKbDocsCommandsFolderResponse404 = CommonError;
+
+/** Request parts for `POST /kb/docs/seed` (schema/http/docs.schema.json). */
+export type PostKbDocsSeedRequest = {
+  query: ProjectQuery;
+};
+
+export type PostKbDocsSeedResponse200 = SeedResult;
+
+export type PostKbDocsSeedResponse400 = CommonError;
+
+export type PostKbDocsSeedResponse404 = CommonError;
+
+/** Request parts for `POST /kb/projects/register` (schema/http/docs.schema.json). */
+export type PostKbProjectsRegisterRequest = {
+  body: RegisterRequest;
+};
+
+export type PostKbProjectsRegisterResponse200 = RegisterResult;
+
+export type PostKbProjectsRegisterResponse400 = CommonError;
 
 /** Request parts for `GET /` (schema/http/health-auth.schema.json). */
 export type GetRequest = Record<string, never>;
@@ -5340,6 +5536,69 @@ export interface ApiEndpoints {
     request: DeleteKbChatSessionsIdMessagesRequest;
     responses: {
       200: DeleteKbChatSessionsIdMessagesResponse200;
+    };
+  };
+  "GET /kb/docs/templates": {
+    request: GetKbDocsTemplatesRequest;
+    responses: {
+      200: GetKbDocsTemplatesResponse200;
+      400: GetKbDocsTemplatesResponse400;
+      404: GetKbDocsTemplatesResponse404;
+    };
+  };
+  "GET /kb/docs/commands": {
+    request: GetKbDocsCommandsRequest;
+    responses: {
+      200: GetKbDocsCommandsResponse200;
+      400: GetKbDocsCommandsResponse400;
+      404: GetKbDocsCommandsResponse404;
+    };
+  };
+  "PUT /kb/docs/templates/:folder": {
+    request: PutKbDocsTemplatesFolderRequest;
+    responses: {
+      200: PutKbDocsTemplatesFolderResponse200;
+      400: PutKbDocsTemplatesFolderResponse400;
+      404: PutKbDocsTemplatesFolderResponse404;
+    };
+  };
+  "DELETE /kb/docs/templates/:folder": {
+    request: DeleteKbDocsTemplatesFolderRequest;
+    responses: {
+      200: DeleteKbDocsTemplatesFolderResponse200;
+      400: DeleteKbDocsTemplatesFolderResponse400;
+      404: DeleteKbDocsTemplatesFolderResponse404;
+    };
+  };
+  "PUT /kb/docs/commands/:folder": {
+    request: PutKbDocsCommandsFolderRequest;
+    responses: {
+      200: PutKbDocsCommandsFolderResponse200;
+      400: PutKbDocsCommandsFolderResponse400;
+      404: PutKbDocsCommandsFolderResponse404;
+    };
+  };
+  "DELETE /kb/docs/commands/:folder": {
+    request: DeleteKbDocsCommandsFolderRequest;
+    responses: {
+      200: DeleteKbDocsCommandsFolderResponse200;
+      400: DeleteKbDocsCommandsFolderResponse400;
+      404: DeleteKbDocsCommandsFolderResponse404;
+    };
+  };
+  "POST /kb/docs/seed": {
+    request: PostKbDocsSeedRequest;
+    responses: {
+      200: PostKbDocsSeedResponse200;
+      400: PostKbDocsSeedResponse400;
+      404: PostKbDocsSeedResponse404;
+    };
+  };
+  "POST /kb/projects/register": {
+    request: PostKbProjectsRegisterRequest;
+    responses: {
+      200: PostKbProjectsRegisterResponse200;
+      400: PostKbProjectsRegisterResponse400;
     };
   };
   "GET /": {

@@ -1,0 +1,22 @@
+{
+  "endpoint": "PUT /kb/docs/commands/:folder",
+  "status": 404,
+  "description": "Captured by calling the real handler with a project id this user never registered.",
+  "request": {
+    "query": {
+      "project": "nope"
+    },
+    "params": {
+      "folder": "x"
+    },
+    "body": {
+      "name": "X"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROJECT_NOT_REGISTERED",
+      "message": "project is not registered on this server; the client must register it first"
+    }
+  }
+}

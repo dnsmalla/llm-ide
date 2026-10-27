@@ -1,0 +1,32 @@
+{
+  "endpoint": "PUT /kb/docs/templates/:folder",
+  "status": 200,
+  "description": "Captured by calling the real handler with rawContent: the file is written exactly as sent, and the record is built from it.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "retro"
+    },
+    "body": {
+      "name": "Retro",
+      "rawContent": "# Retro\n\n<!-- llmide:doc-template -->\n\n## Went well\n\n## Improve\n"
+    }
+  },
+  "response": {
+    "template": {
+      "id": "65A8ADFC-2236-44D5-A676-C0DA368BBC91",
+      "name": "Retro",
+      "sections": [
+        "Went well",
+        "Improve"
+      ],
+      "rawContent": "# Retro\n\n<!-- llmide:doc-template -->\n\n## Went well\n\n## Improve\n",
+      "isBuiltin": false,
+      "folderName": "retro",
+      "isProjectTemplate": true,
+      "surface": "doc"
+    }
+  }
+}

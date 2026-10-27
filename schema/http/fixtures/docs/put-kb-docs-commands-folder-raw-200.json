@@ -1,0 +1,28 @@
+{
+  "endpoint": "PUT /kb/docs/commands/:folder",
+  "status": 200,
+  "description": "Captured by calling the real handler with rawContent: written as sent, and the record is built from it.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "summarize"
+    },
+    "body": {
+      "rawContent": "# Summarize\n\n<!-- llmide:doc-command -->\n\nSummarize the source into five bullet points."
+    }
+  },
+  "response": {
+    "command": {
+      "id": "5B879386-47FA-48CC-BE1B-C93217D2EC84",
+      "name": "Summarize",
+      "instruction": "Summarize the source into five bullet points.",
+      "rawContent": "# Summarize\n\n<!-- llmide:doc-command -->\n\nSummarize the source into five bullet points.",
+      "isBuiltin": false,
+      "folderName": "summarize",
+      "isProjectCommand": true,
+      "surface": "doc"
+    }
+  }
+}

@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 80
+  x-api-version: 81
 servers:
   - url: "https://{host}"
     variables:
@@ -20,6 +20,7 @@ security:
 tags:
   - name: "_common"
   - name: "agent"
+  - name: "docs"
   - name: "health-auth"
   - name: "kb-sources"
   - name: "live-loop-misc"
@@ -5370,6 +5371,235 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/docs/commands:
+    get:
+      tags:
+        - "docs"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "commands"
+                  - "count"
+                properties:
+                  commands:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Command"
+                  count:
+                    type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/docs/commands/{folder}:
+    put:
+      tags:
+        - "docs"
+      parameters:
+        - name: "folder"
+          in: "path"
+          required: true
+          description: "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task."
+          schema:
+            type: "string"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/CommandWrite"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "command"
+                properties:
+                  command:
+                    "$ref": "#/components/schemas/Command"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      tags:
+        - "docs"
+      parameters:
+        - name: "folder"
+          in: "path"
+          required: true
+          description: "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/DeleteResult"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/docs/seed:
+    post:
+      tags:
+        - "docs"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/SeedResult"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/docs/templates:
+    get:
+      tags:
+        - "docs"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "templates"
+                  - "count"
+                properties:
+                  templates:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Template"
+                  count:
+                    type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/docs/templates/{folder}:
+    put:
+      tags:
+        - "docs"
+      parameters:
+        - name: "folder"
+          in: "path"
+          required: true
+          description: "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task."
+          schema:
+            type: "string"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/TemplateWrite"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "template"
+                properties:
+                  template:
+                    "$ref": "#/components/schemas/Template"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    delete:
+      tags:
+        - "docs"
+      parameters:
+        - name: "folder"
+          in: "path"
+          required: true
+          description: "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/DeleteResult"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/email/classify:
     post:
       summary: "Classify a fetched email with LLM and extract to-dos (60 s server timeout)"
@@ -8247,6 +8477,29 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/projects/register:
+    post:
+      tags:
+        - "docs"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/RegisterRequest"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RegisterResult"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/providers/models:
     post:
       summary: "Fetch the current chat model list for a provider"
@@ -10824,6 +11077,54 @@ components:
           type: "array"
           items:
             type: "string"
+    Command:
+      type: "object"
+      required:
+        - "id"
+        - "name"
+        - "instruction"
+        - "rawContent"
+        - "isBuiltin"
+        - "folderName"
+        - "isProjectCommand"
+        - "surface"
+      properties:
+        id:
+          type: "string"
+          description: "Stable UUID for the folder (SHA-256 of llmide.doc-command.<folder>, uppercase)."
+        name:
+          type: "string"
+          description: "The first '# ' line, or the humanized folder name."
+        instruction:
+          type: "string"
+          description: "The body without the first '# ' line and the marker line."
+        rawContent:
+          type: "string"
+        isBuiltin:
+          const: false
+        folderName:
+          type: "string"
+        isProjectCommand:
+          const: true
+        surface:
+          enum:
+            - "doc"
+            - "visual"
+    CommandWrite:
+      type: "object"
+      properties:
+        name:
+          type: "string"
+          description: "Title, at most 200 characters. Defaults to the folder name."
+        instruction:
+          type: "string"
+          description: "Instruction text, at most 20 000 characters."
+        surface:
+          type: "string"
+          description: "doc (default) or visual. Any other value answers 400 VALIDATION_FAILED."
+        rawContent:
+          type: "string"
+          description: "The whole file text. When present it is written as-is."
     ConnectorEntry:
       type: "object"
       required:
@@ -10855,6 +11156,16 @@ components:
         selected:
           type: "boolean"
           description: "set only on the catalog endpoint"
+    DeleteResult:
+      type: "object"
+      required:
+        - "deleted"
+        - "folderName"
+      properties:
+        deleted:
+          const: true
+        folderName:
+          type: "string"
     Discovery:
       type: "object"
       required:
@@ -12306,6 +12617,12 @@ components:
             type: "object"
             additionalProperties: true
             description: "one exported plan; not pinned, the captured project has no plans"
+    ProjectQuery:
+      type: "object"
+      properties:
+        project:
+          type: "string"
+          description: "A registered project id (1 to 128 letters, digits, _ or -). Required: a request without it answers 400 VALIDATION_FAILED."
     QaIndex:
       type: "object"
       required:
@@ -12340,6 +12657,26 @@ components:
               const: "RATE_LIMITED"
             retryAfterSec:
               type: "integer"
+    RegisterRequest:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          description: "The project id (1 to 128 letters, digits, _ or -)."
+        root:
+          type: "string"
+          description: "Absolute path of the project folder. Must exist, must not be a symlink, must not be the filesystem root, the home directory or an ancestor of it, and must contain system/project.json."
+    RegisterResult:
+      type: "object"
+      required:
+        - "id"
+        - "root"
+      properties:
+        id:
+          type: "string"
+        root:
+          type: "string"
+          description: "The validated realpath the server stored."
     Resolution:
       type: "object"
       required:
@@ -12606,6 +12943,19 @@ components:
           type: "string"
         updatedAt:
           type: "string"
+    SeedResult:
+      type: "object"
+      required:
+        - "written"
+        - "count"
+      properties:
+        written:
+          type: "array"
+          items:
+            type: "string"
+          description: "Relative paths created by this call (templates/README.md, templates/<folder>/template.md, ...). Files that already exist are not listed."
+        count:
+          type: "integer"
     Session:
       type: "object"
       required:
@@ -12829,6 +13179,62 @@ components:
           type:
             - "number"
             - "null"
+    Template:
+      type: "object"
+      required:
+        - "id"
+        - "name"
+        - "sections"
+        - "rawContent"
+        - "isBuiltin"
+        - "folderName"
+        - "isProjectTemplate"
+        - "surface"
+      properties:
+        id:
+          type: "string"
+          description: "Stable UUID for the folder (SHA-256 of llmide.doc-template.<folder>, uppercase)."
+        name:
+          type: "string"
+          description: "The '# Title' line, or the humanized folder name."
+        sections:
+          type: "array"
+          items:
+            type: "string"
+          description: "The '## ' headings, or ['Content'] when there are none."
+        rawContent:
+          type: "string"
+          description: "The file text exactly as stored."
+        isBuiltin:
+          const: false
+        folderName:
+          type: "string"
+        isProjectTemplate:
+          const: true
+        surface:
+          enum:
+            - "doc"
+            - "visual"
+    TemplateWrite:
+      type: "object"
+      properties:
+        name:
+          type: "string"
+          description: "Title, at most 200 characters. Defaults to the folder name."
+        sections:
+          type: "array"
+          items:
+            type: "string"
+          description: "Section headings, at most 100 of 200 characters each. Used when rawContent is absent."
+        surface:
+          type: "string"
+          description: "doc (default) or visual. Any other value answers 400 VALIDATION_FAILED."
+        rawContent:
+          type: "string"
+          description: "The whole file text. When present it is written as-is (the Swift renderedMarkdown rule)."
+        rewrite:
+          type: "boolean"
+          description: "With no rawContent: apply name and sections to the existing file and keep its body text (DocTemplate.rewriting)."
     TicketIndex:
       type: "object"
       required:

@@ -36,9 +36,11 @@ export const FEATURE_ROUTE_GROUPS = Object.freeze({
     load: async () => (await import('./issue-schedule.mjs')).handleIssueScheduleRoutes,
   }),
   // Doc Gen's /generate-doc (Features/Generation, Mac only). Prefix-matched
-  // exactly: /generate-docx is a different, always-on route.
+  // exactly: /generate-docx is a different, always-on route. docs-kit K1 adds
+  // the project template/command files (/kb/docs/) and the project id map the
+  // Mac registers (/kb/projects/register); both are Doc Gen's alone.
   doc_gen: Object.freeze({
-    prefixes: Object.freeze(['/generate-doc']),
+    prefixes: Object.freeze(['/generate-doc', '/kb/docs/', '/kb/projects/register']),
     load: async () => (await import('./doc-gen.mjs')).handleDocGenRoutes,
   }),
   // Loop / Auto-Tasks / Self-Heal headless agent step (Features/Loop +

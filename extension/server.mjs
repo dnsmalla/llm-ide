@@ -275,14 +275,21 @@ const HOST = config.host;
 //   v77 — GET /kb/usage/turn-composition?limit= → { turns: [...] }: the caller's newest v2 chat turns' measured context split (migration 0044): LLM-IDE parts as approximate tokens (chars/4), the SDK's own end-of-turn categories (sdk_*), tool-result size and user MCP server count. Additive; read-only.
 //   v78 — GET /kb/meeting/:id?include=transcript adds `transcript` (the stored transcript text) to the record; the default response is unchanged (no transcript). Used by the Mac's Doc Gen.
 //   v79 — GET /kb/os/state: the read-only System view aggregate (feature set + kit table, health checks, this user's running chat turns / meeting-agent runs / live sessions with their cancel routes, activity, token usage by window, turn composition, knowledge counts). No model call, no write. Additive. Also GET /kb/os/stream: a per-user SSE change channel (hello, then activity / usage / turn-start / turn-end / agent-run / live-session events carrying only {type, at}; the client re-fetches /kb/os/state).
+//   v81 — docs-kit K1: GET/PUT/DELETE /kb/docs/templates[/:folder] and GET/PUT/DELETE /kb/docs/commands[/:folder] (Doc Gen project template and command files under the project's templates/ and commands/, addressed by ?project=<id>), POST /kb/docs/seed (kit defaults, write-if-absent), POST /kb/projects/register ({id, root}: the per-user project id -> folder map the docs routes resolve through, validated like the System bridge's roots). All in the doc_gen group: with doc_gen off they answer 404 feature_disabled. Additive; no existing shape changes.
 //   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
-const SERVER_API_VERSION = 80;
+const SERVER_API_VERSION = 81;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
   '/generate-doc',
+  '/kb/docs/templates',
+  '/kb/docs/templates/:folder',
+  '/kb/docs/commands',
+  '/kb/docs/commands/:folder',
+  '/kb/docs/seed',
+  '/kb/projects/register',
   '/chat',
   '/code-assist',
   '/code-assist/decision',
@@ -423,6 +430,7 @@ function rateLimitProfile(url, method) {
     const path = url.split('?')[0];
     if (path === '/kb/usage/limits')           return 'kbWrite';
     if (path.startsWith('/kb/issue-schedule')) return 'kbWrite';
+    if (path.startsWith('/kb/docs/')) return 'kbWrite';
     return null;
   }
   if (method !== 'POST') return null;
@@ -433,6 +441,7 @@ function rateLimitProfile(url, method) {
   if (url === '/extract-entities')       return 'llmFast';
   if (url === '/generate-docx')          return 'llmFast';
   if (url === '/generate-doc')           return 'llmFast';          // LLM export twin of /generate-docx
+  if (url === '/kb/docs/seed' || url === '/kb/projects/register') return 'kbWrite';
   // Chat agent turns get their own bucket — see `agentTurn` in
   // server/rate-limit.mjs for why `llm`'s burst of 3 was too small.
   if (url === '/code-assist')            return 'agentTurn';

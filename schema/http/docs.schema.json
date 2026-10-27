@@ -1,0 +1,190 @@
+{
+  "description": "docs-kit K1: Doc Gen's project template and command files, the seed that fills them, and the project id registration the Mac makes first (routes/docs-routes.mjs, kb/doc-project-files.mjs, kb/project-roots.mjs). Roster: all eight paths are in ALL_ENDPOINTS (extension/server.mjs); the handler is reached from routes/doc-gen.mjs through the doc_gen group (routes/feature-routes.mjs), so with doc_gen off every one of these answers 404 feature_disabled. Every route resolves its project through the caller's own registrations (POST /kb/projects/register), so another user's project id answers 404 PROJECT_NOT_REGISTERED. Folders in a path are checked before any disk access; a folder that is reserved (auto_task), dotted, over-long or not a plain name answers 400 VALIDATION_FAILED. The 413 body limit (512 KB) and the malformed-JSON 400 are not declared per route (SCHEMA.md). Rate limits: PUT and DELETE under /kb/docs/ and POST /kb/docs/seed and /kb/projects/register share the kbWrite bucket (429 is not declared: the bucket answers it for every kbWrite route). The Template and Command objects mirror the Swift DocTemplate and DocCommand Codable shapes, so the Mac decodes them with its existing models.",
+  "$defs": {
+    "Template": {
+      "type": "object",
+      "required": ["id", "name", "sections", "rawContent", "isBuiltin", "folderName", "isProjectTemplate", "surface"],
+      "properties": {
+        "id": { "type": "string", "description": "Stable UUID for the folder (SHA-256 of llmide.doc-template.<folder>, uppercase)." },
+        "name": { "type": "string", "description": "The '# Title' line, or the humanized folder name." },
+        "sections": { "type": "array", "items": { "type": "string" }, "description": "The '## ' headings, or ['Content'] when there are none." },
+        "rawContent": { "type": "string", "description": "The file text exactly as stored." },
+        "isBuiltin": { "const": false },
+        "folderName": { "type": "string" },
+        "isProjectTemplate": { "const": true },
+        "surface": { "enum": ["doc", "visual"] }
+      }
+    },
+    "Command": {
+      "type": "object",
+      "required": ["id", "name", "instruction", "rawContent", "isBuiltin", "folderName", "isProjectCommand", "surface"],
+      "properties": {
+        "id": { "type": "string", "description": "Stable UUID for the folder (SHA-256 of llmide.doc-command.<folder>, uppercase)." },
+        "name": { "type": "string", "description": "The first '# ' line, or the humanized folder name." },
+        "instruction": { "type": "string", "description": "The body without the first '# ' line and the marker line." },
+        "rawContent": { "type": "string" },
+        "isBuiltin": { "const": false },
+        "folderName": { "type": "string" },
+        "isProjectCommand": { "const": true },
+        "surface": { "enum": ["doc", "visual"] }
+      }
+    },
+    "ProjectQuery": {
+      "type": "object",
+      "properties": {
+        "project": { "type": "string", "description": "A registered project id (1 to 128 letters, digits, _ or -). Required: a request without it answers 400 VALIDATION_FAILED." }
+      }
+    },
+    "TemplateWrite": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Title, at most 200 characters. Defaults to the folder name." },
+        "sections": { "type": "array", "items": { "type": "string" }, "description": "Section headings, at most 100 of 200 characters each. Used when rawContent is absent." },
+        "surface": { "type": "string", "description": "doc (default) or visual. Any other value answers 400 VALIDATION_FAILED." },
+        "rawContent": { "type": "string", "description": "The whole file text. When present it is written as-is (the Swift renderedMarkdown rule)." },
+        "rewrite": { "type": "boolean", "description": "With no rawContent: apply name and sections to the existing file and keep its body text (DocTemplate.rewriting)." }
+      }
+    },
+    "CommandWrite": {
+      "type": "object",
+      "properties": {
+        "name": { "type": "string", "description": "Title, at most 200 characters. Defaults to the folder name." },
+        "instruction": { "type": "string", "description": "Instruction text, at most 20 000 characters." },
+        "surface": { "type": "string", "description": "doc (default) or visual. Any other value answers 400 VALIDATION_FAILED." },
+        "rawContent": { "type": "string", "description": "The whole file text. When present it is written as-is." }
+      }
+    },
+    "DeleteResult": {
+      "type": "object",
+      "required": ["deleted", "folderName"],
+      "properties": {
+        "deleted": { "const": true },
+        "folderName": { "type": "string" }
+      }
+    },
+    "SeedResult": {
+      "type": "object",
+      "required": ["written", "count"],
+      "properties": {
+        "written": { "type": "array", "items": { "type": "string" }, "description": "Relative paths created by this call (templates/README.md, templates/<folder>/template.md, ...). Files that already exist are not listed." },
+        "count": { "type": "integer" }
+      }
+    },
+    "RegisterRequest": {
+      "type": "object",
+      "properties": {
+        "id": { "type": "string", "description": "The project id (1 to 128 letters, digits, _ or -)." },
+        "root": { "type": "string", "description": "Absolute path of the project folder. Must exist, must not be a symlink, must not be the filesystem root, the home directory or an ancestor of it, and must contain system/project.json." }
+      }
+    },
+    "RegisterResult": {
+      "type": "object",
+      "required": ["id", "root"],
+      "properties": {
+        "id": { "type": "string" },
+        "root": { "type": "string", "description": "The validated realpath the server stored." }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /kb/docs/templates": {
+      "request": { "query": { "$ref": "#/$defs/ProjectQuery" } },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["templates", "count"],
+          "properties": {
+            "templates": { "type": "array", "items": { "$ref": "#/$defs/Template" } },
+            "count": { "type": "integer" }
+          }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "GET /kb/docs/commands": {
+      "request": { "query": { "$ref": "#/$defs/ProjectQuery" } },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["commands", "count"],
+          "properties": {
+            "commands": { "type": "array", "items": { "$ref": "#/$defs/Command" } },
+            "count": { "type": "integer" }
+          }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "PUT /kb/docs/templates/:folder": {
+      "request": {
+        "query": { "$ref": "#/$defs/ProjectQuery" },
+        "params": { "type": "object", "required": ["folder"], "properties": { "folder": { "type": "string", "description": "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task." } } },
+        "body": { "$ref": "#/$defs/TemplateWrite" }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["template"],
+          "properties": { "template": { "$ref": "#/$defs/Template" } }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "DELETE /kb/docs/templates/:folder": {
+      "request": {
+        "query": { "$ref": "#/$defs/ProjectQuery" },
+        "params": { "type": "object", "required": ["folder"], "properties": { "folder": { "type": "string", "description": "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task." } } }
+      },
+      "responses": {
+        "200": { "$ref": "#/$defs/DeleteResult" },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "PUT /kb/docs/commands/:folder": {
+      "request": {
+        "query": { "$ref": "#/$defs/ProjectQuery" },
+        "params": { "type": "object", "required": ["folder"], "properties": { "folder": { "type": "string", "description": "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task." } } },
+        "body": { "$ref": "#/$defs/CommandWrite" }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": ["command"],
+          "properties": { "command": { "$ref": "#/$defs/Command" } }
+        },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "DELETE /kb/docs/commands/:folder": {
+      "request": {
+        "query": { "$ref": "#/$defs/ProjectQuery" },
+        "params": { "type": "object", "required": ["folder"], "properties": { "folder": { "type": "string", "description": "A folder name: a letter or digit first, then letters, digits, _ or - (max 80). Not auto_task." } } }
+      },
+      "responses": {
+        "200": { "$ref": "#/$defs/DeleteResult" },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "POST /kb/docs/seed": {
+      "request": { "query": { "$ref": "#/$defs/ProjectQuery" } },
+      "responses": {
+        "200": { "$ref": "#/$defs/SeedResult" },
+        "400": { "$ref": "_common#/$defs/Error" },
+        "404": { "$ref": "_common#/$defs/Error" }
+      }
+    },
+    "POST /kb/projects/register": {
+      "request": { "body": { "$ref": "#/$defs/RegisterRequest" } },
+      "responses": {
+        "200": { "$ref": "#/$defs/RegisterResult" },
+        "400": { "$ref": "_common#/$defs/Error" }
+      }
+    }
+  }
+}

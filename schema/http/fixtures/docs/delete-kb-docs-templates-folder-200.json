@@ -1,0 +1,17 @@
+{
+  "endpoint": "DELETE /kb/docs/templates/:folder",
+  "status": 200,
+  "description": "Captured by calling the real handler: the template folder is removed.",
+  "request": {
+    "query": {
+      "project": "alpha"
+    },
+    "params": {
+      "folder": "retro"
+    }
+  },
+  "response": {
+    "deleted": true,
+    "folderName": "retro"
+  }
+}
