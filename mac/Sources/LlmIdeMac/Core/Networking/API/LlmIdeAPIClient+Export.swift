@@ -144,14 +144,7 @@ extension LlmIdeAPIClient {
         guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
             let status = (response as? HTTPURLResponse)?.statusCode ?? -1
             if status == 401 { throw APIError.noSession }
-            // The server's (redacted) message, never the raw body: a provider
-            // error echoed through can carry a key.
-            let server = Self.serverError(fromBody: data)
-            throw APIError.http(
-                status: status,
-                code: server?.code ?? "GENERATE_DOC_FAILED",
-                message: server?.message ?? "Document generation failed (HTTP \(status))",
-                details: nil)
+            throw Self.generateDocFailure(status: status, body: data)
         }
         let resp = try AppJSON.decoder.decode(GenerateDocResponse.self, from: data)
         let truncated = resp.truncated ?? []
@@ -165,6 +158,26 @@ extension LlmIdeAPIClient {
             omittedSources: omitted,
             omittedTotal: max(resp.omittedCount ?? 0, omitted.count),
             serverReportsFit: resp.truncated != nil)
+    }
+
+    /// The error for a non-200 `/generate-doc` answer. A server with doc_gen
+    /// turned off answers 404 `{error:'feature_disabled', feature:'doc_gen'}`
+    /// (routes/doc-gen.mjs): name that, rather than the generic HTTP text.
+    /// Everything else keeps the server's redacted message, never the raw body:
+    /// a provider error echoed through can carry a key.
+    static func generateDocFailure(status: Int, body: Data) -> APIError {
+        if status == 404,
+           let env = try? JSONDecoder().decode(GenerateDocFeatureDisabledEnvelope.self, from: body),
+           env.error == "feature_disabled", env.feature == "doc_gen" {
+            return .http(status: status, code: "feature_disabled",
+                         message: "The connected server has Doc Gen turned off.", details: nil)
+        }
+        let server = serverError(fromBody: body)
+        return .http(
+            status: status,
+            code: server?.code ?? "GENERATE_DOC_FAILED",
+            message: server?.message ?? "Document generation failed (HTTP \(status))",
+            details: nil)
     }
 
     /// Write `content` as Markdown. `directory` wins when supplied (Doc Gen's
@@ -282,4 +295,9 @@ extension LlmIdeAPIClient {
             }
         }
     }
+}
+
+private struct GenerateDocFeatureDisabledEnvelope: Decodable {
+    let error: String?
+    let feature: String?
 }

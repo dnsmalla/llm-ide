@@ -1090,15 +1090,8 @@ struct AppShell: View {
     /// so an idle project never gets them until first open.
     private func seedAndReloadGenerationFiles() {
         let root = projectStore.activeProject.map { URL(fileURLWithPath: $0.localPath) }
-        let generation = GenerationProviderRegistry.shared.provider
-        if let root {
-            IngestTemplateSeeder.seedIfNeeded(at: root)
-        }
-        if shell.section == .docGen || shell.section == .visual {
-            generation?.seedProjectFiles(at: root)
-        } else {
-            generation?.reloadProjectFiles(at: root)
-        }
+        GenerationFilesRefresh.run(projectRoot: root, visibleSection: shell.section,
+                                   provider: GenerationProviderRegistry.shared.provider)
     }
 
     private func reloadDocTemplatesForActiveProject() {

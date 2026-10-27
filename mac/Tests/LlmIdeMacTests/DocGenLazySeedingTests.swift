@@ -138,6 +138,90 @@ final class DocGenLazySeedingTests: XCTestCase {
         ])
     }
 
+    // MARK: - Kit arrives after open
+
+    /// Records which refresh the shared path asked for, and seeds from the
+    /// kit the store holds at call time, as `DocGenProvider` does.
+    private final class RecordingProvider: GenerationProviding {
+        var seeds = 0
+        var reloads = 0
+        func resetForSignOut() {}
+        func resetForProjectChange() {}
+        func reloadProjectFiles(at projectRoot: URL?) { reloads += 1 }
+        func seedProjectFiles(at projectRoot: URL?) {
+            seeds += 1
+            guard let projectRoot else { return }
+            let kit = GenerationLibraryStore.shared
+            DocGenProvider.seedProjectFiles(at: projectRoot,
+                                            templateKit: kit.templates, commandKit: kit.commands)
+        }
+        func templateRefs(surface: TemplateSurface) -> [GenerationTemplateRef] { [] }
+        func commandRefs(surface: TemplateSurface) -> [GenerationCommandRef] { [] }
+        func templateRef(id: String, surface: TemplateSurface) -> GenerationTemplateRef? { nil }
+        func commandRef(id: String, surface: TemplateSurface) -> GenerationCommandRef? { nil }
+        func sourceFitNotice(for result: LlmIdeAPIClient.GeneratedDoc, sentCount: Int) -> String? { nil }
+    }
+
+    /// The kit arriving (`.generationLibraryChanged`) while Doc Gen is open must
+    /// put its templates on disk without a project switch.
+    func testKitArrivingWhileDocGenOpenSeedsTemplates() throws {
+        try scaffold()
+        let layout = ProjectLayout(root: root)
+        let store = GenerationLibraryStore.shared
+        let previousTemplates = store.templates
+        let previousCommands = store.commands
+        defer { store.replaceEntriesForTesting(templates: previousTemplates, commands: previousCommands) }
+        let provider = RecordingProvider()
+
+        // Open with an empty kit (fresh install, library not fetched yet).
+        store.replaceEntriesForTesting(templates: [], commands: [])
+        GenerationFilesRefresh.run(projectRoot: root, visibleSection: .docGen, provider: provider)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: layout.templateDir(named: "meeting-summary").appendingPathComponent("template.md").path))
+
+        // The kit arrives; the observer runs with Doc Gen still visible.
+        store.replaceEntriesForTesting(templates: [try docTemplate(), try visualTemplate()],
+                                       commands: [try command()])
+        GenerationFilesRefresh.run(projectRoot: root, visibleSection: .docGen, provider: provider)
+
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: layout.templateDir(named: "meeting-summary").appendingPathComponent("template.md").path),
+            "the Doc Gen template appears once the kit arrives while Doc Gen is open")
+        XCTAssertTrue(files(under: layout.commandsDir).contains("explain-code/command.md"))
+        XCTAssertEqual(provider.seeds, 2)
+    }
+
+    func testKitArrivingWhileVisualOpenSeedsTemplates() throws {
+        try scaffold()
+        let layout = ProjectLayout(root: root)
+        let provider = RecordingProvider()
+        GenerationFilesRefresh.run(projectRoot: root, visibleSection: .visual, provider: provider)
+        XCTAssertEqual(provider.seeds, 1)
+        XCTAssertEqual(provider.reloads, 0)
+        XCTAssertTrue(FileManager.default.fileExists(atPath: layout.templatesDir.path))
+    }
+
+    func testKitArrivingWhileElsewhereOnlyReloads() throws {
+        try scaffold()
+        let layout = ProjectLayout(root: root)
+        let store = GenerationLibraryStore.shared
+        let previousTemplates = store.templates
+        let previousCommands = store.commands
+        defer { store.replaceEntriesForTesting(templates: previousTemplates, commands: previousCommands) }
+        store.replaceEntriesForTesting(templates: [try docTemplate()], commands: [try command()])
+        let provider = RecordingProvider()
+
+        GenerationFilesRefresh.run(projectRoot: root, visibleSection: .library, provider: provider)
+
+        XCTAssertEqual(provider.seeds, 0, "Doc Gen files stay unseeded while Doc Gen is not open")
+        XCTAssertEqual(provider.reloads, 1)
+        XCTAssertFalse(FileManager.default.fileExists(
+            atPath: layout.templateDir(named: "meeting-summary").appendingPathComponent("template.md").path))
+        // The ingest templates are app machinery and are still seeded.
+        XCTAssertTrue(FileManager.default.fileExists(
+            atPath: layout.templateDir(named: "meeting-note").appendingPathComponent("template.md").path))
+    }
+
     // MARK: - Idempotence and user edits
 
     func testSecondOpenIsANoOp() throws {
