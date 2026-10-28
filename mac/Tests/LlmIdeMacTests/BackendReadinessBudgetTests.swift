@@ -21,7 +21,7 @@ final class BackendReadinessBudgetTests: XCTestCase {
     }
 
     func testFirstLaunchOfTheDataDirGetsTheLongerWait() {
-        XCTAssertEqual(BackendManager.readinessBudgetSeconds(dataDir: dir.path), 90)
+        XCTAssertEqual(BackendManager.readinessBudgetSeconds(dataDir: dir.path), 240)
     }
 
     func testAnExistingDataDirKeepsTheDefault() throws {

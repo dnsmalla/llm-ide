@@ -94,15 +94,17 @@ final class BackendManager {
     nonisolated static let featuresEnvKey = "LLMIDE_FEATURES"
     nonisolated static let dataDirEnvKey = "LLMIDE_DATA_DIR"
     nonisolated static let dataLocationEnvKeys = ["LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_AGENT_DB_PATH"]
-    /// Seconds to wait for a spawned backend's /health. 20 by default. 90 only
+    /// Seconds to wait for a spawned backend's /health. 20 by default. 240 only
     /// when the system data dir is set and holds no data.db yet: the server then
-    /// copies the legacy kb (synchronously, before it listens), which can take
-    /// a while on a large DB. Pure apart from one existence check.
+    /// moves the legacy kb (synchronously, before it listens, under a lock that
+    /// may wait for another run), which can take minutes on a large DB. A shorter
+    /// wait would kill a slow move and start the loop again. Pure apart from one
+    /// existence check.
     nonisolated static func readinessBudgetSeconds(dataDir: String?,
                                                    fileManager: FileManager = .default) -> Int {
         guard let dataDir else { return 20 }
         let db = URL(fileURLWithPath: dataDir, isDirectory: true).appendingPathComponent("data.db").path
-        return fileManager.fileExists(atPath: db) ? 20 : 90
+        return fileManager.fileExists(atPath: db) ? 20 : 240
     }
 
     /// Developer escape: `LLMIDE_USE_REPO_KB=1` keeps the server on the repo's
