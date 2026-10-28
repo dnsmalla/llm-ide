@@ -123,7 +123,7 @@ test('a failing agent.db never fails recordUsage: the ledger row is kept and the
 
 test('a store that is down (no handle) never affects recordUsage', () => {
   clearMain();
-  assert.equal(shadow.mirrorUsageCall(mdb(), 1, { agentDb: null }), false);
+  assert.equal(shadow.mirrorUsageCall({ user_id: U, ts: '2026-10-01 10:00:00', provider: 'a', model: 'm' }, { agentDb: null }), false);
   const id = recordUsage(mdb(), { userId: U, ...ROW, requestId: 'turn-nodb' });
   assert.equal(typeof id, 'number');
 });
@@ -200,7 +200,8 @@ test('the backfill resumes after a restart with the same bounds', () => {
 
 function captureLogger() {
   const warnings = [];
-  return { warnings, warn: (event, data) => warnings.push({ event, data }), error() {}, info() {} };
+  const push = (level) => (event, data) => warnings.push({ level, event, data });
+  return { warnings, warn: push('warn'), error: push('error'), info() {} };
 }
 
 function finishedCopy(db) {
@@ -293,7 +294,11 @@ test('the compare buckets DST-day rows the way the budget window does', () => {
   for (const ts of ['2026-03-07 23:59:59', '2026-03-08 00:00:00', '2026-03-08 03:30:00']) {
     mdb().prepare(`INSERT INTO usage_ledger (user_id, ts, provider, model, input_tokens, output_tokens, runs)
       VALUES (?, ?, 'anthropic', 'claude-sonnet-4-6', 1, 1, 1)`).run(U, ts);
-    shadow.mirrorUsageCall(mdb(), mdb().prepare('SELECT MAX(id) AS m FROM usage_ledger').get().m, { agentDb: db });
+    shadow.mirrorUsageCall({
+      user_id: U, ts, provider: 'anthropic', model: 'claude-sonnet-4-6', source: 'api', endpoint: null,
+      input_tokens: 1, output_tokens: 1, cache_read_tokens: null, cache_creation_tokens: null, runs: 1,
+      request_id: null, turns: null, stop_reason: null,
+    }, { agentDb: db });
   }
   finishedCopy(db);
   const now = new Date(2026, 2, 8, 12, 0, 0);
@@ -431,4 +436,79 @@ test('the copy gives up after the attempt cap, and says so', () => {
   assert.equal(agent.readMeta(db, 'usage_copy_gave_up'), '1');
   assert.equal(copy.copyUsageStep({ mainDb: mdb(), agentDb: db }).reason, 'gave_up');
   assert.equal(copy.usageCopyDone({ agentDb: db, mainDb: mdb() }), false);
+});
+
+// --- hot path and failure isolation (review fix 2, 3, 4, 6) -----------------
+
+test('the mirror equals the ledger row exactly, after clamping, with no read-back', () => {
+  clearMain();
+  const db = bootAgent();
+  const id = recordUsage(mdb(), {
+    userId: U, provider: 'anthropic', model: 'claude-opus-4-1', source: 'bogus', endpoint: 'x'.repeat(200) + ':internal',
+    inputTokens: -5, outputTokens: 2_000_000_000, cacheReadTokens: 3, cacheCreationTokens: null,
+    runs: 5_000_000, requestId: 'r'.repeat(200), turns: 4, stopReason: 'end_turn',
+  });
+  const ledger = mdb().prepare('SELECT * FROM usage_ledger WHERE id = ?').get(id);
+  const mirror = db.prepare('SELECT * FROM usage_calls WHERE request_id = ?').get(ledger.request_id);
+  assert.ok(mirror);
+  for (const k of ['ts', 'provider', 'model', 'source', 'endpoint', 'input_tokens', 'output_tokens',
+    'cache_read_tokens', 'cache_creation_tokens', 'runs', 'request_id', 'turns', 'stop_reason']) {
+    assert.deepEqual(mirror[k], ledger[k], `column ${k}`);
+  }
+  assert.equal(mirror.day, ledger.ts.slice(0, 10));
+  // The clamp cuts the endpoint to 128 characters, so the ':internal' suffix is gone on both sides.
+  assert.equal(mirror.is_internal, 0);
+  assert.equal(ledger.endpoint.length, 128);
+});
+
+test('a main-DB error in the ledger insert returns null and never touches agent.db', () => {
+  clearMain();
+  bootAgent();
+  const before = agent.agentStoreStatus();
+  const brokenMain = { prepare() { throw Object.assign(new Error('main read error'), { code: 'SQLITE_ERROR' }); } };
+  assert.equal(recordUsage(brokenMain, { userId: U, ...ROW, requestId: 'main-err' }), null);
+  const after = agent.agentStoreStatus();
+  assert.equal(after.writeErrors, before.writeErrors, 'no agent write failure is counted');
+  assert.equal(after.quarantinesThisProcess, before.quarantinesThisProcess, 'the healthy agent.db is not quarantined');
+  assert.equal(after.state, 'ok');
+});
+
+test('a corruption-class error during the mirror does not change the ledger return value', () => {
+  clearMain();
+  const real = bootAgent();
+  const id = recordUsage(mdb(), { userId: U, ...ROW, requestId: 'corrupt-ok' });
+  assert.equal(typeof id, 'number');
+  const before = agent.agentStoreStatus().writeErrors;
+  // Every mirror insert reports corruption. No file is attached, so nothing is moved.
+  agent.setAgentDbForTests({
+    name: 'corrupt-fake',
+    prepare(sql) {
+      if (/INSERT INTO usage_calls/.test(sql)) throw Object.assign(new Error('database disk image is malformed'), { code: 'SQLITE_CORRUPT' });
+      return real.prepare(sql);
+    },
+    transaction(fn) { return real.transaction(fn); },
+    pragma(...a) { return real.pragma(...a); },
+  });
+  try {
+    const next = recordUsage(mdb(), { userId: U, ...ROW, requestId: 'corrupt-next' });
+    assert.equal(typeof next, 'number', 'the return value is the ledger id');
+    assert.equal(count(mdb(), "SELECT COUNT(*) AS n FROM usage_ledger WHERE request_id = 'corrupt-next'"), 1);
+  } finally {
+    agent.setAgentDbForTests(null);
+  }
+  assert.equal(agent.agentStoreStatus().writeErrors, before + 1);
+});
+
+test('failure logs are rate limited to one line per minute; the counter counts every failure', () => {
+  clearMain();
+  agent.closeAgentDb();
+  for (const f of agentFiles) fs.rmSync(f, { force: true });
+  const logger = captureLogger();
+  assert.ok(agent.openAgentDb({ logger }), 'opens with a logger');
+  agent.resetWriteFailureLogForTests();
+  const before = agent.agentStoreStatus().writeErrors;
+  for (let i = 0; i < 3; i += 1) agent.noteAgentWriteFailure(Object.assign(new Error('x'), { code: 'SQLITE_IOERR' }));
+  const errors = logger.warnings.filter((w) => w.event === 'agent_db_write_failed');
+  assert.equal(agent.agentStoreStatus().writeErrors, before + 3, 'every failure is counted');
+  assert.equal(errors.length, 1, 'three failures inside a minute log one line');
 });

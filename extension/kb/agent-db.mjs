@@ -353,10 +353,24 @@ export function flushAgentQueue({ openIfNeeded = true } = {}) {
  * the file when the error means it is damaged. Never throws. The caller has
  * already swallowed the error; this only makes the failure visible in health.
  */
+export const WRITE_FAIL_LOG_MS = 60 * 1000;
+let lastWriteFailLogAt = 0;
+
+/** Test seam: forget the last logged failure, so the next one logs. */
+export function resetWriteFailureLogForTests() {
+  lastWriteFailLogAt = 0;
+}
+
 export function noteAgentWriteFailure(err) {
   try {
     state.writeErrors += 1;
-    log('error', 'agent_db_write_failed', { code: err?.code ?? null, rows: 1, sync: true });
+    // Count every failure, log at most one line per WRITE_FAIL_LOG_MS so a
+    // store that keeps failing cannot flood the log.
+    const now = Date.now();
+    if (now - lastWriteFailLogAt >= WRITE_FAIL_LOG_MS) {
+      lastWriteFailLogAt = now;
+      log('error', 'agent_db_write_failed', { code: err?.code ?? null, rows: 1, sync: true, errors: state.writeErrors });
+    }
     if (isCorruptionError(err) && state.file) {
       try {
         state.db = quarantineAndRecreate(state.file, err.message);

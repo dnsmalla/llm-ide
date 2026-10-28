@@ -2,8 +2,8 @@
 // usage_ledger stays authoritative; this module only MIRRORS it into agent.db's
 // usage_calls and COMPARES the two. Nothing here changes an enforcement read.
 //
-//   mirrorUsageCall(db, ledgerId)   sync, after the ledger insert in recordUsage.
-//                                   Copies the ledger row verbatim (same ts,
+//   mirrorUsageCall(row)           sync, after the ledger insert in recordUsage.
+//                                   Takes the values the ledger stored (same ts,
 //                                   request_id, tokens). Never throws.
 //   pruneUsageCalls(now)            raw retention, the ledger's 90 days.
 //   compareLedgerShadow(userId?)    per window, per user+provider+model, compares
@@ -82,18 +82,20 @@ export function shadowRowFromLedger(r) {
 
 /**
  * Mirror one ledger row into agent.db, synchronously, right after the ledger
- * insert. Best-effort: a missing store, a failing write or a damaged file is
- * counted by the store and never reaches the model call. Returns true when the
- * row was written.
+ * insert. `row` holds exactly the values the ledger stored (including `ts`), so
+ * no read-back is needed. Resolves the handle inside its own try, and never
+ * throws: a missing store is silent, a failing write is counted by the store.
+ * Writes nothing until the boot step has set the id floor. Returns true when
+ * the row was written.
  */
-export function mirrorUsageCall(mainDb, ledgerId, { agentDb = getAgentDb() } = {}) {
-  if (!agentDb || !Number.isFinite(Number(ledgerId))) return false;
+export function mirrorUsageCall(row, opts = {}) {
   try {
-    if (!usageFloorReady(agentDb)) return false;
-    const row = mainDb.prepare('SELECT * FROM usage_ledger WHERE id = ?').get(ledgerId);
-    if (!row) return false;
-    const st = handleState(agentDb);
-    st.insert ??= agentDb.prepare(MIRROR_SQL);
+    // An explicit `agentDb: null` means "no store" (tests, down store), not "use the default".
+    const handle = 'agentDb' in opts ? opts.agentDb : getAgentDb();
+    if (!handle || !row) return false;
+    if (!usageFloorReady(handle)) return false;
+    const st = handleState(handle);
+    st.insert ??= handle.prepare(MIRROR_SQL);
     st.insert.run(...shadowRowFromLedger(row));
     return true;
   } catch (err) {
@@ -129,12 +131,16 @@ const AGG_COLUMNS = `COUNT(*) AS n,
            THEN 1 ELSE 0 END) AS unknownRows`;
 const COMPARE_FIELDS = ['n', 'runs', 'input', 'output', 'cacheRead', 'cacheCreation', 'turns', 'turnRows', 'unknownRows'];
 
-function aggregate(db, table, cutoff, userId) {
+// Literal FROM clauses (not interpolated), so the SQL inventory guard sees them.
+const FROM_LEDGER = 'FROM usage_ledger';
+const FROM_SHADOW = 'FROM usage_calls';
+
+function aggregate(db, from, cutoff, userId) {
   const userSql = userId ? ' AND user_id = ?' : '';
   const args = userId ? [cutoff, userId] : [cutoff];
   const out = new Map();
   for (const r of db.prepare(
-    `SELECT user_id, provider, model, ${AGG_COLUMNS} FROM ${table} WHERE ts >= ?${userSql}
+    `SELECT user_id, provider, model, ${AGG_COLUMNS} ${from} WHERE ts >= ?${userSql}
       GROUP BY user_id, provider, model`,
   ).all(...args)) {
     out.set(`${r.user_id}\u0000${r.provider}\u0000${r.model}`, r);
@@ -159,8 +165,8 @@ export function compareLedgerShadow(userId = null, {
   let mismatches = 0;
   for (const w of SHADOW_WINDOWS) {
     const cutoff = shadowWindowCutoff(w.days, now);
-    const ledger = aggregate(mainDb, 'usage_ledger', cutoff, userId);
-    const shadow = aggregate(agentDb, 'usage_calls', cutoff, userId);
+    const ledger = aggregate(mainDb, FROM_LEDGER, cutoff, userId);
+    const shadow = aggregate(agentDb, FROM_SHADOW, cutoff, userId);
     const keys = new Set([...ledger.keys(), ...shadow.keys()]);
     let mismatchedKeys = 0;
     let ledgerRows = 0;

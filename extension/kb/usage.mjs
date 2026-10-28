@@ -387,26 +387,43 @@ export function recordUsage(db, {
   addToTurnTotals({ inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens });
   if (!userId || !provider || !model) return null;
   try {
+    // The values as stored. The shadow (Stage 2a) mirrors exactly these, so it
+    // never needs to read the ledger back.
+    const v = {
+      user_id: userId,
+      provider: String(provider),
+      model: String(model),
+      source: VALID_SOURCES.has(source) ? source : 'api',
+      endpoint: clampStr(endpoint, 128),
+      input_tokens: tokenCountOrNull(inputTokens),
+      output_tokens: tokenCountOrNull(outputTokens),
+      cache_read_tokens: tokenCountOrNull(cacheReadTokens),
+      cache_creation_tokens: tokenCountOrNull(cacheCreationTokens),
+      runs: Math.max(1, Math.min(1_000_000, intOrNull(runs) || 1)),
+      request_id: clampStr(requestId, 128),
+      turns: turns == null ? null : tokenCountOrNull(turns),
+      stop_reason: clampStr(stopReason, 40),
+    };
+    // `ts` comes back from the insert itself, so the mirror carries the exact
+    // timestamp the ledger stored.
     const info = db.prepare(
       `INSERT INTO usage_ledger
          (user_id, provider, model, source, endpoint, input_tokens, output_tokens,
           cache_read_tokens, cache_creation_tokens, runs, request_id, turns, stop_reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(
-      userId, String(provider), String(model),
-      VALID_SOURCES.has(source) ? source : 'api',
-      clampStr(endpoint, 128),
-      tokenCountOrNull(inputTokens), tokenCountOrNull(outputTokens),
-      tokenCountOrNull(cacheReadTokens), tokenCountOrNull(cacheCreationTokens),
-      Math.max(1, Math.min(1_000_000, intOrNull(runs) || 1)),
-      clampStr(requestId, 128),
-      turns == null ? null : tokenCountOrNull(turns), clampStr(stopReason, 40),
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       RETURNING id, ts`
+    ).get(
+      v.user_id, v.provider, v.model, v.source, v.endpoint,
+      v.input_tokens, v.output_tokens, v.cache_read_tokens, v.cache_creation_tokens,
+      v.runs, v.request_id, v.turns, v.stop_reason,
     );
-    const ledgerId = Number(info.lastInsertRowid);
-    // Shadow (Stage 2a): mirror the row into agent.db. Best-effort and
-    // synchronous, so the shadow never lags the ledger. The ledger stays
-    // authoritative; a shadow failure is counted by the store, never thrown.
-    mirrorUsageCall(db, ledgerId);
+    const ledgerId = Number(info.id);
+    // Shadow (Stage 2a): best-effort, synchronous, and isolated. The mirror
+    // resolves its own handle and never throws, but the call is wrapped too so
+    // nothing the shadow does can change the return value below.
+    try {
+      mirrorUsageCall({ ...v, ts: info.ts });
+    } catch { /* the shadow never affects the ledger result */ }
     maybePruneLedger(db);
     emitOsEvent(userId, 'usage');
     return ledgerId;
