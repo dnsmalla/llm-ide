@@ -38,6 +38,10 @@ const count = (db, sql, ...a) => db.prepare(sql).get(...a).n;
 test.after(() => {
   jobs.stopAgentStoreJobs();
   agent.closeAgentDb();
+  // The quarantine test leaves corrupt copies beside the test store: remove them.
+  const dir = path.dirname(config.agentDbPath);
+  const base = path.basename(config.agentDbPath) + '.corrupt-';
+  for (const f of fs.readdirSync(dir)) if (f.startsWith(base)) fs.rmSync(path.join(dir, f), { force: true });
 });
 
 test('openAgentStoreAtBoot opens the store, raises the id floors and reports ok', () => {
