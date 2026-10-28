@@ -11,6 +11,7 @@ import { randomBytes } from 'crypto';
 import { appendFileSync, statSync, renameSync, mkdirSync } from 'fs';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
+import { resolveDataLayout, getDataDirOverride } from './data-dir.mjs';
 
 const LEVELS = { trace: 10, debug: 20, info: 30, warn: 40, error: 50 };
 const isPretty = process.stdout.isTTY && !process.env.LLMIDE_LOG_JSON;
@@ -46,15 +47,19 @@ function rotateOnStartup() {
 rotateOnStartup();
 
 function resolveLogFile() {
-  const env = process.env.LLMIDE_LOG_FILE;
-  if (env !== undefined) {
-    const t = env.trim();
-    return (t === '' || t.toLowerCase() === 'none') ? null : t;
-  }
-  // core/logger.mjs → repo root is one dir up from core/.
+  // Same precedence as every other data location (core/data-dir.mjs):
+  // LLMIDE_LOG_FILE > LLMIDE_DATA_DIR/server.log > extension/kb/server.log.
   try {
-    const root = dirname(dirname(fileURLToPath(import.meta.url)));
-    return join(root, 'kb', 'server.log');
+    // core/logger.mjs → repo root is one dir up from core/.
+    const extensionDir = dirname(dirname(fileURLToPath(import.meta.url)));
+    const root = dirname(extensionDir);
+    return resolveDataLayout({
+      env: process.env,
+      root,
+      legacyLogFile: join(extensionDir, 'kb', 'server.log'),
+      isTest: Boolean(process.env.NODE_TEST_CONTEXT),
+      dataDirOverride: getDataDirOverride(),
+    }).logFile;
   } catch {
     return null;
   }

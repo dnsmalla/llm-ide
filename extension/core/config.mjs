@@ -13,6 +13,7 @@ import fs from 'fs';
 import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { resolveDataLayout, getDataDirOverride } from './data-dir.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -207,19 +208,24 @@ if (TEST_DB_PATH) {
   });
 }
 
-// The main DB path, resolved once so the agent store can derive from it.
-const MAIN_DB_PATH = envStr('LLMIDE_DB_PATH', TEST_DB_PATH ?? path.join(ROOT, 'kb', 'data.db'));
-// agent.db (agent history store, kb/agent-db.mjs). Production: beside the
-// main DB. Under the test runner: `<main test DB>.agent.db`, so a test can
-// never open the live kb/agent.db. Removed at exit like the main test DB.
+// Every per-install data location, resolved once (core/data-dir.mjs documents
+// the precedence: individual env vars > test isolation > LLMIDE_DATA_DIR >
+// the repo kb default). The boot migration may have forced the repo kb.
 const IS_TEST_RUN = Boolean(process.env.NODE_TEST_CONTEXT);
-const DEFAULT_AGENT_DB_PATH = IS_TEST_RUN
-  ? `${MAIN_DB_PATH}.agent.db`
-  : path.join(path.dirname(MAIN_DB_PATH), 'agent.db');
+const DATA_LAYOUT = resolveDataLayout({
+  env: process.env,
+  root: ROOT,
+  legacyLogFile: path.join(ROOT, 'extension', 'kb', 'server.log'),
+  testDbPath: TEST_DB_PATH,
+  isTest: IS_TEST_RUN,
+  dataDirOverride: getDataDirOverride(),
+});
+const MAIN_DB_PATH = DATA_LAYOUT.dbPath;
+// agent.db removal at test exit, like the main test DB.
 if (IS_TEST_RUN && !process.env.LLMIDE_AGENT_DB_PATH) {
   process.once('exit', () => {
     for (const suffix of ['', '-wal', '-shm']) {
-      try { fs.rmSync(DEFAULT_AGENT_DB_PATH + suffix, { force: true }); } catch { /* best effort */ }
+      try { fs.rmSync(DATA_LAYOUT.agentDbPath + suffix, { force: true }); } catch { /* best effort */ }
     }
   });
 }
@@ -258,7 +264,14 @@ export const config = Object.freeze({
   // process. An explicit LLMIDE_DB_PATH still wins.
   dbPath:       MAIN_DB_PATH,
   // agent.db: agent-run history, retention and storage (kb/agent-db.mjs).
-  agentDbPath:  envStr('LLMIDE_AGENT_DB_PATH', DEFAULT_AGENT_DB_PATH),
+  agentDbPath:  DATA_LAYOUT.agentDbPath,
+  // Global per-install data (core/data-dir.mjs). dataDir is null in the repo
+  // kb layout; dataLocation is 'system' | 'repo-kb' for /health.
+  dataDir:      DATA_LAYOUT.dataDir,
+  dataLocation: DATA_LAYOUT.location,
+  backupDir:    DATA_LAYOUT.backupDir,
+  agentSdkDir:  DATA_LAYOUT.agentSdkDir,
+  logFile:      DATA_LAYOUT.logFile,
 
   // Auth
   jwtSecret:    _jwtSecret,

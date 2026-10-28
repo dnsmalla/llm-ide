@@ -36,10 +36,10 @@ export function resolveAnthropicKey(userId) {
 // SETTINGS; the config dir isolates everything else the SDK writes). Applied
 // to KEYED turns only: an ambient-auth turn relies on the operator's
 // `claude login`, which lives under the operator's default config dir, so
-// redirecting it would leave the subprocess "Not logged in". The base
-// follows the server's canonical data dir — the DB's directory (core/config:
-// <repo>/kb by default, wherever LLMIDE_DB_PATH points) — so engine homes sit
-// next to the other per-install runtime data. User ids are server-minted hex
+// redirecting it would leave the subprocess "Not logged in". The base is
+// config.agentSdkDir (core/data-dir.mjs: LLMIDE_DATA_DIR/agent-sdk, else the
+// DB's directory, <repo>/kb by default) — so engine homes sit next to the
+// other per-install runtime data. User ids are server-minted hex
 // (users.mjs); the charset guard keeps even a hand-edited id from escaping
 // the base via path traversal. Shared by the runner (composes the env every
 // keyed turn) and the route's transcript cleanup — one derivation, never two.
@@ -48,5 +48,5 @@ const USER_ID_RE = /^[A-Za-z0-9_-]+$/;
 
 export function agentSdkHomeFor(userId) {
   if (typeof userId !== 'string' || !USER_ID_RE.test(userId)) return null;
-  return path.join(path.dirname(config.dbPath), 'agent-sdk', userId);
+  return path.join(config.agentSdkDir, userId);
 }

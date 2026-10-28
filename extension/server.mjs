@@ -761,8 +761,7 @@ const server = http.createServer(async (req, res) => {
     try { requireAdmin(req); } catch (err) { sendError(res, err, { logger: reqLog }); return; }
     try {
       const u = new URL(req.url, 'http://127.0.0.1');
-      const dbDir = path.dirname(config.dbPath);
-      const defaultBackupDir = path.join(dbDir, 'backups');
+      const defaultBackupDir = config.backupDir;
       const rawDir = u.searchParams.get('dir') || defaultBackupDir;
       // Resolve symlinks / ".." components and enforce containment:
       // the final target must sit inside the default backup directory so
@@ -1118,8 +1117,7 @@ function runAutoBackup() {
   if (shuttingDown) return;
   if (BACKUP_INTERVAL_HOURS === 0) return;
   try {
-    const dbDir     = path.dirname(config.dbPath);
-    const backupDir = process.env.LLMIDE_BACKUP_DIR || path.join(dbDir, 'backups');
+    const backupDir = config.backupDir;
     fs.mkdirSync(backupDir, { recursive: true });
     const stamp  = Math.floor(Date.now() / 1000);
     const target = path.join(backupDir, `data-${stamp}.db`);
