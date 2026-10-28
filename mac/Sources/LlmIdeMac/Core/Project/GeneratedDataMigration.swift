@@ -325,12 +325,12 @@ enum GeneratedDataMigration {
         }
     }
 
-    private enum GitRun {
+    private enum MigrationGitProbe {
         case launchFailed
         case exited(Int32, String, String)
     }
 
-    private static func runGit(_ git: String, _ args: [String]) -> GitRun {
+    private static func runGit(_ git: String, _ args: [String]) -> MigrationGitProbe {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: git)
         process.arguments = args
