@@ -91,6 +91,14 @@ test('the tick runs a rollup when the size watchdog requested one, and clears th
   agent.writeMeta(db, 'soft_bytes', 256 * 1024 * 1024);
 });
 
+test('over the soft threshold, three ticks run one rollup, not three', () => {
+  const db = fresh();
+  agent.writeMeta(db, 'soft_bytes', 1);            // any file is over the soft threshold
+  const ran = [0, 1, 2].map(() => jobs.agentStoreTick(new Date(), {}).ran);
+  assert.deepEqual(ran, [true, false, false], 'only the transition into soft rolls up');
+  agent.writeMeta(db, 'soft_bytes', 256 * 1024 * 1024);
+});
+
 test('startAgentStoreJobs runs the history copy after listen and finishes it', async () => {
   const db = fresh();
   copy.prepareHistoryCopy({ agentDb: db });

@@ -12,7 +12,7 @@
 //   stopAgentStoreJobs    shutdown: stop the tick. The caller then calls
 //                         closeAgentDb(), which flushes the queue.
 
-import { getAgentDb, openAgentDb, takeRollupRequest, verifyAgentDb, localDay, readMeta, writeMeta, checkStorageSize } from './agent-db.mjs';
+import { agentStoreStatus, getAgentDb, openAgentDb, takeRollupRequest, verifyAgentDb, localDay, readMeta, writeMeta, checkStorageSize } from './agent-db.mjs';
 import { prepareHistoryCopy, copyHistoryStep, historyCopyDone } from './agent-history-copy.mjs';
 import { abortStaleRuns, replayPendingPurges, rollupAll } from './agent-store.mjs';
 
@@ -56,8 +56,13 @@ export function agentStoreTick(now = new Date(), { logger } = {}) {
   try {
     const db = getAgentDb();
     if (!db) return { ran: false };
-    checkStorageSize(now.getTime());
-    const requested = takeRollupRequest();
+    // A rollup is requested on a TRANSITION into soft or hard, not on every
+    // tick while the store stays over the threshold (that would be a full
+    // rollup every 60 s). The size refresh itself never sets the flag.
+    const before = agentStoreStatus().sizeState;
+    const size = checkStorageSize(now.getTime(), { requestRollup: false });
+    const transitioned = size.state !== 'ok' && size.state !== before;
+    const requested = takeRollupRequest() || transitioned;
     const due = dailyRollupDue(readMeta(db, LAST_DAILY_KEY), now);
     if (!requested && !due) return { ran: false };
     const result = rollupAll({ db, now });
