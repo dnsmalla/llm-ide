@@ -452,6 +452,8 @@ export type Health = {
     location: "system" | "repo-kb";
     /** migrated | skipped | fallback */
     migration: string;
+    /** true when the legacy <repo>/kb/data.db changed (or vanished) after the copy to the data dir: something still writes to the old copy */
+    legacyDiverged?: boolean;
   };
   checks: {
     db: boolean;

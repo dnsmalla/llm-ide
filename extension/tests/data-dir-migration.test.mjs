@@ -276,3 +276,46 @@ test('a legacy vault with stored secrets but no key file falls back instead of m
   assert.equal(fs.existsSync(path.join(dataDir, 'data.db')), false);
   assert.ok(fs.existsSync(path.join(kb, 'data.db')));
 });
+
+// --- forks: the legacy DB changed after the move ----------------------------
+
+test('a successful copy records the legacy baseline and leaves a MOVED notice in the legacy kb', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated');
+  const marker = JSON.parse(fs.readFileSync(path.join(dataDir, 'migrated-from.json'), 'utf8'));
+  assert.ok(marker.legacyBaseline.dataDb.size > 0);
+  const notice = fs.readFileSync(path.join(kb, 'MOVED-TO-APP-SUPPORT.txt'), 'utf8');
+  assert.match(notice, /Now lives:\s+.*system/);
+  assert.match(notice, /stale copy/);
+  assert.equal(report.legacyDiverged, false);
+});
+
+test('a later boot with an untouched legacy DB reports no divergence', () => {
+  makeLegacy({ withAgent: false, withTrees: false });
+  runDataDirMigration({ env: env(), root });
+  const again = runDataDirMigration({ env: env(), root });
+  assert.equal(again.status, 'skipped');
+  assert.equal(again.legacyDiverged, false);
+});
+
+test('a later boot reports divergence once the legacy DB is written to', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  runDataDirMigration({ env: env(), root });
+  // An old server (or an adopted dev server) keeps writing to the legacy kb.
+  const old = new Database(path.join(kb, 'data.db'));
+  old.prepare('INSERT INTO meetings (title) VALUES (?)').run('written after the move');
+  old.close();
+  const again = runDataDirMigration({ env: env(), root });
+  assert.equal(again.status, 'skipped');
+  assert.equal(again.legacyDiverged, true);
+});
+
+test('no baseline (no marker) means divergence is unknown, not reported', () => {
+  makeLegacy({ withAgent: false, withTrees: false });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'data.db'), 'placeholder');
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'skipped');
+  assert.equal(report.legacyDiverged, null);
+});

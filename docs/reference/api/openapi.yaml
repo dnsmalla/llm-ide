@@ -12061,6 +12061,9 @@ components:
             migration:
               type: "string"
               description: "migrated | skipped | fallback"
+            legacyDiverged:
+              type: "boolean"
+              description: "true when the legacy <repo>/kb/data.db changed (or vanished) after the copy to the data dir: something still writes to the old copy"
         checks:
           type: "object"
           required:

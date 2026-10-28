@@ -928,7 +928,7 @@ async function collectHealth() {
     serverStartedAt: SERVER_STARTED_AT,
     skillsAvailable,
     features: config.features,
-    storage: { location: config.dataLocation, migration: dataDirMigration.status },
+    storage: { location: config.dataLocation, migration: dataDirMigration.status, legacyDiverged: dataDirMigration.legacyDiverged === true },
   });
 }
 
@@ -1282,6 +1282,11 @@ server.listen(PORT, HOST, () => {
       notes: mig.notes.length ? mig.notes : undefined,
       durationMs: mig.durationMs,
     });
+    if (mig.legacyDiverged === true) {
+      logger.warn('legacy_kb_diverged', {
+        detail: 'the legacy <repo>/kb/data.db changed after it was migrated to the data dir; something is still writing to it, and that data is not seen by this server',
+      });
+    }
   }
   // Token-bench fake engine (scripts/token-bench.mjs --fake): make it loud.
   // Every chat turn on this server is synthetic while it is active.

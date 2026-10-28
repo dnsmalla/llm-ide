@@ -66,7 +66,12 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 
     const newDb = path.join(dataDir, 'data.db');
-    if (fs.existsSync(newDb)) return finish('skipped', 'data-dir-has-db');
+    if (fs.existsSync(newDb)) {
+      // Already moved: say whether the legacy kb has been written to since
+      // (a fork: an older server or an adopted dev server is still using it).
+      report.legacyDiverged = checkLegacyDivergence(path.join(root, 'kb'), dataDir);
+      return finish('skipped', 'data-dir-has-db');
+    }
 
     const legacyDir = path.join(root, 'kb');
     const legacyDb = path.join(legacyDir, 'data.db');
@@ -139,6 +144,9 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, repo
       agentDb: agentCopied,
       backups: trees.backups,
       agentSdk: trees['agent-sdk'],
+      // What the legacy DB looked like when it was left behind. A later boot
+      // compares against this to notice a fork.
+      legacyBaseline: legacyFingerprint(legacyDir),
     };
     fs.writeFileSync(path.join(staging, MARKER), `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
 
@@ -152,6 +160,8 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, repo
       moved.push(name);
     }
     rmTree(staging);
+    report.legacyDiverged = false;
+    writeMovedNotice(legacyDir, dataDir, report);
     return finish('migrated', null);
   } catch (err) {
     for (const name of moved) rmTree(path.join(dataDir, name));
@@ -237,6 +247,58 @@ function copySecrets({ legacyFile, dataDir, staging, env, report }) {
   const dest = path.join(staging, DEV_SECRETS);
   fs.writeFileSync(dest, raw, { mode: 0o600 });
   fs.chmodSync(dest, 0o600);
+}
+
+// Size and mtime of the legacy data.db and its -wal. A server writing to the
+// legacy kb changes at least one of them (writes land in the WAL first).
+function legacyFingerprint(legacyDir) {
+  const stat = (f) => {
+    try { const st = fs.statSync(f); return { size: st.size, mtimeMs: st.mtimeMs }; } catch { return null; }
+  };
+  return {
+    dataDb: stat(path.join(legacyDir, 'data.db')),
+    wal: stat(path.join(legacyDir, 'data.db-wal')),
+    takenAt: new Date().toISOString(),
+  };
+}
+
+// true: the legacy DB changed since it was migrated (or disappeared).
+// null: no marker, so there is nothing to compare.
+function checkLegacyDivergence(legacyDir, dataDir) {
+  let marker;
+  try { marker = JSON.parse(fs.readFileSync(path.join(dataDir, MARKER), 'utf8')); } catch { return null; }
+  const base = marker?.legacyBaseline;
+  if (!base) return null;
+  const now = legacyFingerprint(legacyDir);
+  if (!now.dataDb) return true;
+  const same = (a, b) => (a === null && b === null) || (a && b && a.size === b.size && a.mtimeMs === b.mtimeMs);
+  return !(same(base.dataDb, now.dataDb) && same(base.wal, now.wal));
+}
+
+// Plain-text notice in the legacy kb, so a person (or a later agent) who finds
+// the old files knows where the live data went and how to roll back.
+function writeMovedNotice(legacyDir, dataDir, report) {
+  const text = [
+    'The live data moved to the app data directory.',
+    '',
+    `Moved on:   ${new Date().toISOString()}`,
+    `Now lives:  ${dataDir}`,
+    '  data.db, agent.db, .dev-secrets.json (vault key), agent-sdk/ (agent credentials, mode 0600)',
+    'Not copied: backups/ (old backups stay here; new ones go to the data dir)',
+    `Tables copied: ${Object.keys(report.tables ?? {}).length} (row counts verified)`,
+    '',
+    'This directory is now a stale copy. Writing to it forks the data: the server',
+    'reads the data dir, so anything written here is invisible to it.',
+    '',
+    'To roll back to this copy, stop the server and read docs/how-to/data-location-and-rollback.md',
+    'in the repository (LLMIDE_USE_REPO_KB=1 runs an old-layout server on this directory).',
+    '',
+  ].join('\n');
+  try {
+    fs.writeFileSync(path.join(legacyDir, 'MOVED-TO-APP-SUPPORT.txt'), text);
+  } catch (err) {
+    report.notes.push(`could not write MOVED-TO-APP-SUPPORT.txt: ${err.message}`);
+  }
 }
 
 function tableCounts(db) {
