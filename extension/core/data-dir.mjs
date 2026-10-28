@@ -68,14 +68,20 @@ export function resolveDataLayout({
   else if (dataDir) { dbPath = path.join(dataDir, 'data.db'); dbSource = 'data-dir'; }
   else { dbPath = path.join(repoKb, 'data.db'); dbSource = 'default'; }
 
+  // Where agent.db, backups/ and agent-sdk/ live. An explicit LLMIDE_DB_PATH
+  // puts them beside that DB, so one custom DB never splits its companions
+  // between the custom path and the data dir. Otherwise: the data dir, or the
+  // repo kb beside the default DB.
+  const base = dbSource === 'env'
+    ? path.dirname(dbPath)
+    : (dataDir ?? path.dirname(dbPath));
+
   // agent.db (agent history store). Under test: `<main test DB>.agent.db`.
   let agentDbPath;
   if (str('LLMIDE_AGENT_DB_PATH')) agentDbPath = str('LLMIDE_AGENT_DB_PATH');
   else if (isTest) agentDbPath = `${dbPath}.agent.db`;
-  else if (dataDir) agentDbPath = path.join(dataDir, 'agent.db');
-  else agentDbPath = path.join(path.dirname(dbPath), 'agent.db');
+  else agentDbPath = path.join(base, 'agent.db');
 
-  const base = dataDir ?? path.dirname(dbPath);
   const backupDir = str('LLMIDE_BACKUP_DIR') ?? path.join(base, 'backups');
   const agentSdkDir = path.join(base, 'agent-sdk');
   // LLMIDE_LOG_FILE set (even empty) is an explicit choice: '' or 'none' disables the file sink.
@@ -88,10 +94,10 @@ export function resolveDataLayout({
   }
 
   return {
-    // The active system data dir, or null when the repo kb layout is in use.
+    // The system data dir (dev secrets and logs follow it), or null.
     dataDir,
-    // 'system' | 'repo-kb' | 'custom' (an individual env var moved a file out of it)
-    location: dataDir ? 'system' : 'repo-kb',
+    // 'custom': an explicit LLMIDE_DB_PATH; 'system': the data dir; 'repo-kb': the checkout.
+    location: dbSource === 'env' ? 'custom' : (dataDir ? 'system' : 'repo-kb'),
     dbPath,
     dbSource,
     agentDbPath,

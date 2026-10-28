@@ -137,8 +137,10 @@
             "location": {
               "enum": [
                 "system",
-                "repo-kb"
-              ]
+                "repo-kb",
+                "custom"
+              ],
+              "description": "system: LLMIDE_DATA_DIR; repo-kb: the checkout's kb/; custom: an explicit LLMIDE_DB_PATH"
             },
             "migration": {
               "type": "string",

@@ -449,7 +449,8 @@ export type Health = {
   features: string[] | null;
   /** Where the global data lives (core/data-dir.mjs): location is 'system' (LLMIDE_DATA_DIR, the Mac app's Application Support dir) or 'repo-kb' (the checkout's kb/); migration is the boot copy outcome (kb/data-dir-migration.mjs: migrated | skipped | fallback). No paths. */
   storage?: {
-    location: "system" | "repo-kb";
+    /** system: LLMIDE_DATA_DIR; repo-kb: the checkout's kb/; custom: an explicit LLMIDE_DB_PATH */
+    location: "system" | "repo-kb" | "custom";
     /** migrated | skipped | fallback */
     migration: string;
     /** true when the legacy <repo>/kb/data.db changed (or vanished) after the copy to the data dir: something still writes to the old copy */

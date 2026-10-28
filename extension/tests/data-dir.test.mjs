@@ -48,14 +48,26 @@ test('individual env vars win over LLMIDE_DATA_DIR', () => {
   assert.equal(l.agentDbPath, '/x/agent.db');
   assert.equal(l.backupDir, '/x/bk');
   assert.equal(l.logFile, '/x/log.txt');
-  // agent-sdk is not individually overridable: it follows the data dir.
-  assert.equal(l.agentSdkDir, path.join(DATA, 'agent-sdk'));
+  assert.equal(l.location, 'custom');
+  // agent-sdk is not individually overridable: it sits beside the explicit DB.
+  assert.equal(l.agentSdkDir, path.join('/x', 'agent-sdk'));
 });
 
-test('LLMIDE_DB_PATH alone keeps agent.db beside the explicit DB (old behaviour)', () => {
+test('an explicit LLMIDE_DB_PATH derives agent.db, backups and agent-sdk beside it, and reports custom', () => {
   const l = layout({ LLMIDE_DB_PATH: '/elsewhere/main.db' });
+  assert.equal(l.location, 'custom');
   assert.equal(l.agentDbPath, path.join('/elsewhere', 'agent.db'));
   assert.equal(l.backupDir, path.join('/elsewhere', 'backups'));
+  assert.equal(l.agentSdkDir, path.join('/elsewhere', 'agent-sdk'));
+});
+
+test('with LLMIDE_DB_PATH and LLMIDE_DATA_DIR both set, no companion file splits into the data dir', () => {
+  const l = layout({ LLMIDE_DATA_DIR: DATA, LLMIDE_DB_PATH: '/elsewhere/main.db' });
+  assert.equal(l.location, 'custom');
+  assert.equal(l.agentDbPath, path.join('/elsewhere', 'agent.db'));
+  assert.equal(l.backupDir, path.join('/elsewhere', 'backups'));
+  assert.equal(l.agentSdkDir, path.join('/elsewhere', 'agent-sdk'));
+  assert.ok(!l.agentDbPath.startsWith(DATA) && !l.backupDir.startsWith(DATA));
 });
 
 test('empty LLMIDE_LOG_FILE disables the file sink; none does too', () => {
