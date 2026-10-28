@@ -25,6 +25,7 @@ const store = await import('../kb/agent-store.mjs');
 const { recordUsage, windowStart, toSqliteLocal } = await import('../kb/usage.mjs');
 const { config } = await import('../core/config.mjs');
 const users = await import('../server/users.mjs');
+const jobs = await import('../kb/agent-jobs.mjs');
 
 const U = users.registerUser(main.getDb(), { email: 'shadow-a@example.test', password: 'CorrectHorseBattery', displayName: 'a' }).id;
 const OTHER = users.registerUser(main.getDb(), { email: 'shadow-b@example.test', password: 'CorrectHorseBattery', displayName: 'b' }).id;
@@ -511,4 +512,65 @@ test('failure logs are rate limited to one line per minute; the counter counts e
   const errors = logger.warnings.filter((w) => w.event === 'agent_db_write_failed');
   assert.equal(agent.agentStoreStatus().writeErrors, before + 3, 'every failure is counted');
   assert.equal(errors.length, 1, 'three failures inside a minute log one line');
+});
+
+// --- compare false negatives and the independent daily step (review fix 5) ---
+
+test('the compare flags tokens, is_internal, day and source divergence that counts alone would miss', () => {
+  clearMain();
+  const db = freshAgent();
+  recordUsage(mdb(), { userId: U, ...ROW, requestId: 'fn-1', endpoint: 'chat:internal', inputTokens: 100 });
+  recordUsage(mdb(), { userId: U, ...ROW, requestId: 'fn-2', inputTokens: 200 });
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  finishedCopy(db);
+  // Clean first, so the mutations below are the only differences.
+  assert.equal(shadow.compareLedgerShadow(null, { mainDb: mdb(), agentDb: db, logger: captureLogger() }).ok, true);
+
+  // Same row count, same runs, token sums moved by one.
+  db.prepare("UPDATE usage_calls SET input_tokens = input_tokens + 1 WHERE request_id = 'fn-2'").run();
+  let r = shadow.compareLedgerShadow(null, { mainDb: mdb(), agentDb: db, logger: captureLogger() });
+  assert.equal(r.ok, false);
+  assert.ok(r.sample.some((x) => x.fields.includes('input')), 'token sum flagged');
+  db.prepare("UPDATE usage_calls SET input_tokens = input_tokens - 1 WHERE request_id = 'fn-2'").run();
+
+  // The internal flag flipped on the internal row.
+  db.prepare("UPDATE usage_calls SET is_internal = 0 WHERE request_id = 'fn-1'").run();
+  r = shadow.compareLedgerShadow(null, { mainDb: mdb(), agentDb: db, logger: captureLogger() });
+  assert.ok(r.sample.some((x) => x.fields.includes('internal')), 'is_internal flagged');
+  db.prepare("UPDATE usage_calls SET is_internal = 1 WHERE request_id = 'fn-1'").run();
+
+  // A day that does not match ts.
+  db.prepare("UPDATE usage_calls SET day = '2020-01-01' WHERE request_id = 'fn-2'").run();
+  r = shadow.compareLedgerShadow(null, { mainDb: mdb(), agentDb: db, logger: captureLogger() });
+  assert.ok(r.sample.some((x) => x.fields.includes('badDay')), 'day mismatch flagged');
+  db.prepare("UPDATE usage_calls SET day = substr(ts, 1, 10) WHERE request_id = 'fn-2'").run();
+
+  // A source that differs.
+  db.prepare("UPDATE usage_calls SET source = 'cli' WHERE request_id = 'fn-2'").run();
+  r = shadow.compareLedgerShadow(null, { mainDb: mdb(), agentDb: db, logger: captureLogger() });
+  assert.ok(r.sample.some((x) => x.fields.includes('srcCli') || x.fields.includes('srcApi')), 'source flagged');
+  db.prepare("UPDATE usage_calls SET source = 'api' WHERE request_id = 'fn-2'").run();
+
+  r = shadow.compareLedgerShadow(null, { mainDb: mdb(), agentDb: db, logger: captureLogger() });
+  assert.equal(r.ok, true, 'back to clean after the reverts');
+});
+
+test('a rollup failure does not skip the daily usage shadow (prune and compare still run)', () => {
+  clearMain();
+  const db = freshAgent();
+  recordUsage(mdb(), { userId: U, ...ROW, requestId: 'daily-1' });
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  copy.runHistoryCopy({ mainDb: mdb(), agentDb: db });
+  // Make rollupAll fail: its first query reads agent_runs.
+  db.exec('DROP TABLE agent_runs');
+  agent.setAgentDbForTests(db, { file: agentFiles[0] });
+  const logger = captureLogger();
+  const now = new Date(2026, 9, 28, 12, 0, 0);
+  const r = jobs.agentStoreTick(now, { logger });
+  assert.equal(r.ran, false, 'the rollup failed');
+  assert.equal(r.shadow, true, 'the shadow ran');
+  assert.ok(logger.warnings.some((w) => w.event === 'agent_db_rollup_failed'), 'the rollup failure is logged');
+  assert.ok(shadow.lastShadowCompare(db), 'the compare result was stored despite the rollup failure');
+  assert.equal(agent.readMeta(db, 'last_daily_usage_shadow_day'), '2026-10-28');
+  assert.equal(agent.readMeta(db, 'last_daily_rollup_day'), null, 'the rollup day is not marked done');
 });

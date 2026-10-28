@@ -118,7 +118,10 @@ export function shadowWindowCutoff(days, now = new Date()) {
   return toSqliteLocal(d);
 }
 
-const AGG_COLUMNS = `COUNT(*) AS n,
+// Per user+provider+model sums. Each side is a literal query (the SQL inventory
+// guard reads these FROM clauses). The shadow also checks its own `day` against
+// `ts`; the ledger has no day column, so its badDay is 0 by definition.
+const COMMON_AGG = `COUNT(*) AS n,
   COALESCE(SUM(runs), 0) AS runs,
   COALESCE(SUM(input_tokens), 0) AS input,
   COALESCE(SUM(output_tokens), 0) AS output,
@@ -128,23 +131,43 @@ const AGG_COLUMNS = `COUNT(*) AS n,
   COUNT(turns) AS turnRows,
   SUM(CASE WHEN input_tokens IS NULL AND output_tokens IS NULL
             AND cache_read_tokens IS NULL AND cache_creation_tokens IS NULL
-           THEN 1 ELSE 0 END) AS unknownRows`;
-const COMPARE_FIELDS = ['n', 'runs', 'input', 'output', 'cacheRead', 'cacheCreation', 'turns', 'turnRows', 'unknownRows'];
+           THEN 1 ELSE 0 END) AS unknownRows,
+  SUM(CASE WHEN endpoint IS NULL THEN 1 ELSE 0 END) AS nullEndpoint,
+  SUM(CASE WHEN source = 'api' THEN 1 ELSE 0 END) AS srcApi,
+  SUM(CASE WHEN source = 'cli' THEN 1 ELSE 0 END) AS srcCli,
+  SUM(CASE WHEN source = 'auto-task' THEN 1 ELSE 0 END) AS srcAuto`;
+const COMPARE_FIELDS = [
+  'n', 'runs', 'input', 'output', 'cacheRead', 'cacheCreation', 'turns', 'turnRows', 'unknownRows',
+  'nullEndpoint', 'srcApi', 'srcCli', 'srcAuto', 'internal', 'badDay',
+];
 
-// Literal FROM clauses (not interpolated), so the SQL inventory guard sees them.
-const FROM_LEDGER = 'FROM usage_ledger';
-const FROM_SHADOW = 'FROM usage_calls';
-
-function aggregate(db, from, cutoff, userId) {
+function ledgerAggregate(db, cutoff, userId) {
   const userSql = userId ? ' AND user_id = ?' : '';
   const args = userId ? [cutoff, userId] : [cutoff];
+  return db.prepare(
+    `SELECT user_id, provider, model, ${COMMON_AGG},
+       COALESCE(SUM(CASE WHEN endpoint LIKE '%:internal' THEN 1 ELSE 0 END), 0) AS internal,
+       0 AS badDay
+     FROM usage_ledger WHERE ts >= ?${userSql}
+     GROUP BY user_id, provider, model`,
+  ).all(...args);
+}
+
+function shadowAggregate(db, cutoff, userId) {
+  const userSql = userId ? ' AND user_id = ?' : '';
+  const args = userId ? [cutoff, userId] : [cutoff];
+  return db.prepare(
+    `SELECT user_id, provider, model, ${COMMON_AGG},
+       COALESCE(SUM(is_internal), 0) AS internal,
+       COALESCE(SUM(CASE WHEN day <> substr(ts, 1, 10) THEN 1 ELSE 0 END), 0) AS badDay
+     FROM usage_calls WHERE ts >= ?${userSql}
+     GROUP BY user_id, provider, model`,
+  ).all(...args);
+}
+
+function byKey(rows) {
   const out = new Map();
-  for (const r of db.prepare(
-    `SELECT user_id, provider, model, ${AGG_COLUMNS} ${from} WHERE ts >= ?${userSql}
-      GROUP BY user_id, provider, model`,
-  ).all(...args)) {
-    out.set(`${r.user_id}\u0000${r.provider}\u0000${r.model}`, r);
-  }
+  for (const r of rows) out.set(`${r.user_id}\u0000${r.provider}\u0000${r.model}`, r);
   return out;
 }
 
@@ -165,8 +188,8 @@ export function compareLedgerShadow(userId = null, {
   let mismatches = 0;
   for (const w of SHADOW_WINDOWS) {
     const cutoff = shadowWindowCutoff(w.days, now);
-    const ledger = aggregate(mainDb, FROM_LEDGER, cutoff, userId);
-    const shadow = aggregate(agentDb, FROM_SHADOW, cutoff, userId);
+    const ledger = byKey(ledgerAggregate(mainDb, cutoff, userId));
+    const shadow = byKey(shadowAggregate(agentDb, cutoff, userId));
     const keys = new Set([...ledger.keys(), ...shadow.keys()]);
     let mismatchedKeys = 0;
     let ledgerRows = 0;

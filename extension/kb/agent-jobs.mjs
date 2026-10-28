@@ -22,6 +22,9 @@ export const TICK_MS = 60 * 1000;
 export const DAILY_ROLLUP_HOUR = 3;
 export const DAILY_ROLLUP_MINUTE = 10;
 const LAST_DAILY_KEY = 'last_daily_rollup_day';
+// The daily usage shadow (prune + compare) has its own day key, so a failing
+// rollup neither skips it nor makes it repeat every tick.
+const LAST_SHADOW_KEY = 'last_daily_usage_shadow_day';
 
 let timer = null;
 
@@ -78,7 +81,24 @@ export function openAgentStoreAtBoot({ logger } = {}) {
   }
 }
 
-/** One tick: a requested or due rollup, and the size watchdog. Exported for tests. */
+/**
+ * The daily usage shadow: prune usage_calls to the ledger's retention, then
+ * compare it with the ledger. Own try blocks, so neither can stop the other or
+ * the rollup. Exported for tests.
+ */
+export function runDailyUsageShadow(db, now, logger) {
+  try { pruneUsageCalls({ agentDb: db, now }); } catch (err) {
+    log(logger, 'error', 'agent_usage_prune_failed', { error: err?.message });
+  }
+  try {
+    if (usageCopyDone({ agentDb: db })) compareLedgerShadow(null, { agentDb: db, now, logger });
+  } catch (err) {
+    log(logger, 'error', 'agent_usage_compare_failed', { error: err?.message });
+  }
+  try { writeMeta(db, LAST_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
+}
+
+/** One tick: a requested or due rollup and the daily usage shadow, and the size watchdog. Exported for tests. */
 export function agentStoreTick(now = new Date(), { logger } = {}) {
   try {
     const db = getAgentDb();
@@ -92,20 +112,21 @@ export function agentStoreTick(now = new Date(), { logger } = {}) {
     const size = checkStorageSize(now.getTime(), { requestRollup: false });
     const transitioned = size.state !== 'ok' && size.state !== before;
     const requested = takeRollupRequest() || transitioned;
-    const due = dailyRollupDue(readMeta(db, LAST_DAILY_KEY), now);
-    if (!requested && !due) return { ran: false };
-    const result = rollupAll({ db, now });
-    if (due) {
-      // Daily, not per tick: the usage shadow keeps the ledger's 90-day raw window
-      // and is compared against the ledger (Stage 2a evidence gate).
-      try { pruneUsageCalls({ agentDb: db, now }); } catch { /* best effort */ }
-      try {
-        if (usageCopyDone({ agentDb: db })) compareLedgerShadow(null, { agentDb: db, now, logger });
-      } catch (err) { log(logger, 'error', 'agent_usage_compare_failed', { error: err?.message }); }
-      writeMeta(db, LAST_DAILY_KEY, localDay(now));
+    const rollupDue = dailyRollupDue(readMeta(db, LAST_DAILY_KEY), now);
+    const shadowDue = dailyRollupDue(readMeta(db, LAST_SHADOW_KEY), now);
+    if (!requested && !rollupDue && !shadowDue) return { ran: false };
+    if (shadowDue) runDailyUsageShadow(db, now, logger);
+    let users = 0;
+    let rolled = true;
+    try {
+      users = rollupAll({ db, now }).users?.length ?? 0;
+    } catch (err) {
+      rolled = false;
+      log(logger, 'error', 'agent_db_rollup_failed', { error: err?.message });
     }
-    log(logger, 'info', 'agent_db_rollup', { requested, daily: due, users: result.users?.length ?? 0 });
-    return { ran: true, requested, daily: due };
+    if (rolled && rollupDue) writeMeta(db, LAST_DAILY_KEY, localDay(now));
+    if (rolled) log(logger, 'info', 'agent_db_rollup', { requested, daily: rollupDue, users });
+    return { ran: rolled, requested, daily: rollupDue, shadow: shadowDue };
   } catch (err) {
     log(logger, 'error', 'agent_db_rollup_failed', { error: err?.message });
     return { ran: false };
