@@ -19,6 +19,8 @@ import { getDb } from './db.mjs';
 import { toSqliteLocal, windowStart } from './usage.mjs';
 
 export const USAGE_RETENTION_DAYS = 90;
+export const USAGE_FLOOR_KEY = 'usage_copy_floor';
+export const USAGE_CUTOFF_KEY = 'usage_copy_cutoff';
 export const SHADOW_META_KEY = 'last_shadow_compare';
 export const SHADOW_MISMATCH_KEY = 'shadow_mismatches';
 // Windows the compare checks, in local days (today = 1). Same local-midnight
@@ -29,6 +31,32 @@ export const SHADOW_WINDOWS = Object.freeze([
   { key: 'days30', days: 30 },
 ]);
 const SAMPLE_CAP = 10;
+
+// Per-handle cache: the floor check (one readMeta) runs until it first passes,
+// and the prepared insert is built once per handle.
+const handleCache = new WeakMap();
+function handleState(agentDb) {
+  let st = handleCache.get(agentDb);
+  if (!st) { st = { floor: false, insert: null }; handleCache.set(agentDb, st); }
+  return st;
+}
+
+/**
+ * True once the boot step has set the id floor on this handle. Until then the
+ * mirror writes nothing: a row written before the floor exists would take an id
+ * that the backfill later copies from the ledger (boot-order collision).
+ */
+export function usageFloorReady(agentDb) {
+  const st = handleState(agentDb);
+  if (st.floor) return true;
+  try {
+    if (readMeta(agentDb, USAGE_FLOOR_KEY) == null) return false;
+  } catch {
+    return false;
+  }
+  st.floor = true;
+  return true;
+}
 
 const MIRROR_SQL = `INSERT INTO usage_calls
   (user_id, day, ts, provider, model, source, endpoint, is_internal,
@@ -61,9 +89,12 @@ export function shadowRowFromLedger(r) {
 export function mirrorUsageCall(mainDb, ledgerId, { agentDb = getAgentDb() } = {}) {
   if (!agentDb || !Number.isFinite(Number(ledgerId))) return false;
   try {
+    if (!usageFloorReady(agentDb)) return false;
     const row = mainDb.prepare('SELECT * FROM usage_ledger WHERE id = ?').get(ledgerId);
     if (!row) return false;
-    agentDb.prepare(MIRROR_SQL).run(...shadowRowFromLedger(row));
+    const st = handleState(agentDb);
+    st.insert ??= agentDb.prepare(MIRROR_SQL);
+    st.insert.run(...shadowRowFromLedger(row));
     return true;
   } catch (err) {
     noteAgentWriteFailure(err);

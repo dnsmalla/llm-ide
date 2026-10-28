@@ -17,7 +17,7 @@
 
 import { getDb } from './db.mjs';
 import { getAgentDb, readMeta, writeMeta } from './agent-db.mjs';
-import { isInternalEndpoint, USAGE_RETENTION_DAYS } from './agent-usage.mjs';
+import { isInternalEndpoint, USAGE_FLOOR_KEY, USAGE_CUTOFF_KEY, USAGE_RETENTION_DAYS } from './agent-usage.mjs';
 import { toSqliteLocal } from './usage.mjs';
 
 export const COPY_BATCH_ROWS = 5000;
@@ -74,17 +74,32 @@ export function prepareHistoryCopy({ mainDb = getDb(), agentDb = getAgentDb() } 
 // (rows mirrored live after boot have larger ids and are never copied) and
 // ts >= the 90-day cutoff fixed at boot. Both are kept in store_meta so a resumed
 // copy uses the same bounds.
-const USAGE_FLOOR_KEY = 'usage_copy_floor';
-const USAGE_CUTOFF_KEY = 'usage_copy_cutoff';
+//
+// Verification compares COUNT and the SUMs of every token, run, turn and
+// internal-flag column between the ledger range and the copy. A mismatch never
+// writes copy_done: the copied rows are removed and the copy is retried from
+// scratch on the next boot, at most USAGE_MAX_ATTEMPTS times per store.
 const USAGE_CURSOR_KEY = 'copy_cursor:usage_ledger';
 const USAGE_DONE_KEY = 'copy_done:usage_ledger';
 const USAGE_VERIFIED_KEY = 'copy_verified:usage_ledger';
+const USAGE_ATTEMPTS_KEY = 'usage_copy_attempts';
+const USAGE_PENDING_KEY = 'usage_copy_retry_next_boot';
+const USAGE_GAVE_UP_KEY = 'usage_copy_gave_up';
+export const USAGE_MAX_ATTEMPTS = 3;
 
+/**
+ * Boot step (and the bounds-missing branch of the copy). When no floor exists
+ * yet, any usage_calls rows are leftovers that would collide with copied ids:
+ * the table is only a shadow, so it is emptied before the bounds are set.
+ */
 function prepareUsageCopy(agent, mainDb, floors) {
   if (!hasTable(mainDb, 'usage_ledger') || readMeta(agent, USAGE_DONE_KEY)) return;
+  writeMeta(agent, USAGE_PENDING_KEY, '0');
   if (readMeta(agent, USAGE_FLOOR_KEY) == null) {
+    agent.prepare('DELETE FROM usage_calls').run();
     const floor = maxId(mainDb, 'usage_ledger');
     const cutoff = toSqliteLocal(new Date(Date.now() - USAGE_RETENTION_DAYS * 86_400_000));
+    writeMeta(agent, USAGE_CURSOR_KEY, 0);
     writeMeta(agent, USAGE_CUTOFF_KEY, cutoff);
     writeMeta(agent, USAGE_FLOOR_KEY, floor);
   }
@@ -93,10 +108,47 @@ function prepareUsageCopy(agent, mainDb, floors) {
   floors.usage_ledger = floor;
 }
 
+const SUM_COLUMNS = `COUNT(*) AS n,
+  COALESCE(SUM(runs), 0) AS runs,
+  COALESCE(SUM(input_tokens), 0) AS input,
+  COALESCE(SUM(output_tokens), 0) AS output,
+  COALESCE(SUM(cache_read_tokens), 0) AS cacheRead,
+  COALESCE(SUM(cache_creation_tokens), 0) AS cacheCreation,
+  COALESCE(SUM(turns), 0) AS turns,
+  SUM(CASE WHEN %INTERNAL% THEN 1 ELSE 0 END) AS internal`;
+
+/** Totals of the copied range on one side (ledger or copy), for verification. */
+function copyTotals(db, table, floor, cutoff) {
+  const internal = table === 'usage_ledger' ? "endpoint LIKE '%:internal'" : 'is_internal = 1';
+  const where = cutoff == null ? 'id <= ?' : 'id <= ? AND ts >= ?';
+  const args = cutoff == null ? [floor] : [floor, cutoff];
+  const row = db.prepare(`SELECT ${SUM_COLUMNS.replace('%INTERNAL%', internal)} FROM ${table} WHERE ${where}`).get(...args);
+  return { ...row };
+}
+
+const sameTotals = (a, b) => Object.keys(a).every((k) => Number(a[k]) === Number(b[k]));
+
+function failCopyAttempt(agent, floor, want, got) {
+  const attempts = (Number(readMeta(agent, USAGE_ATTEMPTS_KEY)) || 0) + 1;
+  // The copy is a shadow: remove what this attempt wrote and start over later.
+  agent.prepare('DELETE FROM usage_calls WHERE id <= ?').run(floor);
+  writeMeta(agent, USAGE_CURSOR_KEY, 0);
+  writeMeta(agent, USAGE_ATTEMPTS_KEY, attempts);
+  writeMeta(agent, USAGE_PENDING_KEY, '1');
+  writeMeta(agent, USAGE_VERIFIED_KEY, `mismatch:${attempts}`);
+  writeMeta(agent, 'usage_copy_mismatch', JSON.stringify({ want, got }));
+  if (attempts >= USAGE_MAX_ATTEMPTS) writeMeta(agent, USAGE_GAVE_UP_KEY, '1');
+  return { ok: false, table: 'usage_ledger', copied: 0, done: false, reason: 'verify_mismatch', attempts };
+}
+
 /** One batch of the usage backfill, in one transaction with its cursor. */
 export function copyUsageStep({ mainDb = getDb(), agentDb = getAgentDb(), batch = COPY_BATCH_ROWS } = {}) {
   if (!agentDb) return { ok: false, reason: 'unavailable' };
   if (usageCopyDone({ agentDb, mainDb })) return { ok: true, table: null, copied: 0, done: true };
+  if (readMeta(agentDb, USAGE_GAVE_UP_KEY)) return { ok: false, table: 'usage_ledger', reason: 'gave_up', done: false };
+  if (readMeta(agentDb, USAGE_PENDING_KEY) === '1') {
+    return { ok: false, table: 'usage_ledger', reason: 'verify_retry_next_boot', done: false };
+  }
   const floor = Number(readMeta(agentDb, USAGE_FLOOR_KEY));
   const cutoff = readMeta(agentDb, USAGE_CUTOFF_KEY);
   if (!Number.isFinite(floor) || !cutoff) {
@@ -128,9 +180,10 @@ export function copyUsageStep({ mainDb = getDb(), agentDb = getAgentDb(), batch 
     return rows.length;
   })();
   if (copied === 0) {
-    const mainCount = mainDb.prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE id <= ? AND ts >= ?').get(floor, cutoff).n;
-    const copyCount = agentDb.prepare('SELECT COUNT(*) AS n FROM usage_calls WHERE id <= ?').get(floor).n;
-    writeMeta(agentDb, USAGE_VERIFIED_KEY, mainCount === copyCount ? 'ok' : `mismatch:${mainCount}:${copyCount}`);
+    const want = copyTotals(mainDb, 'usage_ledger', floor, cutoff);
+    const got = copyTotals(agentDb, 'usage_calls', floor, null);
+    if (!sameTotals(want, got)) return failCopyAttempt(agentDb, floor, want, got);
+    writeMeta(agentDb, USAGE_VERIFIED_KEY, 'ok');
     writeMeta(agentDb, USAGE_DONE_KEY, '1');
     return { ok: true, table: 'usage_ledger', copied: 0, done: true };
   }

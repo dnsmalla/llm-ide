@@ -41,6 +41,23 @@ function freshAgent() {
   return db;
 }
 
+// Bounded drain: a copy that fails (mismatch, gave up) stops the loop instead of spinning.
+function drain(db, batch = 2) {
+  let last = null;
+  for (let i = 0; i < 10_000; i += 1) {
+    last = copy.copyUsageStep({ mainDb: mdb(), agentDb: db, batch });
+    if (last.done || !last.ok) return last;
+  }
+  throw new Error('copy did not finish');
+}
+
+// A store past its boot step: the id floor exists, so the mirror writes.
+function bootAgent() {
+  const db = freshAgent();
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  return db;
+}
+
 function clearMain() {
   mdb().prepare('DELETE FROM usage_ledger').run();
 }
@@ -51,7 +68,7 @@ const ROW = { provider: 'anthropic', model: 'claude-sonnet-4-6', source: 'api', 
 
 test('recordUsage mirrors the ledger row into usage_calls with the same values', () => {
   clearMain();
-  const db = freshAgent();
+  const db = bootAgent();
   const id = recordUsage(mdb(), { userId: U, ...ROW, endpoint: 'chat:internal', requestId: 'turn-m1' });
   assert.equal(typeof id, 'number');
   const ledger = mdb().prepare('SELECT * FROM usage_ledger WHERE id = ?').get(id);
@@ -72,7 +89,7 @@ test('recordUsage mirrors the ledger row into usage_calls with the same values',
 
 test('a plain call is mirrored with is_internal 0 and NULL endpoint kept NULL', () => {
   clearMain();
-  const db = freshAgent();
+  const db = bootAgent();
   recordUsage(mdb(), { userId: U, ...ROW, requestId: 'turn-m2' });
   const row = db.prepare('SELECT endpoint, is_internal FROM usage_calls WHERE request_id = ?').get('turn-m2');
   assert.equal(row.endpoint, null);
@@ -81,13 +98,18 @@ test('a plain call is mirrored with is_internal 0 and NULL endpoint kept NULL', 
 
 test('a failing agent.db never fails recordUsage: the ledger row is kept and the failure is counted', () => {
   clearMain();
-  freshAgent();
+  bootAgent();
   const before = agent.agentStoreStatus().writeErrors;
+  // Only the mirror's insert fails; the floor check (a meta read) still works.
+  const real = agent.getAgentDb();
   agent.setAgentDbForTests({
     name: 'fake',
-    prepare() { throw Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' }); },
-    transaction(fn) { return fn; },
-    pragma() { return 0; },
+    prepare(sql) {
+      if (/INSERT INTO usage_calls/.test(sql)) throw Object.assign(new Error('disk I/O error'), { code: 'SQLITE_IOERR' });
+      return real.prepare(sql);
+    },
+    transaction(fn) { return real.transaction(fn); },
+    pragma(...a) { return real.pragma(...a); },
   });
   try {
     const id = recordUsage(mdb(), { userId: U, ...ROW, requestId: 'turn-fail' });
@@ -108,7 +130,7 @@ test('a store that is down (no handle) never affects recordUsage', () => {
 
 test('recordUsage with an incomplete call still returns null and mirrors nothing', () => {
   clearMain();
-  const db = freshAgent();
+  const db = bootAgent();
   assert.equal(recordUsage(mdb(), { userId: U, provider: 'anthropic' }), null);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls'), 0);
 });
@@ -143,9 +165,7 @@ test('the backfill copies the last 90 days up to the boot floor, keeps ids, and 
   assert.ok(liveId > floor, 'live id is above the floor');
   // Rows added to the ledger after boot are never backfilled.
   seedLedger([{ user: U, ts: recent(0), input: 1, output: 1, req: 'after-boot' }]);
-  let steps = 0;
-  while (!copy.copyUsageStep({ mainDb: mdb(), agentDb: db, batch: 2 }).done) steps += 1;
-  assert.ok(steps >= 1, 'the copy ran in several batches');
+  assert.equal(drain(db, 2).done, true);
   assert.equal(agent.readMeta(db, 'copy_verified:usage_ledger'), 'ok');
   assert.equal(copy.usageCopyDone({ agentDb: db, mainDb: mdb() }), true);
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM usage_calls WHERE request_id = 'ancient'"), 0, 'older than 90 days is not copied');
@@ -171,7 +191,7 @@ test('the backfill resumes after a restart with the same bounds', () => {
   // A "restart": the boot step runs again. It must keep the same floor and cursor.
   copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
   assert.equal(agent.readMeta(db, 'usage_copy_floor'), floor, 'the floor is not moved on a resumed boot');
-  while (!copy.copyUsageStep({ mainDb: mdb(), agentDb: db, batch: 2 }).done) { /* drain */ }
+  assert.equal(drain(db, 2).done, true);
   assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls'), 5, 'every row once, none twice');
   assert.equal(agent.readMeta(db, 'copy_verified:usage_ledger'), 'ok');
 });
@@ -184,7 +204,7 @@ function captureLogger() {
 }
 
 function finishedCopy(db) {
-  while (!copy.copyUsageStep({ mainDb: mdb(), agentDb: db, batch: 50 }).done) { /* drain */ }
+  assert.equal(drain(db, 50).done, true, 'the copy finished and verified');
 }
 
 test('the compare reports clean when the shadow equals the ledger, and stores the result', () => {
@@ -319,4 +339,96 @@ test('the ledger itself is unchanged by the shadow: same rows, same ids, same pr
   const b = recordUsage(mdb(), { userId: U, ...ROW, requestId: 'same-2' });
   assert.equal(b, a + 1, 'ledger ids are consecutive, as before');
   assert.equal(count(mdb(), 'SELECT COUNT(*) AS n FROM usage_ledger WHERE user_id = ?', U), 2);
+});
+
+// --- boot order and copy verification (review fix 1) -----------------------
+
+test('the mirror writes nothing before the id floor exists (lazy open, no boot step)', () => {
+  clearMain();
+  const db = freshAgent();
+  const before = agent.agentStoreStatus().writeErrors;
+  recordUsage(mdb(), { userId: U, ...ROW, requestId: 'pre-floor' });
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls'), 0, 'nothing mirrored without a floor');
+  assert.equal(agent.agentStoreStatus().writeErrors, before, 'not a failure either');
+});
+
+test('lazy open, rows before the boot step: the backfill copies every ledger row once, with its tokens', () => {
+  clearMain();
+  const db = freshAgent();
+  const tokens = [[101, 11], [202, 22], [303, 33], [404, 44], [505, 55]];
+  tokens.forEach(([input, output], i) => recordUsage(mdb(), {
+    userId: U, provider: 'anthropic', model: 'claude-sonnet-4-6', inputTokens: input, outputTokens: output, requestId: `pre-${i}`,
+  }));
+  recordUsage(mdb(), { userId: U, ...ROW, inputTokens: 606, outputTokens: 66, requestId: 'pre-6' });
+  recordUsage(mdb(), { userId: U, ...ROW, inputTokens: 707, outputTokens: 77, requestId: 'pre-7' });
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  assert.equal(drain(db, 2).done, true);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls'), 7);
+  assert.equal(count(db, 'SELECT COUNT(DISTINCT id) AS n FROM usage_calls'), 7, 'no duplicate ids');
+  const sums = db.prepare('SELECT SUM(input_tokens) AS i, SUM(output_tokens) AS o FROM usage_calls').get();
+  const want = mdb().prepare('SELECT SUM(input_tokens) AS i, SUM(output_tokens) AS o FROM usage_ledger').get();
+  assert.deepEqual({ i: sums.i, o: sums.o }, { i: want.i, o: want.o });
+  assert.equal(agent.readMeta(db, 'copy_verified:usage_ledger'), 'ok');
+});
+
+test('leftover shadow rows with no floor are cleared before the bounds are set', () => {
+  clearMain();
+  const db = freshAgent();
+  db.prepare("INSERT INTO usage_calls (id, user_id, day, ts, provider, model, runs, input_tokens) VALUES (1, ?, '2026-10-01', '2026-10-01 10:00:00', 'anthropic', 'm', 1, 999)").run(U);
+  seedRowsForLeftover();
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  assert.equal(drain(db, 10).done, true);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls WHERE input_tokens = 999'), 0, 'the leftover is gone');
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls'), mdb().prepare('SELECT COUNT(*) AS n FROM usage_ledger').get().n);
+});
+
+function seedRowsForLeftover() {
+  mdb().prepare(`INSERT INTO usage_ledger (user_id, ts, provider, model, input_tokens, output_tokens, runs)
+    VALUES (?, ?, 'anthropic', 'm', 5, 5, 1)`).run(U, toSqliteLocal(new Date()));
+}
+
+test('a copy whose totals differ (same count, different tokens) is not marked done and is retried next boot', () => {
+  clearMain();
+  const db = freshAgent();
+  recordUsage(mdb(), { userId: U, ...ROW, inputTokens: 1000, outputTokens: 10, requestId: 'v-1' });
+  recordUsage(mdb(), { userId: U, ...ROW, inputTokens: 2000, outputTokens: 20, requestId: 'v-2' });
+  recordUsage(mdb(), { userId: U, ...ROW, inputTokens: 3000, outputTokens: 30, requestId: 'v-3' });
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  // Pre-fill id 2 with different tokens: INSERT OR IGNORE then skips the ledger row, so
+  // the COUNT matches while the token sums do not. The verifier must catch that.
+  const ledgerIds = mdb().prepare("SELECT id FROM usage_ledger ORDER BY id").all().map((r) => r.id);
+  db.prepare('DELETE FROM usage_calls').run();
+  db.prepare("INSERT INTO usage_calls (id, user_id, day, ts, provider, model, runs, input_tokens) VALUES (?, ?, '2026-10-01', '2026-10-01 10:00:00', 'anthropic', 'm', 1, 9999)")
+    .run(ledgerIds[1], U);
+  const r = drain(db, 10);
+  assert.equal(r.ok, false);
+  assert.equal(r.reason, 'verify_mismatch');
+  assert.equal(agent.readMeta(db, 'copy_done:usage_ledger'), null, 'copy_done is never written on a mismatch');
+  assert.equal(copy.usageCopyDone({ agentDb: db, mainDb: mdb() }), false);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls'), 0, 'the attempt removed what it wrote');
+  assert.equal(copy.copyUsageStep({ mainDb: mdb(), agentDb: db }).reason, 'verify_retry_next_boot', 'no retry in this process');
+  // Next boot: the retry runs from scratch and succeeds.
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  assert.equal(drain(db, 10).done, true);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM usage_calls WHERE input_tokens = 9999'), 0);
+  assert.equal(agent.readMeta(db, 'copy_verified:usage_ledger'), 'ok');
+});
+
+test('the copy gives up after the attempt cap, and says so', () => {
+  clearMain();
+  const db = freshAgent();
+  recordUsage(mdb(), { userId: U, ...ROW, requestId: 'cap-1' });
+  recordUsage(mdb(), { userId: U, ...ROW, requestId: 'cap-2' });
+  copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  const ids = mdb().prepare('SELECT id FROM usage_ledger ORDER BY id').all().map((r) => r.id);
+  for (let boot = 0; boot < copy.USAGE_MAX_ATTEMPTS; boot += 1) {
+    db.prepare("INSERT OR REPLACE INTO usage_calls (id, user_id, day, ts, provider, model, runs, input_tokens) VALUES (?, ?, '2026-10-01', '2026-10-01 10:00:00', 'anthropic', 'm', 1, 7777)")
+      .run(ids[0], U);
+    const r = drain(db, 10);
+    assert.equal(r.reason, 'verify_mismatch');
+    copy.prepareHistoryCopy({ mainDb: mdb(), agentDb: db });
+  }
+  assert.equal(agent.readMeta(db, 'usage_copy_gave_up'), '1');
+  assert.equal(copy.copyUsageStep({ mainDb: mdb(), agentDb: db }).reason, 'gave_up');
+  assert.equal(copy.usageCopyDone({ agentDb: db, mainDb: mdb() }), false);
 });
