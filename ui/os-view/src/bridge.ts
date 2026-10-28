@@ -11,7 +11,9 @@
 //     { type: 'open', target }                       navigate: loop | autoTasks | settings | library
 //                                                    | explorer | codeGraph (a target whose feature is off is ignored)
 //     { type: 'openFile', path, line? }              show a repo file in Explorer (no reply; line is 1-based)
-//     { type: 'request', id, method, path, body? }   one allowlisted server call (native SystemBridge)
+//     { type: 'request', id, method, path, body? }   one allowlisted server call (native SystemBridge).
+//                                                    body values are strings, whole numbers or booleans
+//                                                    (the storage calls send numbers and booleans)
 //     { type: 'native', id, name }                   native-only data: projectGraph | routines
 //                                                    (answered like a request; unknown name = 400 not_allowed)
 //     { type: 'native', id, name: 'file', path }     one repo file's text for the code preview
@@ -38,11 +40,14 @@ export type NativeName = 'projectGraph' | 'routines';
 /** A native call that carries a repo-relative file path: the text of one file for the code preview. */
 export type NativeFileCall = { name: 'file'; path: string };
 
+/** One value of an allowlisted request body. */
+export type BridgeValue = string | number | boolean;
+
 export type ToNative =
   | { type: 'ready' }
   | { type: 'open'; target: ViewTarget }
   | { type: 'openFile'; path: string; line?: number }
-  | { type: 'request'; id: string; method: 'GET' | 'POST'; path: string; body?: Record<string, string> }
+  | { type: 'request'; id: string; method: 'GET' | 'POST' | 'PUT'; path: string; body?: Record<string, BridgeValue> }
   | { type: 'native'; id: string; name: NativeName }
   | ({ type: 'native'; id: string } & NativeFileCall)
   | { type: 'subscribe' }
@@ -112,10 +117,19 @@ export class NativeRequests {
     private readonly clearTimer: (handle: unknown) => void,
   ) {}
 
-  /** Sends one allowlisted call to native. Rejects on timeout or when there is no bridge. */
-  call(method: 'GET' | 'POST', path: string, body?: Record<string, string>): Promise<NativeReply> {
-    return this.dispatch((id) =>
-      body === undefined ? { type: 'request', id, method, path } : { type: 'request', id, method, path, body },
+  /**
+   * Sends one allowlisted call to native. Rejects on timeout or when there is no bridge.
+   * `timeoutMs` overrides the default wait for a call native runs long (a compaction).
+   */
+  call(
+    method: 'GET' | 'POST' | 'PUT',
+    path: string,
+    body?: Record<string, BridgeValue>,
+    timeoutMs?: number,
+  ): Promise<NativeReply> {
+    return this.dispatch(
+      (id) => (body === undefined ? { type: 'request', id, method, path } : { type: 'request', id, method, path, body }),
+      timeoutMs,
     );
   }
 
@@ -129,12 +143,12 @@ export class NativeRequests {
     return this.dispatch((id) => ({ type: 'native', id, name: 'file', path }));
   }
 
-  private dispatch(build: (id: string) => ToNative): Promise<NativeReply> {
+  private dispatch(build: (id: string) => ToNative, timeoutMs = NATIVE_REQUEST_TIMEOUT_MS): Promise<NativeReply> {
     const id = `r${this.nextId++}`;
     return new Promise<NativeReply>((resolve, reject) => {
       const timer = this.setTimer(() => {
         if (this.pending.delete(id)) reject(new Error('LLM-IDE did not answer in time'));
-      }, NATIVE_REQUEST_TIMEOUT_MS);
+      }, timeoutMs);
       this.pending.set(id, { resolve, timer });
       if (!this.post(build(id))) {
         this.clearTimer(timer);

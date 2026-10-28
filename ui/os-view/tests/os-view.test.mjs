@@ -735,6 +735,91 @@ describe('native data sets (graph, skills, routines)', () => {
   });
 });
 
+describe('native storage host', () => {
+  /** A bridge that answers every storage request with `reply(message)`. */
+  const storageHost = (reply) => {
+    const bridge = nativeBridge((message) => reply(message));
+    const host = api.hosts.createNativeHost({ requests: bridge.requests, post: bridge.post });
+    return { ...bridge, host };
+  };
+  const clearCounts = {
+    agent_runs: 4, agent_tool_events: 9, turn_composition: 2, agent_daily: 1, agent_daily_tools: 3,
+  };
+
+  it('storageSettings is a GET of the settings with no body, and returns the stored retention', async () => {
+    const { host, sent } = storageHost(() => ({ status: 200, body: { retentionDays: 30, rollupKeepDays: 365, min: 7, max: 365 } }));
+    const settings = await host.storageSettings();
+    assert.equal(settings.retentionDays, 30);
+    assert.deepEqual(
+      { type: sent[0].type, method: sent[0].method, path: sent[0].path },
+      { type: 'request', method: 'GET', path: '/kb/agent-history/settings' },
+    );
+    assert.ok(!('body' in sent[0]));
+  });
+
+  it('setStorageRetention is a PUT carrying the whole number of days', async () => {
+    const { host, sent } = storageHost(() => ({ status: 200, body: { retentionDays: 90 } }));
+    assert.deepEqual(await host.setStorageRetention(90), { retentionDays: 90 });
+    assert.equal(sent[0].method, 'PUT');
+    assert.equal(sent[0].path, '/kb/agent-history/settings');
+    assert.deepEqual(sent[0].body, { retentionDays: 90 });
+  });
+
+  it('a dry run posts scope and dryRun (and the cutoff), never a previewId', async () => {
+    const preview = { dryRun: true, scope: 'raw', beforeDays: 30, wouldDelete: clearCounts, total: 19, previewId: 'p.1', expiresAt: '2026-10-28T00:05:00Z' };
+    const { host, sent } = storageHost(() => ({ status: 200, body: preview }));
+    assert.deepEqual(await host.storageClear({ scope: 'raw', beforeDays: 30, dryRun: true }), preview);
+    assert.deepEqual(sent[0].body, { scope: 'raw', beforeDays: 30, dryRun: true });
+    assert.ok(!('previewId' in sent[0].body));
+  });
+
+  it('a real clear posts the previewId and is refused before sending when it has none', async () => {
+    const done = { dryRun: false, scope: 'all', beforeDays: null, deleted: clearCounts, total: 19 };
+    const { host, sent } = storageHost(() => ({ status: 200, body: done }));
+    assert.deepEqual(await host.storageClear({ scope: 'all', dryRun: false, previewId: 'p.1' }), done);
+    assert.deepEqual(sent[0].body, { scope: 'all', dryRun: false, previewId: 'p.1' });
+
+    const none = storageHost(() => ({ status: 200, body: done }));
+    await assert.rejects(
+      none.host.storageClear({ scope: 'all', dryRun: false }),
+      (err) => err.code === 'PREVIEW_REQUIRED',
+    );
+    assert.equal(none.sent.length, 0, 'nothing is sent for a clear without a preview');
+  });
+
+  it('maps the server codes to the storage codes graph-kit reads', async () => {
+    const cases = [
+      [{ status: 503, error: 'AGENT_STORE_UNAVAILABLE', body: { code: 'AGENT_STORE_UNAVAILABLE', message: 'down' } }, 'store_down'],
+      [{ status: 409, body: { code: 'busy', message: 'in flight' } }, 'busy'],
+      [{ status: 507, body: { code: 'disk_space', message: 'full' } }, 'disk_space'],
+      [{ status: 400, body: { code: 'PREVIEW_EXPIRED', message: 'expired' } }, 'PREVIEW_EXPIRED'],
+      [{ status: 409, body: { code: 'preview_stale', message: 'moved' } }, 'preview_stale'],
+      [{ status: 0, error: 'unreachable' }, 'unreachable'],
+    ];
+    for (const [reply, code] of cases) {
+      const { host } = storageHost(() => reply);
+      await assert.rejects(host.storageCompact(), (err) => err.code === code, `status ${reply.status} maps to ${code}`);
+    }
+    const message = storageHost(() => ({ status: 400, body: { code: 'PREVIEW_INVALID', message: 'wrong scope' } }));
+    await assert.rejects(
+      message.host.storageClear({ scope: 'raw', dryRun: false, previewId: 'x' }),
+      (err) => err.code === 'PREVIEW_INVALID' && err.message === 'wrong scope',
+    );
+  });
+
+  it('a 401 from native signs the user out for every storage call', async () => {
+    const { host } = storageHost(() => ({ status: 401 }));
+    await assert.rejects(host.storageSettings(), (err) => err.name === 'OsAuthError');
+    await assert.rejects(host.storageCompact(), (err) => err.name === 'OsAuthError');
+  });
+
+  it('compaction waits longer than the default native timeout', () => {
+    const { host, timers } = storageHost(() => undefined);
+    void host.storageCompact().catch(() => {});
+    assert.deepEqual(timers.pendingMs(), [130000]);
+  });
+});
+
 describe('dev host skills', () => {
   const conn = { baseURL: BASE, token: TOKEN };
 

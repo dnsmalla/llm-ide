@@ -33,7 +33,14 @@ import {
   type FetchLike,
   type Requester,
 } from './api';
-import type { NativeEvent, NativeFeedStatus, NativeReply, NativeRequests, ToNative } from './bridge';
+import type {
+  BridgeValue,
+  NativeEvent,
+  NativeFeedStatus,
+  NativeReply,
+  NativeRequests,
+  ToNative,
+} from './bridge';
 import { OsStream } from './stream';
 
 /** Maps the server's 401 to the error graph-kit reads as "session refused". Other errors pass through. */
@@ -63,6 +70,64 @@ function fileBody(reply: NativeReply): OsFileContent | null {
   if (reply.status !== 200) throw new Error(`The file could not be loaded (${reply.error ?? reply.status})`);
   if (!reply.body || typeof reply.body !== 'object') throw new Error('The file reply had no content');
   return reply.body as OsFileContent;
+}
+
+/** The storage types graph-kit's OsHost declares (its own type names are not exported from the package). */
+type StorageSettings = Awaited<ReturnType<NonNullable<OsHost['storageSettings']>>>;
+type ClearRequest = Parameters<NonNullable<OsHost['storageClear']>>[0];
+type ClearResult = Awaited<ReturnType<NonNullable<OsHost['storageClear']>>>;
+type CompactResult = Awaited<ReturnType<NonNullable<OsHost['storageCompact']>>>;
+
+/**
+ * A storage call the server refused or failed. graph-kit reads only `code` (a string) and the
+ * message; its codes are PREVIEW_EXPIRED, PREVIEW_INVALID, preview_stale, PREVIEW_REQUIRED,
+ * VALIDATION_FAILED for a clear, and busy, disk_space, store_down for a compact.
+ */
+export class StorageError extends Error {
+  readonly code: string;
+  constructor(code: string, message: string) {
+    super(message);
+    this.name = 'StorageError';
+    this.code = code;
+  }
+}
+
+/** Compaction can run a full VACUUM; native waits this long for it (its own call timeout is 120 s). */
+const COMPACT_TIMEOUT_MS = 130_000;
+
+const STORAGE_MESSAGES: Record<string, string> = {
+  store_down: 'The agent history store is not available. Restart LLM-IDE and try again.',
+  busy: 'A chat turn or meeting run is in progress. Try again when it finishes.',
+  disk_space: 'Not enough free disk space to compact the agent history.',
+  PREVIEW_EXPIRED: 'The preview expired. Run a new preview.',
+  PREVIEW_INVALID: 'The preview does not match this clear. Run a new preview.',
+  preview_stale: 'The history changed since the preview. Run a new preview.',
+  PREVIEW_REQUIRED: 'A clear needs a preview first.',
+  VALIDATION_FAILED: 'The storage request was not valid.',
+  unreachable: 'LLM-IDE did not answer.',
+};
+
+/**
+ * Maps a native storage reply to graph-kit's storage codes: 503 AGENT_STORE_UNAVAILABLE is store_down,
+ * 409 busy is busy, 507 is disk_space; any other server code passes through.
+ */
+function storageCode(status: number, code: string | undefined): string {
+  if (code === 'AGENT_STORE_UNAVAILABLE' || status === 503) return 'store_down';
+  if (status === 507) return 'disk_space';
+  if (status === 409 && (code === undefined || code === 'busy')) return 'busy';
+  if (code) return code;
+  return status === 0 ? 'unreachable' : `http_${status}`;
+}
+
+/** The body of a 200 storage reply. 401 signs the user out; any other status throws a StorageError. */
+function storageBody<T>(reply: NativeReply): T {
+  if (reply.status === 401) throw new OsAuthError();
+  if (reply.status === 200 && reply.body && typeof reply.body === 'object') return reply.body as T;
+  const body = reply.body && typeof reply.body === 'object' ? (reply.body as { code?: unknown; message?: unknown }) : {};
+  const serverCode = typeof body.code === 'string' ? body.code : reply.error;
+  const code = storageCode(reply.status, serverCode);
+  const message = typeof body.message === 'string' ? body.message : STORAGE_MESSAGES[code] ?? `The storage call failed (${code}).`;
+  throw new StorageError(code, message);
 }
 
 export type NativeHostDeps = {
@@ -107,6 +172,20 @@ export function createNativeHost({ requests, post }: NativeHostDeps): NativeHost
     loadSkills: (): Promise<OsSkill[]> => refusedAsAuthError(fetchSkills(requester)),
     loadRoutines: async (): Promise<OsRoutine[]> =>
       toOsRoutines(nativeBody(await requests.native('routines'), 'The routines')),
+    storageSettings: async (): Promise<StorageSettings> =>
+      storageBody(await requests.call('GET', '/kb/agent-history/settings')),
+    setStorageRetention: async (days: number): Promise<StorageSettings> =>
+      storageBody(await requests.call('PUT', '/kb/agent-history/settings', { retentionDays: days })),
+    storageClear: async (req: ClearRequest): Promise<ClearResult> => {
+      // A real clear is only ever sent with the previewId of its dry run. Native checks this too.
+      if (!req.dryRun && !req.previewId) throw new StorageError('PREVIEW_REQUIRED', STORAGE_MESSAGES.PREVIEW_REQUIRED);
+      const body: Record<string, BridgeValue> = { scope: req.scope, dryRun: req.dryRun };
+      if (req.beforeDays !== undefined) body.beforeDays = req.beforeDays;
+      if (req.previewId !== undefined) body.previewId = req.previewId;
+      return storageBody(await requests.call('POST', '/kb/agent-history/clear', body));
+    },
+    storageCompact: async (): Promise<CompactResult> =>
+      storageBody(await requests.call('POST', '/kb/agent-history/compact', undefined, COMPACT_TIMEOUT_MS)),
     nativeEvent(event) {
       if (!event || typeof event.type !== 'string' || event.type === 'hello') return;
       current?.onChange();
