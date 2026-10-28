@@ -182,6 +182,15 @@ function persistedDevSecrets() {
   return loadDevSecrets({ primaryFile, legacyFile: LEGACY_DEV_SECRETS_FILE });
 }
 
+// LLMIDE_BACKUP_KEEP: how many server backups to keep (kb/backup-retention.mjs).
+// An integer, at least 1; anything else means the default of 2.
+export function backupKeepFromEnv(raw) {
+  if (raw === undefined || raw === null || String(raw).trim() === '') return 2;
+  const n = Number(raw);
+  if (!Number.isFinite(n)) return 2;
+  return Math.max(1, Math.floor(n));
+}
+
 const isProd = (envStr('NODE_ENV', 'development') === 'production');
 
 let _jwtSecret = envStr('LLMIDE_JWT_SECRET');
@@ -265,6 +274,8 @@ export const config = Object.freeze({
   dataDir:      DATA_LAYOUT.dataDir,
   dataLocation: DATA_LAYOUT.location,
   backupDir:    DATA_LAYOUT.backupDir,
+  // Newest server backups kept; older data-<unix>.db files in backupDir are deleted.
+  backupKeep:   backupKeepFromEnv(process.env.LLMIDE_BACKUP_KEEP),
   agentSdkDir:  DATA_LAYOUT.agentSdkDir,
   logFile:      DATA_LAYOUT.logFile,
 

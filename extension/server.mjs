@@ -7,6 +7,7 @@ import { execFile } from 'child_process';
 import path from 'path';
 import fs from 'fs';
 import { handleKB, initFeatureRoutes } from './routes/router.mjs';
+import { pruneBackups } from './kb/backup-retention.mjs';
 import { prewarmAgentEngine, benchFakeEngineEnabled } from './routes/agent-v2.mjs';
 import { enabledEndpoints, featureDisabledFor, sendFeatureDisabled } from './routes/feature-routes.mjs';
 import { handleAIRoutes } from './server/ai-routes.mjs';
@@ -781,6 +782,8 @@ const server = http.createServer(async (req, res) => {
       backupTo(target);
       const stat = fs.statSync(target);
       reqLog.info('db_backup_created', { path: target, bytes: stat.size });
+      const pruned = pruneBackups(targetDir, config.backupKeep);
+      for (const file of pruned.deleted) reqLog.info('db_backup_pruned', { file });
       sendJSON(res, 200, { ok: true, path: target, bytes: stat.size });
     } catch (err) {
       reqLog.error('db_backup_failed', { error: err.message });
@@ -1108,16 +1111,12 @@ function runAuthGc(stage) {
 // Automatic DB backup — runs every 24 hours (configurable via
 // LLMIDE_BACKUP_INTERVAL_HOURS). Uses the same VACUUM INTO primitive
 // as the /admin/backup endpoint: produces a self-consistent snapshot
-// without locking the live DB. Keeps up to LLMIDE_BACKUP_RETAIN
-// recent copies (default 7) and prunes older ones so disk doesn't
-// grow unboundedly. Disabled when LLMIDE_BACKUP_INTERVAL_HOURS=0.
+// without locking the live DB. Keeps the newest LLMIDE_BACKUP_KEEP copies
+// (default 2, see kb/backup-retention.mjs) and deletes older ones. Disabled
+// when LLMIDE_BACKUP_INTERVAL_HOURS=0.
 const BACKUP_INTERVAL_HOURS = (() => {
   const v = Number(process.env.LLMIDE_BACKUP_INTERVAL_HOURS ?? 24);
   return Number.isFinite(v) && v >= 0 ? v : 24;
-})();
-const BACKUP_RETAIN = (() => {
-  const v = Number(process.env.LLMIDE_BACKUP_RETAIN ?? 7);
-  return Number.isFinite(v) && v >= 1 ? Math.floor(v) : 7;
 })();
 let backupTimer = null;
 
@@ -1133,19 +1132,9 @@ function runAutoBackup() {
     const stat = fs.statSync(target);
     logger.info('auto_backup_created', { path: target, bytes: stat.size });
 
-    // Prune: keep only the N most-recent backups.
-    const all = fs.readdirSync(backupDir)
-      .filter((f) => /^data-\d+\.db$/.test(f))
-      .sort()          // ascending by timestamp prefix
-      .reverse();      // newest first
-    for (const old of all.slice(BACKUP_RETAIN)) {
-      try {
-        fs.unlinkSync(path.join(backupDir, old));
-        logger.info('auto_backup_pruned', { file: old });
-      } catch (e) {
-        logger.warn('auto_backup_prune_failed', { file: old, error: e.message });
-      }
-    }
+    const pruned = pruneBackups(backupDir, config.backupKeep);
+    for (const file of pruned.deleted) logger.info('auto_backup_pruned', { file });
+    for (const f of pruned.failed) logger.warn('auto_backup_prune_failed', { file: f.name, error: f.error });
   } catch (err) {
     logger.error('auto_backup_failed', { error: err.message });
   }
