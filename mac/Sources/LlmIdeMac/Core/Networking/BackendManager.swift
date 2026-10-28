@@ -94,6 +94,17 @@ final class BackendManager {
     nonisolated static let featuresEnvKey = "LLMIDE_FEATURES"
     nonisolated static let dataDirEnvKey = "LLMIDE_DATA_DIR"
     nonisolated static let dataLocationEnvKeys = ["LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_AGENT_DB_PATH"]
+    /// Seconds to wait for a spawned backend's /health. 20 by default. 90 only
+    /// when the system data dir is set and holds no data.db yet: the server then
+    /// copies the legacy kb (synchronously, before it listens), which can take
+    /// a while on a large DB. Pure apart from one existence check.
+    nonisolated static func readinessBudgetSeconds(dataDir: String?,
+                                                   fileManager: FileManager = .default) -> Int {
+        guard let dataDir else { return 20 }
+        let db = URL(fileURLWithPath: dataDir, isDirectory: true).appendingPathComponent("data.db").path
+        return fileManager.fileExists(atPath: db) ? 20 : 90
+    }
+
     /// Developer escape: `LLMIDE_USE_REPO_KB=1` keeps the server on the repo's
     /// `kb/` (no LLMIDE_DATA_DIR is passed) — the pre-migration location.
     nonisolated static let useRepoKbEnvKey = "LLMIDE_USE_REPO_KB"
@@ -248,6 +259,9 @@ final class BackendManager {
     /// rather than spawning our own child. Used by `stop()` to decide
     /// whether we have any process to terminate.
     private var adoptedExternal: Bool = false
+    /// How long a spawned backend may take to answer /health. Raised on a first
+    /// launch (see `readinessBudgetSeconds`), when the boot copy may run.
+    private var readinessBudgetSeconds: Int = 20
 
     /// Returns the first node binary found in well-known macOS locations.
     /// Does NOT shell out — we don't want to launch a login shell from
@@ -550,6 +564,7 @@ final class BackendManager {
         let env = ProcessInfo.processInfo.environment
         let useRepoKb = env[Self.useRepoKbEnvKey] == "1"
         let dataDir = Self.systemDataDirForChild(useRepoKb: useRepoKb)
+        readinessBudgetSeconds = Self.readinessBudgetSeconds(dataDir: dataDir)
         if dataDir == nil && !useRepoKb {
             append("--- could not create the system data dir; the backend will use the repo kb ---", stream: .info)
         }
@@ -671,7 +686,7 @@ final class BackendManager {
     private func waitForReadyThenRun(proc: Process, nodePath: String, workURL: URL) {
         Task { @MainActor [weak self] in
             guard let self else { return }
-            let deadline = Date().addingTimeInterval(20)
+            let deadline = Date().addingTimeInterval(TimeInterval(self.readinessBudgetSeconds))
             while Date() < deadline {
                 // Process died during startup — terminationHandler handles
                 // the .crashed transition and error. Stop polling.
@@ -695,7 +710,7 @@ final class BackendManager {
             if proc.isRunning, self.process === proc {
                 self.startTimedOutPID = proc.processIdentifier
                 proc.terminate()
-                self.fail("Server started but didn't answer /health within 20s. Check Settings → Backend for the log.")
+                self.fail("Server started but didn't answer /health within \(self.readinessBudgetSeconds)s. Check Settings → Backend for the log.")
             }
         }
     }
