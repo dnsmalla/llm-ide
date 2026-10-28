@@ -52,13 +52,13 @@ struct GraphMemoryState {
         // One directory, one file per artifact — see graphkit/paths.mjs. The
         // repo overview is NOT listed here: it is `system/graph/index.md`
         // (covered by `hasGraph` above), not a second copy in the memory dir.
-        let memDir = GeneratedDataLocator.readableMemoryDir(forRepo: repo)
+        // Each artifact is read per file, like the server does (see readableMemoryFile).
         let names = ["graph-notes.md", "doc-notes.md", "chat-memory.md"]
         var newestMtime: Date?
         for name in names {
-            let url = memDir.appendingPathComponent(name)
-            let attrs = try? fm.attributesOfItem(atPath: url.path)
-            if let attrs, let size = attrs[.size] as? Int {
+            let found = GeneratedDataLocator.readableMemoryFile(forRepo: repo, name: name)
+            let attrs = found.flatMap { try? fm.attributesOfItem(atPath: $0.path) }
+            if let url = found, let attrs, let size = attrs[.size] as? Int {
                 let mtime = attrs[.modificationDate] as? Date
                 if let mtime, name != "chat-memory.md" { // graph artifacts drive "last generated"
                     if newestMtime == nil || mtime > newestMtime! { newestMtime = mtime }
@@ -79,8 +79,8 @@ struct GraphMemoryState {
         // repo.md, which in the normal case was a copy of index.md — "# Codebase
         // Index", no node counts — so the card read blank on exactly the repos
         // that DID have a graph.)
-        if let body = try? String(contentsOf: memDir.appendingPathComponent("graph-notes.md"),
-                                  encoding: .utf8) {
+        if let notes = GeneratedDataLocator.readableMemoryFile(forRepo: repo, name: "graph-notes.md"),
+           let body = try? String(contentsOf: notes, encoding: .utf8) {
             s.counts = parseCounts(body)
         }
         if let mtime = newestMtime { s.lastGenerated = relativeAge(mtime) }

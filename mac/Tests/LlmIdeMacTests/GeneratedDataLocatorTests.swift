@@ -352,6 +352,92 @@ final class GeneratedDataLocatorTests: XCTestCase {
                        project.appendingPathComponent("system/graph").standardizedFileURL.path)
     }
 
+    // MARK: - Loop worktrees map back to the main checkout
+
+    /// `.llmide-loop-worktrees/<repo>/<id>` (project root IS the repo): a sibling
+    /// worktree directory maps to the project it belongs to.
+    func testSiblingLoopWorktreeMapsToTheMainProject() throws {
+        let project = try makeProject("solo")
+        let wt = root.appendingPathComponent(".llmide-loop-worktrees/solo/run1", isDirectory: true)
+        try fm.createDirectory(at: wt, withIntermediateDirectories: true)
+
+        XCTAssertEqual(GeneratedDataLocator.projectRoot(forRepo: wt).path, project.standardizedFileURL.path)
+        XCTAssertEqual(GeneratedDataLocator.faultsDir(forRepo: wt).path,
+                       project.appendingPathComponent("system/faults").standardizedFileURL.path)
+        XCTAssertEqual(GeneratedDataLocator.graphDir(forRepo: wt).path,
+                       project.appendingPathComponent("system/graph").standardizedFileURL.path)
+    }
+
+    /// A real linked worktree under `<project>/system/loop-worktrees/<id>`: git says
+    /// which main checkout it belongs to, so faults and graph stay at the project,
+    /// and a missing worktree graph falls back to the main checkout's graph.
+    func testRealLoopWorktreeResolvesToTheMainCheckoutAndItsGraph() throws {
+        let project = try makeProject("wtproj")
+        let app = try makeRepo("app", in: project)
+        try git(["init", "-q"], in: app)
+        try git(["-c", "user.email=t@example.com", "-c", "user.name=t", "commit", "-q",
+                 "--allow-empty", "-m", "init"], in: app)
+        let parent = project.appendingPathComponent("system/loop-worktrees", isDirectory: true)
+        try fm.createDirectory(at: parent, withIntermediateDirectories: true)
+        let wt = parent.appendingPathComponent("wt1", isDirectory: true)
+        try git(["worktree", "add", "-q", wt.path, "-b", "wt1"], in: app)
+        try write("{\"version\":\"1.1\",\"files\":[]}",
+                  to: project.appendingPathComponent("system/graph/graph.json"))
+
+        XCTAssertEqual(GeneratedDataLocator.projectRoot(forRepo: wt).path, project.standardizedFileURL.path)
+        XCTAssertEqual(GeneratedDataLocator.faultsDir(forRepo: wt).path,
+                       project.appendingPathComponent("system/faults").standardizedFileURL.path)
+        XCTAssertEqual(GeneratedDataLocator.readableGraphDir(forRepo: wt).path,
+                       project.appendingPathComponent("system/graph").standardizedFileURL.path)
+    }
+
+    // MARK: - Graph fallbacks across a change in repo count
+
+    /// One repo, then a second is added: the flat graph is still readable for the
+    /// child it belongs to (its files exist there) and not for the other child.
+    func testFlatGraphStaysReadableForItsChildAfterASecondRepoIsAdded() throws {
+        let project = try makeProject("grow")
+        let a = try makeRepo("a", in: project)
+        try write("print(1)\n", to: a.appendingPathComponent("a-file.py"))
+        try write("{\"version\":\"1.1\",\"files\":[{\"path\":\"a-file.py\",\"language\":\"py\",\"loc\":1,\"imports\":[],\"usedBy\":[],\"types\":[],\"functions\":[]}],\"calls\":[]}",
+                  to: project.appendingPathComponent("system/graph/graph.json"))
+        let b = try makeRepo("b", in: project)
+
+        XCTAssertEqual(GeneratedDataLocator.readableGraphDir(forRepo: a).path,
+                       project.appendingPathComponent("system/graph").standardizedFileURL.path)
+        XCTAssertFalse(GeneratedDataLocator.readableGraphDir(forRepo: b).path
+                        == project.appendingPathComponent("system/graph").standardizedFileURL.path,
+                       "a sibling must not be served another repo's graph")
+    }
+
+    /// Two repos, then one is removed: the per-repo graph is still found flat.
+    func testPerRepoGraphStaysReadableAfterTheSecondRepoIsRemoved() throws {
+        let project = try makeProject("shrink")
+        let a = try makeRepo("a", in: project)
+        _ = try makeRepo("b", in: project)
+        try write("# a\n", to: project.appendingPathComponent("system/graph/a/index.md"))
+        try fm.removeItem(at: project.appendingPathComponent("code/b"))
+
+        XCTAssertEqual(GeneratedDataLocator.readableGraphDir(forRepo: a).path,
+                       project.appendingPathComponent("system/graph/a").standardizedFileURL.path)
+    }
+
+    // MARK: - Memory reads merge per file
+
+    /// An empty project memory dir must not hide the legacy artifact (parity with
+    /// the server's per-file `readMemoryFile`).
+    func testReadableMemoryFileFallsBackPerFileWhenTheProjectDirIsEmpty() throws {
+        let project = try makeProject("memmerge")
+        let app = try makeRepo("app", in: project)
+        try fm.createDirectory(at: project.appendingPathComponent("system/memory"), withIntermediateDirectories: true)
+        try write("LEGACY-GRAPH-NOTES\n", to: app.appendingPathComponent("system/memory/graph-notes.md"))
+
+        let found = GeneratedDataLocator.readableMemoryFile(forRepo: app, name: "graph-notes.md")
+        XCTAssertEqual(try String(contentsOf: XCTUnwrap(found), encoding: .utf8), "LEGACY-GRAPH-NOTES\n")
+        XCTAssertNil(GeneratedDataLocator.readableMemoryFile(forRepo: app, name: "doc-notes.md"))
+        XCTAssertEqual(GeneratedDataLocator.readableMemoryFileNames(forRepo: app), ["graph-notes.md"])
+    }
+
     // MARK: - Git helper
 
     private func git(_ args: [String], in dir: URL) throws {

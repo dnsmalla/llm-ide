@@ -742,9 +742,8 @@ extension AutoCodeUpdateService {
         } else {
             lines.append("Graph: not generated yet — auto-generates on open.")
         }
-        let memDir = GeneratedDataLocator.readableMemoryDir(forRepo: repo)
-        let mem = ((try? FileManager.default.contentsOfDirectory(atPath: memDir.path)) ?? [])
-            .filter { $0.hasSuffix(".md") }.sorted()
+        let mem = GeneratedDataLocator.readableMemoryFileNames(forRepo: repo)
+            .filter { $0.hasSuffix(".md") }
         lines.append(mem.isEmpty ? "Memory: none yet." : "Memory: \(mem.joined(separator: ", "))")
         for line in lines { logStore.append(.generateKnowledge, line) }
         taskErrors.removeValue(forKey: key)
