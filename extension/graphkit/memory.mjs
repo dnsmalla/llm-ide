@@ -31,7 +31,7 @@ import { parseChatMemoryFacts } from './memory-writer.mjs';
 import { factStamp } from '../core/fact-key.mjs';
 import { memoryLedgerFor, ledgerKey } from '../kb/memory-ledger.mjs';
 import { termTokens } from '../core/text-tokens.mjs';
-import { memoryDir, legacyMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
+import { memoryDir, legacyMemoryDir, legacySystemDir, legacySystemMemoryDir, systemDir, graphIndexFile, SYSTEM_DIR } from './paths.mjs';
 
 // Expand a leading `~`/`~/` to the home directory. The Mac client sends
 // home-relative repo paths (homeRelativePath → "~/Developer/foo"), but the
@@ -129,18 +129,18 @@ export function safeRead(path, maxChars) {
 // prefix, so a plain ascending sort puts the oldest first — taking the head
 // would pin the agent to the first 8 faults a repo ever recorded and hide
 // everything since. Take the tail instead.
-function listMdFiles(dir, max) {
-  try {
-    const entries = readdirSync(dir, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isFile() && e.name.endsWith('.md'))
-      .map((e) => e.name)
-      .sort()
-      .slice(-max)
-      .map((name) => join(dir, name));
-  } catch {
-    return [];
+// Markdown files across `dirs` (the project location first, then the pre-D1
+// repo location as an N-1 fallback). A name present in both keeps the first.
+function listMdFiles(dirs, max) {
+  const byName = new Map();
+  for (const dir of dirs) {
+    try {
+      for (const e of readdirSync(dir, { withFileTypes: true })) {
+        if (e.isFile() && e.name.endsWith('.md') && !byName.has(e.name)) byName.set(e.name, join(dir, e.name));
+      }
+    } catch { /* missing dir: nothing to read */ }
   }
+  return [...byName.keys()].sort().slice(-max).map((name) => byName.get(name));
 }
 
 // macOS APFS in its default mode is case-insensitive — '/Users/Alice'
@@ -376,8 +376,12 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
   // Read a canonical memory file, falling back to its pre-consolidation location
   // for a repo the Mac app hasn't regenerated since the move. Read-only — see
   // paths.mjs; nothing writes to the legacy tree any more.
+  // D1: `memDir` is the PROJECT's system/memory. The pre-D1 `<repo>/system/memory`
+  // and the pre-consolidation `graphify-out/memory` are read-only fallbacks.
   const readMemoryFile = (name, maxChars) =>
-    safeRead(join(memDir, name), maxChars) ?? safeRead(join(legacyMemoryDir(root), name), maxChars);
+    safeRead(join(memDir, name), maxChars)
+    ?? safeRead(join(legacySystemMemoryDir(root), name), maxChars)
+    ?? safeRead(join(legacyMemoryDir(root), name), maxChars);
 
   // Compute the block header up front so its length counts against `budget` —
   // otherwise the header + inter-part joins were unbudgeted and a block could
@@ -447,7 +451,8 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
   // gotchas) — the highest-signal memory there is, and the one thing no
   // generator can reproduce — so it leads. It shares the `budget - chatFloor`
   // cap with the generated overview so neither can starve the curated facts.
-  tryAdd('system/repo.md', safeRead(join(sysDir, 'repo.md'), PER_FILE_CHARS), budget - chatFloor);
+  tryAdd('system/repo.md', safeRead(join(sysDir, 'repo.md'), PER_FILE_CHARS)
+    ?? safeRead(join(legacySystemDir(root), 'repo.md'), PER_FILE_CHARS), budget - chatFloor);
   // This machine's runtime facts (virtualenv, PATH additions, project files) —
   // written by the Mac app, so "how do I run the tests here?" is answered from
   // memory instead of rediscovered with tool calls. Small (well under 1k) and
@@ -465,7 +470,7 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
   tryAdd('graph-notes.md', readMemoryFile('graph-notes.md', PER_FILE_CHARS));
   tryAdd('doc-notes.md', readMemoryFile('doc-notes.md', PER_FILE_CHARS));
 
-  const faults = listMdFiles(join(sysDir, 'faults'), MAX_FAULT_FILES);
+  const faults = listMdFiles([join(sysDir, 'faults'), join(legacySystemDir(root), 'faults')], MAX_FAULT_FILES);
   if (faults.length > 0 && used < budget) {
     const faultBodies = faults
       .map((p) => safeRead(p, Math.floor(PER_FILE_CHARS / 2)))
@@ -474,7 +479,7 @@ export function repoMemoryBlock(repo, budget, allowedRoots, stats, userMessage, 
     tryAdd(`faults/ (${faults.length})`, faultBodies);
   }
 
-  const qa = listMdFiles(join(sysDir, 'q&a'), MAX_QA_FILES);
+  const qa = listMdFiles([join(sysDir, 'q&a'), join(legacySystemDir(root), 'q&a')], MAX_QA_FILES);
   if (qa.length > 0 && used < budget) {
     const qaBodies = qa
       .map((p) => safeRead(p, Math.floor(PER_FILE_CHARS / 2)))

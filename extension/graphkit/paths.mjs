@@ -1,55 +1,104 @@
-// The ONE place that knows where a repo's generated knowledge lives on disk.
+// The ONE place that knows where a project's generated knowledge lives on disk.
+// Mirrors the Mac app's `GeneratedDataLocator` (mac/.../Core/Project), decision D1
+// of 2026-10-28: generated data ALWAYS lives in the PROJECT's own `system/`,
+// never in a cloned repo's `system/` under `code/<child>/`. The cloned repo is
+// only the input being graphed.
 //
-// Everything the app generates for a repo lives under a single container,
-// `<repo>/system/` — mirroring the Mac app's ProjectLayout ("System / generated
-// data — one visible container"). One artifact, one path, rewritten in place:
+// Callers pass either the project root or a `code/<child>` repo root. Both
+// resolve to the same project:
 //
-//   system/graph/index.md      impact-ranked repo overview  (code graph)
-//   system/graph/graph.json    machine-readable adjacency list
-//   system/memory/graph-notes.md   cross-links + dependency hubs
-//   system/memory/doc-notes.md     doc/InfiniteBrain sections
-//   system/memory/chat-memory.md   LLM-curated durable facts (written here)
-//   system/repo.md             hand-authored project facts
-//   system/faults/, system/q&a/    archived fault reports + saved Q&A
+//   <project>/system/graph/index.md          code graph overview (one repo)
+//   <project>/system/graph/<child>/index.md  code graph per repo (2+ code/ repos)
+//   <project>/system/memory/chat-memory.md   LLM-curated durable facts
+//   <project>/system/memory/graph-notes.md   cross-links + dependency hubs
+//   <project>/system/memory/doc-notes.md     doc/InfiniteBrain sections
+//   <project>/system/repo.md                 hand-authored project facts
+//   <project>/system/faults/, system/q&a/    archived fault reports + saved Q&A
 //
-// Two things this replaced:
+// A `<project>` is a directory whose `system/project.json` exists. A repo is a
+// `code/<child>` directory only when its parent is named `code` AND the
+// grandparent is such a project. Anything else (including a project living
+// under `~/code/`) is its own root.
 //
-//  1. `graphify-out/memory/` — that directory belongs to the separate
-//     `/graphify` skill (it writes `graphify-out/graph.json`). The app was
-//     dropping its own memory into another tool's output tree, so a `/graphify`
-//     rebuild and an app regeneration each owned part of one directory.
-//  2. `graphify-out/memory/repo.md` — a byte-for-byte COPY of
-//     `system/graph/index.md`, rewritten every generation. The overview is now
-//     read from the one file that owns it, so there is nothing to keep in sync.
+// Read-only legacy fallbacks (N-1), never written:
+//   `<repo>/system/...`             pre-D1 location of generated output
+//   `<repo>/graphify-out/memory/`   pre-consolidation memory (owned by `/graphify`)
+// The Mac app's migration moves `<repo>/system/...` into the project at open.
 //
-// LEGACY_MEMORY_DIR is still READ when the canonical dir has no counterpart, so
-// a repo the Mac app hasn't regenerated since the move keeps working. Nothing
-// writes there any more: the chat-memory writer materialises migrated facts at
-// the canonical path on its first write and removes the legacy file.
+// Nothing here writes to a repo; writers use the project-level paths only.
 
-import { join } from 'node:path';
+import { existsSync, readdirSync } from 'node:fs';
+import { basename, dirname, join, resolve } from 'node:path';
 
 export const SYSTEM_DIR = 'system';
 const MEMORY_DIRNAME = 'memory';
+const GRAPH_DIRNAME = 'graph';
 
-/** `<root>/system` — the single generated-knowledge container. */
+/** `<project>` for a project root or a `code/<child>` repo root. */
+export function projectRootOf(root) {
+  const r = resolve(root);
+  const parent = dirname(r);
+  if (basename(parent) !== 'code') return r;
+  const grand = dirname(parent);
+  return existsSync(join(grand, SYSTEM_DIR, 'project.json')) ? grand : r;
+}
+
+/** Child repo folder names under `<project>/code/` (sorted, hidden skipped). */
+function codeChildNames(project) {
+  try {
+    return readdirSync(join(project, 'code'), { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+      .map((d) => d.name)
+      .sort();
+  } catch {
+    return [];
+  }
+}
+
+/** `<project>/system` — the single generated-knowledge container. */
 export function systemDir(root) {
-  return join(root, SYSTEM_DIR);
+  return join(projectRootOf(root), SYSTEM_DIR);
 }
 
-/** `<root>/system/memory` — generated + curated agent memory. */
+/** `<project>/system/memory` — generated + curated agent memory. */
 export function memoryDir(root) {
-  return join(root, SYSTEM_DIR, MEMORY_DIRNAME);
+  return join(systemDir(root), MEMORY_DIRNAME);
 }
 
-/** Pre-consolidation location. Read-only fallback; never written. */
+/**
+ * Code-graph output dir for `root`. Flat `system/graph/` when the project graphs
+ * at most one repo; with 2+ `code/<child>` repos each gets `system/graph/<child>/`.
+ * Mirrors `GeneratedDataLocator.graphDir(forRepo:)` on the Mac side.
+ */
+export function graphDir(root) {
+  const r = resolve(root);
+  const project = projectRootOf(r);
+  const base = join(project, SYSTEM_DIR, GRAPH_DIRNAME);
+  if (r === project) return base;
+  return codeChildNames(project).length > 1 ? join(base, basename(r)) : base;
+}
+
+/** Pre-D1 generated-output container inside a repo: `<repo>/system`. Read-only. */
+export function legacySystemDir(root) {
+  return join(resolve(root), SYSTEM_DIR);
+}
+
+/** Pre-consolidation memory location. Read-only fallback; never written. */
 export function legacyMemoryDir(root) {
-  return join(root, 'graphify-out', MEMORY_DIRNAME);
+  return join(resolve(root), 'graphify-out', MEMORY_DIRNAME);
 }
 
-/** `<root>/system/graph/index.md` — the repo overview, owned by the code graph. */
+/** Pre-D1 memory location inside a repo: `<repo>/system/memory`. Read-only. */
+export function legacySystemMemoryDir(root) {
+  return join(legacySystemDir(root), MEMORY_DIRNAME);
+}
+
+/** `<project>/system/graph/index.md` — the code graph overview. Falls back to the legacy file when only that exists. */
 export function graphIndexFile(root) {
-  return join(root, SYSTEM_DIR, 'graph', 'index.md');
+  const current = join(graphDir(root), 'index.md');
+  if (existsSync(current)) return current;
+  const legacy = join(legacySystemDir(root), GRAPH_DIRNAME, 'index.md');
+  return existsSync(legacy) ? legacy : current;
 }
 
 /** The canonical chat-memory file (the only path ever written). */
