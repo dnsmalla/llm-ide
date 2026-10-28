@@ -44,14 +44,17 @@ final class GeneratedDataLocatorTests: XCTestCase {
 
     private func exists(_ url: URL) -> Bool { fm.fileExists(atPath: url.path) }
 
-    /// The pre-D1 layout: generated output under `<repo>/system/`.
+    /// The pre-D1 layout: the app's own generated output under `<repo>/system/`,
+    /// named the way the writers name it.
     private func legacyOutput(in repo: URL) throws {
         try write("# Codebase Index\n", to: repo.appendingPathComponent("system/graph/index.md"))
         try write("{\"version\":\"1.1\"}", to: repo.appendingPathComponent("system/graph/graph.json"))
         try write("*\n", to: repo.appendingPathComponent("system/graph/.gitignore"))
+        try write("# file note\n", to: repo.appendingPathComponent("system/graph/Sources/A.swift.md"))
         try write("- fact\n", to: repo.appendingPathComponent("system/memory/chat-memory.md"))
-        try write("# fault\n", to: repo.appendingPathComponent("system/faults/2026-01-01-a.md"))
-        try write("# qa\n", to: repo.appendingPathComponent("system/q&a/2026-01-02-b.md"))
+        try write("env\n", to: repo.appendingPathComponent("system/memory/environment.md"))
+        try write("# crash\n", to: repo.appendingPathComponent("system/faults/2026-01-01T10-00-00Z-crash.md"))
+        try write("# why wal\n", to: repo.appendingPathComponent("system/q&a/2026-01-02T10-00-00Z-why-wal.md"))
         try write("# Project facts\n", to: repo.appendingPathComponent("system/repo.md"))
     }
 
@@ -121,6 +124,16 @@ final class GeneratedDataLocatorTests: XCTestCase {
         XCTAssertEqual(qaFiles.count, 1)
     }
 
+    /// A hand-authored repo.md left in the repo must not be shadowed by a project template.
+    func testSeedDoesNotShadowLegacyRepoMd() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try write("# My facts\n", to: app.appendingPathComponent("system/repo.md"))
+        try MemoryStore().seedIfMissing(in: app)
+        XCTAssertFalse(exists(project.appendingPathComponent("system/repo.md")))
+        XCTAssertEqual(try String(contentsOf: app.appendingPathComponent("system/repo.md"), encoding: .utf8), "# My facts\n")
+    }
+
     func testNoRepoLevelSystemDirIsCreatedForAnyWriter() throws {
         let project = try makeProject()
         let repo = try makeRepo("app", in: project)
@@ -132,25 +145,28 @@ final class GeneratedDataLocatorTests: XCTestCase {
 
     // MARK: - Migration
 
-    func testMigrationMovesMultiRepoLegacyOutputToProjectSystem() throws {
+    func testMigrationMovesMultiRepoGeneratedOutputToProjectSystem() throws {
         let project = try makeProject()
         let a = try makeRepo("a", in: project)
         let b = try makeRepo("b", in: project)
         try legacyOutput(in: a)
         try write("# Codebase Index\n", to: b.appendingPathComponent("system/graph/index.md"))
+        try write("{\"version\":\"1.1\"}", to: b.appendingPathComponent("system/graph/graph.json"))
+        try write("*\n", to: b.appendingPathComponent("system/graph/.gitignore"))
 
         let report = GeneratedDataMigration.run(in: project)
 
         let sys = project.appendingPathComponent("system")
         XCTAssertTrue(exists(sys.appendingPathComponent("graph/a/index.md")))
         XCTAssertTrue(exists(sys.appendingPathComponent("graph/a/graph.json")))
+        XCTAssertTrue(exists(sys.appendingPathComponent("graph/a/Sources/A.swift.md")))
         XCTAssertTrue(exists(sys.appendingPathComponent("graph/b/index.md")))
         XCTAssertTrue(exists(sys.appendingPathComponent("memory/chat-memory.md")))
-        XCTAssertTrue(exists(sys.appendingPathComponent("faults/2026-01-01-a.md")))
-        XCTAssertTrue(exists(sys.appendingPathComponent("q&a/2026-01-02-b.md")))
-        XCTAssertTrue(exists(sys.appendingPathComponent("repo.md")))
-        XCTAssertFalse(exists(a.appendingPathComponent("system")), "legacy system/ must be removed")
-        XCTAssertFalse(exists(b.appendingPathComponent("system")))
+        XCTAssertTrue(exists(sys.appendingPathComponent("memory/environment.md")))
+        XCTAssertTrue(exists(sys.appendingPathComponent("faults/2026-01-01T10-00-00Z-crash.md")))
+        XCTAssertTrue(exists(sys.appendingPathComponent("q&a/2026-01-02T10-00-00Z-why-wal.md")))
+        XCTAssertFalse(exists(a.appendingPathComponent("system/graph")), "moved generated dirs are gone from the repo")
+        XCTAssertFalse(exists(b.appendingPathComponent("system")), "an emptied legacy system/ is removed")
         XCTAssertEqual(Set(report.movedRepos), ["a", "b"])
     }
 
@@ -163,7 +179,8 @@ final class GeneratedDataLocatorTests: XCTestCase {
 
         XCTAssertTrue(exists(project.appendingPathComponent("system/graph/index.md")))
         XCTAssertFalse(exists(project.appendingPathComponent("system/graph/app")))
-        XCTAssertFalse(exists(app.appendingPathComponent("system")))
+        XCTAssertFalse(exists(app.appendingPathComponent("system/graph")))
+        XCTAssertTrue(exists(app.appendingPathComponent("system/repo.md")), "hand-authored repo.md stays")
     }
 
     func testMigrationIsIdempotent() throws {
@@ -176,41 +193,154 @@ final class GeneratedDataLocatorTests: XCTestCase {
         XCTAssertTrue(exists(project.appendingPathComponent("system/graph/index.md")))
     }
 
+    /// User source that happens to sit in a folder named like a generated dir stays put.
+    func testUntrackedUserFilesNamedLikeGeneratedDirsStay() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try write("my design notes\n", to: app.appendingPathComponent("system/memory/design.md"))
+        try write("keep me\n", to: app.appendingPathComponent("system/faults/triage.md"))
+        try write("hand notes\n", to: app.appendingPathComponent("system/q&a/faq.md"))
+        try write("# readme\n", to: app.appendingPathComponent("system/graph/README.md"))
+
+        let report = GeneratedDataMigration.run(in: project)
+
+        XCTAssertTrue(exists(app.appendingPathComponent("system/memory/design.md")))
+        XCTAssertTrue(exists(app.appendingPathComponent("system/faults/triage.md")))
+        XCTAssertTrue(exists(app.appendingPathComponent("system/q&a/faq.md")))
+        XCTAssertTrue(exists(app.appendingPathComponent("system/graph/README.md")))
+        XCTAssertFalse(exists(project.appendingPathComponent("system/memory/design.md")))
+        XCTAssertFalse(exists(project.appendingPathComponent("system/faults/triage.md")))
+        XCTAssertFalse(exists(project.appendingPathComponent("system/graph/README.md")))
+        XCTAssertFalse(report.unrecognised.isEmpty)
+    }
+
+    /// A graph dir without the generator's self-ignore marker is not generated output.
+    func testGraphWithoutGeneratorMarkerIsNotMoved() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try write("{\"version\":\"1.1\"}", to: app.appendingPathComponent("system/graph/graph.json"))
+
+        GeneratedDataMigration.run(in: project)
+
+        XCTAssertTrue(exists(app.appendingPathComponent("system/graph/graph.json")))
+        XCTAssertFalse(exists(project.appendingPathComponent("system/graph/graph.json")))
+    }
+
+    /// Inside a recognised graph dir, a user file still stays; only generator output moves.
+    func testRecognisedGraphMovesOnlyGeneratorFiles() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try legacyOutput(in: app)
+        try write("user data\n", to: app.appendingPathComponent("system/graph/keep.txt"))
+
+        GeneratedDataMigration.run(in: project)
+
+        XCTAssertTrue(exists(app.appendingPathComponent("system/graph/keep.txt")))
+        XCTAssertFalse(exists(project.appendingPathComponent("system/graph/keep.txt")))
+        XCTAssertTrue(exists(project.appendingPathComponent("system/graph/index.md")))
+    }
+
     /// A repo whose `system/` holds a git-TRACKED file is user content: skipped whole.
     func testMigrationSkipsRepoWithTrackedFilesAndKeepsThemReadable() throws {
         let project = try makeProject()
         let app = try makeRepo("app", in: project)
         try legacyOutput(in: app)
         try git(["init", "-q"], in: app)
-        try git(["add", "-f", "system/repo.md"], in: app)
+        try git(["add", "-f", "system/memory/chat-memory.md"], in: app)
 
         let report = GeneratedDataMigration.run(in: project)
 
         XCTAssertEqual(report.skippedTrackedRepos, ["app"])
-        XCTAssertTrue(exists(app.appendingPathComponent("system/repo.md")), "tracked file must not move")
+        XCTAssertTrue(exists(app.appendingPathComponent("system/memory/chat-memory.md")), "tracked file must not move")
         XCTAssertTrue(exists(app.appendingPathComponent("system/graph/index.md")))
         XCTAssertFalse(exists(project.appendingPathComponent("system/graph/index.md")))
 
         // N-1 fallback: the reader still finds the un-migrated graph in the old place.
-        XCTAssertEqual(GeneratedDataLocator.readableGraphDir(forRepo: app).path, (app.appendingPathComponent("system/graph").standardizedFileURL).path)
+        XCTAssertEqual(GeneratedDataLocator.readableGraphDir(forRepo: app).path,
+                       app.appendingPathComponent("system/graph").standardizedFileURL.path)
         XCTAssertEqual(MemoryStore().listFaults(at: app).map(\.lastPathComponent),
-                       ["2026-01-01-a.md"])
+                       ["2026-01-01T10-00-00Z-crash.md"])
+    }
+
+    /// Git that fails must not be read as "nothing tracked": fail closed.
+    func testMigrationFailsClosedWhenGitFails() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try legacyOutput(in: app)
+        let fake = root.appendingPathComponent("fake-git")
+        try write("#!/bin/sh\necho 'xcrun: error: invalid active developer path' >&2\nexit 1\n", to: fake)
+        try fm.setAttributes([.posixPermissions: 0o755], ofItemAtPath: fake.path)
+
+        let report = GeneratedDataMigration.run(in: project, gitCandidates: [fake.path])
+
+        XCTAssertEqual(report.skippedUnsafeRepos, ["app"])
+        XCTAssertTrue(report.movedRepos.isEmpty)
+        XCTAssertTrue(exists(app.appendingPathComponent("system/graph/index.md")))
+    }
+
+    func testMigrationFailsClosedWhenNoGitExecutableIsAtAKnownLocation() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try legacyOutput(in: app)
+
+        let report = GeneratedDataMigration.run(in: project, gitCandidates: ["/nonexistent/git"])
+
+        XCTAssertEqual(report.skippedUnsafeRepos, ["app"])
+        XCTAssertTrue(exists(app.appendingPathComponent("system/graph/index.md")))
+    }
+
+    /// A nested checkout (a repo inside the repo's generated dir) owns its own files.
+    func testMigrationSkipsNestedCheckoutInsideTheRepo() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try git(["init", "-q"], in: app)
+        try legacyOutput(in: app)
+        try git(["init", "-q"], in: app.appendingPathComponent("system/graph"))
+
+        let report = GeneratedDataMigration.run(in: project)
+
+        XCTAssertEqual(report.skippedUnsafeRepos, ["app"])
+        XCTAssertTrue(exists(app.appendingPathComponent("system/graph/index.md")))
+    }
+
+    /// A plain folder (no git at all) migrates on the name rules.
+    func testPlainFolderWithoutGitIsMigrated() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try legacyOutput(in: app)
+
+        let report = GeneratedDataMigration.run(in: project)
+
+        XCTAssertEqual(report.movedRepos, ["app"])
+        XCTAssertTrue(exists(project.appendingPathComponent("system/graph/index.md")))
     }
 
     /// A file already at the new root is never overwritten; the legacy copy stays.
     func testMigrationNeverOverwritesExistingNewRootFile() throws {
         let project = try makeProject()
         let app = try makeRepo("app", in: project)
-        try write("NEW\n", to: project.appendingPathComponent("system/faults/2026-01-01-a.md"))
+        try write("NEW\n", to: project.appendingPathComponent("system/faults/2026-01-01T10-00-00Z-crash.md"))
         try legacyOutput(in: app)
 
         let report = GeneratedDataMigration.run(in: project)
 
-        XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("system/faults/2026-01-01-a.md"),
+        XCTAssertEqual(try String(contentsOf: project.appendingPathComponent("system/faults/2026-01-01T10-00-00Z-crash.md"),
                                   encoding: .utf8), "NEW\n")
-        XCTAssertTrue(exists(app.appendingPathComponent("system/faults/2026-01-01-a.md")))
+        XCTAssertTrue(exists(app.appendingPathComponent("system/faults/2026-01-01T10-00-00Z-crash.md")))
         XCTAssertEqual(report.conflicts.count, 1)
         XCTAssertTrue(report.movedRepos.isEmpty, "a repo with a conflict is not reported as cleanly moved")
+    }
+
+    /// repo.md is hand-authored: it never moves, and the server still reads it from the repo.
+    func testRepoMdStaysInTheRepo() throws {
+        let project = try makeProject()
+        let app = try makeRepo("app", in: project)
+        try legacyOutput(in: app)
+
+        GeneratedDataMigration.run(in: project)
+
+        XCTAssertTrue(exists(app.appendingPathComponent("system/repo.md")))
+        XCTAssertFalse(exists(project.appendingPathComponent("system/repo.md")))
     }
 
     func testReadableGraphDirPrefersNewLocationAfterMigration() throws {
@@ -218,7 +348,8 @@ final class GeneratedDataLocatorTests: XCTestCase {
         let app = try makeRepo("app", in: project)
         try legacyOutput(in: app)
         GeneratedDataMigration.run(in: project)
-        XCTAssertEqual(GeneratedDataLocator.readableGraphDir(forRepo: app).path, (project.appendingPathComponent("system/graph").standardizedFileURL).path)
+        XCTAssertEqual(GeneratedDataLocator.readableGraphDir(forRepo: app).path,
+                       project.appendingPathComponent("system/graph").standardizedFileURL.path)
     }
 
     // MARK: - Git helper

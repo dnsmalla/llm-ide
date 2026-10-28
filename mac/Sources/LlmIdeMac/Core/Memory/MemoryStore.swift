@@ -73,7 +73,10 @@ public struct MemoryStore: Sendable {
             }
         }
         let repoMd = repoNotesURL(in: repo)
-        if !fm.fileExists(atPath: repoMd.path) {
+        // A hand-authored repo.md still in a cloned repo's legacy system/ (never moved)
+        // wins over a fresh template, which would otherwise shadow it.
+        let legacyRepoMd = GeneratedDataLocator.legacySystemDir(forRepo: repo).appendingPathComponent("repo.md")
+        if !fm.fileExists(atPath: repoMd.path), !fm.fileExists(atPath: legacyRepoMd.path) {
             try Self.repoTemplate.write(to: repoMd, atomically: true, encoding: .utf8)
         }
     }
