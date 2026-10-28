@@ -813,6 +813,87 @@ describe('native storage host', () => {
     await assert.rejects(host.storageCompact(), (err) => err.name === 'OsAuthError');
   });
 
+  it('a clear and a compact wait 130 s for native; a read waits 15 s', () => {
+    const { host, timers } = storageHost(() => undefined);
+    void host.storageClear({ scope: 'raw', dryRun: true }).catch(() => {});
+    assert.deepEqual(timers.pendingMs(), [130000]);
+    void host.storageSettings().catch(() => {});
+    assert.deepEqual(timers.pendingMs(), [130000, 15000]);
+  });
+
+  it('a clear whose wait runs out is a timeout that says it may have completed', async () => {
+    const { host, timers } = storageHost(() => undefined);
+    const p = host.storageClear({ scope: 'all', dryRun: false, previewId: 'p.1' });
+    timers.runTimers(130000);
+    await assert.rejects(p, (err) => err.code === 'timeout' && /may still have completed/.test(err.message));
+  });
+
+  it('a compact whose wait runs out is a timeout that says it may have completed', async () => {
+    const { host, timers } = storageHost(() => undefined);
+    const p = host.storageCompact();
+    timers.runTimers(130000);
+    await assert.rejects(p, (err) => err.code === 'timeout' && /may still have completed/.test(err.message));
+  });
+
+  it('a read whose wait runs out keeps the generic bridge error, not a storage code', async () => {
+    const { host, timers } = storageHost(() => undefined);
+    const p = host.storageSettings();
+    timers.runTimers(15000);
+    await assert.rejects(p, (err) => !('code' in err) && /did not answer in time/.test(err.message));
+  });
+
+  it('a native 504 timeout reply is the timeout code too', async () => {
+    const { host } = storageHost(() => ({ status: 504, body: { code: 'timeout', message: 'slow' }, error: 'timeout' }));
+    await assert.rejects(host.storageClear({ scope: 'raw', dryRun: false, previewId: 'p.1' }), (err) => err.code === 'timeout');
+  });
+
+  it('a request that is wrong on its face is refused before anything is sent', async () => {
+    const { host, sent } = storageHost(() => ({ status: 200, body: { retentionDays: 30 } }));
+    for (const days of [6, 366, 30.5, NaN, '30']) {
+      await assert.rejects(host.setStorageRetention(days), (err) => err.code === 'VALIDATION_FAILED', String(days));
+    }
+    const bad = [
+      { scope: 'everything', dryRun: true },
+      { scope: 'raw', dryRun: 'yes' },
+      { scope: 'raw', dryRun: true, beforeDays: 3651 },
+      { scope: 'raw', dryRun: true, beforeDays: -1 },
+      { scope: 'raw', dryRun: true, beforeDays: 1.5 },
+    ];
+    for (const req of bad) {
+      await assert.rejects(host.storageClear(req), (err) => err.code === 'VALIDATION_FAILED', JSON.stringify(req));
+    }
+    assert.equal(sent.length, 0, 'nothing is sent for an invalid request');
+    const ok = storageHost(() => ({ status: 200, body: { dryRun: true } }));
+    await ok.host.storageClear({ scope: 'raw', dryRun: true, beforeDays: 0 });
+    assert.deepEqual(ok.sent[0].body, { scope: 'raw', dryRun: true, beforeDays: 0 }, '0 days is a valid cutoff');
+  });
+
+  it("native's not_allowed is a validation failure", async () => {
+    const { host } = storageHost(() => ({ status: 400, error: 'not_allowed' }));
+    await assert.rejects(host.storageSettings(), (err) => err.code === 'VALIDATION_FAILED');
+  });
+
+  it('only AGENT_STORE_UNAVAILABLE (or a compact 503) is store_down; other 503s keep their code', async () => {
+    const other = storageHost(() => ({ status: 503, body: { code: 'busy', message: 'in flight' } }));
+    await assert.rejects(other.host.storageClear({ scope: 'raw', dryRun: false, previewId: 'p.1' }), (err) => err.code === 'busy');
+    const bare = storageHost(() => ({ status: 503, body: { code: 'UPSTREAM_ERROR', message: 'x' } }));
+    await assert.rejects(bare.host.storageClear({ scope: 'raw', dryRun: false, previewId: 'p.1' }), (err) => err.code === 'failed');
+    const compact = storageHost(() => ({ status: 503 }));
+    await assert.rejects(compact.host.storageCompact(), (err) => err.code === 'store_down');
+    const read = storageHost(() => ({ status: 503 }));
+    await assert.rejects(read.host.storageSettings(), (err) => err.code === 'failed', 'a read 503 without a store code is not store_down');
+  });
+
+  it('an unknown server code becomes failed, with the generic message and no server text', async () => {
+    const { host } = storageHost(() => ({ status: 500, body: { code: 'UPSTREAM_ERROR', message: 'leaked detail' } }));
+    await assert.rejects(host.storageCompact(), (err) => err.code === 'failed' && !/leaked/.test(err.message));
+  });
+
+  it('a bad_reply from native keeps its code', async () => {
+    const { host } = storageHost(() => ({ status: 502, body: { code: 'bad_reply', message: 'unreadable' }, error: 'bad_reply' }));
+    await assert.rejects(host.storageCompact(), (err) => err.code === 'bad_reply' && err.message === 'unreadable');
+  });
+
   it('compaction waits longer than the default native timeout', () => {
     const { host, timers } = storageHost(() => undefined);
     void host.storageCompact().catch(() => {});

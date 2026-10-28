@@ -33,13 +33,14 @@ import {
   type FetchLike,
   type Requester,
 } from './api';
-import type {
-  BridgeValue,
-  NativeEvent,
-  NativeFeedStatus,
-  NativeReply,
-  NativeRequests,
-  ToNative,
+import {
+  NativeTimeoutError,
+  type BridgeValue,
+  type NativeEvent,
+  type NativeFeedStatus,
+  type NativeReply,
+  type NativeRequests,
+  type ToNative,
 } from './bridge';
 import { OsStream } from './stream';
 
@@ -92,8 +93,18 @@ export class StorageError extends Error {
   }
 }
 
-/** Compaction can run a full VACUUM; native waits this long for it (its own call timeout is 120 s). */
-const COMPACT_TIMEOUT_MS = 130_000;
+/**
+ * How long the page waits for native, per storage call. Native gives a clear or compact 120 s in total
+ * (a 401 refresh included) and a read 12 s, so each page wait is longer than native's: the page gets
+ * native's answer (a result, or 504 timeout), not its own timeout.
+ */
+const READ_WAIT_MS = 15_000;
+const LONG_WAIT_MS = 130_000;
+
+/** The operation whose failure codes are read. A clear or compact can complete after the page gave up. */
+type StorageOp = 'read' | 'clear' | 'compact';
+
+const TIMEOUT_MESSAGE = 'LLM-IDE did not answer in time. The operation may still have completed; check the storage figures before trying again.';
 
 const STORAGE_MESSAGES: Record<string, string> = {
   store_down: 'The agent history store is not available. Restart LLM-IDE and try again.',
@@ -104,30 +115,61 @@ const STORAGE_MESSAGES: Record<string, string> = {
   preview_stale: 'The history changed since the preview. Run a new preview.',
   PREVIEW_REQUIRED: 'A clear needs a preview first.',
   VALIDATION_FAILED: 'The storage request was not valid.',
+  timeout: TIMEOUT_MESSAGE,
+  bad_reply: 'The server answered but the reply was unreadable; the operation may have completed.',
   unreachable: 'LLM-IDE did not answer.',
+  failed: 'The storage call failed.',
 };
 
+/** The codes native sends that graph-kit reads as they are. Any other code becomes `failed`. */
+const PASSED_CODES = new Set([
+  'busy', 'disk_space', 'PREVIEW_EXPIRED', 'PREVIEW_INVALID', 'preview_stale', 'PREVIEW_REQUIRED',
+  'VALIDATION_FAILED', 'store_down', 'timeout', 'bad_reply', 'unreachable',
+]);
+
 /**
- * Maps a native storage reply to graph-kit's storage codes: 503 AGENT_STORE_UNAVAILABLE is store_down,
- * 409 busy is busy, 507 is disk_space; any other server code passes through.
+ * Maps a native storage reply to graph-kit's storage codes. Store down is AGENT_STORE_UNAVAILABLE, or a
+ * 503 from a compact; other 503s keep their code. 507 is disk_space, 504 is timeout, native's
+ * not_allowed is VALIDATION_FAILED. A code outside the known set becomes `failed`.
  */
-function storageCode(status: number, code: string | undefined): string {
-  if (code === 'AGENT_STORE_UNAVAILABLE' || status === 503) return 'store_down';
+function storageCode(status: number, code: string | undefined, op: StorageOp): string {
+  if (code === 'not_allowed') return 'VALIDATION_FAILED';
+  if (code === 'AGENT_STORE_UNAVAILABLE' || (status === 503 && op === 'compact')) return 'store_down';
   if (status === 507) return 'disk_space';
-  if (status === 409 && (code === undefined || code === 'busy')) return 'busy';
-  if (code) return code;
-  return status === 0 ? 'unreachable' : `http_${status}`;
+  if (status === 504 || code === 'timeout') return 'timeout';
+  if (status === 0 || code === 'unreachable') return 'unreachable';
+  if (code !== undefined && PASSED_CODES.has(code)) return code;
+  return 'failed';
 }
 
 /** The body of a 200 storage reply. 401 signs the user out; any other status throws a StorageError. */
-function storageBody<T>(reply: NativeReply): T {
+function storageBody<T>(reply: NativeReply, op: StorageOp): T {
   if (reply.status === 401) throw new OsAuthError();
   if (reply.status === 200 && reply.body && typeof reply.body === 'object') return reply.body as T;
   const body = reply.body && typeof reply.body === 'object' ? (reply.body as { code?: unknown; message?: unknown }) : {};
   const serverCode = typeof body.code === 'string' ? body.code : reply.error;
-  const code = storageCode(reply.status, serverCode);
-  const message = typeof body.message === 'string' ? body.message : STORAGE_MESSAGES[code] ?? `The storage call failed (${code}).`;
-  throw new StorageError(code, message);
+  const code = storageCode(reply.status, serverCode, op);
+  // A server message is already redacted by native. An unknown code shows the generic message instead.
+  const serverMessage = typeof body.message === 'string' && code !== 'failed' ? body.message : undefined;
+  throw new StorageError(code, serverMessage ?? STORAGE_MESSAGES[code] ?? STORAGE_MESSAGES.failed!);
+}
+
+/** A request the page refuses before it is sent. The message is the one the user sees. */
+function refuse(message: string): never {
+  throw new StorageError('VALIDATION_FAILED', message);
+}
+
+/**
+ * A storage call with its page wait. A wait that runs out is `timeout`: a clear or compact may still
+ * have completed on native. A read that runs out keeps its generic error.
+ */
+async function storageCall(run: Promise<NativeReply>, op: StorageOp): Promise<NativeReply> {
+  try {
+    return await run;
+  } catch (err) {
+    if (err instanceof NativeTimeoutError && op !== 'read') throw new StorageError('timeout', TIMEOUT_MESSAGE);
+    throw err;
+  }
 }
 
 export type NativeHostDeps = {
@@ -173,19 +215,29 @@ export function createNativeHost({ requests, post }: NativeHostDeps): NativeHost
     loadRoutines: async (): Promise<OsRoutine[]> =>
       toOsRoutines(nativeBody(await requests.native('routines'), 'The routines')),
     storageSettings: async (): Promise<StorageSettings> =>
-      storageBody(await requests.call('GET', '/kb/agent-history/settings')),
-    setStorageRetention: async (days: number): Promise<StorageSettings> =>
-      storageBody(await requests.call('PUT', '/kb/agent-history/settings', { retentionDays: days })),
+      storageBody(await storageCall(requests.call('GET', '/kb/agent-history/settings', undefined, READ_WAIT_MS), 'read'), 'read'),
+    setStorageRetention: async (days: number): Promise<StorageSettings> => {
+      if (!Number.isInteger(days) || days < 7 || days > 365) refuse('Enter 7 to 365 whole days.');
+      return storageBody(
+        await storageCall(requests.call('PUT', '/kb/agent-history/settings', { retentionDays: days }, READ_WAIT_MS), 'read'),
+        'read',
+      );
+    },
     storageClear: async (req: ClearRequest): Promise<ClearResult> => {
-      // A real clear is only ever sent with the previewId of its dry run. Native checks this too.
-      if (!req.dryRun && !req.previewId) throw new StorageError('PREVIEW_REQUIRED', STORAGE_MESSAGES.PREVIEW_REQUIRED);
+      if (req.scope !== 'raw' && req.scope !== 'all') refuse('Choose raw rows or all history.');
+      if (typeof req.dryRun !== 'boolean') refuse('The clear request is not valid.');
+      if (req.beforeDays != null && !(Number.isInteger(req.beforeDays) && req.beforeDays >= 0 && req.beforeDays <= 3650)) {
+        refuse('The cutoff must be a whole number of days from 0 to 3650.');
+      }
+      // A real clear is only ever sent with the previewId of its dry run.
+      if (!req.dryRun && !req.previewId) throw new StorageError('PREVIEW_REQUIRED', STORAGE_MESSAGES.PREVIEW_REQUIRED!);
       const body: Record<string, BridgeValue> = { scope: req.scope, dryRun: req.dryRun };
-      if (req.beforeDays !== undefined) body.beforeDays = req.beforeDays;
+      if (req.beforeDays != null) body.beforeDays = req.beforeDays;
       if (req.previewId !== undefined) body.previewId = req.previewId;
-      return storageBody(await requests.call('POST', '/kb/agent-history/clear', body));
+      return storageBody(await storageCall(requests.call('POST', '/kb/agent-history/clear', body, LONG_WAIT_MS), 'clear'), 'clear');
     },
     storageCompact: async (): Promise<CompactResult> =>
-      storageBody(await requests.call('POST', '/kb/agent-history/compact', undefined, COMPACT_TIMEOUT_MS)),
+      storageBody(await storageCall(requests.call('POST', '/kb/agent-history/compact', undefined, LONG_WAIT_MS), 'compact'), 'compact'),
     nativeEvent(event) {
       if (!event || typeof event.type !== 'string' || event.type === 'hello') return;
       current?.onChange();

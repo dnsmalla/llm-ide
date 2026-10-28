@@ -98,6 +98,14 @@ export function applyTheme(theme: string | undefined, root: HTMLElement): ThemeI
 /** How long a bridged request may wait for native before it fails. */
 export const NATIVE_REQUEST_TIMEOUT_MS = 15_000;
 
+/** The wait for a bridged request ran out: native never answered. Hosts tell it apart from other failures. */
+export class NativeTimeoutError extends Error {
+  constructor() {
+    super('LLM-IDE did not answer in time');
+    this.name = 'NativeTimeoutError';
+  }
+}
+
 type Pending = {
   resolve: (reply: NativeReply) => void;
   timer: unknown;
@@ -147,7 +155,7 @@ export class NativeRequests {
     const id = `r${this.nextId++}`;
     return new Promise<NativeReply>((resolve, reject) => {
       const timer = this.setTimer(() => {
-        if (this.pending.delete(id)) reject(new Error('LLM-IDE did not answer in time'));
+        if (this.pending.delete(id)) reject(new NativeTimeoutError());
       }, timeoutMs);
       this.pending.set(id, { resolve, timer });
       if (!this.post(build(id))) {
