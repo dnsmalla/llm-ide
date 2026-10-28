@@ -162,7 +162,12 @@ extension LlmIdeAPIClient {
                               authenticated: true)
     }
 
+    /// Compaction can run for a while (a full VACUUM), so it gets a long idle
+    /// timer. A 503 (store down) or 507 (disk short) is a state the user is told
+    /// about in the card, not a fault to log as an incident.
     func compactAgentHistory() async throws -> AgentHistoryCompactResult {
-        try await post("/kb/agent-history/compact", body: EmptyBody(), authenticated: true)
+        try await send(path: "/kb/agent-history/compact", method: "POST", body: EmptyBody(),
+                       authenticated: true, timeout: 120,
+                       incidentFreeStatuses: [503, 507])
     }
 }

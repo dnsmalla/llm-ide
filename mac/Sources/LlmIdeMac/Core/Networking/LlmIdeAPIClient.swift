@@ -427,7 +427,8 @@ public final class LlmIdeAPIClient: @unchecked Sendable {
 
     func send<B: Encodable, T: Decodable>(
         path: String, method: String, body: B?, authenticated: Bool, isRetry: Bool = false,
-        timeout: TimeInterval? = nil
+        timeout: TimeInterval? = nil,
+        incidentFreeStatuses: Set<Int> = []
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
@@ -478,7 +479,7 @@ public final class LlmIdeAPIClient: @unchecked Sendable {
                     let ok = await store.attemptRefresh(via: self)
                     if ok {
                         return try await send(path: path, method: method, body: body, authenticated: authenticated, isRetry: true,
-                                              timeout: timeout)
+                                              timeout: timeout, incidentFreeStatuses: incidentFreeStatuses)
                     }
                 }
             }
@@ -514,7 +515,9 @@ public final class LlmIdeAPIClient: @unchecked Sendable {
                 // Redact before surfacing — an upstream/provider body can echo a
                 // token (e.g. "Bad credentials for ghp_…", "Bearer …").
                 let msg = SecretRedactor.redact(rawMsg)
-                if http.statusCode >= 500 {
+                // `incidentFreeStatuses` lets a caller whose 5xx is an expected
+                // answer (Compact's 503/507) keep it out of the incident log.
+                if http.statusCode >= 500, !incidentFreeStatuses.contains(http.statusCode) {
                     IncidentRecorder.record(source: .server,
                                             category: "\(method) \(IncidentSignature.normalizeEndpoint(path))",
                                             message: "HTTP \(http.statusCode): \(msg)")
