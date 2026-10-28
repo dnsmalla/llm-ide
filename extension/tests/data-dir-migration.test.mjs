@@ -353,3 +353,30 @@ test('a retry discards an agent.db left by an interrupted run, and moves a fresh
   agent.close();
   assert.equal(fs.existsSync(path.join(dataDir, '.migrating-owner')), false);
 });
+
+// --- the tripwire: the repo kb after a move ----------------------------------
+
+test('the repo-kb layout refuses to open a moved kb, unless overridden', () => {
+  const kb = path.join(root, 'kb');
+  fs.mkdirSync(kb, { recursive: true });
+  fs.writeFileSync(path.join(kb, 'MOVED-TO-APP-SUPPORT.txt'), 'moved');
+  const refused = runDataDirMigration({ env: {}, root });
+  assert.equal(refused.status, 'refused');
+  assert.equal(refused.reason, 'moved-legacy-tripwire');
+  assert.equal(fs.existsSync(path.join(kb, 'data.db')), false, 'no empty DB may be created there');
+  assert.equal(getDataDirOverride(), undefined);
+  const allowed = runDataDirMigration({ env: { LLMIDE_ALLOW_EMPTY_LEGACY: '1' }, root });
+  assert.equal(allowed.status, 'skipped');
+  assert.equal(allowed.reason, 'no-data-dir');
+});
+
+test('the tripwire does not fire while kb/data.db exists, or without a move notice', () => {
+  const kb = path.join(root, 'kb');
+  fs.mkdirSync(kb, { recursive: true });
+  fs.writeFileSync(path.join(kb, 'MOVED-TO-APP-SUPPORT.txt'), 'moved');
+  fs.writeFileSync(path.join(kb, 'data.db'), 'x');
+  assert.equal(runDataDirMigration({ env: {}, root }).status, 'skipped');
+  fs.rmSync(path.join(kb, 'MOVED-TO-APP-SUPPORT.txt'));
+  fs.rmSync(path.join(kb, 'data.db'));
+  assert.equal(runDataDirMigration({ env: {}, root }).status, 'skipped');
+});

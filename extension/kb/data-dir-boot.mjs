@@ -9,3 +9,9 @@ import { runDataDirMigration } from './data-dir-migration.mjs';
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 export const dataDirMigration = runDataDirMigration({ root: REPO_ROOT });
+
+// The repo kb was moved and this run would open it as fresh: stop, say why.
+if (dataDirMigration.status === 'refused') {
+  process.stderr.write(`${dataDirMigration.notes.join('\n')}\n`);
+  process.exit(1);
+}

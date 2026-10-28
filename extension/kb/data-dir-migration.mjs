@@ -36,6 +36,7 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { setDataDirOverride, setDataMigrationReport } from '../core/data-dir.mjs';
+import { legacyTripwire } from './legacy-tripwire.mjs';
 
 const MARKER = 'migrated-from.json';
 const DEV_SECRETS = '.dev-secrets.json';
@@ -73,7 +74,18 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
 
   try {
     const rawDataDir = typeof env.LLMIDE_DATA_DIR === 'string' ? env.LLMIDE_DATA_DIR.trim() : '';
-    if (!rawDataDir) return finish('skipped', 'no-data-dir');
+    if (!rawDataDir) {
+      // The repo kb layout. After a move it must not be opened as if it were fresh.
+      if (!env.NODE_TEST_CONTEXT) {
+        const trip = legacyTripwire({ root, env });
+        if (trip?.refuse) {
+          report.notes.push(trip.message);
+          return finish('refused', 'moved-legacy-tripwire');
+        }
+        if (trip) report.notes.push(trip.message);
+      }
+      return finish('skipped', 'no-data-dir');
+    }
     // Never move or delete anything under the test runner.
     if (env.NODE_TEST_CONTEXT) return finish('skipped', 'test-run');
     if (typeof env.LLMIDE_DB_PATH === 'string' && env.LLMIDE_DB_PATH.trim()) {
