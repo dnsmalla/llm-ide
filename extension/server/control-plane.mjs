@@ -7,6 +7,7 @@ export function buildHealthPayload({
   serverStartedAt,
   skillsAvailable,
   features = null,
+  storage = null,
 }) {
   return {
     status: dbOk && claude?.ok && skillsAvailable !== false ? 'ok' : 'degraded',
@@ -18,6 +19,9 @@ export function buildHealthPayload({
     // enabled keys, sorted (JSON has no Set; a stable order lets the Mac
     // compare it with the feature set it launched the server with).
     features: features ? [...features].sort() : null,
+    // Where the global data lives: 'system' (LLMIDE_DATA_DIR) or 'repo-kb', and
+    // the boot migration outcome (kb/data-dir-migration.mjs). No paths here.
+    ...(storage ? { storage } : {}),
     checks: {
       db: dbOk,
       claude: !!claude?.ok,

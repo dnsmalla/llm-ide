@@ -12047,6 +12047,20 @@ components:
           items:
             type: "string"
           description: "Null means every feature is enabled; otherwise the sorted enabled feature keys, with agent_chat always included."
+        storage:
+          type: "object"
+          description: "Where the global data lives (core/data-dir.mjs): location is 'system' (LLMIDE_DATA_DIR, the Mac app's Application Support dir) or 'repo-kb' (the checkout's kb/); migration is the boot copy outcome (kb/data-dir-migration.mjs: migrated | skipped | fallback). No paths."
+          required:
+            - "location"
+            - "migration"
+          properties:
+            location:
+              enum:
+                - "system"
+                - "repo-kb"
+            migration:
+              type: "string"
+              description: "migrated | skipped | fallback"
         checks:
           type: "object"
           required:

@@ -447,6 +447,12 @@ export type Health = {
   endpoints: string[];
   /** Null means every feature is enabled; otherwise the sorted enabled feature keys, with agent_chat always included. */
   features: string[] | null;
+  /** Where the global data lives (core/data-dir.mjs): location is 'system' (LLMIDE_DATA_DIR, the Mac app's Application Support dir) or 'repo-kb' (the checkout's kb/); migration is the boot copy outcome (kb/data-dir-migration.mjs: migrated | skipped | fallback). No paths. */
+  storage?: {
+    location: "system" | "repo-kb";
+    /** migrated | skipped | fallback */
+    migration: string;
+  };
   checks: {
     db: boolean;
     claude: boolean;

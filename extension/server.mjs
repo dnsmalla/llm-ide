@@ -1,5 +1,7 @@
 // Alias legacy MEETNOTES_* env vars to LLMIDE_* before any config is read.
 import './core/env-compat.mjs';
+// Must precede every import that reads config/logger/DB (see the module).
+import { dataDirMigration } from './kb/data-dir-boot.mjs';
 import http from 'http';
 import { execFile } from 'child_process';
 import path from 'path';
@@ -926,6 +928,7 @@ async function collectHealth() {
     serverStartedAt: SERVER_STARTED_AT,
     skillsAvailable,
     features: config.features,
+    storage: { location: config.dataLocation, migration: dataDirMigration.status },
   });
 }
 
@@ -1268,6 +1271,18 @@ server.listen(PORT, HOST, () => {
     pid: process.pid,
     config: configSummary(),
   });
+  // Where the global data lives, and what the boot migration did about it.
+  {
+    const mig = dataDirMigration;
+    const log = mig.status === 'fallback' ? logger.warn.bind(logger) : logger.info.bind(logger);
+    log('data_location', {
+      location: config.dataLocation,
+      migration: mig.status,
+      reason: mig.reason,
+      notes: mig.notes.length ? mig.notes : undefined,
+      durationMs: mig.durationMs,
+    });
+  }
   // Token-bench fake engine (scripts/token-bench.mjs --fake): make it loud.
   // Every chat turn on this server is synthetic while it is active.
   if (benchFakeEngineEnabled()) {
