@@ -32,6 +32,8 @@ content of any kind.
 
 The user chose **Stage 1 without the ledger**; this overrides the phase ordering below wherever they conflict.
 
+**Stage 2a (shadow, shipped).** `usage_calls` is written beside every ledger row and compared with it (`kb/agent-usage.mjs`). The ledger stays authoritative and no budget read changed. Two decisions taken in 2a, both for Stage 2b to honour: (1) `Clear` never deletes `usage_calls` (a cap must not reset because history was cleared), which amends §2.9 below; (2) the usage rollup into a daily table is a Stage 2b decision (2a keeps 90 raw days, matching the ledger, and adds no usage rollup).
+
 **Stage 1 (build now):** `agent.db` with `agent_runs`, `agent_tool_events`, `turn_composition`, `activity`, the `agent_daily` rollups and `store_meta`; the write queue, corruption handling, retention/rollup job, per-user Clear (dry-run preview), Compact; the one-time copy of `activity`, `turn_tool_events` and `turn_composition` from the main DB; `/kb/storage`, `/kb/agent-history/*` routes; `/kb/os/state` additions (`storage`, `agents.recentRuns`); the OS view Storage/Agents/Activity hubs; the Mac Settings card.
 
 **Out of Stage 1 (unchanged):** `usage_ledger`, `model_limits`, `quota_state`, every budget/limit read (Phase 2 tasks that move `usage_calls`, the `agent_daily`-backed budget reads, `LLMIDE_AGENT_BUDGET_READS`, and the removal of `maybePruneLedger`). The ledger keeps its own 90-day prune. Each run's token totals are recorded ONCE in `agent_runs` at the same call site that already calls `recordUsage` (so the OS Models/Agents hubs stay accurate), but `agent_runs` is a display/history copy and is never read by budget enforcement.
@@ -551,6 +553,9 @@ replay any pending purge (idempotent). The user-delete-cascade test gets an
 ### 2.9 Clear and compact
 
 **Clear (per user).**
+
+> Amendment (Stage 2a): `usage_calls` is never deleted by Clear, in any scope. It is the budget ledger's shadow, and a cap must not reset when history is cleared. Whether usage gets a daily rollup is a Stage 2b decision (see §0.1).
+
 - `POST /kb/agent-history/clear` with `{ scope: 'raw' | 'all', beforeDays?, dryRun: true }`
   returns `{ wouldDelete: { usage_calls, agent_tool_events, turn_composition, agent_runs, activity?, agent_daily? }, previewId, expiresAt }`.
   `previewId` is an HMAC of user, scope, cutoff, and counts, valid for 5 minutes.
