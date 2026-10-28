@@ -145,7 +145,7 @@ export type ApprovalGrant = {
 export type AgentHistoryStorageGroup = {
   key: "agent_history" | "search_index" | "code_graph" | "sources" | "meetings";
   label: string;
-  /** Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings. */
+  /** Rows for this user. agent_history: runs, tool events and composition rows (the rows Clear can delete; the activity feed is not counted). search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings. */
   rows: number;
   /** Approximate bytes for agent_history; null for the main-DB groups. */
   bytes: number | null;
@@ -1107,7 +1107,7 @@ export type UsageCounts = {
 export type OsStorageGroup = {
   key: "agent_history" | "search_index" | "code_graph" | "sources" | "meetings";
   label: string;
-  /** Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings. */
+  /** Rows for this user. agent_history: runs, tool events and composition rows (the rows Clear can delete; the activity feed is not counted). search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings. */
   rows: number;
   /** Approximate bytes for agent_history; null for the main-DB groups. */
   bytes: number | null;

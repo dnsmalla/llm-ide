@@ -123,7 +123,7 @@
         },
         "rows": {
           "type": "integer",
-          "description": "Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings."
+          "description": "Rows for this user. agent_history: runs, tool events and composition rows (the rows Clear can delete; the activity feed is not counted). search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings."
         },
         "bytes": {
           "type": [
