@@ -157,6 +157,16 @@ graphkit-pin-check:
 graphkit-bump:
 	TAG="$(TAG)" DRY_RUN="$(DRY_RUN)" COMMIT="$(COMMIT)" YES="$(YES)" bash scripts/graphkit-bump.sh
 
+# Iterate on graph-kit without pushing it: the app builds against the submodule
+# checkout (GRAPHKIT_LOCAL=1 in mac/Package.swift) in its own scratch path, so
+# the pinned build cache stays warm. SwiftPM would drop the graph-kit entry from
+# Package.resolved in this mode; automatic resolution is disabled instead (the
+# local package needs no resolution), and the target fails if the file changes.
+.PHONY: build-mac-graphkit-local
+build-mac-graphkit-local: graph-kit-checkout ## app built against LocalPackages/graph-kit (no push needed)
+	cd mac && GIT_CONFIG_GLOBAL=/dev/null GRAPHKIT_LOCAL=1 swift build --disable-automatic-resolution --manifest-cache none --scratch-path .build-graphkit-local
+	@git diff --quiet -- mac/Package.resolved || { echo "build-mac-graphkit-local: mac/Package.resolved changed; restore it with git checkout -- mac/Package.resolved" >&2; exit 1; }
+
 .PHONY: graph-gates
 graph-gates: graph-kit-checkout
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab

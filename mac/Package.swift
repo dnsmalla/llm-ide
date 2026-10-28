@@ -313,6 +313,18 @@ if graphIncluded {
     libDependencies.append(.product(name: "GraphKit", package: "graph-kit"))   // UNPLUG: remove
 }
 
+// graph-kit source for the GraphCore/GraphKit products. Default: the exact
+// revision on GitHub (the pin `make graphkit-bump` rewrites; the `// graph-kit`
+// note beside it is the release tag when one was cut). GRAPHKIT_LOCAL=1 swaps
+// in the submodule checkout so graph-kit changes build without a push; the
+// package identity stays "graph-kit", so the products above still resolve.
+// The env var is read here, not in a target, so it changes the manifest:
+// pass --manifest-cache none when toggling it (the Makefile targets do).
+let graphKitDependency: Package.Dependency =
+    ProcessInfo.processInfo.environment["GRAPHKIT_LOCAL"] == "1"
+    ? .package(path: "LocalPackages/graph-kit")
+    : .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "b9235ddfa50c890ae3243fbbada29191b8f1b38f")
+
 // The SharedProtocol PACKAGE is gated with its product: a local path
 // dependency no target uses (mobile_sync off) makes SwiftPM warn "dependency
 // 'sharedprotocol' is not used by any target" on every build-mac-min.
@@ -352,12 +364,16 @@ let package = Package(
         // reports that no engine is installed and keeps rendering any
         // graph.json already on disk. See Sources/LlmIdeMac/Graph/Engine/.
         //
-        // Resolved from the GitHub remote (not the local submodule checkout
-        // in LocalPackages/graph-kit/) so a build works even when that
-        // submodule was never initialized — SwiftPM fetches/caches it into
-        // .build/checkouts itself. Pinned to the exact commit currently
-        // checked out locally; bump this when graph-kit cuts a new release.
-        .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "b9235ddfa50c890ae3243fbbada29191b8f1b38f"),
+        // Resolved from the GitHub remote by the exact revision in
+        // `graphKitDependency` above (not the local submodule checkout), so a
+        // build works even when that submodule was never initialized.
+        // Iterating on graph-kit: set GRAPHKIT_LOCAL=1 to build against
+        // LocalPackages/graph-kit instead (`make build-mac-graphkit-local`
+        // wraps it and keeps Package.resolved clean). The pin is moved by
+        // `make graphkit-bump`; `make graphkit-pin-check` keeps it, the
+        // submodule gitlink and Package.resolved in agreement. Workflow:
+        // docs/how-to/graph-kit-workflow.md.
+        graphKitDependency,
     ] + sharedProtocolPackage,
     targets: [
         .target(
