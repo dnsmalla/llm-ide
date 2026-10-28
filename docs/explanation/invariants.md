@@ -376,7 +376,7 @@ Run through this against a real meeting before merging:
 
 ### agent.db (`extension/kb/agent-db.mjs`, `extension/kb/agent-store.mjs`)
 
-- **MUST understand:** agent-run history lives in a separate SQLite file, `agent.db`, beside the main DB: in `LLMIDE_DATA_DIR` when that is set (the Mac app sets it), otherwise beside the main DB (`LLMIDE_AGENT_DB_PATH` overrides it). It is in the same process, so the single-writer rule above still applies.
+- **MUST understand:** agent-run history lives in a separate SQLite file, `agent.db`, beside the main DB: in `LLMIDE_DATA_DIR` when that is set (the Mac app sets it), or beside an explicit `LLMIDE_DB_PATH` (`LLMIDE_AGENT_DB_PATH` overrides it). It is in the same process, so the single-writer rule above still applies.
 - **MUST preserve:** every write to `agent.db` is best-effort. Enqueueing never throws and never blocks a model turn; a failed batch is dropped and counted in `store_meta.dropped_rows`. A corrupt file is quarantined under a unique `agent.db.corrupt-<ts>[-n]` name and recreated; a boot never fails because of it.
 - **MUST preserve:** live state (sessions, memory, permissions, approvals, personas, feedback, `model_limits`, `quota_state`, `usage_ledger`) stays in the main DB. Cleaning never touches it. Tests use a temp `agent.db` derived from the test DB path, never `kb/agent.db`.
 - **DO NOT** store prompts, responses, tool arguments or error messages in `agent.db`. Codes, counts, sizes and ids only.
