@@ -348,6 +348,26 @@ export function flushAgentQueue({ openIfNeeded = true } = {}) {
   }
 }
 
+/**
+ * A synchronous write (not the queue) failed: count it, log it, and quarantine
+ * the file when the error means it is damaged. Never throws. The caller has
+ * already swallowed the error; this only makes the failure visible in health.
+ */
+export function noteAgentWriteFailure(err) {
+  try {
+    state.writeErrors += 1;
+    log('error', 'agent_db_write_failed', { code: err?.code ?? null, rows: 1, sync: true });
+    if (isCorruptionError(err) && state.file) {
+      try {
+        state.db = quarantineAndRecreate(state.file, err.message);
+      } catch {
+        state.status = 'down';
+        state.db = null;
+      }
+    }
+  } catch { /* counting a failure must never fail */ }
+}
+
 function tick() {
   flushAgentQueue();
   if (Date.now() - state.lastSizeCheck >= SIZE_CHECK_MS) checkStorageSize();
@@ -432,9 +452,20 @@ export function agentStoreStatus() {
       droppedRows = (Number(readMeta(state.db, 'dropped_rows')) || 0) + state.droppedUnsaved;
     } catch { /* unreadable: report the in-process numbers */ }
   }
+  let shadow = null;
+  if (state.db) {
+    try {
+      const raw = readMeta(state.db, 'last_shadow_compare');
+      if (raw) {
+        const last = JSON.parse(raw);
+        shadow = { at: last.at, ok: last.ok, mismatches: last.mismatches, scope: last.scope, windows: last.windows };
+      }
+    } catch { /* unreadable: no compare yet */ }
+  }
   return {
     health,
     state: state.status,
+    shadow,
     historyResetAt,
     droppedRows,
     droppedThisProcess: state.dropped,

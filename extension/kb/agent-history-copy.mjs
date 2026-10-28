@@ -17,6 +17,8 @@
 
 import { getDb } from './db.mjs';
 import { getAgentDb, readMeta, writeMeta } from './agent-db.mjs';
+import { isInternalEndpoint, USAGE_RETENTION_DAYS } from './agent-usage.mjs';
+import { toSqliteLocal } from './usage.mjs';
 
 export const COPY_BATCH_ROWS = 5000;
 const TABLES = ['activity', 'turn_tool_events', 'turn_composition'];
@@ -56,6 +58,7 @@ export function prepareHistoryCopy({ mainDb = getDb(), agentDb = getAgentDb() } 
     bumpSequence(agentDb, SEQ_NAME[table], floor);
     floors[table] = floor;
   }
+  prepareUsageCopy(agentDb, mainDb, floors);
   // The read cursors go first, before listen: a copy of the feed without them
   // would show every copied row as unread for the length of the copy.
   if (hasTable(mainDb, 'activity_seen') && !readMeta(agentDb, doneKey('activity_seen'))) {
@@ -64,6 +67,80 @@ export function prepareHistoryCopy({ mainDb = getDb(), agentDb = getAgentDb() } 
     floors.activity_seen = true;
   }
   return floors;
+}
+
+// --- usage backfill (Stage 2a) -------------------------------------------
+// usage_ledger -> usage_calls. Bounded on both ends: ids <= the boot-time floor
+// (rows mirrored live after boot have larger ids and are never copied) and
+// ts >= the 90-day cutoff fixed at boot. Both are kept in store_meta so a resumed
+// copy uses the same bounds.
+const USAGE_FLOOR_KEY = 'usage_copy_floor';
+const USAGE_CUTOFF_KEY = 'usage_copy_cutoff';
+const USAGE_CURSOR_KEY = 'copy_cursor:usage_ledger';
+const USAGE_DONE_KEY = 'copy_done:usage_ledger';
+const USAGE_VERIFIED_KEY = 'copy_verified:usage_ledger';
+
+function prepareUsageCopy(agent, mainDb, floors) {
+  if (!hasTable(mainDb, 'usage_ledger') || readMeta(agent, USAGE_DONE_KEY)) return;
+  if (readMeta(agent, USAGE_FLOOR_KEY) == null) {
+    const floor = maxId(mainDb, 'usage_ledger');
+    const cutoff = toSqliteLocal(new Date(Date.now() - USAGE_RETENTION_DAYS * 86_400_000));
+    writeMeta(agent, USAGE_CUTOFF_KEY, cutoff);
+    writeMeta(agent, USAGE_FLOOR_KEY, floor);
+  }
+  const floor = Number(readMeta(agent, USAGE_FLOOR_KEY)) || 0;
+  bumpSequence(agent, 'usage_calls', floor);
+  floors.usage_ledger = floor;
+}
+
+/** One batch of the usage backfill, in one transaction with its cursor. */
+export function copyUsageStep({ mainDb = getDb(), agentDb = getAgentDb(), batch = COPY_BATCH_ROWS } = {}) {
+  if (!agentDb) return { ok: false, reason: 'unavailable' };
+  if (usageCopyDone({ agentDb, mainDb })) return { ok: true, table: null, copied: 0, done: true };
+  const floor = Number(readMeta(agentDb, USAGE_FLOOR_KEY));
+  const cutoff = readMeta(agentDb, USAGE_CUTOFF_KEY);
+  if (!Number.isFinite(floor) || !cutoff) {
+    // The bounds were never set (store recreated, or the boot step did not run).
+    prepareUsageCopy(agentDb, mainDb, {});
+    return { ok: true, table: 'usage_ledger', copied: 0, done: false };
+  }
+  const afterId = Number(readMeta(agentDb, USAGE_CURSOR_KEY)) || 0;
+  const copied = agentDb.transaction(() => {
+    const rows = mainDb.prepare(
+      `SELECT id, user_id, ts, provider, model, source, endpoint, input_tokens, output_tokens,
+              cache_read_tokens, cache_creation_tokens, runs, request_id, turns, stop_reason
+         FROM usage_ledger WHERE id > ? AND id <= ? AND ts >= ? ORDER BY id LIMIT ?`,
+    ).all(afterId, floor, cutoff, batch);
+    const ins = agentDb.prepare(
+      `INSERT OR IGNORE INTO usage_calls
+         (id, user_id, day, ts, provider, model, source, endpoint, is_internal,
+          input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens,
+          runs, request_id, turns, stop_reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    );
+    for (const r of rows) {
+      ins.run(r.id, r.user_id, String(r.ts).slice(0, 10), r.ts, r.provider, r.model, r.source ?? 'api',
+        r.endpoint ?? null, isInternalEndpoint(r.endpoint), r.input_tokens ?? null, r.output_tokens ?? null,
+        r.cache_read_tokens ?? null, r.cache_creation_tokens ?? null, r.runs ?? 1, r.request_id ?? null,
+        r.turns ?? null, r.stop_reason ?? null);
+    }
+    if (rows.length) writeMeta(agentDb, USAGE_CURSOR_KEY, rows[rows.length - 1].id);
+    return rows.length;
+  })();
+  if (copied === 0) {
+    const mainCount = mainDb.prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE id <= ? AND ts >= ?').get(floor, cutoff).n;
+    const copyCount = agentDb.prepare('SELECT COUNT(*) AS n FROM usage_calls WHERE id <= ?').get(floor).n;
+    writeMeta(agentDb, USAGE_VERIFIED_KEY, mainCount === copyCount ? 'ok' : `mismatch:${mainCount}:${copyCount}`);
+    writeMeta(agentDb, USAGE_DONE_KEY, '1');
+    return { ok: true, table: 'usage_ledger', copied: 0, done: true };
+  }
+  return { ok: true, table: 'usage_ledger', copied, done: false };
+}
+
+/** True once the usage backfill is finished (or the main DB has no ledger). */
+export function usageCopyDone({ agentDb = getAgentDb(), mainDb = getDb() } = {}) {
+  if (!agentDb) return false;
+  return !hasTable(mainDb, 'usage_ledger') || Boolean(readMeta(agentDb, USAGE_DONE_KEY));
 }
 
 // Batch writers. Each takes the main rows of one batch and inserts them.
@@ -150,7 +227,7 @@ export function copyHistoryStep({ mainDb = getDb(), agentDb = getAgentDb(), batc
     }
     return { ok: true, table, copied, done: false };
   }
-  return { ok: true, table: null, copied: 0, done: true };
+  return copyUsageStep({ mainDb, agentDb, batch });
 }
 
 function verify(agent, mainDb, table) {
@@ -166,7 +243,8 @@ function verify(agent, mainDb, table) {
 export function historyCopyDone({ agentDb = getAgentDb(), mainDb = getDb() } = {}) {
   if (!agentDb) return false;
   return TABLES.every((t) => !hasTable(mainDb, t) || Boolean(readMeta(agentDb, doneKey(t))))
-    && (!hasTable(mainDb, 'activity_seen') || Boolean(readMeta(agentDb, doneKey('activity_seen'))));
+    && (!hasTable(mainDb, 'activity_seen') || Boolean(readMeta(agentDb, doneKey('activity_seen'))))
+    && usageCopyDone({ agentDb, mainDb });
 }
 
 /** Run the copy to completion in one call (tests and operator tools). */

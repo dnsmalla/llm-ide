@@ -13,8 +13,9 @@
 //                         closeAgentDb(), which flushes the queue.
 
 import { agentStoreStatus, getAgentDb, onFreshStore, openAgentDb, takeRollupRequest, verifyAgentDb, localDay, readMeta, writeMeta, checkStorageSize } from './agent-db.mjs';
-import { prepareHistoryCopy, copyHistoryStep, historyCopyDone } from './agent-history-copy.mjs';
+import { prepareHistoryCopy, copyHistoryStep, historyCopyDone, usageCopyDone } from './agent-history-copy.mjs';
 import { abortStaleRuns, purgeUserHistory, rollupAll } from './agent-store.mjs';
+import { compareLedgerShadow, pruneUsageCalls } from './agent-usage.mjs';
 import { getDb } from './db.mjs';
 
 export const TICK_MS = 60 * 1000;
@@ -94,7 +95,15 @@ export function agentStoreTick(now = new Date(), { logger } = {}) {
     const due = dailyRollupDue(readMeta(db, LAST_DAILY_KEY), now);
     if (!requested && !due) return { ran: false };
     const result = rollupAll({ db, now });
-    if (due) writeMeta(db, LAST_DAILY_KEY, localDay(now));
+    if (due) {
+      // Daily, not per tick: the usage shadow keeps the ledger's 90-day raw window
+      // and is compared against the ledger (Stage 2a evidence gate).
+      try { pruneUsageCalls({ agentDb: db, now }); } catch { /* best effort */ }
+      try {
+        if (usageCopyDone({ agentDb: db })) compareLedgerShadow(null, { agentDb: db, now, logger });
+      } catch (err) { log(logger, 'error', 'agent_usage_compare_failed', { error: err?.message }); }
+      writeMeta(db, LAST_DAILY_KEY, localDay(now));
+    }
     log(logger, 'info', 'agent_db_rollup', { requested, daily: due, users: result.users?.length ?? 0 });
     return { ran: true, requested, daily: due };
   } catch (err) {

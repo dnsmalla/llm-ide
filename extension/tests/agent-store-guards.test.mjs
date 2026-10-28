@@ -19,6 +19,7 @@ const EXT = path.resolve(__dirname, '..');
 const INVENTORY = [
   'kb/activity.mjs',
   'kb/agent-history-copy.mjs',
+  'kb/agent-usage.mjs',
   'kb/db.mjs',
   'kb/os-state.mjs',
   'kb/tool-events-summary.mjs',

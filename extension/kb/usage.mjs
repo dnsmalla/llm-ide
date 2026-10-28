@@ -17,6 +17,7 @@
 import { AsyncLocalStorage } from 'node:async_hooks';
 import { ANTHROPIC_MODELS, canonicalModel, modelAliases } from './model-ids.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
+import { mirrorUsageCall } from './agent-usage.mjs';
 
 // ---------------------------------------------------------------------------
 // Built-in fallback chains. Order = default priority (lower index tried first).
@@ -401,9 +402,14 @@ export function recordUsage(db, {
       clampStr(requestId, 128),
       turns == null ? null : tokenCountOrNull(turns), clampStr(stopReason, 40),
     );
+    const ledgerId = Number(info.lastInsertRowid);
+    // Shadow (Stage 2a): mirror the row into agent.db. Best-effort and
+    // synchronous, so the shadow never lags the ledger. The ledger stays
+    // authoritative; a shadow failure is counted by the store, never thrown.
+    mirrorUsageCall(db, ledgerId);
     maybePruneLedger(db);
     emitOsEvent(userId, 'usage');
-    return Number(info.lastInsertRowid);
+    return ledgerId;
   } catch {
     return null;
   }
