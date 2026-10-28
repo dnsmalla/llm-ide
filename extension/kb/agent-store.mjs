@@ -295,7 +295,9 @@ export function rollupAll({ db, now = new Date() } = {}) {
   const handle = handleOr({ db });
   if (!handle) return { ok: false, reason: 'unavailable', users: [] };
   if (!db) flushAgentQueue();
-  checkStorageSize(now.getTime());
+  // Refresh the size state without re-requesting: the rollup itself must not
+  // schedule the next one, or an over-threshold store would roll up every tick.
+  checkStorageSize(now.getTime(), { requestRollup: false });
   const rows = handle.prepare(`
     SELECT user_id FROM agent_runs UNION SELECT user_id FROM agent_tool_events
     UNION SELECT user_id FROM turn_composition UNION SELECT user_id FROM agent_daily
@@ -538,4 +540,42 @@ export function purgeUserHistory(userId) {
     } catch { /* store unusable: the marker cannot be written either */ }
     return { ok: false, pending: true };
   }
+}
+
+/**
+ * Close runs still 'running' that started before `olderThanMs` ago (plan 2.5:
+ * a crash leaves an open row; at boot these become 'aborted'). Operator sweep,
+ * not per user. Returns the number of rows closed.
+ */
+export function abortStaleRuns({ db, now = new Date(), olderThanMs = 24 * 60 * 60 * 1000 } = {}) {
+  const handle = db ?? getAgentDb();
+  if (!handle) return 0;
+  const cutoff = new Date(now.getTime() - olderThanMs).toISOString();
+  return handle.prepare(
+    `UPDATE agent_runs SET status = 'aborted', ended_at = ?, error_code = 'stale_run'
+      WHERE status = 'running' AND started_at < ?`,
+  ).run(now.toISOString(), cutoff).changes;
+}
+
+/**
+ * Replay user purges that could not run with their account delete (the
+ * pending_purge:<userId> markers written by purgeUserHistory). Idempotent.
+ * Returns the user ids purged.
+ */
+export function replayPendingPurges({ db } = {}) {
+  const handle = db ?? getAgentDb();
+  if (!handle) return [];
+  const markers = handle.prepare("SELECT key FROM store_meta WHERE key LIKE 'pending_purge:%'").all();
+  const done = [];
+  for (const { key } of markers) {
+    const userId = key.slice('pending_purge:'.length);
+    try {
+      purgeUser(userId, { db: handle });
+      handle.prepare('DELETE FROM store_meta WHERE key = ?').run(key);
+      done.push(userId);
+    } catch {
+      // Left in place; the next boot retries.
+    }
+  }
+  return done;
 }

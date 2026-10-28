@@ -19,6 +19,8 @@ import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLi
 import { tryConsume, saveBuckets, loadBuckets } from './server/rate-limit.mjs';
 import { recordHttpRequest, recordRateLimitDeny, setKbGauge, renderPrometheus } from './server/metrics.mjs';
 import { getDb, closeDb, statsAdmin, purgeExpiredJti, backupTo, pruneMissingCodeRepos } from './kb/db.mjs';
+import { openAgentStoreAtBoot, startAgentStoreJobs, stopAgentStoreJobs } from './kb/agent-jobs.mjs';
+import { closeAgentDb } from './kb/agent-db.mjs';
 import { stopAllAgents } from './agents/meeting-agent.mjs';
 
 import { migrationStatus } from './kb/migrations.mjs';
@@ -1005,6 +1007,9 @@ function shutdown(signal) {
     // inherits current bucket levels.
     try { saveBuckets(getDb({ logger })); } catch (err) { logger.warn('shutdown_save_buckets_failed', { error: err.message }); }
     closeDb({ logger });
+    // agent.db: stop the tick, then flush the queue and checkpoint (closeAgentDb).
+    stopAgentStoreJobs();
+    closeAgentDb();
     logger.info('shutdown_complete');
     process.exit(0);
   });
@@ -1186,6 +1191,9 @@ server.listen(PORT, HOST, () => {
   // a slow first request would otherwise pay the migration cost.
   try {
     getDb({ logger });
+    // agent.db (Stage 1b): open and raise the id floors before any request
+    // can write. Never throws; a failure leaves the store down (best-effort).
+    openAgentStoreAtBoot({ logger });
     // Restore persisted rate-limit state before accepting any requests
     // so a restart doesn't reset all buckets to full.
     try { loadBuckets(getDb({ logger })); } catch (err) {
@@ -1241,6 +1249,9 @@ server.listen(PORT, HOST, () => {
     logger.error('db_open_failed_at_boot', { error: err.message });
     process.exit(1);
   }
+  // agent.db background work (quick_check, history copy, rollups): after listen,
+  // so none of it sits on the boot path.
+  setImmediate(() => { startAgentStoreJobs({ logger }); });
   // Initial probe — non-blocking; result lands in the cache for /health.
   probeClaude().catch(() => { /* logged inside */ });
   logger.info('server_started', {

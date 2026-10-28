@@ -367,7 +367,7 @@ function fileBytes(file) {
  * (soft_bytes, hard_bytes). Soft and hard both request a rollup. Hard stops
  * tool-event and composition writes (see enqueueAgentWrite).
  */
-export function checkStorageSize(now = Date.now()) {
+export function checkStorageSize(now = Date.now(), { requestRollup = true } = {}) {
   const file = state.file ?? config.agentDbPath;
   const bytes = fileBytes(file);
   let soft = DEFAULT_SOFT_BYTES;
@@ -380,7 +380,7 @@ export function checkStorageSize(now = Date.now()) {
   state.sizeState = next;
   state.bytes = bytes;
   state.lastSizeCheck = now;
-  if (next !== 'ok') state.rollupRequested = true;
+  if (next !== 'ok' && requestRollup) state.rollupRequested = true;
   return { state: next, bytes, soft, hard };
 }
 
