@@ -141,3 +141,17 @@ test('prepare skips tables already copied', () => {
   runAll(100);
   assert.deepEqual(copy.prepareHistoryCopy(), {}, 'nothing left to prepare');
 });
+
+test('the read cursors are copied before listen, so the feed never shows copied rows as unread', async () => {
+  seedMain();
+  const db = freshAgent();
+  copy.prepareHistoryCopy();
+  // Only the prepare step has run: the activity rows are not copied yet, but
+  // the read cursor is already in place.
+  assert.equal(db.prepare('SELECT last_seen_id FROM activity_seen WHERE user_id = ?').get(U).last_seen_id, 3);
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM activity'), 0);
+  runAll(2);
+  const expectedUnread = main.getDb().prepare('SELECT COUNT(*) AS n FROM activity WHERE user_id = ? AND id > 3').get(U).n;
+  const { unreadCount } = await import('../kb/activity.mjs');
+  assert.equal(unreadCount(U), expectedUnread, 'unread is the rows after the cursor, nothing more');
+});

@@ -56,6 +56,13 @@ export function prepareHistoryCopy({ mainDb = getDb(), agentDb = getAgentDb() } 
     bumpSequence(agentDb, SEQ_NAME[table], floor);
     floors[table] = floor;
   }
+  // The read cursors go first, before listen: a copy of the feed without them
+  // would show every copied row as unread for the length of the copy.
+  if (hasTable(mainDb, 'activity_seen') && !readMeta(agentDb, doneKey('activity_seen'))) {
+    copyActivitySeen(agentDb, mainDb);
+    writeMeta(agentDb, doneKey('activity_seen'), '1');
+    floors.activity_seen = true;
+  }
   return floors;
 }
 
@@ -138,7 +145,6 @@ export function copyHistoryStep({ mainDb = getDb(), agentDb = getAgentDb(), batc
       return rows.length;
     })();
     if (copied === 0) {
-      if (table === 'activity' && hasTable(mainDb, 'activity_seen')) copyActivitySeen(agentDb, mainDb);
       verify(agentDb, mainDb, table);
       writeMeta(agentDb, doneKey(table), '1');
     }
@@ -159,7 +165,8 @@ function verify(agent, mainDb, table) {
 /** True once every table is copied. */
 export function historyCopyDone({ agentDb = getAgentDb(), mainDb = getDb() } = {}) {
   if (!agentDb) return false;
-  return TABLES.every((t) => !hasTable(mainDb, t) || Boolean(readMeta(agentDb, doneKey(t))));
+  return TABLES.every((t) => !hasTable(mainDb, t) || Boolean(readMeta(agentDb, doneKey(t))))
+    && (!hasTable(mainDb, 'activity_seen') || Boolean(readMeta(agentDb, doneKey('activity_seen'))));
 }
 
 /** Run the copy to completion in one call (tests and operator tools). */
