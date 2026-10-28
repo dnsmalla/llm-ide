@@ -69,10 +69,19 @@ truth for these paths; its header comment states the same rule.
 └── .claude/         project-level agent config (project.md, settings.json, skills/...)
 ```
 
-> **Being moved.** Today, graph and memory output may be written under
-> `<repo>/system/` of a cloned repo under `code/`, not under the project's own
-> `system/`. This split is being fixed in a later task. Until then, look in the
-> repo's `system/` as well as the project's.
+> **Generated data lives in the project's `system/`, always.** Graph, memory,
+> faults and Q&A output is never written into a cloned repo's own `system/`
+> under `code/<repo>/`. The cloned repo is only the input being graphed.
+>
+> - **Graph:** `system/graph/` when the project graphs one repo (the project root,
+>   or its single `code/<repo>`). With two or more `code/<repo>` repos each gets
+>   `system/graph/<repo>/`.
+> - **Memory, faults, Q&A, repo.md:** `system/memory/`, `system/faults/`,
+>   `system/q&a/`, `system/repo.md`, always at the project level.
+> - **Migration:** at project open, legacy `code/<repo>/system/{graph,memory,faults,q&a,repo.md}`
+>   moves into the project's `system/`. A repo whose `system/` holds git-tracked
+>   files is skipped and logged. Nothing already at the new root is overwritten.
+>   Until a file is moved, readers fall back to the legacy location (N-1).
 
 ## Folders at a glance
 
@@ -100,7 +109,7 @@ LLM-IDE project folder. When the repo is cloned under `code/`, both are under th
 | `system/loop-worktrees/` | Loop git worktrees | **no** | `LoopWorktreeManager` |
 | `system/memory/` | agent memory artifacts | **no** | `KnowledgeGraphService.writeMemoryArtifact` |
 | `system/q&a/`, `system/faults/` | Q&A store, fault log entries | yes | `MemoryStore` |
-| `system/graph/` | knowledge graph + code notes | **no** | `GraphAutoUpdater`, `CodeNoteService` |
+| `system/graph/` (`system/graph/<repo>/` with 2+ code repos) | knowledge graph + code notes | **no** | `GraphAutoUpdater`, `CodeNoteGenerator` |
 | `system/cache/` | runtime cache | **no** | various services |
 | `system/index.sqlite` | full-text search index | **no** | indexer |
 | `system/sync.json` | last export info | **no** | export pipeline |
