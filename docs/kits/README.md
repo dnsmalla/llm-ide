@@ -15,3 +15,4 @@ a design: it changes no code, and it is revised as each later step lands.
 |---|---|---|---|
 | docs-kit (Doc Gen, Visual, `/generate-doc(x)`) | `doc_gen` | K0 map | [docs-kit.md](docs-kit.md) |
 | graph-kit (Code Graph, OS view, graph engine plugin) | `code_graph_3d` | K0 map | [graph-kit.md](graph-kit.md) |
+| knowledge-kit (Library, KB sources and search, connectors, ReviewConflicts) | none (always on) | K0 map | [knowledge-kit.md](knowledge-kit.md) |
