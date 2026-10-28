@@ -28,6 +28,18 @@ content of any kind.
 
 ---
 
+## 0.1 Stage split (user decision, 2026-10-28)
+
+The user chose **Stage 1 without the ledger**; this overrides the phase ordering below wherever they conflict.
+
+**Stage 1 (build now):** `agent.db` with `agent_runs`, `agent_tool_events`, `turn_composition`, `activity`, the `agent_daily` rollups and `store_meta`; the write queue, corruption handling, retention/rollup job, per-user Clear (dry-run preview), Compact; the one-time copy of `activity`, `turn_tool_events` and `turn_composition` from the main DB; `/kb/storage`, `/kb/agent-history/*` routes; `/kb/os/state` additions (`storage`, `agents.recentRuns`); the OS view Storage/Agents/Activity hubs; the Mac Settings card.
+
+**Out of Stage 1 (unchanged):** `usage_ledger`, `model_limits`, `quota_state`, every budget/limit read (Phase 2 tasks that move `usage_calls`, the `agent_daily`-backed budget reads, `LLMIDE_AGENT_BUDGET_READS`, and the removal of `maybePruneLedger`). The ledger keeps its own 90-day prune. Each run's token totals are recorded ONCE in `agent_runs` at the same call site that already calls `recordUsage` (so the OS Models/Agents hubs stay accurate), but `agent_runs` is a display/history copy and is never read by budget enforcement.
+
+**Stage 2 (only if the user asks later):** move the ledger and the budget readers per §2.6 and §5, with the shadow-read gate.
+
+Consequences for the tasks below: skip Phase 0 hot-path benchmarks except as a regression guard (nothing on the hot path changes), skip T2.x tasks that touch `usage.mjs` readers/limits, and keep every new write best-effort (a failure in `agent.db` must never fail or delay a model call).
+
 ## 1. Inventory
 
 ### 1.1 Tables in scope and their writers
