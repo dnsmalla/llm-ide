@@ -222,6 +222,13 @@ struct RepairScopeSnapshot: Equatable {
     /// that could violate, with their content hash ("" when it could not be
     /// taken). Their local content may differ from HEAD with no trace in git.
     var hiddenHashes: [String: String] = [:]
+    /// Protected files under `system/loop/` (the Loop's machine data) with their
+    /// bytes, taken independently of git: a repo whose `.gitignore` covers
+    /// `system/` never lists them in `status`, so a repair's edit would be
+    /// invisible to the dirty-set comparison. `check` compares these directly;
+    /// `revertUnlisted(before:)` writes the bytes back. A missing key means the
+    /// file did not exist before the repair.
+    var ignoredProtected: [String: Data] = [:]
 
     static func unusable(_ reason: String) -> RepairScopeSnapshot {
         RepairScopeSnapshot(dirtyPaths: [], usable: false, reason: reason)
@@ -334,12 +341,58 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
                                            contentHashes: hashed.hashes, elided: hashed.truncated)
             snap.hiddenHashes = await hiddenTracked(gitRoot: gitRoot, protectedGlobs: protectedGlobs,
                                                     scopeGlobs: scopeGlobs)
+            let harness = Self.protectedHarnessFiles(gitRoot: gitRoot, protectedGlobs: protectedGlobs)
+            if harness.overCap { return .unusable("a protected loop data file is too large to snapshot") }
+            snap.ignoredProtected = harness.files
             return snap
         case .truncated:
             return RepairScopeSnapshot(dirtyPaths: [], usable: true, reason: nil, elided: true)
         case .failure(let reason):
             return .unusable(reason)
         }
+    }
+
+    /// The Loop's machine-data root, relative to the repo root (D6).
+    static let harnessDataRoot = "system/loop"
+
+    /// Whether `path` is under the Loop's machine-data root. Such files are
+    /// reverted from the pre-repair snapshot, never through `git checkout`,
+    /// because an ignored file is not something git can restore.
+    static func isIgnoredHarnessPath(_ path: String) -> Bool {
+        path == harnessDataRoot || path.hasPrefix(harnessDataRoot + "/")
+    }
+
+    /// Per-file size cap for the byte snapshot of protected loop data. A larger
+    /// file makes the snapshot unusable, so the repair fails closed.
+    static let maxHarnessFileBytes = 16_000_000
+
+    /// Every protected regular file under `<gitRoot>/system/loop/` with its
+    /// bytes. Reads the filesystem, not git, so it sees ignored files. Symlinks
+    /// are skipped (never followed), like the rest of the guard.
+    static func protectedHarnessFiles(gitRoot: URL,
+                                      protectedGlobs: [String]) -> (files: [String: Data], overCap: Bool) {
+        let root = gitRoot.appendingPathComponent(harnessDataRoot, isDirectory: true)
+        guard let enumerator = FileManager.default.enumerator(at: root,
+                                                              includingPropertiesForKeys: [.isRegularFileKey]) else {
+            return ([:], false)
+        }
+        let base = gitRoot.standardizedFileURL.path + "/"
+        var files: [String: Data] = [:]
+        var overCap = false
+        for case let url as URL in enumerator {
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]).isRegularFile) == true else { continue }
+            let full = url.standardizedFileURL.path
+            guard full.hasPrefix(base) else { continue }
+            let rel = String(full.dropFirst(base.count))
+            guard ProtectedGlobs.isProtected(rel, by: protectedGlobs) else { continue }
+            let size = (try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+            guard size <= maxHarnessFileBytes, let data = try? Data(contentsOf: url) else {
+                overCap = true
+                continue
+            }
+            files[rel] = data
+        }
+        return (files, overCap)
     }
 
     /// Tracked files marked assume-unchanged or skip-worktree (`git ls-files -v`
@@ -452,6 +505,14 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
                 }
             }
         }
+        // Protected loop data, compared by bytes: git cannot see it when `system/`
+        // is ignored. Any difference (edit, deletion, new file) is a change.
+        let harness = Self.protectedHarnessFiles(gitRoot: gitRoot, protectedGlobs: protectedGlobs)
+        if harness.overCap { return .unverifiable(reason: "a protected loop data file is too large to verify") }
+        for path in Set(snapshot.ignoredProtected.keys).union(harness.files.keys)
+        where snapshot.ignoredProtected[path] != harness.files[path] {
+            changedSet.insert(path)
+        }
         let changed = changedSet.sorted()
         // A protected file the APP wrote (and nothing has touched since) is not the
         // repair's edit — see `AppWrittenFiles`.
@@ -533,6 +594,19 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
                         gitRoot: URL) async -> String? {
         var failures: [String] = []
         for path in paths {
+            // Protected loop data that existed before the repair: put its exact
+            // pre-repair bytes back. Works for ignored files, which git cannot restore.
+            if let bytes = before.ignoredProtected[path] {
+                do {
+                    let url = gitRoot.appendingPathComponent(path)
+                    try FileManager.default.createDirectory(at: url.deletingLastPathComponent(),
+                                                            withIntermediateDirectories: true)
+                    try bytes.write(to: url, options: .atomic)
+                } catch {
+                    failures.append("\(path) could not be restored: \(error.localizedDescription)")
+                }
+                continue
+            }
             if case .success = await run("git cat-file -e \(Self.shellQuoted(["HEAD:" + path]))", gitRoot: gitRoot) {
                 // Hidden from `status` before the edit: its local content may
                 // have been the user's own. Restore only if it equalled HEAD.

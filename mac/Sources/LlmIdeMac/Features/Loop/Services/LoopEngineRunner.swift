@@ -2726,8 +2726,12 @@ final class LoopEngineRunner: ObservableObject {
             return .completed(.violated, violations: paths, changed: changed)
         }
         var errors: [String] = []
-        let listed = revertable.filter { !unlisted.contains($0) }
-        let unlistedRevertable = revertable.filter { unlisted.contains($0) }
+        // Loop data under system/loop is restored from the pre-repair snapshot,
+        // never by `git checkout`: it can be git-ignored (see RepairScopeSnapshot).
+        let listed = revertable.filter { !unlisted.contains($0) && !GitRepairScopeGuard.isIgnoredHarnessPath($0) }
+        let unlistedRevertable = revertable.filter {
+            unlisted.contains($0) || GitRepairScopeGuard.isIgnoredHarnessPath($0)
+        }
         if !listed.isEmpty, let error = await scopeGuard.revert(paths: listed, gitRoot: gitRoot) {
             errors.append(error)
         }

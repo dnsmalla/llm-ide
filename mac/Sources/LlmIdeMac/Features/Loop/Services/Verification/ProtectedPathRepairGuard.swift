@@ -83,8 +83,9 @@ enum ProtectedPathRepairGuard {
         // Already-dirty paths keep their earlier (often the user's) edits.
         let revertable = violations.subtracting(before.dirtyPaths).sorted()
         var errors: [String] = []
-        let listed = revertable.filter { !unlisted.contains($0) }
-        let others = revertable.filter { unlisted.contains($0) }
+        // system/loop data is restored from the snapshot bytes, not `git checkout`.
+        let listed = revertable.filter { !unlisted.contains($0) && !GitRepairScopeGuard.isIgnoredHarnessPath($0) }
+        let others = revertable.filter { unlisted.contains($0) || GitRepairScopeGuard.isIgnoredHarnessPath($0) }
         if !listed.isEmpty, let error = await scopeGuard.revert(paths: listed, gitRoot: repoRoot) {
             errors.append(error)
         }
