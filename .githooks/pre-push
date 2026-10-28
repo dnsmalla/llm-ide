@@ -39,6 +39,7 @@ contract_changed=0
 ext_changed=0
 docs_changed=0
 ios_changed=0
+pin_changed=0
 
 # stdin: <local_ref> <local_sha> <remote_ref> <remote_sha> per pushed ref.
 while read -r local_ref local_sha remote_ref remote_sha; do
@@ -72,6 +73,9 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     if printf '%s\n' "$files" | grep -qE '^docs/.*\.md$' && printf '%s\n' "$files" | grep -E '^docs/.*\.md$' | grep -qv '^docs/superpowers/'; then
         docs_changed=1
     fi
+    if printf '%s\n' "$files" | grep -qE '^mac/(Package\.swift|Package\.resolved|LocalPackages/graph-kit)'; then
+        pin_changed=1
+    fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then
         ext_changed=1
     fi
@@ -79,6 +83,20 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         ios_changed=1
     fi
 done
+
+# The graph-kit pins: the submodule gitlink, the revision in mac/Package.swift and
+# the entry in mac/Package.resolved must agree, and the pinned commit must exist
+# on the graph-kit remote, or every other machine fails to resolve it. Online
+# here (the offline form already runs inside `make regression`).
+if [ "$pin_changed" -eq 1 ]; then
+    echo "pre-push: graph-kit pins changed — checking they agree and exist on the remote…"
+    if ! node "$(git rev-parse --show-toplevel)/scripts/graphkit-pin-check.mjs" --online; then
+        echo "pre-push: graph-kit pin check FAILED — push aborted." >&2
+        echo "          Push graph-kit's commit first (git -C mac/LocalPackages/graph-kit push origin main)," >&2
+        echo "          or fix the pins with make graphkit-bump. Bypass with: git push --no-verify" >&2
+        exit 1
+    fi
+fi
 
 if [ "$mac_changed" -eq 1 ]; then
     # The feature-variant builds use their own scratch paths (Makefile

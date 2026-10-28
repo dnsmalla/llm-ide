@@ -104,7 +104,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout feature-gates contract-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
+regression: graph-kit-checkout graphkit-pin-check feature-gates contract-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
 
 .PHONY: feature-gates
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
@@ -140,6 +140,14 @@ graph-kit-checkout:
 	  echo "  needs the submodule, but the graph gates run from it. Fix with:" >&2; \
 	  echo "    git submodule update --init mac/LocalPackages/graph-kit" >&2; \
 	  exit 1; }
+
+# The three graph-kit pins (submodule gitlink, mac/Package.swift revision,
+# mac/Package.resolved) must agree. Offline by default (it runs in `regression`);
+# ONLINE=1 also checks the pinned sha exists on the graph-kit remote, which is
+# what the pre-push hook runs when the pins change. Workflow: docs/how-to/graph-kit-workflow.md.
+.PHONY: graphkit-pin-check
+graphkit-pin-check:
+	node scripts/graphkit-pin-check.mjs $(if $(ONLINE),--online,)
 
 .PHONY: graph-gates
 graph-gates: graph-kit-checkout
