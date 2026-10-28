@@ -8,5 +8,15 @@
     "endpoint": "POST /kb/providers/models",
     "key": "detail",
     "reason": "Why the list is empty (no key / base URL / fetch error). listProviderModels returns [] and callers keep their fallback list; the Mac does not show the reason yet (follow-up)."
+  },
+  {
+    "endpoint": "GET /kb/os/state",
+    "key": "storage",
+    "reason": "Stage 1c: the Storage hub's data (GET /kb/storage). The Mac page reads it from Stage 1d on; until then the decoder ignores it."
+  },
+  {
+    "endpoint": "GET /kb/os/state",
+    "key": "agents",
+    "reason": "Stage 1c: agents.recentRuns for the Agents hub. Decoded from Stage 1d on; until then ignored."
   }
 ]

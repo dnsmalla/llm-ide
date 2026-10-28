@@ -1,0 +1,11 @@
+{
+  "endpoint": "GET /kb/agent-history/settings",
+  "status": 200,
+  "description": "Captured by running the real handler (routes/agent-history.mjs) on a temp DB with example data. Not a live HTTP exchange. Every value is example data.",
+  "response": {
+    "retentionDays": 30,
+    "rollupKeepDays": 400,
+    "min": 7,
+    "max": 365
+  }
+}

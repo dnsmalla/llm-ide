@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/agent-history/clear",
+  "status": 400,
+  "description": "The previewId was issued for another scope or cutoff, or it has been tampered with.",
+  "request": {
+    "body": {
+      "scope": "all",
+      "beforeDays": 30,
+      "dryRun": false,
+      "previewId": "eyJjIjp7ImFnZW50X3J1bnMiOjJ9LCJlIjoxNzk4NTgyNDAwMDAwfQ.9f0c2d6a8e1b4c7d0a3f5e9b2c6d8a1f4e7b0c3d6a9f2e5b8c1d4a7f0e3b6c9d2"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PREVIEW_INVALID",
+      "message": "The previewId does not match this user, scope and cutoff"
+    }
+  }
+}

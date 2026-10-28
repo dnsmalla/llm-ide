@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /kb/agent-history/settings",
+  "status": 200,
+  "description": "Captured by running the real handler (routes/agent-history.mjs) on a temp DB with example data. Not a live HTTP exchange. Every value is example data. The request asked for 1000 days; the server clamps it to the maximum.",
+  "request": {
+    "body": {
+      "retentionDays": 1000
+    }
+  },
+  "response": {
+    "retentionDays": 365,
+    "rollupKeepDays": 400,
+    "min": 7,
+    "max": 365
+  }
+}

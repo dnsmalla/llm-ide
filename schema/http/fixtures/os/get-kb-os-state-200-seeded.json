@@ -1,7 +1,7 @@
 {
   "endpoint": "GET /kb/os/state",
   "status": 200,
-  "description": "Captured by running the real handler (routes/os.mjs) on a temp DB seeded with example data: one API turn with cache tokens and one CLI run, two activity rows, one memory fact, one source, one code-graph repo, one pending review, two outcome rows and one plan task, one v2 turn recorded in turn_composition, a parked chat turn and a live session with its meeting-agent run. The request carries the default activity limit (30), so the captured body is the default-parameter response. Not a live HTTP exchange: the health checks are the probe results the boot path reports on a healthy host, and the running items come from the in-process registries. Every value is example data.",
+  "description": "Captured by running the real handler (routes/os.mjs) on a temp DB seeded with example data: one API turn with cache tokens and one CLI run, two activity rows, one memory fact, one source, one code-graph repo, one pending review, two outcome rows and one plan task, one v2 turn recorded in turn_composition, a parked chat turn and a live session with its meeting-agent run. The request carries the default activity limit (30), so the captured body is the default-parameter response. Not a live HTTP exchange: the health checks are the probe results the boot path reports on a healthy host, and the running items come from the in-process registries. Every value is example data. Stage 1c adds storage and agents.recentRuns (the same storage report as GET /kb/storage and one example run).",
   "request": {
     "query": {
       "activity": "30"
@@ -281,6 +281,94 @@
     "macOnly": {
       "loop": "on this Mac",
       "autoTasks": "on this Mac"
+    },
+    "storage": {
+      "generatedAt": "2026-10-28T09:00:00.000Z",
+      "groups": [
+        {
+          "key": "agent_history",
+          "label": "Agent history",
+          "rows": 5,
+          "bytes": 20480,
+          "bytesApprox": true,
+          "lastCleanedAt": null,
+          "retentionDays": 30,
+          "actions": [
+            "clear",
+            "compact"
+          ]
+        },
+        {
+          "key": "search_index",
+          "label": "Search index",
+          "rows": 12,
+          "bytes": null,
+          "bytesApprox": null,
+          "lastCleanedAt": null,
+          "retentionDays": null,
+          "actions": []
+        },
+        {
+          "key": "code_graph",
+          "label": "Code graph",
+          "rows": 1,
+          "bytes": null,
+          "bytesApprox": null,
+          "lastCleanedAt": null,
+          "retentionDays": null,
+          "actions": []
+        },
+        {
+          "key": "sources",
+          "label": "Sources",
+          "rows": 2,
+          "bytes": null,
+          "bytesApprox": null,
+          "lastCleanedAt": null,
+          "retentionDays": null,
+          "actions": []
+        },
+        {
+          "key": "meetings",
+          "label": "Meetings",
+          "rows": 4,
+          "bytes": null,
+          "bytesApprox": null,
+          "lastCleanedAt": null,
+          "retentionDays": null,
+          "actions": []
+        }
+      ],
+      "agentHistory": {
+        "rawFromDay": "2026-10-20",
+        "rawRows": 5,
+        "rolledDays": 3,
+        "oldestDay": "2026-09-01",
+        "quarantinedAt": null,
+        "droppedRows": 0,
+        "watermark": "2026-09-30"
+      },
+      "agentStore": {
+        "health": "ok",
+        "state": "ok"
+      }
+    },
+    "agents": {
+      "recentRuns": [
+        {
+          "id": "a-new",
+          "source": "chat",
+          "engine": "v2",
+          "status": "ok",
+          "startedAt": "2026-10-28T08:59:00.000Z",
+          "endedAt": "2026-10-28T08:59:04.000Z",
+          "durationMs": 4000,
+          "tokens": 5,
+          "toolCalls": 2,
+          "model": "claude-opus-4",
+          "errorCode": null
+        }
+      ]
     }
   }
 }

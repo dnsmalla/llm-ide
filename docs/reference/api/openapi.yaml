@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 82
+  x-api-version: 83
 servers:
   - url: "https://{host}"
     variables:
@@ -20,6 +20,7 @@ security:
 tags:
   - name: "_common"
   - name: "agent"
+  - name: "agent-history"
   - name: "docs"
   - name: "health-auth"
   - name: "kb-sources"
@@ -3235,6 +3236,278 @@ paths:
                     type: "integer"
         "401":
           description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/agent-history/clear:
+    post:
+      tags:
+        - "agent-history"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "scope"
+              properties:
+                scope:
+                  type: "string"
+                  enum:
+                    - "raw"
+                    - "all"
+                beforeDays:
+                  type:
+                    - "integer"
+                    - "null"
+                  description: "Only rows older than this many days; omit for all."
+                dryRun:
+                  type: "boolean"
+                  description: "Default true: a dry run. false performs the clear and needs previewId."
+                previewId:
+                  type: "string"
+                  description: "From a dry run of the same scope and cutoff."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                oneOf:
+                  - type: "object"
+                    required:
+                      - "dryRun"
+                      - "scope"
+                      - "beforeDays"
+                      - "wouldDelete"
+                      - "total"
+                      - "previewId"
+                      - "expiresAt"
+                    properties:
+                      dryRun:
+                        type: "boolean"
+                        const: true
+                      scope:
+                        type: "string"
+                        enum:
+                          - "raw"
+                          - "all"
+                      beforeDays:
+                        type:
+                          - "integer"
+                          - "null"
+                      wouldDelete:
+                        type: "object"
+                        required:
+                          - "agent_runs"
+                          - "agent_tool_events"
+                          - "turn_composition"
+                          - "agent_daily"
+                          - "agent_daily_tools"
+                        properties:
+                          agent_runs:
+                            type: "integer"
+                          agent_tool_events:
+                            type: "integer"
+                          turn_composition:
+                            type: "integer"
+                          agent_daily:
+                            type: "integer"
+                          agent_daily_tools:
+                            type: "integer"
+                      total:
+                        type: "integer"
+                      previewId:
+                        type: "string"
+                        description: "Signed by the server; valid five minutes for this user, scope and cutoff."
+                      expiresAt:
+                        type: "string"
+                  - type: "object"
+                    required:
+                      - "dryRun"
+                      - "scope"
+                      - "beforeDays"
+                      - "deleted"
+                      - "total"
+                    properties:
+                      dryRun:
+                        type: "boolean"
+                        const: false
+                      scope:
+                        type: "string"
+                        enum:
+                          - "raw"
+                          - "all"
+                      beforeDays:
+                        type:
+                          - "integer"
+                          - "null"
+                      deleted:
+                        type: "object"
+                        required:
+                          - "agent_runs"
+                          - "agent_tool_events"
+                          - "turn_composition"
+                          - "agent_daily"
+                          - "agent_daily_tools"
+                        properties:
+                          agent_runs:
+                            type: "integer"
+                          agent_tool_events:
+                            type: "integer"
+                          turn_composition:
+                            type: "integer"
+                          agent_daily:
+                            type: "integer"
+                          agent_daily_tools:
+                            type: "integer"
+                      total:
+                        type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "503":
+          description: "Not yet specified: Store unavailable or disk short: the status is set by the route (routes/agent-history.mjs); the Error envelope is the same as the other 4xx/5xx answers and needs a store outage to produce, so no fixture captures it."
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/agent-history/compact:
+    post:
+      tags:
+        - "agent-history"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "ok"
+                  - "mode"
+                  - "pagesFreed"
+                  - "bytesBefore"
+                  - "bytesAfter"
+                  - "ms"
+                properties:
+                  ok:
+                    type: "boolean"
+                    const: true
+                  mode:
+                    type: "string"
+                    enum:
+                      - "incremental"
+                      - "full"
+                  pagesFreed:
+                    type: "integer"
+                  bytesBefore:
+                    type: "integer"
+                  bytesAfter:
+                    type: "integer"
+                  ms:
+                    type: "integer"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "503":
+          description: "Not yet specified: Store unavailable or disk short: the status is set by the route (routes/agent-history.mjs); the Error envelope is the same as the other 4xx/5xx answers and needs a store outage to produce, so no fixture captures it."
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "507":
+          description: "Not yet specified: Store unavailable or disk short: the status is set by the route (routes/agent-history.mjs); the Error envelope is the same as the other 4xx/5xx answers and needs a store outage to produce, so no fixture captures it."
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/agent-history/settings:
+    get:
+      tags:
+        - "agent-history"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "retentionDays"
+                  - "rollupKeepDays"
+                  - "min"
+                  - "max"
+                properties:
+                  retentionDays:
+                    type: "integer"
+                    description: "Raw-row retention in days, clamped to min..max."
+                  rollupKeepDays:
+                    type: "integer"
+                    description: "Daily rollups are kept this long."
+                  min:
+                    type: "integer"
+                  max:
+                    type: "integer"
+    put:
+      tags:
+        - "agent-history"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "retentionDays"
+              properties:
+                retentionDays:
+                  description: "A whole number of days, clamped to 7..365. Any other value is a 400 VALIDATION_FAILED."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "retentionDays"
+                  - "rollupKeepDays"
+                  - "min"
+                  - "max"
+                properties:
+                  retentionDays:
+                    type: "integer"
+                    description: "Raw-row retention in days, clamped to min..max."
+                  rollupKeepDays:
+                    type: "integer"
+                    description: "Daily rollups are kept this long."
+                  min:
+                    type: "integer"
+                  max:
+                    type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "503":
+          description: "Not yet specified: Store unavailable or disk short: the status is set by the route (routes/agent-history.mjs); the Error envelope is the same as the other 4xx/5xx answers and needs a store outage to produce, so no fixture captures it."
           content:
             application/json:
               schema:
@@ -7184,6 +7457,8 @@ paths:
                   - "tokens"
                   - "knowledge"
                   - "macOnly"
+                  - "storage"
+                  - "agents"
                 properties:
                   generatedAt:
                     type: "string"
@@ -7651,6 +7926,18 @@ paths:
                       autoTasks:
                         type: "string"
                         const: "on this Mac"
+                  storage:
+                    "$ref": "#/components/schemas/OsStorageReport"
+                  agents:
+                    type: "object"
+                    required:
+                      - "recentRuns"
+                    properties:
+                      recentRuns:
+                        type: "array"
+                        description: "This user's newest 20 agent runs (Stage 1c)."
+                        items:
+                          "$ref": "#/components/schemas/OsAgentRun"
         "400":
           description: "window is not day or week"
           content:
@@ -9364,6 +9651,17 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/storage:
+    get:
+      tags:
+        - "agent-history"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/AgentHistoryStorageReport"
   /kb/summarize:
     post:
       summary: "Summarize a transcript with LLM (3-minute server timeout)"
@@ -10358,6 +10656,196 @@ components:
             hasUpstream:
               type: "boolean"
           additionalProperties: false
+    AgentHistoryAgentHistorySummary:
+      type:
+        - "object"
+        - "null"
+      description: "Null when the agent store is down."
+      required:
+        - "rawFromDay"
+        - "rawRows"
+        - "rolledDays"
+        - "oldestDay"
+        - "quarantinedAt"
+        - "droppedRows"
+        - "watermark"
+      properties:
+        rawFromDay:
+          type:
+            - "string"
+            - "null"
+          description: "Oldest raw day (YYYY-MM-DD, local)."
+        rawRows:
+          type: "integer"
+        rolledDays:
+          type: "integer"
+        oldestDay:
+          type:
+            - "string"
+            - "null"
+          description: "Oldest rolled-up day."
+        quarantinedAt:
+          type:
+            - "string"
+            - "null"
+          description: "When the store was reset after damage, if it was."
+        droppedRows:
+          type: "integer"
+          description: "Rows dropped by the write queue (bounded queue or failed batch), counted since the store was created."
+        watermark:
+          type:
+            - "string"
+            - "null"
+          description: "The last day folded into the daily rollups."
+    AgentHistoryAgentRun:
+      type: "object"
+      description: "One agent run for the System view. No prompt, message or error text: codes only."
+      required:
+        - "id"
+        - "source"
+        - "engine"
+        - "status"
+        - "startedAt"
+        - "endedAt"
+        - "durationMs"
+        - "tokens"
+        - "toolCalls"
+        - "model"
+        - "errorCode"
+      properties:
+        id:
+          type: "string"
+        source:
+          type: "string"
+          enum:
+            - "chat"
+            - "loop"
+            - "meeting"
+            - "autotask"
+            - "dispatch"
+            - "review"
+        engine:
+          type:
+            - "string"
+            - "null"
+        status:
+          type: "string"
+          enum:
+            - "running"
+            - "ok"
+            - "error"
+            - "cancelled"
+            - "aborted"
+        startedAt:
+          type: "string"
+        endedAt:
+          type:
+            - "string"
+            - "null"
+        durationMs:
+          type:
+            - "integer"
+            - "null"
+        tokens:
+          type: "integer"
+          description: "Input plus output tokens of the run."
+        toolCalls:
+          type: "integer"
+        model:
+          type:
+            - "string"
+            - "null"
+        errorCode:
+          type:
+            - "string"
+            - "null"
+    AgentHistoryStorageGroup:
+      type: "object"
+      description: "One data group of the Storage hub. agent_history carries bytes (approximate) and the clear/compact actions; the main-DB groups carry rows per user and no bytes (SQLite sizes whole files, not users)."
+      required:
+        - "key"
+        - "label"
+        - "rows"
+        - "bytes"
+        - "bytesApprox"
+        - "lastCleanedAt"
+        - "retentionDays"
+        - "actions"
+      properties:
+        key:
+          type: "string"
+          enum:
+            - "agent_history"
+            - "search_index"
+            - "code_graph"
+            - "sources"
+            - "meetings"
+        label:
+          type: "string"
+        rows:
+          type: "integer"
+          description: "Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings."
+        bytes:
+          type:
+            - "integer"
+            - "null"
+          description: "Approximate bytes for agent_history; null for the main-DB groups."
+        bytesApprox:
+          type:
+            - "boolean"
+            - "null"
+        lastCleanedAt:
+          type:
+            - "string"
+            - "null"
+          description: "ISO time of the last clear (agent_history only)."
+        retentionDays:
+          type:
+            - "integer"
+            - "null"
+          description: "Raw-row retention (agent_history only)."
+        actions:
+          type: "array"
+          items:
+            type: "string"
+            enum:
+              - "clear"
+              - "compact"
+          description: "Actions the page may offer. Only agent_history has any."
+    AgentHistoryStorageReport:
+      type: "object"
+      required:
+        - "generatedAt"
+        - "groups"
+        - "agentHistory"
+        - "agentStore"
+      properties:
+        generatedAt:
+          type: "string"
+        groups:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/AgentHistoryStorageGroup"
+        agentHistory:
+          "$ref": "#/components/schemas/AgentHistoryAgentHistorySummary"
+        agentStore:
+          type: "object"
+          required:
+            - "health"
+            - "state"
+          properties:
+            health:
+              type: "string"
+              enum:
+                - "ok"
+                - "degraded"
+                - "down"
+            state:
+              type: "string"
+              enum:
+                - "closed"
+                - "ok"
+                - "down"
     AgentOk:
       type: "object"
       required:
@@ -12267,6 +12755,109 @@ components:
         state:
           type: "string"
           description: "poll with the matching /status route"
+    OsAgentHistorySummary:
+      type:
+        - "object"
+        - "null"
+      description: "Null when the agent store is down."
+      required:
+        - "rawFromDay"
+        - "rawRows"
+        - "rolledDays"
+        - "oldestDay"
+        - "quarantinedAt"
+        - "droppedRows"
+        - "watermark"
+      properties:
+        rawFromDay:
+          type:
+            - "string"
+            - "null"
+          description: "Oldest raw day (YYYY-MM-DD, local)."
+        rawRows:
+          type: "integer"
+        rolledDays:
+          type: "integer"
+        oldestDay:
+          type:
+            - "string"
+            - "null"
+          description: "Oldest rolled-up day."
+        quarantinedAt:
+          type:
+            - "string"
+            - "null"
+          description: "When the store was reset after damage, if it was."
+        droppedRows:
+          type: "integer"
+          description: "Rows dropped by the write queue (bounded queue or failed batch), counted since the store was created."
+        watermark:
+          type:
+            - "string"
+            - "null"
+          description: "The last day folded into the daily rollups."
+    OsAgentRun:
+      type: "object"
+      description: "One agent run for the System view. No prompt, message or error text: codes only."
+      required:
+        - "id"
+        - "source"
+        - "engine"
+        - "status"
+        - "startedAt"
+        - "endedAt"
+        - "durationMs"
+        - "tokens"
+        - "toolCalls"
+        - "model"
+        - "errorCode"
+      properties:
+        id:
+          type: "string"
+        source:
+          type: "string"
+          enum:
+            - "chat"
+            - "loop"
+            - "meeting"
+            - "autotask"
+            - "dispatch"
+            - "review"
+        engine:
+          type:
+            - "string"
+            - "null"
+        status:
+          type: "string"
+          enum:
+            - "running"
+            - "ok"
+            - "error"
+            - "cancelled"
+            - "aborted"
+        startedAt:
+          type: "string"
+        endedAt:
+          type:
+            - "string"
+            - "null"
+        durationMs:
+          type:
+            - "integer"
+            - "null"
+        tokens:
+          type: "integer"
+          description: "Input plus output tokens of the run."
+        toolCalls:
+          type: "integer"
+        model:
+          type:
+            - "string"
+            - "null"
+        errorCode:
+          type:
+            - "string"
+            - "null"
     OsEventsEvent:
       title: "os/stream SSE wire event"
       description: "One data: payload on GET /kb/os/stream (os-kit OS-2). Events carry only the type and the time, never data: they tell the System view when to re-fetch GET /kb/os/state. The stream opens with one hello event. The SSE event: line equals type. Every variant sets additionalProperties:false, so a field added server-side must be added here in the same edit."
@@ -12359,6 +12950,93 @@ components:
             at:
               type: "string"
               description: "ISO 8601 time the change was published to the stream."
+    OsStorageGroup:
+      type: "object"
+      description: "One data group of the Storage hub. agent_history carries bytes (approximate) and the clear/compact actions; the main-DB groups carry rows per user and no bytes (SQLite sizes whole files, not users)."
+      required:
+        - "key"
+        - "label"
+        - "rows"
+        - "bytes"
+        - "bytesApprox"
+        - "lastCleanedAt"
+        - "retentionDays"
+        - "actions"
+      properties:
+        key:
+          type: "string"
+          enum:
+            - "agent_history"
+            - "search_index"
+            - "code_graph"
+            - "sources"
+            - "meetings"
+        label:
+          type: "string"
+        rows:
+          type: "integer"
+          description: "Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings."
+        bytes:
+          type:
+            - "integer"
+            - "null"
+          description: "Approximate bytes for agent_history; null for the main-DB groups."
+        bytesApprox:
+          type:
+            - "boolean"
+            - "null"
+        lastCleanedAt:
+          type:
+            - "string"
+            - "null"
+          description: "ISO time of the last clear (agent_history only)."
+        retentionDays:
+          type:
+            - "integer"
+            - "null"
+          description: "Raw-row retention (agent_history only)."
+        actions:
+          type: "array"
+          items:
+            type: "string"
+            enum:
+              - "clear"
+              - "compact"
+          description: "Actions the page may offer. Only agent_history has any."
+    OsStorageReport:
+      type: "object"
+      required:
+        - "generatedAt"
+        - "groups"
+        - "agentHistory"
+        - "agentStore"
+      properties:
+        generatedAt:
+          type: "string"
+        groups:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/OsStorageGroup"
+        agentHistory:
+          "$ref": "#/components/schemas/OsAgentHistorySummary"
+        agentStore:
+          type: "object"
+          required:
+            - "health"
+            - "state"
+          properties:
+            health:
+              type: "string"
+              enum:
+                - "ok"
+                - "degraded"
+                - "down"
+            state:
+              type: "string"
+              enum:
+                - "closed"
+                - "ok"
+                - "down"
     Outcomes:
       type: "object"
       required:

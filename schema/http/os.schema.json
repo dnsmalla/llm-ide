@@ -93,6 +93,264 @@
           "type": "integer"
         }
       }
+    },
+    "StorageGroup": {
+      "type": "object",
+      "description": "One data group of the Storage hub. agent_history carries bytes (approximate) and the clear/compact actions; the main-DB groups carry rows per user and no bytes (SQLite sizes whole files, not users).",
+      "required": [
+        "key",
+        "label",
+        "rows",
+        "bytes",
+        "bytesApprox",
+        "lastCleanedAt",
+        "retentionDays",
+        "actions"
+      ],
+      "properties": {
+        "key": {
+          "type": "string",
+          "enum": [
+            "agent_history",
+            "search_index",
+            "code_graph",
+            "sources",
+            "meetings"
+          ]
+        },
+        "label": {
+          "type": "string"
+        },
+        "rows": {
+          "type": "integer",
+          "description": "Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings."
+        },
+        "bytes": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Approximate bytes for agent_history; null for the main-DB groups."
+        },
+        "bytesApprox": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "lastCleanedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ISO time of the last clear (agent_history only)."
+        },
+        "retentionDays": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "Raw-row retention (agent_history only)."
+        },
+        "actions": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": [
+              "clear",
+              "compact"
+            ]
+          },
+          "description": "Actions the page may offer. Only agent_history has any."
+        }
+      }
+    },
+    "AgentHistorySummary": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Null when the agent store is down.",
+      "required": [
+        "rawFromDay",
+        "rawRows",
+        "rolledDays",
+        "oldestDay",
+        "quarantinedAt",
+        "droppedRows",
+        "watermark"
+      ],
+      "properties": {
+        "rawFromDay": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Oldest raw day (YYYY-MM-DD, local)."
+        },
+        "rawRows": {
+          "type": "integer"
+        },
+        "rolledDays": {
+          "type": "integer"
+        },
+        "oldestDay": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "Oldest rolled-up day."
+        },
+        "quarantinedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "When the store was reset after damage, if it was."
+        },
+        "droppedRows": {
+          "type": "integer",
+          "description": "Rows dropped by the write queue (bounded queue or failed batch), counted since the store was created."
+        },
+        "watermark": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The last day folded into the daily rollups."
+        }
+      }
+    },
+    "StorageReport": {
+      "type": "object",
+      "required": [
+        "generatedAt",
+        "groups",
+        "agentHistory",
+        "agentStore"
+      ],
+      "properties": {
+        "generatedAt": {
+          "type": "string"
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/StorageGroup"
+          }
+        },
+        "agentHistory": {
+          "$ref": "#/$defs/AgentHistorySummary"
+        },
+        "agentStore": {
+          "type": "object",
+          "required": [
+            "health",
+            "state"
+          ],
+          "properties": {
+            "health": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "degraded",
+                "down"
+              ]
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "closed",
+                "ok",
+                "down"
+              ]
+            }
+          }
+        }
+      }
+    },
+    "AgentRun": {
+      "type": "object",
+      "description": "One agent run for the System view. No prompt, message or error text: codes only.",
+      "required": [
+        "id",
+        "source",
+        "engine",
+        "status",
+        "startedAt",
+        "endedAt",
+        "durationMs",
+        "tokens",
+        "toolCalls",
+        "model",
+        "errorCode"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "source": {
+          "type": "string",
+          "enum": [
+            "chat",
+            "loop",
+            "meeting",
+            "autotask",
+            "dispatch",
+            "review"
+          ]
+        },
+        "engine": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "running",
+            "ok",
+            "error",
+            "cancelled",
+            "aborted"
+          ]
+        },
+        "startedAt": {
+          "type": "string"
+        },
+        "endedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "durationMs": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "tokens": {
+          "type": "integer",
+          "description": "Input plus output tokens of the run."
+        },
+        "toolCalls": {
+          "type": "integer"
+        },
+        "model": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "errorCode": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
     }
   },
   "endpoints": {
@@ -123,7 +381,9 @@
             "activity",
             "tokens",
             "knowledge",
-            "macOnly"
+            "macOnly",
+            "storage",
+            "agents"
           ],
           "properties": {
             "generatedAt": {
@@ -781,6 +1041,24 @@
                 "autoTasks": {
                   "type": "string",
                   "const": "on this Mac"
+                }
+              }
+            },
+            "storage": {
+              "$ref": "#/$defs/StorageReport"
+            },
+            "agents": {
+              "type": "object",
+              "required": [
+                "recentRuns"
+              ],
+              "properties": {
+                "recentRuns": {
+                  "type": "array",
+                  "description": "This user's newest 20 agent runs (Stage 1c).",
+                  "items": {
+                    "$ref": "#/$defs/AgentRun"
+                  }
                 }
               }
             }

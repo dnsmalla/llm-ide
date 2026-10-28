@@ -1,0 +1,76 @@
+{
+  "endpoint": "GET /kb/storage",
+  "status": 200,
+  "description": "Captured by running the real handler (routes/agent-history.mjs) on a temp DB with example data. Not a live HTTP exchange. Every value is example data. The agent history holds the user's two runs and three tool events.",
+  "response": {
+    "generatedAt": "2026-10-28T09:00:00.000Z",
+    "groups": [
+      {
+        "key": "agent_history",
+        "label": "Agent history",
+        "rows": 5,
+        "bytes": 20480,
+        "bytesApprox": true,
+        "lastCleanedAt": null,
+        "retentionDays": 30,
+        "actions": [
+          "clear",
+          "compact"
+        ]
+      },
+      {
+        "key": "search_index",
+        "label": "Search index",
+        "rows": 12,
+        "bytes": null,
+        "bytesApprox": null,
+        "lastCleanedAt": null,
+        "retentionDays": null,
+        "actions": []
+      },
+      {
+        "key": "code_graph",
+        "label": "Code graph",
+        "rows": 1,
+        "bytes": null,
+        "bytesApprox": null,
+        "lastCleanedAt": null,
+        "retentionDays": null,
+        "actions": []
+      },
+      {
+        "key": "sources",
+        "label": "Sources",
+        "rows": 2,
+        "bytes": null,
+        "bytesApprox": null,
+        "lastCleanedAt": null,
+        "retentionDays": null,
+        "actions": []
+      },
+      {
+        "key": "meetings",
+        "label": "Meetings",
+        "rows": 4,
+        "bytes": null,
+        "bytesApprox": null,
+        "lastCleanedAt": null,
+        "retentionDays": null,
+        "actions": []
+      }
+    ],
+    "agentHistory": {
+      "rawFromDay": "2026-10-20",
+      "rawRows": 5,
+      "rolledDays": 3,
+      "oldestDay": "2026-09-01",
+      "quarantinedAt": null,
+      "droppedRows": 0,
+      "watermark": "2026-09-30"
+    },
+    "agentStore": {
+      "health": "ok",
+      "state": "ok"
+    }
+  }
+}

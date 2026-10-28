@@ -1,0 +1,27 @@
+{
+  "endpoint": "POST /kb/agent-history/clear",
+  "status": 200,
+  "description": "Captured by running the real handler (routes/agent-history.mjs) on a temp DB with example data. Not a live HTTP exchange. Every value is example data. A dry run: the counts a real clear would delete, and the previewId that authorises it.",
+  "request": {
+    "body": {
+      "scope": "raw",
+      "beforeDays": 30,
+      "dryRun": true
+    }
+  },
+  "response": {
+    "dryRun": true,
+    "scope": "raw",
+    "beforeDays": 30,
+    "wouldDelete": {
+      "agent_runs": 2,
+      "agent_tool_events": 3,
+      "turn_composition": 0,
+      "agent_daily": 0,
+      "agent_daily_tools": 0
+    },
+    "total": 5,
+    "previewId": "eyJjIjp7ImFnZW50X3J1bnMiOjJ9LCJlIjoxNzk4NTgyNDAwMDAwfQ.9f0c2d6a8e1b4c7d0a3f5e9b2c6d8a1f4e7b0c3d6a9f2e5b8c1d4a7f0e3b6c9d2",
+    "expiresAt": "2026-10-28T09:05:00.000Z"
+  }
+}

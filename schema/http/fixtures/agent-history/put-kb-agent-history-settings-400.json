@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /kb/agent-history/settings",
+  "status": 400,
+  "description": "retentionDays is not a whole number.",
+  "request": {
+    "body": {
+      "retentionDays": "thirty"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "retentionDays must be a whole number of days (7 to 365)"
+    }
+  }
+}

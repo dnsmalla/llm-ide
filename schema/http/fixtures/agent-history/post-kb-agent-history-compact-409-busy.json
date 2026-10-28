@@ -1,0 +1,11 @@
+{
+  "endpoint": "POST /kb/agent-history/compact",
+  "status": 409,
+  "description": "A chat turn or meeting-agent run is in flight, so the compact refuses.",
+  "response": {
+    "error": {
+      "code": "busy",
+      "message": "A chat turn or meeting-agent run is in flight; compact later"
+    }
+  }
+}

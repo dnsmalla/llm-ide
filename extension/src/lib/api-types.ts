@@ -141,6 +141,65 @@ export type ApprovalGrant = {
   grantedAt: string;
 };
 
+/** One data group of the Storage hub. agent_history carries bytes (approximate) and the clear/compact actions; the main-DB groups carry rows per user and no bytes (SQLite sizes whole files, not users). */
+export type AgentHistoryStorageGroup = {
+  key: "agent_history" | "search_index" | "code_graph" | "sources" | "meetings";
+  label: string;
+  /** Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings. */
+  rows: number;
+  /** Approximate bytes for agent_history; null for the main-DB groups. */
+  bytes: number | null;
+  bytesApprox: boolean | null;
+  /** ISO time of the last clear (agent_history only). */
+  lastCleanedAt: string | null;
+  /** Raw-row retention (agent_history only). */
+  retentionDays: number | null;
+  /** Actions the page may offer. Only agent_history has any. */
+  actions: ("clear" | "compact")[];
+};
+
+/** Null when the agent store is down. */
+export type AgentHistoryAgentHistorySummary = {
+  /** Oldest raw day (YYYY-MM-DD, local). */
+  rawFromDay: string | null;
+  rawRows: number;
+  rolledDays: number;
+  /** Oldest rolled-up day. */
+  oldestDay: string | null;
+  /** When the store was reset after damage, if it was. */
+  quarantinedAt: string | null;
+  /** Rows dropped by the write queue (bounded queue or failed batch), counted since the store was created. */
+  droppedRows: number;
+  /** The last day folded into the daily rollups. */
+  watermark: string | null;
+} | null;
+
+export type AgentHistoryStorageReport = {
+  generatedAt: string;
+  groups: AgentHistoryStorageGroup[];
+  agentHistory: AgentHistoryAgentHistorySummary;
+  agentStore: {
+    health: "ok" | "degraded" | "down";
+    state: "closed" | "ok" | "down";
+  };
+};
+
+/** One agent run for the System view. No prompt, message or error text: codes only. */
+export type AgentHistoryAgentRun = {
+  id: string;
+  source: "chat" | "loop" | "meeting" | "autotask" | "dispatch" | "review";
+  engine: string | null;
+  status: "running" | "ok" | "error" | "cancelled" | "aborted";
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  /** Input plus output tokens of the run. */
+  tokens: number;
+  toolCalls: number;
+  model: string | null;
+  errorCode: string | null;
+};
+
 export type task = {
   id: string;
   title: string;
@@ -1044,6 +1103,65 @@ export type UsageCounts = {
   billable: number;
 };
 
+/** One data group of the Storage hub. agent_history carries bytes (approximate) and the clear/compact actions; the main-DB groups carry rows per user and no bytes (SQLite sizes whole files, not users). */
+export type OsStorageGroup = {
+  key: "agent_history" | "search_index" | "code_graph" | "sources" | "meetings";
+  label: string;
+  /** Rows for this user. agent_history: runs, tool events, composition rows and activity rows. search_index: indexed chunks. code_graph: repos. sources: distinct source kinds. meetings: meetings. */
+  rows: number;
+  /** Approximate bytes for agent_history; null for the main-DB groups. */
+  bytes: number | null;
+  bytesApprox: boolean | null;
+  /** ISO time of the last clear (agent_history only). */
+  lastCleanedAt: string | null;
+  /** Raw-row retention (agent_history only). */
+  retentionDays: number | null;
+  /** Actions the page may offer. Only agent_history has any. */
+  actions: ("clear" | "compact")[];
+};
+
+/** Null when the agent store is down. */
+export type OsAgentHistorySummary = {
+  /** Oldest raw day (YYYY-MM-DD, local). */
+  rawFromDay: string | null;
+  rawRows: number;
+  rolledDays: number;
+  /** Oldest rolled-up day. */
+  oldestDay: string | null;
+  /** When the store was reset after damage, if it was. */
+  quarantinedAt: string | null;
+  /** Rows dropped by the write queue (bounded queue or failed batch), counted since the store was created. */
+  droppedRows: number;
+  /** The last day folded into the daily rollups. */
+  watermark: string | null;
+} | null;
+
+export type OsStorageReport = {
+  generatedAt: string;
+  groups: OsStorageGroup[];
+  agentHistory: OsAgentHistorySummary;
+  agentStore: {
+    health: "ok" | "degraded" | "down";
+    state: "closed" | "ok" | "down";
+  };
+};
+
+/** One agent run for the System view. No prompt, message or error text: codes only. */
+export type OsAgentRun = {
+  id: string;
+  source: "chat" | "loop" | "meeting" | "autotask" | "dispatch" | "review";
+  engine: string | null;
+  status: "running" | "ok" | "error" | "cancelled" | "aborted";
+  startedAt: string;
+  endedAt: string | null;
+  durationMs: number | null;
+  /** Input plus output tokens of the run. */
+  tokens: number;
+  toolCalls: number;
+  model: string | null;
+  errorCode: string | null;
+};
+
 /** One data: payload on GET /kb/os/stream (os-kit OS-2). Events carry only the type and the time, never data: they tell the System view when to re-fetch GET /kb/os/state. The stream opens with one hello event. The SSE event: line equals type. Every variant sets additionalProperties:false, so a field added server-side must be added here in the same edit. */
 export type OsEventsEvent = {
   type: "hello";
@@ -1287,6 +1405,110 @@ export type ExecutionFailure = {
 export type ReviewOk = {
   ok: true;
 };
+
+/** Request parts for `GET /kb/storage` (schema/http/agent-history.schema.json). */
+export type GetKbStorageRequest = Record<string, never>;
+
+export type GetKbStorageResponse200 = AgentHistoryStorageReport;
+
+/** Request parts for `GET /kb/agent-history/settings` (schema/http/agent-history.schema.json). */
+export type GetKbAgentHistorySettingsRequest = Record<string, never>;
+
+export type GetKbAgentHistorySettingsResponse200 = {
+  /** Raw-row retention in days, clamped to min..max. */
+  retentionDays: number;
+  /** Daily rollups are kept this long. */
+  rollupKeepDays: number;
+  min: number;
+  max: number;
+};
+
+/** Request parts for `PUT /kb/agent-history/settings` (schema/http/agent-history.schema.json). */
+export type PutKbAgentHistorySettingsRequest = {
+  body: {
+    /** A whole number of days, clamped to 7..365. Any other value is a 400 VALIDATION_FAILED. */
+    retentionDays: unknown;
+  };
+};
+
+export type PutKbAgentHistorySettingsResponse200 = {
+  /** Raw-row retention in days, clamped to min..max. */
+  retentionDays: number;
+  /** Daily rollups are kept this long. */
+  rollupKeepDays: number;
+  min: number;
+  max: number;
+};
+
+export type PutKbAgentHistorySettingsResponse400 = CommonError;
+
+export type PutKbAgentHistorySettingsResponse503 = unknown;
+
+/** Request parts for `POST /kb/agent-history/clear` (schema/http/agent-history.schema.json). */
+export type PostKbAgentHistoryClearRequest = {
+  body: {
+    scope: "raw" | "all";
+    /** Only rows older than this many days; omit for all. */
+    beforeDays?: number | null;
+    /** Default true: a dry run. false performs the clear and needs previewId. */
+    dryRun?: boolean;
+    /** From a dry run of the same scope and cutoff. */
+    previewId?: string;
+  };
+};
+
+export type PostKbAgentHistoryClearResponse200 = {
+  dryRun: true;
+  scope: "raw" | "all";
+  beforeDays: number | null;
+  wouldDelete: {
+    agent_runs: number;
+    agent_tool_events: number;
+    turn_composition: number;
+    agent_daily: number;
+    agent_daily_tools: number;
+  };
+  total: number;
+  /** Signed by the server; valid five minutes for this user, scope and cutoff. */
+  previewId: string;
+  expiresAt: string;
+} | {
+  dryRun: false;
+  scope: "raw" | "all";
+  beforeDays: number | null;
+  deleted: {
+    agent_runs: number;
+    agent_tool_events: number;
+    turn_composition: number;
+    agent_daily: number;
+    agent_daily_tools: number;
+  };
+  total: number;
+};
+
+export type PostKbAgentHistoryClearResponse400 = CommonError;
+
+export type PostKbAgentHistoryClearResponse409 = CommonError;
+
+export type PostKbAgentHistoryClearResponse503 = unknown;
+
+/** Request parts for `POST /kb/agent-history/compact` (schema/http/agent-history.schema.json). */
+export type PostKbAgentHistoryCompactRequest = Record<string, never>;
+
+export type PostKbAgentHistoryCompactResponse200 = {
+  ok: true;
+  mode: "incremental" | "full";
+  pagesFreed: number;
+  bytesBefore: number;
+  bytesAfter: number;
+  ms: number;
+};
+
+export type PostKbAgentHistoryCompactResponse409 = CommonError;
+
+export type PostKbAgentHistoryCompactResponse503 = unknown;
+
+export type PostKbAgentHistoryCompactResponse507 = unknown;
 
 /** Request parts for `POST /agent/v2/stream` (schema/http/agent.schema.json). */
 export type PostAgentV2StreamRequest = {
@@ -4181,6 +4403,11 @@ export type GetKbOsStateResponse200 = {
     loop: "on this Mac";
     autoTasks: "on this Mac";
   };
+  storage: OsStorageReport;
+  agents: {
+    /** This user's newest 20 agent runs (Stage 1c). */
+    recentRuns: OsAgentRun[];
+  };
 };
 
 export type GetKbOsStateResponse400 = CommonError;
@@ -5317,6 +5544,44 @@ export type PostKbReviewDeleteResponse429 = CommonError;
 
 /** Typed map of every endpoint: request parts and each declared response, by status. */
 export interface ApiEndpoints {
+  "GET /kb/storage": {
+    request: GetKbStorageRequest;
+    responses: {
+      200: GetKbStorageResponse200;
+    };
+  };
+  "GET /kb/agent-history/settings": {
+    request: GetKbAgentHistorySettingsRequest;
+    responses: {
+      200: GetKbAgentHistorySettingsResponse200;
+    };
+  };
+  "PUT /kb/agent-history/settings": {
+    request: PutKbAgentHistorySettingsRequest;
+    responses: {
+      200: PutKbAgentHistorySettingsResponse200;
+      400: PutKbAgentHistorySettingsResponse400;
+      503: PutKbAgentHistorySettingsResponse503;
+    };
+  };
+  "POST /kb/agent-history/clear": {
+    request: PostKbAgentHistoryClearRequest;
+    responses: {
+      200: PostKbAgentHistoryClearResponse200;
+      400: PostKbAgentHistoryClearResponse400;
+      409: PostKbAgentHistoryClearResponse409;
+      503: PostKbAgentHistoryClearResponse503;
+    };
+  };
+  "POST /kb/agent-history/compact": {
+    request: PostKbAgentHistoryCompactRequest;
+    responses: {
+      200: PostKbAgentHistoryCompactResponse200;
+      409: PostKbAgentHistoryCompactResponse409;
+      503: PostKbAgentHistoryCompactResponse503;
+      507: PostKbAgentHistoryCompactResponse507;
+    };
+  };
   "POST /agent/v2/stream": {
     request: PostAgentV2StreamRequest;
     responses: {
