@@ -219,7 +219,7 @@ llm-ide/
 ├── docs/                # mkdocs site (Diátaxis framework)
 └── kb/                  # Dev/test runtime data (repo kb). On first boot with LLMIDE_DATA_DIR (the Mac app's
                          #   ~/Library/Application Support/llm-ide/system) the DB, agent.db, secrets and agent-sdk
-                         #   are MOVED there and deleted from kb/; kb/backups/ is left alone (see the how-to)
+                         #   are MOVED there (originals kept as *.pre-move for one boot); kb/backups/ is left alone (see the how-to)
 ```
 
 ### Central skills (all agents)

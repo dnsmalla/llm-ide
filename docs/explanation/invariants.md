@@ -384,6 +384,16 @@ Run through this against a real meeting before merging:
 
 ## GitHub PR / codegen-apply (`extension/agents/github-pr.mjs`)
 
+
+### Data move: repo kb → data dir (`extension/kb/data-dir-migration.mjs`)
+
+- **MUST preserve:** every move runs under the `.migrating-lock` directory in the data dir. Nothing is wiped while another live pid holds it, and the `data.db` check is repeated under the lock. A dead pid's lock is stale.
+- **MUST preserve:** the legacy DB is held with an EXCLUSIVE lock for the whole move. If that lock cannot be taken, nothing moves. An idle server connection counts.
+- **MUST preserve:** nothing is deleted before the committed copy is fsynced and verified again (integrity_check, counts, `sqlite_sequence`, secrets bytes, agent-sdk manifest). Originals become `<name>.pre-move`, kept for one boot, and are deleted only by a later boot that opened the DB healthily.
+- **DO NOT** remove a `data.db` from the retry path, and treat a zero-byte or table-less `data.db` with no marker as not migrated (move it aside as `data.db.empty-<stamp>`).
+- **DO NOT** start the repo-kb layout on a moved kb (`MOVED-TO-APP-SUPPORT.txt` present, `kb/data.db` absent): the tripwire refuses unless `LLMIDE_ALLOW_EMPTY_LEGACY=1`.
+- **DO NOT** prune backups outside the data dir's `backups/`, and never in the repo-kb layout (`config.backupPrune`).
+- **Known limit:** Node has no `F_FULLFSYNC`; on macOS the fsync is a plain fsync, so the `.pre-move` copies are the protection against power loss.
 ### ✅ MUST understand
 
 - **`git push` uses the user's ambient credentials.** The PR flow calls `git push -u origin <branch>` using whatever git config / credential helper the user has set up on their machine (SSH key, HTTPS keychain, etc.). No token is passed to the server; the server never stores one.

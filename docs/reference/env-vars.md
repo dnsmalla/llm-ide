@@ -88,8 +88,9 @@ python3 docs/_scripts/extract_env_vars.py
 | `LLMIDE_BACKUP_DIR` | str | `<data dir>/backups` |
 | `LLMIDE_BODY_LIMIT_MB` | int | `8` |
 | `LLMIDE_CORS_ORIGINS` | str | _(empty)_ |
-| `LLMIDE_DATA_DIR` | str | _(unset: repo `kb/`)_. Base for `data.db`, `agent.db`, `.dev-secrets.json`, `backups/`, `agent-sdk/`, `server.log`. On first boot the legacy kb data is MOVED here (legacy copies deleted after verification; `kb/backups/` untouched). Individual vars still win; an explicit `LLMIDE_DB_PATH` puts the companions beside it. Ignored under the test runner. See the how-to on data location. |
+| `LLMIDE_DATA_DIR` | str | _(unset: repo `kb/`)_. Base for `data.db`, `agent.db`, `.dev-secrets.json`, `backups/`, `agent-sdk/`, `server.log`. On first boot the legacy kb data is MOVED here (originals kept as `.pre-move` for one boot, then deleted; `kb/backups/` untouched). Individual vars still win; an explicit `LLMIDE_DB_PATH` puts the companions beside it. Ignored under the test runner. See the how-to on data location. |
 | `LLMIDE_BACKUP_KEEP` | int | `2` (minimum 1). Newest `data-<unix>.db` backups kept; older ones deleted. |
+| `LLMIDE_ALLOW_EMPTY_LEGACY` | `1` | Lets the server start on the repo kb after its data was moved (it would create an empty DB there). Off by default: see the tripwire in the data-location how-to. |
 | `LLMIDE_DB_PATH` | str | `<repo>/kb/data.db` |
 | `LLMIDE_DISABLE_REGISTRATION` | bool | `false` |
 | `LLMIDE_HOST` | str | `127.0.0.1` |
