@@ -1,27 +1,36 @@
-// One-time copy of the repo-level kb/ into the system data dir (LLMIDE_DATA_DIR).
+// One-time MOVE of the repo-level kb/ into the system data dir (LLMIDE_DATA_DIR).
 //
-// Runs at the very top of server.mjs (imported before config and the DB are
-// read) and never throws. It copies; it never moves or deletes the legacy
-// files, which stay as the N-1 rollback (an older server still reads <repo>/kb).
-//
-// Runs only when ALL of these hold, otherwise it reports why it skipped:
+// Runs at the very top of server.mjs, imported before config and the DB are
+// read (kb/data-dir-boot.mjs), and never throws. It runs only when ALL hold,
+// otherwise it reports why it skipped:
 //   - LLMIDE_DATA_DIR is set, and not under the test runner
 //   - LLMIDE_DB_PATH is not set (an explicit DB path wins; nothing to move)
-//   - <dataDir>/data.db does not exist yet (idempotent: a second boot skips)
+//   - <dataDir>/data.db does not exist yet (a second boot skips)
 //   - the legacy <repo>/kb/data.db exists
 //
-// Steps: probe that no process holds the legacy DBs (BEGIN IMMEDIATE); snapshot
-// data.db (and agent.db) with VACUUM INTO, which includes WAL content; verify
-// PRAGMA integrity_check and per-table row counts against the source; copy
-// backups/ and agent-sdk/ (skipped with a note above 2 GB); stage everything in
-// <dataDir>/.migrating, then commit by renaming into place with data.db last
-// and the marker written before it. Any failure removes what this run created
-// and falls back to the legacy location for this process (setDataDirOverride(null)),
-// so the server never boots on a half-copied DB.
+// The legacy files are held open with an EXCLUSIVE lock for the whole move.
+// That read fails with SQLITE_BUSY while ANY other connection has the file
+// open, idle servers included, so when it succeeds nothing else can use the
+// legacy DB until the move ends. If the lock cannot be taken, nothing is moved
+// and this run uses the legacy location (logged as legacy-in-use).
+//
+// Steps:
+//   1. lock legacy data.db (and agent.db, if it is moved)
+//   2. snapshot each with VACUUM INTO (includes WAL content), verify the copy:
+//      integrity_check and per-table row counts against the locked source
+//   3. stage .dev-secrets.json (the vault key; byte-identical, mode 0600),
+//      agent.db and agent-sdk/ (within a 200 MB cap) in <dataDir>/.migrating
+//   4. commit by rename, data.db last, then verify the committed data.db counts
+//      and the secrets bytes. Any mismatch rolls the commit back and falls back.
+//   5. only now delete the legacy copies (-wal, -shm, data.db; agent.db and its
+//      -wal/-shm; legacy .dev-secrets.json once the copy is byte-equal; agent-sdk/
+//      when it was moved). backups/ is never moved and never deleted.
+// Any failure before step 5 removes what this run created, leaves the legacy
+// files untouched and falls back to the legacy location for this process
+// (setDataDirOverride(null)), so the server never boots on a half-moved DB.
 //
 // VACUUM INTO rather than better-sqlite3's db.backup(): backup() is async, and
-// config reads the paths synchronously at import time, so the copy must finish
-// synchronously before the server reads its configuration.
+// config reads the paths synchronously at import time.
 
 import fs from 'fs';
 import path from 'path';
@@ -29,19 +38,18 @@ import Database from 'better-sqlite3';
 import { setDataDirOverride, setDataMigrationReport } from '../core/data-dir.mjs';
 
 const MARKER = 'migrated-from.json';
-// agent-sdk/ holds per-user engine homes (transcripts and credentials). Copy it
-// only under this cap; above it, leave it in place and say so.
-const MAX_SDK_BYTES = 200 * 1024 ** 2;
-// backups/ is never copied: it can be many GB of old DB copies. New backups
-// are written to the data dir; the old ones stay in the legacy kb.
 const DEV_SECRETS = '.dev-secrets.json';
-// Written at the start of a copy, removed when it ends. It lists exactly what a
-// copy may create in the data dir, so a retry can tell its own leftovers (a
+// agent-sdk/ holds per-user engine homes (transcripts and credentials). It is
+// moved only under this cap; above it, it stays in the legacy kb and says so.
+const MAX_SDK_BYTES = 200 * 1024 ** 2;
+// Written at the start of a move, removed when it ends. It lists exactly what a
+// move may create in the data dir, so a retry can tell its own leftovers (a
 // crash between renames) from files a person put there.
 const OWNER = '.migrating-owner';
 const OWNED = ['data.db', 'data.db-wal', 'data.db-shm', 'agent.db', 'agent.db-wal', 'agent.db-shm',
   'agent-sdk', DEV_SECRETS, MARKER];
-const COMMIT_ORDER = ['agent.db', 'backups', 'agent-sdk', DEV_SECRETS, MARKER, 'data.db'];
+// data.db is the commit point: it is renamed into place last.
+const COMMIT_ORDER = ['agent.db', 'agent-sdk', DEV_SECRETS, MARKER, 'data.db'];
 
 /**
  * @param {object} [opts]
@@ -49,6 +57,7 @@ const COMMIT_ORDER = ['agent.db', 'backups', 'agent-sdk', DEV_SECRETS, MARKER, '
  * @param {string} opts.root repo root (holds `kb/`)
  * @param {string|null} [opts.appVersion] recorded in the marker
  * @param {(step: string) => void} [opts.fault] test hook: throws to simulate a failure at a step
+ * @param {number} [opts.sdkCapBytes] agent-sdk/ size cap (tests)
  * @returns {object} the migration report (also stored for /health)
  */
 export function runDataDirMigration({ env = process.env, root, appVersion = null, fault = null, sdkCapBytes = MAX_SDK_BYTES } = {}) {
@@ -65,6 +74,7 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
   try {
     const rawDataDir = typeof env.LLMIDE_DATA_DIR === 'string' ? env.LLMIDE_DATA_DIR.trim() : '';
     if (!rawDataDir) return finish('skipped', 'no-data-dir');
+    // Never move or delete anything under the test runner.
     if (env.NODE_TEST_CONTEXT) return finish('skipped', 'test-run');
     if (typeof env.LLMIDE_DB_PATH === 'string' && env.LLMIDE_DB_PATH.trim()) {
       return finish('skipped', 'db-path-overridden');
@@ -75,21 +85,21 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
     // getDb() needs the directory to exist; create it private whatever happens next.
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 
+    const legacyDir = path.join(root, 'kb');
     const newDb = path.join(dataDir, 'data.db');
     if (fs.existsSync(newDb)) {
       rmTree(path.join(dataDir, OWNER)); // an interrupted run that had in fact committed data.db
-      // Already moved: say whether the legacy kb has been written to since
-      // (a fork: an older server or an adopted dev server is still using it).
-      report.legacyDiverged = checkLegacyDivergence(path.join(root, 'kb'), dataDir);
+      // Already moved. A legacy data.db that exists again means something (an
+      // older server, an adopted dev server) created a fork after the move.
+      report.legacyDiverged = checkLegacyDivergence(legacyDir, dataDir);
       return finish('skipped', 'data-dir-has-db');
     }
 
-    const legacyDir = path.join(root, 'kb');
     const legacyDb = path.join(legacyDir, 'data.db');
     report.from = legacyDb;
     if (!fs.existsSync(legacyDb)) return finish('skipped', 'no-legacy-db');
 
-    return copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish });
+    return moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish });
   } catch (err) {
     setDataDirOverride(null);
     report.notes.push(`unexpected: ${err?.message ?? err}`);
@@ -97,74 +107,74 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
   }
 }
 
-function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish }) {
+function moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish }) {
   const staging = path.join(dataDir, '.migrating');
   const ownerFile = path.join(dataDir, OWNER);
-  const moved = []; // names moved into dataDir by this run, removed on failure
+  const moved = []; // names committed into dataDir by this run, rolled back on failure
   const step = (name) => { if (fault) fault(name); };
   // A previous run that died between commits left files behind with no data.db.
   // data.db is the commit point, so those files cannot be trusted: discard the
-  // ones it recorded as its own, then copy again.
+  // ones it recorded as its own, then move again.
   if (fs.existsSync(ownerFile)) {
     const discarded = OWNED.filter((n) => fs.existsSync(path.join(dataDir, n)));
     for (const name of OWNED) rmTree(path.join(dataDir, name));
     if (discarded.length) report.notes.push(`discarded ${discarded.length} leftover file(s) of an interrupted migration`);
   }
   fs.writeFileSync(ownerFile, `${JSON.stringify({ startedAt: new Date().toISOString(), pid: process.pid, owns: OWNED }, null, 2)}\n`, { mode: 0o600 });
-  const legacyAgent = path.join(legacyDir, 'agent.db');
-  const copyAgent = !(typeof env.LLMIDE_AGENT_DB_PATH === 'string' && env.LLMIDE_AGENT_DB_PATH.trim())
-    && fs.existsSync(legacyAgent);
 
+  const legacyAgent = path.join(legacyDir, 'agent.db');
+  const moveAgent = !(typeof env.LLMIDE_AGENT_DB_PATH === 'string' && env.LLMIDE_AGENT_DB_PATH.trim())
+    && fs.existsSync(legacyAgent) && !fs.existsSync(path.join(dataDir, 'agent.db'));
+  if (fs.existsSync(legacyAgent) && !moveAgent) {
+    report.notes.push('agent.db not moved (already present in the data dir, or LLMIDE_AGENT_DB_PATH is set); the legacy file stays');
+  }
+
+  let legacyHandle = null;
+  let agentHandle = null;
+  let secrets = null;       // { raw, staged }
+  let sdkMoved = false;
+  let agentMoved = false;
   try {
     rmTree(staging);
     fs.mkdirSync(staging, { mode: 0o700 });
 
+    // 1. Lock the legacy files for the whole move. Failure: nothing moved.
+    legacyHandle = lockLegacy(legacyDb);
+    if (moveAgent) agentHandle = lockLegacy(legacyAgent);
+
+    // 2. Snapshot and verify.
     step('db');
-    report.tables = snapshotAndVerify(legacyDb, path.join(staging, 'data.db'));
-
-    // The dev secrets are the only copy of the vault key: without them every
-    // vault-encrypted secret is lost. Copy them, never regenerate.
-    step('secrets');
-    copySecrets({ legacyFile: path.join(legacyDir, DEV_SECRETS), dataDir, staging, env, report });
-
-    let agentCopied = false;
-    if (copyAgent) {
+    report.tables = snapshotAndVerify(legacyHandle, path.join(staging, 'data.db'));
+    step('verify');
+    if (moveAgent) {
       step('agent');
-      if (fs.existsSync(path.join(dataDir, 'agent.db'))) {
-        report.notes.push('agent.db already present in data dir; not copied');
-      } else {
-        snapshotAndVerify(legacyAgent, path.join(staging, 'agent.db'));
-        agentCopied = true;
-      }
+      snapshotAndVerify(agentHandle, path.join(staging, 'agent.db'));
+      agentMoved = true;
     }
 
-    const trees = { backups: false, 'agent-sdk': false };
-    const backupsBytes = treeBytes(path.join(legacyDir, 'backups'));
-    if (fs.existsSync(path.join(legacyDir, 'backups'))) {
-      const mb = Math.round(backupsBytes / 1024 ** 2);
-      const note = `backups/ not copied (${mb} MB stay in the legacy kb); new backups go to the data dir`;
-      report.notes.push(note);
-      report.healthNotes.push(note);
-    }
-    {
+    // 3. Stage the secrets, agent-sdk/ (cap), and nothing else. backups/ stays.
+    step('secrets');
+    secrets = stageSecrets({ legacyFile: path.join(legacyDir, DEV_SECRETS), dataDir, staging, env, report });
+    const sdkSrc = path.join(legacyDir, 'agent-sdk');
+    if (fs.existsSync(sdkSrc)) {
       step('agent-sdk');
-      const src = path.join(legacyDir, 'agent-sdk');
-      if (fs.existsSync(src)) {
-        const bytes = treeBytes(src);
-        if (bytes > sdkCapBytes) {
-          const mb = Math.round(bytes / 1024 ** 2);
-          const note = `agent-sdk/ not copied (${mb} MB exceeds the ${Math.round(sdkCapBytes / 1024 ** 2)} MB cap); per-user agent logins must be re-established`;
-          report.notes.push(note);
-          report.healthNotes.push(note);
-          console.warn(`[data-dir-migration] ${note}`);
-        } else if (fs.existsSync(path.join(dataDir, 'agent-sdk'))) {
-          report.notes.push('agent-sdk/ already present in data dir; not copied');
-        } else {
-          fs.cpSync(src, path.join(staging, 'agent-sdk'), { recursive: true, errorOnExist: true, force: false });
-          trees['agent-sdk'] = true;
-        }
+      const bytes = treeBytes(sdkSrc);
+      const mb = Math.round(bytes / 1024 ** 2);
+      if (bytes > sdkCapBytes) {
+        const note = `agent-sdk/ not moved (${mb} MB exceeds the ${Math.round(sdkCapBytes / 1024 ** 2)} MB cap; it stays in the legacy kb); per-user agent logins must be re-established`;
+        report.notes.push(note);
+        report.healthNotes.push(note);
+      } else if (fs.existsSync(path.join(dataDir, 'agent-sdk'))) {
+        report.notes.push('agent-sdk/ already present in data dir; not moved');
+      } else {
+        fs.cpSync(sdkSrc, path.join(staging, 'agent-sdk'), { recursive: true, errorOnExist: true, force: false });
+        sdkMoved = true;
       }
     }
+    const backupsNote = fs.existsSync(path.join(legacyDir, 'backups'))
+      ? `backups/ not moved (${Math.round(treeBytes(path.join(legacyDir, 'backups')) / 1024 ** 2)} MB stay in the legacy kb); new backups go to the data dir`
+      : null;
+    if (backupsNote) { report.notes.push(backupsNote); report.healthNotes.push(backupsNote); }
 
     step('marker');
     const marker = {
@@ -172,64 +182,103 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkC
       migratedAt: new Date().toISOString(),
       appVersion,
       tables: report.tables,
-      agentDb: agentCopied,
+      agentDb: agentMoved,
       backups: false,
-      agentSdk: trees['agent-sdk'],
-      // What the legacy DB looked like when it was left behind. A later boot
-      // compares against this to notice a fork.
-      legacyBaseline: legacyFingerprint(legacyDir),
+      agentSdk: sdkMoved,
     };
     fs.writeFileSync(path.join(staging, MARKER), `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
 
-    // Commit: everything except data.db first; data.db last is the commit point.
+    // 4. Commit by rename, data.db last. Then verify what is now in the data dir.
     for (const name of COMMIT_ORDER) {
       const from = path.join(staging, name);
       if (!fs.existsSync(from)) continue;
       step(`commit:${name}`);
-      const to = path.join(dataDir, name);
-      fs.renameSync(from, to);
+      fs.renameSync(from, path.join(dataDir, name));
       moved.push(name);
     }
-    rmTree(staging);
-    rmTree(ownerFile);
-    report.legacyDiverged = false;
-    writeMovedNotice(legacyDir, dataDir, report);
-    return finish('migrated', null);
-  } catch (err) {
-    for (const name of moved) rmTree(path.join(dataDir, name));
-    for (const suffix of ['-wal', '-shm']) {
-      rmTree(path.join(dataDir, `data.db${suffix}`));
+    step('postcommit');
+    verifyCommitted(path.join(dataDir, 'data.db'), report.tables);
+    if (secrets) {
+      const now = fs.readFileSync(path.join(dataDir, DEV_SECRETS), 'utf8');
+      if (now !== secrets.raw) throw new Error('the copied dev secrets differ from the legacy file');
     }
+  } catch (err) {
+    closeQuietly(legacyHandle);
+    closeQuietly(agentHandle);
+    for (const name of moved) rmTree(path.join(dataDir, name));
+    for (const suffix of ['-wal', '-shm']) rmTree(path.join(dataDir, `data.db${suffix}`));
     rmTree(staging);
     rmTree(ownerFile);
     setDataDirOverride(null);
-    report.notes.push(`migration failed, using the legacy location for this run: ${err?.message ?? err}`);
-    return finish('fallback', 'copy-failed');
+    const reason = err?.code === 'LEGACY_IN_USE' ? 'legacy-in-use' : 'copy-failed';
+    report.notes.push(`${reason === 'legacy-in-use' ? 'not moved' : 'move failed'}: ${err?.message ?? err}; using the legacy location for this run, legacy files untouched`);
+    return finish('fallback', reason);
   }
+
+  // 5. Everything is verified and committed. Delete the legacy copies while the
+  // legacy DB is still held exclusively. Nothing is deleted before this point.
+  try {
+    step('delete:wal');
+    for (const suffix of ['-wal', '-shm']) rmTree(`${legacyDb}${suffix}`);
+    rmTree(legacyDb);
+    const removed = ['data.db'];
+    if (agentMoved) {
+      for (const suffix of ['-wal', '-shm']) rmTree(`${legacyAgent}${suffix}`);
+      rmTree(legacyAgent);
+      removed.push('agent.db');
+    }
+    if (secrets?.raw && fs.readFileSync(path.join(legacyDir, DEV_SECRETS), 'utf8') === fs.readFileSync(path.join(dataDir, DEV_SECRETS), 'utf8')) {
+      step('delete:secrets');
+      rmTree(path.join(legacyDir, DEV_SECRETS));
+      removed.push(DEV_SECRETS);
+    }
+    if (sdkMoved) {
+      step('delete:agent-sdk');
+      rmTree(path.join(legacyDir, 'agent-sdk'));
+      removed.push('agent-sdk/');
+    }
+    report.removedLegacy = removed;
+    closeQuietly(legacyHandle);
+    closeQuietly(agentHandle);
+    // Closing the last handle can checkpoint and remove the WAL itself; make sure nothing is left.
+    for (const name of ['data.db-wal', 'data.db-shm']) rmTree(path.join(legacyDir, name));
+  } catch (err) {
+    closeQuietly(legacyHandle);
+    closeQuietly(agentHandle);
+    // The new copy is verified and committed; keep it. Say what is left behind.
+    report.notes.push(`legacy removal incomplete (${err?.message ?? err}); delete the remaining legacy files in ${legacyDir} by hand`);
+  }
+
+  rmTree(staging);
+  rmTree(ownerFile);
+  report.legacyDiverged = false;
+  writeMovedNotice(legacyDir, dataDir, report);
+  return finish('migrated', null);
 }
 
-// Snapshot one legacy DB and verify the copy. The source connection takes an
-// EXCLUSIVE lock first: that read fails with SQLITE_BUSY while any other
-// connection has the file open, idle or not (a BEGIN IMMEDIATE probe misses an
-// idle server, which holds no write lock between transactions). Holding the
-// lock until the counts are taken means VACUUM INTO and the counts see the
-// same data. Returns the per-table counts that were verified.
-function snapshotAndVerify(src, dest) {
-  const db = new Database(src, { fileMustExist: true, timeout: 0 });
-  let srcCounts;
+// Take an EXCLUSIVE lock on a legacy DB and keep the connection open. The first
+// read fails with SQLITE_BUSY while any other connection has the file open,
+// idle or not (a BEGIN IMMEDIATE probe misses an idle server, which holds no
+// write lock between transactions).
+function lockLegacy(file) {
+  const db = new Database(file, { fileMustExist: true, timeout: 0 });
   try {
     db.pragma('locking_mode = EXCLUSIVE');
-    try {
-      db.prepare('SELECT COUNT(*) AS n FROM sqlite_master').get();
-    } catch (err) {
-      throw new Error(`${path.basename(src)} is in use by another process (${err.code ?? err.message})`);
-    }
-    db.prepare('VACUUM INTO ?').run(dest);
-    srcCounts = tableCounts(db);
-  } finally {
-    db.close();
+    db.prepare('SELECT COUNT(*) AS n FROM sqlite_master').get();
+  } catch (err) {
+    closeQuietly(db);
+    const e = new Error(`${path.basename(file)} is in use by another process (${err.code ?? err.message})`);
+    e.code = 'LEGACY_IN_USE';
+    throw e;
   }
+  return db;
+}
 
+// VACUUM INTO from the locked source, verify the copy against that same
+// source's counts. Returns the verified per-table counts.
+function snapshotAndVerify(src, dest) {
+  src.prepare('VACUUM INTO ?').run(dest);
+  const srcCounts = tableCounts(src);
   const copy = new Database(dest, { fileMustExist: true });
   let dstCounts;
   try {
@@ -240,10 +289,9 @@ function snapshotAndVerify(src, dest) {
     copy.close();
   }
   for (const suffix of ['-wal', '-shm']) rmTree(`${dest}${suffix}`);
-
   const names = Object.keys(srcCounts);
   if (names.length !== Object.keys(dstCounts).length) {
-    throw new Error(`table count mismatch for ${path.basename(src)}`);
+    throw new Error(`table count mismatch for ${path.basename(dest)}`);
   }
   for (const name of names) {
     if (dstCounts[name] !== srcCounts[name]) {
@@ -253,18 +301,31 @@ function snapshotAndVerify(src, dest) {
   return srcCounts;
 }
 
-// Copy <repo>/kb/.dev-secrets.json into the staging dir (mode 0600). Refuses
-// (the caller falls back) when a legacy vault holds secrets but no key file
-// exists and LLMIDE_VAULT_KEY is not set, or when the data dir already holds a
-// different key. An already identical file is fine.
-function copySecrets({ legacyFile, dataDir, staging, env, report }) {
+// Re-open the committed data.db and check it matches the verified counts.
+function verifyCommitted(file, expected) {
+  const db = new Database(file, { fileMustExist: true, readonly: true });
+  try {
+    const got = tableCounts(db);
+    for (const [name, n] of Object.entries(expected)) {
+      if (got[name] !== n) throw new Error(`committed data.db differs in ${name}: ${n} expected, ${got[name]} found`);
+    }
+  } finally {
+    db.close();
+  }
+}
+
+// Stage <repo>/kb/.dev-secrets.json (the vault key) for the copy, byte for byte.
+// Returns { raw, staged }, or null when there is no legacy file. Refuses (the
+// caller falls back) when a legacy vault holds secrets but no key file exists
+// and LLMIDE_VAULT_KEY is not set, or when the data dir holds a different key.
+function stageSecrets({ legacyFile, dataDir, staging, env, report }) {
   const target = path.join(dataDir, DEV_SECRETS);
   if (!fs.existsSync(legacyFile)) {
     if ((report.tables?.user_secrets ?? 0) > 0 && !(env.LLMIDE_VAULT_KEY ?? '').trim()) {
       throw new Error('legacy vault holds secrets but its key file is missing and LLMIDE_VAULT_KEY is not set');
     }
     report.notes.push('no legacy dev secrets file; the data dir generates one on first boot');
-    return;
+    return null;
   }
   const raw = fs.readFileSync(legacyFile, 'utf8');
   const parsed = JSON.parse(raw); // throws on a corrupt file: fall back, never guess a key
@@ -275,56 +336,37 @@ function copySecrets({ legacyFile, dataDir, staging, env, report }) {
     if (fs.readFileSync(target, 'utf8') !== raw) {
       throw new Error('data dir already holds a different dev secrets file');
     }
-    return;
+    return { raw, staged: false };
   }
   const dest = path.join(staging, DEV_SECRETS);
   fs.writeFileSync(dest, raw, { mode: 0o600 });
   fs.chmodSync(dest, 0o600);
+  return { raw, staged: true };
 }
 
-// Size and mtime of the legacy data.db and its -wal. A server writing to the
-// legacy kb changes at least one of them (writes land in the WAL first).
-function legacyFingerprint(legacyDir) {
-  const stat = (f) => {
-    try { const st = fs.statSync(f); return { size: st.size, mtimeMs: st.mtimeMs }; } catch { return null; }
-  };
-  return {
-    dataDb: stat(path.join(legacyDir, 'data.db')),
-    wal: stat(path.join(legacyDir, 'data.db-wal')),
-    takenAt: new Date().toISOString(),
-  };
-}
-
-// true: the legacy DB changed since it was migrated (or disappeared).
-// null: no marker, so there is nothing to compare.
+// true: the legacy data.db exists again after the move (something recreated it).
+// null: no marker, so the move is not known to have happened.
 function checkLegacyDivergence(legacyDir, dataDir) {
-  let marker;
-  try { marker = JSON.parse(fs.readFileSync(path.join(dataDir, MARKER), 'utf8')); } catch { return null; }
-  const base = marker?.legacyBaseline;
-  if (!base) return null;
-  const now = legacyFingerprint(legacyDir);
-  if (!now.dataDb) return true;
-  const same = (a, b) => (a === null && b === null) || (a && b && a.size === b.size && a.mtimeMs === b.mtimeMs);
-  return !(same(base.dataDb, now.dataDb) && same(base.wal, now.wal));
+  try { JSON.parse(fs.readFileSync(path.join(dataDir, MARKER), 'utf8')); } catch { return null; }
+  return fs.existsSync(path.join(legacyDir, 'data.db'));
 }
 
-// Plain-text notice in the legacy kb, so a person (or a later agent) who finds
-// the old files knows where the live data went and how to roll back.
+// Plain-text notice left in the legacy kb. It says what moved and that there is
+// no automatic rollback.
 function writeMovedNotice(legacyDir, dataDir, report) {
   const text = [
-    'The live data moved to the app data directory.',
+    'The live data was MOVED to the app data directory. The copies in this folder were deleted.',
     '',
     `Moved on:   ${new Date().toISOString()}`,
     `Now lives:  ${dataDir}`,
-    '  data.db, agent.db, .dev-secrets.json (vault key), agent-sdk/ (agent credentials, mode 0600)',
-    'Not copied: backups/ (old backups stay here; new ones go to the data dir)',
-    `Tables copied: ${Object.keys(report.tables ?? {}).length} (row counts verified)`,
+    `Moved:      ${(report.removedLegacy ?? []).join(', ') || 'nothing removed'}`,
+    `Tables:     ${Object.keys(report.tables ?? {}).length} (row counts verified before the legacy copies were deleted)`,
+    'Still here: backups/ (old DB copies, not moved; delete them by hand once you have checked the new location)',
     '',
-    'This directory is now a stale copy. Writing to it forks the data: the server',
-    'reads the data dir, so anything written here is invisible to it.',
-    '',
-    'To roll back to this copy, stop the server and read docs/how-to/data-location-and-rollback.md',
-    'in the repository (LLMIDE_USE_REPO_KB=1 runs an old-layout server on this directory).',
+    'Rollback is NOT automatic. The move deleted the legacy database. To go back,',
+    'restore a backup from the data directory (backups/data-<unix>.db, the newest',
+    'two are kept; see docs/how-to/data-location-and-rollback.md). Anything written',
+    'after the newest backup is lost unless it is still in the data directory.',
     '',
   ].join('\n');
   try {
@@ -332,6 +374,10 @@ function writeMovedNotice(legacyDir, dataDir, report) {
   } catch (err) {
     report.notes.push(`could not write MOVED-TO-APP-SUPPORT.txt: ${err.message}`);
   }
+}
+
+function closeQuietly(db) {
+  try { if (db && db.open) db.close(); } catch { /* already closed */ }
 }
 
 function tableCounts(db) {
