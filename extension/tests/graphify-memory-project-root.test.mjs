@@ -146,3 +146,51 @@ test('the same project-level fault is listed once when both locations hold it', 
     fs.rmSync(base, { recursive: true, force: true });
   }
 });
+
+// Parity with Swift `GeneratedDataLocator.readableMemoryFile`: the memory is read
+// per file, so an empty project memory dir does not hide a legacy artifact.
+test('an empty project memory dir does not hide the legacy graph-notes artifact', () => {
+  const U = freshUser('memmerge');
+  const { base, project, repos: [app] } = makeProject('memmerge', ['app']);
+  try {
+    fs.mkdirSync(path.join(project, 'system', 'memory'), { recursive: true });
+    write(path.join(app, 'system', 'memory', 'graph-notes.md'), '# Notes\n\nLEGACY-GRAPH-NOTES-MARK\n');
+    db.addUserRepo(U, app);
+    const out = renderGraphifyMemory({ indexedRepos: [{ path: app, name: 'app' }] }, U);
+    assert.match(out, /LEGACY-GRAPH-NOTES-MARK/);
+  } finally {
+    cleanupDb();
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// Parity with Swift readableGraphDir: a flat graph is served to its own child
+// after a second repo is added, and never to the sibling.
+test('graphIndexFile: the flat graph stays with its child after a second repo is added', () => {
+  const { base, project, repos: [a] } = makeProject('grow', ['a']);
+  try {
+    write(path.join(a, 'a-file.py'), 'print(1)\n');
+    write(path.join(project, 'system', 'graph', 'index.md'), '# flat overview\n');
+    write(path.join(project, 'system', 'graph', 'graph.json'),
+      JSON.stringify({ version: '1.1', files: [{ path: 'a-file.py' }], calls: [] }));
+    const b = path.join(project, 'code', 'b');
+    write(path.join(b, 'main.py'), 'print(2)\n');
+
+    assert.equal(paths.graphIndexFile(a), path.join(project, 'system', 'graph', 'index.md'));
+    assert.notEqual(paths.graphIndexFile(b), path.join(project, 'system', 'graph', 'index.md'));
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// Parity with Swift readableGraphDir: a per-repo leftover is found after the second repo goes.
+test('graphIndexFile: a per-repo graph is found flat after the second repo is removed', () => {
+  const { base, project, repos: [a, b] } = makeProject('shrink', ['a', 'b']);
+  try {
+    write(path.join(project, 'system', 'graph', 'a', 'index.md'), '# a overview\n');
+    fs.rmSync(b, { recursive: true, force: true });
+    assert.equal(paths.graphIndexFile(a), path.join(project, 'system', 'graph', 'a', 'index.md'));
+  } finally {
+    fs.rmSync(base, { recursive: true, force: true });
+  }
+});

@@ -27,7 +27,7 @@
 //
 // Nothing here writes to a repo; writers use the project-level paths only.
 
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
 
 export const SYSTEM_DIR = 'system';
@@ -93,11 +93,45 @@ export function legacySystemMemoryDir(root) {
   return join(legacySystemDir(root), MEMORY_DIRNAME);
 }
 
-/** `<project>/system/graph/index.md` — the code graph overview. Falls back to the legacy file when only that exists. */
+/**
+ * Whether the flat project graph's `graph.json` names a file that exists in `root`.
+ * Graph paths are repo-relative, so this tells this child's graph from a sibling's.
+ */
+function flatGraphIsOf(root, flatDir) {
+  try {
+    const graph = JSON.parse(readFileSync(join(flatDir, 'graph.json'), 'utf8'));
+    return (graph.files ?? []).slice(0, 50).some((f) =>
+      typeof f?.path === 'string' && f.path !== '' && !f.path.startsWith('/')
+      && existsSync(join(root, f.path)));
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * `<project>/system/graph/index.md` — the code graph overview. Mirrors the Swift
+ * `GeneratedDataLocator.readableGraphDir`: the current location first; then the
+ * other layout (a flat graph still readable for its child after a second repo is
+ * added, or a per-repo leftover after the second repo is removed); then the
+ * pre-D1 `<repo>/system/graph/index.md`. Read-only: nothing is moved.
+ */
 export function graphIndexFile(root) {
-  const current = join(graphDir(root), 'index.md');
+  const r = resolve(root);
+  const project = projectRootOf(r);
+  const current = join(graphDir(r), 'index.md');
   if (existsSync(current)) return current;
-  const legacy = join(legacySystemDir(root), GRAPH_DIRNAME, 'index.md');
+  const flat = join(project, SYSTEM_DIR, GRAPH_DIRNAME);
+  if (r !== project) {
+    if (graphDir(r) !== flat) {
+      // Per-repo now: the flat graph is ours only if its files live in this child.
+      if (existsSync(join(flat, 'index.md')) && flatGraphIsOf(r, flat)) return join(flat, 'index.md');
+    } else {
+      // Flat now: a per-repo leftover named for this child.
+      const perChild = join(flat, basename(r), 'index.md');
+      if (existsSync(perChild)) return perChild;
+    }
+  }
+  const legacy = join(legacySystemDir(r), GRAPH_DIRNAME, 'index.md');
   return existsSync(legacy) ? legacy : current;
 }
 
