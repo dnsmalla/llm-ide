@@ -1,0 +1,168 @@
+import Foundation
+
+// MARK: - Agent history (storage report, retention, clear, compact)
+//
+// Server: extension/routes/agent-history.mjs, shapes in
+// schema/http/agent-history.schema.json. Always on (no feature gate). A real
+// clear needs the `previewId` of a dry run for the same scope and cutoff; the
+// server refuses with 400 PREVIEW_EXPIRED / PREVIEW_INVALID or 409 preview_stale,
+// and compact refuses with 409 busy, 507 disk_space or 503 AGENT_STORE_UNAVAILABLE.
+// Those arrive as `APIError.http(status:code:message:details:)`.
+
+extension LlmIdeAPIClient {
+
+    /// The two scopes a clear accepts: `raw` deletes raw rows and keeps the daily
+    /// rollups; `all` also deletes the rollups.
+    public enum AgentHistoryClearScope: String, Codable, CaseIterable, Sendable {
+        case raw
+        case all
+    }
+
+    /// One data group of the storage report. `agent_history` carries bytes (an
+    /// approximation) and the clear/compact actions; the other groups carry rows.
+    public struct StorageGroup: Codable, Equatable, Identifiable, Sendable {
+        public let key: String
+        public let label: String
+        public let rows: Int
+        public let bytes: Int?
+        public let bytesApprox: Bool?
+        public let lastCleanedAt: String?
+        public let retentionDays: Int?
+        public let actions: [String]
+
+        public var id: String { key }
+        public var canClear: Bool { actions.contains("clear") }
+        public var canCompact: Bool { actions.contains("compact") }
+    }
+
+    /// The agent store's raw/rollup summary. Null when the store is down.
+    public struct AgentHistorySummary: Codable, Equatable, Sendable {
+        public let rawFromDay: String?
+        public let rawRows: Int
+        public let rolledDays: Int
+        public let oldestDay: String?
+        public let quarantinedAt: String?
+        public let droppedRows: Int
+        public let watermark: String?
+    }
+
+    public struct AgentStoreHealth: Codable, Equatable, Sendable {
+        public let health: String   // "ok" | "degraded" | "down"
+        public let state: String    // "closed" | "ok" | "down"
+    }
+
+    /// GET /kb/storage.
+    public struct StorageReport: Codable, Equatable, Sendable {
+        public let generatedAt: String
+        public let groups: [StorageGroup]
+        public let agentHistory: AgentHistorySummary?
+        public let agentStore: AgentStoreHealth
+
+        /// The agent history group, when the server sent one.
+        public var agentHistoryGroup: StorageGroup? {
+            groups.first { $0.key == "agent_history" }
+        }
+    }
+
+    /// GET and PUT /kb/agent-history/settings. `retentionDays` is clamped by the
+    /// server to `min`...`max`.
+    public struct AgentHistorySettings: Codable, Equatable, Sendable {
+        public let retentionDays: Int
+        public let rollupKeepDays: Int
+        public let min: Int
+        public let max: Int
+    }
+
+    /// Row counts per table, as the clear reports them.
+    public struct AgentHistoryClearCounts: Codable, Equatable, Sendable {
+        public let agentRuns: Int
+        public let agentToolEvents: Int
+        public let turnComposition: Int
+        public let agentDaily: Int
+        public let agentDailyTools: Int
+
+        enum CodingKeys: String, CodingKey {
+            case agentRuns = "agent_runs"
+            case agentToolEvents = "agent_tool_events"
+            case turnComposition = "turn_composition"
+            case agentDaily = "agent_daily"
+            case agentDailyTools = "agent_daily_tools"
+        }
+    }
+
+    /// POST /kb/agent-history/clear. One model for both 200 answers: a dry run
+    /// (`dryRun: true`, `wouldDelete`, `previewId`, `expiresAt`) and a real clear
+    /// (`dryRun: false`, `deleted`). The fields of the other answer are nil.
+    public struct AgentHistoryClearResult: Codable, Equatable, Sendable {
+        public let dryRun: Bool
+        public let scope: AgentHistoryClearScope
+        public let beforeDays: Int?
+        public let wouldDelete: AgentHistoryClearCounts?
+        public let deleted: AgentHistoryClearCounts?
+        public let total: Int
+        public let previewId: String?
+        public let expiresAt: String?
+    }
+
+    /// POST /kb/agent-history/compact (200).
+    public struct AgentHistoryCompactResult: Codable, Equatable, Sendable {
+        public let ok: Bool
+        public let mode: String     // "incremental" | "full"
+        public let pagesFreed: Int
+        public let bytesBefore: Int
+        public let bytesAfter: Int
+        public let ms: Int
+    }
+
+    // MARK: - Calls
+
+    func storageReport() async throws -> StorageReport {
+        try await get("/kb/storage", authenticated: true)
+    }
+
+    func agentHistorySettings() async throws -> AgentHistorySettings {
+        try await get("/kb/agent-history/settings", authenticated: true)
+    }
+
+    /// Saves the raw-row retention. The server clamps the value to 7...365 and
+    /// answers with the value it kept, so callers show the returned one.
+    func setAgentHistoryRetention(days: Int) async throws -> AgentHistorySettings {
+        struct Req: Encodable { let retentionDays: Int }
+        return try await put("/kb/agent-history/settings", body: Req(retentionDays: days), authenticated: true)
+    }
+
+    /// Step one of a clear: counts a real clear would delete, plus the
+    /// `previewId` that authorises it (valid five minutes).
+    func previewAgentHistoryClear(scope: AgentHistoryClearScope,
+                                  beforeDays: Int? = nil) async throws -> AgentHistoryClearResult {
+        struct Req: Encodable {
+            let scope: String
+            let beforeDays: Int?
+            let dryRun: Bool
+        }
+        return try await post("/kb/agent-history/clear",
+                              body: Req(scope: scope.rawValue, beforeDays: beforeDays, dryRun: true),
+                              authenticated: true)
+    }
+
+    /// Step two of a clear. Needs the `previewId` of a dry run for the same
+    /// scope and cutoff; the server consumes it whatever the answer.
+    func performAgentHistoryClear(scope: AgentHistoryClearScope,
+                                  beforeDays: Int? = nil,
+                                  previewId: String) async throws -> AgentHistoryClearResult {
+        struct Req: Encodable {
+            let scope: String
+            let beforeDays: Int?
+            let dryRun: Bool
+            let previewId: String
+        }
+        return try await post("/kb/agent-history/clear",
+                              body: Req(scope: scope.rawValue, beforeDays: beforeDays,
+                                        dryRun: false, previewId: previewId),
+                              authenticated: true)
+    }
+
+    func compactAgentHistory() async throws -> AgentHistoryCompactResult {
+        try await post("/kb/agent-history/compact", body: EmptyBody(), authenticated: true)
+    }
+}

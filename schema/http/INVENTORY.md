@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 176 token, 12 public
 - Handler found: 186; no handler found: 2
-- No Mac and no extension caller: 39 (tests only: 26, comments/docs only: 13, no reference: 0)
+- No Mac and no extension caller: 35 (tests only: 22, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -46,7 +46,7 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (39):
+Endpoints with no client caller (35):
 
 - `/agent-sdk/spike` — tests only
 - `/kb/entity/:id` — tests only
@@ -55,10 +55,6 @@ Endpoints with no client caller (39):
 - `/kb/ingest-scip` — tests only
 - `/kb/connect-tickets-json` — comments/docs only
 - `/kb/usage/turn-composition` — tests only
-- `/kb/storage` — tests only
-- `/kb/agent-history/settings` — tests only
-- `/kb/agent-history/clear` — tests only
-- `/kb/agent-history/compact` — tests only
 - `/kb/analyze-risks` — tests only
 - `/kb/code-sync` — tests only
 - `/kb/plans` — comments/docs only
@@ -151,10 +147,10 @@ Endpoints with no client caller (39):
 | `/kb/usage/record` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1059` | `LlmIdeAPIClient+Usage.swift` | - | - |
 | `/kb/usage/ratelimits` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1044` | `LlmIdeAPIClient+Usage.swift` | - | - |
 | `/kb/usage/turn-composition` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1053` | - | - | tests only |
-| `/kb/storage` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-history.mjs:41` | - | - | tests only |
-| `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:45` | - | - | tests only |
-| `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:58` | - | - | tests only |
-| `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:89` | - | - | tests only |
+| `/kb/storage` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-history.mjs:41` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
+| `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:45` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
+| `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:58` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
+| `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:89` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
 | `/kb/generate-plan` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:34` | - | `App.tsx` | - |
 | `/kb/analyze-risks` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:60` | - | - | tests only |
 | `/kb/summarize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1096` | `LlmIdeAPIClient+Export.swift` | - | - |
@@ -283,7 +279,7 @@ Endpoints with no client caller (39):
 
 ## Consistency
 
-Checked: 188 roster entries, 719 Swift files, 46 extension source files.
+Checked: 188 roster entries, 722 Swift files, 46 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 

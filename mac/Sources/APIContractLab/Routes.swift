@@ -91,6 +91,11 @@ let apiRoutes: [Route] = [
     route("POST /kb/outcomes/refresh", "OutcomeRefreshSummary", LlmIdeAPIClient.OutcomeRefreshSummary.self),  // refreshOutcomes
     route("GET /kb/project/:id/export", "ProjectExportBundle", ProjectExportBundle.self),  // exportProject
     route("POST /kb/ingest", "[String: AnyCodable]", [String: AnyCodable].self),  // ingestMeeting
+    route("GET /kb/storage", "StorageReport", LlmIdeAPIClient.StorageReport.self),  // storageReport
+    route("GET /kb/agent-history/settings", "AgentHistorySettings", LlmIdeAPIClient.AgentHistorySettings.self),  // agentHistorySettings
+    route("PUT /kb/agent-history/settings", "AgentHistorySettings", LlmIdeAPIClient.AgentHistorySettings.self),  // setAgentHistoryRetention
+    route("POST /kb/agent-history/clear", "AgentHistoryClearResult", LlmIdeAPIClient.AgentHistoryClearResult.self),  // previewAgentHistoryClear, performAgentHistoryClear
+    route("POST /kb/agent-history/compact", "AgentHistoryCompactResult", LlmIdeAPIClient.AgentHistoryCompactResult.self),  // compactAgentHistory
 ]
 
 /// 2xx fixture endpoints this table does not decode, with the reason.
@@ -124,11 +129,6 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("GET /auth/well-known", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("GET /health", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("GET /kb/activity", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
-    ("GET /kb/agent-history/settings", "no Mac caller yet; the Settings Agent history card (Stage 1e) adds one"),
-    ("PUT /kb/agent-history/settings", "no Mac caller yet; the Settings Agent history card (Stage 1e) adds one"),
-    ("POST /kb/agent-history/clear", "no Mac caller yet; the Settings Agent history card (Stage 1e) adds one"),
-    ("POST /kb/agent-history/compact", "no Mac caller yet; the Settings Agent history card (Stage 1e) adds one"),
-    ("GET /kb/storage", "no Mac caller yet; the Settings Agent history card (Stage 1e) adds one"),
     ("GET /kb/agent/ask/history", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("GET /kb/agent/feedback/by-task", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("GET /kb/agent/feedback/stats", "no Mac caller (see schema/http/INVENTORY.md)"),
