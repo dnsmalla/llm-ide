@@ -42,11 +42,12 @@ test('agent-only tables exist with user_id and the expected keys', () => {
   assert.deepEqual(names, [
     'activity', 'activity_seen', 'agent_daily', 'agent_daily_tools', 'agent_runs',
     'agent_schema_migrations', 'agent_tool_events', 'agent_user_settings', 'store_meta', 'turn_composition',
+    'usage_calls',
   ]);
   for (const t of names.filter((n) => !n.startsWith('agent_schema') && n !== 'store_meta')) {
     assert.ok(cols(db, t).some((c) => c.startsWith('user_id:')), `${t} has no user_id`);
   }
-  assert.ok(!names.includes('usage_calls'), 'usage_calls is Stage 2');
+  assert.ok(names.includes('usage_calls'), 'usage_calls is the Stage 2a shadow');
   db.close();
 });
 
@@ -54,7 +55,7 @@ test('re-running the migrations is a no-op', () => {
   const db = new Database(path.join(tmp, 'agent-rerun.db'));
   const first = applyMigrations(db, { dir: AGENT_MIGRATIONS_DIR, table: agent.AGENT_MIGRATIONS_TABLE });
   const second = applyMigrations(db, { dir: AGENT_MIGRATIONS_DIR, table: agent.AGENT_MIGRATIONS_TABLE });
-  assert.equal(first.applied, 1);
+  assert.equal(first.applied, 2);
   assert.equal(second.applied, 0);
   db.close();
 });

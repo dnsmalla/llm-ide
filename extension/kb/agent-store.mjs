@@ -33,7 +33,7 @@ export const RUN_SOURCES = new Set(['chat', 'loop', 'meeting', 'autotask', 'disp
 // Tables that carry user_id. The user purge and the enumerator test use this.
 export const AGENT_USER_TABLES = Object.freeze([
   'agent_runs', 'agent_tool_events', 'turn_composition', 'activity', 'activity_seen',
-  'agent_daily', 'agent_daily_tools', 'agent_user_settings',
+  'agent_daily', 'agent_daily_tools', 'agent_user_settings', 'usage_calls',
 ]);
 
 const clampInt = (v) => Math.max(0, Math.min(1_000_000_000, Math.trunc(Number(v) || 0)));
@@ -363,6 +363,8 @@ export function clearHistory(userId, {
   const cutoff = beforeDays == null
     ? null
     : localDayBefore(now, Math.max(0, Math.trunc(Number(beforeDays) || 0)));
+  // usage_calls is deliberately not cleared: it is the budget ledger's shadow
+  // (Stage 2a), and a cap must not reset because history was cleared.
   const tables = ['agent_runs', 'agent_tool_events', 'turn_composition'];
   if (scope === 'all') tables.push('agent_daily', 'agent_daily_tools');
   const counts = { agent_runs: 0, agent_tool_events: 0, turn_composition: 0, agent_daily: 0, agent_daily_tools: 0 };
