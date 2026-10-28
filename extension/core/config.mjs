@@ -14,6 +14,7 @@ import os from 'os';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveDataLayout, getDataDirOverride } from './data-dir.mjs';
+import { loadDevSecrets } from './dev-secrets.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -124,6 +125,41 @@ export function parseFeatures(raw, warn = console.warn) {
   return readOnlySet(enabled);
 }
 
+// The per-process test DB (see `dbPath` below) is removed when the test
+// process exits, so `npm test` leaves nothing behind in the temp dir.
+const TEST_DB_PATH = process.env.NODE_TEST_CONTEXT && !process.env.LLMIDE_DB_PATH
+  ? path.join(os.tmpdir(), `llmide-test-${process.pid}.db`)
+  : null;
+if (TEST_DB_PATH) {
+  process.once('exit', () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.rmSync(TEST_DB_PATH + suffix, { force: true }); } catch { /* best effort */ }
+    }
+  });
+}
+
+// Every per-install data location, resolved once (core/data-dir.mjs documents
+// the precedence: individual env vars > test isolation > LLMIDE_DATA_DIR >
+// the repo kb default). The boot migration may have forced the repo kb.
+const IS_TEST_RUN = Boolean(process.env.NODE_TEST_CONTEXT);
+const DATA_LAYOUT = resolveDataLayout({
+  env: process.env,
+  root: ROOT,
+  legacyLogFile: path.join(ROOT, 'extension', 'kb', 'server.log'),
+  testDbPath: TEST_DB_PATH,
+  isTest: IS_TEST_RUN,
+  dataDirOverride: getDataDirOverride(),
+});
+const MAIN_DB_PATH = DATA_LAYOUT.dbPath;
+// agent.db removal at test exit, like the main test DB.
+if (IS_TEST_RUN && !process.env.LLMIDE_AGENT_DB_PATH) {
+  process.once('exit', () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.rmSync(DATA_LAYOUT.agentDbPath + suffix, { force: true }); } catch { /* best effort */ }
+    }
+  });
+}
+
 // --- Secrets -------------------------------------------------------------
 //
 // JWT_SECRET signs access + refresh tokens.  VAULT_KEY derives per-user
@@ -136,20 +172,14 @@ export function parseFeatures(raw, warn = console.warn) {
 // must set the env vars explicitly so secrets live in the deployment
 // platform's secret store, not on disk in the repo directory.
 
+// Dev secrets: the system data dir when one is set (the boot migration copies
+// the legacy file there), else <repo>/kb. See core/dev-secrets.mjs.
+const LEGACY_DEV_SECRETS_FILE = path.join(ROOT, 'kb', '.dev-secrets.json');
 function persistedDevSecrets() {
-  const file = path.join(ROOT, 'kb', '.dev-secrets.json');
-  try {
-    if (fs.existsSync(file)) return JSON.parse(fs.readFileSync(file, 'utf8'));
-  } catch { /* fall through to regen */ }
-  const fresh = {
-    jwtSecret:  crypto.randomBytes(48).toString('base64url'),
-    vaultKey:   crypto.randomBytes(48).toString('base64url'),
-  };
-  try {
-    fs.mkdirSync(path.dirname(file), { recursive: true });
-    fs.writeFileSync(file, JSON.stringify(fresh, null, 2), { mode: 0o600 });
-  } catch { /* ignore — we still return the value in-memory */ }
-  return fresh;
+  const primaryFile = DATA_LAYOUT.dataDir
+    ? path.join(DATA_LAYOUT.dataDir, '.dev-secrets.json')
+    : LEGACY_DEV_SECRETS_FILE;
+  return loadDevSecrets({ primaryFile, legacyFile: LEGACY_DEV_SECRETS_FILE });
 }
 
 const isProd = (envStr('NODE_ENV', 'development') === 'production');
@@ -193,41 +223,6 @@ if (_jwtSecretPrevious && _jwtSecretPrevious.length < 32) {
 const _bcryptCost = envInt('LLMIDE_BCRYPT_COST', 12);
 if (_bcryptCost < 10 || _bcryptCost > 14) {
   throw new Error(`LLMIDE_BCRYPT_COST must be between 10 and 14 (got ${_bcryptCost})`);
-}
-
-// The per-process test DB (see `dbPath` below) is removed when the test
-// process exits, so `npm test` leaves nothing behind in the temp dir.
-const TEST_DB_PATH = process.env.NODE_TEST_CONTEXT && !process.env.LLMIDE_DB_PATH
-  ? path.join(os.tmpdir(), `llmide-test-${process.pid}.db`)
-  : null;
-if (TEST_DB_PATH) {
-  process.once('exit', () => {
-    for (const suffix of ['', '-wal', '-shm']) {
-      try { fs.rmSync(TEST_DB_PATH + suffix, { force: true }); } catch { /* best effort */ }
-    }
-  });
-}
-
-// Every per-install data location, resolved once (core/data-dir.mjs documents
-// the precedence: individual env vars > test isolation > LLMIDE_DATA_DIR >
-// the repo kb default). The boot migration may have forced the repo kb.
-const IS_TEST_RUN = Boolean(process.env.NODE_TEST_CONTEXT);
-const DATA_LAYOUT = resolveDataLayout({
-  env: process.env,
-  root: ROOT,
-  legacyLogFile: path.join(ROOT, 'extension', 'kb', 'server.log'),
-  testDbPath: TEST_DB_PATH,
-  isTest: IS_TEST_RUN,
-  dataDirOverride: getDataDirOverride(),
-});
-const MAIN_DB_PATH = DATA_LAYOUT.dbPath;
-// agent.db removal at test exit, like the main test DB.
-if (IS_TEST_RUN && !process.env.LLMIDE_AGENT_DB_PATH) {
-  process.once('exit', () => {
-    for (const suffix of ['', '-wal', '-shm']) {
-      try { fs.rmSync(DATA_LAYOUT.agentDbPath + suffix, { force: true }); } catch { /* best effort */ }
-    }
-  });
 }
 
 export const config = Object.freeze({
