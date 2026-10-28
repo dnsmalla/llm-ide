@@ -61,7 +61,7 @@ if graphIncluded {
         "CodeGraphCitationUploadTests.swift",
         "CodeNoteGeneratorCallsTests.swift",
         "CodeNoteGeneratorKindsTests.swift",
-        "AnalyzePhaseArgumentsTests.swift",
+        "AnalyzePhaseTests.swift",
         "CodeNoteServiceSupersedeTests.swift",
     ])
 }
