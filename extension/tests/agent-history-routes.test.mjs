@@ -358,3 +358,32 @@ test('compact re-checks the guard during its slices: a run that starts mid-compa
   assert.equal(result.reason, 'busy');
   assert.ok(calls >= 2, 'the guard was checked again inside the loop');
 });
+
+test('the all-users row total is cached for a short TTL and dropped by bulk changes', () => {
+  freshAgent();
+  const handle = agent.getAgentDb();
+  const tables = ['agent_runs', 'agent_tool_events', 'turn_composition', 'activity', 'agent_daily', 'agent_daily_tools'];
+  store.invalidateStorageTotals();
+  const t0 = Date.now();
+  const first = store.globalRowTotals(handle, tables, t0);
+  // A direct insert (no store API, so no invalidation) is not seen within the TTL...
+  handle.prepare("INSERT INTO agent_runs (run_id, user_id, day, source, started_at) VALUES ('cache-1', 'someone', '2026-10-28', 'chat', '2026-10-28T00:00:00Z')").run();
+  assert.equal(store.globalRowTotals(handle, tables, t0 + 1000), first, 'cached within the TTL');
+  // ...and is seen after the TTL, or after a bulk change.
+  assert.equal(store.globalRowTotals(handle, tables, t0 + store.TOTALS_TTL_MS + 1), first + 1, 'recounted after the TTL');
+  store.invalidateStorageTotals();
+  assert.equal(store.globalRowTotals(handle, tables, t0 + 2000), first + 1, 'recounted after an invalidation');
+  // A clear invalidates by itself.
+  handle.prepare("INSERT INTO agent_runs (run_id, user_id, day, source, started_at) VALUES ('cache-2', 'someone', '2026-10-28', 'chat', '2026-10-28T00:00:00Z')").run();
+  store.clearHistory('nobody-here', { scope: 'raw', dryRun: false });
+  assert.equal(store.globalRowTotals(handle, tables, t0 + 2001), first + 2, 'a clear drops the cached total');
+});
+
+test('the per-user storage counts use an index on user_id, not a table scan', () => {
+  freshAgent();
+  const handle = agent.getAgentDb();
+  for (const t of ['agent_runs', 'agent_tool_events', 'turn_composition', 'activity', 'agent_daily', 'agent_daily_tools']) {
+    const plan = handle.prepare(`EXPLAIN QUERY PLAN SELECT COUNT(*) FROM ${t} WHERE user_id = ?`).all('u').map((r) => r.detail).join(' | ');
+    assert.match(plan, /USING (COVERING )?INDEX|PRIMARY KEY/, `${t}: ${plan}`);
+  }
+});

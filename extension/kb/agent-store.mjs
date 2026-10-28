@@ -307,6 +307,7 @@ export function rollupAll({ db, now = new Date() } = {}) {
     const { retentionDays } = getRetentionSettings(userId, { db: handle });
     users.push({ userId, ...rollupOlderThan(userId, retentionDays, { db: handle, now }) });
   }
+  invalidateStorageTotals();
   writeMeta(handle, 'last_rollup_at', now.toISOString());
   return { ok: true, users };
 }
@@ -365,7 +366,7 @@ export function clearHistory(userId, {
   const tables = ['agent_runs', 'agent_tool_events', 'turn_composition'];
   if (scope === 'all') tables.push('agent_daily', 'agent_daily_tools');
   const counts = { agent_runs: 0, agent_tool_events: 0, turn_composition: 0, agent_daily: 0, agent_daily_tools: 0 };
-  return handle.transaction(() => {
+  const result = handle.transaction(() => {
     for (const t of tables) {
       const w = clearWhere(t, userId, cutoff);
       counts[t] = handle.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE ${w.sql}`).get(...w.args).n;
@@ -391,6 +392,8 @@ export function clearHistory(userId, {
     }
     return { dryRun: false, ok: true, deleted: counts, total };
   })();
+  invalidateStorageTotals();
+  return result;
 }
 
 // --- compact --------------------------------------------------------------
@@ -454,10 +457,34 @@ export async function compact({
   const ms = now() - started;
   if (busy) return { ok: false, reason: 'busy', mode, pagesFreed, bytesBefore, bytesAfter, ms };
   writeMeta(handle, 'last_compact_at', new Date(now()).toISOString());
+  invalidateStorageTotals();
   return { ok: true, mode, pagesFreed, bytesBefore, bytesAfter, ms };
 }
 
 // --- storage stats --------------------------------------------------------
+
+// The all-users row total behind bytesApprox is a whole-table COUNT, too slow to
+// repeat on every /kb/storage and /kb/os/state call. It is cached for a short
+// TTL, and dropped when the rows change in bulk (clear, compact, rollup, purge).
+export const TOTALS_TTL_MS = 45 * 1000;
+let totalsCache = null;   // { file, at, total }
+
+/** Drop the cached all-users total (called by every bulk change). */
+export function invalidateStorageTotals() {
+  totalsCache = null;
+}
+
+/** Sum of row counts over `tables`, all users, cached for TOTALS_TTL_MS per file. */
+export function globalRowTotals(handle, tables, nowMs = Date.now()) {
+  const file = handle.name ?? '';
+  if (totalsCache && totalsCache.file === file && nowMs - totalsCache.at < TOTALS_TTL_MS) {
+    return totalsCache.total;
+  }
+  let total = 0;
+  for (const t of tables) total += handle.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
+  totalsCache = { file, at: nowMs, total };
+  return total;
+}
 
 /**
  * Sizes and counts for the Storage hub. File sizes are exact. Per-user bytes
@@ -474,13 +501,14 @@ export function storageStats(userId, { db, now = new Date() } = {}) {
   const freelist = handle.pragma('freelist_count', { simple: true });
   const TABLES = ['agent_runs', 'agent_tool_events', 'turn_composition', 'activity', 'agent_daily', 'agent_daily_tools'];
   const rows = {};
-  let totalRows = 0;
   let userRows = 0;
   for (const t of TABLES) {
+    // Per user: index-backed (every table leads with user_id in an index).
     rows[t] = handle.prepare(`SELECT COUNT(*) AS n FROM ${t} WHERE user_id = ?`).get(userId).n;
-    totalRows += handle.prepare(`SELECT COUNT(*) AS n FROM ${t}`).get().n;
     userRows += rows[t];
   }
+  // All users: a whole-table count, cached (see globalRowTotals).
+  const totalRows = globalRowTotals(handle, TABLES, now.getTime());
   const usedBytes = Math.max(0, (pageCount - freelist) * pageSize);
   const bytesApprox = totalRows > 0 ? Math.round(usedBytes * (userRows / totalRows)) : 0;
   const rolled = handle.prepare(
@@ -539,13 +567,15 @@ export function purgeUser(userId, { db } = {}) {
   // the queue is process-wide, not per handle.
   flushAgentQueue();
   dropQueuedForUser(userId);
-  return handle.transaction(() => {
+  const result = handle.transaction(() => {
     const deleted = {};
     for (const t of AGENT_USER_TABLES) {
       deleted[t] = handle.prepare(`DELETE FROM ${t} WHERE user_id = ?`).run(userId).changes;
     }
     return { ok: true, deleted };
   })();
+  invalidateStorageTotals();
+  return result;
 }
 
 /**
