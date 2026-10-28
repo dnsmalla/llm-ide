@@ -146,3 +146,18 @@ test('token averages are scoped to the requesting user', () => {
   const s = db.summarizeToolEvents(U, { days: 7 });
   assert.equal(s.tokensWithFindCode.cacheCreation, 1000);
 });
+
+test('token averages over more than 500 turns stay correct (chunked ledger query)', () => {
+  const W = users.registerUser(db.getDb(), {
+    email: `te-many-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'w',
+  }).id;
+  for (let i = 0; i < 1200; i += 1) {
+    db.recordToolEvents(W, { turnId: `many-${i}`, engine: 'v2', events: [{ tool: 'find-code', resultChars: 1 }] });
+    recordUsage(db.getDb(), { userId: W, provider: 'anthropic', model: 'm', endpoint: '/agent/v2/stream',
+      inputTokens: 2, outputTokens: 1, cacheReadTokens: 0, cacheCreationTokens: 4, requestId: `many-${i}` });
+  }
+  const s = db.summarizeToolEvents(W, { days: 7 });
+  assert.equal(s.tokensWithFindCode.turns, 1200);
+  assert.equal(s.tokensWithFindCode.input, 2);
+  assert.equal(s.tokensWithFindCode.cacheCreation, 4);
+});

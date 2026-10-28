@@ -46,21 +46,28 @@ export function summarizeToolEventsOn(db, userId, { days = 7, engine = 'v2', led
     const ids = perTurn.filter((t) => (t.fc !== null) === hasFindCode).map((t) => t.run_id);
     if (ids.length === 0) return null;
     const ledgerUser = userId === null ? '' : ' AND user_id = ?';
-    const placeholders = ids.map(() => '?').join(', ');
-    const row = ledgerDb.prepare(
-      `SELECT COUNT(*) AS turns, AVG(i) AS input, AVG(cr) AS cacheRead,
-              AVG(cc) AS cacheCreation, AVG(o) AS output
-       FROM (SELECT request_id,
-                    SUM(COALESCE(input_tokens,0)) AS i, SUM(COALESCE(cache_read_tokens,0)) AS cr,
-                    SUM(COALESCE(cache_creation_tokens,0)) AS cc, SUM(COALESCE(output_tokens,0)) AS o
-             FROM usage_ledger
-             WHERE request_id IN (${placeholders})${ledgerUser}
-             GROUP BY request_id)`,
-    ).get(...ids, ...(userId === null ? [] : [userId]));
-    if (!row || !row.turns) return null;
+    // Chunked: one IN list per 500 ids, so a large window never hits SQLite's
+    // bound-parameter limit. Per-turn sums are collected, then averaged.
+    const perLedgerTurn = [];
+    for (let i = 0; i < ids.length; i += 500) {
+      const chunk = ids.slice(i, i + 500);
+      const placeholders = chunk.map(() => '?').join(', ');
+      const rows = ledgerDb.prepare(
+        `SELECT request_id,
+                SUM(COALESCE(input_tokens,0)) AS i, SUM(COALESCE(cache_read_tokens,0)) AS cr,
+                SUM(COALESCE(cache_creation_tokens,0)) AS cc, SUM(COALESCE(output_tokens,0)) AS o
+           FROM usage_ledger
+          WHERE request_id IN (${placeholders})${ledgerUser}
+          GROUP BY request_id`,
+      ).all(...chunk, ...(userId === null ? [] : [userId]));
+      perLedgerTurn.push(...rows);
+    }
+    if (perLedgerTurn.length === 0) return null;
+    const n = perLedgerTurn.length;
+    const mean = (k) => perLedgerTurn.reduce((a, r) => a + (r[k] || 0), 0) / n;
     const r = (v) => Math.round(v || 0);
-    return { turns: row.turns, input: r(row.input), cacheRead: r(row.cacheRead),
-      cacheCreation: r(row.cacheCreation), output: r(row.output) };
+    return { turns: n, input: r(mean('i')), cacheRead: r(mean('cr')),
+      cacheCreation: r(mean('cc')), output: r(mean('o')) };
   };
 
   return {
