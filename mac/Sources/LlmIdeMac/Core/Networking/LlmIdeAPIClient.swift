@@ -428,7 +428,8 @@ public final class LlmIdeAPIClient: @unchecked Sendable {
     func send<B: Encodable, T: Decodable>(
         path: String, method: String, body: B?, authenticated: Bool, isRetry: Bool = false,
         timeout: TimeInterval? = nil,
-        incidentFreeStatuses: Set<Int> = []
+        incidentFreeStatuses: Set<Int> = [],
+        allowRetries: Bool = true
     ) async throws -> T {
         guard let url = URL(string: baseURL + path) else { throw APIError.invalidURL }
         var req = URLRequest(url: url)
@@ -451,7 +452,7 @@ public final class LlmIdeAPIClient: @unchecked Sendable {
         // Only GETs are safe to auto-retry — re-issuing a POST/PUT/DELETE could
         // double-apply a side effect. Transient connectivity blips and transient
         // server statuses (429/502/503/504) get a bounded backoff.
-        let isGET = method == "GET"
+        let isGET = method == "GET" && allowRetries
         let maxAttempts = 3
         var attempt = 0
         while true {
@@ -479,7 +480,8 @@ public final class LlmIdeAPIClient: @unchecked Sendable {
                     let ok = await store.attemptRefresh(via: self)
                     if ok {
                         return try await send(path: path, method: method, body: body, authenticated: authenticated, isRetry: true,
-                                              timeout: timeout, incidentFreeStatuses: incidentFreeStatuses)
+                                              timeout: timeout, incidentFreeStatuses: incidentFreeStatuses,
+                                              allowRetries: allowRetries)
                     }
                 }
             }

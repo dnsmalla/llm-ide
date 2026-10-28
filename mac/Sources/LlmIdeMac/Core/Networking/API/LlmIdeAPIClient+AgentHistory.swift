@@ -125,8 +125,10 @@ extension LlmIdeAPIClient {
         try await get("/kb/storage", authenticated: true)
     }
 
+    /// No retries: a store that is down (503) is reported at once, not after the GET backoff.
     func agentHistorySettings() async throws -> AgentHistorySettings {
-        try await get("/kb/agent-history/settings", authenticated: true)
+        try await send(path: "/kb/agent-history/settings", method: "GET", body: nil as EmptyBody?,
+                       authenticated: true, allowRetries: false)
     }
 
     /// Saves the raw-row retention. The server clamps the value to 7...365 and

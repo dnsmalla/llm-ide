@@ -372,6 +372,14 @@ final class SystemBridgeStorageTests: XCTestCase {
         XCTAssertEqual(reply?.error, "bad_reply")
     }
 
+    func testSettingsReadIsNotRetriedOnStoreDown() async throws {
+        let stub = Stub { _ in (503, #"{"error":{"code":"AGENT_STORE_UNAVAILABLE","message":"down"}}"#) }
+        let reply = await SystemBridge.storageReply(.agentHistorySettings, api: try signedInClient(stub))
+        XCTAssertEqual(reply?.status, 503)
+        XCTAssertEqual(reply?.error, "AGENT_STORE_UNAVAILABLE")
+        XCTAssertEqual(stub.requests.count, 1, "one attempt: the GET backoff would have sent three")
+    }
+
     func testURLTimeoutIsTimeoutNotUnreachable() async throws {
         let stub = Stub { _ in throw URLError(.timedOut) }
         let reply = await SystemBridge.storageReply(.compactAgentHistory, api: try signedInClient(stub))
