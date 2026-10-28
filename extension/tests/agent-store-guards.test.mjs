@@ -10,8 +10,12 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const EXT = path.resolve(__dirname, '..');
 
-// Files with direct SQL on the four tables in the main DB, as of Stage 1a
-// (plan section 1.1 and 1.3). Stage 1b moves these; update the list then.
+// Files whose SQL names a ledger, turn or activity table. As of Stage 1b the
+// activity feed, tool events and turn composition LIVE in agent.db (see
+// kb/agent-db.mjs and kb/agent-store.mjs). The main-DB copies stay frozen:
+// they are read only by the one-time copy (kb/agent-history-copy.mjs) and
+// removed by the user cascade (kb/db.mjs). usage_ledger stays in the main DB
+// (Stage 2 moves it). Adding a file here means a reviewed new reader or writer.
 const INVENTORY = [
   'kb/activity.mjs',
   'kb/agent-history-copy.mjs',
@@ -28,6 +32,9 @@ const INVENTORY = [
 const SQL_RE = /\b(?:FROM|INTO|UPDATE|JOIN|TABLE)\s+(?:IF\s+(?:NOT\s+)?EXISTS\s+)?(usage_ledger|turn_tool_events|turn_composition|activity|activity_seen)\b|pragma_table_info\(\s*'(usage_ledger|turn_tool_events|turn_composition|activity)'/i;
 // The agent store's own modules use these table names in agent.db, not the
 // main DB. They are the new home, so they are not part of the inventory.
+// kb/activity.mjs, kb/tool-events.mjs and kb/turn-composition.mjs now write to
+// agent.db through the store; they stay listed while their SQL names the
+// activity / turn tables (the list is textual, not a main-DB proof).
 const AGENT_STORE_OWN = new Set(['kb/agent-db.mjs', 'kb/agent-store.mjs']);
 const SKIP_DIRS = new Set(['node_modules', 'tests', 'migrations', 'agent-migrations', 'src', 'coverage', 'ui']);
 
