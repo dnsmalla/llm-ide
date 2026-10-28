@@ -6,7 +6,9 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { pruneBackups } from '../kb/backup-retention.mjs';
-import { backupKeepFromEnv } from '../core/config.mjs';
+import { backupKeepFromEnv, backupPrunePolicy } from '../core/config.mjs';
+
+const ON = { allowed: true };
 
 let dir;
 beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'bk-retain-')); });
@@ -25,37 +27,30 @@ function seedBackups() {
 
 test('keeps the newest two and deletes the rest', () => {
   seedBackups();
-  const r = pruneBackups(dir, 2);
+  const r = pruneBackups(dir, 2, ON);
   assert.deepEqual(r.kept.sort(), ['data-1700000004.db', 'data-1700000005.db']);
   assert.equal(r.deleted.length, 3);
   assert.deepEqual(fs.readdirSync(dir).sort(), ['data-1700000004.db', 'data-1700000005.db']);
 });
 
-test('deletes only files matching the backup name pattern and only regular files', () => {
+test('subdirectories named like backups are never deleted or counted', () => {
   seedBackups();
-  fs.writeFileSync(path.join(dir, 'notes.txt'), 'keep me');
-  fs.writeFileSync(path.join(dir, 'data-x.db'), 'keep me');
-  fs.writeFileSync(path.join(dir, 'data-1700000001.db.bak'), 'keep me');
-  fs.writeFileSync(path.join(dir, 'data-1700000001.db-wal'), 'keep me');
   fs.mkdirSync(path.join(dir, 'data-9999999999.db'));
   fs.writeFileSync(path.join(dir, 'data-9999999999.db', 'inside.txt'), 'keep me');
-  pruneBackups(dir, 1);
-  const left = fs.readdirSync(dir).sort();
-  for (const keep of ['notes.txt', 'data-x.db', 'data-1700000001.db.bak', 'data-1700000001.db-wal', 'data-9999999999.db']) {
-    assert.ok(left.includes(keep), `${keep} must survive`);
-  }
+  const r = pruneBackups(dir, 1, ON);
+  assert.equal(r.skipped, null);
+  assert.equal(r.deleted.length, 4);
   assert.ok(fs.existsSync(path.join(dir, 'data-9999999999.db', 'inside.txt')));
-  assert.equal(left.filter((n) => /^data-\d+\.db$/.test(n) && fs.statSync(path.join(dir, n)).isFile()).length, 1);
 });
 
 test('keep is never below one', () => {
   seedBackups();
-  assert.equal(pruneBackups(dir, 0).kept.length, 1);
+  assert.equal(pruneBackups(dir, 0, ON).kept.length, 1);
 });
 
 test('a missing directory is a no-op', () => {
-  const r = pruneBackups(path.join(dir, 'nope'), 2);
-  assert.deepEqual(r, { kept: [], deleted: [], failed: [] });
+  const r = pruneBackups(path.join(dir, 'nope'), 2, ON);
+  assert.deepEqual(r, { kept: [], deleted: [], failed: [], skipped: null });
 });
 
 test('LLMIDE_BACKUP_KEEP parses to an integer of at least 1, default 2', () => {
@@ -66,4 +61,28 @@ test('LLMIDE_BACKUP_KEEP parses to an integer of at least 1, default 2', () => {
   assert.equal(backupKeepFromEnv('2.9'), 2);
   assert.equal(backupKeepFromEnv('0'), 1);
   assert.equal(backupKeepFromEnv('-4'), 1);
+});
+
+test('nothing is deleted unless the policy allows it', () => {
+  seedBackups();
+  const r = pruneBackups(dir, 1, { allowed: false, reason: 'repo-kb layout never prunes' });
+  assert.equal(r.skipped, 'repo-kb layout never prunes');
+  assert.equal(fs.readdirSync(dir).length, 5);
+});
+
+test('a directory holding any other regular file is not pruned at all', () => {
+  seedBackups();
+  fs.writeFileSync(path.join(dir, 'MOVED-TO-APP-SUPPORT.txt'), 'a notice, not a backup');
+  const r = pruneBackups(dir, 1, ON);
+  assert.match(r.skipped, /other files/);
+  assert.equal(r.deleted.length, 0);
+  assert.equal(fs.readdirSync(dir).length, 6);
+});
+
+test('the prune policy: system always, custom only with both explicit settings, repo-kb never', () => {
+  assert.equal(backupPrunePolicy({ location: 'system', backupDirSet: false, keepSet: false }).prune, true);
+  assert.equal(backupPrunePolicy({ location: 'repo-kb', backupDirSet: true, keepSet: true }).prune, false);
+  assert.equal(backupPrunePolicy({ location: 'custom', backupDirSet: false, keepSet: true }).prune, false);
+  assert.equal(backupPrunePolicy({ location: 'custom', backupDirSet: true, keepSet: false }).prune, false);
+  assert.equal(backupPrunePolicy({ location: 'custom', backupDirSet: true, keepSet: true }).prune, true);
 });

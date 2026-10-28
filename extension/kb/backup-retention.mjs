@@ -12,20 +12,25 @@ export const DEFAULT_BACKUP_KEEP = 2;
 
 /**
  * Delete all but the newest `keep` matching backups in `dir` (newest by mtime,
- * then by name). Returns what was kept and what was deleted.
+ * then by name). `allowed` is the policy decision from config.backupPrune; when
+ * it is false nothing is touched. A directory that holds any other regular file
+ * is not this server's backup directory, so it is left alone as well.
  */
-export function pruneBackups(dir, keep = DEFAULT_BACKUP_KEEP) {
+export function pruneBackups(dir, keep = DEFAULT_BACKUP_KEEP, { allowed = false, reason = 'not allowed' } = {}) {
   const limit = Math.max(1, Math.floor(keep));
-  const result = { kept: [], deleted: [], failed: [] };
+  const result = { kept: [], deleted: [], failed: [], skipped: null };
+  if (!allowed) return { ...result, skipped: reason };
   if (!fs.existsSync(dir)) return result;
   const candidates = [];
+  const foreign = [];
   for (const name of fs.readdirSync(dir)) {
-    if (!BACKUP_FILE_RE.test(name)) continue;
     const full = path.join(dir, name);
     const st = fs.statSync(full);
     if (!st.isFile()) continue;
+    if (!BACKUP_FILE_RE.test(name)) { foreign.push(name); continue; }
     candidates.push({ name, full, mtimeMs: st.mtimeMs });
   }
+  if (foreign.length) return { ...result, skipped: `directory holds other files (${foreign.join(', ')}); not pruned` };
   candidates.sort((a, b) => (b.mtimeMs - a.mtimeMs) || (a.name < b.name ? 1 : -1));
   result.kept = candidates.slice(0, limit).map((c) => c.name);
   for (const old of candidates.slice(limit)) {

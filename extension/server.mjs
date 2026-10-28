@@ -782,8 +782,9 @@ const server = http.createServer(async (req, res) => {
       backupTo(target);
       const stat = fs.statSync(target);
       reqLog.info('db_backup_created', { path: target, bytes: stat.size });
-      const pruned = pruneBackups(targetDir, config.backupKeep);
+      const pruned = pruneBackups(targetDir, config.backupKeep, { allowed: config.backupPrune.prune, reason: config.backupPrune.reason });
       for (const file of pruned.deleted) reqLog.info('db_backup_pruned', { file });
+      if (pruned.skipped) reqLog.warn('db_backup_prune_skipped', { reason: pruned.skipped });
       sendJSON(res, 200, { ok: true, path: target, bytes: stat.size });
     } catch (err) {
       reqLog.error('db_backup_failed', { error: err.message });
@@ -1132,8 +1133,9 @@ function runAutoBackup() {
     const stat = fs.statSync(target);
     logger.info('auto_backup_created', { path: target, bytes: stat.size });
 
-    const pruned = pruneBackups(backupDir, config.backupKeep);
+    const pruned = pruneBackups(backupDir, config.backupKeep, { allowed: config.backupPrune.prune, reason: config.backupPrune.reason });
     for (const file of pruned.deleted) logger.info('auto_backup_pruned', { file });
+    if (pruned.skipped) logger.warn('auto_backup_prune_skipped', { reason: pruned.skipped });
     for (const f of pruned.failed) logger.warn('auto_backup_prune_failed', { file: f.name, error: f.error });
   } catch (err) {
     logger.error('auto_backup_failed', { error: err.message });

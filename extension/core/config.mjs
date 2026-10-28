@@ -191,6 +191,19 @@ export function backupKeepFromEnv(raw) {
   return Math.max(1, Math.floor(n));
 }
 
+// Whether the server may delete old backups (kb/backup-retention.mjs). Never in
+// the repo-kb layout: there the backup directory is the checkout's kb/backups,
+// which holds the pre-move copies and anything else a person put there. In the
+// system layout it is the data dir's own backups/. In a custom layout (an
+// explicit LLMIDE_DB_PATH) only an explicit LLMIDE_BACKUP_DIR plus an explicit
+// LLMIDE_BACKUP_KEEP opt in.
+export function backupPrunePolicy({ location, backupDirSet, keepSet }) {
+  if (location === 'repo-kb') return { prune: false, reason: 'repo-kb layout never prunes' };
+  if (location === 'system') return { prune: true, reason: 'system data dir backups/' };
+  if (backupDirSet && keepSet) return { prune: true, reason: 'explicit LLMIDE_BACKUP_DIR and LLMIDE_BACKUP_KEEP' };
+  return { prune: false, reason: 'custom layout without explicit LLMIDE_BACKUP_DIR and LLMIDE_BACKUP_KEEP' };
+}
+
 const isProd = (envStr('NODE_ENV', 'development') === 'production');
 
 let _jwtSecret = envStr('LLMIDE_JWT_SECRET');
@@ -276,6 +289,11 @@ export const config = Object.freeze({
   backupDir:    DATA_LAYOUT.backupDir,
   // Newest server backups kept; older data-<unix>.db files in backupDir are deleted.
   backupKeep:   backupKeepFromEnv(process.env.LLMIDE_BACKUP_KEEP),
+  backupPrune:  backupPrunePolicy({
+    location: DATA_LAYOUT.location,
+    backupDirSet: Boolean(envStr('LLMIDE_BACKUP_DIR')),
+    keepSet: (process.env.LLMIDE_BACKUP_KEEP ?? '').trim() !== '',
+  }),
   agentSdkDir:  DATA_LAYOUT.agentSdkDir,
   logFile:      DATA_LAYOUT.logFile,
 
