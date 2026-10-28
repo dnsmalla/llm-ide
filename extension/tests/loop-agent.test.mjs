@@ -725,6 +725,22 @@ test('runLoopAgent: reports every tool call in order — name, result size, deni
   ]);
 }));
 
+test('route: a Loop step is one agent.db run, closed ok with its totals', async () => {
+  const u = newUser();
+  addUserRepo(u.id, REPO);
+  await withKey(() => handleLoopAgentRoutes(
+    makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), makeRes(), { userId: u.id },
+    { runAgent: (args) => runLoopAgent({ ...args, queryFactory: toolStreamQuery() }, noSkill) },
+  ));
+  const runs = agentReadDb().prepare('SELECT source, engine, status, tool_calls, input_tokens FROM agent_runs WHERE user_id = ?').all(u.id);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].source, 'loop');
+  assert.equal(runs[0].engine, 'loop');
+  assert.equal(runs[0].status, 'ok');
+  assert.equal(runs[0].tool_calls, 3);
+  assert.equal(runs[0].input_tokens, 3);
+});
+
 test('route: a run\'s tool calls land in turn_tool_events under engine loop, keyed to its ledger rows', async () => {
   const db = getDb();
   const u = newUser();

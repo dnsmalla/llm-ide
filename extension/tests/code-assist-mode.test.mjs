@@ -140,6 +140,14 @@ test('POST /code-assist (buffered) threads body.mode into handleCodeAssist and r
     // return value.
     assert.equal(json.mode, 'plan');
     assert.match(json.reply, /plan/i);
+    // Stage 1b: the turn is one agent.db run (engine legacy, source chat), closed ok.
+    const { getAgentDb, flushAgentQueue } = await import('../kb/agent-db.mjs');
+    flushAgentQueue();
+    const runs = getAgentDb().prepare("SELECT source, engine, status, mode FROM agent_runs WHERE user_id = ? AND engine = 'legacy'").all(u.id);
+    assert.equal(runs.length, 1, 'one legacy run row for the turn');
+    assert.equal(runs[0].source, 'chat');
+    assert.equal(runs[0].status, 'ok');
+    assert.equal(runs[0].mode, 'plan');
   } finally {
     globalThis.fetch = savedFetch;
     if (savedKey === undefined) delete process.env.ANTHROPIC_API_KEY;

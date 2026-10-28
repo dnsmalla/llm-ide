@@ -68,6 +68,28 @@ test('dispatchAgent is idempotent — second call returns attached:false reason:
   await meetingAgent.stopAgent({ userId: 'user-1', sessionId: 'sess-X' });
 });
 
+test('a meeting-agent attach is one agent.db run: opened on attach, closed cancelled on stop', async () => {
+  reset();
+  const { getAgentDb, flushAgentQueue, closeAgentDb } = await import('../kb/agent-db.mjs');
+  closeAgentDb();
+  const meetingRuns = (status) => {
+    flushAgentQueue();
+    return getAgentDb().prepare("SELECT status, source FROM agent_runs WHERE user_id = 'user-1' AND engine = 'meeting' AND status = ?").all(status);
+  };
+  const runningBefore = meetingRuns('running').length;
+  liveSessions.appendCaptions('user-1', 'sess-run', [
+    { speaker: 'Alice', text: 'hi', ts: Date.now(), source: 'extension-cc' },
+  ]);
+  await meetingAgent.dispatchAgent({ userId: 'user-1', sessionId: 'sess-run' });
+  await meetingAgent.dispatchAgent({ userId: 'user-1', sessionId: 'sess-run' });   // idempotent: no second run
+  const open = meetingRuns('running');
+  assert.equal(open.length, runningBefore + 1, 'one new running run for the attach');
+  assert.equal(open[open.length - 1].source, 'meeting');
+  await meetingAgent.stopAgent({ userId: 'user-1', sessionId: 'sess-run' });
+  assert.equal(meetingRuns('running').length, runningBefore, 'the stop closes it');
+  assert.ok(meetingRuns('cancelled').length >= 1);
+});
+
 test('stopAgent rejects ownership mismatch', async () => {
   reset();
   liveSessions.appendCaptions('user-1', 'sess-Y', [

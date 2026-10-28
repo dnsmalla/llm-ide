@@ -34,6 +34,7 @@ import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
 import { makeSecretReader } from '../../server/vault.mjs';
 import { getDb, recordToolEvents } from '../../kb/db.mjs';
 import { randomUUID } from 'node:crypto';
+import { beginAgentRun } from '../../kb/agent-runs.mjs';
 import { memoryPushEvent } from './memory-push-event.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
@@ -126,7 +127,29 @@ function providerRefusal(message) {
   return Object.assign(new Error(message), { code: 'PROVIDER_UNAVAILABLE' });
 }
 
-export async function handleCodeAssist({
+// One legacy code-assist turn, recorded as an agent.db run (plan 2.5, engine
+// 'legacy'). The wrapper owns the run row; runCodeAssistTurn is the turn.
+export async function handleCodeAssist(args) {
+  const runId = randomUUID();
+  const agentRun = beginAgentRun(args.userId, {
+    runId, source: 'chat', engine: 'legacy', mode: args.mode ?? null,
+    provider: args.provider ?? null, model: args.model ?? null,
+  });
+  try {
+    const out = await runCodeAssistTurn({ ...args, runId });
+    agentRun.finish({ status: args.signal?.aborted ? 'cancelled' : 'ok' });
+    return out;
+  } catch (err) {
+    agentRun.finish({
+      status: args.signal?.aborted ? 'cancelled' : 'error',
+      errorCode: err?.code || 'ENGINE_ERROR',
+    });
+    throw err;
+  }
+}
+
+async function runCodeAssistTurn({
+  runId,                    // the agent.db run id (this turn's tool events key)
   message,
   history,
   agentContext,             // arrives from the client; ONLY internal consumes it
@@ -702,7 +725,7 @@ export async function handleCodeAssist({
   // user can judge whether the always-on memory block is worth its tokens).
   const memoryUsage = { chars: memoryChars, approxTokens: Math.round(memoryChars / 4), hasChatMemory: memoryHasChat };
   // Best-effort; never breaks code-assist (recordToolEvents swallows errors).
-  recordToolEvents(userId, { turnId: randomUUID(), engine: 'legacy', events: memoryPushEvent(memoryChars) });
+  recordToolEvents(userId, { turnId: runId, engine: 'legacy', events: memoryPushEvent(memoryChars) });
   // A restricted mode (plan/assist_plan/review/document) can never resolve a pending
   // task — task-create/task-update are excluded from its tool allowlist,
   // and its persona forbids acting on one. Without this gate, a stale task

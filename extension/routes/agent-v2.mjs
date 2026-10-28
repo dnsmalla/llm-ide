@@ -35,6 +35,7 @@ import { randomUUID } from 'node:crypto';
 import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { recordToolEvents } from '../kb/tool-events.mjs';
 import { recordTurnComposition } from '../kb/turn-composition.mjs';
+import { beginAgentRun, runTotals } from '../kb/agent-runs.mjs';
 import { isSdkUpdating } from '../llm_agent/sdk/updater.mjs';
 import { isPluginUpdating } from '../plugins/claude-update.mjs';
 import { sendJSON, readBody, parseJSON, readJsonObjectOr400, onClientDisconnect } from '../core/utils.mjs';
@@ -499,6 +500,10 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // Joins this turn's tool accounting (turn_tool_events) to its ledger rows
   // (usage_ledger.request_id), which were written with no request id before.
   const turnId = randomUUID();
+  // agent.db run row (plan 2.5): run_id = turn id. Closed once, after the turn.
+  const agentRun = beginAgentRun(userId, { runId: turnId, source: 'chat', engine: 'v2', mode, provider, model });
+  let runUsage = null;
+  let runErrorCode = null;
   const toolAccounting = createToolAccounting();
   // Time to the first streamed text — what the user actually waits for.
   let firstTokenMs = null;
@@ -592,6 +597,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       allowAmbientAuth: true,
     });
     turnComposition = composition ?? null;
+    runUsage = usageTotals ?? null;
     // Success bookkeeping: bind/refresh the mapping with the session the
     // stream reported, then meter the turn. The engine-resolved model wins
     // over the client's request (the SDK resolves defaults/fallbacks); with
@@ -610,6 +616,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     const { tasks: currentTasks, continueNeeded } = taskTurnResponse(userId, agentContext, mode);
     send({ type: 'tasks', tasks: currentTasks, continueNeeded });
   } catch (err) {
+    runErrorCode = err?.code || 'ENGINE_ERROR';
     if (err?.code === 'SESSION_UNRESUMABLE') {
       // The resumed SDK session is gone (pruned/cleared). Terminal error
       // event carrying the code — the stream has already started, so the
@@ -650,6 +657,13 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     const toolResultChars = toolEvents.reduce((n, e) => n + (Number(e?.resultChars) || 0), 0);
     recordTurnComposition(userId, { ...turnComposition, turnId, toolResultChars });
   }
+  agentRun.finish({
+    ...runTotals(runUsage),
+    status: ac.signal.aborted ? 'cancelled' : (runErrorCode ? 'error' : 'ok'),
+    toolCalls: toolEvents.length,
+    stopReason: runUsage?.stopReason ?? null,
+    errorCode: runErrorCode,
+  });
   const totalMs = Date.now() - turnStartedAt;
   recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
   log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });

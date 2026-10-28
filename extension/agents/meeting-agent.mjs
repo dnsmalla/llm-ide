@@ -18,6 +18,8 @@ import { draftQuestion } from './agent-prompt.mjs';
 import { getPlan, getAgentPersona } from '../kb/db.mjs';
 import { logger as _agentLog } from '../core/logger.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
+import { randomUUID } from 'node:crypto';
+import { beginAgentRun } from '../kb/agent-runs.mjs';
 
 const log = _agentLog.child ? _agentLog.child({ component: 'meeting-agent' }) : _agentLog;
 
@@ -213,6 +215,8 @@ export async function dispatchAgent({
     language,
   });
   runs.set(resolvedSessionId, run);
+  // agent.db run row (plan 2.5): one per attached session, closed where the run leaves `runs`.
+  run.agentRun = beginAgentRun(userId, { runId: randomUUID(), source: 'meeting', engine: 'meeting', model: null });
   emitOsEvent(userId, 'agent-run');
 
   // Surface the attachment as a system caption so both UIs flip to
@@ -322,6 +326,7 @@ export async function stopAgent({ userId, sessionId }) {
   // session ends when the capturing client (extension/Mac app)
   // stops recording — that's when /kb/live/<id>/finalize is called.
   runs.delete(sessionId);
+  run.agentRun?.finish({ status: 'cancelled' });
   emitOsEvent(userId, 'agent-run');
   return { stopped: true };
 }
@@ -402,6 +407,7 @@ async function tickRun(run) {
     recordDecision(run, 'capture-stopped');
     stopQuestionLoop(run);
     runs.delete(run.sessionId);
+    run.agentRun?.finish({ status: 'ok' });
     emitOsEvent(run.userId, 'agent-run');
     return;
   }
@@ -568,6 +574,7 @@ export function stopAllAgents() {
   for (const r of runs.values()) {
     r.finalizing = true;       // in-flight tick will skip publish
     stopQuestionLoop(r);
+    r.agentRun?.finish({ status: 'aborted' });   // server shutdown
   }
   runs.clear();
   return true;

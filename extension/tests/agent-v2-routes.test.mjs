@@ -1377,6 +1377,28 @@ test('stream: tool events and ledger rows share one turn id (the measurement joi
   assert.ok(ledger.every((r) => r.request_id === ev[0].turn_id));
 });
 
+test('stream: a v2 turn is one agent.db run, keyed by its turn id, closed with its totals', async () => {
+  const user = newUser('v2route-run@example.com');
+  const fakeTurn = async ({ onEvent }) => {
+    onEvent({ type: 'init', sessionId: 'sdk-run', claudeCodeVersion: '2.1.234', tools: [], capabilities: [] });
+    onEvent({ type: 'tool_use_start', index: 0, id: 'tu-run', name: 'Read' });
+    onEvent({ type: 'tool_result', toolUseId: 'tu-run', isError: false, text: 'abc', truncated: false });
+    return { result: { subtype: 'success' }, usageTotals: { inputTokens: 7, outputTokens: 3, stopReason: 'end_turn' } };
+  };
+  await handleAgentV2Routes(toolTurnReq(user, 'chat-run'), makeRes(), { runTurn: fakeTurn });
+  const runs = agentReadDb().prepare('SELECT run_id, source, engine, status, tool_calls, input_tokens, output_tokens, stop_reason FROM agent_runs WHERE user_id = ?').all(user.id);
+  assert.equal(runs.length, 1, 'one run per turn');
+  const ev = agentReadDb().prepare('SELECT DISTINCT run_id FROM agent_tool_events WHERE user_id = ?').all(user.id);
+  assert.equal(runs[0].run_id, ev[0].run_id, 'tool events key to the run');
+  assert.equal(runs[0].source, 'chat');
+  assert.equal(runs[0].engine, 'v2');
+  assert.equal(runs[0].status, 'ok');
+  assert.equal(runs[0].tool_calls, 1);
+  assert.equal(runs[0].input_tokens, 7);
+  assert.equal(runs[0].output_tokens, 3);
+  assert.equal(runs[0].stop_reason, 'end_turn');
+});
+
 test('stream: the turn\'s prompt composition is stored under the same turn id as its ledger rows', async () => {
   const db = getDb();
   const user = newUser('v2route-composition@example.com');

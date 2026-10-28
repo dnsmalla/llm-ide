@@ -28,6 +28,7 @@ import { randomUUID } from 'node:crypto';
 import { AGENT_SDK_PROVIDER, MAX_LOOP_MESSAGE_CHARS } from '../llm_agent/sdk/constants.mjs';
 import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { getDb, recordToolEvents } from '../kb/db.mjs';
+import { beginAgentRun, runTotals } from '../kb/agent-runs.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 
 const MAX_SKILL_IDS = 5;
@@ -155,6 +156,11 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
   // the SDK needs to kill its CLI subprocess.
   const ac = new AbortController();
   const turnId = randomUUID();
+  // agent.db run row (plan 2.5): run_id = turnId. Closed once, in the finally.
+  const agentRun = beginAgentRun(userId, { runId: turnId, source: 'loop', engine: 'loop', provider: meteredProvider, model: model ?? null });
+  let runOut = null;          // a finished run's output, or a cut-off run's partial usage
+  let runStatus = 'error';
+  let runErrorCode = null;
   let timedOut = false;
   const timer = setTimeout(() => { timedOut = true; ac.abort(); }, timeoutMs);
   onClientDisconnect(req, res, () => ac.abort());
@@ -181,6 +187,8 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
       ...out,
       resultSubtype: out.resultSubtype ?? (timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : null)),
     }, model, turnId, meteredProvider);
+    runOut = out;
+    runStatus = timedOut ? 'aborted' : (ac.signal.aborted ? 'cancelled' : 'ok');
     if (ac.signal.aborted && !timedOut) return true; // client gone — nobody to answer
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
@@ -206,6 +214,9 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     // Why it was cut off, so "hit the cap" and "timed out" can be told apart later.
     const cutOffReason = timedOut ? 'timeout' : (ac.signal.aborted ? 'aborted' : 'error');
     if (err?.partialUsage) meterRun(userId, { ...err.partialUsage, ran: true, resultSubtype: cutOffReason }, model, turnId, meteredProvider);
+    runOut = err?.partialUsage ? { usage: err.partialUsage } : null;
+    runStatus = timedOut ? 'aborted' : (ac.signal.aborted ? 'cancelled' : 'error');
+    runErrorCode = err?.code || 'ENGINE_ERROR';
     if (timedOut) {
       sendJSON(res, 504, { error: { code: 'AGENT_RUN_TIMEOUT', message: `The agent run exceeded ${timeoutMs} ms` } });
     } else if (ac.signal.aborted) {
@@ -222,6 +233,13 @@ export async function handleLoopAgentRoutes(req, res, { userId } = {}, deps = {}
     }
   } finally {
     clearTimeout(timer);
+    agentRun.finish({
+      ...runTotals(runOut?.usage),
+      status: runStatus,
+      toolCalls: Array.isArray(runOut?.toolEvents) ? runOut.toolEvents.length : 0,
+      stopReason: runOut?.resultSubtype ?? null,
+      errorCode: runStatus === 'error' ? runErrorCode : null,
+    });
   }
   return true;
 }
