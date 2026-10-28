@@ -202,6 +202,7 @@ if autoTasksIncluded {
         "LoopArtifactCheckTests.swift",
         "LoopAttemptLedgerTests.swift",
         "LoopConfigBlessGateTests.swift",
+        "LoopDataMigrationTests.swift",
         "LoopFinalFixTests.swift",
         "LoopPauseTimeoutTests.swift",
         "LoopPhase1FixTests.swift",

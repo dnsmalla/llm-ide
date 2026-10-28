@@ -1,0 +1,10 @@
+{
+  "failing" : [
+    "LlmIdeMacTests\/FooTests\/testBarFails"
+  ],
+  "passing" : [
+    "LlmIdeMacTests\/FooTests\/testBazPasses"
+  ],
+  "recordedAt" : "2026-10-20T09:00:00Z",
+  "runId" : "run-2026-10-20-001"
+}

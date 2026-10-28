@@ -25,8 +25,10 @@ enum LoopOutputLayout {
     static let refactorPlan = "llm-doc/loop/refactor/REFACTOR.md"
     static let refactorDir = "llm-doc/loop/refactor"
     static let refactorGraphDir = "llm-doc/loop/refactor/graph"
-    static let refactorGraphBefore = "llm-doc/loop/refactor/graph/before.json"
-    static let refactorGraphAfter = "llm-doc/loop/refactor/graph/after.json"
+    /// Machine data (D6): the JSON the loops compute and read back lives under
+    /// `system/loop/<key>/`, never in `llm-doc/`. Same relative names as before.
+    static let refactorGraphBefore = "\(dataRoot)/refactor/graph/before.json"
+    static let refactorGraphAfter = "\(dataRoot)/refactor/graph/after.json"
     static let refactorGraphMD = "llm-doc/loop/refactor/GRAPH.md"
     /// The target project's own rules, digested by `RefactorRulesCollector` for the plan/apply stages.
     public static let refactorRules = "llm-doc/loop/refactor/RULES.md"
@@ -39,11 +41,15 @@ enum LoopOutputLayout {
     static let docsIndex = "llm-doc/loop/docs/INDEX.md"
     static let testDir = "llm-doc/loop/test"
     static let testStructureMD = "llm-doc/loop/test/TEST-STRUCTURE.md"
-    static let testStructureJSON = "llm-doc/loop/test/TEST-STRUCTURE.json"
+    static let testStructureJSON = "\(dataRoot)/test/TEST-STRUCTURE.json"
     static let testMapMD = "llm-doc/loop/test/TEST-MAP.md"
-    static let testMapJSON = "llm-doc/loop/test/TEST-MAP.json"
+    static let testMapJSON = "\(dataRoot)/test/TEST-MAP.json"
     static let testPruneMD = "llm-doc/loop/test/TEST-PRUNE.md"
-    static let testLedger = "llm-doc/loop/test/ledger.json"
+    static let testLedger = "\(dataRoot)/test/ledger.json"
+
+    /// Root of the Loop's machine data, relative to the repo root: `system/loop`.
+    /// Single spelling shared with `ProjectLayout.loopDataDir`.
+    static let dataRoot = "system/\(ProjectLayout.loopDataDirName)"
 
     /// The Plan loop's INPUT: plans collected from elsewhere. Unchanged.
     static let collectedPlansDir = "llm-doc/plans"
@@ -51,6 +57,15 @@ enum LoopOutputLayout {
     // MARK: Previous layout (stage revision 1)
 
     enum Legacy {
+        /// Machine data written to `llm-doc/loop/` before D6. Readers fall back
+        /// to these while the `dataRoot` file is missing; `LoopDataMigration`
+        /// moves them.
+        static let testStructureJSON = "llm-doc/loop/test/TEST-STRUCTURE.json"
+        static let testMapJSON = "llm-doc/loop/test/TEST-MAP.json"
+        static let testLedger = "llm-doc/loop/test/ledger.json"
+        static let refactorGraphBefore = "llm-doc/loop/refactor/graph/before.json"
+        static let refactorGraphAfter = "llm-doc/loop/refactor/graph/after.json"
+
         static let planIndex = "llm-doc/plans/INDEX.md"
         static let planMaster = "llm-doc/plans/PLAN.md"
         static let planAreasDir = "llm-doc/plans/areas"

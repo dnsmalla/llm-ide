@@ -30,7 +30,11 @@ public struct TestStructureDetector {
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         enc.dateEncodingStrategy = .iso8601
-        try enc.encode(s).write(to: out.appendingPathComponent(LoopOutputLayout.testStructureJSON), options: .atomic)
+        let json = out.appendingPathComponent(LoopOutputLayout.testStructureJSON)
+        try FileManager.default.createDirectory(at: json.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try enc.encode(s).write(to: json, options: .atomic)
+        LoopDataMigration.retireLegacy(legacy: LoopOutputLayout.Legacy.testStructureJSON,
+                                       current: LoopOutputLayout.testStructureJSON, gitRoot: out)
         return md
     }
 

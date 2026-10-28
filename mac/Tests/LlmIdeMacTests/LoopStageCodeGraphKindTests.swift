@@ -46,8 +46,8 @@ final class LoopStageCodeGraphKindTests: XCTestCase {
     func testOutputLayoutConstants() {
         XCTAssertEqual(LoopOutputLayout.refactorDir, "llm-doc/loop/refactor")
         XCTAssertEqual(LoopOutputLayout.refactorGraphDir, "llm-doc/loop/refactor/graph")
-        XCTAssertEqual(LoopOutputLayout.refactorGraphBefore, "llm-doc/loop/refactor/graph/before.json")
-        XCTAssertEqual(LoopOutputLayout.refactorGraphAfter, "llm-doc/loop/refactor/graph/after.json")
+        XCTAssertEqual(LoopOutputLayout.refactorGraphBefore, "system/loop/refactor/graph/before.json")
+        XCTAssertEqual(LoopOutputLayout.refactorGraphAfter, "system/loop/refactor/graph/after.json")
         XCTAssertEqual(LoopOutputLayout.refactorGraphMD, "llm-doc/loop/refactor/GRAPH.md")
         XCTAssertEqual(LoopOutputLayout.refactorGraphDelta, "llm-doc/loop/refactor/GRAPH-DELTA.md")
     }

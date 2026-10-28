@@ -100,13 +100,13 @@ func runRefactorBatchRollbackChecks() {
     let changed: Set<String> = [
         "Sources/B.swift", "Sources/A.swift", "Tests/ATests.swift",
         "llm-doc/loop/refactor/REFACTOR.md", "llm-doc/loop/refactor/RULES.md",
-        "llm-doc/loop/refactor/graph/after.json", "llm-doc/loop/refactor",
+        "system/loop/refactor/graph/after.json", "llm-doc/loop/refactor",
         "llm-doc/loop/refactor-notes.md", "docs/PLAN.md",
     ]
     let restored = RefactorBatchRollback.restorePaths(changed, planPath: "docs/PLAN.md")
     expect(restored == ["Sources/A.swift", "Sources/B.swift", "Tests/ATests.swift",
                         "llm-doc/loop/refactor-notes.md"],
-           "restore = the batch's changed paths minus the refactor llm-doc dir and the plan, sorted")
+           "restore = the batch's changed paths minus the refactor llm-doc dir, the refactor machine data (system/loop/refactor) and the plan, sorted")
     expect(RefactorBatchRollback.restorePaths([], planPath: nil).isEmpty, "nothing changed → nothing restored")
 
     // MARK: - Recorded words (§3.5)

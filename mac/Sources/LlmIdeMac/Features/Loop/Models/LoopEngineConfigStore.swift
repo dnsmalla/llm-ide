@@ -297,6 +297,15 @@ enum LoopEngineConfigStore {
     private static func migrateGeneratedOutputs(ensured: LoopEngineProjectStore,
                                                 projectRoot: URL?, gitRoot: URL?) {
         guard let projectRoot, let gitRoot else { return }
+        // D6: machine data (ledger, test map, graph snapshots) out of llm-doc/loop/.
+        for (legacy, outcome) in LoopDataMigration.perform(gitRoot: gitRoot) {
+            switch outcome {
+            case .moved: NSLog("LoopEngineConfigStore: moved loop data %@ -> system/loop", legacy)
+            case .nothingToMove: break
+            case .destinationExists: NSLog("LoopEngineConfigStore: kept %@ (system/loop copy already exists)", legacy)
+            case let .refused(reason), let .failed(reason): NSLog("LoopEngineConfigStore: did not move %@: %@", legacy, reason)
+            }
+        }
         let moves = LoopOutputMigration.moves(ensured: ensured, gitRoot: gitRoot, projectRoot: projectRoot)
         for (move, outcome) in LoopOutputMigration.perform(moves) {
             switch outcome {

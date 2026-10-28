@@ -69,15 +69,20 @@ public enum RefactorBatchRollback {
     }
 
     /// The paths a rollback restores from the batch base: the union of what the
-    /// batch's own stages changed (§5.2), minus the refactor llm-doc directory
-    /// and the plan file. Those hold the loop's record of the batch — the plan
-    /// the rollback is about to mark blocked, RULES.md, the graph snapshots —
-    /// and restoring them would erase the very note that says what happened.
-    /// Sorted, so the restore (and its log line) is deterministic.
+    /// batch's own stages changed (§5.2), minus the refactor llm-doc directory,
+    /// the refactor machine data under `system/loop/refactor/` (D6: the graph
+    /// snapshots moved there from llm-doc), and the plan file. Those hold the
+    /// loop's record of the batch — the plan the rollback is about to mark
+    /// blocked, RULES.md, the graph snapshots — and restoring them would erase
+    /// the very note that says what happened. Sorted, so the restore (and its
+    /// log line) is deterministic.
     public static func restorePaths(_ changed: Set<String>, planPath: String?) -> [String] {
         let docDir = LoopOutputLayout.refactorDir
+        let dataDir = LoopOutputLayout.dataRoot + "/refactor"
         return changed.filter { path in
-            path != docDir && !path.hasPrefix(docDir + "/") && path != planPath
+            path != docDir && !path.hasPrefix(docDir + "/")
+                && path != dataDir && !path.hasPrefix(dataDir + "/")
+                && path != planPath
         }.sorted()
     }
 

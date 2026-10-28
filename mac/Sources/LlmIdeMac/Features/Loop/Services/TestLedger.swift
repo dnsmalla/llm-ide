@@ -13,12 +13,16 @@ struct TestLedger: Codable, Equatable {
         var fixed: [String]
     }
 
+    /// `system/loop/test/ledger.json` (D6). Reads fall back to the pre-D6
+    /// `llm-doc/loop/test/ledger.json` while the new file is missing.
     private static func url(_ gitRoot: URL) -> URL {
         gitRoot.appendingPathComponent(LoopOutputLayout.testLedger)
     }
 
     static func load(gitRoot: URL) -> TestLedger? {
-        guard let data = try? Data(contentsOf: url(gitRoot)) else { return nil }
+        let source = LoopDataMigration.resolve(legacy: LoopOutputLayout.Legacy.testLedger,
+                                               current: LoopOutputLayout.testLedger, gitRoot: gitRoot)
+        guard let data = try? Data(contentsOf: source) else { return nil }
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
         return try? d.decode(TestLedger.self, from: data)
     }
@@ -29,6 +33,8 @@ struct TestLedger: Codable, Equatable {
         let e = JSONEncoder(); e.dateEncodingStrategy = .iso8601
         e.outputFormatting = [.prettyPrinted, .sortedKeys]
         try e.encode(self).write(to: u, options: .atomic)
+        LoopDataMigration.retireLegacy(legacy: LoopOutputLayout.Legacy.testLedger,
+                                       current: LoopOutputLayout.testLedger, gitRoot: gitRoot)
     }
 
     /// `fixed` = previously failing, no longer failing, and either seen passing or `runPassed`.

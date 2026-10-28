@@ -272,6 +272,11 @@ public final class GitRepairScopeGuard: RepairScopeGuarding {
         // and a root-anchored glob let a repair delete those and pass the
         // regression stage as `.clean`.
         "**/system/faults.csv", "**/system/faults/**", "**/system/loop-runs/**",
+        // The loops' machine data (D6): the test ledger, test map and structure,
+        // refactor graph snapshots. The ledger and map are the verdict's inputs,
+        // so a repair must not rewrite them; `**/test/**` alone covered the
+        // pre-D6 `llm-doc/loop/test/` copies and does not cover the graph files.
+        "**/system/loop/**",
         // The loop's own contract: a repair that turned the guard off, disabled
         // the failing stage or raised the budgets would be re-read by the NEXT
         // scheduled run. App writes are exempt via `AppWrittenFiles`.

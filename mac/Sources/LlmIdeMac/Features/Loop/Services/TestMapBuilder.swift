@@ -85,10 +85,13 @@ public struct TestMapBuilder {
         let json = out.appendingPathComponent(LoopOutputLayout.testMapJSON)
         let md = out.appendingPathComponent(LoopOutputLayout.testMapMD)
         try FileManager.default.createDirectory(at: json.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: md.deletingLastPathComponent(), withIntermediateDirectories: true)
         let enc = JSONEncoder()
         enc.dateEncodingStrategy = .iso8601
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         try enc.encode(map).write(to: json, options: .atomic)
+        LoopDataMigration.retireLegacy(legacy: LoopOutputLayout.Legacy.testMapJSON,
+                                       current: LoopOutputLayout.testMapJSON, gitRoot: out)
         try map.render().write(to: md, atomically: true, encoding: .utf8)
         return md
     }

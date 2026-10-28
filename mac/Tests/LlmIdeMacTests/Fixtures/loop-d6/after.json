@@ -1,0 +1,25 @@
+{
+  "files" : [
+    {
+      "functions" : [
+        {
+          "line" : 12,
+          "name" : "computeTotal"
+        }
+      ],
+      "imports" : [
+
+      ],
+      "language" : "swift",
+      "loc" : 20,
+      "path" : "Sources\/Billing\/Totals.swift",
+      "types" : [
+
+      ],
+      "usedBy" : [
+
+      ]
+    }
+  ],
+  "version" : "1.1"
+}

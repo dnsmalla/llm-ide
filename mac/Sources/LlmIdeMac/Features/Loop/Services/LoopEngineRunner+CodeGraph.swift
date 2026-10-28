@@ -52,6 +52,8 @@ extension LoopEngineRunner {
         let report = await Self.graphReport(loaded.index, runRoot: runRoot)
         do {
             try Self.writeGraphFile(loaded.data, to: LoopOutputLayout.refactorGraphBefore, root: mainRoot)
+            LoopDataMigration.retireLegacy(legacy: LoopOutputLayout.Legacy.refactorGraphBefore,
+                                           current: LoopOutputLayout.refactorGraphBefore, gitRoot: mainRoot)
             try Self.writeGraphFile(Data(report.render().utf8), to: LoopOutputLayout.refactorGraphMD, root: mainRoot)
         } catch {
             return finishCodeGraph(stage, startedAt: startedAt, passed: false,
@@ -121,6 +123,8 @@ extension LoopEngineRunner {
         let after = await Self.graphReport(loaded.index, runRoot: runRoot)
         do {
             try Self.writeGraphFile(loaded.data, to: LoopOutputLayout.refactorGraphAfter, root: mainRoot)
+            LoopDataMigration.retireLegacy(legacy: LoopOutputLayout.Legacy.refactorGraphAfter,
+                                           current: LoopOutputLayout.refactorGraphAfter, gitRoot: mainRoot)
         } catch {
             return finishCodeGraph(stage, startedAt: startedAt, passed: false,
                                    output: "could not write the regenerated graph: \(error.localizedDescription)")
