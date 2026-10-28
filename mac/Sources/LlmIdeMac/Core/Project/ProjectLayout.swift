@@ -33,9 +33,11 @@ import Foundation
 /// `.self-heal/` (`BATCH.md`, the Self-Heal proposal batch) sits at the repo
 /// root beside `source/`, not under `system/`.
 ///
-/// Known exception, being moved: today graph and memory output may be written
-/// under `<repo>/system/` of a cloned repo under `code/` rather than under the
-/// project's own `system/`. That split is being fixed in a later task.
+/// Generated graph, memory, faults and Q&A always live under the PROJECT's
+/// `system/` (D1, 2026-10-28), never under a cloned repo's `system/` in `code/`.
+/// Writers and readers resolve them through `GeneratedDataLocator`, not by
+/// joining `systemDir` onto a repo path. Graph output is `system/graph/` for one
+/// repo and `system/graph/<repo>/` for 2+ `code/` repos.
 struct ProjectLayout {
     let root: URL
 
