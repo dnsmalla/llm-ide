@@ -136,6 +136,11 @@ enum FeatureCatalog {
             AnyView(DocGenServerStoreCard())
         }
         #endif
+        // Agent history (storage, retention, clear, compact). Always compiled:
+        // agent_chat is always on and the store backs chat, Loop and meetings.
+        registry.register(slot: .agentHistory, id: "agent-history") {
+            AnyView(AgentHistorySettingsCard(api: api))
+        }
         #if FEATURE_AUTOTASK
         registry.register(slot: .loopDefaults, id: "loop-defaults") {
             AnyView(LoopNewProjectDefaultsPanel())

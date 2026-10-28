@@ -25,6 +25,8 @@ enum SettingsSectionSlot: String, CaseIterable, Sendable {
     case graph
     /// App group, after Loop defaults: Doc Gen's server-files switch (beta).
     case docGen
+    /// App group, after Doc Gen: agent history storage, retention, clear and compact.
+    case agentHistory
 }
 
 /// Scroll anchors a deep link can post with `.scrollSettingsToCard`.

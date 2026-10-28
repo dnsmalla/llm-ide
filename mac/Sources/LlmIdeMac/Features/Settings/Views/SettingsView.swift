@@ -49,6 +49,7 @@ struct SettingsView: View {
                             TierRoutingSection(api: api)
                             SettingsSlotView(slot: .loopDefaults)
                             SettingsSlotView(slot: .docGen)
+                            SettingsSlotView(slot: .agentHistory)
                             OptionalComponentsSettingsSection()
                             if AppSourceRoot.gitRoot != nil {
                                 SelfHealSettingsSection()
