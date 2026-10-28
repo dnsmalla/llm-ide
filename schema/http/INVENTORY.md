@@ -148,9 +148,9 @@ Endpoints with no client caller (35):
 | `/kb/usage/ratelimits` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1044` | `LlmIdeAPIClient+Usage.swift` | - | - |
 | `/kb/usage/turn-composition` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1053` | - | - | tests only |
 | `/kb/storage` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-history.mjs:41` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
-| `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:45` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
-| `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:58` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
-| `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:89` | `LlmIdeAPIClient+AgentHistory.swift` | - | - |
+| `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:45` | `LlmIdeAPIClient+AgentHistory.swift`, `SystemBridge.swift` | - | - |
+| `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:58` | `LlmIdeAPIClient+AgentHistory.swift`, `SystemBridge.swift` | - | - |
+| `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:89` | `LlmIdeAPIClient+AgentHistory.swift`, `SystemBridge.swift` | - | - |
 | `/kb/generate-plan` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:34` | - | `App.tsx` | - |
 | `/kb/analyze-risks` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:60` | - | - | tests only |
 | `/kb/summarize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1096` | `LlmIdeAPIClient+Export.swift` | - | - |
@@ -287,7 +287,7 @@ Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
 Unresolvable client paths (1): first segment only, not matched to any route:
 
-- `/auth/` (Mac mac/Sources/LlmIdeMac/Core/Networking/LlmIdeAPIClient.swift:589)
+- `/auth/` (Mac mac/Sources/LlmIdeMac/Core/Networking/LlmIdeAPIClient.swift:592)
 
 Open inconsistencies (0):
 

@@ -242,6 +242,10 @@ struct SystemWebView: NSViewRepresentable {
                 reply(id: request.id, status: 400, body: nil, error: "not_allowed")
                 return
             }
+            if call.isAgentHistory {
+                performAgentHistory(call, id: request.id)
+                return
+            }
             let client = parent.api
             let id = request.id
             let timeout = Self.requestTimeout
@@ -261,6 +265,18 @@ struct SystemWebView: NSViewRepresentable {
                 } catch {
                     self?.reply(id: id, status: 0, body: nil, error: "unreachable")
                 }
+            }
+        }
+
+        /// Answers an agent-history call with the typed client. Its own call timeouts apply (a
+        /// compaction runs long), so the generic 12 s request timeout is not used here.
+        @MainActor
+        private func performAgentHistory(_ call: SystemAllowedCall, id: String) {
+            let client = parent.api
+            Task { @MainActor [weak self] in
+                let reply = await SystemBridge.storageReply(call, api: client)
+                    ?? SystemBridge.NativeReply(status: 400, bodyJSON: "null", error: "not_allowed")
+                self?.replyRaw(id: id, reply: reply)
             }
         }
 

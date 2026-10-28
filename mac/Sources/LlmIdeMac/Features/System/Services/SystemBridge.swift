@@ -1,5 +1,24 @@
 import Foundation
 
+/// One value of a request body the page sends: a string, a whole number or a boolean.
+/// Encoded as the bare JSON value, so the server sees the types the page meant.
+enum SystemBridgeValue: Equatable, Encodable, ExpressibleByStringLiteral {
+    case string(String)
+    case int(Int)
+    case bool(Bool)
+
+    init(stringLiteral value: String) { self = .string(value) }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .string(let value): try container.encode(value)
+        case .int(let value): try container.encode(value)
+        case .bool(let value): try container.encode(value)
+        }
+    }
+}
+
 /// The server calls the OS page may ask native to make. Native makes them with
 /// its authenticated client; the page never holds the token and never talks to
 /// the server itself. Anything not in this list is refused.
@@ -12,11 +31,23 @@ enum SystemAllowedCall: Equatable {
     case stopAgentRun(sessionId: String)
     /// `GET /kb/agent/skill-library` (no query, no body)
     case skillLibrary
+    /// `GET /kb/agent-history/settings` (no query, no body): the retention settings.
+    case agentHistorySettings
+    /// `PUT /kb/agent-history/settings` with `{retentionDays}`, a whole number of 7...365.
+    case setAgentHistoryRetention(days: Int)
+    /// `POST /kb/agent-history/clear` with `{scope, beforeDays?, dryRun, previewId?}`. A dry run
+    /// (`dryRun: true`) has no previewId; a real clear (`dryRun: false`) carries the previewId
+    /// of its dry run. `beforeDays` is a whole number of 0...3650 when given.
+    case clearAgentHistory(scope: LlmIdeAPIClient.AgentHistoryClearScope, beforeDays: Int?,
+                           dryRun: Bool, previewId: String?)
+    /// `POST /kb/agent-history/compact` (no query, no body)
+    case compactAgentHistory
 
     var method: String {
         switch self {
-        case .state, .skillLibrary: return "GET"
-        case .cancelChat, .stopAgentRun: return "POST"
+        case .state, .skillLibrary, .agentHistorySettings: return "GET"
+        case .setAgentHistoryRetention: return "PUT"
+        case .cancelChat, .stopAgentRun, .clearAgentHistory, .compactAgentHistory: return "POST"
         }
     }
 
@@ -33,15 +64,36 @@ enum SystemAllowedCall: Equatable {
             return "/kb/agent/stop"
         case .skillLibrary:
             return "/kb/agent/skill-library"
+        case .agentHistorySettings, .setAgentHistoryRetention:
+            return "/kb/agent-history/settings"
+        case .clearAgentHistory:
+            return "/kb/agent-history/clear"
+        case .compactAgentHistory:
+            return "/kb/agent-history/compact"
         }
     }
 
-    /// The JSON body, or nil for a GET.
-    var body: [String: String]? {
+    /// The JSON body, or nil when the call has none.
+    var body: [String: SystemBridgeValue]? {
         switch self {
-        case .state, .skillLibrary: return nil
-        case .cancelChat(let id): return ["chatSessionId": id]
-        case .stopAgentRun(let id): return ["sessionId": id]
+        case .state, .skillLibrary, .agentHistorySettings, .compactAgentHistory: return nil
+        case .cancelChat(let id): return ["chatSessionId": .string(id)]
+        case .stopAgentRun(let id): return ["sessionId": .string(id)]
+        case .setAgentHistoryRetention(let days): return ["retentionDays": .int(days)]
+        case .clearAgentHistory(let scope, let beforeDays, let dryRun, let previewId):
+            var body: [String: SystemBridgeValue] = ["scope": .string(scope.rawValue), "dryRun": .bool(dryRun)]
+            if let beforeDays { body["beforeDays"] = .int(beforeDays) }
+            if let previewId { body["previewId"] = .string(previewId) }
+            return body
+        }
+    }
+
+    /// Whether native answers this call with the typed agent-history client (`SystemBridge.storageReply`),
+    /// not with a generic server request.
+    var isAgentHistory: Bool {
+        switch self {
+        case .agentHistorySettings, .setAgentHistoryRetention, .clearAgentHistory, .compactAgentHistory: return true
+        case .state, .cancelChat, .stopAgentRun, .skillLibrary: return false
         }
     }
 }
@@ -253,9 +305,81 @@ enum SystemBridge {
         case ("GET", "/kb/agent/skill-library"):
             guard body == nil, query == nil else { return nil }
             return .skillLibrary
+        case ("GET", "/kb/agent-history/settings"):
+            guard body == nil, query == nil else { return nil }
+            return .agentHistorySettings
+        case ("PUT", "/kb/agent-history/settings"):
+            guard query == nil, let body, body.count == 1,
+                  let days = integerValue(body["retentionDays"], in: retentionDaysRange) else { return nil }
+            return .setAgentHistoryRetention(days: days)
+        case ("POST", "/kb/agent-history/clear"):
+            guard query == nil else { return nil }
+            return clearCall(body: body)
+        case ("POST", "/kb/agent-history/compact"):
+            guard body == nil, query == nil else { return nil }
+            return .compactAgentHistory
         default:
             return nil
         }
+    }
+
+    /// Whole days the retention setting may hold (the server clamps to the same range).
+    static let retentionDaysRange = 7...365
+    /// Largest `beforeDays` a clear may name (the server's own cap).
+    static let maxBeforeDays = 3650
+    /// Longest preview id the page may send back. Preview ids are a base64url payload, a dot, and a MAC.
+    static let maxPreviewIdLength = 512
+
+    /// `{scope, dryRun, beforeDays?, previewId?}`: scope `raw` or `all`; a dry run takes no previewId,
+    /// a real clear needs one. Any other key, or a value of the wrong type, refuses the call.
+    private static func clearCall(body: [String: Any]?) -> SystemAllowedCall? {
+        guard let body, onlyKeys(body, required: ["scope", "dryRun"], optional: ["beforeDays", "previewId"]),
+              let scopeName = body["scope"] as? String,
+              let scope = LlmIdeAPIClient.AgentHistoryClearScope(rawValue: scopeName),
+              let dryRun = boolValue(body["dryRun"]) else { return nil }
+        let beforeDays: Int?
+        if let raw = body["beforeDays"], !(raw is NSNull) {
+            guard let days = integerValue(raw, in: 0...maxBeforeDays) else { return nil }
+            beforeDays = days
+        } else {
+            beforeDays = nil
+        }
+        let previewId: String?
+        if let raw = body["previewId"], !(raw is NSNull) {
+            guard let id = raw as? String, isValidPreviewId(id) else { return nil }
+            previewId = id
+        } else {
+            previewId = nil
+        }
+        // A dry run has no previewId and a real clear has one: any other pairing is refused.
+        guard dryRun == (previewId == nil) else { return nil }
+        return .clearAgentHistory(scope: scope, beforeDays: beforeDays, dryRun: dryRun, previewId: previewId)
+    }
+
+    /// Whether a body has no keys outside `required` and `optional`, and every `required` key.
+    private static func onlyKeys(_ body: [String: Any], required: Set<String>, optional: Set<String>) -> Bool {
+        let keys = Set(body.keys)
+        return required.isSubset(of: keys) && keys.isSubset(of: required.union(optional))
+    }
+
+    /// A JSON whole number in `range`. A boolean, a fraction and a string are refused.
+    static func integerValue(_ value: Any?, in range: ClosedRange<Int>) -> Int? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) != CFBooleanGetTypeID() else { return nil }
+        let d = number.doubleValue
+        guard d.rounded() == d, d >= Double(range.lowerBound), d <= Double(range.upperBound) else { return nil }
+        return Int(d)
+    }
+
+    /// A JSON boolean. A number (even 0 or 1) is refused.
+    static func boolValue(_ value: Any?) -> Bool? {
+        guard let number = value as? NSNumber, CFGetTypeID(number) == CFBooleanGetTypeID() else { return nil }
+        return number.boolValue
+    }
+
+    /// A preview id: 1...`maxPreviewIdLength` characters of letters, digits, `-`, `_` and `.`.
+    static func isValidPreviewId(_ id: String) -> Bool {
+        guard !id.isEmpty, id.count <= maxPreviewIdLength else { return false }
+        return id.allSatisfy { $0.isASCII && ($0.isLetter || $0.isNumber || $0 == "-" || $0 == "_" || $0 == ".") }
     }
 
     /// Parses `window=day|week` (required) and `activity=1..100` (optional).
@@ -460,6 +584,77 @@ enum SystemBridge {
     /// A string or an explicit JSON null, for dictionaries handed to `jsonObjectFragment`.
     static func nullable(_ value: String?) -> Any {
         value.map { $0 as Any } ?? NSNull()
+    }
+
+    // MARK: Agent history replies
+
+    /// What a clear call does: a dry run (the counts and a previewId) or a real clear that
+    /// carries the previewId of its dry run.
+    enum StorageClearPlan: Equatable {
+        case preview(scope: LlmIdeAPIClient.AgentHistoryClearScope, beforeDays: Int?)
+        case commit(scope: LlmIdeAPIClient.AgentHistoryClearScope, beforeDays: Int?, previewId: String)
+    }
+
+    /// The plan for a validated clear call. Nil for any other call, and for a real clear without a previewId.
+    static func clearPlan(_ call: SystemAllowedCall) -> StorageClearPlan? {
+        guard case .clearAgentHistory(let scope, let beforeDays, let dryRun, let previewId) = call else { return nil }
+        if dryRun { return .preview(scope: scope, beforeDays: beforeDays) }
+        guard let previewId else { return nil }
+        return .commit(scope: scope, beforeDays: beforeDays, previewId: previewId)
+    }
+
+    /// Answers one agent-history call with the typed client, which owns the request shapes and the
+    /// Codable models. A 200 carries the JSON the page reads. A failure keeps the server's status,
+    /// sets `error` to the server's code and sends `{code, message}` as the body. Nil for a call
+    /// that is not an agent-history call.
+    static func storageReply(_ call: SystemAllowedCall, api: LlmIdeAPIClient) async -> NativeReply? {
+        guard call.isAgentHistory else { return nil }
+        do {
+            switch call {
+            case .agentHistorySettings:
+                let settings = try await api.agentHistorySettings()
+                return okJSON(settings)
+            case .setAgentHistoryRetention(let days):
+                let settings = try await api.setAgentHistoryRetention(days: days)
+                return okJSON(settings)
+            case .clearAgentHistory:
+                guard let plan = clearPlan(call) else { return nil }
+                switch plan {
+                case .preview(let scope, let beforeDays):
+                    let result = try await api.previewAgentHistoryClear(scope: scope, beforeDays: beforeDays)
+                    return okJSON(result)
+                case .commit(let scope, let beforeDays, let previewId):
+                    let result = try await api.performAgentHistoryClear(
+                        scope: scope, beforeDays: beforeDays, previewId: previewId)
+                    return okJSON(result)
+                }
+            case .compactAgentHistory:
+                let result = try await api.compactAgentHistory()
+                return okJSON(result)
+            default:
+                return nil
+            }
+        } catch APIError.http(let status, let code, let message, _) {
+            return storageFailure(status: status, code: code, message: message)
+        } catch APIError.noSession {
+            return NativeReply(status: 401, bodyJSON: "null", error: "signed_out")
+        } catch {
+            return NativeReply(status: 0, bodyJSON: "null", error: "unreachable")
+        }
+    }
+
+    /// A 200 reply whose body is `value` encoded as JSON.
+    static func okJSON<T: Encodable>(_ value: T) -> NativeReply {
+        guard let json = jsonFragment(value) else {
+            return NativeReply(status: 500, bodyJSON: "null", error: "encode_failed")
+        }
+        return NativeReply(status: 200, bodyJSON: json, error: nil)
+    }
+
+    /// A failed agent-history call: the server's status, its code as `error`, and `{code, message}` as the body.
+    static func storageFailure(status: Int, code: String, message: String) -> NativeReply {
+        let json = jsonObjectFragment(["code": code, "message": message]) ?? "null"
+        return NativeReply(status: status, bodyJSON: json, error: code)
     }
 
     // MARK: File access (openFile and native file)
