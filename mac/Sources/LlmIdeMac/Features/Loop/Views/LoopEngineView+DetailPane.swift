@@ -162,8 +162,8 @@ extension LoopEngineView {
             return stage.check?.summary(resolvedAgainst: stages.filter(\.enabled)) ?? "no checks configured"
         case .testMap:
             switch stage.testOp {
-            case .structure: return "Test Map · detect the test layout → llm-doc/loop/test/"
-            case .map: return "Test Map · classify files into the matrix and list unit-test candidates → llm-doc/loop/test/"
+            case .structure: return "Test Map · detect the test layout → llm-doc/loop/test/TEST-STRUCTURE.md, system/loop/test/"
+            case .map: return "Test Map · classify files into the matrix and list unit-test candidates → llm-doc/loop/test/TEST-MAP.md, system/loop/test/TEST-MAP.json"
             case .ledger: return "Test Map · diff test results into the ledger and open faults"
             case nil: return "no operation chosen"
             }
@@ -171,7 +171,7 @@ extension LoopEngineView {
             return "Test Prune · report delete-candidate tests → TEST-PRUNE.md (never deletes)"
         case .codeGraph:
             switch stage.graphOp {
-            case .snapshot: return "Code Graph · record the structure graph → llm-doc/loop/refactor/graph/"
+            case .snapshot: return "Code Graph · record the structure graph → system/loop/refactor/graph/before.json"
             case .verify: return "Code Graph · diff the regenerated graph against the snapshot → GRAPH-DELTA.md"
             case nil: return "no operation chosen"
             }

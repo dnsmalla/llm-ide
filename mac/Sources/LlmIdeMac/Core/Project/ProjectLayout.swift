@@ -137,10 +137,9 @@ struct ProjectLayout {
     /// Pre-D6 file name, kept for the legacy-location fallback and migration.
     static let legacyNotesIndexFileName = "index.json"
 
-    /// Loop machine data (ledger, test map/structure, refactor graph snapshots):
-    /// `system/loop/<loop key>/…`, same relative names as the `llm-doc/loop`
-    /// files they replace (D6). The Loop's `.md` outputs stay in `llm-doc/loop/`.
-    var loopDataDir: URL { systemDir.appendingPathComponent(Self.loopDataDirName, isDirectory: true) }
+    /// The folder name of the Loop's machine data under `system/` (D6). The
+    /// relative path is `LoopOutputLayout.dataRoot` (`system/loop`), built from
+    /// this name, so the Loop's paths and this layout share one spelling.
     static let loopDataDirName = "loop"
 
     /// Container subdir (relative) used by MemoryStore — it appends

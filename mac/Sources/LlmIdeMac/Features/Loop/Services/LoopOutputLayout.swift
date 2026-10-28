@@ -9,6 +9,14 @@ import Foundation
 /// output: chat's "Save Plan" and the knowledge-base export write plans there,
 /// and the Plan loop reads them from there as its INPUT — so it does not move.
 ///
+/// Roots (one rule, D6). The Loop writes every output and every machine-data
+/// file under the same root: `gitRoot`, the main checkout the run was started
+/// in (`mainGitRoot` for a worktree run). `llm-doc/loop/<key>/` holds the
+/// human-readable `.md`; `system/loop/<key>/` holds the machine data (the test
+/// ledger and map JSON, the refactor graph snapshots). Both are relative to that
+/// root, and `ProjectLayout` (Core/Project) is the place that names `system/`.
+/// The protected-path guard treats `system/loop/**` as harness state.
+///
 /// One source for the default stages, the templates, the revision history and
 /// the file migration (`LoopOutputMigration`), so they cannot drift apart.
 enum LoopOutputLayout {
@@ -48,7 +56,7 @@ enum LoopOutputLayout {
     static let testLedger = "\(dataRoot)/test/ledger.json"
 
     /// Root of the Loop's machine data, relative to the repo root: `system/loop`.
-    /// Single spelling shared with `ProjectLayout.loopDataDir`.
+    /// Built from `ProjectLayout.loopDataDirName`, the one spelling of that folder.
     static let dataRoot = "system/\(ProjectLayout.loopDataDirName)"
 
     /// The Plan loop's INPUT: plans collected from elsewhere. Unchanged.
