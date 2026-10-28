@@ -8,6 +8,7 @@ import { config } from '../core/config.mjs';
 import { onOsEvent } from '../core/os-events.mjs';
 import { getDb } from '../kb/db.mjs';
 import { listActivity, unreadCount } from '../kb/activity.mjs';
+import { recentRuns, storageReport } from '../kb/agent-history-api.mjs';
 import { usageForWindow, rollupTurnComposition, knowledgeCounts, kitStatus, TOKEN_WINDOWS } from '../kb/os-state.mjs';
 import { memoryLedgerRepos } from '../kb/memory-ledger.mjs';
 import { turnCompositionRecent } from '../kb/turn-composition.mjs';
@@ -236,6 +237,10 @@ export async function handleOsRoutes(req, res, { userId, url }) {
       })),
     },
     macOnly: { loop: 'on this Mac', autoTasks: 'on this Mac' },
+    // Stage 1c (additive): the storage report (the same as GET /kb/storage, so
+    // the page needs one fetch) and this user's newest agent runs.
+    storage: storageReport(userId, { db }),
+    agents: { recentRuns: recentRuns(userId) },
   });
   return true;
 }

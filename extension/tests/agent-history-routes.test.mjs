@@ -238,3 +238,27 @@ test('POST /kb/agent-history/compact answers 409 busy while a meeting-agent run 
   assert.equal(res.json().error.code, 'busy');
   await meetingAgent.stopAgent({ userId: a, sessionId: 'sess-busy' });
 });
+
+test('GET /kb/os/state adds storage and agents.recentRuns for the caller only', async () => {
+  freshAgent();
+  const a = user('o1');
+  const b = user('o2');
+  seed(a, b);
+  const res = await call('GET', '/kb/os/state', null, a);
+  assert.equal(res.statusCode, 200, res._body);
+  const body = res.json();
+  assert.ok(body.storage && Array.isArray(body.storage.groups), 'storage is present');
+  assert.equal(body.storage.groups.find((g) => g.key === 'agent_history').rows, 5);
+  const runs = body.agents.recentRuns;
+  assert.deepEqual(runs.map((r) => r.id).sort(), ['a-new', 'a-old'], 'A sees only A\'s runs');
+  const first = runs.find((r) => r.id === 'a-new');
+  assert.equal(first.source, 'chat');
+  assert.equal(first.status, 'ok');
+  assert.equal(first.tokens, 5);
+  assert.equal(first.toolCalls, 0, 'tool calls are only counted at close');
+  assert.equal(Object.hasOwn(first, 'prompt'), false, 'no prompt or message text');
+  // Additive: the existing fields are still there.
+  for (const k of ['generatedAt', 'apiVersion', 'system', 'running', 'activity', 'tokens', 'knowledge', 'macOnly']) {
+    assert.ok(Object.hasOwn(body, k), `${k} kept`);
+  }
+});
