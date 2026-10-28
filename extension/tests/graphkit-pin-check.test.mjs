@@ -10,6 +10,10 @@ import {
   parseSwiftPins,
   pinIsRemoteTip,
   rewriteSwiftPin,
+  classifyGhProbe,
+  classifyShaFetch,
+  decideOnline,
+  parseSetPinArgs,
   GRAPHKIT_URL,
 } from '../../scripts/graphkit-pin-check.mjs';
 
@@ -147,4 +151,88 @@ test('rewriteSwiftPin refuses malformed input', () => {
   assert.throws(() => rewriteSwiftPin(swiftFixture(SHA_A), SHA_B, 'v1.7'), /not a semver/);
   assert.throws(() => rewriteSwiftPin('no pin here', SHA_B), /exactly one/);
   assert.throws(() => rewriteSwiftPin(swiftFixture(SHA_A) + swiftFixture(SHA_B), SHA_A), /exactly one/);
+});
+
+test('parseSetPinArgs accepts a sha with or without a plain X.Y.Z tag', () => {
+  assert.deepEqual(parseSetPinArgs(['--set-pin', SHA_A]), { sha: SHA_A, tag: undefined });
+  assert.deepEqual(parseSetPinArgs(['--set-pin', SHA_A, '--tag', '1.7.0']), { sha: SHA_A, tag: '1.7.0' });
+});
+
+test('parseSetPinArgs rejects --tag with no value, a flag as its value, or a non-semver value', () => {
+  assert.throws(() => parseSetPinArgs(['--set-pin', SHA_A, '--tag']), /--tag needs a value/);
+  assert.throws(() => parseSetPinArgs(['--set-pin', SHA_A, '--tag', '--online']), /--tag needs a value/);
+  assert.throws(() => parseSetPinArgs(['--set-pin', SHA_A, '--tag', '']), /plain X\.Y\.Z/);
+  assert.throws(() => parseSetPinArgs(['--set-pin', SHA_A, '--tag', 'v1.7.0']), /plain X\.Y\.Z/);
+});
+
+test('parseSetPinArgs rejects a missing or short sha', () => {
+  assert.throws(() => parseSetPinArgs(['--set-pin']), /full 40-character sha/);
+  assert.throws(() => parseSetPinArgs(['--set-pin', 'abc123']), /full 40-character sha/);
+});
+
+test('classifyShaFetch: success is present, the server "not our ref" is absent, anything else unknown', () => {
+  assert.equal(classifyShaFetch({ ok: true }), 'present');
+  assert.equal(
+    classifyShaFetch({ ok: false, stderr: 'fatal: remote error: upload-pack: not our ref ' + SHA_A }),
+    'absent',
+  );
+  assert.equal(classifyShaFetch({ ok: false, stderr: 'fatal: unable to access: Could not resolve host' }), 'unknown');
+  assert.equal(classifyShaFetch({ ok: false, stderr: '' }), 'unknown');
+});
+
+test('classifyGhProbe: 200 is present, 404 is absent, missing gh is skipped, other errors unknown', () => {
+  assert.equal(classifyGhProbe({ ok: true }), 'present');
+  assert.equal(classifyGhProbe({ ok: false, stderr: 'gh: Not Found (HTTP 404)' }), 'absent');
+  assert.equal(classifyGhProbe({ ok: false, missing: true }), 'skipped');
+  assert.equal(classifyGhProbe({ ok: false, stderr: 'HTTP 403: rate limit exceeded' }), 'unknown');
+});
+
+test('decideOnline: a branch or tag tip passes without probing', () => {
+  const r = decideOnline({ sha: SHA_A, remoteRefs: [{ sha: SHA_A, ref: 'refs/heads/main' }] });
+  assert.deepEqual(r, { problems: [], warnings: [] });
+});
+
+test('decideOnline: a non-tip sha the remote serves passes (submodule fetch or GitHub API)', () => {
+  const refs = [{ sha: SHA_B, ref: 'refs/heads/main' }];
+  assert.deepEqual(decideOnline({ sha: SHA_A, remoteRefs: refs, shaProbe: 'present' }).problems, []);
+  assert.deepEqual(decideOnline({ sha: SHA_A, remoteRefs: refs, shaProbe: 'unknown', ghProbe: 'present' }).problems, []);
+});
+
+test('decideOnline: a definite absent fails with a fix that names both remedies', () => {
+  const refs = [{ sha: SHA_B, ref: 'refs/heads/main' }];
+  const r = decideOnline({ sha: SHA_A, remoteRefs: refs, shaProbe: 'absent', ghProbe: 'absent', fetchOk: true, hasSub: true });
+  assert.equal(r.problems.length, 1);
+  assert.match(r.problems[0], new RegExp(`does not exist on ${GRAPHKIT_URL.replace(/\./g, '\\.')}`));
+  assert.match(r.problems[0], /push graph-kit/);
+  assert.match(r.problems[0], /git submodule update --init/);
+  assert.deepEqual(r.warnings, []);
+});
+
+test('decideOnline: a remote-ahead, unfetched submodule does not fail when the remote serves the sha', () => {
+  // The old shortcut looked only at the stale local origin/main and failed here.
+  const refs = [{ sha: SHA_B, ref: 'refs/heads/main' }];
+  const r = decideOnline({ sha: SHA_A, remoteRefs: refs, shaProbe: 'present', fetchOk: false, hasSub: true });
+  assert.deepEqual(r, { problems: [], warnings: [] });
+});
+
+test('decideOnline: an absent submodule with no GitHub answer warns, it does not fail', () => {
+  const refs = [{ sha: SHA_B, ref: 'refs/heads/main' }];
+  const r = decideOnline({ sha: SHA_A, remoteRefs: refs, shaProbe: 'skipped', ghProbe: 'unknown', hasSub: false });
+  assert.deepEqual(r.problems, []);
+  assert.equal(r.warnings.length, 1);
+  assert.match(r.warnings[0], /not checked out/);
+  assert.match(r.warnings[0], /could not confirm/);
+});
+
+test('decideOnline: a failed submodule fetch is reported as possibly stale in the warning', () => {
+  const refs = [{ sha: SHA_B, ref: 'refs/heads/main' }];
+  const r = decideOnline({ sha: SHA_A, remoteRefs: refs, shaProbe: 'unknown', ghProbe: 'unknown', fetchOk: false, hasSub: true });
+  assert.deepEqual(r.problems, []);
+  assert.match(r.warnings[0], /may be stale/);
+});
+
+test('decideOnline: an unreachable remote warns and never fails', () => {
+  const r = decideOnline({ sha: SHA_A, remoteRefs: null, remoteError: 'Could not resolve host' });
+  assert.deepEqual(r.problems, []);
+  assert.match(r.warnings[0], /unreachable.*Could not resolve host/);
 });

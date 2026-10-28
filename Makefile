@@ -155,7 +155,8 @@ graphkit-pin-check:
 #   make graphkit-bump TAG=1.7.0 YES=1 COMMIT=1   (cut a release tag too)
 .PHONY: graphkit-bump
 graphkit-bump:
-	TAG="$(TAG)" DRY_RUN="$(DRY_RUN)" COMMIT="$(COMMIT)" YES="$(YES)" bash scripts/graphkit-bump.sh
+	$(if $(filter-out undefined,$(origin TAG)),$(if $(strip $(TAG)),,$(error graphkit-bump: TAG is set but empty; pass TAG=X.Y.Z or leave TAG unset)),)
+	TAG="$(TAG)" DRY_RUN="$(DRY_RUN)" COMMIT="$(COMMIT)" YES="$(YES)" COAUTHOR="$(COAUTHOR)" SKIP_BUILD="$(SKIP_BUILD)" bash scripts/graphkit-bump.sh
 
 # Iterate on graph-kit without pushing it: the app builds against the submodule
 # checkout (GRAPHKIT_LOCAL=1 in mac/Package.swift) in its own scratch path, so

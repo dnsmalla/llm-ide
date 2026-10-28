@@ -21,8 +21,14 @@ places. They must agree.
 
 `make graphkit-pin-check` verifies that the three agree. It runs offline inside
 `make regression`. With `ONLINE=1` it also checks that the pinned commit exists
-on the graph-kit remote. The pre-push hook runs the online form whenever the
-pins change. Without that check, a pin to a commit that was never pushed passes
+on the graph-kit remote. It asks the remote, not a possibly stale local copy: it
+first runs `git fetch origin` in the submodule, then accepts the pin if it is a
+branch or tag tip (`git ls-remote`), or if the remote serves that one object
+(`git fetch origin <sha>` in the submodule, then the GitHub API). Only a definite
+"not on the remote" fails. An unreachable remote, a failed fetch, or a missing
+`gh` only prints a warning. The pre-push hook runs the online form when the
+gitlink moves, `mac/Package.resolved` changes, or a pushed line of
+`mac/Package.swift` names graph-kit. Other `Package.swift` edits skip it. Without that check, a pin to a commit that was never pushed passes
 locally and fails on every other machine and in CI.
 
 ## Iterate without pushing
@@ -75,7 +81,17 @@ Pins are not touched by any of this, and nothing is pushed.
    - builds the app (`make build-mac`);
    - runs `make graphkit-pin-check ONLINE=1`.
 
-   If the bump is already at graph-kit's HEAD it only runs the pin check.
+   Rerunning is the recovery path. If a run fails after graph-kit was pushed
+   (for example, the build failed), fix the cause and run `make graphkit-bump`
+   again. The message on failure says where it stopped. The rerun sees the pins
+   already at graph-kit's HEAD, so it skips the moves, but it still checks the
+   staged gitlink and pin files, runs `make os-view-check` (and `make os-view`
+   only when the bundle is stale), builds the app, and runs the online pin check.
+   Only then does it print "nothing to bump". With `SKIP_BUILD=1` the build step
+   is skipped, and that run does not verify the build.
+
+   The commit trailer defaults to `Co-Authored-By: Claude Sonnet 5.5
+   <noreply@anthropic.com>`. Set `COAUTHOR="Name <email>"` to change it.
 4. Run the gates. `make regression` is the pre-push gate and runs the pin check
    offline. The pre-push hook also runs the online check when the pins change.
    Then push llm-ide.
@@ -97,8 +113,12 @@ make graphkit-bump TAG=1.7.0 YES=1 COMMIT=1
 ```
 
 The bump refuses unless `1.7.0` is plain `X.Y.Z`, greater than the latest tag
-(local and remote), and graph-kit's `CHANGELOG.md` at HEAD has a `## [1.7.0]`
-heading. It needs `YES=1` because pushing a tag starts graph-kit's release
+(local and remote), not already a local tag, and graph-kit's `CHANGELOG.md` at
+HEAD has a `## [1.7.0]` heading. The canonical tag form is plain `X.Y.Z`
+(`1.7.0`). Older tags are mixed: some are plain (`1.5.3`, `1.6.0`) and one is
+prefixed (`v1.6.2`). The `v` prefix is ignored when the latest tag is found, and
+new tags never use it. The tag is pushed as `refs/tags/X.Y.Z`, so a branch with
+the same name cannot be pushed by mistake. It needs `YES=1` because pushing a tag starts graph-kit's release
 workflow, which can publish outside this repository. The tag is created and
 pushed only after the build and the online pin check pass, so a failed build
 leaves no release behind. llm-ide's pin line gets a `// graph-kit 1.7.0` note.
@@ -111,7 +131,12 @@ Check graph-kit's release workflow before you run it with `YES=1`.
 | Message | Meaning | Fix |
 | --- | --- | --- |
 | `graph-kit pins disagree` | The gitlink, `Package.swift` and `Package.resolved` name different commits. | `make graphkit-bump`, or set them by hand and run `swift package resolve graph-kit`. |
-| `does not exist on …graph-kit.git` | The pinned commit is not on the remote. | Push graph-kit first: `git -C mac/LocalPackages/graph-kit push origin main`. |
+| `does not exist on …graph-kit.git` | The remote does not have the pinned commit. Both the tip check and the per-object fetch said so. | If the commit is local, push graph-kit: `git -C mac/LocalPackages/graph-kit push origin main`. If it should already be on the remote, fetch or check out the submodule: `git submodule update --init mac/LocalPackages/graph-kit`. |
+| `could not confirm pinned … on the remote` (warning) | The remote could not be asked about a non-tip commit (offline, submodule not checked out, GitHub API unavailable). It is not a failure. | Re-run with network access, or check out the submodule and run `make graphkit-pin-check ONLINE=1` again. |
+| `unreachable, existence check skipped` (warning) | `git ls-remote` could not reach graph-kit. | Re-run when the network is back. The hook never blocks a push on this. |
+| `TAG is set but empty` | `make graphkit-bump TAG=` was given with no value. | Pass `TAG=X.Y.Z`, or leave `TAG` out for a plain bump. |
+| `--tag needs a value` | `graphkit-pin-check.mjs --set-pin <sha> --tag` was given without a version. | Pass `--tag X.Y.Z`, or drop `--tag`. |
+| `graph-kit was pushed at <sha>; re-run make graphkit-bump` | A step after the push failed. graph-kit is already on the remote. | Fix the cause shown above, then run `make graphkit-bump` again. It finishes the bump. |
 | `worktree HEAD … differs from the gitlink` (warning) | The submodule checkout is not at the committed commit. | `git submodule update --init mac/LocalPackages/graph-kit`, or `git add` the gitlink. |
 | `graph-kit local main has diverged` | graph-kit's local `main` is behind or has diverged from `origin/main`. | Reconcile graph-kit's `main` first. The bump never force-pushes. |
 | `build-mac-graphkit-local: mac/Package.resolved changed` | SwiftPM rewrote the resolved file. | `git checkout -- mac/Package.resolved`. |
@@ -137,7 +162,7 @@ Commit the result with a `revert` subject.
 | Check | Command | Where it runs |
 | --- | --- | --- |
 | Pins agree | `make graphkit-pin-check` | `make regression`, first gate after the submodule check |
-| Pin exists on the remote | `make graphkit-pin-check ONLINE=1` | pre-push, when the pins change; the bump |
+| Pin exists on the remote | `make graphkit-pin-check ONLINE=1` | pre-push, when the gitlink, `Package.resolved`, or a graph-kit line in `Package.swift` changes; the bump |
 | Pin unit tests | `node --test extension/tests/graphkit-pin-check.test.mjs` | `make test` |
 | Local override builds | `make build-mac-graphkit-local` | manual |
 | Bump dry run | `make graphkit-bump DRY_RUN=1` | manual |

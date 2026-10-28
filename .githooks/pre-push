@@ -49,11 +49,14 @@ while read -r local_ref local_sha remote_ref remote_sha; do
         # otherwise be safe and run the gate.
         if git rev-parse --verify --quiet origin/main >/dev/null; then
             files=$(git diff --name-only "origin/main...$local_sha" 2>/dev/null || echo mac/)
+            pkg_diff=$(git diff "origin/main...$local_sha" -- mac/Package.swift 2>/dev/null || true)
         else
             files="mac/"
+            pkg_diff="+graph-kit (no origin/main to diff against: assume the pin moved)"
         fi
     else
         files=$(git diff --name-only "$remote_sha" "$local_sha" 2>/dev/null || echo mac/)
+        pkg_diff=$(git diff "$remote_sha" "$local_sha" -- mac/Package.swift 2>/dev/null || true)
     fi
     # `schema/` and `scripts/` carry the Mac↔server wire contract and the gate
     # that checks it (make chat-gates → conformance-agent-v2.mjs). The contract
@@ -73,7 +76,13 @@ while read -r local_ref local_sha remote_ref remote_sha; do
     if printf '%s\n' "$files" | grep -qE '^docs/.*\.md$' && printf '%s\n' "$files" | grep -E '^docs/.*\.md$' | grep -qv '^docs/superpowers/'; then
         docs_changed=1
     fi
-    if printf '%s\n' "$files" | grep -qE '^mac/(Package\.swift|Package\.resolved|LocalPackages/graph-kit)'; then
+    # Pin trigger, narrowed: the gitlink moved (its path appears in the diff),
+    # Package.resolved changed, or a pushed Package.swift line names graph-kit.
+    # Other Package.swift edits (dependencies, flags) skip the online check.
+    if printf '%s\n' "$files" | grep -qxE 'mac/LocalPackages/graph-kit|mac/Package\.resolved'; then
+        pin_changed=1
+    fi
+    if printf '%s\n' "$pkg_diff" | grep -qE '^[+-].*graph-kit'; then
         pin_changed=1
     fi
     if printf '%s\n' "$files" | grep -q '^extension/'; then
