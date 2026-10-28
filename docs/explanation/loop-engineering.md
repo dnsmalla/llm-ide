@@ -415,6 +415,10 @@ every skill stage, and compares the **newly** dirty paths against a protected se
    the test map would change what "tested" and "regressed" mean. Before D6 the
    ledger and map sat in `llm-doc/loop/test/` and were protected only by the
    `**/test/**` glob; `system/loop/**` now protects them by name.
+   That part of the set does not depend on git: a project whose `.gitignore`
+   covers `system/` never lists those files in `git status`, so the guard
+   snapshots their bytes before a repair and compares them after it, and a
+   violation is undone by writing the pre-repair bytes back.
 
 `LoopEngineConfig.extraProtectedGlobs` widens the set per project; it cannot
 narrow the built-ins.
