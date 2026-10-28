@@ -1,6 +1,8 @@
 import Foundation
 
-/// Read-only view of `<gitRoot>/system/graph/graph.json` (written by the CodeGraph feature).
+/// Read-only view of the repo's code graph `graph.json` (written by the CodeGraph feature).
+/// Location: `GeneratedDataLocator.readableGraphDir(forRepo:)` (project `system/graph/`,
+/// or `system/graph/<repo>/` with 2+ code repos; legacy `<repo>/system/graph/` as fallback).
 /// Own Codable so Features/Loop never imports CodeGraph/GraphCore.
 /// graph.json 1.1 adds `calls` (file-level call edges) and `files[].role`; 1.0 files decode unchanged.
 struct GraphIndex: Codable {
@@ -52,7 +54,8 @@ struct GraphIndex: Codable {
     }
 
     static func load(gitRoot: URL) -> GraphIndex? {
-        let url = gitRoot.appendingPathComponent("system/graph/graph.json")
+        let url = GeneratedDataLocator.readableGraphDir(forRepo: gitRoot)
+            .appendingPathComponent("graph.json")
         guard let data = try? Data(contentsOf: url) else { return nil }
         do { return try JSONDecoder().decode(GraphIndex.self, from: data) }
         catch { NSLog("GraphIndex: graph.json could not be decoded: \(error)"); return nil }

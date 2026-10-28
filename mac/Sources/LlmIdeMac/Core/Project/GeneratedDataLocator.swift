@@ -78,19 +78,22 @@ enum GeneratedDataLocator {
 
     // MARK: - Reader locations (new location first, legacy N-1 fallback)
 
-    /// Graph directory to READ from: the current location when its `index.md`
-    /// exists, else the legacy `<repo>/system/graph/` when that holds one, else
+    /// Graph directory to READ from: the current location when it holds a graph
+    /// (`index.md` or `graph.json`), else the legacy `<repo>/system/graph/` when that holds one, else
     /// the current location (so a missing graph still reads as "not generated").
     static func readableGraphDir(forRepo repo: URL) -> URL {
         let current = graphDir(forRepo: repo)
-        if FileManager.default.fileExists(atPath: current.appendingPathComponent("index.md").path) {
-            return current
-        }
+        if holdsGraph(current) { return current }
         let legacy = legacySystemDir(forRepo: repo).appendingPathComponent("graph", isDirectory: true)
-        if FileManager.default.fileExists(atPath: legacy.appendingPathComponent("index.md").path) {
-            return legacy
-        }
+        if holdsGraph(legacy) { return legacy }
         return current
+    }
+
+    /// A graph directory holds an overview (`index.md`) or the machine graph (`graph.json`).
+    private static func holdsGraph(_ dir: URL) -> Bool {
+        let fm = FileManager.default
+        return fm.fileExists(atPath: dir.appendingPathComponent("index.md").path)
+            || fm.fileExists(atPath: dir.appendingPathComponent("graph.json").path)
     }
 
     /// Memory directory to READ from: the project location when it exists, else the

@@ -4,7 +4,7 @@ import Foundation
 public struct TestMapBuilder {
     var gitRoot: URL
     var structure: TestStructure
-    /// Directory whose `system/graph/graph.json` is read; defaults to `gitRoot`.
+    /// Repo whose code graph is read (`GeneratedDataLocator.readableGraphDir`); defaults to `gitRoot`.
     /// The Loop passes the main checkout, since `system/` is gitignored and absent in a worktree.
     var graphRoot: URL? = nil
 

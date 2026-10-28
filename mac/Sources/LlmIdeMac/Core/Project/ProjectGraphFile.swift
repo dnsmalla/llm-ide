@@ -129,7 +129,7 @@ struct ProjectGraphDocument: Equatable, Sendable {
     }
 }
 
-/// Reads the project's code graph from disk: `<repo>/system/graph/graph.json`,
+/// Reads the project's code graph from disk: `<project>/system/graph/graph.json`,
 /// the v1.1 file `CodeNoteGenerator` writes.
 ///
 /// The repo is the one `RepoGraphLocator` picks for the project. The conversion
@@ -144,7 +144,7 @@ struct ProjectGraphDocument: Equatable, Sendable {
 ///   (from, to, kind), and an edge whose endpoint is not a file node is
 ///   dropped, so the result never holds a dangling edge.
 enum ProjectGraphFile {
-    /// `<repo>/system/graph/graph.json` for the project, or nil when the project
+    /// `<project>/system/graph/graph.json` for the project, or nil when the project
     /// has no graph repo.
     static func fileURL(projectRoot: URL) -> URL? {
         guard let repo = RepoGraphLocator.repoToGraph(projectRoot: projectRoot) else { return nil }

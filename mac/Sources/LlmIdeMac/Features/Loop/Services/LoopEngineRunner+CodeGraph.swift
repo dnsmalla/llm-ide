@@ -179,7 +179,8 @@ extension LoopEngineRunner {
                 notRegenerated = reason
             }
         }
-        let url = runRoot.appendingPathComponent("system/graph/graph.json")
+        let url = GeneratedDataLocator.readableGraphDir(forRepo: runRoot)
+            .appendingPathComponent("graph.json")
         guard let data = try? Data(contentsOf: url),
               let index = try? JSONDecoder().decode(GraphIndex.self, from: data) else {
             return GraphLoad(graph: nil, notRegenerated: notRegenerated)

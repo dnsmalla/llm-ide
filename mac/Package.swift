@@ -213,6 +213,7 @@ if autoTasksIncluded {
         "MobileLoopSnapshotTests.swift",
         "MobileLoopStopTests.swift",       // also in mobile_sync's list — deduped there
         "RegressionFaultSyncTests.swift",
+        "LoopGeneratedDataTests.swift",
         "ReviewMergeCandidatesTests.swift",
         "TestFailureExtractorTests.swift",
         "VerifyCommandBuilderTests.swift",

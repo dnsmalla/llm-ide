@@ -21,7 +21,8 @@ struct RegressionFaultSync {
             guard let f = try? store.loadFault(at: u), f.status == .open || f.status == .acknowledged else { continue }
             for t in f.tags where t.hasPrefix("test:") { live[t, default: []].append(u) }
         }
-        let faultsDir = gitRoot.appendingPathComponent("system/faults", isDirectory: true)
+        // D1: faults live in the project's system/faults, same as MemoryStore writes them.
+        let faultsDir = GeneratedDataLocator.faultsDir(forRepo: gitRoot)
         for id in diff.newFailures {
             let tag = "test:\(id)"
             if live[tag] != nil { out.skippedExisting.append(id); continue }
