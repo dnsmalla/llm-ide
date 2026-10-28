@@ -151,10 +151,10 @@ Endpoints with no client caller (39):
 | `/kb/usage/record` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1059` | `LlmIdeAPIClient+Usage.swift` | - | - |
 | `/kb/usage/ratelimits` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1044` | `LlmIdeAPIClient+Usage.swift` | - | - |
 | `/kb/usage/turn-composition` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1053` | - | - | tests only |
-| `/kb/storage` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-history.mjs:40` | - | - | tests only |
-| `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:44` | - | - | tests only |
-| `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:57` | - | - | tests only |
-| `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:87` | - | - | tests only |
+| `/kb/storage` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-history.mjs:41` | - | - | tests only |
+| `/kb/agent-history/settings` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-history.mjs:45` | - | - | tests only |
+| `/kb/agent-history/clear` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:58` | - | - | tests only |
+| `/kb/agent-history/compact` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-history.mjs:89` | - | - | tests only |
 | `/kb/generate-plan` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:34` | - | `App.tsx` | - |
 | `/kb/analyze-risks` | ALL_ENDPOINTS | POST | token | core | `extension/routes/planning.mjs:60` | - | - | tests only |
 | `/kb/summarize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1096` | `LlmIdeAPIClient+Export.swift` | - | - |
@@ -212,8 +212,8 @@ Endpoints with no client caller (39):
 | `/kb/chat/sessions` | ALL_ENDPOINTS | GET, POST | token | core | `extension/routes/chat.mjs:21` | - | `App.tsx`, `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id` | ALL_ENDPOINTS | DELETE, GET, PATCH | token | core | `extension/routes/chat.mjs:44` | - | `unified-chat.ts` | - |
 | `/kb/chat/sessions/:id/messages` | ALL_ENDPOINTS | DELETE, POST | token | core | `extension/routes/chat.mjs:101` | - | `unified-chat.ts` | - |
-| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:170` | `SystemBridge.swift` | - | - |
-| `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:167` | `SystemEventStream.swift` | - | - |
+| `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
+| `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:61` | - | - | tests only |
 | `/health` | public+auth | GET | public | core | `extension/server.mjs:655` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:270` | `LlmIdeAPIClient.swift` | `config.ts` | - |

@@ -9,6 +9,7 @@ import { onOsEvent } from '../core/os-events.mjs';
 import { getDb } from '../kb/db.mjs';
 import { listActivity, unreadCount } from '../kb/activity.mjs';
 import { recentRuns, storageReport } from '../kb/agent-history-api.mjs';
+import { logger } from '../core/logger.mjs';
 import { usageForWindow, rollupTurnComposition, knowledgeCounts, kitStatus, TOKEN_WINDOWS } from '../kb/os-state.mjs';
 import { memoryLedgerRepos } from '../kb/memory-ledger.mjs';
 import { turnCompositionRecent } from '../kb/turn-composition.mjs';
@@ -27,6 +28,19 @@ let serverInfo = {
   apiVersion: null,
   health: async () => ({ status: 'degraded', checks: { db: false, claude: false, skills: false } }),
 };
+
+/**
+ * Run one additive part of the response. A failure (the agent store is damaged
+ * or closed) is logged and answered with `fallback`; the caller keeps the rest.
+ */
+function guarded(part, fn, fallback) {
+  try {
+    return { value: fn() };
+  } catch (err) {
+    logger.warn('os_state_part_failed', { part, error: err?.message });
+    return { value: fallback };
+  }
+}
 
 /** Install the API version and the health probe source (server.mjs boot). */
 export function configureOsRoutes({ apiVersion, health }) {
@@ -213,6 +227,8 @@ export async function handleOsRoutes(req, res, { userId, url }) {
   }));
 
   const turnComposition = rollupTurnComposition(turnCompositionRecent(userId, { limit: TURN_COMPOSITION_LIMIT }));
+  const storage = guarded('storage', () => storageReport(userId, { db }), null);
+  const agentRuns = guarded('recentRuns', () => recentRuns(userId), []);
 
   sendJSON(res, 200, {
     generatedAt: new Date().toISOString(),
@@ -238,9 +254,11 @@ export async function handleOsRoutes(req, res, { userId, url }) {
     },
     macOnly: { loop: 'on this Mac', autoTasks: 'on this Mac' },
     // Stage 1c (additive): the storage report (the same as GET /kb/storage, so
-    // the page needs one fetch) and this user's newest agent runs.
-    storage: storageReport(userId, { db }),
-    agents: { recentRuns: recentRuns(userId) },
+    // the page needs one fetch) and this user's newest agent runs. A store
+    // failure leaves them empty (storage null, recentRuns []); the rest of the
+    // response is unaffected.
+    storage: storage.value,
+    agents: { recentRuns: agentRuns.value },
   });
   return true;
 }

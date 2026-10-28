@@ -1136,6 +1136,7 @@ export type OsAgentHistorySummary = {
   watermark: string | null;
 } | null;
 
+/** The storage report (same as GET /kb/storage). null when the store could not be read; the rest of the OS state is unaffected. */
 export type OsStorageReport = {
   generatedAt: string;
   groups: OsStorageGroup[];
@@ -1144,7 +1145,7 @@ export type OsStorageReport = {
     health: "ok" | "degraded" | "down";
     state: "closed" | "ok" | "down";
   };
-};
+} | null;
 
 /** One agent run for the System view. No prompt, message or error text: codes only. */
 export type OsAgentRun = {

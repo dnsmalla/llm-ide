@@ -387,3 +387,21 @@ test('the per-user storage counts use an index on user_id, not a table scan', ()
     assert.match(plan, /USING (COVERING )?INDEX|PRIMARY KEY/, `${t}: ${plan}`);
   }
 });
+
+test('a store failure leaves OS state\'s storage null and recentRuns empty; the rest of the response stays', async () => {
+  freshAgent();
+  const a = user('o3');
+  seed(a, user('o4'));
+  // Break the storage reads under the route: the runs table is gone, so the
+  // storage report and the recent-runs read throw. Activity (its own table) works.
+  agent.getAgentDb().exec('DROP TABLE agent_runs');
+  const res = await call('GET', '/kb/os/state', null, a);
+  assert.equal(res.statusCode, 200, res._body);
+  const body = res.json();
+  assert.equal(body.storage, null);
+  assert.deepEqual(body.agents.recentRuns, []);
+  for (const k of ['generatedAt', 'apiVersion', 'system', 'running', 'activity', 'tokens', 'knowledge', 'macOnly']) {
+    assert.ok(Object.hasOwn(body, k), `${k} is still there`);
+  }
+  agent.closeAgentDb();
+});

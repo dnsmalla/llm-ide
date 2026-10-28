@@ -222,7 +222,10 @@
       }
     },
     "StorageReport": {
-      "type": "object",
+      "type": [
+        "object",
+        "null"
+      ],
       "required": [
         "generatedAt",
         "groups",
@@ -267,7 +270,8 @@
             }
           }
         }
-      }
+      },
+      "description": "The storage report (same as GET /kb/storage). null when the store could not be read; the rest of the OS state is unaffected."
     },
     "AgentRun": {
       "type": "object",

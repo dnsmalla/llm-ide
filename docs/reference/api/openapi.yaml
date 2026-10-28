@@ -13004,7 +13004,9 @@ components:
               - "compact"
           description: "Actions the page may offer. Only agent_history has any."
     OsStorageReport:
-      type: "object"
+      type:
+        - "object"
+        - "null"
       required:
         - "generatedAt"
         - "groups"
@@ -13037,6 +13039,7 @@ components:
                 - "closed"
                 - "ok"
                 - "down"
+      description: "The storage report (same as GET /kb/storage). null when the store could not be read; the rest of the OS state is unaffected."
     Outcomes:
       type: "object"
       required:
