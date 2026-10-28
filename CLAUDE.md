@@ -217,8 +217,9 @@ llm-ide/
 │   │                    #   see docs/explanation/claude-linker.md
 │   └── Tests/           # XCTest + swift-testing suites
 ├── docs/                # mkdocs site (Diátaxis framework)
-└── kb/                  # Dev/test runtime data (repo kb: data.db, dev secrets). The packaged app's
-                         #   data lives in ~/Library/Application Support/llm-ide/system (LLMIDE_DATA_DIR)
+└── kb/                  # Dev/test runtime data (repo kb). On first boot with LLMIDE_DATA_DIR (the Mac app's
+                         #   ~/Library/Application Support/llm-ide/system) the DB, agent.db, secrets and agent-sdk
+                         #   are MOVED there and deleted from kb/; kb/backups/ is left alone (see the how-to)
 ```
 
 ### Central skills (all agents)
