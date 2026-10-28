@@ -85,8 +85,10 @@ python3 docs/_scripts/extract_env_vars.py
 |---|---|---|
 | `LLMIDE_ACCESS_TTL_SEC` | int | `900` (15 min) |
 | `LLMIDE_BCRYPT_COST` | int | `12` |
+| `LLMIDE_BACKUP_DIR` | str | `<data dir>/backups` |
 | `LLMIDE_BODY_LIMIT_MB` | int | `8` |
 | `LLMIDE_CORS_ORIGINS` | str | _(empty)_ |
+| `LLMIDE_DATA_DIR` | str | _(unset: repo `kb/`)_. Base for `data.db`, `agent.db`, `backups/`, `agent-sdk/`, `server.log`; individual vars still win. Ignored under the test runner. |
 | `LLMIDE_DB_PATH` | str | `<repo>/kb/data.db` |
 | `LLMIDE_DISABLE_REGISTRATION` | bool | `false` |
 | `LLMIDE_HOST` | str | `127.0.0.1` |

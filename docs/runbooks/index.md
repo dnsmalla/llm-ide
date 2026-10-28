@@ -13,7 +13,7 @@ runbook follows the same shape:
 4. **Postmortem hooks** — what to capture for the audit log / follow-up
 
 These are operator docs, not user docs. They assume shell access to the
-machine running `node server.mjs` and read access to `kb/data.db`.
+machine running `node server.mjs` and read access to the data dir's `data.db` (the packaged app's `~/Library/Application Support/llm-ide/system`, or the checkout's `kb/data.db`).
 
 ## Index
 
@@ -30,7 +30,7 @@ machine running `node server.mjs` and read access to `kb/data.db`.
 ## Conventions
 
 - `$ROOT` = the directory containing `extension/server.mjs`
-- `$DB` = `$LLMIDE_DB_PATH` (default: `$ROOT/kb/data.db`)
+- `$DB` = `$LLMIDE_DB_PATH`, else `$LLMIDE_DATA_DIR/data.db`, else `$ROOT/kb/data.db`
 - `$BACKUPS` = `$(dirname $DB)/backups/` (default location for
   `POST /admin/backup`)
 - Commands assume macOS/Linux. Substitute equivalents on other platforms.

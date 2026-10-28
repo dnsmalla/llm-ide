@@ -217,7 +217,8 @@ llm-ide/
 │   │                    #   see docs/explanation/claude-linker.md
 │   └── Tests/           # XCTest + swift-testing suites
 ├── docs/                # mkdocs site (Diátaxis framework)
-└── kb/                  # Runtime data only (SQLite db, dev secrets)
+└── kb/                  # Dev/test runtime data (repo kb: data.db, dev secrets). The packaged app's
+                         #   data lives in ~/Library/Application Support/llm-ide/system (LLMIDE_DATA_DIR)
 ```
 
 ### Central skills (all agents)

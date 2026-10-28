@@ -16,7 +16,7 @@ any code.
 
 | | |
 |---|---|
-| Location | `LLMIDE_DB_PATH` (default `<repo>/kb/data.db`) |
+| Location | `LLMIDE_DB_PATH`; else `LLMIDE_DATA_DIR/data.db` (the Mac app's `~/Library/Application Support/llm-ide/system`); else `<repo>/kb/data.db` |
 | Engine | SQLite, WAL mode, FTS5, foreign keys on |
 | Schema version | Tracked in the `schema_migrations` table |
 | Migrations | `extension/kb/migrations/NNNN_*.sql`, applied at server start by `extension/kb/db.mjs` |

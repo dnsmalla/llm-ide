@@ -86,7 +86,8 @@ two starred entries are required in production.
 | `LLMIDE_PORT` | `3456` | |
 | `LLMIDE_BODY_LIMIT_MB` | `2` | Per-request body cap. |
 | `LLMIDE_TRUST_PROXY` | `false` | Enable only behind a trusted reverse proxy. |
-| `LLMIDE_DB_PATH` | `<repo>/kb/data.db` | SQLite path. |
+| `LLMIDE_DATA_DIR` | _(unset)_ | Global per-install data dir (`data.db`, `agent.db`, `backups/`, `agent-sdk/`, `server.log`). The Mac app sets it to `~/Library/Application Support/llm-ide/system`. See [data location](../how-to/data-location-and-rollback.md). |
+| `LLMIDE_DB_PATH` | `<repo>/kb/data.db` | SQLite path (wins over `LLMIDE_DATA_DIR`). |
 | `LLMIDE_JWT_ISSUER` | `llmide` | `iss` claim. |
 | `LLMIDE_ACCESS_TTL_SEC` | `900` (15 m) | |
 | `LLMIDE_REFRESH_TTL_SEC` | `2592000` (30 d) | |
