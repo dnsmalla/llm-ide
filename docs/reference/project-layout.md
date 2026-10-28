@@ -78,10 +78,14 @@ truth for these paths; its header comment states the same rule.
 >   `system/graph/<repo>/`.
 > - **Memory, faults, Q&A, repo.md:** `system/memory/`, `system/faults/`,
 >   `system/q&a/`, `system/repo.md`, always at the project level.
-> - **Migration:** at project open, legacy `code/<repo>/system/{graph,memory,faults,q&a,repo.md}`
->   moves into the project's `system/`. A repo whose `system/` holds git-tracked
->   files is skipped and logged. Nothing already at the new root is overwritten.
->   Until a file is moved, readers fall back to the legacy location (N-1).
+> - **Migration:** at project open, the app's own generated files under a legacy
+>   `code/<repo>/system/` move into the project's `system/`: the graph (only a
+>   recognised generator output, with its self-ignore marker), the known memory
+>   artifacts, and the fault and Q&A files named by the writers. Anything else
+>   stays. `repo.md` is hand-authored and never moves. A repo is skipped and
+>   logged when git reports tracked files under `system/`, when git cannot answer,
+>   or when `system/` sits in a nested checkout. Nothing already at the new root is
+>   overwritten. Until a file is moved, readers fall back to the legacy location (N-1).
 
 ## Folders at a glance
 
