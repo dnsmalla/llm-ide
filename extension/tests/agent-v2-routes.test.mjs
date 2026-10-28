@@ -1399,6 +1399,30 @@ test('stream: a v2 turn is one agent.db run, keyed by its turn id, closed with i
   assert.equal(runs[0].stop_reason, 'end_turn');
 });
 
+test('stream: a bookkeeping throw after a successful turn does not label the run error', async () => {
+  const user = newUser('v2route-run-bookkeeping@example.com');
+  const fakeTurn = async () => {
+    // The engine succeeds; the first read of byModel (turn bookkeeping) throws.
+    const usageTotals = { inputTokens: 4, outputTokens: 1, stopReason: 'end_turn', get byModel() { throw new Error('bookkeeping boom'); } };
+    return { result: { subtype: 'success' }, usageTotals };
+  };
+  await handleAgentV2Routes(toolTurnReq(user, 'chat-run-bk'), makeRes(), { runTurn: fakeTurn });
+  const runs = agentReadDb().prepare('SELECT status, error_code FROM agent_runs WHERE user_id = ?').all(user.id);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, 'ok', 'the engine finished; the run is not an error');
+  assert.equal(runs[0].error_code, null);
+});
+
+test('stream: an engine failure closes the run as error with its code', async () => {
+  const user = newUser('v2route-run-fail@example.com');
+  const fakeTurn = async () => { const e = new Error('engine down'); e.code = 'ENGINE_ERROR'; throw e; };
+  await handleAgentV2Routes(toolTurnReq(user, 'chat-run-fail'), makeRes(), { runTurn: fakeTurn });
+  const runs = agentReadDb().prepare('SELECT status, error_code FROM agent_runs WHERE user_id = ?').all(user.id);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, 'error');
+  assert.equal(runs[0].error_code, 'ENGINE_ERROR');
+});
+
 test('stream: the turn\'s prompt composition is stored under the same turn id as its ledger rows', async () => {
   const db = getDb();
   const user = newUser('v2route-composition@example.com');

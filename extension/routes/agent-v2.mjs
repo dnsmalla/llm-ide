@@ -547,128 +547,138 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     }
   };
 
-  // Set when the engine finished the turn (sizes only — migration 0040).
-  let turnComposition = null;
+  let runEngineDone = false;
   try {
-    const { usageTotals, composition } = await deps.runTurn({
-      message,
-      history: freshTurnHistory(body),
-      userId,
-      mode,
-      model,
-      provider,
-      language: body.language,
-      // The composer's effort pick (a level string, or "auto"); the engine
-      // checks it against the model's own levels. Older clients send none.
-      effort: typeof body.effort === 'string' ? body.effort : undefined,
-      skills: body.skills,
-      // Set by the saved-plan card's "Execute plan" action — the one
-      // signal the server can trust that this Execute turn is working an
-      // already-approved plan, so the pipeline injects the execution
-      // skill (llm_agent/runtime/plan-pipeline.mjs).
-      planExecute: body.planExecute === true,
-      // Stage 2 of the plan pipeline: the saved-plan card's "Write full plan"
-      // action. Like planExecute, it is a client signal the server cannot
-      // derive from the message, and it selects writing-plans over stage 1's
-      // discovery skill.
-      planWrite: body.planWrite === true,
-      // The chat's own permission chip (Manual / Bypass), forwarded per turn
-      // so the agent follows the setting the user is looking at. Anything
-      // else — including absent, which is what an older client sends — means
-      // "no instruction", and the server's own approval policy applies.
-      permissionMode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : null,
-      agentContext,
-      attachments: body.attachments,
-      resumeSdkSessionId: resumeSdkSessionId ?? undefined,
-      onEvent,
-      // Two views of ONE controller: `signal` aborts parked approval
-      // decisions, `abortController` is the shape the Agent SDK needs to
-      // actually terminate its CLI subprocess (its Options has no `signal`
-      // member, so passing only the signal let a stopped turn run to
-      // completion, tools included).
-      signal: ac.signal,
-      abortController: ac,
-      // Auth ladder's last rung (spec §7, the same ladder runClaude uses):
-      // after the per-user vault key and ANTHROPIC_API_KEY miss, the SDK
-      // subprocess falls back to the operator's ambient claude login. The
-      // engine keeps the rung opt-in (hermetic tests pin the no-key error);
-      // the route is what enables it — without this, a user with no stored
-      // key gets ENGINE_ERROR on every v2 turn.
-      allowAmbientAuth: true,
-    });
-    turnComposition = composition ?? null;
-    runUsage = usageTotals ?? null;
-    // Success bookkeeping: bind/refresh the mapping with the session the
-    // stream reported, then meter the turn. The engine-resolved model wins
-    // over the client's request (the SDK resolves defaults/fallbacks); with
-    // neither, model is null and recordUsage skips the row — accepted, since
-    // there is then genuinely no model name to meter under. (recordUsage's
-    // real params are userId/provider/model/source/endpoint/inputTokens/
-    // outputTokens/runs/requestId — cost is not a ledger column, so costUsd
-    // is not passed.)
-    const meteredModel = resolvedModel ?? model;
-    bindSdkSession();
-    for (const row of ledgerRowsForTurn(meteredModel, usageTotals)) {
-      recordUsage(db, { userId, provider, requestId: turnId, ...row });
-    }
-    // Task parity with legacy /code-assist: emit after the SDK result so the
-    // Mac can populate PlanTimelineCard and auto-continue when work remains.
-    const { tasks: currentTasks, continueNeeded } = taskTurnResponse(userId, agentContext, mode);
-    send({ type: 'tasks', tasks: currentTasks, continueNeeded });
-  } catch (err) {
-    runErrorCode = err?.code || 'ENGINE_ERROR';
-    if (err?.code === 'SESSION_UNRESUMABLE') {
-      // The resumed SDK session is gone (pruned/cleared). Terminal error
-      // event carrying the code — the stream has already started, so the
-      // "409" is realized here; the client retries the turn with fresh:true.
-      // Deliberately NOT bound here: the resume is what failed, so
-      // currentSdkSessionId is the id that just proved unusable. The client's
-      // fresh:true retry opens a replacement and binds that instead.
-      send({
-        type: 'error',
-        code: 'SESSION_UNRESUMABLE',
-        message: err?.message || 'SDK session is no longer resumable',
-        retryable: true,
+    // Set when the engine finished the turn (sizes only — migration 0040).
+    let turnComposition = null;
+    try {
+      const { usageTotals, composition } = await deps.runTurn({
+        message,
+        history: freshTurnHistory(body),
+        userId,
+        mode,
+        model,
+        provider,
+        language: body.language,
+        // The composer's effort pick (a level string, or "auto"); the engine
+        // checks it against the model's own levels. Older clients send none.
+        effort: typeof body.effort === 'string' ? body.effort : undefined,
+        skills: body.skills,
+        // Set by the saved-plan card's "Execute plan" action — the one
+        // signal the server can trust that this Execute turn is working an
+        // already-approved plan, so the pipeline injects the execution
+        // skill (llm_agent/runtime/plan-pipeline.mjs).
+        planExecute: body.planExecute === true,
+        // Stage 2 of the plan pipeline: the saved-plan card's "Write full plan"
+        // action. Like planExecute, it is a client signal the server cannot
+        // derive from the message, and it selects writing-plans over stage 1's
+        // discovery skill.
+        planWrite: body.planWrite === true,
+        // The chat's own permission chip (Manual / Bypass), forwarded per turn
+        // so the agent follows the setting the user is looking at. Anything
+        // else — including absent, which is what an older client sends — means
+        // "no instruction", and the server's own approval policy applies.
+        permissionMode: PERMISSION_MODES.has(body.permissionMode) ? body.permissionMode : null,
+        agentContext,
+        attachments: body.attachments,
+        resumeSdkSessionId: resumeSdkSessionId ?? undefined,
+        onEvent,
+        // Two views of ONE controller: `signal` aborts parked approval
+        // decisions, `abortController` is the shape the Agent SDK needs to
+        // actually terminate its CLI subprocess (its Options has no `signal`
+        // member, so passing only the signal let a stopped turn run to
+        // completion, tools included).
+        signal: ac.signal,
+        abortController: ac,
+        // Auth ladder's last rung (spec §7, the same ladder runClaude uses):
+        // after the per-user vault key and ANTHROPIC_API_KEY miss, the SDK
+        // subprocess falls back to the operator's ambient claude login. The
+        // engine keeps the rung opt-in (hermetic tests pin the no-key error);
+        // the route is what enables it — without this, a user with no stored
+        // key gets ENGINE_ERROR on every v2 turn.
+        allowAmbientAuth: true,
       });
-    } else {
-      // An interrupted (Stop / client disconnect) or failed turn still owns
-      // whatever SDK session it opened, and that session's transcript holds
-      // the conversation so far — bind it so the next message resumes rather
-      // than silently starting the model from zero.
+      turnComposition = composition ?? null;
+      runUsage = usageTotals ?? null;
+      // From here the ENGINE has finished: a bookkeeping throw below is not a
+      // failed run (it must not be recorded as 'error').
+      runEngineDone = true;
+      // Success bookkeeping: bind/refresh the mapping with the session the
+      // stream reported, then meter the turn. The engine-resolved model wins
+      // over the client's request (the SDK resolves defaults/fallbacks); with
+      // neither, model is null and recordUsage skips the row — accepted, since
+      // there is then genuinely no model name to meter under. (recordUsage's
+      // real params are userId/provider/model/source/endpoint/inputTokens/
+      // outputTokens/runs/requestId — cost is not a ledger column, so costUsd
+      // is not passed.)
+      const meteredModel = resolvedModel ?? model;
       bindSdkSession();
-      if (!ac.signal.aborted) {
-        // Provider refusals keep their own code (resolveAgentEngineAuth) so a
-        // client can tell "this provider cannot take the Agent engine" / "the
-        // custom-provider registry hasn't been synced since the server
-        // restarted" apart from a genuine engine failure. Everything else
-        // stays ENGINE_ERROR.
-        const code = PROVIDER_ERROR_CODES.has(err?.code) ? err.code : 'ENGINE_ERROR';
-        send({ type: 'error', code, message: err?.message || 'agent v2 turn failed', retryable: false });
+      for (const row of ledgerRowsForTurn(meteredModel, usageTotals)) {
+        recordUsage(db, { userId, provider, requestId: turnId, ...row });
+      }
+      // Task parity with legacy /code-assist: emit after the SDK result so the
+      // Mac can populate PlanTimelineCard and auto-continue when work remains.
+      const { tasks: currentTasks, continueNeeded } = taskTurnResponse(userId, agentContext, mode);
+      send({ type: 'tasks', tasks: currentTasks, continueNeeded });
+    } catch (err) {
+      if (!runEngineDone) runErrorCode = err?.code || 'ENGINE_ERROR';
+      if (err?.code === 'SESSION_UNRESUMABLE') {
+        // The resumed SDK session is gone (pruned/cleared). Terminal error
+        // event carrying the code — the stream has already started, so the
+        // "409" is realized here; the client retries the turn with fresh:true.
+        // Deliberately NOT bound here: the resume is what failed, so
+        // currentSdkSessionId is the id that just proved unusable. The client's
+        // fresh:true retry opens a replacement and binds that instead.
+        send({
+          type: 'error',
+          code: 'SESSION_UNRESUMABLE',
+          message: err?.message || 'SDK session is no longer resumable',
+          retryable: true,
+        });
+      } else {
+        // An interrupted (Stop / client disconnect) or failed turn still owns
+        // whatever SDK session it opened, and that session's transcript holds
+        // the conversation so far — bind it so the next message resumes rather
+        // than silently starting the model from zero.
+        bindSdkSession();
+        if (!ac.signal.aborted) {
+          // Provider refusals keep their own code (resolveAgentEngineAuth) so a
+          // client can tell "this provider cannot take the Agent engine" / "the
+          // custom-provider registry hasn't been synced since the server
+          // restarted" apart from a genuine engine failure. Everything else
+          // stays ENGINE_ERROR.
+          const code = PROVIDER_ERROR_CODES.has(err?.code) ? err.code : 'ENGINE_ERROR';
+          send({ type: 'error', code, message: err?.message || 'agent v2 turn failed', retryable: false });
+        }
       }
     }
+    // Every exit path — success, Stop, failure: a stopped turn's tool calls
+    // still cost tokens and are exactly the data the report needs.
+    const toolEvents = toolAccounting.events();
+    recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolEvents });
+    // Tool-result text this turn put into the transcript (turn_composition,
+    // migration 0044): the same resultChars turn_tool_events keeps per call.
+    if (turnComposition) {
+      const toolResultChars = toolEvents.reduce((n, e) => n + (Number(e?.resultChars) || 0), 0);
+      recordTurnComposition(userId, { ...turnComposition, turnId, toolResultChars });
+    }
+    const totalMs = Date.now() - turnStartedAt;
+    recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
+    log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });
+    if (!res.writableEnded) res.end();
+    return true;
+  } finally {
+    // Closed on every exit, a throw included: a run never stays 'running' because
+    // bookkeeping failed. Status: cancelled (Stop / disconnect), error (the engine
+    // failed), else ok.
+    agentRun.finish({
+      ...runTotals(runUsage),
+      status: ac.signal.aborted ? 'cancelled' : (runErrorCode ? 'error' : 'ok'),
+      toolCalls: toolAccounting.events().length,
+      stopReason: runUsage?.stopReason ?? null,
+      errorCode: runErrorCode,
+    });
   }
-  // Every exit path — success, Stop, failure: a stopped turn's tool calls
-  // still cost tokens and are exactly the data the report needs.
-  const toolEvents = toolAccounting.events();
-  recordToolEvents(userId, { turnId, engine: 'v2', mode, events: toolEvents });
-  // Tool-result text this turn put into the transcript (turn_composition,
-  // migration 0044): the same resultChars turn_tool_events keeps per call.
-  if (turnComposition) {
-    const toolResultChars = toolEvents.reduce((n, e) => n + (Number(e?.resultChars) || 0), 0);
-    recordTurnComposition(userId, { ...turnComposition, turnId, toolResultChars });
-  }
-  agentRun.finish({
-    ...runTotals(runUsage),
-    status: ac.signal.aborted ? 'cancelled' : (runErrorCode ? 'error' : 'ok'),
-    toolCalls: toolEvents.length,
-    stopReason: runUsage?.stopReason ?? null,
-    errorCode: runErrorCode,
-  });
-  const totalMs = Date.now() - turnStartedAt;
-  recordAgentTurnPhase({ engine: 'v2', phase: 'total', durationMs: totalMs });
-  log.info('agent_turn_timing', { engine: 'v2', mode, turnId, firstTokenMs, totalMs, aborted: ac.signal.aborted });
-  if (!res.writableEnded) res.end();
-  return true;
 }
 
 // --- POST /agent/v2/decision ----------------------------------------------------
