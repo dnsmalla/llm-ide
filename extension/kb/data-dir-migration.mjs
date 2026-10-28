@@ -301,8 +301,8 @@ function moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkC
     for (const name of committed.slice().reverse()) {
       try { removeStrict(path.join(dataDir, name)); } catch (e) { report.notes.push(`rollback could not remove ${name}: ${e.message}`); }
     }
-    rmTreeStrictIfExists(staging);
-    removeQuietly(ownerFile);
+    cleanupNote(staging, report);
+    cleanupNote(ownerFile, report);
     setDataDirOverride(null);
     const reason = err?.code === 'LEGACY_IN_USE' ? 'legacy-in-use' : 'copy-failed';
     report.notes.push(`${reason === 'legacy-in-use' ? 'not moved' : 'move failed'}: ${err?.message ?? err}; using the legacy location for this run, legacy files untouched`);
@@ -350,8 +350,8 @@ function moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkC
     report.notes.push(`legacy move incomplete (${err?.message ?? err}); the new copy is verified and kept. Moved so far: ${removed.join(', ') || 'nothing'}. Check ${legacyDir} by hand.`);
   }
 
-  rmTreeStrictIfExists(staging);
-  removeQuietly(ownerFile);
+  cleanupNote(staging, report);
+  cleanupNote(ownerFile, report);
   report.legacyDiverged = false;
   return finish('migrated', null);
 }
@@ -660,6 +660,11 @@ function renameStrict(from, to) {
 
 function removeQuietly(p) {
   try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* best effort: callers that need certainty use removeStrict */ }
+}
+
+// Cleanup after the outcome is decided: never changes the outcome, only reports.
+function cleanupNote(p, report) {
+  try { removeStrict(p); } catch (err) { report.notes.push(`could not remove ${path.basename(p)}: ${err.message}`); }
 }
 
 function closeQuietly(db) {
