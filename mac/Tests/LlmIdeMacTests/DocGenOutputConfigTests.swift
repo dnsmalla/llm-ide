@@ -11,11 +11,31 @@ final class DocGenOutputConfigTests: XCTestCase {
         }
     }
 
-    func testResolvedDirectoryDefaultsToProjectData() {
-        let root = URL(fileURLWithPath: "/tmp/proj")
+    /// The default is human-readable output, so it lives under `llm-doc/` (D4/D5),
+    /// not `data/`.
+    func testResolvedDirectoryDefaultsToLlmDocGenerated() {
+        let root = URL(fileURLWithPath: "/tmp/proj", isDirectory: true)
         let config = DocGenOutputConfig()
+        let resolved = config.resolvedDirectory(projectRoot: root)
+        XCTAssertEqual(resolved, ProjectLayout(root: root).generatedDocsDir)
+        XCTAssertEqual(resolved?.path, root.appendingPathComponent("llm-doc/generated", isDirectory: true).path)
+        XCTAssertNotEqual(resolved, ProjectLayout(root: root).dataDir)
+    }
+
+    /// A folder saved before the default moved keeps working: the stored path wins
+    /// over the new `llm-doc/generated/` default, with no migration.
+    func testSavedCustomPathStillWinsOverNewDefault() {
+        var config = DocGenOutputConfig()
+        config.localFolderPath = "/tmp/legacy-data-folder"
+        let root = URL(fileURLWithPath: "/tmp/proj", isDirectory: true)
         XCTAssertEqual(config.resolvedDirectory(projectRoot: root),
-                       ProjectLayout(root: root).dataDir)
+                       URL(fileURLWithPath: "/tmp/legacy-data-folder", isDirectory: true))
+    }
+
+    /// The scaffolder creates the default folder on open, so the first Doc Gen save
+    /// has a home. The folder is the one the default resolves to.
+    func testScaffolderRequiresTheGeneratedDocsFolder() {
+        XCTAssertTrue(ProjectScaffolder.requiredDirectories.contains("llm-doc/generated"))
     }
 
     func testResolvedDirectoryPrefersExplicitPath() {

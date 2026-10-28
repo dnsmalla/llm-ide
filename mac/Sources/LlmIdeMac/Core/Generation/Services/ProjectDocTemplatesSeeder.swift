@@ -99,7 +99,7 @@ enum ProjectDocTemplatesSeeder {
     - **Doc Gen templates**: section structure comes from `## Heading` lines.
     - Add a new Doc Gen template: create `templates/my-template/template.md` with at least one `##` section, then reopen the project or use **Rebuild missing folders** in Explorer → Project folders.
 
-    Doc Gen exports go to `data/`. Auto ingest notes go to `llm-doc/`.
+    Doc Gen exports go to `llm-doc/generated/`. Auto ingest notes go to `llm-doc/`.
 
     <!-- llmide:doc-template-readme -->
     """

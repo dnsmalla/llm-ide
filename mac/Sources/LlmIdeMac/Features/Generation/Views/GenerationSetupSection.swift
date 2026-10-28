@@ -108,7 +108,7 @@ struct GenerationSetupSection: View {
                         .foregroundStyle(.tertiary)
                 }
                 .buttonStyle(.plain)
-                .help("Use the project's data/ folder")
+                .help("Use the project's llm-doc/generated/ folder")
             }
         }
         .padding(.leading, 24)

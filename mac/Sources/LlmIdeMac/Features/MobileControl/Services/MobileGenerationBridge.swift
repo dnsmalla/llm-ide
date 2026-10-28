@@ -11,7 +11,7 @@ import SharedProtocol
 /// overwrite what the user is looking at and trip their `isBusy`.
 ///
 /// Every phone run is saved on the Mac under `<project>/llm-doc/generated/`
-/// (never the Doc Gen output folder, which defaults to `data/`), so the same
+/// (never the Doc Gen output folder, which defaults to `llm-doc/generated/`), so the same
 /// folder the phone can browse is where results land.
 @MainActor
 final class MobileGenerationBridge: MobileFeatureBridge {

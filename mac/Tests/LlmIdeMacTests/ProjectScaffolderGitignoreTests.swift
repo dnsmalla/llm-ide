@@ -24,6 +24,12 @@ final class ProjectScaffolderGitignoreTests: XCTestCase {
             .filter { !$0.isEmpty && !$0.hasPrefix("#") }
     }
 
+    /// Loop worktrees are per-run checkouts under `system/`; a new project must ignore them.
+    func testFullBlockIgnoresLoopWorktrees() {
+        let rules = ignoreRules(in: ProjectScaffolder.managedGitignoreBlockForTesting)
+        XCTAssertTrue(rules.contains("system/loop-worktrees/"))
+    }
+
     func testFullBlockIgnoresRunHistoryButNotTheContract() {
         let rules = ignoreRules(in: ProjectScaffolder.managedGitignoreBlockForTesting)
         // A brand-new project gets the block verbatim, so the run log must be ignored…
@@ -87,6 +93,16 @@ final class ProjectScaffolderGitignoreTests: XCTestCase {
         let upgraded = try XCTUnwrap(ProjectScaffolder.upgradedManagedGitignore(existing))
         XCTAssertTrue(upgraded.contains(".agents/"), "agent-skills upgrade missing")
         XCTAssertTrue(upgraded.contains("system/loop-runs/"), "run-history upgrade missing")
+        XCTAssertTrue(upgraded.contains("system/loop-worktrees/"), "loop-worktrees upgrade missing")
+    }
+
+    /// A block that predates the worktree entry gains it, inside the managed block.
+    func testOlderBlockGainsTheLoopWorktreesIgnore() throws {
+        let existing = managedBlock("system/cache/\n.agents/\nsystem/loop-runs/")
+        let upgraded = try XCTUnwrap(ProjectScaffolder.upgradedManagedGitignore(existing))
+        let ignoreIndex = try XCTUnwrap(upgraded.range(of: "system/loop-worktrees/")?.lowerBound)
+        let closeIndex = try XCTUnwrap(upgraded.range(of: AppIdentity.managedBlockClose)?.lowerBound)
+        XCTAssertLessThan(ignoreIndex, closeIndex)
     }
 
     /// Idempotent: opening an up-to-date project must not rewrite .gitignore, or
@@ -96,6 +112,7 @@ final class ProjectScaffolderGitignoreTests: XCTestCase {
         system/cache/
         .agents/
         system/loop-runs/
+        system/loop-worktrees/
         """)
         XCTAssertNil(ProjectScaffolder.upgradedManagedGitignore(existing))
     }

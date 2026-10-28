@@ -181,8 +181,8 @@ extension LlmIdeAPIClient {
     }
 
     /// Write `content` as Markdown. `directory` wins when supplied (Doc Gen's
-    /// configured output folder); otherwise `<projectRoot>/data/`; otherwise
-    /// Downloads. Existing callers pass neither and keep the old behaviour.
+    /// configured output folder); otherwise `<projectRoot>/llm-doc/generated/`;
+    /// otherwise Downloads. Existing callers pass neither and keep the old behaviour.
     func exportMarkdown(content: String, filename: String,
                         projectRoot: URL? = nil, directory: URL? = nil) throws -> URL {
         let fm = FileManager.default
@@ -191,9 +191,9 @@ extension LlmIdeAPIClient {
             try fm.createDirectory(at: dir, withIntermediateDirectories: true)
             baseDir = dir
         } else if let root = projectRoot {
-            let plansDir = ProjectLayout(root: root).dataDir
-            try fm.createDirectory(at: plansDir, withIntermediateDirectories: true)
-            baseDir = plansDir
+            let outDir = ProjectLayout(root: root).generatedDocsDir
+            try fm.createDirectory(at: outDir, withIntermediateDirectories: true)
+            baseDir = outDir
         } else {
             baseDir = fm.urls(for: .downloadsDirectory, in: .userDomainMask).first
                 ?? URL(fileURLWithPath: NSTemporaryDirectory())

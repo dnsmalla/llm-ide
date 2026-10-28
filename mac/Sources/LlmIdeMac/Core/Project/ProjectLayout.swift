@@ -4,14 +4,37 @@ import Foundation
 /// All folder-name string literals live HERE and nowhere else, so the layout
 /// can be changed in one place.
 ///
+/// Placement rule (user decision 2026-10-28, D4/D5): human-readable generated
+/// content lives in `llm-doc/`; machine-consumed artifacts (code notes, agent
+/// memory, faults, Q&A, indexes, databases) stay in `system/`.
+///
 /// ```
 /// <root>/
-/// ├── source/   code/   data/   llm-doc/   templates/   ← user content
-/// └── system/                              ← generated / system data
-///     ├── project.json  (marker + settings)
-///     ├── faults/   graph/   cache/
-///     └── index.sqlite   sync.json
+/// ├── source/   code/   data/   templates/   commands/   ← user content
+/// ├── llm-doc/                                ← human-readable generated docs
+/// │   ├── <type>/YYYY/MM/   meetings/ emails/ documents/ (+ connector dirs)
+/// │   ├── plans/            KB plans as Markdown
+/// │   ├── loop/<key>/       loop outputs (plan/, refactor/, test/, docs/ …)
+/// │   └── generated/        Doc Gen exports (default output folder)
+/// ├── system/                                 ← machine-consumed state
+/// │   ├── project.json      project marker + settings
+/// │   ├── loop.json         Loop contract (committed)
+/// │   ├── loop-runs/        Loop run journal (git-ignored)
+/// │   ├── loop-worktrees/   Loop git worktrees (git-ignored)
+/// │   ├── memory/           agent memory artifacts: graph-notes.md, doc-notes.md, chat-memory.md
+/// │   ├── q&a/  faults/     Q&A store, fault reports (MemoryStore container: system/)
+/// │   ├── repo.md           no longer written; the code summary is graph/index.md
+/// │   ├── graph/            code graph + code notes (git-ignored)
+/// │   ├── cache/            runtime cache (git-ignored)
+/// │   └── index.sqlite  sync.json   search index + export info (git-ignored)
 /// ```
+///
+/// `.self-heal/` (`BATCH.md`, the Self-Heal proposal batch) sits at the repo
+/// root beside `source/`, not under `system/`.
+///
+/// Known exception, being moved: today graph and memory output may be written
+/// under `<repo>/system/` of a cloned repo under `code/` rather than under the
+/// project's own `system/`. That split is being fixed in a later task.
 struct ProjectLayout {
     let root: URL
 
@@ -20,6 +43,13 @@ struct ProjectLayout {
     var codeDir:   URL { root.appendingPathComponent("code", isDirectory: true) }
     var dataDir:   URL { root.appendingPathComponent("data", isDirectory: true) }
     var notesDir:  URL { root.appendingPathComponent("llm-doc", isDirectory: true) }
+
+    /// Doc Gen markdown exports, default output: `<root>/llm-doc/generated/`.
+    /// Human-readable, so it sits under `llm-doc/` (D4/D5). A saved per-project
+    /// folder (`DocGenOutputConfig.localFolderPath`) still wins over this.
+    var generatedDocsDir: URL {
+        notesDir.appendingPathComponent("generated", isDirectory: true)
+    }
 
     /// Raw source directory for a note type: `<root>/source/<type.directoryName>/`.
     /// Mirrors `notesDir` so raw and processed trees stay symmetric for every

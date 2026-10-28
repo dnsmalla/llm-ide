@@ -37,7 +37,9 @@ enum DocGenOutputDestination: String, Codable, CaseIterable, Identifiable {
 /// Doc Gen's output settings for one project.
 struct DocGenOutputConfig: Codable, Equatable {
     var destination: DocGenOutputDestination = .localFolder
-    /// nil ⇒ `<project>/data/`.
+    /// nil ⇒ `<project>/llm-doc/generated/` (`ProjectLayout.generatedDocsDir`).
+    /// A path saved before that default moved keeps working: a stored value
+    /// always wins, so no migration is needed.
     var localFolderPath: String?
     /// Dormant. Reserved for "output sent to Slack also goes to email"; has no
     /// effect until Slack delivery ships, and is persisted now so enabling it
@@ -51,6 +53,6 @@ struct DocGenOutputConfig: Codable, Equatable {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
         guard let root = projectRoot else { return nil }
-        return ProjectLayout(root: root).dataDir
+        return ProjectLayout(root: root).generatedDocsDir
     }
 }
