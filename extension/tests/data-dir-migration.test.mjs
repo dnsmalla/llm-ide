@@ -14,22 +14,37 @@ import { getDataDirOverride, clearDataDirOverride, getDataMigrationReport } from
 let work;
 let root;      // fake repo root (holds kb/)
 let dataDir;   // LLMIDE_DATA_DIR target
-let writers = []; // connections kept open so the legacy DB has un-checkpointed WAL rows
+let writers = []; // test-owned connections, closed in afterEach
 
 const sha = (f) => crypto.createHash('sha256').update(fs.readFileSync(f)).digest('hex');
 const env = (extra = {}) => ({ LLMIDE_DATA_DIR: dataDir, ...extra });
 
-function makeLegacy({ withAgent = true, withTrees = true } = {}) {
+// A legacy kb whose newest rows are still in the WAL, as on a live server.
+// Closing the last connection would checkpoint them into the main file, so the
+// -wal (and main file) are copied aside while open, then restored after close:
+// the result is the same WAL-resident state, with no connection left open.
+function makeLegacy({ withAgent = true, withTrees = true, vaultRows = false } = {}) {
   const kb = path.join(root, 'kb');
   fs.mkdirSync(kb, { recursive: true });
-  const db = new Database(path.join(kb, 'data.db'));
+  const dbFile = path.join(kb, 'data.db');
+  const db = new Database(dbFile);
   db.pragma('journal_mode = WAL');
   db.pragma('wal_autocheckpoint = 0'); // keep the rows in the -wal file
   db.exec('CREATE TABLE meetings (id INTEGER PRIMARY KEY, title TEXT); CREATE TABLE users (id TEXT);');
   const ins = db.prepare('INSERT INTO meetings (title) VALUES (?)');
   for (let i = 0; i < 25; i++) ins.run(`m${i}`);
   db.prepare('INSERT INTO users (id) VALUES (?)').run('u1');
-  writers.push(db);
+  if (vaultRows) {
+    db.exec('CREATE TABLE user_secrets (user_id TEXT, key TEXT, blob BLOB)');
+    db.prepare('INSERT INTO user_secrets VALUES (?, ?, ?)').run('u1', 'claude.apiKey', Buffer.from('x'));
+  }
+  const stash = path.join(work, `stash-${crypto.randomUUID()}`);
+  fs.mkdirSync(stash);
+  fs.copyFileSync(dbFile, path.join(stash, 'data.db'));
+  fs.copyFileSync(`${dbFile}-wal`, path.join(stash, 'data.db-wal'));
+  db.close();
+  fs.copyFileSync(path.join(stash, 'data.db'), dbFile);
+  fs.copyFileSync(path.join(stash, 'data.db-wal'), `${dbFile}-wal`);
   if (withAgent) {
     const a = new Database(path.join(kb, 'agent.db'));
     a.pragma('journal_mode = WAL');
@@ -90,8 +105,12 @@ test('migrates a WAL DB with its rows, agent.db, backups and agent-sdk; legacy u
   assert.equal(marker.tables.meetings, 25);
   assert.ok(marker.migratedAt);
 
-  // The legacy files are byte-identical (the writer above is still open, so no checkpoint ran).
-  for (const [f, digest] of before) assert.equal(sha(f), digest, `${f} changed`);
+  // The legacy DB keeps its rows and is not deleted. Byte-identity is not
+  // promised: closing the snapshot's last connection may checkpoint the WAL.
+  const legacyNow = new Database(path.join(kb, 'data.db'), { readonly: true, fileMustExist: true });
+  assert.equal(legacyNow.prepare('SELECT COUNT(*) AS n FROM meetings').get().n, 25);
+  legacyNow.close();
+  assert.ok(before.length >= 1);
   assert.equal(getDataDirOverride(), undefined, 'success leaves the env-chosen dir in place');
   assert.equal(getDataMigrationReport().status, 'migrated');
   assert.equal(fs.existsSync(path.join(dataDir, '.migrating')), false);
@@ -134,9 +153,8 @@ test('partial failure at the agent.db step also cleans up and falls back', () =>
   assert.equal(fs.existsSync(path.join(dataDir, 'agent.db')), false);
 });
 
-test('refuses while another process holds the legacy DB, and falls back', () => {
+test('refuses while a write transaction holds the legacy DB, and falls back', () => {
   const kb = makeLegacy();
-  // Another writer holds the write lock (a live server).
   const holder = new Database(path.join(kb, 'data.db'));
   holder.prepare('BEGIN IMMEDIATE').run();
   writers.push(holder);
@@ -146,6 +164,21 @@ test('refuses while another process holds the legacy DB, and falls back', () => 
   assert.equal(getDataDirOverride(), null);
   assert.equal(fs.existsSync(path.join(dataDir, 'data.db')), false);
   holder.prepare('ROLLBACK').run();
+});
+
+test('refuses while an IDLE server connection holds the legacy DB (the case a write-lock probe misses)', () => {
+  const kb = makeLegacy();
+  // An open connection with no transaction: what a running server looks like between requests.
+  const idle = new Database(path.join(kb, 'data.db'));
+  idle.prepare('SELECT COUNT(*) AS n FROM meetings').get();
+  writers.push(idle);
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'fallback', JSON.stringify(report));
+  assert.match(report.notes.join(' '), /in use by another process/);
+  assert.equal(getDataDirOverride(), null);
+  assert.equal(fs.existsSync(path.join(dataDir, 'data.db')), false);
+  // The idle connection still works: the refused run changed nothing.
+  assert.equal(idle.prepare('SELECT COUNT(*) AS n FROM meetings').get().n, 25);
 });
 
 test('skips when there is no legacy DB (fresh install) and creates the dir 0700', () => {
@@ -235,10 +268,7 @@ test('a vault-encrypted value decrypts after migration with the copied key', () 
 });
 
 test('a legacy vault with stored secrets but no key file falls back instead of migrating', () => {
-  const kb = makeLegacy({ withAgent: false, withTrees: false });
-  const w = writers[0];
-  w.exec('CREATE TABLE user_secrets (user_id TEXT, key TEXT, blob BLOB)');
-  w.prepare('INSERT INTO user_secrets VALUES (?, ?, ?)').run('u1', 'claude.apiKey', Buffer.from('x'));
+  const kb = makeLegacy({ withAgent: false, withTrees: false, vaultRows: true });
   const report = runDataDirMigration({ env: env(), root });
   assert.equal(report.status, 'fallback', JSON.stringify(report));
   assert.match(report.notes.join(' '), /key file is missing/);

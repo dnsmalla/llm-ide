@@ -165,15 +165,19 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, repo
   }
 }
 
-// Probe the source for another writer, snapshot it with VACUUM INTO, then
-// verify the copy. Returns the per-table counts that were verified.
+// Snapshot one legacy DB and verify the copy. The source connection takes an
+// EXCLUSIVE lock first: that read fails with SQLITE_BUSY while any other
+// connection has the file open, idle or not (a BEGIN IMMEDIATE probe misses an
+// idle server, which holds no write lock between transactions). Holding the
+// lock until the counts are taken means VACUUM INTO and the counts see the
+// same data. Returns the per-table counts that were verified.
 function snapshotAndVerify(src, dest) {
   const db = new Database(src, { fileMustExist: true, timeout: 0 });
   let srcCounts;
   try {
+    db.pragma('locking_mode = EXCLUSIVE');
     try {
-      db.prepare('BEGIN IMMEDIATE').run();
-      db.prepare('COMMIT').run();
+      db.prepare('SELECT COUNT(*) AS n FROM sqlite_master').get();
     } catch (err) {
       throw new Error(`${path.basename(src)} is in use by another process (${err.code ?? err.message})`);
     }
