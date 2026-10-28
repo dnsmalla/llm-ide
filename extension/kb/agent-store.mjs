@@ -10,7 +10,7 @@
 import fs from 'fs';
 import path from 'path';
 import {
-  agentDbFile, agentStoreStatus, checkStorageSize, enqueueAgentWrite, flushAgentQueue,
+  agentDbFile, agentStoreStatus, checkStorageSize, dropQueuedForUser, enqueueAgentWrite, flushAgentQueue,
   getAgentDb, localDay, localDayBefore, readMeta, writeMeta,
 } from './agent-db.mjs';
 // Local, not imported from db.mjs: db.mjs imports this module (user purge), so
@@ -513,7 +513,11 @@ export function storageStats(userId, { db, now = new Date() } = {}) {
 export function purgeUser(userId, { db } = {}) {
   requireUser(userId);
   const handle = requireHandle(handleOr({ db }));
-  if (!db) flushAgentQueue();
+  // Flush first (so no queued row for this user lands after the delete), then
+  // drop anything still queued for the user. An explicit handle is flushed too:
+  // the queue is process-wide, not per handle.
+  flushAgentQueue();
+  dropQueuedForUser(userId);
   return handle.transaction(() => {
     const deleted = {};
     for (const t of AGENT_USER_TABLES) {
@@ -534,10 +538,6 @@ export function purgeUserHistory(userId) {
     if (!db) return { ok: false, pending: true };
     return purgeUser(userId, { db });
   } catch {
-    try {
-      const db = getAgentDb();
-      if (db) writeMeta(db, `pending_purge:${userId}`, new Date().toISOString());
-    } catch { /* store unusable: the marker cannot be written either */ }
     return { ok: false, pending: true };
   }
 }

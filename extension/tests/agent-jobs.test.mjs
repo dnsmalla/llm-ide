@@ -122,3 +122,14 @@ test('shutdown path: queued rows are flushed by closeAgentDb, and stop/close are
   assert.ok(reopened);
   assert.equal(count(reopened, "SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = 'shutdown-run'"), 1);
 });
+
+test('a user purge flushes and drops that user\'s queued writes; other users keep theirs', () => {
+  const db = fresh();
+  store.enqueueToolEvents(U, 'purge-q-1', { engine: 'v2', events: [{ tool: 'Read', resultChars: 1 }] });
+  store.enqueueToolEvents('u-keep', 'purge-q-2', { engine: 'v2', events: [{ tool: 'Read', resultChars: 1 }] });
+  const r = store.purgeUserHistory(U);
+  assert.equal(r.ok, true);
+  agent.flushAgentQueue();
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = 'purge-q-1'"), 0, 'no queued row lands after the purge');
+  assert.equal(count(db, "SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = 'purge-q-2'"), 1, 'other users are unaffected');
+});

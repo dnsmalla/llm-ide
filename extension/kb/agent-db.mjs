@@ -280,6 +280,19 @@ export function enqueueAgentWrite(kind, sql, params = []) {
   }
 }
 
+/**
+ * Drop queued writes that belong to one user (any queued param equal to the
+ * user id). Used before a user purge so no queued row lands after it.
+ * Returns the number dropped.
+ */
+export function dropQueuedForUser(userId) {
+  const before = state.queue.length;
+  state.queue = state.queue.filter((e) => !e.params.includes(userId));
+  const n = before - state.queue.length;
+  if (n) dropRows(n);
+  return n;
+}
+
 function persistDropped(db) {
   const n = state.droppedUnsaved;
   if (!n) return;
