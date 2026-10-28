@@ -116,4 +116,65 @@ struct NotesIndexMigrationTests {
         #expect(exists(layout.notesIndex))
         #expect(!exists(layout.legacyNotesIndex))
     }
+    @Test("a symlink at the new index location is never replaced: both files are left alone")
+    func symlinkTargetRefused() throws {
+        let root = try tmpProject()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let legacy = try fixture("index.json")
+        try writeLegacy(legacy, in: root)
+        let layout = ProjectLayout(root: root)
+        let elsewhere = root.appendingPathComponent("elsewhere.json")
+        try Data("{}".utf8).write(to: elsewhere)
+        try FileManager.default.createDirectory(at: layout.cacheDir, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(at: layout.notesIndex, withDestinationURL: elsewhere)
+
+        NotesIndexMigration.run(in: root)
+
+        let type = try FileManager.default.attributesOfItem(atPath: layout.notesIndex.path)[.type] as? FileAttributeType
+        #expect(type == .typeSymbolicLink, "the symlink must survive")
+        #expect(try Data(contentsOf: elsewhere) == Data("{}".utf8), "the link target must not be written")
+        #expect(try Data(contentsOf: layout.legacyNotesIndex) == legacy)
+    }
+
+    @Test("an app save before the migration runs keeps the legacy-only entries")
+    func saveKeepsLegacyOnlyEntries() async throws {
+        let root = try tmpProject()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeLegacy(try fixture("index.json"), in: root)
+        let service = NoteService(repoRoot: root)
+        let metadata = NoteMetadata(
+            id: "", type: .meeting, source: "test", title: "New",
+            date: "2026-08-20T10:00:00Z", path: "", rawFile: "meetings/2026/08/new.md",
+            sourceHash: nil, generatedAt: "", tags: [], participants: nil, fileSize: 0)
+
+        _ = try await service.saveNote(type: .meeting, filename: "new.md",
+                                       content: Data("# new".utf8), metadata: metadata)
+
+        let ids = try await service.loadIndex().notes.map(\.id)
+        #expect(ids.contains("meeting-2026-08-14-standup"), "the legacy-only entry must survive the save")
+        #expect(!exists(ProjectLayout(root: root).legacyNotesIndex), "the legacy file is retired after the union")
+    }
+
+    @Test("when both indexes exist, a save unions the legacy entries and drops neither side")
+    func saveUnionsBothIndexes() async throws {
+        let root = try tmpProject()
+        defer { try? FileManager.default.removeItem(at: root) }
+        try writeLegacy(try fixture("index-other.json"), in: root)
+        let layout = ProjectLayout(root: root)
+        try FileManager.default.createDirectory(at: layout.cacheDir, withIntermediateDirectories: true)
+        try fixture("index.json").write(to: layout.notesIndex)
+        let metadata = NoteMetadata(
+            id: "", type: .meeting, source: "test", title: "New",
+            date: "2026-08-20T10:00:00Z", path: "", rawFile: "meetings/2026/08/new.md",
+            sourceHash: nil, generatedAt: "", tags: [], participants: nil, fileSize: 0)
+
+        _ = try await NoteService(repoRoot: root).saveNote(type: .meeting, filename: "new.md",
+                                                           content: Data("# new".utf8), metadata: metadata)
+
+        let ids = Set(try decodeIndex(layout.notesIndex).notes.map(\.id))
+        #expect(ids.contains("meeting-2026-08-14-standup"))
+        #expect(ids.contains("email-2026-08-15-invoice"))
+        #expect(!exists(layout.legacyNotesIndex))
+    }
+
 }

@@ -404,18 +404,38 @@ public final class NoteService: Sendable {
     }
 
     /// Save the unified note index. Caller must hold `indexLock`.
-    private func saveIndex(_ index: NoteIndex) throws {
+    ///
+    /// `mergingLegacy`: an app write (`addToIndex`) unions the pre-D6
+    /// `llm-doc/index.json` first, adding the entries the new index lacks, so
+    /// nothing a not-yet-migrated project recorded is lost. A rebuild passes
+    /// `false`: the disk scan is the truth, so legacy-only entries are dropped on
+    /// purpose. The legacy file is removed only after the new file is written
+    /// and reads back with every entry; an undecodable legacy file is kept.
+    private func saveIndex(_ index: NoteIndex, mergingLegacy: Bool) throws {
         var mutableIndex = index
         mutableIndex.updated = ISO8601DateFormatter().string(from: Date())
+        let legacy = legacyIndexPath
+        var legacyRetireable = FileManager.default.fileExists(atPath: legacy.path)
+        if mergingLegacy, legacyRetireable {
+            if let legacyData = try? Data(contentsOf: legacy),
+               let old = try? decoder.decode(NoteIndex.self, from: legacyData) {
+                let known = Set(mutableIndex.notes.map(\.id))
+                mutableIndex.notes.append(contentsOf: old.notes.filter { !known.contains($0.id) })
+            } else {
+                logger.error("legacy note index undecodable; kept in place during save")
+                legacyRetireable = false
+            }
+        }
         let data = try encoder.encode(mutableIndex)
         try FileManager.default.createDirectory(at: indexPath.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
         try data.write(to: indexPath, options: .atomic)
-        // The new index now supersedes the pre-D6 copy; drop it so it cannot be
-        // read again after a later edit to the new file.
-        if FileManager.default.fileExists(atPath: legacyIndexPath.path) {
-            try? FileManager.default.removeItem(at: legacyIndexPath)
-        }
+        guard legacyRetireable else { return }
+        // Retire the pre-D6 copy only once the new file reads back complete.
+        guard let written = try? Data(contentsOf: indexPath),
+              let readBack = try? decoder.decode(NoteIndex.self, from: written),
+              readBack.notes.count == mutableIndex.notes.count else { return }
+        try? FileManager.default.removeItem(at: legacy)
     }
 
     /// Add a note to the index. The load → replace → save runs under
@@ -432,7 +452,7 @@ public final class NoteService: Sendable {
             // Add new note
             index.notes.append(metadata)
 
-            try saveIndex(index)
+            try saveIndex(index, mergingLegacy: true)
         }
     }
 
@@ -448,7 +468,7 @@ public final class NoteService: Sendable {
                 updated: ISO8601DateFormatter().string(from: Date()),
                 notes: try scanAllNotes()
             )
-            try saveIndex(index)
+            try saveIndex(index, mergingLegacy: false)
             return index
         }
     }

@@ -28,6 +28,13 @@ enum NotesIndexMigration {
         let legacy = layout.legacyNotesIndex
         guard fileIsRegular(legacy, fm) else { return }
         let target = layout.notesIndex
+        // Never replace a symlink or a directory at the target: the atomic write
+        // would follow or clobber it. Leave both files alone and say why.
+        if let type = (try? fm.attributesOfItem(atPath: target.path))?[.type] as? FileAttributeType,
+           type != .typeRegular {
+            log.error("system/cache/notes-index.json exists but is not a regular file — leaving both index files in place.")
+            return
+        }
 
         let decoder = JSONDecoder()
         decoder.dateDecodingStrategy = .iso8601
