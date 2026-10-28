@@ -35,6 +35,9 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const { registerUser } = await import('../server/users.mjs');
 const { tasks: sessionTasks } = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
 const { getDb } = await import('../kb/db.mjs');
+const agentStoreRead = await import('../kb/agent-db.mjs');
+// Tool events and composition live in agent.db (Stage 1b): flush the queue, then read.
+const agentReadDb = () => { agentStoreRead.flushAgentQueue(); return agentStoreRead.getAgentDb(); };
 const {
   getOrCreateAgentSession,
   markAgentSessionUsed,
@@ -1364,7 +1367,7 @@ test('stream: tool events and ledger rows share one turn id (the measurement joi
     return { result: { subtype: 'success' }, usageTotals: { inputTokens: 7, outputTokens: 3 } };
   };
   await handleAgentV2Routes(toolTurnReq(user, 'chat-join'), makeRes(), { runTurn: fakeTurn });
-  const ev = db.prepare('SELECT DISTINCT turn_id, tool, engine, result_chars FROM turn_tool_events WHERE user_id = ?').all(user.id);
+  const ev = agentReadDb().prepare('SELECT DISTINCT run_id AS turn_id, tool, engine, result_chars FROM agent_tool_events WHERE user_id = ?').all(user.id);
   assert.equal(ev.length, 1);
   assert.equal(ev[0].tool, 'find-code');
   assert.equal(ev[0].engine, 'v2');
@@ -1384,7 +1387,7 @@ test('stream: the turn\'s prompt composition is stored under the same turn id as
       firstCall: { inputTokens: 2, cacheCreationTokens: 30000, cacheReadTokens: 0 } },
   });
   await handleAgentV2Routes(toolTurnReq(user, 'chat-composition'), makeRes(), { runTurn: fakeTurn });
-  const rows = db.prepare('SELECT turn_id, mode, system_chars, first_call_prompt_tokens FROM turn_composition WHERE user_id = ?').all(user.id);
+  const rows = agentReadDb().prepare('SELECT turn_id, mode, system_chars, first_call_prompt_tokens FROM turn_composition WHERE user_id = ?').all(user.id);
   assert.equal(rows.length, 1);
   assert.equal(rows[0].system_chars, 3846);
   assert.equal(rows[0].first_call_prompt_tokens, 30002);
@@ -1401,7 +1404,7 @@ test('stream: a turn that throws after a tool event still records it, with no le
     throw new Error('boom');
   };
   await handleAgentV2Routes(toolTurnReq(user, 'chat-join-throw'), makeRes(), { runTurn: fakeTurn });
-  const ev = db.prepare('SELECT DISTINCT turn_id, tool FROM turn_tool_events WHERE user_id = ?').all(user.id);
+  const ev = agentReadDb().prepare('SELECT DISTINCT run_id AS turn_id, tool FROM agent_tool_events WHERE user_id = ?').all(user.id);
   assert.equal(ev.length, 1);
   assert.equal(ev[0].tool, 'Read');
   assert.equal(db.prepare('SELECT COUNT(*) AS n FROM usage_ledger WHERE user_id = ?').get(user.id).n, 0);

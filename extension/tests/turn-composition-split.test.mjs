@@ -18,6 +18,11 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
 const db = await import('../kb/db.mjs');
+// turn_composition lives in agent.db (Stage 1b). Reads flush the queue first, so a
+// row written just before the read is visible, as it was when the write was sync.
+const agentStore = await import('../kb/agent-db.mjs');
+agentStore.closeAgentDb();
+const agentReadDb = () => { agentStore.flushAgentQueue(); return agentStore.getAgentDb(); };
 const users = await import('../server/users.mjs');
 const { recordTurnComposition, turnCompositionRecent } = await import('../kb/turn-composition.mjs');
 const { runAgentV2Turn } = await import('../llm_agent/sdk/engine.mjs');
@@ -65,7 +70,7 @@ test('migration 0044 applies on a fresh database and adds the split columns', ()
 
 test('a faked turn with known sizes is written as approximate tokens and SDK categories', () => {
   assert.equal(recordTurnComposition(A, measured('split-1')), true);
-  const r = db.getDb().prepare('SELECT * FROM turn_composition WHERE user_id = ? AND turn_id = ?').get(A, 'split-1');
+  const r = agentReadDb().prepare('SELECT * FROM turn_composition WHERE user_id = ? AND turn_id = ?').get(A, 'split-1');
   assert.equal(r.system_prompt_tokens, 1000, 'chars / 4');
   assert.equal(r.skills_append_tokens, 2);
   assert.equal(r.llmide_tool_tokens, 601, 'ceil(2401 / 4)');
@@ -96,7 +101,7 @@ test('classification is by kind and anchored name: a deferred row never counts a
       { name: 'MCP tools', kind: 'used', isDeferred: true, tokens: 9000 },
     ],
   }));
-  const r = db.getDb().prepare('SELECT * FROM turn_composition WHERE turn_id = ?').get('split-kind');
+  const r = agentReadDb().prepare('SELECT * FROM turn_composition WHERE turn_id = ?').get('split-kind');
   assert.equal(r.sdk_system_tools_tokens, null, 'neither row is a live "System tools"');
   assert.equal(r.sdk_mcp_tools_tokens, null, 'isDeferred excludes it from the live sum');
   assert.equal(r.sdk_deferred_tools_tokens, 16000, 'deferred = kind deferred OR isDeferred, tool rows only (7000 + 9000)');
@@ -104,7 +109,7 @@ test('classification is by kind and anchored name: a deferred row never counts a
 
 test('unmeasured parts stay NULL, not zero', () => {
   assert.equal(recordTurnComposition(A, { turnId: 'split-bare', mode: 'ask', systemChars: 40 }), true);
-  const r = db.getDb().prepare('SELECT * FROM turn_composition WHERE turn_id = ?').get('split-bare');
+  const r = agentReadDb().prepare('SELECT * FROM turn_composition WHERE turn_id = ?').get('split-bare');
   assert.equal(r.system_prompt_tokens, 10);
   assert.equal(r.llmide_tool_tokens, null);
   assert.equal(r.tool_result_chars, null);

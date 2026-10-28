@@ -16,13 +16,20 @@ for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: t
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { recordUsage } = await import('../kb/usage.mjs');
+const agentAccess = await import('../kb/agent-db.mjs');
+const { config } = await import('../core/config.mjs');
+const agentFile = config.agentDbPath;
+const agentFiles = [agentFile, `${agentFile}-wal`, `${agentFile}-shm`];
+agentAccess.closeAgentDb();
+for (const f of agentFiles) fs.rmSync(f, { force: true });
 const U = users.registerUser(db.getDb(), {
   email: `te-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 't',
 }).id;
 
 test.after(() => {
   db.closeDb();
-  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: true });
+  agentAccess.closeAgentDb();
+  for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`, ...agentFiles]) fs.rmSync(f, { force: true });
 });
 
 test('recordToolEvents writes one row per event and never stores text', () => {
@@ -31,7 +38,7 @@ test('recordToolEvents writes one row per event and never stores text', () => {
     events: [{ tool: 'find-code', resultChars: 900 }, { tool: 'Read', resultChars: 4000, truncated: false }],
   });
   assert.equal(n, 2);
-  const cols = db.getDb().prepare('PRAGMA table_info(turn_tool_events)').all().map((c) => c.name);
+  const cols = agentAccess.getAgentDb().prepare('PRAGMA table_info(agent_tool_events)').all().map((c) => c.name);
   assert.ok(!cols.some((c) => /arg|text|content|body/.test(c)), 'no column may hold tool text');
 });
 
@@ -67,15 +74,18 @@ test('legacy memory push becomes one memory_push event, none when empty', async 
 
 test('summarizeToolEventsOn works with a readonly DB handle (proves query is write-free)', () => {
   // Open the same test DB a second time with readonly handle
-  const roDb = new Database(tmpDb, { readonly: true });
+  agentAccess.flushAgentQueue();
+  const roDb = new Database(agentFile, { readonly: true });
+  const roMain = new Database(tmpDb, { readonly: true });
   try {
-    const result = db.summarizeToolEventsOn(roDb, U, { days: 7 });
+    const result = db.summarizeToolEventsOn(roDb, U, { days: 7, ledgerDb: roMain });
     const expected = db.summarizeToolEvents(U, { days: 7 });
     assert.equal(result.turns, expected.turns);
     assert.equal(result.turnsWithFindCode, expected.turnsWithFindCode);
     assert.equal(result.findCodeFirstTurns, expected.findCodeFirstTurns);
   } finally {
     roDb.close();
+    roMain.close();
   }
 });
 

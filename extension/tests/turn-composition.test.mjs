@@ -13,6 +13,11 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
 const db = await import('../kb/db.mjs');
+// turn_composition lives in agent.db (Stage 1b). Reads flush the queue first, so a
+// row written just before the read is visible, as it was when the write was sync.
+const agentStore = await import('../kb/agent-db.mjs');
+agentStore.closeAgentDb();
+const agentReadDb = () => { agentStore.flushAgentQueue(); return agentStore.getAgentDb(); };
 const users = await import('../server/users.mjs');
 const { recordTurnComposition } = await import('../kb/turn-composition.mjs');
 const U = users.registerUser(db.getDb(), { email: 'tc@example.test', password: 'CorrectHorseBattery', displayName: 't' }).id;
@@ -27,7 +32,7 @@ const row = {
 
 test('a turn composition row is stored with sizes and counts, keyed by turn id', () => {
   assert.equal(recordTurnComposition(U, row), true);
-  const r = db.getDb().prepare('SELECT * FROM turn_composition WHERE user_id = ? AND turn_id = ?').get(U, 't1');
+  const r = agentReadDb().prepare('SELECT * FROM turn_composition WHERE user_id = ? AND turn_id = ?').get(U, 't1');
   assert.equal(r.mode, 'ask');
   assert.equal(r.system_prompt_kind, 'preset');
   assert.equal(r.system_chars, 2573);
@@ -50,6 +55,6 @@ test('best-effort: bad input or no user records nothing and never throws', () =>
 
 test('names are clamped, never text: mcp server names joined and capped', () => {
   recordTurnComposition(U, { ...row, turnId: 't2', mcpServers: Array.from({ length: 50 }, (_, i) => `s${i}`) });
-  const r = db.getDb().prepare('SELECT mcp_servers FROM turn_composition WHERE turn_id = ?').get('t2');
+  const r = agentReadDb().prepare('SELECT mcp_servers FROM turn_composition WHERE turn_id = ?').get('t2');
   assert.ok(r.mcp_servers.length <= 512);
 });

@@ -27,6 +27,9 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 
 const { registerUser } = await import('../server/users.mjs');
 const { getDb, addUserRepo, writeCodeGraph } = await import('../kb/db.mjs');
+const agentStoreRead = await import('../kb/agent-db.mjs');
+// Tool events live in agent.db (Stage 1b): flush the queue, then read.
+const agentReadDb = () => { agentStoreRead.flushAgentQueue(); return agentStoreRead.getAgentDb(); };
 const {
   runLoopAgent, validateLoopRepoRoot, loopToolRefusal, LOOP_AGENT_TOOLS,
   LOOP_FIND_CODE_TOOL, loopFindCode, graphScopeRoot,
@@ -730,7 +733,7 @@ test('route: a run\'s tool calls land in turn_tool_events under engine loop, key
     makeReq({ body: { message: 'fix', repoRoot: REPO }, user: u }), makeRes(), { userId: u.id },
     { runAgent: (args) => runLoopAgent({ ...args, queryFactory: toolStreamQuery() }, noSkill) },
   ));
-  const events = db.prepare('SELECT turn_id, engine, seq, tool, is_error FROM turn_tool_events WHERE user_id = ? ORDER BY seq')
+  const events = agentReadDb().prepare('SELECT run_id AS turn_id, engine, seq, tool, is_error FROM agent_tool_events WHERE user_id = ? ORDER BY seq')
     .all(u.id).map((r) => ({ ...r }));
   assert.deepEqual(events.map(({ turn_id: _t, ...rest }) => rest), [
     { engine: 'loop', seq: 0, tool: 'Grep', is_error: 0 },
@@ -760,7 +763,7 @@ test('route: a run that fails mid-stream still records the tool calls it made', 
     })() }, noSkill) },
   ));
   assert.equal(res.statusCode, 502);
-  const events = db.prepare('SELECT turn_id, tool FROM turn_tool_events WHERE user_id = ?').all(u.id);
+  const events = agentReadDb().prepare('SELECT run_id AS turn_id, tool FROM agent_tool_events WHERE user_id = ?').all(u.id);
   assert.deepEqual(events.map((e) => e.tool), ['Glob']);
   const ledger = db.prepare('SELECT request_id FROM usage_ledger WHERE user_id = ?').all(u.id);
   assert.equal(ledger[0].request_id, events[0].turn_id);

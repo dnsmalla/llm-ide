@@ -1,7 +1,9 @@
 // Per-turn prompt composition (migrations 0040 and 0044). Best-effort by
 // contract, like tool-events.mjs: a telemetry write must never break a model
 // turn.
-import { getDb, requireUser } from './db.mjs';
+import { requireUser } from './db.mjs';
+import { flushAgentQueue, getAgentDb, localDay } from './agent-db.mjs';
+import { enqueueTurnComposition } from './agent-store.mjs';
 
 const clampInt = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.min(1_000_000_000, Math.trunc(Number(v)))) : null);
 const clampStr = (v, n) => (typeof v === 'string' && v ? v.slice(0, n) : null);
@@ -94,11 +96,9 @@ export function recordTurnComposition(userId, row) {
       ['sdk_deferred_tools_tokens', sdkDeferredToolsTokens(categories)],
       ['sdk_categories', sdkCategories],
     ];
-    getDb().prepare(
-      `INSERT INTO turn_composition (${cols.map(([c]) => c).join(', ')})
-       VALUES (${cols.map(() => '?').join(', ')})`,
-    ).run(...cols.map(([, v]) => v));
-    return true;
+    // Queued write to agent.db (never throws; a dropped row is counted).
+    const columns = Object.fromEntries(cols.filter(([c]) => c !== 'user_id' && c !== 'turn_id'));
+    return enqueueTurnComposition(userId, { turnId: row.turnId, day: localDay(), columns });
   } catch {
     return false;
   }
@@ -110,11 +110,15 @@ export function recordTurnComposition(userId, row) {
  */
 export function turnCompositionRecent(userId, { limit = 50 } = {}) {
   requireUser(userId);
+  flushAgentQueue();
+  const db = getAgentDb();
+  if (!db) return [];
   const n = Math.max(1, Math.min(200, clampInt(limit) || 50));
-  const rows = getDb().prepare(
+  const rows = db.prepare(
     'SELECT * FROM turn_composition WHERE user_id = ? ORDER BY created_at DESC, id DESC LIMIT ?',
   ).all(userId, n);
-  return rows.map(({ id: _id, user_id: _uid, ...rest }) => Object.fromEntries(
+  // `day` is agent.db bookkeeping, not part of the response (the API stays as it was).
+  return rows.map(({ id: _id, user_id: _uid, day: _day, ...rest }) => Object.fromEntries(
     Object.entries(rest).map(([k, v]) => [k.replace(/_([a-z0-9])/g, (_, c) => c.toUpperCase()), v]),
   ));
 }
