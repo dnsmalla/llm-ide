@@ -147,7 +147,7 @@ Legend: **C** = through `Core/Contracts` or an HTTP route; **D** = direct refere
 | # | Store | Where | Written by | Rebuildable? |
 |---|---|---|---|---|
 | S1 | Raw transcripts and raw inbox files | `<project>/source/meetings/YYYY/MM/*.md`, `source/emails/...` (`MeetingFileStore.swift:246-248`; `EmailSource.swift:91`) | Live, Email, Slack, MCP sources on the Mac | no: the files are the data |
-| S2 | Generated notes | `<project>/llm-doc/<type>/YYYY/MM/*.md` plus `llm-doc/index.json` (`NoteService.swift:180`) | Mac writers, Chat, Loop, Doc Gen | notes no; `index.json` yes (`NoteService.rebuildIndex` `:419`) |
+| S2 | Generated notes | `<project>/llm-doc/<type>/YYYY/MM/*.md` plus the note index `system/cache/notes-index.json` (D6: moved from `llm-doc/index.json`; `NoteService.swift:186`) | Mac writers, Chat, Loop, Doc Gen | notes no; `index.json` yes (`NoteService.rebuildIndex` `:419`) |
 | S3 | Meeting index | `<project>/system/index.sqlite`, `PRAGMA user_version` 3 (`MeetingIndex.swift:78`) | `FolderIndexer.fullScan` (`:59`), watched by kqueue | yes, **except** the `hidden` tombstone (v3, `:114`; `LibraryView.swift:1827-1835`) |
 | S4 | In-memory Library list | `LibraryItemStore.items`, built by `performScan` (`:260`); `library_items.json` is decode-only legacy (`:72-78`) | scan of `source/ code/ data/ llm-doc/` plus external code folders | yes |
 | S5 | Server KB | `kb/data.db`: `meetings`, `entities`, `sources`, `search` FTS, `email_seen/state`, `slack_*`, `mcp_connector_seen`, vault | `/kb/ingest` (Live only), Pattern A connectors, doc generation | partly: Pattern A rows are re-indexable; meetings and entities are not |

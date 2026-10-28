@@ -53,6 +53,8 @@ truth for these paths; its header comment states the same rule.
 ├── system/          machine-consumed state (mostly git-ignored)
 │   ├── project.json     project marker + settings (written by ProjectStore)
 │   ├── loop.json        Loop contract — committed, so a fresh clone reloads it
+│   ├── loop/<key>/      Loop machine data: test/ledger.json, test/TEST-MAP.json,
+│   │                    test/TEST-STRUCTURE.json, refactor/graph/{before,after}.json
 │   ├── loop-runs/       Loop run journal (git-ignored)
 │   ├── loop-worktrees/  Loop git worktrees (git-ignored)
 │   ├── memory/          agent memory artifacts: graph-notes.md, doc-notes.md,
@@ -61,7 +63,7 @@ truth for these paths; its header comment states the same rule.
 │   ├── faults/          fault log entries (MemoryStore)
 │   ├── repo.md          no longer written; the code summary is graph/index.md
 │   ├── graph/           knowledge graph + code notes (git-ignored)
-│   ├── cache/           runtime cache (git-ignored)
+│   ├── cache/           runtime cache (git-ignored); notes-index.json = the note index
 │   ├── index.sqlite     full-text index (git-ignored)
 │   └── sync.json        last export info (git-ignored)
 └── .claude/         project-level agent config (project.md, settings.json, skills/...)
@@ -81,7 +83,13 @@ truth for these paths; its header comment states the same rule.
 | `data/` | user-added documents, data, images | yes | import |
 | `llm-doc/` | generated notes (AI output) | yes (`.gitkeep`) | `NoteService` + meeting/email/connector writers |
 | `llm-doc/plans/` | KB plans as Markdown | yes | `ProjectExporter.writePlans` |
-| `llm-doc/loop/<key>/` | Loop outputs (plan, refactor, test, …) | yes | Loop stages |
+| `llm-doc/loop/<key>/` | Loop outputs, human-readable (`.md`: plan, refactor, test map, …) | yes | Loop stages |
+| `system/loop/<key>/` | Loop machine data (test ledger, test map/structure JSON, refactor graph snapshots) | yes | Loop stages (`LoopDataMigration` moves pre-D6 copies) |
+
+`system/loop/` sits beside `llm-doc/loop/` under the **same root**: the Loop writes both at
+its main checkout root (`gitRoot`, the same root `llm-doc/loop` used), not necessarily at the
+LLM-IDE project folder. When the repo is cloned under `code/`, both are under that repo.
+| `system/cache/notes-index.json` | unified note index (rebuildable) | **no** | `NoteService` |
 | `llm-doc/generated/` | Doc Gen markdown exports (default folder) | yes | Doc Gen export |
 | `templates/` | Doc Gen templates (`<slug>/template.md`) | yes | `DocTemplateStore`, `ProjectDocTemplatesSeeder` |
 | `commands/` | Doc Gen commands (`<slug>/command.md`) | yes | `DocCommandStore`, `ProjectDocCommandsSeeder` |
@@ -118,18 +126,21 @@ and the Library UI labels the section "LLM Doc".
 ├── documents/     <YYYY>/<MM>/<filename>.md
 ├── <noteType>/    new Source Connectors use their raw type name (e.g. slack/)
 ├── plans/         KB plans as Markdown (written on export)
-├── loop/<key>/    Loop outputs, one folder per loop key (plan/, refactor/, test/, …)
+├── loop/<key>/    Loop outputs (Markdown only), one folder per loop key (plan/, refactor/, test/, …)
 ├── generated/     Doc Gen exports (default output folder; see "Not here" below)
-└── index.json     unified note index (maintained by NoteService)
 ```
+
+The unified note index is **not** here: it lives at `<project>/system/cache/notes-index.json`
+(D6, machine state). Before D6 it was `llm-doc/index.json`; readers fall back to it
+until it is moved.
 
 - One subdirectory per `NoteType`. The legacy three keep their **plural** names
   (`meetings/`, `emails/`, `documents/`) so already-written notes never move; any
   new Source Connector uses its `noteType` raw value as the directory name
   (e.g. `slack/`).
 - Notes are bucketed by month: `<type>/<YYYY>/<MM>/`.
-- `index.json` is the unified index maintained by `NoteService`
-  (`version`, `updated`, `notes[]`).
+- `system/cache/notes-index.json` is the unified index maintained by `NoteService`
+  (`version`, `updated`, `notes[]`). It is rebuildable from the note files.
 
 ### NoteType → directory
 
@@ -147,7 +158,7 @@ and the Library UI labels the section "LLM Doc".
 | `MeetingNoteWriter` + `IngestTemplateRenderer` | meeting `.md` from `templates/meeting-note/template.md` | same summary (parallel output) |
 | `EmailNoteWriter` + `IngestTemplateRenderer` | email `.md` from `templates/email-note/template.md` | classified email |
 | `SourceConnectorNoteWriter` | connector notes (e.g. `slack/`) | fetched + classified source items |
-| `NoteService.saveNote` | any note + `index.json` update | all of the above route through this |
+| `NoteService.saveNote` | any note + `system/cache/notes-index.json` update | all of the above route through this |
 
 ### Not here
 
