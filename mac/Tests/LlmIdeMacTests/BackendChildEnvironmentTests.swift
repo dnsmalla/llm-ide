@@ -50,4 +50,52 @@ final class BackendChildEnvironmentTests: XCTestCase {
         XCTAssertEqual(env["TERM"], "dumb")
         XCTAssertTrue(env["PATH"]?.hasPrefix("/Users/tester/.local/bin:") ?? false)
     }
+
+    // MARK: - Data locations (LLMIDE_DATA_DIR)
+
+    func testDataDirIsWrittenWhenGiven() {
+        let env = BackendManager.childEnvironment(base: base, featureKeys: nil,
+                                                  dataDir: "/Users/tester/Library/Application Support/llm-ide/system")
+        XCTAssertEqual(env["LLMIDE_DATA_DIR"], "/Users/tester/Library/Application Support/llm-ide/system")
+    }
+
+    func testDataDirIsAbsentWithoutAnAppDir() {
+        let env = BackendManager.childEnvironment(base: base, featureKeys: nil, dataDir: nil)
+        XCTAssertNil(env["LLMIDE_DATA_DIR"])
+    }
+
+    func testInheritedDataLocationsAreNeverPassedThrough() {
+        var inherited = base
+        inherited["LLMIDE_DATA_DIR"] = "/Users/someone/checkout/kb"
+        inherited["LLMIDE_DB_PATH"] = "/Users/someone/checkout/kb/data.db"
+        inherited["LLMIDE_AGENT_DB_PATH"] = "/Users/someone/checkout/kb/agent.db"
+
+        let unset = BackendManager.childEnvironment(base: inherited, featureKeys: nil, dataDir: nil)
+        XCTAssertNil(unset["LLMIDE_DATA_DIR"])
+        XCTAssertNil(unset["LLMIDE_DB_PATH"])
+        XCTAssertNil(unset["LLMIDE_AGENT_DB_PATH"])
+
+        let set = BackendManager.childEnvironment(base: inherited, featureKeys: nil, dataDir: "/app/system")
+        XCTAssertEqual(set["LLMIDE_DATA_DIR"], "/app/system")
+        XCTAssertNil(set["LLMIDE_DB_PATH"])
+        XCTAssertNil(set["LLMIDE_AGENT_DB_PATH"])
+    }
+
+    func testSystemDataDirIsCreatedPrivateUnderTheSupportRoot() throws {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-support-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let path = BackendManager.systemDataDirForChild(useRepoKb: false, supportRoot: root)
+        XCTAssertEqual(path, root.appendingPathComponent("system", isDirectory: true).path)
+        let attrs = try FileManager.default.attributesOfItem(atPath: try XCTUnwrap(path))
+        XCTAssertEqual((attrs[.posixPermissions] as? NSNumber)?.intValue, 0o700)
+    }
+
+    func testRepoKbEscapeGivesNoDataDir() {
+        let root = FileManager.default.temporaryDirectory
+            .appendingPathComponent("llmide-support-\(UUID().uuidString)", isDirectory: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        XCTAssertNil(BackendManager.systemDataDirForChild(useRepoKb: true, supportRoot: root))
+        XCTAssertFalse(FileManager.default.fileExists(atPath: root.path), "escape must not create the dir")
+    }
 }

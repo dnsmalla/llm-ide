@@ -92,6 +92,31 @@ final class BackendManager {
     /// feature route groups to load (comma-separated `AppFeature` raw values;
     /// unset/empty → all, the same semantics as `mac/Package.swift`).
     nonisolated static let featuresEnvKey = "LLMIDE_FEATURES"
+    nonisolated static let dataDirEnvKey = "LLMIDE_DATA_DIR"
+    nonisolated static let dataLocationEnvKeys = ["LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_AGENT_DB_PATH"]
+    /// Developer escape: `LLMIDE_USE_REPO_KB=1` keeps the server on the repo's
+    /// `kb/` (no LLMIDE_DATA_DIR is passed) — the pre-migration location.
+    nonisolated static let useRepoKbEnvKey = "LLMIDE_USE_REPO_KB"
+
+    /// The system data dir the app hands the backend it spawns:
+    /// `~/Library/Application Support/llm-ide/system`, created 0700. Returns nil
+    /// when the repo-kb escape is set, or when the directory cannot be created
+    /// (the caller then logs it and the server falls back to the repo kb).
+    nonisolated static func systemDataDirForChild(
+        useRepoKb: Bool,
+        supportRoot: URL = AppIdentity.applicationSupportRoot()
+    ) -> String? {
+        if useRepoKb { return nil }
+        let dir = supportRoot.appendingPathComponent("system", isDirectory: true)
+        do {
+            try FileManager.default.createDirectory(
+                at: dir, withIntermediateDirectories: true,
+                attributes: [.posixPermissions: 0o700])
+            return dir.path
+        } catch {
+            return nil
+        }
+    }
     /// Token-bench fake-engine switches (see extension/routes/agent-v2.mjs).
     nonisolated static let benchFakeEnvKeys = ["LLMIDE_BENCH_FAKE", "LLMIDE_BENCH_FAKE_TOKEN"]
 
@@ -448,8 +473,13 @@ final class BackendManager {
     /// - Postcondition: only allowlisted variables from `base` survive;
     ///   `LLMIDE_FEATURES` is present iff `featureKeys` is non-nil, and then
     ///   holds the keys sorted and comma-joined — never the inherited value.
+    ///   `LLMIDE_DATA_DIR` is present iff `dataDir` is non-nil (the app's own
+    ///   system data dir); the inherited `LLMIDE_DATA_DIR`, `LLMIDE_DB_PATH` and
+    ///   `LLMIDE_AGENT_DB_PATH` are always dropped, so the child's data
+    ///   locations follow the app, not the shell it was launched from.
     nonisolated static func childEnvironment(base: [String: String],
-                                             featureKeys: [String]?) -> [String: String] {
+                                             featureKeys: [String]?,
+                                             dataDir: String? = nil) -> [String: String] {
         // Build the child environment from an allowlist instead of inheriting
         // the full shell env. Passing the full inherited env would expose
         // unrelated ambient secrets (AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, etc.)
@@ -481,6 +511,13 @@ final class BackendManager {
         if let featureKeys {
             env[featuresEnvKey] = featureKeys.sorted().joined(separator: ",")
         }
+        // Data locations: an inherited value would move the DB or agent.db out
+        // of the app's system dir (or into a checkout). Only the app's own
+        // `dataDir` is ever written.
+        for key in dataLocationEnvKeys { env.removeValue(forKey: key) }
+        if let dataDir {
+            env[dataDirEnvKey] = dataDir
+        }
         env["TERM"] = "dumb"
         env["MEETNOTES_LOG_JSON"] = env["MEETNOTES_LOG_JSON"] ?? "0"
         // macOS GUI apps (launched via Finder/launchd) inherit a minimal PATH
@@ -510,9 +547,16 @@ final class BackendManager {
         proc.executableURL = URL(fileURLWithPath: nodePath)
         proc.arguments = ["server.mjs"]
         proc.currentDirectoryURL = workURL
+        let env = ProcessInfo.processInfo.environment
+        let useRepoKb = env[Self.useRepoKbEnvKey] == "1"
+        let dataDir = Self.systemDataDirForChild(useRepoKb: useRepoKb)
+        if dataDir == nil && !useRepoKb {
+            append("--- could not create the system data dir; the backend will use the repo kb ---", stream: .info)
+        }
         proc.environment = Self.childEnvironment(
-            base: ProcessInfo.processInfo.environment,
-            featureKeys: Self.featureKeysProvider())
+            base: env,
+            featureKeys: Self.featureKeysProvider(),
+            dataDir: dataDir)
 
         let stdOut = Pipe()
         let stdErr = Pipe()
