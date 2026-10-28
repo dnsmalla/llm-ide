@@ -118,23 +118,39 @@ final class AgentHistoryModel: ObservableObject {
 
         /// True while the clear sheet is on screen.
         var isPresented: Bool { self != .idle }
+
+        /// The real delete cannot be abandoned from the UI: the sheet stays up
+        /// until the server answers, so the user sees what happened.
+        var isDismissible: Bool {
+            if case .clearing = self { return false }
+            return true
+        }
     }
 
     @Published private(set) var report: LlmIdeAPIClient.StorageReport?
     @Published private(set) var settings: LlmIdeAPIClient.AgentHistorySettings?
     @Published private(set) var loadError: String?
     /// The stepper's value; saved explicitly, so a half-moved stepper changes nothing.
-    @Published var retentionDraft: Int = 30
+    /// Moving it clears the last save message, which no longer describes the draft.
+    @Published var retentionDraft: Int = 30 {
+        didSet { if oldValue != retentionDraft { retentionMessage = nil } }
+    }
     @Published private(set) var savingRetention = false
     @Published private(set) var retentionMessage: String?
     @Published private(set) var clearPhase: ClearPhase = .idle
-    /// Set when a stale preview was refused and counted again.
+    /// Set only when a stale preview was counted again successfully.
     @Published private(set) var clearNotice: String?
     @Published private(set) var compacting = false
     @Published private(set) var compactMessage: String?
     @Published private(set) var compactIsError = false
 
     let api: AgentHistoryAPI
+    /// The Clear step in flight, so cancelling can stop it.
+    private var clearTask: Task<Void, Never>?
+    /// Bumped by every step start and by cancel. A step whose generation is no
+    /// longer current drops its result, so a cancelled request can never reopen
+    /// the sheet.
+    private var generation = 0
 
     init(api: AgentHistoryAPI) {
         self.api = api
@@ -148,6 +164,8 @@ final class AgentHistoryModel: ObservableObject {
     var retentionChanged: Bool {
         settings.map { $0.retentionDays != retentionDraft } ?? false
     }
+
+    var canDismissClear: Bool { clearPhase.isDismissible }
 
     func load() async {
         do {
@@ -175,25 +193,18 @@ final class AgentHistoryModel: ObservableObject {
             retentionMessage = saved.retentionDays == requested
                 ? "Saved. Raw history is kept for \(saved.retentionDays) days."
                 : "Saved as \(saved.retentionDays) days; the limit is \(saved.min) to \(saved.max)."
+            await refreshReport()
         } catch {
             retentionMessage = AgentHistoryMessages.clearFailure(error)
         }
     }
 
     /// Step one: a dry run. Opens the sheet with the counts; deletes nothing.
+    /// Ignored while a Clear step is already running, so overlapping taps
+    /// cannot start two dry runs.
     func beginClear(scope: LlmIdeAPIClient.AgentHistoryClearScope) async {
-        clearNotice = nil
-        clearPhase = .previewing(scope)
-        do {
-            let preview = try await api.previewAgentHistoryClear(scope: scope, beforeDays: nil)
-            guard preview.previewId != nil else {
-                clearPhase = .failed("The server did not return a preview. Nothing was deleted.")
-                return
-            }
-            clearPhase = .confirming(scope, preview)
-        } catch {
-            clearPhase = .failed(AgentHistoryMessages.clearFailure(error))
-        }
+        guard clearPhase == .idle else { return }
+        await runClearStep { gen in await self.previewStep(scope, gen: gen, notice: nil) }
     }
 
     /// Step two: the real clear, with the preview's id. On a stale, expired or
@@ -201,23 +212,16 @@ final class AgentHistoryModel: ObservableObject {
     /// user confirms the new counts.
     func confirmClear() async {
         guard case let .confirming(scope, preview) = clearPhase, let previewId = preview.previewId else { return }
-        clearPhase = .clearing(scope)
-        do {
-            let result = try await api.performAgentHistoryClear(scope: scope, beforeDays: nil, previewId: previewId)
-            clearPhase = .cleared(result)
-            await refreshReport()
-        } catch {
-            if AgentHistoryMessages.isStalePreview(error) {
-                let notice = AgentHistoryMessages.staleNotice(for: error)
-                await beginClear(scope: scope)
-                clearNotice = notice
-            } else {
-                clearPhase = .failed(AgentHistoryMessages.clearFailure(error))
-            }
-        }
+        await runClearStep { gen in await self.performStep(scope, previewId: previewId, gen: gen) }
     }
 
+    /// Dismisses the sheet and abandons a preview in flight. Refused while the
+    /// real delete runs (see `ClearPhase.isDismissible`).
     func cancelClear() {
+        guard clearPhase.isDismissible else { return }
+        generation += 1
+        clearTask?.cancel()
+        clearTask = nil
         clearPhase = .idle
         clearNotice = nil
     }
@@ -234,6 +238,53 @@ final class AgentHistoryModel: ObservableObject {
         } catch {
             compactIsError = true
             compactMessage = AgentHistoryMessages.compactFailure(error)
+        }
+    }
+
+    // MARK: - Clear steps
+
+    /// Runs one step as the tracked task, under a fresh generation.
+    private func runClearStep(_ step: @escaping @MainActor (Int) async -> Void) async {
+        generation += 1
+        let gen = generation
+        let task = Task { @MainActor in await step(gen) }
+        clearTask = task
+        await task.value
+    }
+
+    private func previewStep(_ scope: LlmIdeAPIClient.AgentHistoryClearScope, gen: Int, notice: String?) async {
+        clearPhase = .previewing(scope)
+        clearNotice = nil
+        do {
+            let preview = try await api.previewAgentHistoryClear(scope: scope, beforeDays: nil)
+            guard gen == generation else { return }
+            guard preview.previewId != nil else {
+                clearPhase = .failed("The server did not return a preview. Nothing was deleted.")
+                return
+            }
+            clearNotice = notice
+            clearPhase = .confirming(scope, preview)
+        } catch {
+            guard gen == generation else { return }
+            clearPhase = .failed(AgentHistoryMessages.clearFailure(error))
+        }
+    }
+
+    private func performStep(_ scope: LlmIdeAPIClient.AgentHistoryClearScope,
+                             previewId: String, gen: Int) async {
+        clearPhase = .clearing(scope)
+        do {
+            let result = try await api.performAgentHistoryClear(scope: scope, beforeDays: nil, previewId: previewId)
+            guard gen == generation else { return }
+            clearPhase = .cleared(result)
+            await refreshReport()
+        } catch {
+            guard gen == generation else { return }
+            if AgentHistoryMessages.isStalePreview(error) {
+                await previewStep(scope, gen: gen, notice: AgentHistoryMessages.staleNotice(for: error))
+            } else {
+                clearPhase = .failed(AgentHistoryMessages.clearFailure(error))
+            }
         }
     }
 

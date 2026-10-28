@@ -19,9 +19,16 @@ struct AgentHistorySettingsCard: View {
                 SettingsHint("Chat, Loop and meeting-agent runs are kept here. Clearing deletes the rows you pick after a preview of what will go; compacting gives back free disk space.")
 
                 if let loadError = model.loadError {
-                    Text(loadError)
-                        .font(Typography.caption)
-                        .foregroundStyle(theme.current.danger)
+                    HStack(alignment: .firstTextBaseline) {
+                        Text("Couldn't load agent history: \(loadError)")
+                            .font(Typography.caption)
+                            .foregroundStyle(theme.current.danger)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button("Retry") { Task { await model.load() } }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                    }
                 }
 
                 storageRows
@@ -213,13 +220,19 @@ private struct ClearHistorySheet: View {
                 case .cleared, .failed:
                     Button("Done") { close() }
                         .keyboardShortcut(.defaultAction)
-                default:
+                case .previewing, .idle:
                     Button("Cancel") { close() }
+                        .keyboardShortcut(.cancelAction)
+                case .clearing:
+                    EmptyView()
                 }
             }
         }
         .padding(Spacing.lg)
         .frame(width: 420)
+        // The real delete cannot be dismissed away: the sheet stays until the
+        // server answers, so the result is never lost behind a closed sheet.
+        .interactiveDismissDisabled(!model.canDismissClear)
     }
 
     private var title: String {

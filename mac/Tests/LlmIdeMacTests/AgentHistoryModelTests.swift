@@ -1,7 +1,37 @@
 // The Agent history card's Clear flow: dry run, confirm with the preview id, and
-// a stale preview is counted again instead of deleting anything.
+// a stale preview is counted again instead of deleting anything. Cancelling
+// abandons a preview in flight; the real delete cannot be abandoned.
 import XCTest
 @testable import LlmIdeMacLib
+
+/// Holds a call open until the test opens it, so a cancel can land mid-request.
+final class Gate: @unchecked Sendable {
+    private let lock = NSLock()
+    private var isOpen = false
+    private var waiters: [CheckedContinuation<Void, Never>] = []
+
+    func wait() async {
+        await withCheckedContinuation { cont in
+            lock.lock()
+            if isOpen {
+                lock.unlock()
+                cont.resume()
+            } else {
+                waiters.append(cont)
+                lock.unlock()
+            }
+        }
+    }
+
+    func open() {
+        lock.lock()
+        isOpen = true
+        let pending = waiters
+        waiters = []
+        lock.unlock()
+        pending.forEach { $0.resume() }
+    }
+}
 
 @MainActor
 final class AgentHistoryModelTests: XCTestCase {
@@ -12,17 +42,25 @@ final class AgentHistoryModelTests: XCTestCase {
     /// Scripted answers; every call is recorded so a test can check what was sent.
     final class FakeAPI: AgentHistoryAPI {
         var report: LlmIdeAPIClient.StorageReport
+        var reportError: Error?
         var settings = LlmIdeAPIClient.AgentHistorySettings(retentionDays: 30, rollupKeepDays: 400, min: 7, max: 365)
         var previews: [Result<Result_, Error>] = []
         var performs: [Result<Result_, Error>] = []
+        var previewGate: Gate?
+        var performGate: Gate?
         var compact: Result<LlmIdeAPIClient.AgentHistoryCompactResult, Error>?
+        private(set) var storageCalls = 0
         private(set) var previewCalls: [Scope] = []
         private(set) var performedIds: [String] = []
         private(set) var retentionSaves: [Int] = []
 
         init(report: LlmIdeAPIClient.StorageReport) { self.report = report }
 
-        func storageReport() async throws -> LlmIdeAPIClient.StorageReport { report }
+        func storageReport() async throws -> LlmIdeAPIClient.StorageReport {
+            storageCalls += 1
+            if let reportError { throw reportError }
+            return report
+        }
         func agentHistorySettings() async throws -> LlmIdeAPIClient.AgentHistorySettings { settings }
         func setAgentHistoryRetention(days: Int) async throws -> LlmIdeAPIClient.AgentHistorySettings {
             retentionSaves.append(days)
@@ -32,10 +70,12 @@ final class AgentHistoryModelTests: XCTestCase {
         }
         func previewAgentHistoryClear(scope: Scope, beforeDays: Int?) async throws -> Result_ {
             previewCalls.append(scope)
+            if let previewGate { await previewGate.wait() }
             return try previews.removeFirst().get()
         }
         func performAgentHistoryClear(scope: Scope, beforeDays: Int?, previewId: String) async throws -> Result_ {
             performedIds.append(previewId)
+            if let performGate { await performGate.wait() }
             return try performs.removeFirst().get()
         }
         func compactAgentHistory() async throws -> LlmIdeAPIClient.AgentHistoryCompactResult {
@@ -64,9 +104,21 @@ final class AgentHistoryModelTests: XCTestCase {
                 total: total, previewId: nil, expiresAt: nil)
     }
 
+    private static func staleError() -> Error {
+        APIError.http(status: 409, code: "preview_stale", message: "changed", details: nil)
+    }
+
     private func makeModel(_ api: FakeAPI) -> AgentHistoryModel {
         AgentHistoryModel(api: api)
     }
+
+    /// Lets a started task run until `condition` holds (bounded, so a bug fails instead of hanging).
+    private func waitUntil(_ condition: () -> Bool, file: StaticString = #filePath, line: UInt = #line) async {
+        for _ in 0..<10_000 where !condition() { await Task.yield() }
+        XCTAssertTrue(condition(), "condition never held", file: file, line: line)
+    }
+
+    // MARK: - Load and retention
 
     func testLoadFillsReportAndRetentionDraft() async throws {
         let api = FakeAPI(report: try Self.report())
@@ -77,6 +129,56 @@ final class AgentHistoryModelTests: XCTestCase {
         XCTAssertEqual(model.retentionRange, 7...365)
         XCTAssertFalse(model.retentionChanged)
     }
+
+    func testFailedLoadKeepsErrorAndRetrySucceeds() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.reportError = APIError.http(status: 500, code: "INTERNAL_ERROR", message: "store offline", details: nil)
+        let model = makeModel(api)
+        await model.load()
+        XCTAssertNil(model.report)
+        XCTAssertEqual(model.loadError, "store offline")
+
+        api.reportError = nil
+        await model.load()
+        XCTAssertNotNil(model.report)
+        XCTAssertNil(model.loadError)
+    }
+
+    func testSaveRetentionSendsDraftTakesClampedValueAndRefreshesReport() async throws {
+        let api = FakeAPI(report: try Self.report())
+        let model = makeModel(api)
+        await model.load()
+        let callsAfterLoad = api.storageCalls
+        model.retentionDraft = 1000
+        XCTAssertTrue(model.retentionChanged)
+        await model.saveRetention()
+        XCTAssertEqual(api.retentionSaves, [1000])
+        XCTAssertEqual(model.retentionDraft, 365)
+        XCTAssertFalse(model.retentionChanged)
+        XCTAssertTrue(model.retentionMessage?.contains("365") == true)
+        XCTAssertEqual(api.storageCalls, callsAfterLoad + 1, "the report is refreshed after a save")
+    }
+
+    func testMovingTheStepperClearsTheSaveMessage() async throws {
+        let api = FakeAPI(report: try Self.report())
+        let model = makeModel(api)
+        await model.load()
+        model.retentionDraft = 60
+        await model.saveRetention()
+        XCTAssertNotNil(model.retentionMessage)
+        model.retentionDraft = 90
+        XCTAssertNil(model.retentionMessage, "a message about the old draft must not stay up")
+    }
+
+    func testSaveRetentionIsNoOpWhenUnchanged() async throws {
+        let api = FakeAPI(report: try Self.report())
+        let model = makeModel(api)
+        await model.load()
+        await model.saveRetention()
+        XCTAssertTrue(api.retentionSaves.isEmpty)
+    }
+
+    // MARK: - Clear: happy path
 
     func testBeginClearOnlyPreviews() async throws {
         let api = FakeAPI(report: try Self.report())
@@ -100,38 +202,12 @@ final class AgentHistoryModelTests: XCTestCase {
         XCTAssertEqual(AgentHistoryMessages.clearSuccess(Self.deleted(total: 5)), "Deleted 5 rows.")
     }
 
-    func testStalePreviewIsCountedAgainAndNothingIsDeleted() async throws {
+    func testConfirmWithoutPreviewDoesNothing() async throws {
         let api = FakeAPI(report: try Self.report())
-        api.previews = [
-            .success(Self.preview(total: 5, id: "id-1")),
-            .success(Self.preview(total: 7, id: "id-2")),
-        ]
-        api.performs = [.failure(APIError.http(status: 409, code: "preview_stale",
-                                               message: "changed", details: nil))]
         let model = makeModel(api)
-        await model.beginClear(scope: .raw)
         await model.confirmClear()
-        XCTAssertEqual(api.previewCalls, [.raw, .raw], "a fresh dry run is made")
-        XCTAssertEqual(model.clearPhase, .confirming(.raw, Self.preview(total: 7, id: "id-2")))
-        XCTAssertEqual(model.clearNotice, AgentHistoryMessages.staleNotice(for: APIError.http(
-            status: 409, code: "preview_stale", message: "changed", details: nil)))
-        XCTAssertTrue(model.clearNotice?.contains("counted again") == true)
-        XCTAssertEqual(api.performedIds, ["id-1"], "the user confirms the new counts before any delete")
-    }
-
-    func testExpiredPreviewGetsAFreshPreview() async throws {
-        let api = FakeAPI(report: try Self.report())
-        api.previews = [
-            .success(Self.preview(total: 5, id: "id-1")),
-            .success(Self.preview(total: 5, id: "id-2")),
-        ]
-        api.performs = [.failure(APIError.http(status: 400, code: "PREVIEW_EXPIRED",
-                                               message: "expired", details: nil))]
-        let model = makeModel(api)
-        await model.beginClear(scope: .raw)
-        await model.confirmClear()
-        XCTAssertEqual(model.clearPhase, .confirming(.raw, Self.preview(total: 5, id: "id-2")))
-        XCTAssertTrue(model.clearNotice?.contains("expired") == true)
+        XCTAssertTrue(api.performedIds.isEmpty)
+        XCTAssertEqual(model.clearPhase, .idle)
     }
 
     func testOtherClearErrorShowsServerMessage() async throws {
@@ -155,15 +231,138 @@ final class AgentHistoryModelTests: XCTestCase {
         XCTAssertEqual(model.clearPhase, .failed("store down"))
     }
 
-    func testConfirmWithoutPreviewDoesNothing() async throws {
+    // MARK: - Clear: stale previews
+
+    func testStalePreviewIsCountedAgainAndNothingIsDeleted() async throws {
         let api = FakeAPI(report: try Self.report())
+        api.previews = [
+            .success(Self.preview(total: 5, id: "id-1")),
+            .success(Self.preview(total: 7, id: "id-2")),
+        ]
+        api.performs = [.failure(Self.staleError())]
         let model = makeModel(api)
+        await model.beginClear(scope: .raw)
         await model.confirmClear()
-        XCTAssertTrue(api.performedIds.isEmpty)
-        XCTAssertEqual(model.clearPhase, .idle)
+        XCTAssertEqual(api.previewCalls, [.raw, .raw], "a fresh dry run is made")
+        XCTAssertEqual(model.clearPhase, .confirming(.raw, Self.preview(total: 7, id: "id-2")))
+        XCTAssertEqual(model.clearNotice, AgentHistoryMessages.staleNotice(for: Self.staleError()))
+        XCTAssertTrue(model.clearNotice?.contains("counted again") == true)
+        XCTAssertEqual(api.performedIds, ["id-1"], "the user confirms the new counts before any delete")
     }
 
-    func testCancelClosesTheSheet() async throws {
+    func testExpiredPreviewGetsAFreshPreview() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [
+            .success(Self.preview(total: 5, id: "id-1")),
+            .success(Self.preview(total: 5, id: "id-2")),
+        ]
+        api.performs = [.failure(APIError.http(status: 400, code: "PREVIEW_EXPIRED",
+                                               message: "expired", details: nil))]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw)
+        await model.confirmClear()
+        XCTAssertEqual(model.clearPhase, .confirming(.raw, Self.preview(total: 5, id: "id-2")))
+        XCTAssertTrue(model.clearNotice?.contains("expired") == true)
+    }
+
+    func testFailedRecountShowsTheFailureNotAStaleNotice() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [
+            .success(Self.preview(total: 5, id: "id-1")),
+            .failure(APIError.http(status: 500, code: "INTERNAL_ERROR", message: "recount broke", details: nil)),
+        ]
+        api.performs = [.failure(Self.staleError())]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw)
+        await model.confirmClear()
+        XCTAssertEqual(model.clearPhase, .failed("recount broke"))
+        XCTAssertNil(model.clearNotice, "no 'counted again' notice when the recount did not happen")
+        XCTAssertEqual(api.performedIds, ["id-1"])
+    }
+
+    // MARK: - Clear: cancel, late results, overlap
+
+    func testCancelDuringPreviewDropsTheLateResult() async throws {
+        let api = FakeAPI(report: try Self.report())
+        let gate = Gate()
+        api.previewGate = gate
+        api.previews = [.success(Self.preview(total: 5, id: "id-1"))]
+        let model = makeModel(api)
+        let task = Task { await model.beginClear(scope: .raw) }
+        await waitUntil { model.clearPhase == .previewing(.raw) }
+
+        model.cancelClear()
+        XCTAssertEqual(model.clearPhase, .idle)
+        XCTAssertFalse(model.clearPhase.isPresented)
+
+        // The request ignores cancellation and answers late; the answer must not reopen the sheet.
+        gate.open()
+        await task.value
+        XCTAssertEqual(model.clearPhase, .idle)
+        XCTAssertNil(model.clearNotice)
+        XCTAssertTrue(api.performedIds.isEmpty)
+    }
+
+    func testCancelDuringRecountDropsTheRecountAndItsNotice() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [.success(Self.preview(total: 5, id: "id-1"))]
+        api.performs = [.failure(Self.staleError())]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw)
+
+        // Hold the recount, which runs inside the confirm step.
+        let gate = Gate()
+        api.previewGate = gate
+        api.previews.append(.success(Self.preview(total: 7, id: "id-2")))
+        let confirm = Task { await model.confirmClear() }
+        await waitUntil { model.clearPhase == .previewing(.raw) }
+
+        model.cancelClear()
+        gate.open()
+        await confirm.value
+        XCTAssertEqual(model.clearPhase, .idle, "a cancelled recount must not reopen the sheet")
+        XCTAssertNil(model.clearNotice)
+        XCTAssertEqual(api.previewCalls.count, 2)
+    }
+
+    func testCancelDuringDeleteIsRefusedAndTheResultShows() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [.success(Self.preview(total: 5, id: "id-1"))]
+        api.performs = [.success(Self.deleted(total: 5))]
+        let gate = Gate()
+        api.performGate = gate
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw)
+
+        let confirm = Task { await model.confirmClear() }
+        await waitUntil { model.clearPhase == .clearing(.raw) }
+        XCTAssertFalse(model.canDismissClear, "the sheet cannot be dismissed during the delete")
+        model.cancelClear()
+        XCTAssertEqual(model.clearPhase, .clearing(.raw), "cancel is refused while deleting")
+
+        gate.open()
+        await confirm.value
+        XCTAssertEqual(model.clearPhase, .cleared(Self.deleted(total: 5)))
+    }
+
+    func testOverlappingBeginClearStartsOnlyOneDryRun() async throws {
+        let api = FakeAPI(report: try Self.report())
+        let gate = Gate()
+        api.previewGate = gate
+        api.previews = [.success(Self.preview(total: 5, id: "id-1"))]
+        let model = makeModel(api)
+        let first = Task { await model.beginClear(scope: .raw) }
+        await waitUntil { model.clearPhase == .previewing(.raw) }
+
+        await model.beginClear(scope: .all)
+        XCTAssertEqual(api.previewCalls, [.raw], "a second tap while a dry run runs is ignored")
+
+        gate.open()
+        await first.value
+        XCTAssertEqual(model.clearPhase, .confirming(.raw, Self.preview(total: 5, id: "id-1")))
+    }
+
+    func testCancelClosesAConfirmedPreview() async throws {
         let api = FakeAPI(report: try Self.report())
         api.previews = [.success(Self.preview(total: 5, id: "id-1"))]
         let model = makeModel(api)
@@ -171,8 +370,10 @@ final class AgentHistoryModelTests: XCTestCase {
         XCTAssertTrue(model.clearPhase.isPresented)
         model.cancelClear()
         XCTAssertEqual(model.clearPhase, .idle)
-        XCTAssertFalse(model.clearPhase.isPresented)
+        XCTAssertTrue(api.performedIds.isEmpty)
     }
+
+    // MARK: - Compact
 
     func testCompactBusyShowsWaitMessage() async throws {
         let api = FakeAPI(report: try Self.report())
@@ -203,26 +404,7 @@ final class AgentHistoryModelTests: XCTestCase {
         XCTAssertEqual(AgentHistoryMessages.compactFailure(err("other")), "server said")
     }
 
-    func testSaveRetentionSendsDraftAndTakesClampedValue() async throws {
-        let api = FakeAPI(report: try Self.report())
-        let model = makeModel(api)
-        await model.load()
-        model.retentionDraft = 1000
-        XCTAssertTrue(model.retentionChanged)
-        await model.saveRetention()
-        XCTAssertEqual(api.retentionSaves, [1000])
-        XCTAssertEqual(model.retentionDraft, 365)
-        XCTAssertFalse(model.retentionChanged)
-        XCTAssertTrue(model.retentionMessage?.contains("365") == true)
-    }
-
-    func testSaveRetentionIsNoOpWhenUnchanged() async throws {
-        let api = FakeAPI(report: try Self.report())
-        let model = makeModel(api)
-        await model.load()
-        await model.saveRetention()
-        XCTAssertTrue(api.retentionSaves.isEmpty)
-    }
+    // MARK: - Helpers
 
     func testStaleNoticeCoversEachStaleCode() {
         func err(_ code: String) -> Error { APIError.http(status: 400, code: code, message: "m", details: nil) }

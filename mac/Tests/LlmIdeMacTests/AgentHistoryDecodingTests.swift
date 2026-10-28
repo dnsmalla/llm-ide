@@ -95,6 +95,59 @@ final class AgentHistoryDecodingTests: XCTestCase {
         XCTAssertEqual(result.bytesAfter, 458752)
     }
 
+    // MARK: - Real fixtures (schema/http/fixtures/agent-history)
+
+    /// The `response` body of a captured fixture, read from the repo so the Mac
+    /// decodes exactly what the server's contract says it sends.
+    private func fixtureBody(_ name: String) throws -> Data {
+        let repoRoot = URL(fileURLWithPath: #filePath)
+            .deletingLastPathComponent()  // LlmIdeMacTests
+            .deletingLastPathComponent()  // Tests
+            .deletingLastPathComponent()  // mac
+            .deletingLastPathComponent()  // repo root
+        let url = repoRoot.appendingPathComponent("schema/http/fixtures/agent-history/\(name).json")
+        let fixture = try JSONSerialization.jsonObject(with: Data(contentsOf: url)) as? [String: Any]
+        let response = try XCTUnwrap(fixture?["response"], "\(name) has no response")
+        return try JSONSerialization.data(withJSONObject: response, options: [.fragmentsAllowed])
+    }
+
+    func testFixtureStorageReportDecodes() throws {
+        let report = try JSONDecoder().decode(LlmIdeAPIClient.StorageReport.self,
+                                              from: try fixtureBody("get-kb-storage-200"))
+        XCTAssertEqual(report.groups.map(\.key), ["agent_history", "search_index", "code_graph", "sources", "meetings"])
+        XCTAssertEqual(report.agentHistoryGroup?.rows, 5)
+        XCTAssertEqual(report.agentHistory?.watermark, "2026-09-30")
+    }
+
+    func testFixtureSettingsDecodeForGetAndPut() throws {
+        let get = try JSONDecoder().decode(LlmIdeAPIClient.AgentHistorySettings.self,
+                                           from: try fixtureBody("get-kb-agent-history-settings-200"))
+        XCTAssertEqual(get.retentionDays, 30)
+        let put = try JSONDecoder().decode(LlmIdeAPIClient.AgentHistorySettings.self,
+                                           from: try fixtureBody("put-kb-agent-history-settings-200"))
+        XCTAssertEqual(put.retentionDays, 365, "the fixture asked for 1000; the server clamped it")
+    }
+
+    func testFixtureClearAnswersDecode() throws {
+        let preview = try JSONDecoder().decode(LlmIdeAPIClient.AgentHistoryClearResult.self,
+                                               from: try fixtureBody("post-kb-agent-history-clear-200-dry-run"))
+        XCTAssertTrue(preview.dryRun)
+        XCTAssertNotNil(preview.previewId)
+        XCTAssertEqual(preview.wouldDelete?.agentToolEvents, 3)
+
+        let done = try JSONDecoder().decode(LlmIdeAPIClient.AgentHistoryClearResult.self,
+                                            from: try fixtureBody("post-kb-agent-history-clear-200-deleted"))
+        XCTAssertFalse(done.dryRun)
+        XCTAssertEqual(done.deleted?.agentRuns, 2)
+        XCTAssertEqual(done.total, 5)
+    }
+
+    func testFixtureCompactDecodes() throws {
+        let result = try JSONDecoder().decode(LlmIdeAPIClient.AgentHistoryCompactResult.self,
+                                              from: try fixtureBody("post-kb-agent-history-compact-200"))
+        XCTAssertEqual(result.pagesFreed, 120)
+    }
+
     func testClearScopeRejectsUnknownValue() {
         XCTAssertNil(LlmIdeAPIClient.AgentHistoryClearScope(rawValue: "everything"))
         XCTAssertEqual(LlmIdeAPIClient.AgentHistoryClearScope.raw.rawValue, "raw")
