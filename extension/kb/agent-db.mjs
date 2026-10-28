@@ -135,6 +135,12 @@ function closeHandle() {
   try { db.close?.(); } catch { /* best effort */ }
 }
 
+// Called with the fresh handle after a quarantine recreates the file (set by
+// agent-jobs: it re-raises the history id floors, so copied rows can never
+// collide with new ones in the new file).
+let freshStoreHook = null;
+export function onFreshStore(fn) { freshStoreHook = typeof fn === 'function' ? fn : null; }
+
 function quarantineAndRecreate(file, reason) {
   closeHandle();
   const target = quarantinePath(file);
@@ -143,6 +149,7 @@ function quarantineAndRecreate(file, reason) {
   log('error', 'agent_db_quarantined', { reason, quarantine: path.basename(target) });
   const db = openFile(file);
   writeMeta(db, 'history_reset_at', new Date().toISOString());
+  try { freshStoreHook?.(db); } catch (err) { log('error', 'agent_db_fresh_hook_failed', { code: err?.code ?? null }); }
   return db;
 }
 

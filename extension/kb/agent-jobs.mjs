@@ -12,7 +12,7 @@
 //   stopAgentStoreJobs    shutdown: stop the tick. The caller then calls
 //                         closeAgentDb(), which flushes the queue.
 
-import { agentStoreStatus, getAgentDb, openAgentDb, takeRollupRequest, verifyAgentDb, localDay, readMeta, writeMeta, checkStorageSize } from './agent-db.mjs';
+import { agentStoreStatus, getAgentDb, onFreshStore, openAgentDb, takeRollupRequest, verifyAgentDb, localDay, readMeta, writeMeta, checkStorageSize } from './agent-db.mjs';
 import { prepareHistoryCopy, copyHistoryStep, historyCopyDone } from './agent-history-copy.mjs';
 import { abortStaleRuns, purgeUserHistory, rollupAll } from './agent-store.mjs';
 import { getDb } from './db.mjs';
@@ -60,6 +60,9 @@ export function replayPendingAgentPurges({ mainDb }) {
 /** Sync boot step. Never throws; returns the store status it reached. */
 export function openAgentStoreAtBoot({ logger } = {}) {
   try {
+    // A quarantine recreates the file with no history: its id floors and copy
+    // must be set again on the new file, or copied rows could collide with new ones.
+    onFreshStore((fresh) => prepareHistoryCopy({ agentDb: fresh }));
     const db = openAgentDb({ logger });
     if (!db) return { ok: false };
     prepareHistoryCopy({ agentDb: db });
@@ -82,6 +85,8 @@ export function agentStoreTick(now = new Date(), { logger } = {}) {
     // A rollup is requested on a TRANSITION into soft or hard, not on every
     // tick while the store stays over the threshold (that would be a full
     // rollup every 60 s). The size refresh itself never sets the flag.
+    // A fresh store (quarantine) starts with no copy markers: resume the copy.
+    if (!historyCopyDone({ agentDb: db })) copyHistoryStep({ agentDb: db });
     const before = agentStoreStatus().sizeState;
     const size = checkStorageSize(now.getTime(), { requestRollup: false });
     const transitioned = size.state !== 'ok' && size.state !== before;

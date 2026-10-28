@@ -150,3 +150,21 @@ test('a user purge flushes and drops that user\'s queued writes; other users kee
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = 'purge-q-1'"), 0, 'no queued row lands after the purge');
   assert.equal(count(db, "SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = 'purge-q-2'"), 1, 'other users are unaffected');
 });
+
+test('after a quarantine, the fresh store gets new id floors and the history copy runs again', () => {
+  fresh();
+  const u = users.registerUser(main.getDb(), { email: 'jobs-fresh@example.test', password: 'CorrectHorseBattery', displayName: 'f' }).id;
+  const mainMax = () => main.getDb().prepare('SELECT COALESCE(MAX(id),0) AS m FROM activity').get().m;
+  main.getDb().prepare("INSERT INTO activity (user_id, kind, title) VALUES (?, 'meeting_added', 'before quarantine')").run(u);
+  main.getDb().prepare("INSERT INTO activity (user_id, kind, title) VALUES (?, 'meeting_added', 'before quarantine 2')").run(u);
+  // Garbage at the store path: the next open quarantines and recreates the file.
+  agent.closeAgentDb();
+  fs.writeFileSync(config.agentDbPath, Buffer.from('not a sqlite file at all, just garbage bytes'));
+  jobs.openAgentStoreAtBoot({});
+  const db = agent.getAgentDb();
+  assert.ok(db);
+  const newId = recordActivity({ userId: u, kind: 'meeting_added', title: 'after quarantine' });
+  assert.ok(newId > mainMax(), `new id ${newId} must be above the main max ${mainMax()}`);
+  copy.runHistoryCopy();
+  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM activity WHERE user_id = ? AND id <= ?', u, mainMax()), 2, 'the copy re-ran on the fresh file');
+});
