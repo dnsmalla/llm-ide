@@ -360,9 +360,14 @@ test('duplicateHeadings', () => {
 // DocGenOutputConfigTests: the three resolution rules (the rest stays Swift).
 // ---------------------------------------------------------------------------
 
-test('testResolvedDirectoryDefaultsToProjectData', () => {
-  // ported from DocGenOutputConfigTests:testResolvedDirectoryDefaultsToProjectData
-  assert.equal(F.resolveOutputDirectory({ projectRoot: '/tmp/proj' }), path.join('/tmp/proj', 'data'));
+test('testResolvedDirectoryDefaultsToLlmDocGenerated', () => {
+  // ported from DocGenOutputConfigTests:testResolvedDirectoryDefaultsToLlmDocGenerated
+  assert.equal(F.resolveOutputDirectory({ projectRoot: '/tmp/proj' }), path.join('/tmp/proj', 'llm-doc', 'generated'));
+});
+
+test('testSavedCustomPathStillWinsOverNewDefault', () => {
+  // ported from DocGenOutputConfigTests:testSavedCustomPathStillWinsOverNewDefault
+  assert.equal(F.resolveOutputDirectory({ localFolderPath: '/tmp/legacy-data-folder', projectRoot: '/tmp/proj' }), '/tmp/legacy-data-folder');
 });
 
 test('testResolvedDirectoryPrefersExplicitPath', () => {

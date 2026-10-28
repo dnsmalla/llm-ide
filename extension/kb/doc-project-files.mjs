@@ -622,12 +622,12 @@ function folderOf(entry) {
 
 /**
  * Where a Doc Gen save goes (`DocGenOutputConfig.resolvedDirectory`): the
- * explicit folder when set, else `<project>/data`, else null (the caller falls
+ * explicit folder when set, else `<project>/llm-doc/generated`, else null (the caller falls
  * back to Downloads). The output config is still owned by Swift until K3
  * (docs-kit §5a); this is its server twin, pinned by the same tests.
  */
 export function resolveOutputDirectory({ localFolderPath, projectRoot } = {}) {
   if (typeof localFolderPath === 'string' && localFolderPath !== '') return localFolderPath;
-  if (typeof projectRoot === 'string' && projectRoot !== '') return join(projectRoot, 'data');
+  if (typeof projectRoot === 'string' && projectRoot !== '') return join(projectRoot, 'llm-doc', 'generated');
   return null;
 }
