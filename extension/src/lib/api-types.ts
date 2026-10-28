@@ -454,6 +454,8 @@ export type Health = {
     migration: string;
     /** true when the legacy <repo>/kb/data.db changed (or vanished) after the copy to the data dir: something still writes to the old copy */
     legacyDiverged?: boolean;
+    /** What the boot migration left in place (backups/, an agent-sdk/ over the cap). Strings carry no paths. */
+    notes?: string[];
   };
   checks: {
     db: boolean;

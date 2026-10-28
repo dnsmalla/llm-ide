@@ -928,7 +928,12 @@ async function collectHealth() {
     serverStartedAt: SERVER_STARTED_AT,
     skillsAvailable,
     features: config.features,
-    storage: { location: config.dataLocation, migration: dataDirMigration.status, legacyDiverged: dataDirMigration.legacyDiverged === true },
+    storage: {
+      location: config.dataLocation,
+      migration: dataDirMigration.status,
+      legacyDiverged: dataDirMigration.legacyDiverged === true,
+      notes: dataDirMigration.healthNotes,
+    },
   });
 }
 

@@ -29,7 +29,11 @@ import Database from 'better-sqlite3';
 import { setDataDirOverride, setDataMigrationReport } from '../core/data-dir.mjs';
 
 const MARKER = 'migrated-from.json';
-const MAX_TREE_BYTES = 2 * 1024 ** 3;
+// agent-sdk/ holds per-user engine homes (transcripts and credentials). Copy it
+// only under this cap; above it, leave it in place and say so.
+const MAX_SDK_BYTES = 200 * 1024 ** 2;
+// backups/ is never copied: it can be many GB of old DB copies. New backups
+// are written to the data dir; the old ones stay in the legacy kb.
 const DEV_SECRETS = '.dev-secrets.json';
 const COMMIT_ORDER = ['agent.db', 'backups', 'agent-sdk', DEV_SECRETS, MARKER, 'data.db'];
 
@@ -41,9 +45,9 @@ const COMMIT_ORDER = ['agent.db', 'backups', 'agent-sdk', DEV_SECRETS, MARKER, '
  * @param {(step: string) => void} [opts.fault] test hook: throws to simulate a failure at a step
  * @returns {object} the migration report (also stored for /health)
  */
-export function runDataDirMigration({ env = process.env, root, appVersion = null, fault = null } = {}) {
+export function runDataDirMigration({ env = process.env, root, appVersion = null, fault = null, sdkCapBytes = MAX_SDK_BYTES } = {}) {
   const started = Date.now();
-  const report = { status: 'skipped', reason: null, dataDir: null, from: null, tables: null, notes: [], durationMs: 0 };
+  const report = { status: 'skipped', reason: null, dataDir: null, from: null, tables: null, notes: [], healthNotes: [], legacyDiverged: null, durationMs: 0 };
   const finish = (status, reason = null) => {
     report.status = status;
     report.reason = reason;
@@ -78,7 +82,7 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
     report.from = legacyDb;
     if (!fs.existsSync(legacyDb)) return finish('skipped', 'no-legacy-db');
 
-    return copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, report, finish });
+    return copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish });
   } catch (err) {
     setDataDirOverride(null);
     report.notes.push(`unexpected: ${err?.message ?? err}`);
@@ -86,7 +90,7 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
   }
 }
 
-function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, report, finish }) {
+function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish }) {
   const staging = path.join(dataDir, '.migrating');
   const moved = []; // names moved into dataDir by this run, removed on failure
   const step = (name) => { if (fault) fault(name); };
@@ -118,21 +122,31 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, repo
     }
 
     const trees = { backups: false, 'agent-sdk': false };
-    for (const name of Object.keys(trees)) {
-      step(name);
-      const src = path.join(legacyDir, name);
-      if (!fs.existsSync(src)) continue;
-      const bytes = treeBytes(src);
-      if (bytes > MAX_TREE_BYTES) {
-        report.notes.push(`${name}/ skipped: ${Math.round(bytes / 1024 ** 3)} GB exceeds the 2 GB copy cap`);
-        continue;
+    const backupsBytes = treeBytes(path.join(legacyDir, 'backups'));
+    if (fs.existsSync(path.join(legacyDir, 'backups'))) {
+      const mb = Math.round(backupsBytes / 1024 ** 2);
+      const note = `backups/ not copied (${mb} MB stay in the legacy kb); new backups go to the data dir`;
+      report.notes.push(note);
+      report.healthNotes.push(note);
+    }
+    {
+      step('agent-sdk');
+      const src = path.join(legacyDir, 'agent-sdk');
+      if (fs.existsSync(src)) {
+        const bytes = treeBytes(src);
+        if (bytes > sdkCapBytes) {
+          const mb = Math.round(bytes / 1024 ** 2);
+          const note = `agent-sdk/ not copied (${mb} MB exceeds the ${Math.round(sdkCapBytes / 1024 ** 2)} MB cap); per-user agent logins must be re-established`;
+          report.notes.push(note);
+          report.healthNotes.push(note);
+          console.warn(`[data-dir-migration] ${note}`);
+        } else if (fs.existsSync(path.join(dataDir, 'agent-sdk'))) {
+          report.notes.push('agent-sdk/ already present in data dir; not copied');
+        } else {
+          fs.cpSync(src, path.join(staging, 'agent-sdk'), { recursive: true, errorOnExist: true, force: false });
+          trees['agent-sdk'] = true;
+        }
       }
-      if (fs.existsSync(path.join(dataDir, name))) {
-        report.notes.push(`${name}/ already present in data dir; not copied`);
-        continue;
-      }
-      fs.cpSync(src, path.join(staging, name), { recursive: true, errorOnExist: true, force: false });
-      trees[name] = true;
     }
 
     step('marker');
@@ -142,7 +156,7 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, repo
       appVersion,
       tables: report.tables,
       agentDb: agentCopied,
-      backups: trees.backups,
+      backups: false,
       agentSdk: trees['agent-sdk'],
       // What the legacy DB looked like when it was left behind. A later boot
       // compares against this to notice a fork.
@@ -311,6 +325,7 @@ function tableCounts(db) {
 }
 
 function treeBytes(dir) {
+  if (!fs.existsSync(dir)) return 0;
   let total = 0;
   const stack = [dir];
   while (stack.length) {
@@ -319,7 +334,6 @@ function treeBytes(dir) {
       const p = path.join(cur, ent.name);
       if (ent.isDirectory()) stack.push(p);
       else if (ent.isFile()) total += fs.statSync(p).size;
-      if (total > MAX_TREE_BYTES) return total; // enough to decide
     }
   }
   return total;

@@ -98,11 +98,15 @@ test('migrates a WAL DB with its rows, agent.db, backups and agent-sdk; legacy u
   assert.equal(agent.prepare('SELECT COUNT(*) n FROM agent_runs').get().n, 1);
   agent.close();
 
-  assert.equal(fs.readFileSync(path.join(dataDir, 'backups', 'data-1.db'), 'utf8'), 'backup-bytes');
+  // backups/ stays in the legacy kb; agent-sdk/ is small enough to copy.
+  assert.equal(fs.existsSync(path.join(dataDir, 'backups')), false);
+  assert.equal(fs.readFileSync(path.join(kb, 'backups', 'data-1.db'), 'utf8'), 'backup-bytes');
   assert.ok(fs.existsSync(path.join(dataDir, 'agent-sdk', 'u1', 'cred.json')));
+  assert.match(report.healthNotes.join(' '), /backups\/ not copied/);
   const marker = JSON.parse(fs.readFileSync(path.join(dataDir, 'migrated-from.json'), 'utf8'));
   assert.equal(marker.source, path.join(kb, 'data.db'));
   assert.equal(marker.tables.meetings, 25);
+  assert.equal(marker.backups, false);
   assert.ok(marker.migratedAt);
 
   // The legacy DB keeps its rows and is not deleted. Byte-identity is not
@@ -146,7 +150,7 @@ test('partial failure at the agent.db step also cleans up and falls back', () =>
   makeLegacy();
   const report = runDataDirMigration({
     env: env(), root,
-    fault: (step) => { if (step === 'backups') throw new Error('injected'); },
+    fault: (step) => { if (step === 'agent-sdk') throw new Error('injected'); },
   });
   assert.equal(report.status, 'fallback');
   assert.equal(fs.existsSync(path.join(dataDir, 'data.db')), false);
@@ -318,4 +322,13 @@ test('no baseline (no marker) means divergence is unknown, not reported', () => 
   const report = runDataDirMigration({ env: env(), root });
   assert.equal(report.status, 'skipped');
   assert.equal(report.legacyDiverged, null);
+});
+
+test('agent-sdk/ over the cap is left in place with a note, and the DB still migrates', () => {
+  makeLegacy({ withAgent: false, withTrees: true });
+  const report = runDataDirMigration({ env: env(), root, sdkCapBytes: 1 });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  assert.equal(fs.existsSync(path.join(dataDir, 'agent-sdk')), false);
+  assert.match(report.healthNotes.join(' '), /agent-sdk\/ not copied/);
+  assert.ok(fs.existsSync(path.join(root, 'kb', 'agent-sdk', 'u1', 'cred.json')));
 });
