@@ -11,10 +11,10 @@ import Foundation
 /// ```
 /// <root>/
 /// ├── source/   code/   data/   templates/   commands/   ← user content
-/// ├── llm-doc/                                ← human-readable generated docs
+/// ├── llm-doc/                                ← human-readable generated docs (Markdown only)
 /// │   ├── <type>/YYYY/MM/   meetings/ emails/ documents/ (+ connector dirs)
 /// │   ├── plans/            KB plans as Markdown
-/// │   ├── loop/<key>/       loop outputs (plan/, refactor/, test/, docs/ …)
+/// │   ├── loop/<key>/       loop Markdown outputs (plan/, refactor/, test/, docs/ …)
 /// │   └── generated/        Doc Gen exports (default output folder)
 /// ├── system/                                 ← machine-consumed state
 /// │   ├── project.json      project marker + settings
@@ -25,7 +25,8 @@ import Foundation
 /// │   ├── q&a/  faults/     Q&A store, fault reports (MemoryStore container: system/)
 /// │   ├── repo.md           no longer written; the code summary is graph/index.md
 /// │   ├── graph/            code graph + code notes (git-ignored)
-/// │   ├── cache/            runtime cache (git-ignored)
+/// │   ├── cache/            runtime cache (git-ignored); notes-index.json = the note index (D6)
+/// │   ├── loop/<key>/       Loop machine data: test ledger/map/structure JSON, refactor graph (D6)
 /// │   └── index.sqlite  sync.json   search index + export info (git-ignored)
 /// ```
 ///
@@ -119,6 +120,26 @@ struct ProjectLayout {
     var indexDB:     URL { systemDir.appendingPathComponent("index.sqlite") }
     var syncJSON:    URL { systemDir.appendingPathComponent("sync.json") }
     var cacheDir:    URL { systemDir.appendingPathComponent("cache", isDirectory: true) }
+
+    /// The rebuildable note index (`NoteService`'s unified index of every
+    /// generated note): `system/cache/notes-index.json`, git-ignored with the
+    /// rest of `system/cache/`. Machine state, so it never lives in `llm-doc/`
+    /// (D6). Before D6 it was `llm-doc/index.json`; see `legacyNotesIndex`.
+    var notesIndex: URL { cacheDir.appendingPathComponent(Self.notesIndexFileName) }
+
+    /// The pre-D6 note index location, `llm-doc/index.json`. Readers fall back
+    /// to it while the new file is missing; `NotesIndexMigration` moves it.
+    var legacyNotesIndex: URL { notesDir.appendingPathComponent(Self.legacyNotesIndexFileName) }
+
+    static let notesIndexFileName = "notes-index.json"
+    /// Pre-D6 file name, kept for the legacy-location fallback and migration.
+    static let legacyNotesIndexFileName = "index.json"
+
+    /// Loop machine data (ledger, test map/structure, refactor graph snapshots):
+    /// `system/loop/<loop key>/…`, same relative names as the `llm-doc/loop`
+    /// files they replace (D6). The Loop's `.md` outputs stay in `llm-doc/loop/`.
+    var loopDataDir: URL { systemDir.appendingPathComponent(Self.loopDataDirName, isDirectory: true) }
+    static let loopDataDirName = "loop"
 
     /// Container subdir (relative) used by MemoryStore — it appends
     /// `faults/` and `q&a/` inside it, so this is `system` (yielding

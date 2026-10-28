@@ -49,18 +49,21 @@ struct NoteServiceIndexTests {
         let root = tmpRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let service = NoteService(repoRoot: root)
-        try FileManager.default.createDirectory(at: service.notesRoot, withIntermediateDirectories: true)
+        try FileManager.default.createDirectory(at: service.indexPath.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
         let garbage = Data("{ not json".utf8)
         try garbage.write(to: service.indexPath)
 
         _ = try await service.saveNote(
             type: .meeting, filename: "one.md", content: Data("# one".utf8), metadata: metadata(1))
 
-        let names = try FileManager.default.contentsOfDirectory(atPath: service.notesRoot.path)
-        let quarantined = names.filter { $0.hasPrefix("index.json.corrupt-") }
+        // D6: the index lives in system/cache/, so the damaged copy is set aside there.
+        let cacheDir = service.indexPath.deletingLastPathComponent()
+        let names = try FileManager.default.contentsOfDirectory(atPath: cacheDir.path)
+        let quarantined = names.filter { $0.hasPrefix("notes-index.json.corrupt-") }
         #expect(quarantined.count == 1)
         if let name = quarantined.first {
-            let kept = try Data(contentsOf: service.notesRoot.appendingPathComponent(name))
+            let kept = try Data(contentsOf: cacheDir.appendingPathComponent(name))
             #expect(kept == garbage, "the damaged bytes are preserved, not rewritten")
         }
         #expect(try await service.loadIndex().notes.count == 1)

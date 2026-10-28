@@ -1,0 +1,24 @@
+{
+  "notes" : [
+    {
+      "fileSize" : 512,
+      "generatedAt" : "2026-08-14T10:05:00Z",
+      "date" : "2026-08-14T10:00:00Z",
+      "id" : "meeting-2026-08-14-standup",
+      "participants" : [
+        "Dinesh"
+      ],
+      "path" : "llm-doc\/meetings\/2026\/08\/standup.md",
+      "rawFile" : "source\/meetings\/2026\/08\/standup.txt",
+      "source" : "google-meet",
+      "sourceHash" : "sha256-aaa111",
+      "tags" : [
+
+      ],
+      "title" : "Standup",
+      "type" : "meeting"
+    }
+  ],
+  "updated" : "2026-08-14T10:05:00Z",
+  "version" : 1
+}

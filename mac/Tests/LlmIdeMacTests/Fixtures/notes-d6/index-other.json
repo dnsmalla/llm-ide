@@ -1,0 +1,22 @@
+{
+  "notes" : [
+    {
+      "fileSize" : 900,
+      "generatedAt" : "2026-08-15T08:00:00Z",
+      "date" : "2026-08-15T08:00:00Z",
+      "id" : "email-2026-08-15-invoice",
+      "participants" : null,
+      "path" : "llm-doc\/emails\/2026\/08\/invoice.md",
+      "rawFile" : null,
+      "source" : "gmail",
+      "sourceHash" : "sha256-bbb222",
+      "tags" : [
+
+      ],
+      "title" : "Invoice",
+      "type" : "email"
+    }
+  ],
+  "updated" : "2026-08-15T08:00:00Z",
+  "version" : 1
+}

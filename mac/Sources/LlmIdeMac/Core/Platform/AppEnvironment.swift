@@ -32,6 +32,8 @@ final class AppEnvironment {
         NotesToLlmDocMigration.runForNotesFolder(folder)
         if let project = indexRootURL {
             NotesToLlmDocMigration.run(in: project)
+            // D6: the note index leaves llm-doc/ for system/cache/ before the nested merge targets it.
+            NotesIndexMigration.run(in: project)
             SourceNestedLlmDocMigration.run(in: project)
             GeneratedDataMigration.run(in: project)
         }

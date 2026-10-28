@@ -179,9 +179,24 @@ public final class NoteService: Sendable {
     /// LibraryItemStore's llm-doc scan, so the skip rules can't drift.
     public static let indexFileName = "index.json"
 
-    /// Path to unified note index: notesRoot/index.json
+    /// Path to the unified note index: `<repoRoot>/system/cache/notes-index.json`
+    /// (D6). Machine state, so not under `llm-doc/`. The pre-D6 file
+    /// `llm-doc/index.json` is read as a fallback until it is moved; see
+    /// `ProjectLayout.notesIndex` / `legacyNotesIndex`.
     public var indexPath: URL {
-        notesRoot.appendingPathComponent(Self.indexFileName)
+        ProjectLayout(root: repoRoot).notesIndex
+    }
+
+    /// The pre-D6 index location, read only while `indexPath` is missing.
+    var legacyIndexPath: URL {
+        ProjectLayout(root: repoRoot).legacyNotesIndex
+    }
+
+    /// The file to read the index from: the new location, else the legacy one
+    /// when that exists, else the new location (which then reads as missing).
+    private var readableIndexPath: URL {
+        if FileManager.default.fileExists(atPath: indexPath.path) { return indexPath }
+        return FileManager.default.fileExists(atPath: legacyIndexPath.path) ? legacyIndexPath : indexPath
     }
 
     /// Get the appropriate subdirectory for a note type
@@ -327,21 +342,22 @@ public final class NoteService: Sendable {
     /// Caller must hold `indexLock`.
     private func readIndex(quarantineCorrupt: Bool) -> NoteIndex {
         let data: Data
+        let source = readableIndexPath
         do {
-            data = try Data(contentsOf: indexPath)
+            data = try Data(contentsOf: source)
         } catch let error as CocoaError where error.code == .fileReadNoSuchFile {
             logger.info("Creating new note index")
             return NoteIndex()
         } catch {
             logger.error("note index unreadable: \(error.localizedDescription, privacy: .public)")
-            if quarantineCorrupt { quarantineIndex() }
+            if quarantineCorrupt { quarantineIndex(source) }
             return scannedIndex()
         }
         do {
             return try decoder.decode(NoteIndex.self, from: data)
         } catch {
             logger.error("note index undecodable: \(error.localizedDescription, privacy: .public)")
-            if quarantineCorrupt { quarantineIndex() }
+            if quarantineCorrupt { quarantineIndex(source) }
             return scannedIndex()
         }
     }
@@ -374,13 +390,13 @@ public final class NoteService: Sendable {
     /// Move a damaged `index.json` aside as `<name>.corrupt-<timestamp>`.
     /// `rebuildIndex()` regenerates the index from the note files; the moved
     /// copy is kept for inspection rather than deleted.
-    private func quarantineIndex() {
+    private func quarantineIndex(_ source: URL) {
         let stamp = ISO8601DateFormatter().string(from: Date())
             .replacingOccurrences(of: ":", with: "-")
-        let dest = indexPath.deletingLastPathComponent()
-            .appendingPathComponent("\(indexPath.lastPathComponent).corrupt-\(stamp)")
+        let dest = source.deletingLastPathComponent()
+            .appendingPathComponent("\(source.lastPathComponent).corrupt-\(stamp)")
         do {
-            try FileManager.default.moveItem(at: indexPath, to: dest)
+            try FileManager.default.moveItem(at: source, to: dest)
             logger.error("moved corrupt note index aside to \(dest.lastPathComponent, privacy: .public)")
         } catch {
             logger.error("could not move corrupt note index aside: \(error.localizedDescription, privacy: .public)")
@@ -392,7 +408,14 @@ public final class NoteService: Sendable {
         var mutableIndex = index
         mutableIndex.updated = ISO8601DateFormatter().string(from: Date())
         let data = try encoder.encode(mutableIndex)
+        try FileManager.default.createDirectory(at: indexPath.deletingLastPathComponent(),
+                                                withIntermediateDirectories: true)
         try data.write(to: indexPath, options: .atomic)
+        // The new index now supersedes the pre-D6 copy; drop it so it cannot be
+        // read again after a later edit to the new file.
+        if FileManager.default.fileExists(atPath: legacyIndexPath.path) {
+            try? FileManager.default.removeItem(at: legacyIndexPath)
+        }
     }
 
     /// Add a note to the index. The load → replace → save runs under

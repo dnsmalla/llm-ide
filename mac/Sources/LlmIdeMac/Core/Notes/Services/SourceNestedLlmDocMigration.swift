@@ -43,7 +43,9 @@ enum SourceNestedLlmDocMigration {
         // empty and would linger forever, logging a false "collision" below
         // on every launch even when every note file moved successfully.
         let misplacedIndex = misplaced.appendingPathComponent("index.json")
-        if mergeIndexes(fm, from: misplacedIndex, into: canonical.appendingPathComponent("index.json")) {
+        // The canonical index is `system/cache/notes-index.json` (D6). NotesIndexMigration
+        // runs first in AppEnvironment, so a pre-D6 `llm-doc/index.json` has already moved.
+        if mergeIndexes(fm, from: misplacedIndex, into: ProjectLayout(root: projectRoot).notesIndex) {
             try? fm.removeItem(at: misplacedIndex)
         }
 
@@ -138,7 +140,7 @@ enum SourceNestedLlmDocMigration {
         if fm.fileExists(atPath: canonicalIndex.path) {
             guard let canonicalData = try? Data(contentsOf: canonicalIndex),
                   let decoded = try? decoder.decode(NoteIndex.self, from: canonicalData) else {
-                log.error("Could not decode canonical llm-doc/index.json — refusing to merge (would discard its existing entries).")
+                log.error("Could not decode canonical note index — refusing to merge (would discard its existing entries).")
                 return false
             }
             canonical = decoded
@@ -159,6 +161,7 @@ enum SourceNestedLlmDocMigration {
             return false
         }
         do {
+            try fm.createDirectory(at: canonicalIndex.deletingLastPathComponent(), withIntermediateDirectories: true)
             try merged.write(to: canonicalIndex, options: .atomic)
         } catch {
             log.error("Failed to write merged note index: \(error.localizedDescription, privacy: .public)")
