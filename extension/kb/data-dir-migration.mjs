@@ -30,7 +30,8 @@ import { setDataDirOverride, setDataMigrationReport } from '../core/data-dir.mjs
 
 const MARKER = 'migrated-from.json';
 const MAX_TREE_BYTES = 2 * 1024 ** 3;
-const COMMIT_ORDER = ['agent.db', 'backups', 'agent-sdk', MARKER, 'data.db'];
+const DEV_SECRETS = '.dev-secrets.json';
+const COMMIT_ORDER = ['agent.db', 'backups', 'agent-sdk', DEV_SECRETS, MARKER, 'data.db'];
 
 /**
  * @param {object} [opts]
@@ -94,6 +95,11 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, repo
 
     step('db');
     report.tables = snapshotAndVerify(legacyDb, path.join(staging, 'data.db'));
+
+    // The dev secrets are the only copy of the vault key: without them every
+    // vault-encrypted secret is lost. Copy them, never regenerate.
+    step('secrets');
+    copySecrets({ legacyFile: path.join(legacyDir, DEV_SECRETS), dataDir, staging, env, report });
 
     let agentCopied = false;
     if (copyAgent) {
@@ -198,6 +204,35 @@ function snapshotAndVerify(src, dest) {
     }
   }
   return srcCounts;
+}
+
+// Copy <repo>/kb/.dev-secrets.json into the staging dir (mode 0600). Refuses
+// (the caller falls back) when a legacy vault holds secrets but no key file
+// exists and LLMIDE_VAULT_KEY is not set, or when the data dir already holds a
+// different key. An already identical file is fine.
+function copySecrets({ legacyFile, dataDir, staging, env, report }) {
+  const target = path.join(dataDir, DEV_SECRETS);
+  if (!fs.existsSync(legacyFile)) {
+    if ((report.tables?.user_secrets ?? 0) > 0 && !(env.LLMIDE_VAULT_KEY ?? '').trim()) {
+      throw new Error('legacy vault holds secrets but its key file is missing and LLMIDE_VAULT_KEY is not set');
+    }
+    report.notes.push('no legacy dev secrets file; the data dir generates one on first boot');
+    return;
+  }
+  const raw = fs.readFileSync(legacyFile, 'utf8');
+  const parsed = JSON.parse(raw); // throws on a corrupt file: fall back, never guess a key
+  if (typeof parsed?.jwtSecret !== 'string' || typeof parsed?.vaultKey !== 'string') {
+    throw new Error('legacy dev secrets file is missing jwtSecret or vaultKey');
+  }
+  if (fs.existsSync(target)) {
+    if (fs.readFileSync(target, 'utf8') !== raw) {
+      throw new Error('data dir already holds a different dev secrets file');
+    }
+    return;
+  }
+  const dest = path.join(staging, DEV_SECRETS);
+  fs.writeFileSync(dest, raw, { mode: 0o600 });
+  fs.chmodSync(dest, 0o600);
 }
 
 function tableCounts(db) {

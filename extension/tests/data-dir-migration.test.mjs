@@ -6,6 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { runDataDirMigration } from '../kb/data-dir-migration.mjs';
 import { getDataDirOverride, clearDataDirOverride, getDataMigrationReport } from '../core/data-dir.mjs';
@@ -177,4 +178,71 @@ test('a legacy kb with no agent.db or trees still migrates the DB', () => {
   assert.equal(report.status, 'migrated');
   assert.equal(fs.existsSync(path.join(dataDir, 'agent.db')), false);
   assert.equal(fs.existsSync(path.join(dataDir, 'backups')), false);
+});
+
+// --- dev secrets (the vault key) ---------------------------------------------
+
+const VAULT_URL = new URL('../server/vault.mjs', import.meta.url).href;
+const KEY_A = 'A'.repeat(64);
+const KEY_B = 'B'.repeat(64);
+
+// Encrypt/decrypt through the real server/vault.mjs in a child process, so the
+// key comes from its env exactly as in production (config reads LLMIDE_VAULT_KEY).
+function vaultOp(key, op, arg) {
+  const child = path.join(work, `vault-${crypto.randomUUID()}.mjs`);
+  fs.writeFileSync(child, `const v = await import(${JSON.stringify(VAULT_URL)});
+const { op, user, arg } = JSON.parse(process.env.VAULT_ARGS);
+if (op === 'enc') process.stdout.write(v.encrypt(user, arg).toString('base64'));
+else process.stdout.write(v.decrypt(user, Buffer.from(arg, 'base64')));
+`);
+  return execFileSync(process.execPath, [child], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      NODE_TEST_CONTEXT: '1',
+      LLMIDE_JWT_SECRET: 'j'.repeat(64),
+      LLMIDE_VAULT_KEY: key,
+      VAULT_ARGS: JSON.stringify({ op, user: 'user-1', arg }),
+    },
+  });
+}
+
+function writeLegacySecrets(kb, vaultKey) {
+  fs.writeFileSync(path.join(kb, '.dev-secrets.json'),
+    JSON.stringify({ jwtSecret: 'j'.repeat(64), vaultKey }, null, 2), { mode: 0o600 });
+}
+
+test('the dev secrets file is copied with mode 0600 and the copy is byte-identical', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  writeLegacySecrets(kb, KEY_A);
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  const dst = path.join(dataDir, '.dev-secrets.json');
+  assert.equal(fs.readFileSync(dst, 'utf8'), fs.readFileSync(path.join(kb, '.dev-secrets.json'), 'utf8'));
+  assert.equal(fs.statSync(dst).mode & 0o777, 0o600);
+});
+
+test('a vault-encrypted value decrypts after migration with the copied key', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  writeLegacySecrets(kb, KEY_A);
+  const blob = vaultOp(KEY_A, 'enc', 'sk-ant-test-secret');
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  const copied = JSON.parse(fs.readFileSync(path.join(dataDir, '.dev-secrets.json'), 'utf8'));
+  assert.equal(copied.vaultKey, KEY_A);
+  assert.equal(vaultOp(copied.vaultKey, 'dec', blob), 'sk-ant-test-secret');
+  assert.throws(() => vaultOp(KEY_B, 'dec', blob), 'a different key must not decrypt it');
+});
+
+test('a legacy vault with stored secrets but no key file falls back instead of migrating', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  const w = writers[0];
+  w.exec('CREATE TABLE user_secrets (user_id TEXT, key TEXT, blob BLOB)');
+  w.prepare('INSERT INTO user_secrets VALUES (?, ?, ?)').run('u1', 'claude.apiKey', Buffer.from('x'));
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'fallback', JSON.stringify(report));
+  assert.match(report.notes.join(' '), /key file is missing/);
+  assert.equal(getDataDirOverride(), null);
+  assert.equal(fs.existsSync(path.join(dataDir, 'data.db')), false);
+  assert.ok(fs.existsSync(path.join(kb, 'data.db')));
 });
