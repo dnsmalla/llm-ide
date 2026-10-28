@@ -72,7 +72,8 @@ export async function handleAgentHistoryRoutes(req, res, { userId, url }) {
     if (typeof body.previewId !== 'string' || !body.previewId) {
       return fail(res, 400, 'PREVIEW_REQUIRED', 'A real clear needs the previewId from a dry run (dryRun: true) first');
     }
-    const checked = checkPreview(userId, body.previewId, { scope, beforeDays });
+    // consume: a preview is single use, whatever the clear then answers.
+    const checked = checkPreview(userId, body.previewId, { scope, beforeDays, consume: true });
     if (!checked.ok) {
       return fail(res, 400, checked.reason === 'expired' ? 'PREVIEW_EXPIRED' : 'PREVIEW_INVALID',
         checked.reason === 'expired' ? 'The preview expired; run a new dry run' : 'The previewId does not match this user, scope and cutoff');

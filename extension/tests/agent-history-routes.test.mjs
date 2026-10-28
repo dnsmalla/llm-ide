@@ -262,3 +262,34 @@ test('GET /kb/os/state adds storage and agents.recentRuns for the caller only', 
     assert.ok(Object.hasOwn(body, k), `${k} kept`);
   }
 });
+
+test('a multibyte previewId is refused as PREVIEW_INVALID, not a server error', async () => {
+  freshAgent();
+  const a = user('m1');
+  const res = await call('POST', '/kb/agent-history/clear', { scope: 'raw', beforeDays: 30, dryRun: false, previewId: 'é'.repeat(64) }, a);
+  assert.equal(res.statusCode, 400, res._body);
+  assert.equal(res.json().error.code, 'PREVIEW_INVALID');
+});
+
+test('a previewId is single use: a replay after a successful clear is PREVIEW_INVALID', async () => {
+  freshAgent();
+  const a = user('m2');
+  seed(a, user('m3'));
+  const preview = (await call('POST', '/kb/agent-history/clear', { scope: 'raw', beforeDays: 30, dryRun: true }, a)).json();
+  const body = { scope: 'raw', beforeDays: 30, dryRun: false, previewId: preview.previewId };
+  assert.equal((await call('POST', '/kb/agent-history/clear', body, a)).statusCode, 200);
+  const replay = await call('POST', '/kb/agent-history/clear', body, a);
+  assert.equal(replay.statusCode, 400);
+  assert.equal(replay.json().error.code, 'PREVIEW_INVALID');
+});
+
+test('a preview signed before a restart is PREVIEW_EXPIRED, the same answer as a timed-out one', async () => {
+  freshAgent();
+  const a = user('m4');
+  seed(a, user('m5'));
+  const preview = (await call('POST', '/kb/agent-history/clear', { scope: 'raw', beforeDays: 30, dryRun: true }, a)).json();
+  api.rotatePreviewKeyForTests();                       // as after a restart
+  const res = await call('POST', '/kb/agent-history/clear', { scope: 'raw', beforeDays: 30, dryRun: false, previewId: preview.previewId }, a);
+  assert.equal(res.statusCode, 400);
+  assert.equal(res.json().error.code, 'PREVIEW_EXPIRED');
+});
