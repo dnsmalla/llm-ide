@@ -155,10 +155,10 @@ fi
 if [ -n "$RESUME" ]; then
   say "(c) pins already at $SHORT; checking they agree (re-resolve only when they do not)"
   if [ -n "$DRY_RUN" ]; then
-    printf 'graphkit-bump: [dry-run] node scripts/graphkit-pin-check.mjs (swift package resolve graph-kit only if it fails)\n'
+    printf 'graphkit-bump: [dry-run] node scripts/graphkit-pin-check.mjs (swift package resolve only if it fails)\n'
   elif ! node "$ROOT/scripts/graphkit-pin-check.mjs" >/dev/null 2>&1; then
     say "pins disagree; re-resolving graph-kit"
-    run swift package --package-path "$ROOT/mac" resolve graph-kit
+    run swift package --package-path "$ROOT/mac" resolve
   fi
 else
   say "(c) move the pins to $SHORT"
@@ -167,7 +167,7 @@ else
   else
     run node "$ROOT/scripts/graphkit-pin-check.mjs" --set-pin "$NEW"
   fi
-  run swift package --package-path "$ROOT/mac" resolve graph-kit
+  run swift package --package-path "$ROOT/mac" resolve
 fi
 
 # ---- staging: the gitlink and the pin files must be staged to match the worktree
