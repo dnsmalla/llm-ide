@@ -33,7 +33,7 @@ struct GraphMemoryState {
         // root when no code/<child> has a graph. Inlined via ProjectLayout (a
         // plain struct) to stay nonisolated.
         func graphed(_ root: URL) -> Bool {
-            fm.fileExists(atPath: ProjectLayout(root: root).graphDir.appendingPathComponent("index.md").path)
+            fm.fileExists(atPath: GeneratedDataLocator.readableGraphDir(forRepo: root).appendingPathComponent("index.md").path)
         }
         let repo: URL = {
             let codeDir = ProjectLayout(root: projectRoot).codeDir
@@ -46,14 +46,13 @@ struct GraphMemoryState {
         s.repoLabel = repo.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
         s.repoPath = repo.standardizedFileURL.path
 
-        let layout = ProjectLayout(root: repo)
-        let graphIndex = layout.graphDir.appendingPathComponent("index.md")
+        let graphIndex = GeneratedDataLocator.readableGraphDir(forRepo: repo).appendingPathComponent("index.md")
         s.hasGraph = fm.fileExists(atPath: graphIndex.path)
 
         // One directory, one file per artifact — see graphkit/paths.mjs. The
         // repo overview is NOT listed here: it is `system/graph/index.md`
         // (covered by `hasGraph` above), not a second copy in the memory dir.
-        let memDir = layout.memoryDir
+        let memDir = GeneratedDataLocator.readableMemoryDir(forRepo: repo)
         let names = ["graph-notes.md", "doc-notes.md", "chat-memory.md"]
         var newestMtime: Date?
         for name in names {

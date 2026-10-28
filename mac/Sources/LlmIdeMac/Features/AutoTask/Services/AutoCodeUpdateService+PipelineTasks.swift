@@ -734,15 +734,15 @@ extension AutoCodeUpdateService {
             return
         }
         var lines: [String] = ["Repo: \(repo.lastPathComponent)"]
-        let graphJSON = ProjectLayout(root: repo).graphDir.appendingPathComponent("graph.json")
+        let graphJSON = GeneratedDataLocator.readableGraphDir(forRepo: repo).appendingPathComponent("graph.json")
         if let data = try? Data(contentsOf: graphJSON),
            let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             let files = (obj["files"] as? [Any])?.count ?? 0
-            lines.append("Graph: \(files) files (\(repo.lastPathComponent)/system/graph/graph.json)")
+            lines.append("Graph: \(files) files (system/graph/graph.json)")
         } else {
             lines.append("Graph: not generated yet — auto-generates on open.")
         }
-        let memDir = ProjectLayout(root: repo).memoryDir
+        let memDir = GeneratedDataLocator.readableMemoryDir(forRepo: repo)
         let mem = ((try? FileManager.default.contentsOfDirectory(atPath: memDir.path)) ?? [])
             .filter { $0.hasSuffix(".md") }.sorted()
         lines.append(mem.isEmpty ? "Memory: none yet." : "Memory: \(mem.joined(separator: ", "))")

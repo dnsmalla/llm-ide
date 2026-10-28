@@ -148,7 +148,7 @@ enum ProjectGraphFile {
     /// has no graph repo.
     static func fileURL(projectRoot: URL) -> URL? {
         guard let repo = RepoGraphLocator.repoToGraph(projectRoot: projectRoot) else { return nil }
-        return ProjectLayout(root: repo).graphDir.appendingPathComponent("graph.json")
+        return GeneratedDataLocator.readableGraphDir(forRepo: repo).appendingPathComponent("graph.json")
     }
 
     /// The project's graph, or nil when the file is missing, unreadable, or not

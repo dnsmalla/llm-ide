@@ -35,7 +35,8 @@ public struct MemoryStore: Sendable {
     // MARK: - Paths
 
     private func memoryDir(in repo: URL) -> URL {
-        var url = repo
+        // D1: generated memory always lives under the PROJECT root, never a code/<child> repo.
+        var url = GeneratedDataLocator.projectRoot(forRepo: repo)
         for segment in memorySubdir.split(separator: "/", omittingEmptySubsequences: true) {
             url = url.appendingPathComponent(String(segment), isDirectory: true)
         }
@@ -82,7 +83,20 @@ public struct MemoryStore: Sendable {
     /// Sorted ascending by file name (date-prefixed slugs naturally
     /// order chronologically). Only `.md` files are returned; non-markdown
     /// files in the dir are ignored.
-    public func listFaults(at repo: URL) -> [URL] { listMarkdown(in: faultsDir(in: repo)) }
+    public func listFaults(at repo: URL) -> [URL] {
+        let current = listMarkdown(in: faultsDir(in: repo))
+        // N-1: faults written before D1 sit under <repo>/<memorySubdir>/faults.
+        // Read them too (new location wins on a name clash) until migrated.
+        var legacyDir = repo.standardizedFileURL
+        for segment in memorySubdir.split(separator: "/", omittingEmptySubsequences: true) {
+            legacyDir = legacyDir.appendingPathComponent(String(segment), isDirectory: true)
+        }
+        let legacy = listMarkdown(in: legacyDir.appendingPathComponent("faults", isDirectory: true))
+        guard !legacy.isEmpty else { return current }
+        let names = Set(current.map(\.lastPathComponent))
+        return (current + legacy.filter { !names.contains($0.lastPathComponent) })
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+    }
 
     private func listMarkdown(in dir: URL) -> [URL] {
         let fm = FileManager.default

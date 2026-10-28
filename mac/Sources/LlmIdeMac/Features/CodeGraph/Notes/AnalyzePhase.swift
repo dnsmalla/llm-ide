@@ -38,7 +38,7 @@ public struct AnalyzePhase {
 
     public func run(batch: CodeBatch, scan: ScanResult, repoRoot: URL) async -> Result<Void, CodeNoteError> {
         let prompt = Self.buildPrompt(batch: batch, scan: scan,
-                                      notesDir: "system/graph")
+                                      notesDir: GeneratedDataLocator.graphDir(forRepo: repoRoot).path)
         do {
             let (code, _, stderr) = try await launcher.run(
                 executable: cliExecutable,

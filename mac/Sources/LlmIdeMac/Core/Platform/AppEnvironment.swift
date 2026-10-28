@@ -33,6 +33,7 @@ final class AppEnvironment {
         if let project = indexRootURL {
             NotesToLlmDocMigration.run(in: project)
             SourceNestedLlmDocMigration.run(in: project)
+            GeneratedDataMigration.run(in: project)
         }
         SourceFolderMigration.run(in: folder, connectorFolders: connectorFolders)
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)

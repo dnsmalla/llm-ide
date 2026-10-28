@@ -31,14 +31,13 @@ public enum CodeNoteGenerator {
     public static func generate(scan: ScanResult, repoRoot: URL,
                                 changedPaths: Set<String>? = nil,
                                 calls: [FileCall] = []) -> Int {
-        let layout = ProjectLayout(root: repoRoot)
-        let notesRoot = layout.graphNotesDir
+        let notesRoot = GeneratedDataLocator.graphDir(forRepo: repoRoot)
         try? FileManager.default.createDirectory(at: notesRoot, withIntermediateDirectories: true)
 
         // Self-ignoring marker: makes git ignore everything under `system/graph`
         // in ANY repo, regardless of the repo's root .gitignore. Idempotent /
         // write-always (cheap), so generated notes never flood Source Control.
-        let codeNotesRoot = layout.graphDir
+        let codeNotesRoot = GeneratedDataLocator.graphDir(forRepo: repoRoot)
         try? "*\n".write(to: codeNotesRoot.appendingPathComponent(".gitignore"),
                          atomically: true, encoding: .utf8)
 
@@ -155,7 +154,7 @@ public enum CodeNoteGenerator {
     // MARK: - index.md
 
     static func writeIndex(scan: ScanResult, usedBy: [String: [String]], repoRoot: URL) {
-        let codeDir = ProjectLayout(root: repoRoot).graphDir
+        let codeDir = GeneratedDataLocator.graphDir(forRepo: repoRoot)
         try? FileManager.default.createDirectory(at: codeDir, withIntermediateDirectories: true)
 
         let codeFiles = Self.codeFiles(from: scan)
@@ -246,7 +245,7 @@ public enum CodeNoteGenerator {
 
     static func writeGraphJSON(scan: ScanResult, usedBy: [String: [String]],
                                calls: [FileCall] = [], repoRoot: URL) {
-        let codeDir = ProjectLayout(root: repoRoot).graphDir
+        let codeDir = GeneratedDataLocator.graphDir(forRepo: repoRoot)
 
         struct SymEntry: Encodable {
             let name: String; let line: Int; let declaration: String?

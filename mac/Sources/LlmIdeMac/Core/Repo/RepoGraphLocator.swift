@@ -8,7 +8,7 @@ public enum RepoGraphLocator {
     static func repoToGraph(projectRoot: URL) -> URL? {
         let fm = FileManager.default
         func hasGraph(_ root: URL) -> Bool {
-            fm.fileExists(atPath: ProjectLayout(root: root).graphDir.appendingPathComponent("index.md").path)
+            fm.fileExists(atPath: GeneratedDataLocator.readableGraphDir(forRepo: root).appendingPathComponent("index.md").path)
         }
         let codeDir = ProjectLayout(root: projectRoot).codeDir
         let children = (try? fm.contentsOfDirectory(at: codeDir, includingPropertiesForKeys: [.isDirectoryKey],

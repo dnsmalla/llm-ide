@@ -290,7 +290,7 @@ final class KnowledgeGraphService: ObservableObject {
     /// churn the watcher or the disk.
     nonisolated static func writeMemoryArtifact(to repoRoot: URL, code: CGData, doc: CGData, merged: CGData,
                                                 docCount: Int, chunks: [MemoryChunk]) {
-        let memDir = ProjectLayout(root: repoRoot).memoryDir
+        let memDir = GeneratedDataLocator.memoryDir(forRepo: repoRoot)
         do {
             try FileManager.default.createDirectory(at: memDir, withIntermediateDirectories: true)
         } catch {
