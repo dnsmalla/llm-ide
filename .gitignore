@@ -8,6 +8,10 @@ kb/.dev-secrets.json
 kb/data.db
 kb/data.db-shm
 kb/data.db-wal
+kb/agent.db
+kb/agent.db-wal
+kb/agent.db-shm
+kb/agent.db.corrupt-*
 kb/*.db-journal
 kb/backups/
 

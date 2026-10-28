@@ -19,12 +19,17 @@ import { migrateRetiredModelIds } from './model-ids.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const MIGRATIONS_DIR = path.join(__dirname, 'migrations');
+// Second store (agent.db, kb/agent-db.mjs): its own directory and table.
+export const AGENT_MIGRATIONS_DIR = path.join(__dirname, 'agent-migrations');
 
 const FILE_RE = /^(\d{3,4})_([\w.-]+)\.sql$/;
+const TABLE_RE = /^[a-z_][a-z0-9_]*$/;
 
 // Data steps that SQL cannot express (recursive JSON rewrites). A migration
 // file still provides the version and checksum; when its version is listed
 // here, the step runs inside the same transaction right after its SQL.
+// Only the main DB's directory gets these: another store's version numbers
+// are its own.
 const JS_MIGRATIONS = new Map([
   [45, (db) => scrubReviewPayloadRows(db)],
   [46, (db) => migrateRetiredModelIds(db)],
@@ -48,9 +53,16 @@ function isSingleAddColumn(sql) {
   return /^alter\s+table\s+\S+\s+add\s+(column\s+)?/i.test(statements[0]);
 }
 
-function ensureMigrationsTable(db) {
+function checkTable(table) {
+  if (typeof table !== 'string' || !TABLE_RE.test(table)) {
+    throw new Error(`invalid migrations table name: ${table}`);
+  }
+  return table;
+}
+
+function ensureMigrationsTable(db, table) {
   db.exec(`
-    CREATE TABLE IF NOT EXISTS schema_migrations (
+    CREATE TABLE IF NOT EXISTS ${table} (
       version    INTEGER PRIMARY KEY,
       name       TEXT NOT NULL,
       applied_at TEXT NOT NULL DEFAULT (datetime('now')),
@@ -59,9 +71,9 @@ function ensureMigrationsTable(db) {
   `);
 }
 
-function listMigrationFiles() {
-  if (!fs.existsSync(MIGRATIONS_DIR)) return [];
-  return fs.readdirSync(MIGRATIONS_DIR)
+function listMigrationFiles(dir) {
+  if (!fs.existsSync(dir)) return [];
+  return fs.readdirSync(dir)
     .map((f) => {
       const m = f.match(FILE_RE);
       if (!m) return null;
@@ -84,16 +96,20 @@ function checksum(text) {
   return (h >>> 0).toString(16).padStart(8, '0');
 }
 
-export function applyMigrations(db, { logger } = {}) {
-  ensureMigrationsTable(db);
+// `dir` and `table` select the store: the main DB uses the defaults. The
+// JS data steps are attached to the main directory only.
+export function applyMigrations(db, { logger, dir = MIGRATIONS_DIR, table = 'schema_migrations' } = {}) {
+  checkTable(table);
+  const steps = dir === MIGRATIONS_DIR ? JS_MIGRATIONS : new Map();
+  ensureMigrationsTable(db, table);
   const applied = new Map(
-    db.prepare('SELECT version, checksum FROM schema_migrations').all()
+    db.prepare(`SELECT version, checksum FROM ${table}`).all()
       .map((r) => [r.version, r.checksum]),
   );
-  const files = listMigrationFiles();
+  const files = listMigrationFiles(dir);
   let ranCount = 0;
   for (const { file, version, name } of files) {
-    const sql = fs.readFileSync(path.join(MIGRATIONS_DIR, file), 'utf8');
+    const sql = fs.readFileSync(path.join(dir, file), 'utf8');
     const sum = checksum(sql);
     if (applied.has(version)) {
       const prev = applied.get(version);
@@ -117,10 +133,10 @@ export function applyMigrations(db, { logger } = {}) {
     }
     const tx = db.transaction(() => {
       db.exec(sql);
-      const step = JS_MIGRATIONS.get(version);
+      const step = steps.get(version);
       if (step) step(db);
       db.prepare(
-        'INSERT INTO schema_migrations (version, name, checksum) VALUES (?, ?, ?)',
+        `INSERT INTO ${table} (version, name, checksum) VALUES (?, ?, ?)`,
       ).run(version, name, sum);
     });
     try {
@@ -141,7 +157,7 @@ export function applyMigrations(db, { logger } = {}) {
       if (err.message && err.message.includes('duplicate column name') &&
           isSingleAddColumn(sql)) {
         db.prepare(
-          'INSERT OR IGNORE INTO schema_migrations (version, name, checksum) VALUES (?, ?, ?)',
+          `INSERT OR IGNORE INTO ${table} (version, name, checksum) VALUES (?, ?, ?)`,
         ).run(version, name, sum);
         ranCount += 1;
         if (logger) logger.info('migration_column_already_exists', { version, name, file });
@@ -155,10 +171,11 @@ export function applyMigrations(db, { logger } = {}) {
   return { applied: ranCount, total: files.length };
 }
 
-export function migrationStatus(db) {
-  ensureMigrationsTable(db);
+export function migrationStatus(db, { table = 'schema_migrations' } = {}) {
+  checkTable(table);
+  ensureMigrationsTable(db, table);
   const rows = db.prepare(`
-    SELECT version, name, applied_at FROM schema_migrations ORDER BY version
+    SELECT version, name, applied_at FROM ${table} ORDER BY version
   `).all();
   return {
     current: rows.length > 0 ? rows[rows.length - 1].version : 0,

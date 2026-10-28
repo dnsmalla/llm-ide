@@ -207,6 +207,23 @@ if (TEST_DB_PATH) {
   });
 }
 
+// The main DB path, resolved once so the agent store can derive from it.
+const MAIN_DB_PATH = envStr('LLMIDE_DB_PATH', TEST_DB_PATH ?? path.join(ROOT, 'kb', 'data.db'));
+// agent.db (agent history store, kb/agent-db.mjs). Production: beside the
+// main DB. Under the test runner: `<main test DB>.agent.db`, so a test can
+// never open the live kb/agent.db. Removed at exit like the main test DB.
+const IS_TEST_RUN = Boolean(process.env.NODE_TEST_CONTEXT);
+const DEFAULT_AGENT_DB_PATH = IS_TEST_RUN
+  ? `${MAIN_DB_PATH}.agent.db`
+  : path.join(path.dirname(MAIN_DB_PATH), 'agent.db');
+if (IS_TEST_RUN && !process.env.LLMIDE_AGENT_DB_PATH) {
+  process.once('exit', () => {
+    for (const suffix of ['', '-wal', '-shm']) {
+      try { fs.rmSync(DEFAULT_AGENT_DB_PATH + suffix, { force: true }); } catch { /* best effort */ }
+    }
+  });
+}
+
 export const config = Object.freeze({
   env:          isProd ? 'production' : envStr('NODE_ENV', 'development'),
   isProd,
@@ -239,7 +256,9 @@ export const config = Object.freeze({
   // never the live repo-root kb/data.db: one such test wrote rows into the
   // live DB on every `npm test` and applied migrations to it from a second
   // process. An explicit LLMIDE_DB_PATH still wins.
-  dbPath:       envStr('LLMIDE_DB_PATH', TEST_DB_PATH ?? path.join(ROOT, 'kb', 'data.db')),
+  dbPath:       MAIN_DB_PATH,
+  // agent.db: agent-run history, retention and storage (kb/agent-db.mjs).
+  agentDbPath:  envStr('LLMIDE_AGENT_DB_PATH', DEFAULT_AGENT_DB_PATH),
 
   // Auth
   jwtSecret:    _jwtSecret,
