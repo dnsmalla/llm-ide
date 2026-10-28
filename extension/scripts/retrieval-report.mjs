@@ -5,14 +5,12 @@
 //
 // Read-only. Opens the DB with readonly: true (never migrates or checkpoints).
 // Safe to run while the server is up: readonly handles don't block the writer.
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { config } from '../core/config.mjs';
 import Database from 'better-sqlite3';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const dbPath = process.env.LLMIDE_DB_PATH || path.resolve(__dirname, '..', '..', 'kb', 'data.db');
+const dbPath = config.dbPath;
 // Turn history lives in agent.db (Stage 1b); live usage_ledger stays in the main DB.
-const agentDbPath = process.env.LLMIDE_AGENT_DB_PATH || path.join(path.dirname(dbPath), 'agent.db');
+const agentDbPath = config.agentDbPath;
 
 const daysArg = process.argv.indexOf('--days');
 const rawDays = daysArg > -1 ? Number(process.argv[daysArg + 1]) || 7 : 7;

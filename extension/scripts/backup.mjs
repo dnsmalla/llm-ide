@@ -95,6 +95,9 @@ export async function runBackup({ dbPath = config.dbPath, outPath = defaultBacku
   const sha256 = await sha256File(resolvedOut);
   return {
     dbPath: resolvedDb,
+    // Which data location the DB came from: 'system' (LLMIDE_DATA_DIR),
+    // 'repo-kb' (the checkout's kb/) or 'custom' (an explicit LLMIDE_DB_PATH or --db).
+    location: resolvedDb === path.resolve(config.dbPath) ? config.dataLocation : 'custom',
     outPath: resolvedOut,
     bytes: info.size,
     sha256,
@@ -121,7 +124,8 @@ if (isMain) {
     }
     const result = await runBackup(parsed);
     process.stdout.write(
-      `backup=${result.outPath}\nbytes=${result.bytes}\nsha256=${result.sha256}\n`,
+      `source=${result.dbPath} (location: ${result.location})\n`
+      + `backup=${result.outPath}\nbytes=${result.bytes}\nsha256=${result.sha256}\n`,
     );
   } catch (err) {
     process.stderr.write(`${err.message}\n`);

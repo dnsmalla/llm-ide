@@ -3,7 +3,7 @@
 // 2026-10-05 finding that the Loop's headless agent steps (not chat) are most of
 // the cache-read volume and that a few long runs dominate it.
 //
-//   node scripts/usage-report.mjs [--db kb/data.db] [--days 14]
+//   node scripts/usage-report.mjs [--db <path>] [--days 14]
 //
 // Read-only: a consistent SNAPSHOT is taken through SQLite's own backup API (a
 // file-by-file copy of the main file and its WAL, made while the server keeps
@@ -17,6 +17,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { config } from '../core/config.mjs';
 
 const MIB = 1_000_000;
 
@@ -69,9 +70,8 @@ function parseArgs(argv) {
 
 async function main() {
   const { default: Database } = await import('better-sqlite3');
-  const here = path.dirname(fileURLToPath(import.meta.url));
   const args = parseArgs(process.argv.slice(2));
-  const source = args.db || process.env.LLMIDE_DB_PATH || path.join(here, '..', '..', 'kb', 'data.db');
+  const source = args.db || config.dbPath;
   if (!fs.existsSync(source)) { console.error(`no database at ${source}`); process.exit(1); }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'usage-report-'));
   const copy = path.join(dir, 'snapshot.db');
