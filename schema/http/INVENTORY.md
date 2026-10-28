@@ -211,7 +211,7 @@ Endpoints with no client caller (35):
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:61` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:657` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:658` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:270` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:282` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:307` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -221,7 +221,7 @@ Endpoints with no client caller (35):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:456` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:506` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:551` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:681` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:682` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:598` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:780` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:795` | - | - | tests only |

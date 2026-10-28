@@ -172,7 +172,7 @@ if (IS_TEST_RUN && !process.env.LLMIDE_AGENT_DB_PATH) {
 // must set the env vars explicitly so secrets live in the deployment
 // platform's secret store, not on disk in the repo directory.
 
-// Dev secrets: the system data dir when one is set (the boot migration copies
+// Dev secrets: the system data dir when one is set (the boot migration moves
 // the legacy file there), else <repo>/kb. See core/dev-secrets.mjs.
 const LEGACY_DEV_SECRETS_FILE = path.join(ROOT, 'kb', '.dev-secrets.json');
 function persistedDevSecrets() {

@@ -453,7 +453,7 @@ export type Health = {
     location: "system" | "repo-kb" | "custom";
     /** migrated | skipped | fallback */
     migration: string;
-    /** true when the legacy <repo>/kb/data.db changed (or vanished) after the copy to the data dir: something still writes to the old copy */
+    /** true when the legacy <repo>/kb/data.db exists again after the move to the data dir (an older server recreated it, a fork) */
     legacyDiverged?: boolean;
     /** What the boot migration left in place (backups/, an agent-sdk/ over the cap). Strings carry no paths. */
     notes?: string[];

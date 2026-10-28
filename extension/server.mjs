@@ -1278,7 +1278,7 @@ server.listen(PORT, HOST, () => {
     });
     if (mig.legacyDiverged === true) {
       logger.warn('legacy_kb_diverged', {
-        detail: 'the legacy <repo>/kb/data.db changed after it was migrated to the data dir; something is still writing to it, and that data is not seen by this server',
+        detail: 'the legacy <repo>/kb/data.db exists again after the data was moved to the data dir; an older server or an adopted dev server recreated it, and this server does not see that data',
       });
     }
   }
