@@ -14,6 +14,7 @@ const EXT = path.resolve(__dirname, '..');
 // (plan section 1.1 and 1.3). Stage 1b moves these; update the list then.
 const INVENTORY = [
   'kb/activity.mjs',
+  'kb/agent-history-copy.mjs',
   'kb/db.mjs',
   'kb/os-state.mjs',
   'kb/tool-events-summary.mjs',

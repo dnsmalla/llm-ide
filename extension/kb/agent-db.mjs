@@ -75,11 +75,6 @@ export function isCorruptionError(err) {
   return /malformed|not a database/i.test(String(err?.message ?? ''));
 }
 
-function corruptError(detail) {
-  const err = new Error(`agent.db is corrupt: ${detail}`);
-  err.code = 'SQLITE_CORRUPT';
-  return err;
-}
 
 // --- meta ---------------------------------------------------------------
 
@@ -108,8 +103,8 @@ function openFile(file) {
     db.pragma('synchronous = NORMAL');
     db.pragma('busy_timeout = 5000');
     db.pragma('temp_store = MEMORY');
-    const verdict = db.pragma('quick_check', { simple: true });
-    if (verdict !== 'ok') throw corruptError(`quick_check: ${verdict}`);
+    // quick_check is NOT here: it runs after listen (verifyAgentDb), off the
+    // boot critical path. Garbage bytes still fail the pragmas and migrations.
     applyMigrations(db, { dir: AGENT_MIGRATIONS_DIR, table: AGENT_MIGRATIONS_TABLE, logger: state.logger });
     return db;
   } catch (err) {
@@ -180,6 +175,32 @@ export function openAgentDb({ logger, file = config.agentDbPath } = {}) {
     state.db = null;
     log('error', 'agent_db_open_failed', { code: err?.code ?? null });
     return null;
+  }
+}
+
+/**
+ * PRAGMA quick_check on the open file (Stage 1b: run after listen). A damaged
+ * file is quarantined and recreated, as at open. Returns the verdict. Never throws.
+ */
+export function verifyAgentDb() {
+  const db = state.db ?? getAgentDb();
+  if (!db) return { ok: false, reason: 'unavailable' };
+  let verdict;
+  try {
+    verdict = db.pragma('quick_check', { simple: true });
+  } catch (err) {
+    verdict = isCorruptionError(err) ? String(err.message) : null;
+    if (verdict === null) return { ok: false, reason: 'check_failed' };
+  }
+  if (verdict === 'ok') return { ok: true };
+  try {
+    if (state.file) state.db = quarantineAndRecreate(state.file, `quick_check: ${verdict}`);
+    checkStorageSize();
+    return { ok: false, reason: 'quarantined' };
+  } catch {
+    state.status = 'down';
+    state.db = null;
+    return { ok: false, reason: 'down' };
   }
 }
 
