@@ -556,26 +556,3 @@ export function abortStaleRuns({ db, now = new Date(), olderThanMs = 24 * 60 * 6
       WHERE status = 'running' AND started_at < ?`,
   ).run(now.toISOString(), cutoff).changes;
 }
-
-/**
- * Replay user purges that could not run with their account delete (the
- * pending_purge:<userId> markers written by purgeUserHistory). Idempotent.
- * Returns the user ids purged.
- */
-export function replayPendingPurges({ db } = {}) {
-  const handle = db ?? getAgentDb();
-  if (!handle) return [];
-  const markers = handle.prepare("SELECT key FROM store_meta WHERE key LIKE 'pending_purge:%'").all();
-  const done = [];
-  for (const { key } of markers) {
-    const userId = key.slice('pending_purge:'.length);
-    try {
-      purgeUser(userId, { db: handle });
-      handle.prepare('DELETE FROM store_meta WHERE key = ?').run(key);
-      done.push(userId);
-    } catch {
-      // Left in place; the next boot retries.
-    }
-  }
-  return done;
-}

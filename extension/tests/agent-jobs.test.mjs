@@ -59,16 +59,33 @@ test('a run left open for more than 24 hours is closed as aborted at boot; a fre
   assert.equal(db.prepare("SELECT status FROM agent_runs WHERE run_id = 'fresh-1'").get().status, 'running');
 });
 
-test('pending purge markers are replayed at boot and removed', () => {
-  const db = fresh();
-  recordActivity({ userId: U, kind: 'meeting_added', title: 'to purge' });
+test('an account delete while agent.db is down leaves a main-DB marker; boot replays it and clears it', async () => {
+  fresh();
+  const gone = users.registerUser(main.getDb(), { email: 'jobs-gone@example.test', password: 'CorrectHorseBattery', displayName: 'g' }).id;
+  recordActivity({ userId: gone, kind: 'meeting_added', title: 'history of a deleted account' });
   agent.flushAgentQueue();
-  assert.ok(count(db, 'SELECT COUNT(*) AS n FROM activity WHERE user_id = ?', U) >= 1);
-  agent.writeMeta(db, `pending_purge:${U}`, new Date().toISOString());
-  const r = jobs.openAgentStoreAtBoot({});
-  assert.equal(r.ok, true);
-  assert.equal(count(db, 'SELECT COUNT(*) AS n FROM activity WHERE user_id = ?', U), 0);
-  assert.equal(agent.readMeta(db, `pending_purge:${U}`), null);
+  // Make agent.db unavailable: a path under a regular file cannot be created.
+  agent.closeAgentDb();
+  agent.openAgentDb({ file: path.join(tmpDb, 'agent.db') });
+  assert.equal(agent.getAgentDb(), null, 'the store is down');
+  main.deleteUserCascade(gone);
+  const marker = () => main.getDb().prepare('SELECT COUNT(*) AS n FROM pending_agent_purges WHERE deleted_user_id = ?').get(gone).n;
+  assert.equal(marker(), 1, 'the purge is recorded in the main DB, so it is not lost');
+  // The store comes back; the next boot replays the purge and clears the marker.
+  agent.closeAgentDb();
+  const back = agent.getAgentDb();      // reopen the same file: the history is still there
+  assert.ok(back);
+  assert.ok(count(back, 'SELECT COUNT(*) AS n FROM activity WHERE user_id = ?', gone) >= 1, 'the history survived the outage');
+  jobs.openAgentStoreAtBoot({});
+  assert.equal(count(back, 'SELECT COUNT(*) AS n FROM activity WHERE user_id = ?', gone), 0, 'boot replayed the purge');
+  assert.equal(marker(), 0, 'the marker is cleared on success');
+});
+
+test('an account delete with agent.db up leaves no marker', () => {
+  fresh();
+  const u = users.registerUser(main.getDb(), { email: 'jobs-clean@example.test', password: 'CorrectHorseBattery', displayName: 'c' }).id;
+  main.deleteUserCascade(u);
+  assert.equal(main.getDb().prepare('SELECT COUNT(*) AS n FROM pending_agent_purges WHERE deleted_user_id = ?').get(u).n, 0);
 });
 
 test('dailyRollupDue: 03:10 local, once per day', () => {

@@ -950,6 +950,9 @@ export function deleteUserCascade(userId) {
   const tx = db.transaction(() => {
     const counts = {};
     const del = (sql) => db.prepare(sql).run(userId).changes;
+    // The agent.db purge runs after this commit (another file). This row makes
+    // it durable: if the purge cannot run now, boot replays it.
+    db.prepare('INSERT OR REPLACE INTO pending_agent_purges (deleted_user_id) VALUES (?)').run(userId);
 
     // Children-first to avoid FK constraint violations under
     // foreign_keys=ON, even though most of these don't have
@@ -1040,9 +1043,11 @@ export function deleteUserCascade(userId) {
   });
   const counts = tx();
   // agent.db history (Stage 1b) lives in another file, so it cannot join the
-  // transaction above. Purged after the main commit; a failure leaves a
-  // pending marker that the next boot replays.
-  purgeUserHistory(userId);
+  // transaction above. Purged after the main commit; the marker row is cleared
+  // only when the purge succeeded, otherwise boot replays it.
+  if (purgeUserHistory(userId).ok) {
+    db.prepare('DELETE FROM pending_agent_purges WHERE deleted_user_id = ?').run(userId);
+  }
   return counts;
 }
 

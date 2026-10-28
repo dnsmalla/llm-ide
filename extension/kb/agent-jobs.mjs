@@ -14,7 +14,8 @@
 
 import { agentStoreStatus, getAgentDb, openAgentDb, takeRollupRequest, verifyAgentDb, localDay, readMeta, writeMeta, checkStorageSize } from './agent-db.mjs';
 import { prepareHistoryCopy, copyHistoryStep, historyCopyDone } from './agent-history-copy.mjs';
-import { abortStaleRuns, replayPendingPurges, rollupAll } from './agent-store.mjs';
+import { abortStaleRuns, purgeUserHistory, rollupAll } from './agent-store.mjs';
+import { getDb } from './db.mjs';
 
 export const TICK_MS = 60 * 1000;
 export const DAILY_ROLLUP_HOUR = 3;
@@ -34,13 +35,35 @@ export function dailyRollupDue(lastDay, now = new Date()) {
   return due && lastDay !== localDay(now);
 }
 
+/**
+ * Replay account deletes whose agent.db purge did not run (pending_agent_purges
+ * in the main DB, written by deleteUserCascade). A row is removed only after
+ * its purge succeeds. Returns the user ids purged.
+ */
+export function replayPendingAgentPurges({ mainDb }) {
+  const done = [];
+  let rows = [];
+  try {
+    rows = mainDb.prepare('SELECT deleted_user_id FROM pending_agent_purges').all();
+  } catch {
+    return done;                  // the table is missing only on a pre-0049 DB
+  }
+  for (const { deleted_user_id: userId } of rows) {
+    if (purgeUserHistory(userId).ok) {
+      mainDb.prepare('DELETE FROM pending_agent_purges WHERE deleted_user_id = ?').run(userId);
+      done.push(userId);
+    }
+  }
+  return done;
+}
+
 /** Sync boot step. Never throws; returns the store status it reached. */
 export function openAgentStoreAtBoot({ logger } = {}) {
   try {
     const db = openAgentDb({ logger });
     if (!db) return { ok: false };
     prepareHistoryCopy({ agentDb: db });
-    const purged = replayPendingPurges({ db });
+    const purged = replayPendingAgentPurges({ mainDb: getDb() });
     const aborted = abortStaleRuns({ db });
     if (purged.length) log(logger, 'info', 'agent_db_pending_purges_replayed', { count: purged.length });
     if (aborted) log(logger, 'info', 'agent_db_stale_runs_aborted', { count: aborted });
