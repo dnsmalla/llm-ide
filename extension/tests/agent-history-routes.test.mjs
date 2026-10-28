@@ -293,3 +293,38 @@ test('a preview signed before a restart is PREVIEW_EXPIRED, the same answer as a
   assert.equal(res.statusCode, 400);
   assert.equal(res.json().error.code, 'PREVIEW_EXPIRED');
 });
+
+test('a clear leaves the tool events and composition of a run still running', async () => {
+  freshAgent();
+  const a = user('r1');
+  const handle = agent.getAgentDb();
+  const old = new Date(Date.now() - 40 * 24 * 60 * 60 * 1000);
+  store.openRun(a, { runId: 'r-live', source: 'chat', engine: 'v2' }, { now: old });
+  store.enqueueToolEvents(a, 'r-live', { engine: 'v2', day: '2026-09-01', events: [{ tool: 'Read', resultChars: 1 }] });
+  store.enqueueTurnComposition(a, { turnId: 'r-live', day: '2026-09-01', columns: { system_chars: 10 } });
+  agent.flushAgentQueue();
+  const dry = (await call('POST', '/kb/agent-history/clear', { scope: 'all', dryRun: true }, a)).json();
+  assert.equal(dry.wouldDelete.agent_tool_events, 0, 'the live run\'s event is not counted');
+  assert.equal(dry.wouldDelete.turn_composition, 0, 'the live run\'s composition is not counted');
+  const real = await call('POST', '/kb/agent-history/clear', { scope: 'all', dryRun: false, previewId: dry.previewId }, a);
+  assert.equal(real.statusCode, 200, real._body);
+  assert.equal(count(handle, 'SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = ?', 'r-live'), 1);
+  assert.equal(count(handle, 'SELECT COUNT(*) AS n FROM turn_composition WHERE turn_id = ?', 'r-live'), 1);
+  // Once the run closes, the same clear may take its rows.
+  store.enqueueRunClose(a, 'r-live', { status: 'ok' });
+  agent.flushAgentQueue();
+  const dry2 = (await call('POST', '/kb/agent-history/clear', { scope: 'all', dryRun: true }, a)).json();
+  assert.equal(dry2.wouldDelete.agent_tool_events, 1);
+  assert.equal(dry2.wouldDelete.turn_composition, 1);
+});
+
+test('the storage rows count only what clear can delete (the activity feed is not in them)', async () => {
+  freshAgent();
+  const a = user('r2');
+  seed(a, user('r3'));
+  const before = (await call('GET', '/kb/storage', null, a)).json().groups.find((g) => g.key === 'agent_history').rows;
+  const { recordActivity } = await import('../kb/activity.mjs');
+  recordActivity({ userId: a, kind: 'meeting_added', title: 'not history' });
+  const after = (await call('GET', '/kb/storage', null, a)).json().groups.find((g) => g.key === 'agent_history').rows;
+  assert.equal(after, before, 'an activity row does not change the agent-history count');
+});

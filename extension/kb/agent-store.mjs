@@ -314,9 +314,30 @@ export function rollupAll({ db, now = new Date() } = {}) {
 // --- clear (per user, dry run first) -------------------------------------
 
 function clearWhere(table, userId, cutoff) {
-  const base = table === 'agent_runs' ? "user_id = ? AND status <> 'running'" : 'user_id = ?';
-  if (cutoff == null) return { sql: base, args: [userId] };
-  return { sql: `${base} AND day < ?`, args: [userId, cutoff] };
+  // A run that is still running keeps its tool events and composition rows: a
+  // clear never takes history out from under a live turn. (Its runs row is
+  // already kept by the status filter.)
+  const live = 'SELECT run_id FROM agent_runs WHERE user_id = ? AND status = \'running\'';
+  let sql;
+  let args;
+  if (table === 'agent_runs') {
+    sql = "user_id = ? AND status <> 'running'";
+    args = [userId];
+  } else if (table === 'agent_tool_events') {
+    sql = `user_id = ? AND run_id NOT IN (${live})`;
+    args = [userId, userId];
+  } else if (table === 'turn_composition') {
+    sql = `user_id = ? AND turn_id NOT IN (${live})`;
+    args = [userId, userId];
+  } else {
+    sql = 'user_id = ?';
+    args = [userId];
+  }
+  if (cutoff != null) {
+    sql += ' AND day < ?';
+    args.push(cutoff);
+  }
+  return { sql, args };
 }
 
 /**

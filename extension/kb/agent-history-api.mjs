@@ -103,7 +103,9 @@ export function storageReport(userId, { db = getDb(), now = new Date() } = {}) {
   const codeRepos = counts.codeGraph.length;
   const store = agentStoreStatus();
   const u = agent.ok ? agent.user : null;
-  const agentRows = u ? sum(u.rows, ['agent_runs', 'agent_tool_events', 'turn_composition', 'activity']) : 0;
+  // The rows Clear can delete. The activity feed is not in this count: clear
+  // never touches it (it has its own cap, KEEP_PER_USER).
+  const agentRows = u ? sum(u.rows, ['agent_runs', 'agent_tool_events', 'turn_composition']) : 0;
   const group = (key, label, rows, extra = {}) => ({
     key, label, rows, bytes: null, bytesApprox: null, lastCleanedAt: null, retentionDays: null, actions: [], ...extra,
   });
