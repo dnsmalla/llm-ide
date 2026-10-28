@@ -287,7 +287,7 @@ Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
 Unresolvable client paths (1): first segment only, not matched to any route:
 
-- `/auth/` (Mac mac/Sources/LlmIdeMac/Core/Networking/LlmIdeAPIClient.swift:592)
+- `/auth/` (Mac mac/Sources/LlmIdeMac/Core/Networking/LlmIdeAPIClient.swift:594)
 
 Open inconsistencies (0):
 
