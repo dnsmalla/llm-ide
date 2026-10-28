@@ -36,13 +36,28 @@ public struct AnalyzePhase {
         return lines.joined(separator: "\n")
     }
 
+    /// Arguments for the headless enrichment run. Edits are unattended
+    /// (`acceptEdits`, the same mode the other headless runs use). The notes dir
+    /// is the project's `system/graph/`, which is outside the cloned repo the CLI
+    /// runs in, so it is granted with `--add-dir`. A notes dir inside `repoRoot`
+    /// (the project root itself) needs no grant.
+    static func arguments(prompt: String, notesDir: URL, repoRoot: URL) -> [String] {
+        var args = ClaudeCLI.promptArgs(prompt) + ClaudeCLI.unattendedPermissionArgs
+        let notes = notesDir.standardizedFileURL.path
+        let repo = repoRoot.standardizedFileURL.path
+        if !(notes == repo || notes.hasPrefix(repo + "/")) {
+            args += ["--add-dir", notes]
+        }
+        return args
+    }
+
     public func run(batch: CodeBatch, scan: ScanResult, repoRoot: URL) async -> Result<Void, CodeNoteError> {
-        let prompt = Self.buildPrompt(batch: batch, scan: scan,
-                                      notesDir: GeneratedDataLocator.graphDir(forRepo: repoRoot).path)
+        let notesDir = GeneratedDataLocator.graphDir(forRepo: repoRoot)
+        let prompt = Self.buildPrompt(batch: batch, scan: scan, notesDir: notesDir.path)
         do {
             let (code, _, stderr) = try await launcher.run(
                 executable: cliExecutable,
-                arguments: ["-p", prompt],
+                arguments: Self.arguments(prompt: prompt, notesDir: notesDir, repoRoot: repoRoot),
                 currentDirectory: repoRoot,
                 environment: nil)
             guard code == 0 else {
