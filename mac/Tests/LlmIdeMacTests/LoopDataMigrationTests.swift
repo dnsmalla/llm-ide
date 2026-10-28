@@ -59,7 +59,8 @@ struct LoopDataMigrationTests {
     func projectLayoutPaths() {
         let root = URL(fileURLWithPath: "/tmp/proj")
         let layout = ProjectLayout(root: root)
-        #expect(layout.loopDataDir.path == "/tmp/proj/system/loop")
+        #expect(LoopOutputLayout.dataRoot == "system/loop")
+        #expect(layout.systemDir.appendingPathComponent(ProjectLayout.loopDataDirName).path == "/tmp/proj/system/loop")
         #expect(layout.notesIndex.path == "/tmp/proj/system/cache/notes-index.json")
         #expect(layout.legacyNotesIndex.path == "/tmp/proj/llm-doc/index.json")
     }
@@ -174,6 +175,45 @@ struct LoopDataMigrationTests {
         // `**/test/**` also matches the test folder's markdown, so only the graph notes are checked as unprotected.
         #expect(!protected("llm-doc/loop/refactor/GRAPH.md"))
     }
+    @Test("a corrupt new ledger does not hide an intact legacy one: the legacy history is read and the corrupt file is quarantined")
+    func corruptNewLedgerFallsBackToLegacy() throws {
+        let repo = try tmpRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        let legacy = try place("ledger.json", at: "llm-doc/loop/test/ledger.json", under: repo)
+        let garbled = Data("{\"runId\": not-json".utf8)
+        let newURL = repo.appendingPathComponent("system/loop/test/ledger.json")
+        try FileManager.default.createDirectory(at: newURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try garbled.write(to: newURL)
+
+        let ledger = try #require(TestLedger.load(gitRoot: repo))
+        #expect(ledger.runId == "run-2026-10-20-001", "the legacy history must be the diff baseline")
+        #expect(ledger.failing == ["LlmIdeMacTests/FooTests/testBarFails"])
+
+        // The corrupt file is set aside, not overwritten, and the legacy copy is still there until a write.
+        #expect(!exists("system/loop/test/ledger.json", under: repo))
+        let quarantined = try FileManager.default.contentsOfDirectory(
+            atPath: repo.appendingPathComponent("system/loop/test").path)
+            .filter { $0.hasPrefix("ledger.json.corrupt-") }
+        #expect(quarantined.count == 1)
+        if let name = quarantined.first {
+            #expect(try Data(contentsOf: repo.appendingPathComponent("system/loop/test/\(name)")) == garbled)
+        }
+        #expect(try Data(contentsOf: repo.appendingPathComponent("llm-doc/loop/test/ledger.json")) == legacy)
+    }
+
+    @Test("with neither ledger valid, the reader reports nothing rather than inventing history")
+    func bothCorruptReadsNil() throws {
+        let repo = try tmpRepo()
+        defer { try? FileManager.default.removeItem(at: repo) }
+        _ = try place("ledger.json", at: "llm-doc/loop/test/ledger.json", under: repo)
+        try Data("garbage".utf8).write(to: repo.appendingPathComponent("llm-doc/loop/test/ledger.json"))
+        let newURL = repo.appendingPathComponent("system/loop/test/ledger.json")
+        try FileManager.default.createDirectory(at: newURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try Data("garbage".utf8).write(to: newURL)
+
+        #expect(TestLedger.load(gitRoot: repo) == nil)
+    }
+
 }
 
 private extension JSONDecoder {

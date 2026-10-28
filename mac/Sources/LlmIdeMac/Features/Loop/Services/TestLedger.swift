@@ -19,12 +19,19 @@ struct TestLedger: Codable, Equatable {
         gitRoot.appendingPathComponent(LoopOutputLayout.testLedger)
     }
 
-    static func load(gitRoot: URL) -> TestLedger? {
-        let source = LoopDataMigration.resolve(legacy: LoopOutputLayout.Legacy.testLedger,
-                                               current: LoopOutputLayout.testLedger, gitRoot: gitRoot)
-        guard let data = try? Data(contentsOf: source) else { return nil }
+    private static func decode(_ data: Data) -> TestLedger? {
         let d = JSONDecoder(); d.dateDecodingStrategy = .iso8601
         return try? d.decode(TestLedger.self, from: data)
+    }
+
+    static func load(gitRoot: URL) -> TestLedger? {
+        // A corrupt new ledger does not hide a valid legacy one: the diff baseline
+        // is the run history, and losing it would report every failure as new.
+        let source = LoopDataMigration.resolve(legacy: LoopOutputLayout.Legacy.testLedger,
+                                               current: LoopOutputLayout.testLedger, gitRoot: gitRoot,
+                                               isValid: { decode($0) != nil })
+        guard let data = try? Data(contentsOf: source) else { return nil }
+        return decode(data)
     }
 
     func write(gitRoot: URL) throws {

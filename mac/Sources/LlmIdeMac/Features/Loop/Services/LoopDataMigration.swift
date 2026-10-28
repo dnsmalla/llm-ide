@@ -38,14 +38,34 @@ public enum LoopDataMigration {
         case failed(String)
     }
 
-    /// The file a reader should use: the new location when it exists, else the
-    /// legacy one when that is a regular file, else the new location (absent).
+    /// The file a reader should use. The new location wins when it is a regular
+    /// file that `isValid` accepts. When it is present but corrupt and a valid
+    /// legacy file exists, the legacy file is used instead and the corrupt new
+    /// file is renamed to `<name>.corrupt-<stamp>` (never silently overwritten),
+    /// so the legacy history survives. With neither valid, the new location is
+    /// returned and the reader reports what it finds.
     public static func resolve(legacy: String, current: String, gitRoot: URL,
+                               isValid: (Data) -> Bool = { _ in true },
                                fileManager fm: FileManager = .default) -> URL {
         let newURL = gitRoot.appendingPathComponent(current)
-        if fileType(newURL, fm) != nil { return newURL }
         let legacyURL = gitRoot.appendingPathComponent(legacy)
+        let newType = fileType(newURL, fm)
+        if newType == .typeRegular {
+            if let data = try? Data(contentsOf: newURL), isValid(data) { return newURL }
+            guard fileType(legacyURL, fm) == .typeRegular,
+                  let legacyData = try? Data(contentsOf: legacyURL), isValid(legacyData) else { return newURL }
+            quarantine(newURL, fileManager: fm)
+            return legacyURL
+        }
+        if newType != nil { return newURL }
         return fileType(legacyURL, fm) == .typeRegular ? legacyURL : newURL
+    }
+
+    /// Renames a corrupt machine-data file aside as `<name>.corrupt-<stamp>`.
+    private static func quarantine(_ url: URL, fileManager fm: FileManager) {
+        let stamp = ISO8601DateFormatter().string(from: Date()).replacingOccurrences(of: ":", with: "-")
+        let dest = url.deletingLastPathComponent().appendingPathComponent("\(url.lastPathComponent).corrupt-\(stamp)")
+        try? fm.moveItem(at: url, to: dest)
     }
 
     /// Removes the legacy copy once the new file has been written. Only when the
