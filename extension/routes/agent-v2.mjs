@@ -173,6 +173,11 @@ const inFlightTurns = new Map();
  * This user's chat turns running right now (read-only). Entries of other
  * users are never returned: the owner is compared, not parsed from the key.
  */
+/** True while any user's v2 chat turn runs (the agent.db compact guard). */
+export function anyChatTurnInFlight() {
+  return inFlightTurns.size > 0;
+}
+
 export function listInFlightChatTurns(userId) {
   const out = [];
   for (const turn of inFlightTurns.values()) {

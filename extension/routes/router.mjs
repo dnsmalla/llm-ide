@@ -24,6 +24,7 @@ import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
 import { handleChatRoutes } from './chat.mjs';
 import { handleOsRoutes } from './os.mjs';
+import { handleAgentHistoryRoutes } from './agent-history.mjs';
 // Feature-owned groups (loop-agent, issue-schedule, code-graph) are NOT
 // imported here: routes/feature-routes.mjs loads only the enabled ones.
 import { loadFeatureRoutes, featureDisabledFor, sendFeatureDisabled } from './feature-routes.mjs';
@@ -1257,6 +1258,10 @@ export async function handleKB(req, res) {
 
     // ── Unified chat sessions (mac + extension) ─────────────────
     if (await handleChatRoutes(req, res, { userId, url })) return true;
+
+    // ── Agent history: storage report, retention, clear, compact (Stage 1c) ──
+    // Always on (plan Q5). See routes/agent-history.mjs.
+    if (await handleAgentHistoryRoutes(req, res, { userId, url })) return true;
 
     // ── System view aggregate (GET /kb/os/state) ─────────────────
     // Read-only, no model call. See routes/os.mjs.

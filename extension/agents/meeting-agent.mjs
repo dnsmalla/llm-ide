@@ -333,6 +333,11 @@ export async function stopAgent({ userId, sessionId }) {
 
 // ── Inspection ──────────────────────────────────────────────────────
 
+/** True while any user's meeting-agent run is attached (the agent.db compact guard). */
+export function anyMeetingRunInFlight() {
+  return runs.size > 0;
+}
+
 export function listRuns(userId) {
   const out = [];
   for (const r of runs.values()) {
