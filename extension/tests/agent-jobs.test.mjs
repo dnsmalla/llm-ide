@@ -48,15 +48,24 @@ test('openAgentStoreAtBoot opens the store, raises the id floors and reports ok'
   assert.equal(agent.agentStoreStatus().state, 'ok');
 });
 
-test('a run left open for more than 24 hours is closed as aborted at boot; a fresh one is kept', () => {
+test('at boot every run still running from a previous process is closed as aborted', () => {
   const db = fresh();
-  const old = new Date(Date.now() - 25 * 60 * 60 * 1000);
-  openRun(U, { runId: 'stale-1', source: 'chat', engine: 'v2' }, { now: old });
-  openRun(U, { runId: 'fresh-1', source: 'chat', engine: 'v2' });
+  // Rows a previous process left open, however recent: no run of this process exists at boot.
+  openRun(U, { runId: 'prev-old', source: 'chat', engine: 'v2' }, { now: new Date(Date.now() - 25 * 60 * 60 * 1000) });
+  openRun(U, { runId: 'prev-recent', source: 'chat', engine: 'v2' });
   agent.flushAgentQueue();
-  assert.equal(store.abortStaleRuns({ db }), 1);
-  assert.equal(db.prepare("SELECT status, error_code FROM agent_runs WHERE run_id = 'stale-1'").get().status, 'aborted');
-  assert.equal(db.prepare("SELECT status FROM agent_runs WHERE run_id = 'fresh-1'").get().status, 'running');
+  assert.equal(store.abortStaleRuns({ db }), 2);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE status = 'running'").get().n, 0);
+  assert.equal(db.prepare("SELECT error_code FROM agent_runs WHERE run_id = 'prev-recent'").get().error_code, 'stale_run');
+});
+
+test('an operator sweep with a window keeps the recent running rows', () => {
+  const db = fresh();
+  openRun(U, { runId: 'win-old', source: 'chat', engine: 'v2' }, { now: new Date(Date.now() - 25 * 60 * 60 * 1000) });
+  openRun(U, { runId: 'win-recent', source: 'chat', engine: 'v2' });
+  agent.flushAgentQueue();
+  assert.equal(store.abortStaleRuns({ db, olderThanMs: 24 * 60 * 60 * 1000 }), 1);
+  assert.equal(db.prepare("SELECT status FROM agent_runs WHERE run_id = 'win-recent'").get().status, 'running');
 });
 
 test('an account delete while agent.db is down leaves a main-DB marker; boot replays it and clears it', async () => {

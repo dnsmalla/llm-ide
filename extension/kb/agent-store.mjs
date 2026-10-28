@@ -543,16 +543,18 @@ export function purgeUserHistory(userId) {
 }
 
 /**
- * Close runs still 'running' that started before `olderThanMs` ago (plan 2.5:
- * a crash leaves an open row; at boot these become 'aborted'). Operator sweep,
- * not per user. Returns the number of rows closed.
+ * Close runs still 'running' from a previous process (plan 2.5). At boot no
+ * run of THIS process exists yet (the boot step runs before listen), so every
+ * 'running' row is from a process that died: the default cutoff of 0 closes
+ * them all. `olderThanMs` narrows it for an operator sweep. Not per user.
+ * Returns the number of rows closed.
  */
-export function abortStaleRuns({ db, now = new Date(), olderThanMs = 24 * 60 * 60 * 1000 } = {}) {
+export function abortStaleRuns({ db, now = new Date(), olderThanMs = 0 } = {}) {
   const handle = db ?? getAgentDb();
   if (!handle) return 0;
   const cutoff = new Date(now.getTime() - olderThanMs).toISOString();
   return handle.prepare(
     `UPDATE agent_runs SET status = 'aborted', ended_at = ?, error_code = 'stale_run'
-      WHERE status = 'running' AND started_at < ?`,
+      WHERE status = 'running' AND started_at <= ?`,
   ).run(now.toISOString(), cutoff).changes;
 }
