@@ -249,13 +249,17 @@ final class SystemBridgeStorageTests: XCTestCase {
     private var sessions: [SessionStore] = []
 
     private func signedInClient(_ stub: Stub) throws -> LlmIdeAPIClient {
+        try signedInClient(fetch: stub.fetch)
+    }
+
+    private func signedInClient(fetch: @escaping LlmIdeAPIClient.DataFetcher) throws -> LlmIdeAPIClient {
         let session = SessionStore(server: "http://test-\(UUID().uuidString.lowercased()).invalid")
         session.persistRefreshToken = { _, _ in true }
         session.adopt(session: try JSONDecoder().decode(
             SessionResponse.self,
             from: Data(#"{"accessToken":"tok","refreshToken":"rt","accessTokenTTLSec":900}"#.utf8)))
         sessions.append(session)
-        return LlmIdeAPIClient(baseURL: "http://test.invalid", sessionStore: session, fetchOverride: stub.fetch)
+        return LlmIdeAPIClient(baseURL: "http://test.invalid", sessionStore: session, fetchOverride: fetch)
     }
 
     private func requestBody(_ request: URLRequest) -> [String: Any] {
@@ -332,5 +336,102 @@ final class SystemBridgeStorageTests: XCTestCase {
         let reply = await SystemBridge.storageReply(.agentHistorySettings, api: api)
         XCTAssertEqual(reply?.status, 0)
         XCTAssertEqual(reply?.error, "unreachable")
+    }
+
+    // MARK: Failure answers: signed out, store down, unreadable reply, timeouts
+
+    func testSignedOutClientAnswers401SignedOut() async {
+        let signedOut = LlmIdeAPIClient(baseURL: "http://test.invalid")
+        let reply = await SystemBridge.storageReply(.agentHistorySettings, api: signedOut)
+        XCTAssertEqual(reply?.status, 401)
+        XCTAssertEqual(reply?.error, "signed_out")
+    }
+
+    func testStoreDownIs503WithItsCode() async throws {
+        let stub = Stub { _ in (503, #"{"error":{"code":"AGENT_STORE_UNAVAILABLE","message":"The agent history store is not available."}}"#) }
+        let reply = await SystemBridge.storageReply(.compactAgentHistory, api: try signedInClient(stub))
+        XCTAssertEqual(reply?.status, 503)
+        XCTAssertEqual(reply?.error, "AGENT_STORE_UNAVAILABLE")
+        XCTAssertEqual(parse(reply?.bodyJSON ?? "")["code"] as? String, "AGENT_STORE_UNAVAILABLE")
+    }
+
+    func testUnreadableCommitReplyIsBadReplyNotUnreachable() async throws {
+        let stub = Stub { _ in (200, "this is not json") }
+        let call = SystemAllowedCall.clearAgentHistory(scope: .all, beforeDays: nil, dryRun: false, previewId: "p.1")
+        let reply = await SystemBridge.storageReply(call, api: try signedInClient(stub))
+        XCTAssertEqual(reply?.status, 502)
+        XCTAssertEqual(reply?.error, "bad_reply")
+        XCTAssertEqual(parse(reply?.bodyJSON ?? "")["code"] as? String, "bad_reply")
+        XCTAssertTrue((parse(reply?.bodyJSON ?? "")["message"] as? String ?? "").contains("may have completed"))
+    }
+
+    func testUnreadableCompactReplyIsBadReply() async throws {
+        let stub = Stub { _ in (200, "<html>") }
+        let reply = await SystemBridge.storageReply(.compactAgentHistory, api: try signedInClient(stub))
+        XCTAssertEqual(reply?.status, 502)
+        XCTAssertEqual(reply?.error, "bad_reply")
+    }
+
+    func testURLTimeoutIsTimeoutNotUnreachable() async throws {
+        let stub = Stub { _ in throw URLError(.timedOut) }
+        let reply = await SystemBridge.storageReply(.compactAgentHistory, api: try signedInClient(stub))
+        XCTAssertEqual(reply?.status, 504)
+        XCTAssertEqual(reply?.error, "timeout")
+    }
+
+    func testDeadlineAnswersTimeoutWhileTheCallIsStillRunning() async throws {
+        struct Late: Error {}
+        let api = try signedInClient(fetch: { _ in
+            try await Task.sleep(nanoseconds: 5_000_000_000)
+            throw Late()
+        })
+        let reply = await SystemBridge.storageReply(.compactAgentHistory, api: api, deadline: 0.05)
+        XCTAssertEqual(reply?.status, 504)
+        XCTAssertEqual(reply?.error, "timeout")
+        XCTAssertTrue((parse(reply?.bodyJSON ?? "")["message"] as? String ?? "").contains("may still have completed"))
+    }
+
+    func testWithDeadlineReturnsFastWorkAndExpiresSlowWork() async throws {
+        let value = try await SystemBridge.withDeadline(seconds: 5) { 42 }
+        XCTAssertEqual(value, 42)
+        do {
+            _ = try await SystemBridge.withDeadline(seconds: 0.01) {
+                try await Task.sleep(nanoseconds: 3_000_000_000)
+                return 1
+            }
+            XCTFail("a slow call must expire")
+        } catch is SystemBridge.DeadlineExpired {
+            // expected
+        }
+    }
+
+    func testClearAndCompactHaveLongerDeadlinesThanThePage() {
+        XCTAssertEqual(LlmIdeAPIClient.longCallTimeout, 120)
+        XCTAssertEqual(SystemBridge.storageDeadline(for: .clearAgentHistory(scope: .raw, beforeDays: nil, dryRun: true, previewId: nil)), 120)
+        XCTAssertEqual(SystemBridge.storageDeadline(for: .compactAgentHistory), 120)
+        XCTAssertLessThan(SystemBridge.storageDeadline(for: .agentHistorySettings), 15, "the page waits 15 s for reads")
+    }
+
+    // MARK: The inbound bridge message, end to end
+
+    func testInboundRetentionRequestDecodesWithANumberBody() {
+        let message = body(#"{"type":"request","id":"r1","method":"PUT","path":"/kb/agent-history/settings","body":{"retentionDays":30}}"#)
+        XCTAssertEqual(SystemBridgeInbound.decode(message),
+                       .request(SystemBridgeRequest(id: "r1", call: .setAgentHistoryRetention(days: 30))))
+    }
+
+    func testInboundClearRequestDecodesWithNumberAndBooleanBodies() {
+        let message = body(#"{"type":"request","id":"r2","method":"POST","path":"/kb/agent-history/clear","body":{"scope":"raw","dryRun":true,"beforeDays":30}}"#)
+        XCTAssertEqual(SystemBridgeInbound.decode(message),
+                       .request(SystemBridgeRequest(id: "r2", call: .clearAgentHistory(scope: .raw, beforeDays: 30, dryRun: true, previewId: nil))))
+    }
+
+    func testInboundRefusedBodiesKeepTheIdAndAnswerNotAllowed() {
+        let boolAsDays = body(#"{"type":"request","id":"r3","method":"PUT","path":"/kb/agent-history/settings","body":{"retentionDays":true}}"#)
+        XCTAssertEqual(SystemBridgeInbound.decode(boolAsDays), .request(SystemBridgeRequest(id: "r3", call: nil)))
+        let realClearWithoutPreview = body(#"{"type":"request","id":"r4","method":"POST","path":"/kb/agent-history/clear","body":{"scope":"raw","dryRun":false}}"#)
+        XCTAssertEqual(SystemBridgeInbound.decode(realClearWithoutPreview), .request(SystemBridgeRequest(id: "r4", call: nil)))
+        let badId = body(#"{"type":"request","id":"bad id!","method":"PUT","path":"/kb/agent-history/settings","body":{"retentionDays":30}}"#)
+        XCTAssertNil(SystemBridgeInbound.decode(badId), "a malformed id gets no reply")
     }
 }

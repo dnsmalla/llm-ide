@@ -11,6 +11,11 @@ import Foundation
 
 extension LlmIdeAPIClient {
 
+    /// Per-request timeout for the calls that can run long on a large store: clear (both steps)
+    /// and compact. The OS page's wait is longer than this (ui/os-view `hosts.ts`), and the bridge's
+    /// total deadline is shorter (`SystemBridge.storageDeadline`).
+    static let longCallTimeout: TimeInterval = 120
+
     /// The two scopes a clear accepts: `raw` deletes raw rows and keeps the daily
     /// rollups; `all` also deletes the rollups.
     public enum AgentHistoryClearScope: String, Codable, CaseIterable, Sendable {
@@ -142,7 +147,7 @@ extension LlmIdeAPIClient {
         }
         return try await post("/kb/agent-history/clear",
                               body: Req(scope: scope.rawValue, beforeDays: beforeDays, dryRun: true),
-                              authenticated: true)
+                              authenticated: true, timeout: Self.longCallTimeout)
     }
 
     /// Step two of a clear. Needs the `previewId` of a dry run for the same
@@ -159,7 +164,7 @@ extension LlmIdeAPIClient {
         return try await post("/kb/agent-history/clear",
                               body: Req(scope: scope.rawValue, beforeDays: beforeDays,
                                         dryRun: false, previewId: previewId),
-                              authenticated: true)
+                              authenticated: true, timeout: Self.longCallTimeout)
     }
 
     /// Compaction can run for a while (a full VACUUM), so it gets a long idle
@@ -167,7 +172,7 @@ extension LlmIdeAPIClient {
     /// about in the card, not a fault to log as an incident.
     func compactAgentHistory() async throws -> AgentHistoryCompactResult {
         try await send(path: "/kb/agent-history/compact", method: "POST", body: EmptyBody(),
-                       authenticated: true, timeout: 120,
+                       authenticated: true, timeout: Self.longCallTimeout,
                        incidentFreeStatuses: [503, 507])
     }
 }

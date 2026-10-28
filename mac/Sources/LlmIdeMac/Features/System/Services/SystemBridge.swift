@@ -603,43 +603,110 @@ enum SystemBridge {
         return .commit(scope: scope, beforeDays: beforeDays, previewId: previewId)
     }
 
+    /// The total time native gives one agent-history call, a 401 refresh and retry included. The
+    /// page waits longer than this (ui/os-view `hosts.ts`), so it gets native's answer, not its own
+    /// timeout. Clear and compact can run long on a large store; the rest are quick reads.
+    static func storageDeadline(for call: SystemAllowedCall) -> TimeInterval {
+        switch call {
+        case .clearAgentHistory, .compactAgentHistory: return LlmIdeAPIClient.longCallTimeout
+        default: return 12
+        }
+    }
+
     /// Answers one agent-history call with the typed client, which owns the request shapes and the
-    /// Codable models. A 200 carries the JSON the page reads. A failure keeps the server's status,
-    /// sets `error` to the server's code and sends `{code, message}` as the body. Nil for a call
-    /// that is not an agent-history call.
-    static func storageReply(_ call: SystemAllowedCall, api: LlmIdeAPIClient) async -> NativeReply? {
+    /// Codable models, within `storageDeadline` (or `deadline`, for tests). A 200 carries the JSON the
+    /// page reads. A failure keeps the server's status, sets `error` to the server's code and sends
+    /// `{code, message}` as the body. A deadline, or a URL timeout, is `504 timeout`: the operation may
+    /// still have completed. A reply the client cannot read is `502 bad_reply`. Nil for a call that is
+    /// not an agent-history call.
+    static func storageReply(_ call: SystemAllowedCall, api: LlmIdeAPIClient,
+                             deadline: TimeInterval? = nil) async -> NativeReply? {
         guard call.isAgentHistory else { return nil }
         do {
-            switch call {
-            case .agentHistorySettings:
-                let settings = try await api.agentHistorySettings()
-                return okJSON(settings)
-            case .setAgentHistoryRetention(let days):
-                let settings = try await api.setAgentHistoryRetention(days: days)
-                return okJSON(settings)
-            case .clearAgentHistory:
-                guard let plan = clearPlan(call) else { return nil }
-                switch plan {
-                case .preview(let scope, let beforeDays):
-                    let result = try await api.previewAgentHistoryClear(scope: scope, beforeDays: beforeDays)
-                    return okJSON(result)
-                case .commit(let scope, let beforeDays, let previewId):
-                    let result = try await api.performAgentHistoryClear(
-                        scope: scope, beforeDays: beforeDays, previewId: previewId)
-                    return okJSON(result)
-                }
-            case .compactAgentHistory:
-                let result = try await api.compactAgentHistory()
-                return okJSON(result)
-            default:
-                return nil
+            return try await withDeadline(seconds: deadline ?? storageDeadline(for: call)) {
+                try await storageAnswer(call, api: api)
             }
+        } catch is DeadlineExpired {
+            return timeoutReply()
         } catch APIError.http(let status, let code, let message, _) {
             return storageFailure(status: status, code: code, message: message)
         } catch APIError.noSession {
             return NativeReply(status: 401, bodyJSON: "null", error: "signed_out")
+        } catch APIError.decoding {
+            return badReplyReply(call)
+        } catch APIError.network(let error) where (error as NSError).code == NSURLErrorTimedOut {
+            return timeoutReply()
         } catch {
             return NativeReply(status: 0, bodyJSON: "null", error: "unreachable")
+        }
+    }
+
+    /// Thrown by `withDeadline` when the work has not finished in time.
+    struct DeadlineExpired: Error {}
+
+    /// Runs `work` and returns its value, or throws `DeadlineExpired` after `seconds`. The work is
+    /// cancelled when the deadline passes; a work that ignores cancellation still ends the wait.
+    static func withDeadline<T: Sendable>(seconds: TimeInterval,
+                                          _ work: @escaping @Sendable () async throws -> T) async throws -> T {
+        try await withThrowingTaskGroup(of: T?.self) { group in
+            group.addTask { try await work() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(max(0, seconds) * 1_000_000_000))
+                return nil
+            }
+            let first = try await group.next() ?? nil
+            group.cancelAll()
+            guard let value = first else { throw DeadlineExpired() }
+            return value
+        }
+    }
+
+    /// The reply for a call that did not finish in time: the operation may still have completed.
+    static func timeoutReply() -> NativeReply {
+        let message = "LLM-IDE did not answer in time. The operation may still have completed; check the storage figures before trying again."
+        return NativeReply(status: 504, bodyJSON: jsonObjectFragment(["code": "timeout", "message": message]) ?? "null",
+                           error: "timeout")
+    }
+
+    /// The reply for a clear or compact whose answer the client could not read: the operation may
+    /// have completed. Other calls say only that the reply was unreadable.
+    static func badReplyReply(_ call: SystemAllowedCall) -> NativeReply {
+        let message: String
+        switch call {
+        case .clearAgentHistory, .compactAgentHistory:
+            message = "The server answered but the reply was unreadable; the operation may have completed."
+        default:
+            message = "The server answered but the reply was unreadable."
+        }
+        return NativeReply(status: 502, bodyJSON: jsonObjectFragment(["code": "bad_reply", "message": message]) ?? "null",
+                           error: "bad_reply")
+    }
+
+    /// The typed client's answer to one agent-history call. Its errors reach `storageReply` unchanged.
+    private static func storageAnswer(_ call: SystemAllowedCall, api: LlmIdeAPIClient) async throws -> NativeReply? {
+        switch call {
+        case .agentHistorySettings:
+            let settings = try await api.agentHistorySettings()
+            return okJSON(settings)
+        case .setAgentHistoryRetention(let days):
+            let settings = try await api.setAgentHistoryRetention(days: days)
+            return okJSON(settings)
+        case .clearAgentHistory:
+            guard let plan = clearPlan(call) else { return nil }
+            switch plan {
+            case .preview(let scope, let beforeDays):
+                let result = try await api.previewAgentHistoryClear(scope: scope, beforeDays: beforeDays)
+                return okJSON(result)
+            case .commit(let scope, let beforeDays, let previewId):
+                let result = try await api.performAgentHistoryClear(
+                    scope: scope, beforeDays: beforeDays, previewId: previewId)
+                return okJSON(result)
+            }
+        case .compactAgentHistory:
+            let result = try await api.compactAgentHistory()
+            return okJSON(result)
+        default:
+            return nil
         }
     }
 
