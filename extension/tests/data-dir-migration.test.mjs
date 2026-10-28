@@ -6,7 +6,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import Database from 'better-sqlite3';
 import { runDataDirMigration } from '../kb/data-dir-migration.mjs';
 import { getDataDirOverride, clearDataDirOverride, getDataMigrationReport } from '../core/data-dir.mjs';
@@ -173,16 +173,16 @@ test('a failed post-commit check rolls the commit back and keeps the legacy file
   assert.ok(exists(kb, 'data.db'));
 });
 
-test('a failure while deleting leaves the verified new copy and says what remains', () => {
+test('a failure during the grace step keeps the verified new copy and says what remains', () => {
   const kb = makeLegacy({ withAgent: false, withTrees: false });
   const report = runDataDirMigration({
     env: env(), root,
-    fault: (step) => { if (step === 'delete:wal') throw new Error('EBUSY (injected)'); },
+    fault: (step) => { if (step === 'grace:data') throw new Error('EBUSY (injected)'); },
   });
   assert.equal(report.status, 'migrated');
-  assert.match(report.notes.join(' '), /legacy removal incomplete/);
+  assert.match(report.notes.join(' '), /legacy move incomplete/);
   assert.ok(fs.existsSync(path.join(dataDir, 'data.db')));
-  assert.ok(exists(kb, 'data.db'), 'nothing was deleted before the failure');
+  assert.ok(exists(kb, 'data.db'), 'the legacy file was not renamed');
 });
 
 test('refuses while an IDLE server connection holds the legacy DB, and keeps everything', () => {
@@ -379,4 +379,182 @@ test('the tripwire does not fire while kb/data.db exists, or without a move noti
   fs.rmSync(path.join(kb, 'MOVED-TO-APP-SUPPORT.txt'));
   fs.rmSync(path.join(kb, 'data.db'));
   assert.equal(runDataDirMigration({ env: {}, root }).status, 'skipped');
+});
+
+// --- the grace copies: one boot later they go ---------------------------------
+
+const MODULE_URL = new URL('../kb/data-dir-migration.mjs', import.meta.url).href;
+
+test('a move keeps one-boot .pre-move copies; the next healthy boot deletes them', async () => {
+  const kb = makeLegacy();
+  writeLegacySecrets(kb, 'K'.repeat(64));
+  const { completeGraceAfterHealthyBoot } = await import(MODULE_URL);
+  const report = runDataDirMigration({ env: env(), root, bootId: 'boot-A' });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  for (const f of ['data.db.pre-move', 'agent.db.pre-move', '.dev-secrets.json.pre-move', 'agent-sdk.pre-move']) {
+    assert.ok(exists(kb, f), `${f} should exist for one boot`);
+  }
+  assert.equal(exists(kb, 'data.db'), false);
+  assert.equal(report.graceCleanupDue, null, 'the move boot does not delete its own copies');
+  assert.equal(completeGraceAfterHealthyBoot(report).removed.length, 0);
+
+  const later = runDataDirMigration({ env: env(), root, bootId: 'boot-B' });
+  assert.equal(later.status, 'skipped');
+  assert.ok(later.graceCleanupDue, 'the next boot is due to clean up');
+  const done = completeGraceAfterHealthyBoot(later);
+  assert.deepEqual(done.removed.sort(), ['.dev-secrets.json.pre-move', 'agent-sdk.pre-move', 'agent.db.pre-move', 'data.db.pre-move']);
+  for (const f of ['data.db.pre-move', 'agent.db.pre-move', '.dev-secrets.json.pre-move', 'agent-sdk.pre-move']) {
+    assert.equal(exists(kb, f), false, `${f} should be gone after the healthy boot`);
+  }
+  const m = JSON.parse(fs.readFileSync(path.join(dataDir, 'migrated-from.json'), 'utf8'));
+  assert.equal(m.graceBootPending, false);
+  assert.ok(exists(dataDir, 'data.db'), 'the new DB is untouched');
+});
+
+test('the same boot never deletes the .pre-move copies (a boot that did not open the DB keeps them)', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  runDataDirMigration({ env: env(), root, bootId: 'boot-A' });
+  const same = runDataDirMigration({ env: env(), root, bootId: 'boot-A' });
+  assert.equal(same.graceCleanupDue, null);
+  assert.ok(exists(kb, 'data.db.pre-move'));
+});
+
+test('a restored legacy file at kb/data.db is reported as divergence, not as a clean state', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  runDataDirMigration({ env: env(), root, bootId: 'boot-A' });
+  new Database(path.join(kb, 'data.db')).close();
+  assert.equal(runDataDirMigration({ env: env(), root, bootId: 'boot-B' }).legacyDiverged, true);
+});
+
+// --- the lock, the empty DB, the space check, symlinks, signals --------------
+
+test('a stale lock (dead pid) is taken over and the move proceeds', () => {
+  makeLegacy({ withAgent: false, withTrees: false });
+  fs.mkdirSync(path.join(dataDir, '.migrating-lock'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, '.migrating-lock', 'owner.json'), JSON.stringify({ pid: 2147483646 }));
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  assert.equal(fs.existsSync(path.join(dataDir, '.migrating-lock')), false, 'the lock is released');
+});
+
+test('a lock held by another live process is respected: nothing is touched, the run falls back', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  fs.mkdirSync(path.join(dataDir, '.migrating-lock'), { recursive: true });
+  fs.writeFileSync(path.join(dataDir, '.migrating-lock', 'owner.json'), JSON.stringify({ pid: process.ppid }));
+  const report = runDataDirMigration({ env: env(), root, lockWaitMs: 300 });
+  assert.equal(report.status, 'fallback');
+  assert.equal(report.reason, 'lock-timeout');
+  assert.equal(getDataDirOverride(), null);
+  assert.ok(exists(kb, 'data.db'));
+  assert.equal(fs.existsSync(path.join(dataDir, 'data.db')), false);
+  assert.ok(fs.existsSync(path.join(dataDir, '.migrating-lock')), 'the other process keeps its lock');
+});
+
+test('a zero-byte data.db with no marker is moved aside, never deleted, and the move runs', () => {
+  makeLegacy({ withAgent: false, withTrees: false });
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'data.db'), '');
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  const aside = fs.readdirSync(dataDir).filter((n) => /^data\.db\.empty-\d+$/.test(n));
+  assert.equal(aside.length, 1);
+  assert.equal(fs.statSync(path.join(dataDir, aside[0])).size, 0);
+});
+
+test('a data.db with tables but no marker is left alone (skipped, not moved)', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  fs.mkdirSync(dataDir, { recursive: true });
+  const other = new Database(path.join(dataDir, 'data.db'));
+  other.exec('CREATE TABLE keep_me (x)');
+  other.close();
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'skipped');
+  assert.equal(report.reason, 'data-dir-has-db');
+  assert.ok(exists(kb, 'data.db'));
+});
+
+test('not enough free space: nothing is written and the legacy files stay', () => {
+  const kb = makeLegacy({ withAgent: true, withTrees: false });
+  const report = runDataDirMigration({ env: env(), root, freeBytes: () => 1 });
+  assert.equal(report.status, 'fallback');
+  assert.equal(report.reason, 'no-space');
+  assert.equal(fs.existsSync(path.join(dataDir, 'data.db')), false);
+  assert.equal(fs.existsSync(path.join(dataDir, '.migrating-owner')), false);
+  assert.ok(exists(kb, 'data.db') && exists(kb, 'agent.db'));
+});
+
+test('agent-sdk symlinks are copied as links with the same target', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: true });
+  fs.symlinkSync('u1/cred.json', path.join(kb, 'agent-sdk', 'latest.json'));
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  const link = path.join(dataDir, 'agent-sdk', 'latest.json');
+  assert.ok(fs.lstatSync(link).isSymbolicLink());
+  assert.equal(fs.readlinkSync(link), 'u1/cred.json');
+  assert.equal(fs.readFileSync(path.join(dataDir, 'agent-sdk', 'u1', 'cred.json'), 'utf8'), '{}');
+});
+
+test('sqlite_sequence survives the move (AUTOINCREMENT counters)', () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  const d = new Database(path.join(kb, 'data.db'));
+  d.exec('CREATE TABLE seqd (id INTEGER PRIMARY KEY AUTOINCREMENT, v TEXT)');
+  for (let i = 0; i < 7; i++) d.prepare('INSERT INTO seqd (v) VALUES (?)').run(`v${i}`);
+  d.close();
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  const copy = new Database(path.join(dataDir, 'data.db'), { readonly: true });
+  assert.equal(copy.prepare("SELECT seq FROM sqlite_sequence WHERE name = 'seqd'").get().seq, 7);
+  copy.close();
+});
+
+test('a SIGTERM during the move is deferred: the move completes, then the process exits 143', () => {
+  makeLegacy({ withAgent: false, withTrees: false });
+  const script = path.join(work, 'sigterm-child.mjs');
+  fs.writeFileSync(script, `import { runDataDirMigration } from ${JSON.stringify(MODULE_URL)};
+const report = runDataDirMigration({
+  env: { LLMIDE_DATA_DIR: ${JSON.stringify(dataDir)} },
+  root: ${JSON.stringify(root)},
+  fault: (step) => { if (step === 'verify') process.kill(process.pid, 'SIGTERM'); },
+});
+console.log(JSON.stringify({ status: report.status }));
+`);
+  const r = spawnSync(process.execPath, [script], { encoding: 'utf8' });
+  assert.equal(r.status, 143, `exit was ${r.status} ${r.signal}; stderr: ${r.stderr}`);
+  assert.equal(JSON.parse(r.stdout.trim()).status, 'migrated');
+  assert.ok(fs.existsSync(path.join(dataDir, 'data.db')));
+});
+
+// --- two processes at once ----------------------------------------------------
+
+test('two concurrent runs: one moves, the other waits and then skips; the data is consistent', async () => {
+  const kb = makeLegacy({ withAgent: false, withTrees: false });
+  const script = path.join(work, 'child.mjs');
+  fs.writeFileSync(script, `import { runDataDirMigration } from ${JSON.stringify(MODULE_URL)};
+const o = JSON.parse(process.argv[2]);
+const report = runDataDirMigration({
+  env: { LLMIDE_DATA_DIR: o.dataDir }, root: o.root, lockWaitMs: o.lockWaitMs, bootId: o.bootId,
+  fault: (step) => { if (step === 'verify' && o.sleepMs) Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, o.sleepMs); },
+});
+console.log(JSON.stringify({ status: report.status, reason: report.reason }));
+`);
+  const spawnChild = (o) => new Promise((resolve) => {
+    const c = spawn(process.execPath, [script, JSON.stringify({ dataDir, root, ...o })], { stdio: ['ignore', 'pipe', 'pipe'] });
+    let out = '';
+    c.stdout.on('data', (d) => { out += d; });
+    c.on('close', () => resolve(JSON.parse(out.trim())));
+  });
+  const first = spawnChild({ bootId: 'A', sleepMs: 1500, lockWaitMs: 20000 });
+  await new Promise((r) => setTimeout(r, 400));
+  const second = spawnChild({ bootId: 'B', lockWaitMs: 20000 });
+  const [a, b] = await Promise.all([first, second]);
+  assert.equal(a.status, 'migrated', JSON.stringify(a));
+  assert.equal(b.status, 'skipped', JSON.stringify(b));
+  assert.equal(b.reason, 'data-dir-has-db');
+  assert.ok(exists(kb, 'data.db.pre-move'));
+  assert.equal(exists(kb, 'data.db'), false);
+  const copy = new Database(path.join(dataDir, 'data.db'), { readonly: true });
+  assert.equal(copy.prepare('SELECT COUNT(*) AS n FROM meetings').get().n, 25);
+  assert.equal(copy.pragma('integrity_check', { simple: true }), 'ok');
+  copy.close();
+  assert.equal(fs.existsSync(path.join(dataDir, '.migrating-lock')), false);
 });

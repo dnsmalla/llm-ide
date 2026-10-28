@@ -1,56 +1,66 @@
-// One-time MOVE of the repo-level kb/ into the system data dir (LLMIDE_DATA_DIR).
+// One-time MOVE of the repo-level kb/ data into the system data dir (LLMIDE_DATA_DIR).
 //
-// Runs at the very top of server.mjs, imported before config and the DB are
-// read (kb/data-dir-boot.mjs), and never throws. It runs only when ALL hold,
-// otherwise it reports why it skipped:
+// Runs at the top of server.mjs, imported before config and the DB are read
+// (kb/data-dir-boot.mjs), and never throws. It runs only when ALL hold, otherwise
+// it reports why it skipped:
 //   - LLMIDE_DATA_DIR is set, and not under the test runner
 //   - LLMIDE_DB_PATH is not set (an explicit DB path wins; nothing to move)
-//   - <dataDir>/data.db does not exist yet (a second boot skips)
+//   - <dataDir>/data.db does not exist (or is an empty file with no marker: see below)
 //   - the legacy <repo>/kb/data.db exists
 //
-// The legacy files are held open with an EXCLUSIVE lock for the whole move.
-// That read fails with SQLITE_BUSY while ANY other connection has the file
-// open, idle servers included, so when it succeeds nothing else can use the
-// legacy DB until the move ends. If the lock cannot be taken, nothing is moved
-// and this run uses the legacy location (logged as legacy-in-use).
+// Every run takes a lock first: <dataDir>/.migrating-lock (a directory, created
+// atomically, holding owner.json with the pid). A lock held by a live process
+// makes this run wait (bounded) and then re-check; a lock whose pid is dead is
+// stale and is taken over. Nothing is wiped or deleted while another live
+// process holds the lock, and the data.db check is repeated under the lock.
 //
-// Steps:
-//   1. lock legacy data.db (and agent.db, if it is moved)
-//   2. snapshot each with VACUUM INTO (includes WAL content), verify the copy:
-//      integrity_check and per-table row counts against the locked source
-//   3. stage .dev-secrets.json (the vault key; byte-identical, mode 0600),
-//      agent.db and agent-sdk/ (within a 200 MB cap) in <dataDir>/.migrating
-//   4. commit by rename, data.db last, then verify the committed data.db counts
-//      and the secrets bytes. Any mismatch rolls the commit back and falls back.
-//   5. only now delete the legacy copies (-wal, -shm, data.db; agent.db and its
-//      -wal/-shm; legacy .dev-secrets.json once the copy is byte-equal; agent-sdk/
-//      when it was moved). backups/ is never moved and never deleted.
-// Any failure before step 5 removes what this run created, leaves the legacy
-// files untouched and falls back to the legacy location for this process
-// (setDataDirOverride(null)), so the server never boots on a half-moved DB.
+// The move (all under the lock):
+//   1. free-space preflight: 2x the legacy data.db + agent.db bytes on the data dir's volume
+//   2. lock the legacy data.db (and agent.db) EXCLUSIVELY for the whole move: a
+//      read fails while ANY other connection has the file open, idle servers
+//      included. If the lock cannot be taken, nothing moves (legacy-in-use)
+//   3. snapshot each with VACUUM INTO and verify the copy: integrity_check, and
+//      per-table row counts and sqlite_sequence against the locked source
+//   4. stage the dev secrets (byte-identical), agent.db and agent-sdk/ (verbatim
+//      symlinks; file list, sizes and link targets verified) in <dataDir>/.migrating
+//   5. commit by rename, data.db last; fsync the committed files and the dir;
+//      verify the committed files again (integrity_check, counts, sqlite_sequence,
+//      secrets bytes, agent-sdk manifest). Any failure up to here rolls back.
+//   6. grace step: checkpoint the legacy WAL, rename the legacy files to
+//      <name>.pre-move (kept for ONE boot), write the MOVED notice
+// The .pre-move files are deleted by the next server boot, after that boot has
+// opened the new DB healthily (completeGraceAfterHealthyBoot). A failure in step 6
+// keeps the verified new copy and says what is left in notes.
 //
-// VACUUM INTO rather than better-sqlite3's db.backup(): backup() is async, and
-// config reads the paths synchronously at import time.
+// Signals: the move is synchronous, so a SIGTERM that arrives during it is only
+// seen when the event loop resumes. The handler installed here records it, and
+// the process exits right after the move has finished (committed or rolled back).
 
+import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { setDataDirOverride, setDataMigrationReport } from '../core/data-dir.mjs';
-import { legacyTripwire } from './legacy-tripwire.mjs';
+import { legacyTripwire, MOVED_NOTICE } from './legacy-tripwire.mjs';
 
 const MARKER = 'migrated-from.json';
 const DEV_SECRETS = '.dev-secrets.json';
+const LOCK_DIR = '.migrating-lock';
+const OWNER = '.migrating-owner';
+const PRE_MOVE = '.pre-move';
 // agent-sdk/ holds per-user engine homes (transcripts and credentials). It is
 // moved only under this cap; above it, it stays in the legacy kb and says so.
 const MAX_SDK_BYTES = 200 * 1024 ** 2;
-// Written at the start of a move, removed when it ends. It lists exactly what a
-// move may create in the data dir, so a retry can tell its own leftovers (a
-// crash between renames) from files a person put there.
-const OWNER = '.migrating-owner';
-const OWNED = ['data.db', 'data.db-wal', 'data.db-shm', 'agent.db', 'agent.db-wal', 'agent.db-shm',
-  'agent-sdk', DEV_SECRETS, MARKER];
+// Files an interrupted move may have left in the data dir. data.db is NOT in
+// this list: a data.db is never removed by the retry path.
+const WIPEABLE = ['agent.db', 'agent.db-wal', 'agent.db-shm', 'agent-sdk', DEV_SECRETS, MARKER];
 // data.db is the commit point: it is renamed into place last.
 const COMMIT_ORDER = ['agent.db', 'agent-sdk', DEV_SECRETS, MARKER, 'data.db'];
+const BOOT_ID = crypto.randomUUID();
+const DEFAULT_LOCK_WAIT_MS = 200_000;
+
+const sleepSync = (ms) => Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+const defaultFreeBytes = (dir) => { const s = fs.statfsSync(dir); return Number(s.bavail) * Number(s.bsize); };
 
 /**
  * @param {object} [opts]
@@ -59,11 +69,35 @@ const COMMIT_ORDER = ['agent.db', 'agent-sdk', DEV_SECRETS, MARKER, 'data.db'];
  * @param {string|null} [opts.appVersion] recorded in the marker
  * @param {(step: string) => void} [opts.fault] test hook: throws to simulate a failure at a step
  * @param {number} [opts.sdkCapBytes] agent-sdk/ size cap (tests)
+ * @param {number} [opts.lockWaitMs] how long to wait for another live migration
+ * @param {(dir: string) => number} [opts.freeBytes] free space on a path's volume (tests)
+ * @param {string} [opts.bootId] identifies this boot (tests)
  * @returns {object} the migration report (also stored for /health)
  */
-export function runDataDirMigration({ env = process.env, root, appVersion = null, fault = null, sdkCapBytes = MAX_SDK_BYTES } = {}) {
+export function runDataDirMigration(opts = {}) {
+  let termRequested = false;
+  const onTerm = () => { termRequested = true; };
+  process.on('SIGTERM', onTerm);
+  try {
+    return runMigration(opts);
+  } finally {
+    // The move is done (committed or rolled back). Only now may the process stop.
+    setImmediate(() => {
+      process.removeListener('SIGTERM', onTerm);
+      if (termRequested) process.exit(143);
+    });
+  }
+}
+
+function runMigration({
+  env = process.env, root, appVersion = null, fault = null, sdkCapBytes = MAX_SDK_BYTES,
+  lockWaitMs = DEFAULT_LOCK_WAIT_MS, freeBytes = defaultFreeBytes, bootId = BOOT_ID,
+}) {
   const started = Date.now();
-  const report = { status: 'skipped', reason: null, dataDir: null, from: null, tables: null, notes: [], healthNotes: [], legacyDiverged: null, durationMs: 0 };
+  const report = {
+    status: 'skipped', reason: null, dataDir: null, from: null, tables: null, notes: [],
+    healthNotes: [], legacyDiverged: null, graceCleanupDue: null, durationMs: 0,
+  };
   const finish = (status, reason = null) => {
     report.status = status;
     report.reason = reason;
@@ -97,21 +131,17 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
     // getDb() needs the directory to exist; create it private whatever happens next.
     fs.mkdirSync(dataDir, { recursive: true, mode: 0o700 });
 
-    const legacyDir = path.join(root, 'kb');
-    const newDb = path.join(dataDir, 'data.db');
-    if (fs.existsSync(newDb)) {
-      rmTree(path.join(dataDir, OWNER)); // an interrupted run that had in fact committed data.db
-      // Already moved. A legacy data.db that exists again means something (an
-      // older server, an adopted dev server) created a fork after the move.
-      report.legacyDiverged = checkLegacyDivergence(legacyDir, dataDir);
-      return finish('skipped', 'data-dir-has-db');
+    const lock = acquireLock(dataDir, lockWaitMs);
+    if (!lock) {
+      setDataDirOverride(null);
+      report.notes.push('another process held the data dir migration lock for too long; using the legacy location for this run, nothing was changed');
+      return finish('fallback', 'lock-timeout');
     }
-
-    const legacyDb = path.join(legacyDir, 'data.db');
-    report.from = legacyDb;
-    if (!fs.existsSync(legacyDb)) return finish('skipped', 'no-legacy-db');
-
-    return moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish });
+    try {
+      return underLock({ env, root, appVersion, fault, sdkCapBytes, freeBytes, bootId, dataDir, report, finish });
+    } finally {
+      lock.release();
+    }
   } catch (err) {
     setDataDirOverride(null);
     report.notes.push(`unexpected: ${err?.message ?? err}`);
@@ -119,44 +149,87 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
   }
 }
 
-function moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish }) {
+function underLock({ env, root, appVersion, fault, sdkCapBytes, freeBytes, bootId, dataDir, report, finish }) {
+  const legacyDir = path.join(root, 'kb');
+  const legacyDb = path.join(legacyDir, 'data.db');
+  const newDb = path.join(dataDir, 'data.db');
+  const marker = readMarker(dataDir);
+
+  if (fs.existsSync(newDb)) {
+    if (!marker && isEmptyDb(newDb)) {
+      // A zero-byte or table-less data.db with no marker is not a migrated DB.
+      // Move it aside (never delete it) and migrate again.
+      const aside = `${newDb}.empty-${Date.now()}`;
+      fs.renameSync(newDb, aside);
+      for (const s of ['-wal', '-shm']) { try { fs.renameSync(`${newDb}${s}`, `${aside}${s}`); } catch { /* none */ } }
+      report.notes.push(`data.db had no tables and no migration marker; moved aside to ${path.basename(aside)}`);
+    } else {
+      // Already moved. A legacy data.db that exists again means something recreated it.
+      report.legacyDiverged = checkLegacyDivergence(legacyDir, dataDir);
+      if (marker && marker.graceBootPending && marker.completed && marker.movedBootId !== bootId) {
+        report.graceCleanupDue = { legacyDir, dataDir };
+      }
+      return finish('skipped', 'data-dir-has-db');
+    }
+  }
+
+  report.from = legacyDb;
+  if (!fs.existsSync(legacyDb)) return finish('skipped', 'no-legacy-db');
+
+  return moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, freeBytes, bootId, report, finish });
+}
+
+function moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, freeBytes, bootId, report, finish }) {
+  const step = (name) => { if (fault) fault(name); };
   const staging = path.join(dataDir, '.migrating');
   const ownerFile = path.join(dataDir, OWNER);
-  const moved = []; // names committed into dataDir by this run, rolled back on failure
-  const step = (name) => { if (fault) fault(name); };
-  // A previous run that died between commits left files behind with no data.db.
-  // data.db is the commit point, so those files cannot be trusted: discard the
-  // ones it recorded as its own, then move again.
-  if (fs.existsSync(ownerFile)) {
-    const discarded = OWNED.filter((n) => fs.existsSync(path.join(dataDir, n)));
-    for (const name of OWNED) rmTree(path.join(dataDir, name));
-    if (discarded.length) report.notes.push(`discarded ${discarded.length} leftover file(s) of an interrupted migration`);
-  }
-  fs.writeFileSync(ownerFile, `${JSON.stringify({ startedAt: new Date().toISOString(), pid: process.pid, owns: OWNED }, null, 2)}\n`, { mode: 0o600 });
-
   const legacyAgent = path.join(legacyDir, 'agent.db');
+  // An agent.db in the data dir blocks the move unless it is a leftover of an
+  // interrupted move of ours (the wipe below removes it).
+  const wipeAllowed = fs.existsSync(ownerFile) && !fs.existsSync(path.join(dataDir, 'data.db'));
+  const agentBlocked = fs.existsSync(path.join(dataDir, 'agent.db')) && !wipeAllowed;
   const moveAgent = !(typeof env.LLMIDE_AGENT_DB_PATH === 'string' && env.LLMIDE_AGENT_DB_PATH.trim())
-    && fs.existsSync(legacyAgent) && !fs.existsSync(path.join(dataDir, 'agent.db'));
+    && fs.existsSync(legacyAgent) && !agentBlocked;
   if (fs.existsSync(legacyAgent) && !moveAgent) {
     report.notes.push('agent.db not moved (already present in the data dir, or LLMIDE_AGENT_DB_PATH is set); the legacy file stays');
   }
 
+  // 1. Free-space preflight, before anything is written.
+  const needed = 2 * (fs.statSync(legacyDb).size + (moveAgent ? fs.statSync(legacyAgent).size : 0));
+  const free = freeBytes(dataDir);
+  if (free < needed) {
+    report.notes.push(`not enough free space in the data dir's volume (${Math.round(free / 1024 ** 2)} MB free, ${Math.round(needed / 1024 ** 2)} MB needed); nothing was moved`);
+    setDataDirOverride(null);
+    return finish('fallback', 'no-space');
+  }
+
+  // 2. Wipe what an interrupted move of ours left behind. Only when data.db is
+  // absent, rechecked right before the wipe, and never data.db itself.
+  if (wipeAllowed) {
+    {
+      const discarded = WIPEABLE.filter((n) => fs.existsSync(path.join(dataDir, n)));
+      for (const name of WIPEABLE) removeStrict(path.join(dataDir, name));
+      if (discarded.length) report.notes.push(`discarded ${discarded.length} leftover file(s) of an interrupted migration`);
+    }
+  }
+  writeFileAtomic(ownerFile, JSON.stringify({ startedAt: new Date().toISOString(), pid: process.pid, bootId, owns: [...WIPEABLE, 'data.db'] }, null, 2) + '\n');
+
   let legacyHandle = null;
   let agentHandle = null;
-  let secrets = null;       // { raw, staged }
+  let secrets = null;     // { raw, staged }
   let sdkMoved = false;
   let agentMoved = false;
+  const committed = [];   // names renamed into the data dir by this run
   try {
-    rmTree(staging);
+    rmTreeStrictIfExists(staging);
     fs.mkdirSync(staging, { mode: 0o700 });
 
-    // 1. Lock the legacy files for the whole move. Failure: nothing moved.
+    // 2+3. Lock the legacy DBs, snapshot, verify against the locked source.
     legacyHandle = lockLegacy(legacyDb);
     if (moveAgent) agentHandle = lockLegacy(legacyAgent);
-
-    // 2. Snapshot and verify.
     step('db');
-    report.tables = snapshotAndVerify(legacyHandle, path.join(staging, 'data.db'));
+    const dbFp = snapshotAndVerify(legacyHandle, path.join(staging, 'data.db'));
+    report.tables = dbFp.tables;
     step('verify');
     if (moveAgent) {
       step('agent');
@@ -164,10 +237,11 @@ function moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkC
       agentMoved = true;
     }
 
-    // 3. Stage the secrets, agent-sdk/ (cap), and nothing else. backups/ stays.
+    // 4. Stage the secrets and agent-sdk/ (verbatim, verified).
     step('secrets');
     secrets = stageSecrets({ legacyFile: path.join(legacyDir, DEV_SECRETS), dataDir, staging, env, report });
     const sdkSrc = path.join(legacyDir, 'agent-sdk');
+    let sdkManifest = null;
     if (fs.existsSync(sdkSrc)) {
       step('agent-sdk');
       const bytes = treeBytes(sdkSrc);
@@ -179,99 +253,169 @@ function moveLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkC
       } else if (fs.existsSync(path.join(dataDir, 'agent-sdk'))) {
         report.notes.push('agent-sdk/ already present in data dir; not moved');
       } else {
-        fs.cpSync(sdkSrc, path.join(staging, 'agent-sdk'), { recursive: true, errorOnExist: true, force: false });
+        const want = treeManifest(sdkSrc);
+        fs.cpSync(sdkSrc, path.join(staging, 'agent-sdk'), { recursive: true, errorOnExist: true, force: false, verbatimSymlinks: true });
+        const got = treeManifest(path.join(staging, 'agent-sdk'));
+        if (JSON.stringify(want) !== JSON.stringify(got)) throw new Error('agent-sdk/ copy differs from the original (file list, sizes or link targets)');
+        sdkManifest = want;
         sdkMoved = true;
       }
     }
-    const backupsNote = fs.existsSync(path.join(legacyDir, 'backups'))
-      ? `backups/ not moved (${Math.round(treeBytes(path.join(legacyDir, 'backups')) / 1024 ** 2)} MB stay in the legacy kb); new backups go to the data dir`
-      : null;
-    if (backupsNote) { report.notes.push(backupsNote); report.healthNotes.push(backupsNote); }
+    if (fs.existsSync(path.join(legacyDir, 'backups'))) {
+      const note = `backups/ not moved (${Math.round(treeBytes(path.join(legacyDir, 'backups')) / 1024 ** 2)} MB stay in the legacy kb); new backups go to the data dir`;
+      report.notes.push(note);
+      report.healthNotes.push(note);
+    }
 
     step('marker');
     const marker = {
       source: legacyDb,
       migratedAt: new Date().toISOString(),
+      movedBootId: bootId,
       appVersion,
       tables: report.tables,
       agentDb: agentMoved,
       backups: false,
       agentSdk: sdkMoved,
+      completed: false,
+      graceBootPending: true,
     };
-    fs.writeFileSync(path.join(staging, MARKER), `${JSON.stringify(marker, null, 2)}\n`, { mode: 0o600 });
+    writeFileAtomic(path.join(staging, MARKER), `${JSON.stringify(marker, null, 2)}\n`);
 
-    // 4. Commit by rename, data.db last. Then verify what is now in the data dir.
+    // 5. Commit by rename, data.db last. Up to the post-commit check, a failure rolls back.
     for (const name of COMMIT_ORDER) {
       const from = path.join(staging, name);
       if (!fs.existsSync(from)) continue;
       step(`commit:${name}`);
       fs.renameSync(from, path.join(dataDir, name));
-      moved.push(name);
+      committed.push(name);
     }
+    step('fsync');
+    for (const name of committed) fsyncPath(path.join(dataDir, name));
+    fsyncPath(dataDir);
     step('postcommit');
-    verifyCommitted(path.join(dataDir, 'data.db'), report.tables);
-    if (secrets) {
-      const now = fs.readFileSync(path.join(dataDir, DEV_SECRETS), 'utf8');
-      if (now !== secrets.raw) throw new Error('the copied dev secrets differ from the legacy file');
-    }
+    verifyCommitted({ dataDir, dbFp, agentMoved, secrets, sdkManifest });
   } catch (err) {
     closeQuietly(legacyHandle);
     closeQuietly(agentHandle);
-    for (const name of moved) rmTree(path.join(dataDir, name));
-    for (const suffix of ['-wal', '-shm']) rmTree(path.join(dataDir, `data.db${suffix}`));
-    rmTree(staging);
-    rmTree(ownerFile);
+    for (const name of committed.slice().reverse()) {
+      try { removeStrict(path.join(dataDir, name)); } catch (e) { report.notes.push(`rollback could not remove ${name}: ${e.message}`); }
+    }
+    rmTreeStrictIfExists(staging);
+    removeQuietly(ownerFile);
     setDataDirOverride(null);
     const reason = err?.code === 'LEGACY_IN_USE' ? 'legacy-in-use' : 'copy-failed';
     report.notes.push(`${reason === 'legacy-in-use' ? 'not moved' : 'move failed'}: ${err?.message ?? err}; using the legacy location for this run, legacy files untouched`);
     return finish('fallback', reason);
   }
 
-  // 5. Everything is verified and committed. Delete the legacy copies while the
-  // legacy DB is still held exclusively. Nothing is deleted before this point.
+  // 6. Grace step. The verified new copy is committed; from here a failure keeps it.
+  const removed = [];
   try {
-    step('delete:wal');
-    for (const suffix of ['-wal', '-shm']) rmTree(`${legacyDb}${suffix}`);
-    rmTree(legacyDb);
-    const removed = ['data.db'];
-    if (agentMoved) {
-      for (const suffix of ['-wal', '-shm']) rmTree(`${legacyAgent}${suffix}`);
-      rmTree(legacyAgent);
-      removed.push('agent.db');
+    if (legacyHandle) {
+      step('grace:checkpoint');
+      legacyHandle.pragma('wal_checkpoint(TRUNCATE)');
+      step('grace:data');
+      renameStrict(legacyDb, `${legacyDb}${PRE_MOVE}`);
+      removed.push('data.db');
+      for (const s of ['-wal', '-shm']) removeStrict(`${legacyDb}${s}`);
     }
-    if (secrets?.raw && fs.readFileSync(path.join(legacyDir, DEV_SECRETS), 'utf8') === fs.readFileSync(path.join(dataDir, DEV_SECRETS), 'utf8')) {
-      step('delete:secrets');
-      rmTree(path.join(legacyDir, DEV_SECRETS));
+    if (agentMoved) {
+      step('grace:agent');
+      agentHandle.pragma('wal_checkpoint(TRUNCATE)');
+      renameStrict(legacyAgent, `${legacyAgent}${PRE_MOVE}`);
+      removed.push('agent.db');
+      for (const s of ['-wal', '-shm']) removeStrict(`${legacyAgent}${s}`);
+    }
+    if (secrets && fs.existsSync(path.join(legacyDir, DEV_SECRETS))) {
+      step('grace:secrets');
+      renameStrict(path.join(legacyDir, DEV_SECRETS), path.join(legacyDir, `${DEV_SECRETS}${PRE_MOVE}`));
       removed.push(DEV_SECRETS);
     }
     if (sdkMoved) {
-      step('delete:agent-sdk');
-      rmTree(path.join(legacyDir, 'agent-sdk'));
+      step('grace:agent-sdk');
+      renameStrict(path.join(legacyDir, 'agent-sdk'), path.join(legacyDir, `agent-sdk${PRE_MOVE}`));
       removed.push('agent-sdk/');
     }
-    report.removedLegacy = removed;
     closeQuietly(legacyHandle);
     closeQuietly(agentHandle);
-    // Closing the last handle can checkpoint and remove the WAL itself; make sure nothing is left.
-    for (const name of ['data.db-wal', 'data.db-shm']) rmTree(path.join(legacyDir, name));
+    legacyHandle = null;
+    agentHandle = null;
+    writeFileAtomic(path.join(dataDir, MARKER), `${JSON.stringify({ ...readMarker(dataDir), completed: true, graceBootPending: true, movedBootId: bootId, movedFiles: removed }, null, 2)}\n`);
+    report.removedLegacy = removed;
+    writeMovedNotice(legacyDir, dataDir, report);
   } catch (err) {
     closeQuietly(legacyHandle);
     closeQuietly(agentHandle);
-    // The new copy is verified and committed; keep it. Say what is left behind.
-    report.notes.push(`legacy removal incomplete (${err?.message ?? err}); delete the remaining legacy files in ${legacyDir} by hand`);
+    report.notes.push(`legacy move incomplete (${err?.message ?? err}); the new copy is verified and kept. Moved so far: ${removed.join(', ') || 'nothing'}. Check ${legacyDir} by hand.`);
   }
 
-  rmTree(staging);
-  rmTree(ownerFile);
+  rmTreeStrictIfExists(staging);
+  removeQuietly(ownerFile);
   report.legacyDiverged = false;
-  writeMovedNotice(legacyDir, dataDir, report);
   return finish('migrated', null);
 }
 
-// Take an EXCLUSIVE lock on a legacy DB and keep the connection open. The first
-// read fails with SQLITE_BUSY while any other connection has the file open,
-// idle or not (a BEGIN IMMEDIATE probe misses an idle server, which holds no
-// write lock between transactions).
+// Runs only after this boot opened the new DB healthily (server.mjs). Deletes the
+// .pre-move copies left by the previous boot's move. Keeps them if anything is off.
+export function completeGraceAfterHealthyBoot(report) {
+  const due = report?.graceCleanupDue;
+  if (!due) return { removed: [], kept: [] };
+  const removed = [];
+  const kept = [];
+  for (const name of ['data.db', 'agent.db', DEV_SECRETS, 'agent-sdk']) {
+    const p = path.join(due.legacyDir, `${name}${PRE_MOVE}`);
+    if (!fs.existsSync(p)) continue;
+    try { removeStrict(p); removed.push(path.basename(p)); } catch (err) { kept.push(`${path.basename(p)} (${err.message})`); }
+  }
+  if (kept.length === 0) {
+    const m = readMarker(due.dataDir);
+    if (m) writeFileAtomic(path.join(due.dataDir, MARKER), `${JSON.stringify({ ...m, graceBootPending: false, graceCompletedAt: new Date().toISOString() }, null, 2)}\n`);
+  }
+  return { removed, kept };
+}
+
+// ---------------------------------------------------------------------------
+// Lock
+
+function acquireLock(dataDir, waitMs) {
+  const lockDir = path.join(dataDir, LOCK_DIR);
+  const deadline = Date.now() + waitMs;
+  for (;;) {
+    try {
+      fs.mkdirSync(lockDir, { mode: 0o700 });
+      writeFileAtomic(path.join(lockDir, 'owner.json'), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+      return {
+        release() {
+          const owner = readJson(path.join(lockDir, 'owner.json'));
+          if (owner?.pid === process.pid) removeQuietly(lockDir, true);
+        },
+      };
+    } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+    }
+    const owner = readJson(path.join(lockDir, 'owner.json'));
+    if (owner === null) {
+      // Being written by another process, or left by a crash before the owner was written.
+      const age = Date.now() - fs.statSync(lockDir).mtimeMs;
+      if (age > 5000) removeQuietly(lockDir, true);
+    } else if (!pidAlive(owner.pid)) {
+      removeQuietly(lockDir, true); // stale: its process is gone
+    }
+    if (Date.now() > deadline) return null;
+    sleepSync(250);
+  }
+}
+
+function pidAlive(pid) {
+  if (!Number.isInteger(pid) || pid <= 0) return false;
+  try { process.kill(pid, 0); return true; } catch (err) { return err.code === 'EPERM'; }
+}
+
+// ---------------------------------------------------------------------------
+// Legacy and new DBs
+
+// Exclusive lock on a legacy DB, held open. Fails while any other connection has it open.
 function lockLegacy(file) {
   const db = new Database(file, { fileMustExist: true, timeout: 0 });
   try {
@@ -286,50 +430,100 @@ function lockLegacy(file) {
   return db;
 }
 
-// VACUUM INTO from the locked source, verify the copy against that same
-// source's counts. Returns the verified per-table counts.
+// VACUUM INTO from the locked source; verify the copy against the same source's
+// fingerprint. Returns the source fingerprint.
 function snapshotAndVerify(src, dest) {
   src.prepare('VACUUM INTO ?').run(dest);
-  const srcCounts = tableCounts(src);
+  const srcFp = fingerprint(src);
   const copy = new Database(dest, { fileMustExist: true });
-  let dstCounts;
+  let dstFp;
   try {
     const ic = copy.pragma('integrity_check', { simple: true });
     if (ic !== 'ok') throw new Error(`integrity_check on ${path.basename(dest)}: ${ic}`);
-    dstCounts = tableCounts(copy);
+    dstFp = fingerprint(copy);
   } finally {
     copy.close();
   }
-  for (const suffix of ['-wal', '-shm']) rmTree(`${dest}${suffix}`);
-  const names = Object.keys(srcCounts);
-  if (names.length !== Object.keys(dstCounts).length) {
-    throw new Error(`table count mismatch for ${path.basename(dest)}`);
-  }
-  for (const name of names) {
-    if (dstCounts[name] !== srcCounts[name]) {
-      throw new Error(`row count mismatch in ${name}: ${srcCounts[name]} source, ${dstCounts[name]} copy`);
-    }
-  }
-  return srcCounts;
+  for (const suffix of ['-wal', '-shm']) removeQuietly(`${dest}${suffix}`);
+  compareFingerprints(srcFp, dstFp, path.basename(dest));
+  return srcFp;
 }
 
-// Re-open the committed data.db and check it matches the verified counts.
-function verifyCommitted(file, expected) {
-  const db = new Database(file, { fileMustExist: true, readonly: true });
-  try {
-    const got = tableCounts(db);
-    for (const [name, n] of Object.entries(expected)) {
-      if (got[name] !== n) throw new Error(`committed data.db differs in ${name}: ${n} expected, ${got[name]} found`);
+// Row counts of every table (sqlite_sequence included) and its rows.
+function fingerprint(db) {
+  const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' ORDER BY name").pluck().all();
+  const tables = {};
+  for (const name of names) {
+    tables[name] = db.prepare(`SELECT COUNT(*) AS n FROM "${name.replace(/"/g, '""')}"`).get().n;
+  }
+  const hasSeq = names.includes('sqlite_sequence');
+  const sequence = hasSeq
+    ? JSON.stringify(db.prepare('SELECT name, seq FROM sqlite_sequence ORDER BY name').all())
+    : null;
+  return { tables, sequence };
+}
+
+function compareFingerprints(src, dst, label) {
+  const a = Object.keys(src.tables);
+  const b = Object.keys(dst.tables);
+  if (a.length !== b.length || a.some((n, i) => n !== b[i])) throw new Error(`table list differs for ${label}`);
+  for (const name of a) {
+    if (src.tables[name] !== dst.tables[name]) {
+      throw new Error(`row count mismatch in ${name} (${label}): ${src.tables[name]} source, ${dst.tables[name]} copy`);
     }
+  }
+  if (src.sequence !== dst.sequence) throw new Error(`sqlite_sequence differs for ${label}`);
+}
+
+// Re-verify the committed files: a full integrity_check, the same fingerprint, the
+// secrets bytes and the agent-sdk manifest.
+function verifyCommitted({ dataDir, dbFp, agentMoved, secrets, sdkManifest }) {
+  const db = new Database(path.join(dataDir, 'data.db'), { fileMustExist: true, readonly: true });
+  try {
+    const ic = db.pragma('integrity_check', { simple: true });
+    if (ic !== 'ok') throw new Error(`committed data.db integrity_check: ${ic}`);
+    compareFingerprints(dbFp, fingerprint(db), 'committed data.db');
   } finally {
     db.close();
   }
+  if (agentMoved) {
+    const a = new Database(path.join(dataDir, 'agent.db'), { fileMustExist: true, readonly: true });
+    try {
+      const ic = a.pragma('integrity_check', { simple: true });
+      if (ic !== 'ok') throw new Error(`committed agent.db integrity_check: ${ic}`);
+    } finally {
+      a.close();
+    }
+  }
+  if (secrets) {
+    if (fs.readFileSync(path.join(dataDir, DEV_SECRETS), 'utf8') !== secrets.raw) {
+      throw new Error('the copied dev secrets differ from the legacy file');
+    }
+  }
+  if (sdkManifest) {
+    if (JSON.stringify(treeManifest(path.join(dataDir, 'agent-sdk'))) !== JSON.stringify(sdkManifest)) {
+      throw new Error('the committed agent-sdk/ differs from the original');
+    }
+  }
 }
 
-// Stage <repo>/kb/.dev-secrets.json (the vault key) for the copy, byte for byte.
-// Returns { raw, staged }, or null when there is no legacy file. Refuses (the
-// caller falls back) when a legacy vault holds secrets but no key file exists
-// and LLMIDE_VAULT_KEY is not set, or when the data dir holds a different key.
+// data.db has no tables, or is zero bytes. Unreadable counts as not empty (never touched).
+function isEmptyDb(file) {
+  if (fs.statSync(file).size === 0) return true;
+  let db;
+  try {
+    db = new Database(file, { fileMustExist: true, readonly: true });
+    return db.prepare("SELECT COUNT(*) AS n FROM sqlite_master WHERE type = 'table'").get().n === 0;
+  } catch {
+    return false;
+  } finally {
+    if (db) db.close();
+  }
+}
+
+// Stage <repo>/kb/.dev-secrets.json byte for byte. Refuses (the caller falls back)
+// when a legacy vault holds secrets but no key file exists and LLMIDE_VAULT_KEY
+// is not set, or when the data dir holds a different key.
 function stageSecrets({ legacyFile, dataDir, staging, env, report }) {
   const target = path.join(dataDir, DEV_SECRETS);
   if (!fs.existsSync(legacyFile)) {
@@ -345,77 +539,129 @@ function stageSecrets({ legacyFile, dataDir, staging, env, report }) {
     throw new Error('legacy dev secrets file is missing jwtSecret or vaultKey');
   }
   if (fs.existsSync(target)) {
-    if (fs.readFileSync(target, 'utf8') !== raw) {
-      throw new Error('data dir already holds a different dev secrets file');
-    }
+    if (fs.readFileSync(target, 'utf8') !== raw) throw new Error('data dir already holds a different dev secrets file');
     return { raw, staged: false };
   }
-  const dest = path.join(staging, DEV_SECRETS);
-  fs.writeFileSync(dest, raw, { mode: 0o600 });
-  fs.chmodSync(dest, 0o600);
+  writeFileAtomic(path.join(staging, DEV_SECRETS), raw, 0o600);
   return { raw, staged: true };
 }
 
-// true: the legacy data.db exists again after the move (something recreated it).
+// ---------------------------------------------------------------------------
+// Small helpers
+
+// true: the legacy data.db exists again after the move (MOVED notice present).
 // null: no marker, so the move is not known to have happened.
 function checkLegacyDivergence(legacyDir, dataDir) {
-  try { JSON.parse(fs.readFileSync(path.join(dataDir, MARKER), 'utf8')); } catch { return null; }
-  return fs.existsSync(path.join(legacyDir, 'data.db'));
+  if (!readMarker(dataDir)) return null;
+  return fs.existsSync(path.join(legacyDir, 'data.db')) && fs.existsSync(path.join(legacyDir, MOVED_NOTICE));
 }
 
-// Plain-text notice left in the legacy kb. It says what moved and that there is
-// no automatic rollback.
 function writeMovedNotice(legacyDir, dataDir, report) {
   const text = [
-    'The live data was MOVED to the app data directory. The copies in this folder were deleted.',
+    'The live data was MOVED to the app data directory.',
     '',
     `Moved on:   ${new Date().toISOString()}`,
     `Now lives:  ${dataDir}`,
-    `Moved:      ${(report.removedLegacy ?? []).join(', ') || 'nothing removed'}`,
-    `Tables:     ${Object.keys(report.tables ?? {}).length} (row counts verified before the legacy copies were deleted)`,
-    'Still here: backups/ (old DB copies, not moved; delete them by hand once you have checked the new location)',
+    `Moved here: ${(report.removedLegacy ?? []).join(', ') || 'nothing'}`,
+    `Tables:     ${Object.keys(report.tables ?? {}).length} (verified before the move)`,
     '',
-    'Rollback is NOT automatic. The move deleted the legacy database. To go back,',
-    'restore a backup from the data directory (backups/data-<unix>.db, the newest',
-    'two are kept; see docs/how-to/data-location-and-rollback.md). Anything written',
-    'after the newest backup is lost unless it is still in the data directory.',
+    'For ONE boot the originals are kept as <name>.pre-move in this folder. The next',
+    'server boot deletes them, after that boot has opened the new DB healthily. If',
+    'that next boot looks wrong, do not start it: restore from the .pre-move files',
+    '(see docs/how-to/data-location-and-rollback.md). After that there is no copy',
+    'except backups.',
+    '',
+    'Still here: backups/ (old DB copies, not moved; delete them by hand once you',
+    'have checked the new location).',
+    '',
+    'Rollback is NOT automatic after the .pre-move files are gone. Restore a backup',
+    'from the data directory (backups/data-<unix>.db, the newest two are kept). Any',
+    'write after the newest backup is lost unless it is still in the data directory.',
     '',
   ].join('\n');
   try {
-    fs.writeFileSync(path.join(legacyDir, 'MOVED-TO-APP-SUPPORT.txt'), text);
+    writeFileAtomic(path.join(legacyDir, MOVED_NOTICE), text);
   } catch (err) {
-    report.notes.push(`could not write MOVED-TO-APP-SUPPORT.txt: ${err.message}`);
+    report.notes.push(`could not write ${MOVED_NOTICE}: ${err.message}`);
   }
 }
 
-function closeQuietly(db) {
-  try { if (db && db.open) db.close(); } catch { /* already closed */ }
+function readMarker(dataDir) {
+  return readJson(path.join(dataDir, MARKER));
 }
 
-function tableCounts(db) {
-  const names = db.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name").pluck().all();
-  const counts = {};
-  for (const name of names) {
-    counts[name] = db.prepare(`SELECT COUNT(*) AS n FROM "${name.replace(/"/g, '""')}"`).get().n;
-  }
-  return counts;
+function readJson(file) {
+  try { return JSON.parse(fs.readFileSync(file, 'utf8')); } catch { return null; }
+}
+
+// Write to a temp file, fsync it, rename over the target, fsync the directory.
+function writeFileAtomic(file, text, mode = 0o600) {
+  const tmp = `${file}.tmp-${process.pid}`;
+  const fd = fs.openSync(tmp, 'w', mode);
+  try { fs.writeSync(fd, text); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+  fs.renameSync(tmp, file);
+  fsyncPath(path.dirname(file));
+}
+
+// fsync a file or a directory. Node has no F_FULLFSYNC: on macOS this is a plain fsync.
+function fsyncPath(p) {
+  const fd = fs.openSync(p, 'r');
+  try { fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+}
+
+// Manifest of a tree: every entry's relative path, kind, size (files) or link target (symlinks).
+function treeManifest(dir) {
+  const out = [];
+  const walk = (cur) => {
+    for (const ent of fs.readdirSync(cur, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      const p = path.join(cur, ent.name);
+      const rel = path.relative(dir, p);
+      const st = fs.lstatSync(p);
+      if (st.isSymbolicLink()) out.push({ rel, kind: 'link', target: fs.readlinkSync(p) });
+      else if (st.isDirectory()) { out.push({ rel, kind: 'dir' }); walk(p); }
+      else if (st.isFile()) out.push({ rel, kind: 'file', size: st.size });
+      else out.push({ rel, kind: 'other' });
+    }
+  };
+  walk(dir);
+  return out;
 }
 
 function treeBytes(dir) {
   if (!fs.existsSync(dir)) return 0;
   let total = 0;
-  const stack = [dir];
-  while (stack.length) {
-    const cur = stack.pop();
-    for (const ent of fs.readdirSync(cur, { withFileTypes: true })) {
-      const p = path.join(cur, ent.name);
-      if (ent.isDirectory()) stack.push(p);
-      else if (ent.isFile()) total += fs.statSync(p).size;
-    }
-  }
+  for (const m of treeManifest(dir)) if (m.kind === 'file') total += m.size;
   return total;
 }
 
-function rmTree(p) {
-  try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* best effort */ }
+// Remove, and throw when the path is still there afterwards (ENOENT is not a failure).
+function removeStrict(p) {
+  try {
+    fs.rmSync(p, { recursive: true, force: true });
+  } catch (err) {
+    if (err.code !== 'ENOENT') throw err;
+  }
+  if (pathPresent(p)) throw new Error(`could not remove ${p}`);
+}
+
+// Present as a file, directory or symlink (a dangling symlink counts).
+function pathPresent(p) {
+  try { fs.lstatSync(p); return true; } catch { return false; }
+}
+
+function rmTreeStrictIfExists(p) {
+  if (fs.existsSync(p)) removeStrict(p);
+}
+
+function renameStrict(from, to) {
+  fs.renameSync(from, to);
+  if (pathPresent(from)) throw new Error(`could not move ${from}`);
+}
+
+function removeQuietly(p) {
+  try { fs.rmSync(p, { recursive: true, force: true }); } catch { /* best effort: callers that need certainty use removeStrict */ }
+}
+
+function closeQuietly(db) {
+  try { if (db && db.open) db.close(); } catch { /* already closed */ }
 }

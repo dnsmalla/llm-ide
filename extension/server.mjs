@@ -2,6 +2,7 @@
 import './core/env-compat.mjs';
 // Must precede every import that reads config/logger/DB (see the module).
 import { dataDirMigration } from './kb/data-dir-boot.mjs';
+import { completeGraceAfterHealthyBoot } from './kb/data-dir-migration.mjs';
 import http from 'http';
 import { execFile } from 'child_process';
 import path from 'path';
@@ -1195,6 +1196,12 @@ server.listen(PORT, HOST, () => {
   // a slow first request would otherwise pay the migration cost.
   try {
     getDb({ logger });
+    // The DB opened healthily: the previous boot's move may now drop its .pre-move copies.
+    {
+      const grace = completeGraceAfterHealthyBoot(dataDirMigration);
+      if (grace.removed.length) logger.info('data_move_grace_completed', { removed: grace.removed });
+      if (grace.kept.length) logger.warn('data_move_grace_kept', { kept: grace.kept });
+    }
     // agent.db (Stage 1b): open and raise the id floors before any request
     // can write. Never throws; a failure leaves the store down (best-effort).
     openAgentStoreAtBoot({ logger });
