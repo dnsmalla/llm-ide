@@ -1,12 +1,12 @@
 {
-  "originHash" : "785387e268a363b748d2cc46e1802ce336437fd2d43385d4a49c94c88112b81d",
+  "originHash" : "9748acc2c098747b293a742df96da7cfd096317439aa569254889220892a43f2",
   "pins" : [
     {
       "identity" : "graph-kit",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/dnsmalla/graph-kit.git",
       "state" : {
-        "revision" : "117922ccb070b7368fd3a2d3ae7fa82ffdf87a00"
+        "revision" : "c0bcb6e44579ec85ca3fb34825f02378bb260920"
       }
     },
     {

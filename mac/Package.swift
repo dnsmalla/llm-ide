@@ -327,7 +327,7 @@ if graphIncluded {
 let graphKitDependency: Package.Dependency =
     ProcessInfo.processInfo.environment["GRAPHKIT_LOCAL"] == "1"
     ? .package(path: "LocalPackages/graph-kit")
-    : .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "117922ccb070b7368fd3a2d3ae7fa82ffdf87a00")
+    : .package(url: "https://github.com/dnsmalla/graph-kit.git", revision: "c0bcb6e44579ec85ca3fb34825f02378bb260920")
 
 // The SharedProtocol PACKAGE is gated with its product: a local path
 // dependency no target uses (mobile_sync off) makes SwiftPM warn "dependency
