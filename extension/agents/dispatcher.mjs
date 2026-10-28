@@ -10,7 +10,7 @@
 // re-running the dispatch is idempotent — handy when only a subset
 // failed on the first attempt.
 
-import { getPlan, mergeTaskMeta, getTaskById, getDb, claimTaskForDispatch, releaseTaskDispatchClaim } from '../kb/db.mjs';
+import { getPlan, mergeTaskMeta, getTaskById, claimTaskForDispatch, releaseTaskDispatchClaim } from '../kb/db.mjs';
 import { pMap } from '../core/p-map.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
 import { jittered } from '../providers/runtime.mjs';
@@ -122,7 +122,7 @@ async function dispatchGithub(userId, { plan, tasks, repo, token, labels = [] })
       };
       mergeTaskMeta(userId, task.id, { dispatched }); // overwrites the sentinel
       try {
-        recordActivity(getDb(), {
+        recordActivity({
           userId,
           kind: 'dispatch_issue_created',
           title: `Dispatched issue to ${dispatched.provider} — #${dispatched.number}`,
@@ -198,7 +198,7 @@ async function dispatchBacklog(userId, { plan, tasks, space, projectId, apiKey, 
       };
       mergeTaskMeta(userId, task.id, { dispatched }); // overwrites the sentinel
       try {
-        recordActivity(getDb(), {
+        recordActivity({
           userId,
           kind: 'dispatch_issue_created',
           title: `Dispatched issue to ${dispatched.provider} — #${dispatched.number}`,
@@ -290,7 +290,7 @@ async function dispatchLinear(userId, { plan, tasks, teamId, apiKey, projectId }
       };
       mergeTaskMeta(userId, task.id, { dispatched }); // overwrites the sentinel
       try {
-        recordActivity(getDb(), {
+        recordActivity({
           userId,
           kind: 'dispatch_issue_created',
           title: `Dispatched issue to ${dispatched.provider} — #${dispatched.number}`,

@@ -211,7 +211,7 @@ export function recordOutcome(userId, { taskId, provider, ref, state, meta = {} 
 
     if (fromState !== state) {
       try {
-        recordActivity(db, {
+        recordActivity({
           userId,
           kind: 'outcome_changed',
           title: `${ref} ${state}`,

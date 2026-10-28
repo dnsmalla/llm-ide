@@ -477,7 +477,7 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
               log.warn('provider_reactive_fallback', { provider, from: model, to: next.model });
               if (shouldNotifyFallback(meter.userId, provider, model)) {
                 try {
-                  recordActivity(getDb(), {
+                  recordActivity({
                     userId: meter.userId, kind: 'model_fallback',
                     title: `Switched ${model} → ${next.model} (${provider} rate limit)`,
                     detail: { provider, from: model, to: next.model, reason: 'quota_429' },

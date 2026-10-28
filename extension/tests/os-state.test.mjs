@@ -176,11 +176,11 @@ test('tenancy — user B sees none of user A’s usage, activity, memory or sour
   const { recordActivity } = await import('../kb/activity.mjs');
   const { recordMemoryLedger } = await import('../kb/memory-ledger.mjs');
   insertUsage(db, userA, { provider: 'anthropic', model: 'm-A', source: 'api', endpoint: '/a', input: 500, output: 0 });
-  recordActivity(db, { userId: userA, kind: 'meeting_added', title: 'A meeting' });
+  recordActivity({ userId: userA, kind: 'meeting_added', title: 'A meeting' });
   recordMemoryLedger(userA, '/example/repo-a', { confirmed: ['[decision] use sqlite'] });
   db.prepare(`INSERT INTO sources (kind, ref, chunk_idx, title, body, user_id) VALUES ('code', 'a.mjs', 0, 'A', 'x', ?)`)
     .run(userA);
-  recordActivity(db, { userId: userB, kind: 'meeting_added', title: 'B meeting' });
+  recordActivity({ userId: userB, kind: 'meeting_added', title: 'B meeting' });
 
   const b = (await getState(userB)).body;
   assert.equal(b.tokens.totals.input, 0);
@@ -199,9 +199,9 @@ test('tenancy — user B sees none of user A’s usage, activity, memory or sour
 });
 
 test('activity — the limit parameter bounds the feed and the unread count is reported', async () => {
-  const { db, userA } = await setup();
+  const { userA } = await setup();
   const { recordActivity } = await import('../kb/activity.mjs');
-  for (let i = 0; i < 40; i += 1) recordActivity(db, { userId: userA, kind: 'meeting_added', title: `m${i}` });
+  for (let i = 0; i < 40; i += 1) recordActivity({ userId: userA, kind: 'meeting_added', title: `m${i}` });
   const def = (await getState(userA)).body.activity;
   assert.equal(def.items.length, 30);
   assert.equal(def.unread, 40);
@@ -232,7 +232,7 @@ test('timing — a few hundred rows are answered in under 50 ms', async () => {
         endpoint: `/e/${i % 5}`, input: 100 + i, output: 10, cacheRead: 50, cacheWrite: 5 });
     }
   })();
-  for (let i = 0; i < 200; i += 1) recordActivity(db, { userId: userA, kind: 'meeting_added', title: `t${i}` });
+  for (let i = 0; i < 200; i += 1) recordActivity({ userId: userA, kind: 'meeting_added', title: `t${i}` });
   await getState(userA); // warm the statement cache
   const t0 = performance.now();
   const res = await getState(userA);

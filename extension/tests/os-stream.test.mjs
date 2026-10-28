@@ -101,7 +101,7 @@ test('the stream opens with a hello event and carries only type and at', async (
 test('tenancy: user B never sees user A events', async () => {
   const a = await openStream(userA);
   const b = await openStream(userB);
-  recordActivity(db, { userId: userA, kind: 'knowledge_updated', title: 'A only' });
+  recordActivity({ userId: userA, kind: 'knowledge_updated', title: 'A only' });
   assert.deepEqual(a.types(), ['activity']);
   assert.deepEqual(b.types(), []);
   a.disconnect();
@@ -110,7 +110,7 @@ test('tenancy: user B never sees user A events', async () => {
 
 test('recordActivity emits activity', async () => {
   const s = await openStream(userA);
-  recordActivity(db, { userId: userA, kind: 'meeting_added', title: 'emit check' });
+  recordActivity({ userId: userA, kind: 'meeting_added', title: 'emit check' });
   assert.ok(s.types().includes('activity'));
   s.disconnect();
 });

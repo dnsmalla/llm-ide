@@ -664,7 +664,7 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, { messages, skipped });
         if (fetchCount > 0) {
           try {
-            recordActivity(kb.getDb(), {
+            recordActivity({
               userId,
               kind: 'email_fetched',
               title: `Fetched ${fetchCount} new email${fetchCount === 1 ? '' : 's'}`,
@@ -745,7 +745,7 @@ export async function handleKB(req, res) {
         sendJSON(res, 200, { messages, skipped });
         if (slackCount > 0) {
           try {
-            recordActivity(kb.getDb(), {
+            recordActivity({
               userId,
               kind: 'slack_fetched',
               title: `Fetched ${slackCount} new Slack message${slackCount === 1 ? '' : 's'}${channelId ? ` (#${channelId})` : ''}`,
@@ -964,18 +964,16 @@ export async function handleKB(req, res) {
       const u = new URL(url, 'http://127.0.0.1');
       const sinceId = Number(u.searchParams.get('since')) || 0;
       const limit = Math.min(Math.max(Number(u.searchParams.get('limit')) || 100, 1), 200);
-      const db = kb.getDb();
-      const items = listActivity(db, userId, { sinceId, limit });
+      const items = listActivity(userId, { sinceId, limit });
       const lastId = items.length ? items[0].id : sinceId;
-      sendJSON(res, 200, { items, unread: unreadCount(db, userId), lastId });
+      sendJSON(res, 200, { items, unread: unreadCount(userId), lastId });
       return true;
     }
 
     if (req.method === 'POST' && url === '/kb/activity/seen') {
       const body = parseJSON(await readBody(req, 16 * 1024)) || {};
-      const db = kb.getDb();
-      markSeen(db, userId, Number(body.uptoId) || 0);
-      sendJSON(res, 200, { ok: true, unread: unreadCount(db, userId) });
+      markSeen(userId, Number(body.uptoId) || 0);
+      sendJSON(res, 200, { ok: true, unread: unreadCount(userId) });
       return true;
     }
 
@@ -985,8 +983,7 @@ export async function handleKB(req, res) {
         sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Invalid activity kind or title' } });
         return true;
       }
-      const db = kb.getDb();
-      const id = recordActivity(db, {
+      const id = recordActivity({
         userId, kind: body.kind, title: body.title, detail: body.detail, link: body.link,
       });
       if (id == null) {

@@ -156,9 +156,8 @@ test('recordActivity is called for email_fetched with count>0 shape', async () =
   resetDb();
   getDb();
   const { id: userId } = registerUser(getDb(), { email: 'u-email-evt@example.com', password: 'pw-12345678', displayName: 'evttest' });
-  const dbInst = getDb();
-  recordActivity(dbInst, { userId, kind: 'email_fetched', title: 'Fetched 7 new emails', detail: { count: 7 } });
-  const items = listActivity(dbInst, userId, {});
+  recordActivity({ userId, kind: 'email_fetched', title: 'Fetched 7 new emails', detail: { count: 7 } });
+  const items = listActivity(userId, {});
   assert.equal(items[0].kind, 'email_fetched');
 });
 

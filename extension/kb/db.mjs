@@ -8,6 +8,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { applyMigrations } from './migrations.mjs';
 import { config } from '../core/config.mjs';
+import { purgeUserHistory } from './agent-store.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const DB_PATH = config.dbPath || path.join(__dirname, 'data.db');
@@ -1037,7 +1038,12 @@ export function deleteUserCascade(userId) {
     counts.user = del('DELETE FROM users WHERE id = ?');
     return counts;
   });
-  return tx();
+  const counts = tx();
+  // agent.db history (Stage 1b) lives in another file, so it cannot join the
+  // transaction above. Purged after the main commit; a failure leaves a
+  // pending marker that the next boot replays.
+  purgeUserHistory(userId);
+  return counts;
 }
 
 // Self-consistent hot backup (works on a live DB without locking it).

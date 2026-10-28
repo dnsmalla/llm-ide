@@ -274,32 +274,33 @@ test('slack_seen and slack_state are wiped on user deletion (KB-2)', () => {
 test('deleteUserCascade removes activity + activity_seen rows (KB-3)', async () => {
   reset();
   const { recordActivity, markSeen } = await import('../kb/activity.mjs');
-  const handle = db.getDb();
+  const { getAgentDb } = await import('../kb/agent-db.mjs');
+  const agent = getAgentDb();
   const userId = provision('u-cascade-activity@example.com').id;
 
-  const id = recordActivity(handle, { userId, kind: 'meeting_added', title: 'm' });
+  const id = recordActivity({ userId, kind: 'meeting_added', title: 'm' });
   assert.ok(id != null, 'recordActivity should return a row id');
-  markSeen(handle, userId, id);
+  markSeen(userId, id);
 
   // Pre-deletion: both tables have rows for this user.
   assert.ok(
-    handle.prepare('SELECT COUNT(*) AS c FROM activity WHERE user_id = ?').get(userId).c > 0,
+    agent.prepare('SELECT COUNT(*) AS c FROM activity WHERE user_id = ?').get(userId).c > 0,
     'activity row should exist before cascade',
   );
   assert.ok(
-    handle.prepare('SELECT COUNT(*) AS c FROM activity_seen WHERE user_id = ?').get(userId).c > 0,
+    agent.prepare('SELECT COUNT(*) AS c FROM activity_seen WHERE user_id = ?').get(userId).c > 0,
     'activity_seen row should exist before cascade',
   );
 
   db.deleteUserCascade(userId);
 
   assert.equal(
-    handle.prepare('SELECT COUNT(*) AS c FROM activity WHERE user_id = ?').get(userId).c,
+    agent.prepare('SELECT COUNT(*) AS c FROM activity WHERE user_id = ?').get(userId).c,
     0,
     'activity rows should be gone after cascade',
   );
   assert.equal(
-    handle.prepare('SELECT COUNT(*) AS c FROM activity_seen WHERE user_id = ?').get(userId).c,
+    agent.prepare('SELECT COUNT(*) AS c FROM activity_seen WHERE user_id = ?').get(userId).c,
     0,
     'activity_seen rows should be gone after cascade',
   );

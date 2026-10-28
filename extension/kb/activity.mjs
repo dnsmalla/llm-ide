@@ -6,6 +6,7 @@
 // must never throw into the operation that triggered the event.
 import { redact } from '../core/redact-object.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
+import { getAgentDb } from './agent-db.mjs';
 
 // The v1 event-kind allow-list (shared contract; Swift mirrors this).
 export const ACTIVITY_KINDS = new Set([
@@ -57,12 +58,18 @@ function encodeDetail(detail) {
   return json.length > DETAIL_CAP ? json.slice(0, DETAIL_CAP) : json;
 }
 
+// The feed lives in agent.db (Stage 1b). Every call is synchronous: the feed
+// needs the inserted id, so these never go through the write queue.
+
 // Insert one event and prune the user's feed to the newest KEEP_PER_USER rows.
-// Returns the inserted row id, or null on invalid input / failure.
-export function recordActivity(db, { userId, kind, title, detail, link } = {}) {
+// Returns the inserted row id, or null on invalid input / failure (including a
+// store that is down).
+export function recordActivity({ userId, kind, title, detail, link } = {}) {
   if (!userId || !ACTIVITY_KINDS.has(kind) || typeof title !== 'string' || !title) {
     return null;
   }
+  const db = getAgentDb();
+  if (!db) return null;
   try {
     const info = db.prepare(
       `INSERT INTO activity (user_id, kind, title, detail, link) VALUES (?, ?, ?, ?, ?)`
@@ -82,7 +89,9 @@ export function recordActivity(db, { userId, kind, title, detail, link } = {}) {
 
 // Newest-first feed.  sinceId>0 → only rows after that id (incremental poll);
 // otherwise the newest `limit` rows.
-export function listActivity(db, userId, { sinceId = 0, limit = 100 } = {}) {
+export function listActivity(userId, { sinceId = 0, limit = 100 } = {}) {
+  const db = getAgentDb();
+  if (!db) return [];
   // Clamp defensively: the HTTP route already bounds limit, but other callers
   // could pass 0 (SQLite LIMIT 0 → no rows) or a negative (LIMIT -1 → no limit).
   limit = Math.max(1, Math.min(Number(limit) || 100, 500));
@@ -103,7 +112,9 @@ export function listActivity(db, userId, { sinceId = 0, limit = 100 } = {}) {
 }
 
 // Number of events newer than the user's last-seen cursor.
-export function unreadCount(db, userId) {
+export function unreadCount(userId) {
+  const db = getAgentDb();
+  if (!db) return 0;
   const row = db.prepare(
     `SELECT COUNT(*) AS c FROM activity
       WHERE user_id = ?
@@ -113,7 +124,9 @@ export function unreadCount(db, userId) {
 }
 
 // Advance the last-seen cursor; never lowers it.
-export function markSeen(db, userId, uptoId) {
+export function markSeen(userId, uptoId) {
+  const db = getAgentDb();
+  if (!db) return 0;
   // Only a positive integer id advances the cursor; anything else is a no-op
   // floor of 0 (the MAX upsert below never lowers an existing cursor).
   const upto = Number.isInteger(uptoId) && uptoId > 0 ? uptoId : 0;

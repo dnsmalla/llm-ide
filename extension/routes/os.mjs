@@ -202,7 +202,7 @@ export async function handleOsRoutes(req, res, { userId, url }) {
     cancel: null,
   }));
 
-  const activityItems = listActivity(db, userId, { limit: activityLimit }).map((a) => ({
+  const activityItems = listActivity(userId, { limit: activityLimit }).map((a) => ({
     id: a.id,
     kind: a.kind,
     title: a.title,
@@ -223,7 +223,7 @@ export async function handleOsRoutes(req, res, { userId, url }) {
       checks: health.checks,
     },
     running: { chatTurns, meetingAgentRuns, liveSessions },
-    activity: { unread: unreadCount(db, userId), items: activityItems },
+    activity: { unread: unreadCount(userId), items: activityItems },
     tokens: { ...usageForWindow(db, userId, windowParam), turnComposition },
     knowledge: {
       ...knowledgeCounts(db, userId),

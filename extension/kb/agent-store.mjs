@@ -13,7 +13,14 @@ import {
   agentDbFile, agentStoreStatus, checkStorageSize, enqueueAgentWrite, flushAgentQueue,
   getAgentDb, localDay, localDayBefore, readMeta, writeMeta,
 } from './agent-db.mjs';
-import { requireUser } from './db.mjs';
+// Local, not imported from db.mjs: db.mjs imports this module (user purge), so
+// importing back would be a cycle. Same rule as db.mjs requireUser.
+function requireUser(userId) {
+  if (!userId || typeof userId !== 'string') {
+    throw new Error('userId is required for tenanted operations');
+  }
+  return userId;
+}
 
 export const DEFAULT_RETENTION_DAYS = 30;
 export const MIN_RETENTION_DAYS = 7;
@@ -512,4 +519,23 @@ export function purgeUser(userId, { db } = {}) {
     }
     return { ok: true, deleted };
   })();
+}
+
+/**
+ * Best-effort purge for deleteUserCascade. Never throws: when the purge
+ * cannot run now, a pending marker is left in store_meta so the next boot
+ * replays it (Stage 1b boot job). Returns { ok, deleted? , pending? }.
+ */
+export function purgeUserHistory(userId) {
+  try {
+    const db = getAgentDb();
+    if (!db) return { ok: false, pending: true };
+    return purgeUser(userId, { db });
+  } catch {
+    try {
+      const db = getAgentDb();
+      if (db) writeMeta(db, `pending_purge:${userId}`, new Date().toISOString());
+    } catch { /* store unusable: the marker cannot be written either */ }
+    return { ok: false, pending: true };
+  }
 }
