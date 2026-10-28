@@ -233,7 +233,7 @@ Rule (plan): *does it get better on its own when the model/SDK improves?* → de
 
 - `templates/<folder>/template.md` plus `templates/README.md` (`Core/Generation/Services/DocTemplateStore.swift:175-245`, `ProjectDocTemplatesSeeder.swift:24-71`). Surface marker in the file header (`TemplateSurface.swift`, `GenerationConformance.swift`).
 - `commands/<folder>/command.md` plus `commands/README.md` (`DocCommandStore.swift:101-170`, `ProjectDocCommandsSeeder.swift:19-53`).
-- Output: `data/` (`DocGenOutputConfig.swift:54`; `ProjectLayout.dataDir`). Phone saves go to `llm-doc/generated/` (`MobileControlManager.swift:756`).
+- Output: `llm-doc/generated/` by default (`DocGenOutputConfig.swift`; `ProjectLayout.generatedDocsDir`), since the 2026-10-28 move from `data/` (D4/D5). A folder saved before then still wins. Phone saves go to `llm-doc/generated/` (`MobileControlManager.swift:756`).
 - Auto-task folder `templates/auto_task/` is skipped by name (`ProjectLayout.swift:61`, `DocTemplateStore.swift:207`; `invariants.md:592`).
 - Seed-source comment: `Core/Project/Project.swift:70-71` says doc templates are "seeded on disk under `templates/` by `ProjectDocTemplatesSeeder`", which is the real source.
 

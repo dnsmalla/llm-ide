@@ -16,29 +16,61 @@ imported files into the right one. A folder is accepted as a project only when
 it already contains `system/project.json` or is completely empty
 (`ProjectScaffolder.validate`).
 
+## Placement rule
+
+Two homes, decided 2026-10-28 (D4/D5):
+
+- **`llm-doc/`** holds **human-readable generated content**: notes, plans,
+  Loop outputs, and Doc Gen exports. A person reads these, so they are
+  tracked in git and browsable from the Library.
+- **`system/`** holds **machine-consumed artifacts**: code notes, agent memory,
+  fault reports, Q&A, search indexes, and databases. Agents and the app read
+  these; a person rarely opens them, and most are git-ignored.
+
+`ProjectLayout` (`Core/Project/ProjectLayout.swift`) is the single source of
+truth for these paths; its header comment states the same rule.
+
 ## Canonical tree
 
 ```text
 <project>/
-├── source/        raw inputs (your Sources)
+├── source/          raw inputs (your Sources)
 │   ├── meetings/    YYYY/MM/<ts>-<slug>.md
 │   ├── emails/      YYYY/MM/<ts>-<slug>
 │   ├── documents/   YYYY/MM/…
 │   └── <noteType>/  YYYY/MM/…   (connectors, e.g. slack/)
-├── code/          code files / cloned repos
-├── data/          documents, data files, images; Doc Gen markdown exports
-├── llm-doc/       generated notes (AI output) — detailed below
-├── templates/     Doc Gen templates, one subfolder each (<slug>/template.md)
-├── commands/      Doc Gen commands, one subfolder each (<slug>/command.md)
-├── system/        LLM-IDE managed state (mostly git-ignored)
-│   ├── project.json   project marker + settings (written by ProjectStore)
-│   ├── faults/        fault log entries
-│   ├── graph/         knowledge graph + code notes (git-ignored)
-│   ├── cache/         runtime cache (git-ignored)
-│   ├── index.sqlite   full-text index (git-ignored)
-│   └── sync.json      last export info (git-ignored)
-└── .claude/       project-level agent config (project.md, settings.json, skills/...)
+├── code/            code files / cloned repos (code/<repo> child git repos)
+├── data/            user-added documents, data files, images (not Doc Gen output)
+├── llm-doc/         human-readable generated content — detailed below
+│   ├── meetings/ emails/ documents/ <noteType>/   YYYY/MM/…  (generated notes)
+│   ├── plans/       KB plans exported as Markdown
+│   ├── loop/<key>/  Loop outputs (plan/, refactor/, test/, … per loop key)
+│   └── generated/   Doc Gen exports (default output folder)
+├── templates/       Doc Gen templates, one subfolder each (<slug>/template.md)
+├── commands/        Doc Gen commands, one subfolder each (<slug>/command.md)
+├── .self-heal/      Self-Heal proposal batch (BATCH.md), relative to the repo root;
+│                    created on demand
+├── system/          machine-consumed state (mostly git-ignored)
+│   ├── project.json     project marker + settings (written by ProjectStore)
+│   ├── loop.json        Loop contract — committed, so a fresh clone reloads it
+│   ├── loop-runs/       Loop run journal (git-ignored)
+│   ├── loop-worktrees/  Loop git worktrees (git-ignored)
+│   ├── memory/          agent memory artifacts: graph-notes.md, doc-notes.md,
+│   │                    chat-memory.md (rewritten in place)
+│   ├── q&a/             Q&A store (MemoryStore)
+│   ├── faults/          fault log entries (MemoryStore)
+│   ├── repo.md          no longer written; the code summary is graph/index.md
+│   ├── graph/           knowledge graph + code notes (git-ignored)
+│   ├── cache/           runtime cache (git-ignored)
+│   ├── index.sqlite     full-text index (git-ignored)
+│   └── sync.json        last export info (git-ignored)
+└── .claude/         project-level agent config (project.md, settings.json, skills/...)
 ```
+
+> **Being moved.** Today, graph and memory output may be written under
+> `<repo>/system/` of a cloned repo under `code/`, not under the project's own
+> `system/`. This split is being fixed in a later task. Until then, look in the
+> repo's `system/` as well as the project's.
 
 ## Folders at a glance
 
@@ -46,12 +78,20 @@ it already contains `system/project.json` or is completely empty
 |---|---|---|---|
 | `source/` | raw inputs — per-type: `meetings/`, `emails/`, `documents/`, `<connector>/` | yes | capture / import |
 | `code/` | code files, cloned repos (`code/<repo>` child git repos) | yes | user / import |
-| `data/` | documents, data, images; Doc Gen markdown export | yes | import / Doc Gen export |
+| `data/` | user-added documents, data, images | yes | import |
 | `llm-doc/` | generated notes (AI output) | yes (`.gitkeep`) | `NoteService` + meeting/email/connector writers |
+| `llm-doc/plans/` | KB plans as Markdown | yes | `ProjectExporter.writePlans` |
+| `llm-doc/loop/<key>/` | Loop outputs (plan, refactor, test, …) | yes | Loop stages |
+| `llm-doc/generated/` | Doc Gen markdown exports (default folder) | yes | Doc Gen export |
 | `templates/` | Doc Gen templates (`<slug>/template.md`) | yes | `DocTemplateStore`, `ProjectDocTemplatesSeeder` |
 | `commands/` | Doc Gen commands (`<slug>/command.md`) | yes | `DocCommandStore`, `ProjectDocCommandsSeeder` |
+| `.self-heal/` | Self-Heal proposal batch (`BATCH.md`) | yes | `SelfHealBatch` |
 | `system/project.json` | project marker + metadata | yes | `ProjectStore` |
-| `system/faults/` | fault log entries | yes | `MemoryStore` |
+| `system/loop.json` | Loop contract | yes | Loop engine config store |
+| `system/loop-runs/` | Loop run journal | **no** | Loop engine |
+| `system/loop-worktrees/` | Loop git worktrees | **no** | `LoopWorktreeManager` |
+| `system/memory/` | agent memory artifacts | **no** | `KnowledgeGraphService.writeMemoryArtifact` |
+| `system/q&a/`, `system/faults/` | Q&A store, fault log entries | yes | `MemoryStore` |
 | `system/graph/` | knowledge graph + code notes | **no** | `GraphAutoUpdater`, `CodeNoteService` |
 | `system/cache/` | runtime cache | **no** | various services |
 | `system/index.sqlite` | full-text search index | **no** | indexer |
@@ -77,6 +117,9 @@ and the Library UI labels the section "LLM Doc".
 ├── emails/        <YYYY>/<MM>/<filename>.md
 ├── documents/     <YYYY>/<MM>/<filename>.md
 ├── <noteType>/    new Source Connectors use their raw type name (e.g. slack/)
+├── plans/         KB plans as Markdown (written on export)
+├── loop/<key>/    Loop outputs, one folder per loop key (plan/, refactor/, test/, …)
+├── generated/     Doc Gen exports (default output folder; see "Not here" below)
 └── index.json     unified note index (maintained by NoteService)
 ```
 
@@ -108,9 +151,11 @@ and the Library UI labels the section "LLM Doc".
 
 ### Not here
 
-- Doc Gen markdown exports (`POST /generate-doc`) default to `<project>/data/`,
-  not `llm-doc/` — the output folder is configurable per project in Doc Gen's
-  Setup section (`DocGenOutputStore`), so a given install may write elsewhere.
+- Doc Gen markdown exports (`POST /generate-doc`) default to
+  `<project>/llm-doc/generated/` (`ProjectLayout.generatedDocsDir`). This moved
+  from `data/` on 2026-10-28. A folder saved before then keeps working, since a
+  stored path always wins (no migration). The folder is configurable per project
+  in Doc Gen's Setup section (`DocGenOutputStore`).
 - Code notes live under `system/graph/`, not `llm-doc/`.
 - Raw transcripts live under `source/`.
 
