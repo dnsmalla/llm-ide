@@ -328,3 +328,33 @@ test('the storage rows count only what clear can delete (the activity feed is no
   const after = (await call('GET', '/kb/storage', null, a)).json().groups.find((g) => g.key === 'agent_history').rows;
   assert.equal(after, before, 'an activity row does not change the agent-history count');
 });
+
+test('compact is busy while a Loop-style run (any begun run) is open, and free after it finishes', async () => {
+  freshAgent();
+  const a = user('p4');
+  const { beginAgentRun } = await import('../kb/agent-runs.mjs');
+  const run = beginAgentRun(a, { runId: 'loop-busy', source: 'loop', engine: 'loop' });
+  const busy = await call('POST', '/kb/agent-history/compact', {}, a);
+  assert.equal(busy.statusCode, 409, 'a run begun through kb/agent-runs blocks compact');
+  assert.equal(busy.json().error.code, 'busy');
+  run.finish({ status: 'ok' });
+  run.finish({ status: 'ok' });                    // a second finish changes nothing
+  const free = await call('POST', '/kb/agent-history/compact', {}, a);
+  assert.equal(free.statusCode, 200, free._body);
+});
+
+test('compact re-checks the guard during its slices: a run that starts mid-compact makes it busy', async () => {
+  freshAgent();
+  const a = user('p5');
+  const handle = agent.getAgentDb();
+  // Free pages, so compact enters its incremental loop.
+  store.enqueueToolEvents(a, 'pad', { engine: 'v2', events: Array.from({ length: 200 }, (_, i) => ({ tool: `t${i}`, resultChars: i })) });
+  agent.flushAgentQueue();
+  handle.prepare('DELETE FROM agent_tool_events').run();
+  assert.ok(handle.pragma('freelist_count', { simple: true }) > 0, 'there are free pages to reclaim');
+  let calls = 0;
+  const result = await store.compact({ inFlight: () => { calls += 1; return calls > 1; }, yieldFn: async () => {} });
+  assert.equal(result.ok, false);
+  assert.equal(result.reason, 'busy');
+  assert.ok(calls >= 2, 'the guard was checked again inside the loop');
+});

@@ -18,12 +18,23 @@ export function runTotals(usage) {
   };
 }
 
+// Runs begun and not yet finished in this process: the compact guard reads it.
+// Every run that begins here (chat v2, legacy code-assist, Loop, meeting agent)
+// finishes exactly once, so the count returns to zero when nothing is running.
+let openRuns = 0;
+
+/** Runs in flight in this process (any source). The compact guard reads it. */
+export function agentRunsInFlight() {
+  return openRuns;
+}
+
 /**
  * Open a run. Returns { finish(close) }. `finish` is idempotent: only the
  * first call writes, so a path that closes twice cannot double-count.
  */
 export function beginAgentRun(userId, { runId, source, engine = null, mode = null, provider = null, model = null } = {}) {
   const startedMs = Date.now();
+  openRuns += 1;
   try {
     openRun(userId, { runId, source, engine, mode, provider, model }, {});
   } catch { /* best effort */ }
@@ -33,6 +44,7 @@ export function beginAgentRun(userId, { runId, source, engine = null, mode = nul
     finish(close = {}) {
       if (done) return false;
       done = true;
+      openRuns = Math.max(0, openRuns - 1);
       try {
         return enqueueRunClose(userId, runId, { ...close, durationMs: Date.now() - startedMs });
       } catch {

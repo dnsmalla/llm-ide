@@ -21,6 +21,7 @@ import {
 } from '../kb/agent-store.mjs';
 import { checkPreview, issuePreview, storageReport } from '../kb/agent-history-api.mjs';
 import { anyChatTurnInFlight } from './agent-v2.mjs';
+import { agentRunsInFlight } from '../kb/agent-runs.mjs';
 import { anyMeetingRunInFlight } from '../agents/meeting-agent.mjs';
 
 const SCOPES = new Set(['raw', 'all']);
@@ -87,7 +88,11 @@ export async function handleAgentHistoryRoutes(req, res, { userId, url }) {
   }
   if (req.method === 'POST' && path === '/kb/agent-history/compact') {
     if (!getAgentDb()) return storeDown(res);
-    const result = await compact({ inFlight: () => anyChatTurnInFlight() || anyMeetingRunInFlight() });
+    // Every run begun in this process counts (chat, legacy, Loop, meeting); the
+    // two registries are checked too, as a second source. Checked before each
+    // slice and again before any full VACUUM (kb/agent-store.mjs compact).
+    const inFlight = () => agentRunsInFlight() > 0 || anyChatTurnInFlight() || anyMeetingRunInFlight();
+    const result = await compact({ inFlight });
     if (result.ok) {
       sendJSON(res, 200, { ok: true, mode: result.mode, pagesFreed: result.pagesFreed, bytesBefore: result.bytesBefore, bytesAfter: result.bytesAfter, ms: result.ms });
       return true;
