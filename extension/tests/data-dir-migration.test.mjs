@@ -332,3 +332,30 @@ test('agent-sdk/ over the cap is left in place with a note, and the DB still mig
   assert.match(report.healthNotes.join(' '), /agent-sdk\/ not copied/);
   assert.ok(fs.existsSync(path.join(root, 'kb', 'agent-sdk', 'u1', 'cred.json')));
 });
+
+// --- an interrupted run (a crash between renames) ------------------------------
+
+test('a retry discards an agent.db left by an interrupted run, and copies a fresh one', () => {
+  const kb = makeLegacy();
+  fs.mkdirSync(dataDir, { recursive: true });
+  // What a crash after committing agent.db (but before data.db) leaves behind.
+  fs.writeFileSync(path.join(dataDir, 'agent.db'), 'stale partial copy');
+  fs.writeFileSync(path.join(dataDir, '.migrating-owner'), JSON.stringify({ owns: ['data.db', 'agent.db'] }));
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  const agent = new Database(path.join(dataDir, 'agent.db'), { readonly: true });
+  assert.equal(agent.prepare('SELECT COUNT(*) AS n FROM agent_runs').get().n, 1, 'the stale file must not survive');
+  agent.close();
+  assert.equal(fs.existsSync(path.join(dataDir, '.migrating-owner')), false);
+  assert.ok(fs.existsSync(path.join(kb, 'data.db')));
+});
+
+test('a file the migration did not create is kept, and the copy refuses to overwrite it', () => {
+  makeLegacy();
+  fs.mkdirSync(dataDir, { recursive: true });
+  fs.writeFileSync(path.join(dataDir, 'agent.db'), 'someone else put this here');
+  const report = runDataDirMigration({ env: env(), root });
+  assert.equal(report.status, 'migrated', JSON.stringify(report));
+  assert.match(report.notes.join(' '), /agent\.db already present/);
+  assert.equal(fs.readFileSync(path.join(dataDir, 'agent.db'), 'utf8'), 'someone else put this here');
+});

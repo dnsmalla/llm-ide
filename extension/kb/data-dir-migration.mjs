@@ -35,6 +35,12 @@ const MAX_SDK_BYTES = 200 * 1024 ** 2;
 // backups/ is never copied: it can be many GB of old DB copies. New backups
 // are written to the data dir; the old ones stay in the legacy kb.
 const DEV_SECRETS = '.dev-secrets.json';
+// Written at the start of a copy, removed when it ends. It lists exactly what a
+// copy may create in the data dir, so a retry can tell its own leftovers (a
+// crash between renames) from files a person put there.
+const OWNER = '.migrating-owner';
+const OWNED = ['data.db', 'data.db-wal', 'data.db-shm', 'agent.db', 'agent.db-wal', 'agent.db-shm',
+  'agent-sdk', DEV_SECRETS, MARKER];
 const COMMIT_ORDER = ['agent.db', 'backups', 'agent-sdk', DEV_SECRETS, MARKER, 'data.db'];
 
 /**
@@ -71,6 +77,7 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
 
     const newDb = path.join(dataDir, 'data.db');
     if (fs.existsSync(newDb)) {
+      rmTree(path.join(dataDir, OWNER)); // an interrupted run that had in fact committed data.db
       // Already moved: say whether the legacy kb has been written to since
       // (a fork: an older server or an adopted dev server is still using it).
       report.legacyDiverged = checkLegacyDivergence(path.join(root, 'kb'), dataDir);
@@ -92,8 +99,18 @@ export function runDataDirMigration({ env = process.env, root, appVersion = null
 
 function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkCapBytes, report, finish }) {
   const staging = path.join(dataDir, '.migrating');
+  const ownerFile = path.join(dataDir, OWNER);
   const moved = []; // names moved into dataDir by this run, removed on failure
   const step = (name) => { if (fault) fault(name); };
+  // A previous run that died between commits left files behind with no data.db.
+  // data.db is the commit point, so those files cannot be trusted: discard the
+  // ones it recorded as its own, then copy again.
+  if (fs.existsSync(ownerFile)) {
+    const discarded = OWNED.filter((n) => fs.existsSync(path.join(dataDir, n)));
+    for (const name of OWNED) rmTree(path.join(dataDir, name));
+    if (discarded.length) report.notes.push(`discarded ${discarded.length} leftover file(s) of an interrupted migration`);
+  }
+  fs.writeFileSync(ownerFile, `${JSON.stringify({ startedAt: new Date().toISOString(), pid: process.pid, owns: OWNED }, null, 2)}\n`, { mode: 0o600 });
   const legacyAgent = path.join(legacyDir, 'agent.db');
   const copyAgent = !(typeof env.LLMIDE_AGENT_DB_PATH === 'string' && env.LLMIDE_AGENT_DB_PATH.trim())
     && fs.existsSync(legacyAgent);
@@ -174,6 +191,7 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkC
       moved.push(name);
     }
     rmTree(staging);
+    rmTree(ownerFile);
     report.legacyDiverged = false;
     writeMovedNotice(legacyDir, dataDir, report);
     return finish('migrated', null);
@@ -183,6 +201,7 @@ function copyLegacy({ dataDir, legacyDir, legacyDb, env, appVersion, fault, sdkC
       rmTree(path.join(dataDir, `data.db${suffix}`));
     }
     rmTree(staging);
+    rmTree(ownerFile);
     setDataDirOverride(null);
     report.notes.push(`migration failed, using the legacy location for this run: ${err?.message ?? err}`);
     return finish('fallback', 'copy-failed');
