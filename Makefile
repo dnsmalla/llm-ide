@@ -149,6 +149,14 @@ graph-kit-checkout:
 graphkit-pin-check:
 	node scripts/graphkit-pin-check.mjs $(if $(ONLINE),--online,)
 
+# Push graph-kit, bump all three pins, rebuild the System page bundle and
+# verify. Dry run prints every step and changes nothing:
+#   make graphkit-bump DRY_RUN=1
+#   make graphkit-bump TAG=1.7.0 YES=1 COMMIT=1   (cut a release tag too)
+.PHONY: graphkit-bump
+graphkit-bump:
+	TAG="$(TAG)" DRY_RUN="$(DRY_RUN)" COMMIT="$(COMMIT)" YES="$(YES)" bash scripts/graphkit-bump.sh
+
 .PHONY: graph-gates
 graph-gates: graph-kit-checkout
 	cd mac/LocalPackages/graph-kit && swift run -c release graph-layout-lab
