@@ -2,7 +2,7 @@
 
 Status: **K0 Map**, written 2026-10-28. No code changed. The layout inventory is §6, the port design §7, the parity and rollout plan §8, and the decisions for the user §9. Corrections to the plan's premises are in §10.
 
-Conventions. `gk/` means `mac/LocalPackages/graph-kit/`. Every other path is relative to the llm-ide root. `path:line` citations were checked on llm-ide `a0dd8473` and graph-kit `b9235dd`. That revision is the submodule gitlink and the `revision:` pin at `mac/Package.swift:360`, and `.github/workflows/mac-ci.yml:280-287` fails when the two differ.
+Conventions. `gk/` means `mac/LocalPackages/graph-kit/`. Every other path is relative to the llm-ide root. `path:line` citations were checked on llm-ide `a0dd8473` and graph-kit `b9235dd`. That revision is the submodule gitlink and the `revision:` pin in `mac/Package.swift` (`graphKitDependency`, `:326`), and `.github/workflows/mac-ci.yml:280-287` fails when the two differ. `make graphkit-pin-check` checks all three pins, including `mac/Package.resolved`.
 
 Counts. Line counts are `wc -l` over the listed files. Swift test counts are `grep -c 'func test\|@Test'`. TypeScript and JavaScript test counts are `grep -cE '^\s*(test|it)\('`, which is a source-level count; the runner's own count is given in brackets when it differs. Rust counts are `#[test]` attributes. Run results are from this Mac on 2026-10-28 (arm64, macOS 26.6, Xcode with XCTest, rustc 1.99.1, Node 22.23.1). §11 lists the commands.
 
@@ -196,7 +196,7 @@ Legend. **C** is a contract (a Core seam, an HTTP route or a file format). **D**
 
 **Cycles.** None found. The Swift feature graph has no edge into CodeGraph except from Shell (G3). The server has no kb to graphkit edge (G13). The web side has a build-time cycle of source only: `gk/web` is consumed by `ui/os-view`, and the host interface is implemented in `ui/os-view` (G8, G16). That is not a runtime cycle, but it is a repository-level coupling that the K0 rule should fix (decision Q2).
 
-**Repository coupling for pins.** graph-kit is a separate repository. A change lands in graph-kit first, then both pins are bumped: the submodule gitlink and `mac/Package.swift:360`. `mac-ci.yml:280-287` enforces that they match. The System page additionally needs `ui/os-view` rebuilt and its bundle committed (`make os-view`, checked by `os-view-check`).
+**Repository coupling for pins.** graph-kit is a separate repository, and it stays one (user decision, 2026-10-28), so that other consumers can reuse it. A change lands in graph-kit first. Then `make graphkit-bump` pushes it and moves the three pins: the submodule gitlink, the `revision:` in `mac/Package.swift`, and the entry in `mac/Package.resolved`. `mac-ci.yml:280-287` enforces that the gitlink and the `revision:` match, and `make graphkit-pin-check` enforces all three and, with `ONLINE=1`, that the pinned commit exists on the remote. The System page additionally needs `ui/os-view` rebuilt and its bundle committed (`make os-view`, checked by `os-view-check`; the bump does both). The steps are in [`docs/how-to/graph-kit-workflow.md`](../how-to/graph-kit-workflow.md).
 
 ## 4. Delegated vs owned
 
@@ -539,6 +539,8 @@ None of these is approved. Each has a recommendation.
 | Q9 | Quality metrics on every layout | Keep (today); compute on request only | Compute on request, or sample for large graphs. The metrics cost part of every layout and are logged once. |
 | Q10 | Pins and release | Keep the revision-and-submodule pair (today); tag graph-kit releases | Tag releases once K1 lands; the two pins are otherwise a manual step each time. |
 | Q11 | Which feature key owns the new route? | `code_graph_3d` (same closure as ingest); a new layout key | `code_graph_3d`. A new key adds a row to the feature matrix for no user-visible gain. |
+
+**Q10 resolved (2026-10-28).** llm-ide keeps pinning revisions, not tags. A pinned revision is reproducible and cannot move under a build, and the revision is the unit that the three-pin check and `make graphkit-bump` act on. Tags are for external consumers of graph-kit (the TypeScript plugin and other packages). `make graphkit-bump TAG=X.Y.Z YES=1` cuts one on the bumped commit, after the build passes, and llm-ide's pin line records it in a `// graph-kit X.Y.Z` note. The manual dance that prompted the question is now one command.
 
 ## 10. Drift, gaps, and corrections to the plan's premises
 
