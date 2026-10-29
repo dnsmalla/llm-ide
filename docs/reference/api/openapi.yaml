@@ -7180,6 +7180,9 @@ paths:
                         - "meetingTitle"
                         - "startedAt"
                         - "captionCount"
+                        - "lines"
+                        - "hash"
+                        - "durable"
                         - "source"
                       properties:
                         sessionId:
@@ -7203,6 +7206,17 @@ paths:
                         durationSec:
                           type: "integer"
                           description: "Only for database-source rows."
+                        lines:
+                          type: "integer"
+                          description: "Caption lines the server holds. The ack must echo it."
+                        hash:
+                          type: "string"
+                          description: "SHA-256 (64 hex) of the redacted transcript the server holds. The ack must echo it."
+                        durable:
+                          type: "boolean"
+                        expiresAt:
+                          type: "string"
+                          description: "Database-source rows only."
   /kb/live/{id}:
     get:
       summary: "Poll for new captions since a sequence number"
@@ -7317,6 +7331,12 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "404":
           description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
           content:
             application/json:
               schema:
@@ -7482,6 +7502,8 @@ paths:
                 required:
                   - "sessionId"
                   - "state"
+                  - "durable"
+                  - "expiresAt"
                 properties:
                   sessionId:
                     type: "string"
@@ -7491,8 +7513,17 @@ paths:
                       - "live"
                       - "finalized"
                       - "acked"
+                      - "expired"
                       - "unknown"
-                    description: "unknown: the server has no record (never seen, or lost before a finalize). The extension keeps its draft."
+                    description: "live: still capturing (a live session wins over any ack). finalized: waiting for the ack; durable says whether a restart keeps it. acked: the Mac acked it. expired: not acked within 7 days, the capture was dropped and logged. unknown: the server has no record; the extension keeps its draft."
+                  durable:
+                    type: "boolean"
+                    description: "True when a finalized capture is stored durably (survives a restart)."
+                  expiresAt:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "When an unacked durable capture expires (7 days after finalize)."
   /kb/live/{id}/stream:
     get:
       summary: "Server-sent events stream of a live capture session's captions"

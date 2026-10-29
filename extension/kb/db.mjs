@@ -988,6 +988,8 @@ export function deleteUserCascade(userId) {
     counts.note_index = del('DELETE FROM note_index WHERE user_id = ?');
     counts.pending_session_purges = del('DELETE FROM pending_session_purges WHERE owner_user_id = ?');
     counts.live_acks = del('DELETE FROM live_acks WHERE owner_user_id = ?');
+    // The durable copies of unacked extension captures hold transcripts: they go too.
+    counts.live_crash_rows = del('DELETE FROM live_crash_rows WHERE owner_user_id = ?');
     counts.refresh_tokens  = del('DELETE FROM refresh_tokens WHERE user_id = ?');
     // migration 0008 — password-reset tokens are tied to a user; if we
     // skip these the column hangs as a dangling reference after the

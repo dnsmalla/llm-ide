@@ -16,7 +16,7 @@ import {
   appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
   ackLiveSession, liveSessionStatus, listUnackedLiveSessions,
 } from '../agents/live-sessions.mjs';
-import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, onClientDisconnect, readJsonBody, decodeParam } from '../core/utils.mjs';
 import { tryConsume } from '../server/rate-limit.mjs';
 
 // Per-user cap on concurrent SSE streams. A hostile or buggy client
@@ -40,11 +40,11 @@ export async function handleLiveRoutes(req, res, ctx) {
   }
 
   // POST /kb/live/:sessionId/ack — the Mac app has written and verified the file.
+  // The server recomputes lines and hash; a mismatch is 409 ACK_MISMATCH and
+  // deletes nothing (agents/live-sessions.mjs).
   if (req.method === 'POST' && /^\/kb\/live\/[^/]+\/ack$/.test(path)) {
-    const sessionId = decodeURIComponent(path.slice('/kb/live/'.length, -'/ack'.length));
-    const body = parseJSON(await readBody(req, 64 * 1024)) || {};
-    // Shape is checked before the capture is looked up, so a bad body is a 400
-    // whatever state the capture is in.
+    const sessionId = decodeParam(path.slice('/kb/live/'.length, -'/ack'.length));
+    const body = await readJsonBody(req, 64 * 1024);
     if (typeof body.noteKey !== 'string' || typeof body.hash !== 'string' || !Number.isInteger(body.lines)) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'noteKey, hash and lines (integer) are required' } });
       return true;
@@ -64,8 +64,8 @@ export async function handleLiveRoutes(req, res, ctx) {
 
   // GET /kb/live/:sessionId/status — the extension releases its draft on 'acked'.
   if (req.method === 'GET' && /^\/kb\/live\/[^/]+\/status$/.test(path)) {
-    const sessionId = decodeURIComponent(path.slice('/kb/live/'.length, -'/status'.length));
-    sendJSON(res, 200, { sessionId, state: liveSessionStatus(userId, sessionId) });
+    const sessionId = decodeParam(path.slice('/kb/live/'.length, -'/status'.length));
+    sendJSON(res, 200, { sessionId, ...liveSessionStatus(userId, sessionId) });
     return true;
   }
 

@@ -54,7 +54,11 @@ test('schema golden: note_index, the map, tombstones and ack ledger have the pla
     'deleted_chat_id', 'owner_user_id', 'reason', 'attempts', 'requested_at',
   ]);
   assert.deepEqual(cols('live_acks'), [
-    'session_id', 'owner_user_id', 'note_key', 'content_hash', 'lines', 'acked_at',
+    'session_id', 'owner_user_id', 'note_key_hash', 'content_hash', 'lines', 'outcome', 'acked_at',
+  ]);
+  assert.deepEqual(cols('live_crash_rows'), [
+    'session_id', 'owner_user_id', 'title', 'started_at', 'duration_sec', 'transcript',
+    'lines', 'content_hash', 'bytes', 'finalized_at', 'expires_at',
   ]);
 });
 
@@ -127,11 +131,13 @@ test('user-delete cascade removes the user notes and their FTS rows, not another
   const mine = Number(insNote({ user_id: V, note_key: 'v/1.md', content_hash: 'v1', body_text: 'vendor secret plan' }).lastInsertRowid);
   const doomed = Number(insNote({ user_id: U, note_key: 'u/1.md', content_hash: 'u1', body_text: 'doomed text' }).lastInsertRowid);
   conn.prepare("INSERT INTO pending_session_purges (deleted_chat_id, owner_user_id) VALUES ('c-x', ?)").run(U);
-  conn.prepare("INSERT INTO live_acks (session_id, owner_user_id, note_key, content_hash) VALUES ('s-x', ?, 'k', 'h')").run(U);
+  conn.prepare("INSERT INTO live_acks (session_id, owner_user_id, note_key_hash, content_hash, acked_at) VALUES ('s-x', ?, 'k', 'h', '2026-01-01T00:00:00.000Z')").run(U);
+  conn.prepare("INSERT INTO live_crash_rows (session_id, owner_user_id, title, started_at, transcript, lines, content_hash, bytes, finalized_at, expires_at) VALUES ('c-x', ?, 't', 's', 'secret transcript', 1, 'h', 1, 'f', 'e')").run(U);
   const counts = db.deleteUserCascade(U);
   assert.ok(counts.note_index >= 1);
   assert.equal(counts.pending_session_purges, 1);
   assert.equal(counts.live_acks, 1);
+  assert.equal(counts.live_crash_rows, 1);
   assert.deepEqual(ftsFor(doomed), []);
   assert.equal(ftsFor(mine).length, 1, 'the other user\'s note and its FTS row survive');
 });

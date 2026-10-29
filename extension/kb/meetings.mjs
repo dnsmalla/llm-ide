@@ -137,6 +137,10 @@ export function deleteMeeting(userId, meetingId) {
   const db = getDb();
   lazyPrepare(db, 'DELETE FROM meetings WHERE id = ? AND user_id = ?')
     .run(String(meetingId), userId);
+  // The ack of a finalized extension capture names this meeting: it goes with it
+  // (live_acks, migration 0050), so no ack outlives the meeting it described.
+  lazyPrepare(db, 'DELETE FROM live_acks WHERE owner_user_id = ? AND session_id = ?')
+    .run(userId, String(meetingId));
 }
 
 // ── Reads ─────────────────────────────────────────────────────────

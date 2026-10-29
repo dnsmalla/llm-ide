@@ -24,7 +24,9 @@ import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
 import { handleChatRoutes } from './chat.mjs';
 import { handleIndexRoutes } from './index-routes.mjs';
-const CLIENT_REFUSAL_CODES = new Set(['PAYLOAD_TOO_LARGE', 'BATCH_TOO_LARGE']);
+const CLIENT_REFUSAL_CODES = new Set([
+  'PAYLOAD_TOO_LARGE', 'BATCH_TOO_LARGE', 'ACK_MISMATCH', 'UNACKED_CAPTURE', 'TOO_MANY_UNACKED',
+]);
 import { handleLifecycleRoutes } from './lifecycle-routes.mjs';
 import { handleOsRoutes } from './os.mjs';
 import { handleAgentHistoryRoutes } from './agent-history.mjs';

@@ -95,16 +95,41 @@ CREATE TABLE pending_session_purges (
   PRIMARY KEY (deleted_chat_id, owner_user_id)
 );
 
--- 4. live_acks: the Mac's acknowledgement that a finalized extension meeting is
---    in a verified file (plan 3.6 B). Ids and hashes only, no transcript. Kept
---    so a restarted server still answers "acked" and the extension can release
---    its draft. Owner column is owner_user_id for the same reason as above.
+-- 4. live_crash_rows: the DURABLE copy of a finalized extension capture until
+--    the Mac acks it (plan 3.6 B). It is deliberately NOT a `meetings` row, so a
+--    finalized capture never appears in History, search or Library before the
+--    Mac has written its file. Bounded per user (sessions and bytes) and expiring
+--    (expires_at): an expired capture is logged loudly and recorded as expired.
+--    transcript is the redacted text content_hash covers; the ack must reproduce
+--    lines and content_hash from it (or from the memory copy) to be accepted.
+CREATE TABLE live_crash_rows (
+  session_id    TEXT NOT NULL,
+  owner_user_id TEXT NOT NULL,
+  title         TEXT NOT NULL,
+  started_at    TEXT NOT NULL,
+  duration_sec  INTEGER NOT NULL DEFAULT 0,
+  transcript    TEXT NOT NULL,
+  lines         INTEGER NOT NULL,
+  content_hash  TEXT NOT NULL,
+  bytes         INTEGER NOT NULL,
+  finalized_at  TEXT NOT NULL,
+  expires_at    TEXT NOT NULL,
+  PRIMARY KEY (owner_user_id, session_id)
+);
+CREATE INDEX idx_live_crash_rows_expiry ON live_crash_rows(expires_at);
+
+-- 5. live_acks: the Mac's acknowledgement of a verified capture, or the record
+--    that a capture expired unacked. Ids and hashes only: note_key_hash is the
+--    SHA-256 of the validated note key (the key itself can carry a meeting title,
+--    so it is not stored). Rows older than 90 days are pruned (pruneLiveAcks).
 CREATE TABLE live_acks (
   session_id    TEXT NOT NULL,
   owner_user_id TEXT NOT NULL,
-  note_key      TEXT NOT NULL,
+  note_key_hash TEXT NOT NULL,
   content_hash  TEXT NOT NULL,
   lines         INTEGER NOT NULL DEFAULT 0,
-  acked_at      TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  outcome       TEXT NOT NULL DEFAULT 'acked',
+  acked_at      TEXT NOT NULL,
   PRIMARY KEY (owner_user_id, session_id)
 );
+CREATE INDEX idx_live_acks_time ON live_acks(acked_at);

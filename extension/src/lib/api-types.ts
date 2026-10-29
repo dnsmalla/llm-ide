@@ -3906,6 +3906,8 @@ export type PostKbLiveIdAckResponse400 = CommonError;
 
 export type PostKbLiveIdAckResponse404 = CommonError;
 
+export type PostKbLiveIdAckResponse409 = CommonError;
+
 /** Request parts for `GET /kb/live/:id/status` (schema/http/lifecycle.schema.json). */
 export type GetKbLiveIdStatusRequest = {
   params: {
@@ -3915,8 +3917,12 @@ export type GetKbLiveIdStatusRequest = {
 
 export type GetKbLiveIdStatusResponse200 = {
   sessionId: string;
-  /** unknown: the server has no record (never seen, or lost before a finalize). The extension keeps its draft. */
-  state: "live" | "finalized" | "acked" | "unknown";
+  /** live: still capturing (a live session wins over any ack). finalized: waiting for the ack; durable says whether a restart keeps it. acked: the Mac acked it. expired: not acked within 7 days, the capture was dropped and logged. unknown: the server has no record; the extension keeps its draft. */
+  state: "live" | "finalized" | "acked" | "expired" | "unknown";
+  /** True when a finalized capture is stored durably (survives a restart). */
+  durable: boolean;
+  /** When an unacked durable capture expires (7 days after finalize). */
+  expiresAt: string | null;
 };
 
 /** Request parts for `GET /kb/live/unacked` (schema/http/lifecycle.schema.json). */
@@ -3932,6 +3938,13 @@ export type GetKbLiveUnackedResponse200 = {
     source: "memory" | "database";
     /** Only for database-source rows. */
     durationSec?: number;
+    /** Caption lines the server holds. The ack must echo it. */
+    lines: number;
+    /** SHA-256 (64 hex) of the redacted transcript the server holds. The ack must echo it. */
+    hash: string;
+    durable: boolean;
+    /** Database-source rows only. */
+    expiresAt?: string;
   })[];
 };
 
@@ -7007,6 +7020,7 @@ export interface ApiEndpoints {
       200: PostKbLiveIdAckResponse200;
       400: PostKbLiveIdAckResponse400;
       404: PostKbLiveIdAckResponse404;
+      409: PostKbLiveIdAckResponse409;
     };
   };
   "GET /kb/live/:id/status": {

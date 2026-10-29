@@ -1,7 +1,7 @@
 {
   "endpoint": "GET /kb/live/unacked",
   "status": 200,
-  "description": "Example data. One finalized capture still in memory and one durable row left after a restart.",
+  "description": "Example data. One finalized capture still in memory and one durable row left after a restart. Ack each with the lines and hash shown.",
   "response": {
     "sessions": [
       {
@@ -9,6 +9,9 @@
         "meetingTitle": "Standup",
         "startedAt": 1798500000000,
         "captionCount": 42,
+        "lines": 42,
+        "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+        "durable": true,
         "source": "memory"
       },
       {
@@ -16,8 +19,12 @@
         "meetingTitle": "Design review",
         "startedAt": "2026-10-29T08:00:00.000Z",
         "captionCount": null,
+        "lines": 120,
+        "hash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "durable": true,
         "source": "database",
-        "durationSec": 1800
+        "durationSec": 1800,
+        "expiresAt": "2026-11-05T08:30:00.000Z"
       }
     ]
   }

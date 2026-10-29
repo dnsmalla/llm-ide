@@ -1,7 +1,7 @@
 {
   "endpoint": "GET /kb/live/:id/status",
   "status": 200,
-  "description": "Example data. A finalized capture the Mac has not acked yet.",
+  "description": "Example data. A finalized capture the Mac has not acked yet; it is durable and expires in seven days.",
   "request": {
     "params": {
       "id": "live-session-7"
@@ -9,6 +9,8 @@
   },
   "response": {
     "sessionId": "live-session-7",
-    "state": "finalized"
+    "state": "finalized",
+    "durable": true,
+    "expiresAt": "2026-11-05T10:00:00.000Z"
   }
 }
