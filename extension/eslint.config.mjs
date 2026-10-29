@@ -35,6 +35,14 @@ const CLAUDE_SDK_IMPORT = {
   message: 'The Claude Agent SDK may only be imported inside llm_agent/sdk/ (the Claude linker) — call its exports instead. See docs/explanation/claude-linker.md.',
 };
 
+// Multi-provider adapter boundary (agent-kit K1 Phase 6): the Vercel AI SDK
+// (`ai`, `@ai-sdk/*`) is imported ONLY inside providers/adapter/, so swapping
+// or upgrading the library touches that folder and nothing else.
+const AI_SDK_IMPORT = {
+  regex: '^(ai|@ai-sdk/.+)$',
+  message: 'The Vercel AI SDK may only be imported inside providers/adapter/ — call its exports instead. See docs/spec/provider-catalog.md.',
+};
+
 // Claude model ids belong to ONE file: schema/models/anthropic-models.json.
 // Three hand-kept lists previously disagreed badly enough that the server's own
 // DEFAULT_MODEL was an id the Mac coerces away as retired. Literals are allowed
@@ -54,7 +62,7 @@ const CLAUDE_MODEL_LITERAL = {
   message: 'Claude model ids live in schema/models/anthropic-models.json — read them from there instead of restating one. See docs/explanation/claude-linker.md.',
 };
 
-const forbidLayers = (layers, { allowClaudeSdk = false } = {}) => ({
+const forbidLayers = (layers, { allowClaudeSdk = false, allowAiSdk = false } = {}) => ({
   'no-restricted-imports': ['error', {
     patterns: [
       {
@@ -63,6 +71,7 @@ const forbidLayers = (layers, { allowClaudeSdk = false } = {}) => ({
       },
       ROUTE_MODULES,
       ...(allowClaudeSdk ? [] : [CLAUDE_SDK_IMPORT]),
+      ...(allowAiSdk ? [] : [AI_SDK_IMPORT]),
     ],
   }],
 });
@@ -144,6 +153,11 @@ export default tseslint.config(
   { files: ['kb/**/*.mjs'],        rules: allowOnly('core', 'kb') },
   { files: ['server/**/*.mjs'],    rules: allowOnly('core', 'kb', 'server') },
   { files: ['providers/**/*.mjs'], rules: allowOnly('core', 'kb', 'server', 'providers') },
+  // providers/adapter/ is the ONE place allowed to import the Vercel AI SDK.
+  {
+    files: ['providers/adapter/**/*.mjs'],
+    rules: forbidLayers(LAYERS.filter((l) => !['core', 'kb', 'server', 'providers'].includes(l)), { allowAiSdk: true }),
+  },
   // L3 — leaf libraries reach only downward…
   {
     files: ['graphkit/**/*.mjs', 'guardrails/**/*.mjs', 'plugins/**/*.mjs', 'llm-sources/**/*.mjs', 'mcp/**/*.mjs'],
@@ -176,7 +190,7 @@ export default tseslint.config(
         patterns: [{
           regex: `${REL}(.*/)?src/`,
           message: 'Server-side code must not import browser code (src/).',
-        }, CLAUDE_SDK_IMPORT],
+        }, CLAUDE_SDK_IMPORT, AI_SDK_IMPORT],
       }],
     },
   },
