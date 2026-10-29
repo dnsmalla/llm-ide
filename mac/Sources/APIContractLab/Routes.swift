@@ -57,6 +57,7 @@ let apiRoutes: [Route] = [
     route("GET /auth/me/mcp-plugins/codex-sources", "CodexMcpSourcesWrap", CodexMcpSourcesWrap.self),  // scanCodexMcpSources
     route("GET /auth/me/mcp-plugins/updates", "McpUpdateCheck", LlmIdeAPIClient.McpUpdateCheck.self),  // mcpUpdates
     route("POST /auth/me/mcp-plugins/:id/update", "McpUpdateAck", LlmIdeAPIClient.McpUpdateAck.self),  // updateMcpPlugin
+    route("POST /kb/complete", "CompleteResponse", LlmIdeAPIClient.CompleteResponse.self),  // complete
     route("GET /auth/google/status", "GoogleStatusResult", LlmIdeAPIClient.GoogleStatusResult.self),  // googleSignInStatus
     route("POST /auth/google/start", "GoogleStartResult", LlmIdeAPIClient.GoogleStartResult.self),  // googleSignInStart
     route("POST /auth/slack/start", "SlackConnectStartResult", LlmIdeAPIClient.SlackConnectStartResult.self),  // slackConnectStart

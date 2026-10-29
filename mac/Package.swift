@@ -179,6 +179,7 @@ if autoTasksIncluded {
         "RefactorPlanDiffTests.swift",
         "RefactorRulesCollectorTests.swift",
         "RegressionRunnerSweepAdapterTests.swift",
+        "CompleteRouteTests.swift",
         "RepairScopeGuardTests.swift",
         "StageOutputParserTests.swift",
         "TaskLogStoreTests.swift",

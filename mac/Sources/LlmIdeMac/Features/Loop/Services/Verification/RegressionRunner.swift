@@ -399,7 +399,7 @@ final class RegressionRunner: ObservableObject {
 /// Lives next to the runner so callers don't reach into the API
 /// surface directly.
 final class CodeAssistPrompter: RegressionPrompter {
-    let api: LlmIdeAPIClient
+    let transport: RegressionCompletionTransport
     let language: String
     let agent: String
     /// The caller's tier route, read at EACH call (like `APILoopAgentRunner`)
@@ -408,12 +408,18 @@ final class CodeAssistPrompter: RegressionPrompter {
     /// not know which role it serves, so the caller injects it.
     private let routeResolver: @Sendable () -> TierRoute?
 
-    init(api: LlmIdeAPIClient, language: String = "en", agent: String = "claude_code",
+    init(transport: RegressionCompletionTransport, language: String = "en", agent: String = "claude_code",
          routeResolver: @escaping @Sendable () -> TierRoute? = { nil }) {
-        self.api = api
+        self.transport = transport
         self.language = language
         self.agent = agent
         self.routeResolver = routeResolver
+    }
+
+    convenience init(api: LlmIdeAPIClient, language: String = "en", agent: String = "claude_code",
+                     routeResolver: @escaping @Sendable () -> TierRoute? = { nil }) {
+        self.init(transport: APIRegressionCompletionTransport(api: api), language: language,
+                  agent: agent, routeResolver: routeResolver)
     }
 
     func ask(prompt: String) async throws -> String {
@@ -431,16 +437,61 @@ final class CodeAssistPrompter: RegressionPrompter {
     }
 
     private func send(_ prompt: String, route: TierRoute?) async throws -> String {
-        let resp = try await api.codeAssist(
-            message: prompt,
-            language: language,
-            model: route?.model,
-            provider: route?.provider,
-            history: [],
-            attachments: [],
-            agentContext: nil
-        )
-        return resp.reply
+        try await transport.complete(
+            prompt: prompt, language: language,
+            model: route?.model, provider: route?.provider, tier: nil)
+    }
+}
+
+/// How the regression replay and judge reach a model. One prompt, one answer.
+/// Production uses `POST /kb/complete`; `loop.completionRoute` off (or a
+/// server older than API v88) uses the old tool-less `/code-assist` call, which
+/// wraps the prompt server-side. `/kb/complete` is asked for that same wrapper
+/// (`framing: "code-assist"`), so the model sees identical input either way.
+protocol RegressionCompletionTransport: Sendable {
+    func complete(prompt: String, language: String, model: String?, provider: String?,
+                  tier: String?) async throws -> String
+}
+
+enum LoopCompletionRoute {
+    /// UserDefaults key. Absent = on; `false` restores the `/code-assist` call.
+    static let defaultsKey = "loop.completionRoute"
+
+    static func isEnabled(_ defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: defaultsKey) as? Bool ?? true
+    }
+
+    /// A server without the route (API < 88) answers 404; that alone is a
+    /// reason to use the old call, nothing else is.
+    static func shouldFallBack(on error: Error) -> Bool {
+        if case APIError.http(let status, _, _, _) = error { return status == 404 }
+        return false
+    }
+}
+
+final class APIRegressionCompletionTransport: RegressionCompletionTransport {
+    private let api: LlmIdeAPIClient
+    private let routeEnabled: @Sendable () -> Bool
+
+    init(api: LlmIdeAPIClient, routeEnabled: @escaping @Sendable () -> Bool = { LoopCompletionRoute.isEnabled() }) {
+        self.api = api
+        self.routeEnabled = routeEnabled
+    }
+
+    func complete(prompt: String, language: String, model: String?, provider: String?,
+                  tier: String?) async throws -> String {
+        if routeEnabled() {
+            do {
+                return try await api.complete(prompt: prompt, language: language, model: model,
+                                              provider: provider, tier: tier,
+                                              framing: "code-assist").reply
+            } catch where LoopCompletionRoute.shouldFallBack(on: error) {
+                codeAssistPrompterLogger.notice("/kb/complete missing on this server; using /code-assist")
+            }
+        }
+        return try await api.codeAssist(
+            message: prompt, language: language, model: model, provider: provider, tier: tier,
+            history: [], attachments: [], agentContext: nil).reply
     }
 }
 
@@ -462,12 +513,16 @@ final class CodeAssistJudge: RegressionJudge {
         }
     }
 
-    let api: LlmIdeAPIClient
+    let transport: RegressionCompletionTransport
     /// Bound so two long answers can't blow the prompt budget.
     private static let maxAnswerChars = 4_000
 
-    init(api: LlmIdeAPIClient) {
-        self.api = api
+    init(transport: RegressionCompletionTransport) {
+        self.transport = transport
+    }
+
+    convenience init(api: LlmIdeAPIClient) {
+        self.init(transport: APIRegressionCompletionTransport(api: api))
     }
 
     static func buildPrompt(prompt: String, original: String, current: String) -> String {
@@ -503,15 +558,9 @@ final class CodeAssistJudge: RegressionJudge {
     }
 
     func sameMeaning(prompt: String, original: String, current: String) async throws -> Bool {
-        let resp = try await api.codeAssist(
-            message: Self.buildPrompt(prompt: prompt, original: original, current: current),
-            language: "en",
-            model: nil,
-            tier: "subagent",
-            history: [],
-            attachments: [],
-            agentContext: nil
-        )
-        return try Self.parseReply(resp.reply)
+        let reply = try await transport.complete(
+            prompt: Self.buildPrompt(prompt: prompt, original: original, current: current),
+            language: "en", model: nil, provider: nil, tier: "subagent")
+        return try Self.parseReply(reply)
     }
 }
