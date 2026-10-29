@@ -294,6 +294,34 @@ What this changes for this kit, by reading:
 | Q10 | Open | Unaffected |
 | Q11 | Open | Unaffected |
 
+## User decisions 2026-10-30
+
+Recorded in the user's meaning. The plan that applies them is [agent-kit K1](../superpowers/plans/2026-10-30-agent-kit-k1.md); this section only records what was decided and what is still open.
+
+### Decided
+
+- **Q3 (engine).** The Claude Agent SDK is the **only** agent engine for Claude. The classic homegrown loop (`llm_agent/runtime`: `loop.mjs`, `fence.mjs`, `route.mjs`, `openai-tools.mjs`; Mac `CodeAssistTransport`) is retired in stages. Non-Anthropic providers get a small separate completion/tool adapter (evaluate the Vercel AI SDK against keeping only the OpenAI-compatible path; **not LiteLLM**, because of the 2026 supply-chain incidents). Plain chat for them needs no loop. This answers the open Q3 above and the "classic engine held up by four consumers" finding (section 4).
+- **Token burn is mostly our configuration.** The first track is a *lean SDK configuration* pass measured on the token bench before and after: compact system prompt as default with an exploration cap (evidence: -16% on edit tasks, +55% on read-only search, so a hop bound or a Haiku search subagent comes first); drop `Bash` from modes that do not need it (5.8k); verify `settingSources`, git instructions and attachments; revisit `snapshot: false` (`engine.mjs:888`); a 1-hour cache TTL experiment; a compaction window of about 100k; check built-in tool-result clearing before building our own; Haiku subagents for search; keep `promptSuggestions` and `agentProgressSummaries` off; re-measure tool-search deferral on the current CLI; measure and cut our own per-turn memory-extract call and mode-classifier call. Bench gates: 15% token and 30% time regression thresholds.
+- **Q2 (ended chats).** An ended chat continues on a **fresh SDK session** seeded with a short per-chat summary (made on a cheap model at archive time) plus the last 4 to 6 turns; older detail comes back on demand through `search-kb`. **Resume, not fresh, only when the chat is warm** (last activity under the cache TTL). A long transcript is never cold-resumed (about 156k billable for the first turn at 125k context). This is the answer to lifecycle R2b for the Claude engine.
+- **Q9 (SDK surface).** Triage the 129 `needs-human` rows by *removes our own code, then saves tokens, then improves safety*; ignore about 20 rows of irrelevant tools and UI plumbing. Adopt first, as separate bench-gated tasks and never inside K1: `options.sessionStore`; `options.agents` + `tools.AgentInput` (Haiku search subagent); `options.fallbackModel`; `messages.SDKAPIRetryMessage`; `messages.SDKRateLimitEvent`; `messages.SDKPermissionDeniedMessage`; `messages.SDKModelRefusalFallbackMessage` / `NoFallbackMessage`; `messages.SDKThinkingTokensMessage`; `tools.Task*` (replacing our `task-create` / `task-update` MCP tools, availability to be checked); `options.skills`; `options.sandbox`; `query.mcpServerStatus`; `options.resumeSessionAt` + `resumeDropsTurn`; `options.agent` (persona and mode without rewriting the system prompt, which would allow `snapshot: true`); `tools.EnterPlanMode` / `ExitPlanMode` (lower priority). The ledger is extended to module-level functions (`listSessions`, `getSessionMessages`, `deleteSession`, `forkSession`). Updating `sdk-surface.json` is a task; the human approval is the user's approval of this list on 2026-10-30.
+- **Q4 (ownership).** The plugin, MCP and LLM-source UI (about 5 457 lines in `Features/Library`) and its 37 routes in `server/auth-routes.mjs` **move to agent-kit ownership**. Library keeps notes and sources only (`McpConnectorAdapter`, the MCP ingest adapter, stays with Library).
+- **Migration order.** (1) lean-config pass; (2) SDK triage and top-15 adoption; (3) `RegressionRunner` to a plain completion route (it sends prompt-only, `history: []`); (4) extension `/chat` removal per the data-lifecycle decision (remove `/chat` and `/kb/chat/sessions` from `REQUIRED_ENDPOINTS`, bump `MIN_SERVER_API_VERSION`), coordinated with live-then-archive; (5) legacy chats continue on v2 through the summary-plus-recent-turns path and new chats are no longer stamped classic; (6) non-Anthropic adapter, then delete the fence loop and `CodeAssistTransport`; (7) retire `runtime/` after one release (K4) with an API version bump for the removed routes.
+
+### Open: not decided
+
+- **Subscription login and the SDK terms.** The SDK terms say third-party developers may not offer claude.ai login or its rate limits without Anthropic's approval. LLM-IDE has a `claude login` subscription path (`llm_agent/sdk/transcripts.mjs:32-38`, `llm_agent/sdk/auth.mjs:37-38`) and a CLI fallback. This is a business and terms decision, not an engineering one. The plan keeps the **API-key path first-class** and adds a single switch for the subscription path without deleting code. The terms text itself was not read when this was written.
+
+### Status of Q1 to Q11 after this round
+
+| # | Status | How |
+|---|---|---|
+| Q3 | **Answered** (2026-10-30) | SDK-only for Claude; classic retired in stages; separate adapter for other providers |
+| Q2 | **Answered for continuation** (2026-10-30) | Summary plus recent turns on a fresh session, resume only when warm. Redaction timing stays as recorded under 2026-10-29 |
+| Q4 | **Answered** (2026-10-30) | The plugin / MCP / LLM-source UI and routes move to agent-kit; the target folder is a question in the K1 plan (Q-T2) |
+| Q9 | **Answered** (2026-10-30) | Triage rule and the top-15 list above |
+
+Two findings from the 2026-10-30 reading that the K0 map above does not state: `llm_agent/runtime/` is **not** only the classic loop (the v2 engine imports most of the folder, so retiring it means deleting four files and relocating the rest), and the `ask` mode currently exposes `Bash`, `Edit` and `Write` to the model (only `plan`, `assist_plan`, `review` and `document` are restricted). Details and file:line evidence are in section 0.4 of the plan.
+
 ## 6. K1a data plan (home of chat session state after K1)
 
 Constraints from the plan template (K1a: one-way migration, N-1 readability, rollback, a real old-format fixture) and from this map:
