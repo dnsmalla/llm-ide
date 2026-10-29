@@ -17,6 +17,10 @@ import { prepareHistoryCopy, copyHistoryStep, historyCopyDone, usageCopyDone } f
 import { abortStaleRuns, purgeUserHistory, rollupAll } from './agent-store.mjs';
 import { compareLedgerShadow, pruneUsageCalls } from './agent-usage.mjs';
 import { createNoteShadowRun } from './note-index-shadow.mjs';
+
+/** Retry delay after a failed note compare: 1 min, doubling, capped at 1 h. */
+export const NOTE_SHADOW_RETRY_BASE_MS = 60 * 1000;
+export const NOTE_SHADOW_RETRY_CAP_MS = 60 * 60 * 1000;
 import { getDb } from './db.mjs';
 
 export const TICK_MS = 60 * 1000;
@@ -104,21 +108,54 @@ export function runDailyUsageShadow(db, now, logger) {
 
 // The run that is in progress, if any: one compare at a time.
 let activeNoteRun = null;
+// Failure state: a run that threw or recorded per-pair errors writes no day key and retries.
+let noteShadowFailures = 0;
+let noteShadowRetryAt = 0;
+let noteRunFactory = (opts) => createNoteShadowRun(opts);
+
+/** Test seam: replace how a run is created (for example, a run whose slice throws). */
+export function setNoteShadowRunFactory(fn) {
+  noteRunFactory = fn ?? ((opts) => createNoteShadowRun(opts));
+}
+
+/** The failure state of the note compare (for tests and the Storage report). */
+export function noteShadowFailureState() {
+  return { failures: noteShadowFailures, retryAt: noteShadowRetryAt };
+}
+
+/** Test seam: forget the failure state. */
+export function resetNoteShadowFailureState() {
+  noteShadowFailures = 0;
+  noteShadowRetryAt = 0;
+  activeNoteRun = null;
+}
+
+function noteShadowFailed(now, logger, reason) {
+  noteShadowFailures += 1;
+  const delay = Math.min(NOTE_SHADOW_RETRY_CAP_MS, NOTE_SHADOW_RETRY_BASE_MS * 2 ** Math.min(noteShadowFailures - 1, 10));
+  noteShadowRetryAt = now.getTime() + delay;
+  log(logger, 'error', 'note_index_compare_failed', { reason, failures: noteShadowFailures, retryInMs: delay });
+}
+
+/** Whether a failed note compare is due its retry. */
+export function noteShadowRetryDue(now) {
+  return noteShadowRetryAt > 0 && now.getTime() >= noteShadowRetryAt;
+}
 
 /**
- * The daily note-index compare, in time slices: one (user, project) pair per slice
- * budget, yielding to the event loop between slices (plan Phase 2 review item 6).
- * Nothing is written when there is no note index (lta.mode off); the day key is
- * written only when a run finishes. Errors are logged, never thrown into the tick.
- * Returns the run, or null when there was nothing to start.
+ * The daily note-index compare, in time slices: one unit (a pair's scope or one query) per slice
+ * budget, yielding to the event loop between slices. Nothing is written when there is no note
+ * index (lta.mode off). The day key is written only when a run finishes with no per-pair error;
+ * a slice that threw, or a run with errors, writes no day key and retries with backoff
+ * (noteShadowFailureState). Returns the run, or null when there was nothing to start.
  */
 export function runDailyNoteIndexShadow(db, now, logger) {
   if (activeNoteRun) return activeNoteRun;
   let run;
   try {
-    run = createNoteShadowRun({ db: getDb(), agentDb: db, now, logger });
+    run = noteRunFactory({ db: getDb(), agentDb: db, now, logger });
   } catch (err) {
-    log(logger, 'error', 'note_index_compare_failed', { error: err?.message });
+    noteShadowFailed(now, logger, err?.message);
     return null;
   }
   if (run.empty) return null;
@@ -127,9 +164,17 @@ export function runDailyNoteIndexShadow(db, now, logger) {
     try {
       if (!run.step().done) { setImmediate(slice); return; }
     } catch (err) {
-      log(logger, 'error', 'note_index_compare_failed', { error: err?.message });
+      activeNoteRun = null;
+      noteShadowFailed(now, logger, err?.message);
+      return;
     }
     activeNoteRun = null;
+    if (run.result?.errors > 0) {
+      noteShadowFailed(now, logger, 'per-pair errors');
+      return;
+    }
+    noteShadowFailures = 0;
+    noteShadowRetryAt = 0;
     try { writeMeta(db, LAST_NOTE_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
   };
   setImmediate(slice);
@@ -141,6 +186,7 @@ export function runDailyNoteIndexShadowNow(db, now, logger) {
   const run = createNoteShadowRun({ db: getDb(), agentDb: db, now, logger });
   if (run.empty) return null;
   while (!run.step().done) { /* run to completion */ }
+  if (run.result?.errors > 0) return run.result;   // no day key: the scheduled run retries
   try { writeMeta(db, LAST_NOTE_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
   return run.result;
 }
@@ -161,7 +207,7 @@ export function agentStoreTick(now = new Date(), { logger } = {}) {
     const requested = takeRollupRequest() || transitioned;
     const rollupDue = dailyRollupDue(readMeta(db, LAST_DAILY_KEY), now);
     const shadowDue = dailyRollupDue(readMeta(db, LAST_SHADOW_KEY), now);
-    if (dailyRollupDue(readMeta(db, LAST_NOTE_SHADOW_KEY), now)) runDailyNoteIndexShadow(db, now, logger);
+    if (dailyRollupDue(readMeta(db, LAST_NOTE_SHADOW_KEY), now) || noteShadowRetryDue(now)) runDailyNoteIndexShadow(db, now, logger);
     if (!requested && !rollupDue && !shadowDue) return { ran: false };
     if (shadowDue) runDailyUsageShadow(db, now, logger);
     let users = 0;

@@ -241,3 +241,27 @@ test('the owner filter applies before LIMIT: a user with few matches is not star
   assert.equal(hits.length, 3, 'all three of the quiet user\'s notes are returned');
   assert.ok(hits.every((h) => h.meetingId.startsWith('q')));
 });
+
+const settle = () => new Promise((resolve) => setImmediate(() => setImmediate(resolve)));
+
+test('a slice that throws writes no day key and backs off; the retry succeeds and resets the failures', async () => {
+  seed(newUser());
+  agentDb.prepare("DELETE FROM store_meta WHERE key = 'last_daily_note_index_shadow_day'").run();
+  jobs.resetNoteShadowFailureState();
+  jobs.setNoteShadowRunFactory(() => ({
+    empty: false, result: null, step() { throw new Error('boom'); },
+  }));
+  jobs.runDailyNoteIndexShadow(agentDb, NOW, null);
+  await settle();
+  assert.equal(jobs.noteShadowFailureState().failures, 1);
+  assert.equal(agent.readMeta(agentDb, 'last_daily_note_index_shadow_day'), null, 'no day key after a throw');
+  assert.equal(jobs.noteShadowRetryDue(NOW), false, 'the first retry waits a minute');
+  assert.equal(jobs.noteShadowRetryDue(new Date(NOW.getTime() + 61_000)), true);
+
+  jobs.setNoteShadowRunFactory(null);
+  jobs.runDailyNoteIndexShadow(agentDb, new Date(NOW.getTime() + 61_000), null);
+  await settle();
+  assert.equal(jobs.noteShadowFailureState().failures, 0);
+  assert.equal(agent.readMeta(agentDb, 'last_daily_note_index_shadow_day'), agent.localDay(new Date(NOW.getTime() + 61_000)));
+  jobs.resetNoteShadowFailureState();
+});
