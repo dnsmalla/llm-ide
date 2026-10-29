@@ -93,6 +93,13 @@ let apiRoutes: [Route] = [
     route("GET /kb/project/:id/export", "ProjectExportBundle", ProjectExportBundle.self),  // exportProject
     route("POST /kb/ingest", "[String: AnyCodable]", [String: AnyCodable].self),  // ingestMeeting
     route("GET /kb/storage", "StorageReport", LlmIdeAPIClient.StorageReport.self),  // storageReport
+    route("GET /kb/providers/catalog", "CatalogResponse", LlmIdeAPIClient.CatalogResponse.self),  // fetchProviderCatalog
+    route("POST /kb/providers/catalog/connect", "CatalogConnectAck", LlmIdeAPIClient.CatalogConnectAck.self),  // connectCatalogProvider
+    route("POST /kb/providers/catalog/disconnect", "CatalogAck", LlmIdeAPIClient.CatalogAck.self),  // disconnectCatalogProvider
+    route("POST /kb/providers/catalog/test", "CatalogTestResult", LlmIdeAPIClient.CatalogTestResult.self),  // testCatalogProvider
+    route("POST /kb/providers/catalog/models", "CatalogModelList", LlmIdeAPIClient.CatalogModelList.self),  // fetchCatalogModels
+    route("GET /kb/providers/settings", "CatalogSettings", LlmIdeAPIClient.CatalogSettings.self),  // fetchProviderCatalogSettings
+    route("PUT /kb/providers/settings", "CatalogSettings", LlmIdeAPIClient.CatalogSettings.self),  // saveProviderCatalogSettings
     route("GET /kb/agent-history/settings", "AgentHistorySettings", LlmIdeAPIClient.AgentHistorySettings.self),  // agentHistorySettings
     route("PUT /kb/agent-history/settings", "AgentHistorySettings", LlmIdeAPIClient.AgentHistorySettings.self),  // setAgentHistoryRetention
     route("POST /kb/agent-history/clear", "AgentHistoryClearResult", LlmIdeAPIClient.AgentHistoryClearResult.self),  // previewAgentHistoryClear, performAgentHistoryClear

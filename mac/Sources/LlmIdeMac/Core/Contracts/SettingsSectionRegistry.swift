@@ -27,6 +27,9 @@ enum SettingsSectionSlot: String, CaseIterable, Sendable {
     case docGen
     /// App group, after Doc Gen: agent history storage, retention, clear and compact.
     case agentHistory
+    /// App group, after Custom Providers: the provider catalog (connect OpenAI,
+    /// Groq, Ollama …, capability flags, tool-chat and fallback switches).
+    case providerCatalog
 }
 
 /// Scroll anchors a deep link can post with `.scrollSettingsToCard`.

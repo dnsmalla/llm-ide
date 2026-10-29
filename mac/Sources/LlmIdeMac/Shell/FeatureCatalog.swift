@@ -136,6 +136,11 @@ enum FeatureCatalog {
             AnyView(DocGenServerStoreCard())
         }
         #endif
+        // Provider catalog (connections, tools badge, tool-chat and fallback
+        // switches). Talks only to the API client; Settings is never excluded.
+        registry.register(slot: .providerCatalog, id: "provider-catalog") {
+            AnyView(ProviderCatalogSettingsCard(api: api))
+        }
         // Agent history (storage, retention, clear, compact). Always compiled:
         // agent_chat is always on and the store backs chat, Loop and meetings.
         registry.register(slot: .agentHistory, id: "agent-history") {

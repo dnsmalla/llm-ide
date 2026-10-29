@@ -45,7 +45,12 @@ struct SettingsView: View {
                             AgentSdkSettingsSection(api: api)
                             TokenSavingSettingsSection()
                             ProvidersSettingsSection(api: api)
-                            CustomProvidersSection(api: api)
+                            // One child (a nested Group), so this block stays at the
+                            // ViewBuilder's ten-child limit.
+                            Group {
+                                CustomProvidersSection(api: api)
+                                SettingsSlotView(slot: .providerCatalog)
+                            }
                             TierRoutingSection(api: api)
                             SettingsSlotView(slot: .loopDefaults)
                             SettingsSlotView(slot: .docGen)
