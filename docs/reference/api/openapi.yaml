@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 88
+  x-api-version: 89
 servers:
   - url: "https://{host}"
     variables:
@@ -2591,7 +2591,7 @@ paths:
           application/json:
             schema:
               type: "object"
-              description: "message and transcript are required in effect (400 when either is missing, or empty after sanitization). message is capped at 10 000 characters; history uses the last 10 turns, each capped at 5 000 characters. The user's Meeting-agent persona, when set, prefixes the prompt."
+              description: "REMOVED in API 89: the body is not read and the route answers 410 ENDPOINT_REMOVED (the extension side panel uses POST /agent/v2/stream). The old shape is kept so the 401/429 fixtures stay valid: message and transcript, history (last 10 turns), language."
               properties:
                 message:
                   type: "string"
@@ -2608,18 +2608,10 @@ paths:
       responses:
         "200":
           description: "Assistant reply"
-          content:
-            application/json:
-              schema:
-                type: "object"
-                required:
-                  - "reply"
-                properties:
-                  reply:
-                    type: "string"
-                    description: "The model's reply, trimmed."
+          x-undeclared: true
         "400":
           description: "Validation error"
+          x-undeclared: true
           content:
             application/json:
               schema:
@@ -2630,14 +2622,14 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
-        "429":
-          description: "Rate limited"
+        "410":
+          description: "HTTP 410"
           content:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
-        "500":
-          description: "Internal Server Error"
+        "429":
+          description: "Rate limited"
           content:
             application/json:
               schema:
@@ -12238,6 +12230,27 @@ components:
                 - "string"
                 - "null"
             raw: {}
+        - title: "notice"
+          description: "An SDK signal the app understands (K1 P2): kind retry | rate_limit | permission_denied | model_fallback | refusal | mcp_status (sent after the result, so the Mac, which stops at the terminal event, does not show it). `level` decides visibility: info = server bookkeeping (audit, limits), never shown; warning/error = one status line. `data` is the machine-readable detail for the server and observers; the Mac does not decode it. Never carries `model`. Old clients decode an unknown type as the sdk passthrough."
+          additionalProperties: false
+          required:
+            - "type"
+            - "kind"
+            - "level"
+            - "text"
+          properties:
+            type:
+              const: "notice"
+            kind:
+              type: "string"
+            level:
+              enum:
+                - "info"
+                - "warning"
+                - "error"
+            text:
+              type: "string"
+            data: {}
         - title: "approval_request (ToolApproval)"
           additionalProperties: false
           required:

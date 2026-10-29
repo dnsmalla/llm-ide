@@ -43,6 +43,7 @@ import { sendJSON, readBody, parseJSON, readJsonObjectOr400, onClientDisconnect 
 import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
+import { extensionChatWorkspace } from '../core/extension-chat-workspace.mjs';
 
 const log = logger.child({ component: 'agent-v2' });
 
@@ -334,11 +335,16 @@ async function handleV2Stream(req, res, userId, deps) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'Missing message' } });
     return true;
   }
-  const agentContext = body.agentContext && typeof body.agentContext === 'object' ? body.agentContext : {};
+  let agentContext = body.agentContext && typeof body.agentContext === 'object' ? body.agentContext : {};
   const chatSessionId = typeof agentContext.chatSessionId === 'string' ? agentContext.chatSessionId : '';
   if (!chatSessionId) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'agentContext.chatSessionId is required' } });
     return true;
+  }
+  // The extension side panel has no project folder and sends no paths: its
+  // turns run in a server-owned scratch directory (core/extension-chat-workspace.mjs).
+  if (agentContext.surface === 'extension' && !agentContext.workspaceRoot) {
+    agentContext = { ...agentContext, workspaceRoot: extensionChatWorkspace() };
   }
   const workspaceRoot = typeof agentContext.workspaceRoot === 'string' ? agentContext.workspaceRoot : '';
   if (!workspaceRoot) {

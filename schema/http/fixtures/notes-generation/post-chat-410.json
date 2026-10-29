@@ -1,0 +1,28 @@
+{
+  "endpoint": "POST /chat",
+  "status": 410,
+  "description": "Transcribed from the handler (server/ai-routes.mjs chatRemovedBody) and tests/chat-removed.test.mjs; no model call.",
+  "request": {
+    "body": {
+      "message": "Who owns the release?",
+      "transcript": "Alice: We agreed to ship the release on Friday.\nBob: I will update the release notes by Thursday.",
+      "history": [
+        {
+          "role": "user",
+          "content": "Summarise it."
+        }
+      ],
+      "language": "en"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ENDPOINT_REMOVED",
+      "message": "This version of the LLM-IDE extension is out of date: its chat endpoint was removed. Update the extension to keep using the side-panel chat.",
+      "details": {
+        "use": "/agent/v2/stream",
+        "removedInApiVersion": 89
+      }
+    }
+  }
+}

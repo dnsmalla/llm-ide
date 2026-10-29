@@ -297,6 +297,12 @@ export type AgentV2Event = {
   subtype: string | null;
   raw: unknown;
 } | {
+  type: "notice";
+  kind: string;
+  level: "info" | "warning" | "error";
+  text: string;
+  data?: unknown;
+} | {
   type: "approval_request";
   requestId: string;
   kind: "ToolApproval";
@@ -4645,18 +4651,11 @@ export type PostChatRequest = {
   };
 };
 
-export type PostChatResponse200 = {
-  /** The model's reply, trimmed. */
-  reply: string;
-};
-
-export type PostChatResponse400 = CommonError;
-
 export type PostChatResponse401 = CommonError;
 
-export type PostChatResponse429 = CommonError;
+export type PostChatResponse410 = CommonError;
 
-export type PostChatResponse500 = CommonError;
+export type PostChatResponse429 = CommonError;
 
 /** Request parts for `POST /code-assist` (schema/http/notes-generation.schema.json). */
 export type PostCodeAssistRequest = {
@@ -7474,11 +7473,9 @@ export interface ApiEndpoints {
   "POST /chat": {
     request: PostChatRequest;
     responses: {
-      200: PostChatResponse200;
-      400: PostChatResponse400;
       401: PostChatResponse401;
+      410: PostChatResponse410;
       429: PostChatResponse429;
-      500: PostChatResponse500;
     };
   };
   "POST /code-assist": {
