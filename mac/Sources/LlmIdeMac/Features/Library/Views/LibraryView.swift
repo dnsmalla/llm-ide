@@ -11,8 +11,7 @@ struct LibraryView: View {
     @Environment(ShellState.self) private var shell
     @Environment(AppEnvironment.self) private var env
     @Environment(LibraryItemStore.self) private var itemStore
-    /// Read for `serverApiVersion` only: it decides whether plugin updates use
-    /// the one-click endpoint (v60+) or the re-import path.
+    /// Handed to Extensions' host (its `serverApiVersion` gates plugin updates).
     @Environment(BackendManager.self) private var backend
     @EnvironmentObject private var projectStore: ProjectStore
     @EnvironmentObject private var theme: ThemeStore
@@ -46,66 +45,16 @@ struct LibraryView: View {
         get { Set(expandedSourceGroupsRaw.split(separator: "\n").map(String.init)) }
         nonmutating set { expandedSourceGroupsRaw = newValue.joined(separator: "\n") }
     }
-    /// Installed plugins for the current user. Loaded once on appear
-    /// and refreshed when the user (re-)opens Library. Failures are
-    /// silent — the sidebar just shows an empty Plugins section.
-    @State private var plugins: [PluginInfo] = []
-    /// Why the plugin list could not be read (server down, …). Without it a failed
-    /// fetch read as "No plugins installed yet" and emptied the list.
-    @State private var pluginsError: String?
-    /// True once a plugin list has loaded, so an empty `plugins` before that
-    /// is never handed to the update center as "nothing installed".
-    @State private var pluginsLoaded = false
-    /// The destructive action waiting for the user's yes.
+    /// The destructive action waiting for the user's yes (connector removals;
+    /// plugin / MCP / LLM source removals are confirmed by Extensions' sections).
     @State private var pendingRemoval: LibraryRemoval?
-    /// An MCP consent waiting for the user's yes — the row's Consent button
-    /// shows what would run before granting it.
-    @State private var pendingMcpConsent: McpConsentPrompt?
     /// Request tokens so an older list response cannot overwrite a newer one.
     @State private var loadGenerations = LibraryLoadGenerations()
-    @State private var showingGitInstallSheet = false
-    @State private var showingClaudeImportSheet = false
-    @State private var showingMarketplaceSheet = false
-    @State private var showingCodexImportSheet = false
-    @State private var pluginInstallMessage: String?
-    /// Plugin-update state lives in an app-lifetime object, not here: this
-    /// view's `@State` dies on every section switch, and an update (or its
-    /// confirmation, or its result) must not die with it.
-    private var updateCenter: PluginUpdateCenter { .shared }
-    private var pluginUpdates: [PluginUpdateEntry] { updateCenter.entries }
-    /// Held when an install hits "already installed" (409): re-runs the same
-    /// install with replace=true if the user confirms. Replaces the old
-    /// "go to Settings → Plugins to overwrite" punt now that management is
-    /// wholly in Library.
-    @State private var pendingReplaceInstall: ((Bool) async throws -> PluginInstallResponse)?
-    /// Registered LLM sources for the current user. Loaded once on
-    /// appear and refreshed after any add/toggle/update/remove — same
-    /// pattern as `plugins`.
-    @State private var llmSources: [LlmIdeAPIClient.LlmSourceInfo] = []
-    /// Upstream status per source id (`GET …/updates`) — drives the sidebar's
-    /// "update" badge. Empty until the first check returns; never an error.
-    @State private var llmSourceUpdates: [String: LlmIdeAPIClient.LlmSourceUpdateStatus] = [:]
     @State private var refreshingAll = false
-    @State private var showingLlmSourceAddSheet = false
-    @State private var llmSourceMessage: String?
-    /// Registered MCP plugins for the current user. Loaded once on appear
-    /// and refreshed after any add/consent/toggle/remove — same pattern as
-    /// `llmSources`, except load/refresh surface errors instead of
-    /// swallowing them: an empty section from a real fetch failure (e.g. the
-    /// server down) looks identical to "nothing registered yet" otherwise,
-    /// which hides an actionable problem from the user.
-    @State private var mcpPlugins: [LlmIdeAPIClient.McpPluginInfo] = []
-    @State private var mcpPluginsError: String?
-    /// Registry-owned (not view state) so a check outlives a section switch.
-    private let mcpUpdateCenter = McpUpdateCenter.shared
-    @State private var mcpPluginMessage: String?
-    @State private var mcpClaudeSources: [LlmIdeAPIClient.ClaudeMcpSource] = []
-    @State private var mcpCodexSources: [LlmIdeAPIClient.CodexMcpSource] = []
-    /// Curated one-click servers. Loaded alongside the plugin list, because
-    /// importing from a CLI config was the ONLY way in before this — and for
-    /// anyone who had configured nothing, that meant no way in at all.
-    @State private var mcpCatalog: [LlmIdeAPIClient.McpCatalogEntry] = []
-    @State private var mcpAddSheet: McpAddSheet.Mode?
+    /// The plugin / MCP / LLM-source sections' state, owned by Extensions and
+    /// reached through `ExtensionsLibraryRegistry`; nil until first appearance
+    /// or when nothing is installed.
+    @State private var extensions: (any ExtensionsLibraryHost)?
     /// The connectors this user has selected, plus the whole curated catalog
     /// behind the header's "Add from catalog…" sheet. Selection is what makes
     /// a connector's card appear in Settings → Connections; Meetings and Email
@@ -117,10 +66,6 @@ struct LibraryView: View {
     @State private var connectorsError: String?
     @State private var connectorMessage: String?
     @State private var showingConnectorAddSheet = false
-    // Non-nil when the initial LLM-sources fetch failed — distinguishes a real
-    // load error from "user has zero sources" so the section doesn't misleadingly
-    // show the empty placeholder on a network/auth/decode failure.
-    @State private var llmSourcesError: String?
     /// Persisted set of COLLAPSED section ids (comma-joined). Absence ⇒
     /// expanded. One uniform mechanism drives every section's chevron.
     /// Every section is seeded collapsed so the library opens in a clean,
@@ -143,44 +88,18 @@ struct LibraryView: View {
         // oversized content got centered, clipping headers on the left.
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .task { await load() }
-        .task {
-            await loadLlmSources()
-            await loadLlmSourceUpdates(force: false)
-        }
-        .task { await loadMcpPlugins() }
         .task { await loadConnectors() }
-        .task {
-            // Plugins first: the update check routes (and checks git /
-            // marketplace origins) by each plugin's install source.
-            await loadPlugins()
-            await loadPluginUpdates()
-            consumeUpdateMessage()
+        .task { installExtensionsHost() }
+        .background {
+            if let extensions { ExtensionsLibraryLifecycleView(host: extensions) }
         }
-        // An update finishing elsewhere (or while this view was gone) must
-        // reach the rows and the alert.
-        // The token bump reloads the plugin rows (and the detail pane) here.
-        .onChange(of: updateCenter.changeToken) { shell.markLibraryDirty() }
-        .onChange(of: updateCenter.libraryMessage) { consumeUpdateMessage() }
-        // The version gate decides which update API to ask; the first probe of
-        // the server can land after this view appeared.
-        .onChange(of: backend.serverApiVersion) { Task { await loadPluginUpdates() } }
-        // A detail pane can change what these rows should show (MCP consent /
-        // enable / remove). It has no way to call back into this list, so it
-        // bumps ShellState's token and the affected sections reload here.
+        // A detail pane can change what these rows should show (connector
+        // remove). It has no way to call back into this list, so it bumps
+        // ShellState's token and the affected sections reload here.
         .onChange(of: shell.libraryDirtyToken) {
-            Task {
-                await loadMcpPlugins()
-                await loadConnectors()
-                // Plugins AND their update state. No invalidation here: an
-                // update already re-checked in the center, and a toggle does
-                // not change what is updatable, so the 60 s TTL applies.
-                await loadPlugins()
-                await loadPluginUpdates()
-                await refreshLlmSources()
-                await loadLlmSourceUpdates(force: false)
-            }
+            Task { await loadConnectors() }
         }
-        // Destructive actions (uninstall / remove) are confirmed first; the row
+        // Destructive actions (connector remove) are confirmed first; the row
         // context menus only set `pendingRemoval`.
         .confirmationDialog(
             pendingRemoval?.dialogTitle ?? "",
@@ -196,8 +115,6 @@ struct LibraryView: View {
         } message: { removal in
             Text(removal.message)
         }
-        .task { await scanClaudeSources() }
-        .task { await scanCodexSources() }
         .onReceive(NotificationCenter.default.publisher(for: .meetingIndexChanged)) { _ in
             Task { @MainActor in
                 // Refresh the meeting list. syncMeetingNotes is handled
@@ -350,29 +267,15 @@ struct LibraryView: View {
             // ── Notes section ─────────────────────────────────────────
             fileTreeSection(.notes)
 
-            // ── Plugins section ───────────────────────────────────────
-            // User-scoped — shown regardless of active project. Install /
-            // import / reload live in this section's header menu (the ⊕);
-            // uninstall in each row's context menu. (Plugin management is
-            // wholly here now — there is no Settings → Plugins.)
-            // Agents / Skills browse UIs were removed; skills install into
-            // the project via the central kit, and the Code Assistant "/"
-            // menu still discovers them.
-            pluginsSection
-
-            // ── LLM Sources section ────────────────────────────────────
-            // Registered LLM-resource repos (builtin .skills + user-added
-            // git/local sources), each contributing any mix of skills (chat
-            // "/" menu discovery via /kb/agent/skill-library), agents, and
-            // hooks. Agents/hooks are catalogued for display only — never
-            // invoked/executed.
-            llmSourcesSection
-
-            // ── MCP Plugins section ────────────────────────────────────
-            // Servers imported from ~/.claude.json or registered manually,
-            // gated by per-user consent + enable before they reach the
-            // Claude CLI's --mcp-config.
-            mcpPluginsSection
+            // ── Plugins / LLM Sources / MCP Plugins sections ───────────
+            // Contributed by the Extensions feature (plugins, LLM-resource
+            // repos, MCP servers) through `ExtensionsLibraryRegistry`.
+            if let extensions {
+                ForEach(ExtensionsLibrarySectionKind.allCases, id: \.self) { kind in
+                    ExtensionsLibrarySectionView(request: ExtensionsLibrarySectionRequest(
+                        host: extensions, kind: kind, isExpanded: sectionExpanded(kind.rawValue)))
+                }
+            }
 
             // ── Connectors section ─────────────────────────────────────
             // The curated inbound-source catalog (Box, Slack, Drive, …).
@@ -639,58 +542,14 @@ struct LibraryView: View {
 
     // MARK: - Unified section header
 
-    /// The one header style used by EVERY Library section: a collapse chevron,
-    /// an 18×18 tinted icon chip, an uppercase label, a count pill, and an
-    /// optional trailing control (an "+" / install menu). `tint` is always
-    /// palette-derived so the whole sidebar adapts across Dark/Light/Midnight.
-    ///
-    /// Tapping anywhere on the label area toggles the section (large hit
-    /// target); the trailing control sits outside the toggle button.
+    /// The one header style used by EVERY Library section (see
+    /// `LibrarySectionHeader`, which Extensions' sections use too).
     private func unifiedSectionHeader<Trailing: View>(
         id: String, title: String, icon: String, tint: Color, count: Int,
-        @ViewBuilder trailing: () -> Trailing
+        @ViewBuilder trailing: @escaping () -> Trailing
     ) -> some View {
-        let isExpanded = sectionExpanded(id)
-        return HStack(spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.18)) {
-                    isExpanded.wrappedValue.toggle()
-                }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 8, weight: .bold))
-                        .foregroundStyle(.tertiary)
-                        .rotationEffect(.degrees(isExpanded.wrappedValue ? 90 : 0))
-                        .frame(width: 10)
-                    Image(systemName: icon)
-                        .font(.system(size: 10, weight: .bold))
-                        .foregroundStyle(tint)
-                        .frame(width: 18, height: 18)
-                        .background(tint.opacity(0.12), in: RoundedRectangle(cornerRadius: 4))
-                    Text(title)
-                        .font(.system(size: 11, weight: .heavy))
-                        .foregroundStyle(tint)
-                        .textCase(.uppercase)
-                        .tracking(0.5)
-                    if count > 0 {
-                        Text("\(count)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(tint.opacity(0.6))
-                    }
-                    Spacer(minLength: 4)
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help(isExpanded.wrappedValue ? "Collapse \(title)" : "Expand \(title)")
-
-            trailing()
-        }
-        // Breathing room above each section groups it visually (Finder-style)
-        // and stops the colored uppercase label from crowding the rows beneath.
-        .padding(.top, 12)
-        .padding(.bottom, 3)
+        LibrarySectionHeader(title: title, icon: icon, tint: tint, count: count,
+                             isExpanded: sectionExpanded(id), trailing: trailing)
     }
 
     /// File-tree section header (Sources/Code/Data/LLM Doc): unified header with
@@ -754,17 +613,7 @@ struct LibraryView: View {
 
     /// Consistent muted empty/placeholder row used across every section.
     private func emptyRow(_ text: String, icon: String = "tray", leading: CGFloat = 0) -> some View {
-        HStack(spacing: 5) {
-            Image(systemName: icon)
-                .font(Typography.fileMeta)
-                .foregroundStyle(.tertiary)
-            Text(text)
-                .font(Typography.fileMeta)
-                .foregroundStyle(.tertiary)
-        }
-        .listRowSeparator(.hidden)
-        .padding(.vertical, 2)
-        .padding(.leading, leading)
+        LibraryEmptyRow(text: text, icon: icon, leading: leading)
     }
 
     private func pickFile(for category: LibraryItem.Category) {
@@ -847,10 +696,15 @@ struct LibraryView: View {
             try? indexer.fullScan()
         }.value
         await load()
-        await loadPlugins()
-        await loadLlmSources()
-        await loadMcpPlugins()
+        await extensions?.refresh()
         await loadConnectors()
+    }
+
+    /// Builds Extensions' host once per appearance of this view.
+    private func installExtensionsHost() {
+        guard extensions == nil else { return }
+        extensions = ExtensionsLibraryRegistry.shared.makeHost(
+            ExtensionsLibraryRequest(api: api, shell: shell, backend: backend))
     }
 
     private func load() async {
@@ -866,798 +720,17 @@ struct LibraryView: View {
         }
     }
 
-    @ViewBuilder
-    private var pluginsSection: some View {
-        Section {
-            if sectionExpanded("plugins").wrappedValue {
-                if let pluginsError {
-                    HStack(spacing: 6) {
-                        Text("Couldn't read the plugin list: \(pluginsError)")
-                            .font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        Button("Retry") { Task { await loadPlugins() } }.font(.caption)
-                    }
-                    .padding(.vertical, 2)
-                }
-                if plugins.isEmpty {
-                    // Only claim "none" when the list was actually read.
-                    if pluginsError == nil {
-                        emptyRow("No plugins installed yet — install from .zip or a Git URL.",
-                                 icon: "puzzlepiece.extension")
-                    }
-                } else {
-                    ForEach(plugins) { p in
-                        PluginLibraryRow(plugin: p,
-                                         updateTier: pluginUpdates.first { $0.name == p.name }?.tier)
-                            .tag(ShellState.LibrarySelection.plugin(p.name))
-                            .contextMenu {
-                                Button(role: .destructive) {
-                                    pendingRemoval = .plugin(name: p.name, title: p.title)
-                                } label: { Label("Uninstall", systemImage: "trash") }
-                            }
-                    }
-                }
-            }
-        } header: {
-            pluginsHeader
-        }
-    }
-
-    /// Section header row with the "+" install menu.
-    @ViewBuilder
-    private var pluginsHeader: some View {
-        unifiedSectionHeader(
-            id: "plugins", title: "Plugins", icon: "puzzlepiece.extension",
-            tint: theme.current.categoryTeal, count: plugins.count
-        ) {
-            // Right: install menu — same frame/font as the + buttons above.
-            Menu {
-                Button {
-                    Task { await installFromZip() }
-                } label: { Label("Install from .zip…", systemImage: "doc.zipper") }
-                Button {
-                    showingGitInstallSheet = true
-                } label: { Label("Install from Git URL…", systemImage: "link") }
-                Button {
-                    showingMarketplaceSheet = true
-                } label: { Label("Add marketplace…", systemImage: "bag") }
-                Button {
-                    showingClaudeImportSheet = true
-                } label: { Label("Import from Claude Code…", systemImage: "arrow.down.circle") }
-                Button {
-                    showingCodexImportSheet = true
-                } label: { Label("Import from Codex…", systemImage: "arrow.down.circle") }
-                if !pluginUpdates.isEmpty {
-                    Divider()
-                    Section("Updates available") {
-                        ForEach(pluginUpdates) { update in
-                            Button {
-                                applyPluginUpdate(update)
-                            } label: {
-                                Label(update.name + (update.targetVersion.map { " → \($0)" } ?? ""),
-                                      systemImage: "arrow.triangle.2.circlepath")
-                            }
-                            .disabled(updateCenter.isUpdating)
-                        }
-                        Button {
-                            applyAllPluginUpdates()
-                        } label: { Label("Update all (\(pluginUpdates.count))", systemImage: "square.and.arrow.down.on.square") }
-                        .disabled(updateCenter.isUpdating)
-                    }
-                }
-                Divider()
-                Button {
-                    revealPluginsFolder()
-                } label: { Label("Reveal plugin folder", systemImage: "folder") }
-                Button {
-                    Task { await rescanVendorSources() }
-                } label: { Label("Check for plugin updates", systemImage: "arrow.clockwise.circle") }
-                // A forced check runs `claude plugin marketplace update`; not while an update runs.
-                .disabled(updateCenter.isUpdating)
-                Button {
-                    Task { await reloadPlugins() }
-                } label: { Label("Reload from disk", systemImage: "arrow.clockwise") }
-            } label: {
-                Image(systemName: pluginUpdates.isEmpty ? "plus" : "arrow.triangle.2.circlepath")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(pluginUpdates.isEmpty
-                                     ? theme.current.categoryTeal.opacity(0.6)
-                                     : theme.current.categoryTeal)
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 20)
-            .help(pluginUpdates.isEmpty
-                  ? "Install or reload plugins"
-                  : "\(pluginUpdates.count) plugin update\(pluginUpdates.count == 1 ? "" : "s") available")
-        }
-        .sheet(isPresented: $showingGitInstallSheet) {
-            PluginGitInstallSheet { url, ref in
-                showingGitInstallSheet = false
-                Task { await installFromGit(url: url, ref: ref) }
-            } onCancel: {
-                showingGitInstallSheet = false
-            }
-        }
-        .sheet(isPresented: $showingMarketplaceSheet) {
-            PluginMarketplaceSheet(api: api,
-                onDismiss: { showingMarketplaceSheet = false },
-                onInstalled: { Task { await refreshPlugins() } })
-        }
-        .sheet(isPresented: $showingClaudeImportSheet) {
-            ClaudePluginImportSheet(api: api,
-                onDismiss: { showingClaudeImportSheet = false },
-                onImported: { Task { await refreshPlugins() } })
-        }
-        .sheet(isPresented: $showingCodexImportSheet) {
-            CodexPluginImportSheet(api: api,
-                onDismiss: { showingCodexImportSheet = false },
-                onImported: { Task { await refreshPlugins() } })
-        }
-        .sheet(item: Binding(
-            get: { updateCenter.pendingOrigin == .library ? updateCenter.pendingConfirmation : nil },
-            set: { updateCenter.pendingConfirmation = $0 }
-        ), onDismiss: { updateCenter.confirmationDismissed() }) { confirmation in
-            PluginUpdateConfirmSheet(confirmation: confirmation) {
-                updateCenter.accept(confirmation, api: api, oneClick: usesOneClickUpdate)
-            } onCancel: {
-                updateCenter.pendingConfirmation = nil
-            }
-        }
-        .alert("Plugin install", isPresented: Binding(
-            get: { pluginInstallMessage != nil },
-            set: { if !$0 { pluginInstallMessage = nil } }
-        )) {
-            Button("OK") { pluginInstallMessage = nil }
-        } message: {
-            Text(pluginInstallMessage ?? "")
-        }
-        .alert("Plugin already installed", isPresented: Binding(
-            get: { pendingReplaceInstall != nil },
-            set: { if !$0 { pendingReplaceInstall = nil } }
-        )) {
-            Button("Replace", role: .destructive) {
-                // Captured now: the alert's dismissal clears the binding before
-                // the Task body runs, which used to make Replace a silent no-op.
-                let op = pendingReplaceInstall
-                pendingReplaceInstall = nil
-                Task { await replaceInstall(op) }
-            }
-            Button("Cancel", role: .cancel) { pendingReplaceInstall = nil }
-        } message: {
-            Text("A plugin with this name is already installed. Replace it with this version?")
-        }
-    }
-
-    /// Load installed plugins for the Library → Plugins section. A failure keeps
-    /// the last good list and says so, rather than emptying it.
-    private func loadPlugins() async {
-        let token = loadGenerations.begin(.plugins)
-        do {
-            let fetched = try await api.listPlugins().plugins
-            guard loadGenerations.isCurrent(token, for: .plugins) else { return }
-            self.plugins = fetched
-            self.pluginsError = nil
-            self.pluginsLoaded = true
-        } catch {
-            guard loadGenerations.isCurrent(token, for: .plugins) else { return }
-            self.pluginsError = error.localizedDescription
-        }
-    }
-
     /// Run the removal the user just confirmed.
     private func perform(_ removal: LibraryRemoval) async {
         switch removal {
-        case .plugin(let name, _):
-            await uninstall(name: name)
-        case .mcpServer(let id, _): await removePlugin(id)
         case .connector(let id, _): await removeConnector(id)
-        case .llmSource(let id, _): await removeSource(id)
         case .sourceDisconnect:
             // Disconnect is confirmed inside the source sheets, which own the
             // vault keys to delete; nothing in the Library list sets it.
             break
         }
     }
-
     /// After an install / import / remove / reload: the plugin set changed, so
-    /// the cached update check is stale too (a removed plugin's badge must go).
-    private func refreshPlugins() async {
-        await loadPlugins()
-        updateCenter.invalidateCheck()
-        await loadPluginUpdates()
-    }
-
-    /// True when the server has the one-click update endpoint (API v60+).
-    private var usesOneClickUpdate: Bool {
-        PluginUpdatePresentation.supportsOneClickUpdate(serverApiVersion: backend.serverApiVersion)
-    }
-
-    /// Ask both bridges what the vendor sources now offer (the center keeps a
-    /// short TTL for non-forced checks). `force` also refreshes the
-    /// marketplace catalogs server-side (v60+ only).
-    private func loadPluginUpdates(force: Bool = false) async {
-        updateCenter.supportsExpect = PluginUpdatePresentation.supportsExpect(
-            serverApiVersion: backend.serverApiVersion)
-        // The full list lets the center route each update by its install
-        // source; nil (nothing loaded yet) keeps what it already knows. After a
-        // failed reload `plugins` is still the last good list.
-        await updateCenter.refresh(api: api, oneClick: usesOneClickUpdate, force: force,
-                                   plugins: pluginsLoaded ? plugins : nil)
-    }
-
-    /// Move a result the center holds for the Library into this view's alert.
-    private func consumeUpdateMessage() {
-        guard let message = updateCenter.libraryMessage else { return }
-        updateCenter.libraryMessage = nil
-        pluginInstallMessage = message
-    }
-
-    /// Re-scan the vendors' own plugin directories, then re-check. This is the
-    /// only way a plugin added to Claude Code *after* llm-ide started becomes
-    /// visible without a restart.
-    private func rescanVendorSources() async {
-        let claude = try? await api.refreshClaudeSources()
-        let codex = try? await api.refreshCodexSources()
-        // An explicit check: refresh the marketplace catalogs too.
-        await loadPluginUpdates(force: true)
-        await scanClaudeSources()
-        await scanCodexSources()
-        // Split out of the message expression: inlining these sums plus two
-        // nested interpolations defeated the type-checker's time budget.
-        let claudeSeen: Int = (claude?.installed ?? 0) + (claude?.marketplace ?? 0)
-        let codexSeen: Int = (codex?.installed ?? 0) + (codex?.marketplace ?? 0)
-        let seen: Int = claudeSeen + codexSeen
-        let pendingCount: Int = pluginUpdates.count
-        if pendingCount == 0 {
-            let plural: String = seen == 1 ? "" : "s"
-            pluginInstallMessage = "Re-scanned \(seen) vendor plugin\(plural). Everything imported is up to date."
-        } else {
-            let plural: String = pendingCount == 1 ? "" : "s"
-            pluginInstallMessage = "\(pendingCount) update\(plural) available."
-        }
-    }
-
-    /// Synchronous on purpose: the center marks itself running before this
-    /// returns, so a second click is refused instead of starting a second run.
-    private func applyPluginUpdate(_ update: PluginUpdateEntry) {
-        updateCenter.startUpdate(name: update.name, api: api, oneClick: usesOneClickUpdate, origin: .library)
-    }
-
-    private func applyAllPluginUpdates() {
-        updateCenter.startUpdateAll(api: api, oneClick: usesOneClickUpdate)
-    }
-
-    private func reloadPlugins() async {
-        _ = try? await api.reloadPlugins()
-        await refreshPlugins()
-    }
-
-    private func revealPluginsFolder() {
-        Task {
-            if let resp = try? await api.listPlugins() {
-                let url = URL(fileURLWithPath: resp.pluginDir, isDirectory: true)
-                NSWorkspace.shared.activateFileViewerSelecting([url])
-            }
-        }
-    }
-
-    private func installFromZip() async {
-        let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.zip]
-        panel.allowsMultipleSelection = false
-        panel.message = "Choose a plugin .zip"
-        panel.prompt = "Install"
-        guard panel.runModal() == .OK, let url = panel.url else { return }
-        // Only the file name is recorded: a local path is neither portable nor
-        // something an update check could use.
-        let source = PluginInstallSource.zip(fileName: url.lastPathComponent)
-        await performInstall { replace in
-            try await api.installPlugin(zipURL: url, replace: replace, source: source)
-        }
-    }
-
-    private func installFromGit(url: String, ref: String?) async {
-        await performInstall { replace in
-            try await api.installPluginFromGit(url: url, ref: ref, replace: replace)
-        }
-    }
-
-    /// Common install plumbing: run the install closure, surface
-    /// success/failure via the alert, and refresh the sidebar list. On 409
-    /// (already installed) it holds the op so the "Plugin already installed"
-    /// alert can re-run it with replace=true — the in-Library replacement for
-    /// the old "overwrite from Settings → Plugins" flow.
-    private func performInstall(_ op: @escaping (_ replace: Bool) async throws -> PluginInstallResponse) async {
-        do {
-            let resp = try await op(false)
-            pluginInstallMessage = "Installed \(resp.plugin.title) v\(resp.plugin.version)."
-            await refreshPlugins()
-        } catch let APIError.http(status, _, message, _) where status == 409 || message.contains("already installed") {
-            // The server answers 409 with code INSTALL_FAILED; the status is the
-            // signal, the message a fallback for a proxy that rewrites it.
-            pendingReplaceInstall = op
-        } catch {
-            pluginInstallMessage = error.localizedDescription
-        }
-    }
-
-    /// Re-run the held install with replace=true after the user confirms.
-    private func replaceInstall(_ op: ((Bool) async throws -> PluginInstallResponse)?) async {
-        guard let op else { return }
-        do {
-            let resp = try await op(true)
-            pluginInstallMessage = PluginUpdatePresentation.replacedMessage(
-                name: resp.plugin.title, version: resp.plugin.version,
-                trustReset: resp.plugin.trustReset == true)
-            await refreshPlugins()
-        } catch {
-            pluginInstallMessage = error.localizedDescription
-        }
-    }
-
-    /// By NAME: the server needs nothing else, and a lookup in `plugins` made a
-    /// confirmed uninstall silently do nothing when the list had refreshed while
-    /// the dialog was open.
-    private func uninstall(name: String) async {
-        do {
-            _ = try await api.uninstallPlugin(name: name)
-            if case .plugin(let selected) = shell.librarySelection, selected == name {
-                shell.librarySelection = nil
-            }
-            await refreshPlugins()
-        } catch {
-            pluginInstallMessage = error.localizedDescription
-        }
-    }
-
-    // MARK: - LLM Sources section
-
-    /// Inline error row for the LLM Sources section — shown when the fetch
-    /// fails, with a Retry. Mirrors `emptyRow`'s framing so it lines up with
-    /// the "no sources" placeholder it replaces.
-    @ViewBuilder
-    private func llmSourcesErrorRow(_ msg: String) -> some View {
-        HStack(spacing: 8) {
-            Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.orange)
-            Text(msg)
-                .font(.footnote)
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-            Spacer(minLength: 4)
-            Button("Retry") { Task { await loadLlmSources() } }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.vertical, 12)
-        .listRowSeparator(.hidden)
-    }
-
-    @ViewBuilder
-    private var llmSourcesSection: some View {
-        Section {
-            if sectionExpanded("llmSources").wrappedValue {
-                if let err = llmSourcesError {
-                    llmSourcesErrorRow(err)
-                } else if llmSources.isEmpty {
-                    emptyRow("No LLM sources registered yet.", icon: "books.vertical")
-                } else {
-                    ForEach(llmSources) { s in
-                        LlmSourceRow(source: s, updateAvailable: llmSourceUpdates[s.id]?.updateAvailable == true) { enabled in
-                            Task { await toggleSource(s.id, enabled: enabled) }
-                        }
-                        .tag(ShellState.LibrarySelection.llmSource(s.id))
-                        .contextMenu {
-                            if !s.builtin {
-                                Button(role: .destructive) {
-                                    pendingRemoval = .llmSource(id: s.id, name: s.name)
-                                } label: { Label("Remove", systemImage: "trash") }
-                            }
-                        }
-                    }
-                }
-            }
-        } header: {
-            llmSourcesHeader
-        }
-    }
-
-    /// Section header row with the "+" add menu.
-    @ViewBuilder
-    private var llmSourcesHeader: some View {
-        unifiedSectionHeader(
-            id: "llmSources", title: "LLM Sources", icon: "books.vertical",
-            tint: theme.current.categoryAmber, count: llmSources.count
-        ) {
-            Menu {
-                Button {
-                    showingLlmSourceAddSheet = true
-                } label: { Label("Add LLM source…", systemImage: "plus.circle") }
-                Button {
-                    Task { await loadLlmSourceUpdates(force: true) }
-                } label: { Label("Check for updates", systemImage: "arrow.triangle.2.circlepath") }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.current.categoryAmber.opacity(0.6))
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 20)
-            .help("Add an LLM source")
-        }
-        .sheet(isPresented: $showingLlmSourceAddSheet) {
-            LlmSourceAddSheet(onSubmit: { url, path, ref, name in
-                showingLlmSourceAddSheet = false
-                Task { await addSource(url: url, path: path, ref: ref, name: name) }
-            }, onCancel: {
-                showingLlmSourceAddSheet = false
-            })
-        }
-        .alert("LLM source", isPresented: Binding(
-            get: { llmSourceMessage != nil },
-            set: { if !$0 { llmSourceMessage = nil } }
-        )) {
-            Button("OK") { llmSourceMessage = nil }
-        } message: {
-            Text(llmSourceMessage ?? "")
-        }
-    }
-
-    /// Load registered LLM sources for the Library section. A failure sets
-    /// `llmSourcesError` so the section shows the real error (with Retry)
-    /// instead of misleadingly rendering the empty placeholder.
-    private func loadLlmSources() async {
-        let token = loadGenerations.begin(.llmSources)
-        do {
-            let fetched = try await api.listLlmSources()
-            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
-            llmSources = fetched
-            llmSourcesError = nil
-        } catch {
-            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
-            llmSources = []
-            llmSourcesError = error.localizedDescription
-        }
-    }
-
-    /// Best-effort: a failed check leaves the previous badges in place.
-    private func loadLlmSourceUpdates(force: Bool) async {
-        guard let statuses = try? await api.llmSourceUpdates(force: force) else { return }
-        llmSourceUpdates = Dictionary(statuses.map { ($0.id, $0) }, uniquingKeysWith: { _, last in last })
-        if force {
-            let n = statuses.filter(\.updateAvailable).count
-            llmSourceMessage = n == 0 ? "All LLM sources are up to date."
-                : "\(n) LLM source\(n == 1 ? " has an update" : "s have updates") — open it and press Update."
-        }
-    }
-
-    private func refreshLlmSources() async {
-        // Same list as `loadLlmSources`, so the same generation: whichever of
-        // the two started last owns the rows.
-        let token = loadGenerations.begin(.llmSources)
-        do {
-            let fetched = try await api.listLlmSources()
-            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
-            llmSources = fetched
-            llmSourcesError = nil
-        } catch {
-            guard loadGenerations.isCurrent(token, for: .llmSources) else { return }
-            llmSourcesError = error.localizedDescription
-        }
-    }
-
-    private func toggleSource(_ id: String, enabled: Bool) async {
-        do {
-            _ = try await api.toggleLlmSource(id: id, enabled: enabled)
-            await refreshLlmSources()
-        } catch {
-            llmSourceMessage = error.localizedDescription
-        }
-    }
-
-    private func addSource(url: String?, path: String?, ref: String?, name: String?) async {
-        do {
-            let added = try await api.addLlmSource(url: url, path: path, ref: ref, name: name)
-            llmSourceMessage = "Added \(added.name)."
-            await refreshLlmSources()
-        } catch {
-            llmSourceMessage = error.localizedDescription
-        }
-    }
-
-    private func removeSource(_ id: String) async {
-        do {
-            try await api.removeLlmSource(id: id)
-            if case .llmSource(let sel) = shell.librarySelection, sel == id {
-                shell.librarySelection = nil
-            }
-            await refreshLlmSources()
-        } catch {
-            llmSourceMessage = error.localizedDescription
-        }
-    }
-
-    // MARK: - MCP Plugins
-
-    @ViewBuilder
-    private var mcpPluginsSection: some View {
-        Section {
-            if sectionExpanded("mcpPlugins").wrappedValue {
-                if let mcpPluginsError {
-                    HStack(spacing: 6) {
-                        Text(mcpPluginsError).font(.caption).foregroundStyle(.secondary).lineLimit(2)
-                        Button("Retry") { Task { await loadMcpPlugins() } }
-                            .font(.caption)
-                    }
-                    .padding(.vertical, 2)
-                } else if mcpPlugins.isEmpty {
-                    emptyRow("No MCP plugins registered yet.", icon: "bolt.horizontal.circle")
-                } else {
-                    // Say what the enabled ones cost before the list, so the price of
-                    // leaving a server on is visible where it is switched.
-                    Text(McpUsageNotes.sectionSummary(
-                        enabledCount: mcpPlugins.filter(\.isEffective).count))
-                        .font(.caption).foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .padding(.vertical, 2)
-                    ForEach(mcpPlugins) { p in
-                        McpPluginRow(
-                            plugin: p,
-                            versionUpdate: mcpUpdateCenter.update(for: p.id),
-                            onToggleConsent: { consented in
-                                // Granting runs a process (or reaches a URL) with
-                                // this user's session: confirm with the full
-                                // command first. Revoking only removes power.
-                                if consented {
-                                    pendingMcpConsent = McpConsentPrompt(plugin: p)
-                                } else {
-                                    Task { await consentPlugin(p.id, consented: false) }
-                                }
-                            },
-                            onToggleEnabled: { enabled in Task { await togglePlugin(p.id, enabled: enabled) } }
-                        )
-                        .tag(ShellState.LibrarySelection.mcpPlugin(p.id))
-                        .contextMenu {
-                            Button(role: .destructive) {
-                                pendingRemoval = .mcpServer(id: p.id, name: p.name)
-                            } label: { Label("Remove", systemImage: "trash") }
-                        }
-                    }
-                }
-            }
-        } header: {
-            mcpPluginsHeader
-        }
-    }
-
-    /// Section header row with the "Add from Claude Code…" menu.
-    @ViewBuilder
-    private var mcpPluginsHeader: some View {
-        unifiedSectionHeader(
-            id: "mcpPlugins", title: "MCP Plugins", icon: "bolt.horizontal.circle",
-            tint: theme.current.categoryPurple, count: mcpPlugins.count
-        ) {
-            Menu {
-                Menu("Add from catalog…") {
-                    if mcpCatalog.isEmpty {
-                        Button("Catalog unavailable") {}.disabled(true)
-                    } else {
-                        ForEach(mcpCatalog) { entry in
-                            Button {
-                                // An entry that needs a directory or DSN opens
-                                // the sheet; everything else adds in one click.
-                                if entry.requiresArg != nil {
-                                    mcpAddSheet = .catalogArg(entry)
-                                } else {
-                                    Task { await addMcpPlugin(catalogId: entry.id, arg: nil, name: nil,
-                                                              transport: nil, command: nil, args: nil, url: nil) }
-                                }
-                            } label: {
-                                Label(entry.registered ? "\(entry.name) (added)" : entry.name,
-                                      systemImage: entry.isHosted ? "cloud" : "terminal")
-                            }
-                            .disabled(entry.registered)
-                        }
-                    }
-                }
-                Divider()
-                Menu("Add from Claude Code…") {
-                    if mcpClaudeSources.isEmpty {
-                        Button("No servers found in ~/.claude.json") {}.disabled(true)
-                    } else {
-                        ForEach(mcpClaudeSources) { s in
-                            Button(s.name) {
-                                Task { await addPluginFromClaude(s.name) }
-                            }
-                        }
-                    }
-                    Divider()
-                    Button("Rescan") { Task { await scanClaudeSources() } }
-                }
-                Menu("Add from Codex…") {
-                    if mcpCodexSources.isEmpty {
-                        Button("No servers found in ~/.codex/config.toml") {}.disabled(true)
-                    } else {
-                        ForEach(mcpCodexSources) { s in
-                            Button(s.name) {
-                                Task { await addPluginFromCodex(s.name) }
-                            }
-                        }
-                    }
-                    Divider()
-                    Button("Rescan") { Task { await scanCodexSources() } }
-                }
-                Divider()
-                Button("Add manually…") { mcpAddSheet = .manual }
-            } label: {
-                Image(systemName: "plus")
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(theme.current.categoryPurple.opacity(0.6))
-                    .frame(width: 18, height: 18)
-                    .contentShape(Rectangle())
-            }
-            .menuStyle(.borderlessButton)
-            .menuIndicator(.hidden)
-            .frame(width: 20)
-            .help("Add an MCP plugin")
-        }
-        .alert("MCP plugin", isPresented: Binding(
-            get: { mcpPluginMessage != nil },
-            set: { if !$0 { mcpPluginMessage = nil } }
-        )) {
-            Button("OK") { mcpPluginMessage = nil }
-        } message: {
-            Text(mcpPluginMessage ?? "")
-        }
-        .sheet(item: $mcpAddSheet) { mode in
-            McpAddSheet(mode: mode) { catalogId, arg, name, transport, command, args, url in
-                Task {
-                    await addMcpPlugin(catalogId: catalogId, arg: arg, name: name,
-                                       transport: transport, command: command, args: args, url: url)
-                }
-            }
-            .environmentObject(theme)
-        }
-        .confirmationDialog(
-            pendingMcpConsent?.dialogTitle ?? "",
-            isPresented: Binding(get: { pendingMcpConsent != nil }, set: { if !$0 { pendingMcpConsent = nil } }),
-            titleVisibility: .visible,
-            presenting: pendingMcpConsent
-        ) { prompt in
-            Button(prompt.confirmLabel) {
-                pendingMcpConsent = nil
-                Task { await consentPlugin(prompt.pluginId, consented: true) }
-            }
-            Button("Cancel", role: .cancel) { pendingMcpConsent = nil }
-        } message: { prompt in
-            Text(prompt.message)
-        }
-    }
-
-    private func loadMcpPlugins() async {
-        let token = loadGenerations.begin(.mcpPlugins)
-        do {
-            let fetched = try await api.listMcpPlugins()
-            guard loadGenerations.isCurrent(token, for: .mcpPlugins) else { return }
-            mcpPlugins = fetched
-            mcpPluginsError = nil
-        } catch {
-            guard loadGenerations.isCurrent(token, for: .mcpPlugins) else { return }
-            mcpPluginsError = error.localizedDescription
-        }
-        // Best-effort: a catalog fetch failure just leaves the submenu empty
-        // rather than reporting an error over the plugin list, which is the
-        // more important thing on this screen.
-        let catalog = try? await api.fetchMcpCatalog()
-        guard loadGenerations.isCurrent(token, for: .mcpPlugins) else { return }
-        mcpCatalog = catalog ?? mcpCatalog
-        // Version badges (API v62+): cached server-side, so cheap to repeat.
-        if McpUpdatePresentation.isSupported(serverApiVersion: backend.serverApiVersion),
-           mcpPlugins.contains(where: { $0.package != nil }) {
-            // Not awaited: a slow registry must not hold up the list loads.
-            mcpUpdateCenter.startListCheck(api: api)
-        }
-    }
-
-    /// One add call for every entry point — the server resolves catalogId,
-    /// claudeName/codexName, or a raw command/url, so the client never has to
-    /// restate what the catalog already knows.
-    private func addMcpPlugin(catalogId: String?, arg: String?, name: String?,
-                              transport: String?, command: String?, args: [String]?, url: String?) async {
-        do {
-            let added = try await api.addMcpPlugin(
-                catalogId: catalogId, arg: arg, command: command, args: args,
-                url: url, transport: transport, name: name)
-            mcpPluginMessage = "Added \(added.name). Consent and enable it to start using it."
-            await refreshMcpPlugins()
-        } catch {
-            mcpPluginMessage = error.localizedDescription
-        }
-    }
-
-    private func refreshMcpPlugins() async { await loadMcpPlugins() }
-
-    /// Read-only scan, available to every authenticated user (the server
-    /// dropped its admin gate — LLM-IDE has no admin concept). A transport
-    /// failure is swallowed: the submenu just stays empty until a Rescan.
-    private func scanClaudeSources() async {
-        mcpClaudeSources = (try? await api.scanClaudeMcpSources()) ?? []
-    }
-
-    private func addPluginFromClaude(_ claudeName: String) async {
-        do {
-            let added = try await api.addMcpPlugin(claudeName: claudeName)
-            mcpPluginMessage = "Added \(added.name)."
-            await refreshMcpPlugins()
-        } catch {
-            mcpPluginMessage = error.localizedDescription
-        }
-    }
-
-    /// Read-only scan, available to every authenticated user (the server
-    /// dropped its admin gate — LLM-IDE has no admin concept). A transport
-    /// failure is swallowed: the submenu just stays empty until a Rescan.
-    private func scanCodexSources() async {
-        mcpCodexSources = (try? await api.scanCodexMcpSources()) ?? []
-    }
-
-    private func addPluginFromCodex(_ codexName: String) async {
-        do {
-            let added = try await api.addMcpPlugin(codexName: codexName)
-            mcpPluginMessage = "Added \(added.name)."
-            await refreshMcpPlugins()
-        } catch {
-            mcpPluginMessage = error.localizedDescription
-        }
-    }
-
-    private func consentPlugin(_ id: String, consented: Bool) async {
-        do {
-            _ = try await api.consentMcpPlugin(id: id, consented: consented)
-            await refreshMcpPlugins()
-            notifyOpenMcpPane(id)
-        } catch {
-            mcpPluginMessage = error.localizedDescription
-        }
-    }
-
-    private func togglePlugin(_ id: String, enabled: Bool) async {
-        do {
-            _ = try await api.toggleMcpPlugin(id: id, enabled: enabled)
-            await refreshMcpPlugins()
-            notifyOpenMcpPane(id)
-        } catch {
-            mcpPluginMessage = error.localizedDescription
-        }
-    }
-
-    /// An open detail pane for THIS server would otherwise keep showing the old
-    /// switch. Bumping the token reloads every Library section, so it is done only
-    /// when that pane is actually open — not on every sidebar click.
-    private func notifyOpenMcpPane(_ id: String) {
-        if case .mcpPlugin(let selected) = shell.librarySelection, selected == id {
-            shell.markLibraryDirty()
-        }
-    }
-
-    private func removePlugin(_ id: String) async {
-        do {
-            try await api.removeMcpPlugin(id: id)
-            if case .mcpPlugin(let sel) = shell.librarySelection, sel == id {
-                shell.librarySelection = nil
-            }
-            await refreshMcpPlugins()
-        } catch {
-            mcpPluginMessage = error.localizedDescription
-        }
-    }
-
     // MARK: - Connectors
 
     @ViewBuilder

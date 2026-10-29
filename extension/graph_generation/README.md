@@ -106,8 +106,8 @@ func docSetFingerprint(roots: [URL]) -> String
 ## インストール
 
 Library → Plugins → Plugin Marketplace に git URL を入力します。clone は Mac アプリ側で
-実行されます（[`PluginGitInstaller.swift`](../../mac/Sources/LlmIdeMac/Features/Library/Services/PluginGitInstaller.swift) /
-[`PluginMarketplace.swift`](../../mac/Sources/LlmIdeMac/Features/Library/Services/PluginMarketplace.swift)）。
+実行されます（[`PluginGitInstaller.swift`](../../mac/Sources/LlmIdeMac/Features/Extensions/Services/PluginGitInstaller.swift) /
+[`PluginMarketplace.swift`](../../mac/Sources/LlmIdeMac/Features/Extensions/Services/PluginMarketplace.swift)）。
 プラグインは `~/Library/Application Support/llm-ide/plugins/<name>/` に展開されます。
 
 **`llm-sources/` はエンジンのホストに使えません。** あちらは設計上

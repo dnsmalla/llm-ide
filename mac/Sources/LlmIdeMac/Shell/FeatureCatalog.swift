@@ -286,6 +286,9 @@ enum FeatureCatalog {
     /// returned, so compiled-out behaviour is unchanged. Idempotent: every
     /// install replaces.
     static func installFeatureSeams() {
+        // Extensions (plugins, MCP servers, LLM sources) is always compiled: Library's
+        // sidebar sections and detail panes for them come from this seam.
+        ExtensionsSeams.install()
         #if FEATURE_GANTT
         // Issues and Gantt are one excludable folder (`Features/Issues`), so
         // the picker and the resolver ride on the same `FEATURE_GANTT` flag as

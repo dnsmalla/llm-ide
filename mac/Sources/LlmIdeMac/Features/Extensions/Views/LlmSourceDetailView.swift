@@ -90,15 +90,15 @@ struct LlmSourceDetailView: View {
         // so a pending flag from the previous project no longer applies.
         .onChange(of: projectStore.activeProject?.localPath) { _, _ in hasUnappliedSelection = false }
         .confirmationDialog(
-            LibraryRemoval.llmSource(id: sourceId, name: source?.name ?? sourceId).dialogTitle,
+            ExtensionRemoval.llmSource(id: sourceId, name: source?.name ?? sourceId).dialogTitle,
             isPresented: $confirmingRemoval, titleVisibility: .visible
         ) {
-            Button(LibraryRemoval.llmSource(id: sourceId, name: "").confirmLabel, role: .destructive) {
+            Button(ExtensionRemoval.llmSource(id: sourceId, name: "").confirmLabel, role: .destructive) {
                 Task { await remove() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(LibraryRemoval.llmSource(id: sourceId, name: "").message)
+            Text(ExtensionRemoval.llmSource(id: sourceId, name: "").message)
         }
         .alert("LLM source", isPresented: Binding(
             get: { resultMessage != nil },

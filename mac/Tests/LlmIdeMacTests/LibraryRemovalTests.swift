@@ -9,12 +9,12 @@ import Foundation
 struct LibraryRemovalTests {
     @Test("each kind names the thing and says what it deletes")
     func wording() {
-        let plugin = LibraryRemoval.plugin(name: "claude-security", title: "Claude Security")
+        let plugin = ExtensionRemoval.plugin(name: "claude-security", title: "Claude Security")
         #expect(plugin.dialogTitle == "Uninstall “Claude Security”?")
         #expect(plugin.confirmLabel == "Uninstall")
         #expect(plugin.message.contains("trust"), "reinstalling asks for trust again")
 
-        let mcp = LibraryRemoval.mcpServer(id: "slack", name: "Slack")
+        let mcp = ExtensionRemoval.mcpServer(id: "slack", name: "Slack")
         #expect(mcp.dialogTitle == "Remove “Slack”?")
         #expect(mcp.message.contains("every user"), "the registry is one shared file")
 
@@ -26,9 +26,9 @@ struct LibraryRemovalTests {
 
     @Test("the same id in different kinds does not collide")
     func identity() {
-        #expect(LibraryRemoval.mcpServer(id: "x", name: "X").id != LibraryRemoval.connector(id: "x", name: "X").id)
-        #expect(LibraryRemoval.plugin(name: "x", title: "X").id != LibraryRemoval.mcpServer(id: "x", name: "X").id)
-        #expect(LibraryRemoval.mcpServer(id: "x", name: "X") == LibraryRemoval.mcpServer(id: "x", name: "X"))
+        #expect(ExtensionRemoval.mcpServer(id: "x", name: "X").id != LibraryRemoval.connector(id: "x", name: "X").id)
+        #expect(ExtensionRemoval.plugin(name: "x", title: "X").id != ExtensionRemoval.mcpServer(id: "x", name: "X").id)
+        #expect(ExtensionRemoval.mcpServer(id: "x", name: "X") == ExtensionRemoval.mcpServer(id: "x", name: "X"))
     }
 }
 

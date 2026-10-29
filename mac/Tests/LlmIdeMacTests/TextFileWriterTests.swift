@@ -108,7 +108,7 @@ struct TextFileWriterTests {
 struct LibrarySourceRemovalTests {
     @Test("LLM source removal warns the clone is deleted")
     func llmSourceWording() {
-        let removal = LibraryRemoval.llmSource(id: "kit", name: "Agent Kit")
+        let removal = ExtensionRemoval.llmSource(id: "kit", name: "Agent Kit")
         #expect(removal.dialogTitle.contains("Agent Kit"))
         #expect(removal.message.contains("deleted"))
         #expect(removal.confirmLabel == "Remove")
@@ -126,7 +126,7 @@ struct LibrarySourceRemovalTests {
 
     @Test("ids stay distinct across kinds")
     func distinctIds() {
-        #expect(LibraryRemoval.llmSource(id: "x", name: "X").id != LibraryRemoval.connector(id: "x", name: "X").id)
+        #expect(ExtensionRemoval.llmSource(id: "x", name: "X").id != LibraryRemoval.connector(id: "x", name: "X").id)
         #expect(LibraryRemoval.sourceDisconnect(.email).id != LibraryRemoval.sourceDisconnect(.slack).id)
     }
 }

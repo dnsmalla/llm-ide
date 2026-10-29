@@ -62,15 +62,15 @@ struct McpPluginDetailView: View {
         // must reach this open pane too, without blanking it.
         .onChange(of: shell.libraryDirtyToken) { Task { await refresh() } }
         .confirmationDialog(
-            LibraryRemoval.mcpServer(id: pluginId, name: plugin?.name ?? pluginId).dialogTitle,
+            ExtensionRemoval.mcpServer(id: pluginId, name: plugin?.name ?? pluginId).dialogTitle,
             isPresented: $confirmingRemoval, titleVisibility: .visible
         ) {
-            Button(LibraryRemoval.mcpServer(id: pluginId, name: "").confirmLabel, role: .destructive) {
+            Button(ExtensionRemoval.mcpServer(id: pluginId, name: "").confirmLabel, role: .destructive) {
                 Task { await remove() }
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text(LibraryRemoval.mcpServer(id: pluginId, name: "").message)
+            Text(ExtensionRemoval.mcpServer(id: pluginId, name: "").message)
         }
     }
 

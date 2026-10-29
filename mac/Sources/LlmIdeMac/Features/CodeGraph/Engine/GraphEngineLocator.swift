@@ -5,8 +5,8 @@ import os
 /// Finds graph engines provided by installed plugins.
 ///
 /// Plugins are installed through Library → Plugins (the Mac app clones the git
-/// repo itself — see `Services/PluginGitInstaller.swift` and
-/// `Services/PluginMarketplace.swift` — then hands the bundle to the server,
+/// repo itself — see `Extensions/Services/PluginGitInstaller.swift` and
+/// `Extensions/Services/PluginMarketplace.swift` — then hands the bundle to the server,
 /// which extracts it into the per-user plugin directory). A plugin advertises a
 /// graph engine by dropping a `graph-engine.json` manifest at its root; nothing
 /// else about the plugin system needs to change.

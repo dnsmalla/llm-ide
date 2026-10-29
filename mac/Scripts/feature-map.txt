@@ -35,5 +35,6 @@ Features/SourceControl/    Feature:SourceControl    sealed
 Features/Generation/    Feature:Generation    sealed
 Features/Settings/    Feature:Settings    sealed
 Features/Library/    Feature:Library    sealed
+Features/Extensions/    Feature:Extensions    sealed
 Features/MobileControl/    Feature:MobileControl    sealed
 Features/System/    Feature:System    sealed

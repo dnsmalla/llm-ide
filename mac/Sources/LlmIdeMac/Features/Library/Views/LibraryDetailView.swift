@@ -4,9 +4,8 @@ import SwiftUI
 ///
 /// - Meeting selected     → MeetingDetailView (summary + transcript)
 /// - File selected        → FileDetailView
-/// - Plugin selected      → PluginDetailView
-/// - LLM source selected  → LlmSourceDetailView
-/// - MCP plugin selected  → McpPluginDetailView
+/// - Plugin / LLM source / MCP plugin selected → Extensions' detail pane
+///   (`ExtensionsDetailView`)
 /// - Connector selected   → ConnectorDetailView
 /// - Nothing selected     → placeholder
 struct LibraryDetailView: View {
@@ -23,23 +22,12 @@ struct LibraryDetailView: View {
                 shell.librarySelection = nil
             }
 
-        case .plugin(let name):
-            // `.id` for the same reason as the LLM source below, and with more at
-            // stake: a refresh still in flight for plugin A would otherwise land in
-            // B's pane, and a Trust click there would act on B with A's kinds.
-            PluginDetailView(api: api, pluginName: name)
-                .id(name)
-
-        case .llmSource(let id):
-            // `.id` gives each source its own view state: without it SwiftUI
-            // reuses one instance across sources, and an Update still running
-            // for source A would land its results in B's pane.
-            LlmSourceDetailView(api: api, sourceId: id)
-                .id(id)
-
-        case .mcpPlugin(let id):
-            McpPluginDetailView(api: api, pluginId: id)
-                .id(id)
+        case .plugin, .llmSource, .mcpPlugin:
+            // Plugins, LLM sources and MCP servers are Extensions' screens,
+            // reached through its detail seam (it applies the per-item `.id`).
+            if let selection = shell.librarySelection {
+                ExtensionsDetailView(selection: selection, api: api)
+            }
 
         case .connector(let id):
             ConnectorDetailView(api: api, connectorId: id)
