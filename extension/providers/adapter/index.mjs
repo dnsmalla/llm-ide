@@ -29,17 +29,20 @@ export const DEFAULT_MAX_STEPS = 12;
  * @param {{ name: string, baseURL: string, apiKey?: string, modelId: string,
  *           allowPrivate?: boolean, fetchImpl?: typeof fetch }} o
  */
-export function createChatModel({ name, baseURL, apiKey, modelId, allowPrivate = false, fetchImpl }) {
+export function createChatModel({ name, baseURL, apiKey, modelId, allowPrivate = false, fetchImpl, onHeaders }) {
   if (typeof modelId !== 'string' || !modelId.trim()) throw new Error('No model id provided for this provider.');
   try { assertProviderBaseUrl(baseURL, { allowPrivate: allowPrivate && privateProvidersAllowed() }); }
   catch (e) { throw new SsrfBlockedError(e.message); }
   const doFetch = fetchImpl || makePinnedFetch({ allowPrivate });
   const origin = new URL(baseURL).origin;
-  const guardedFetch = (url, init = {}) => {
+  const guardedFetch = async (url, init = {}) => {
     // The library only ever calls <baseURL>/chat/completions; anything else
     // would carry the key to another host.
     if (new URL(String(url)).origin !== origin) throw new Error('adapter refused a request to a different host');
-    return doFetch(url, { ...init, redirect: 'error' });
+    const res = await doFetch(url, { ...init, redirect: 'error' });
+    // Rate-limit headers go to the caller (learned limits); a failing hook never fails the request.
+    if (onHeaders) { try { onHeaders(res.headers); } catch { /* observation only */ } }
+    return res;
   };
   const provider = createOpenAICompatible({
     name: String(name || 'provider').replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 40) || 'provider',

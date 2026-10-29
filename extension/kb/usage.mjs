@@ -18,6 +18,7 @@ import { AsyncLocalStorage } from 'node:async_hooks';
 import { ANTHROPIC_MODELS, canonicalModel, modelAliases } from './model-ids.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
 import { mirrorUsageCall } from './agent-usage.mjs';
+import { learnFromSnapshot } from './learned-limits.mjs';
 
 // ---------------------------------------------------------------------------
 // Built-in fallback chains. Order = default priority (lower index tried first).
@@ -692,12 +693,15 @@ export function recordRateLimits(userId, { provider, model, headers } = {}) {
   // Nothing useful (e.g. CLI/subscription path) — don't overwrite a prior good snapshot.
   if (!requests && !tokens && !inputTokens && !outputTokens) return;
   try {
-    _rateLimits.set(rlKey(userId, prov), {
+    const snapshot = {
       capturedAt: new Date().toISOString(),
       provider: prov,
       model: model || null,
       requests, tokens, inputTokens, outputTokens,
-    });
+    };
+    _rateLimits.set(rlKey(userId, prov), snapshot);
+    // K1 P6b: per-key limits for connections getLimits does not know (no-op unless LLMIDE_ROUTER_LEARN=on).
+    learnFromSnapshot(null, userId, prov, model, snapshot);
   } catch { /* best effort */ }
 }
 

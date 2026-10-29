@@ -36,6 +36,7 @@ Each is on only when set to exactly `on`. There is no automatic-switch switch: t
 | `extension/kb/migrations/0053_chat_session_route.sql` | `chat_session_route`, `provider_learned_limits` (main DB) |
 | `extension/kb/agent-migrations/0004_route_events.sql` | `agent_route_events` (agent.db, history only) |
 | `extension/kb/chat-route.mjs` | Route store: get, put with compare-and-set, pending, counters, delete, history |
+| `extension/kb/learned-limits.mjs` | Learned per-key limits |
 | `extension/providers/route-policy.mjs` | Pure policy: the pick, warmth, cache TTL table, switch cost, cap state |
 | `extension/providers/handoff.mjs` | The handoff note and last turns |
 | `extension/routes/agent-v2-router.mjs` | The turn hooks and the three routes |

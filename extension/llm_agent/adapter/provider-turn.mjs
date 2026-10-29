@@ -12,13 +12,14 @@
 
 import { randomUUID } from 'node:crypto';
 import { getDb } from '../../kb/db.mjs';
-import { recordUsage, flagQuota } from '../../kb/usage.mjs';
+import { recordUsage, flagQuota, recordRateLimits } from '../../kb/usage.mjs';
 import { recordActivity } from '../../kb/activity.mjs';
 import { logger } from '../../core/logger.mjs';
 import { redactWithKey } from '../../core/redact-secrets.mjs';
 import { resolveCustomProviderDispatch } from '../../providers/providers.mjs';
 import { createChatModel, runToolTurn } from '../../providers/adapter/index.mjs';
 import { pickTurnProvider, noteProviderRateLimited } from '../../providers/provider-fallback.mjs';
+import { learnFrom429 } from '../../kb/learned-limits.mjs';
 import { listConnectionModels } from '../../providers/provider-models.mjs';
 import { getConnection, getSettings } from '../../server/provider-connections.mjs';
 import { TOOL_MODES, catalogEntry } from '../../server/provider-catalog.mjs';
@@ -141,7 +142,8 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     chatModel = deps.modelFor
       ? deps.modelFor({ conn, apiKey: dispatch.apiKey, model: active.model })
       : createChatModel({ name: conn.catalogId, baseURL: dispatch.baseUrl, apiKey: dispatch.apiKey, modelId: active.model,
-        allowPrivate: conn.allowPrivate, fetchImpl: deps.chatFetch });
+        allowPrivate: conn.allowPrivate, fetchImpl: deps.chatFetch,
+        onHeaders: (headers) => recordRateLimits(userId, { provider: active.provider, model: active.model, headers }) });
   } catch (e) {
     if (e?.code === 'SSRF_BLOCKED') throw new ProviderTurnError('PROVIDER_BLOCKED', redactWithKey(e.message, dispatch.apiKey).slice(0, 300), 403);
     throw e;
@@ -176,6 +178,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
         recordUsage(db, { userId, provider: active.provider, model: active.model, source: 'api', endpoint: '/kb/providers/turn', requestId, ...totals });
       }
       if (summary?.failure?.quota) flagQuota(db, userId, active.provider, active.model);
+      if (summary?.failure?.status === 429 && !summary.failure.quota) learnFrom429(db, userId, active.provider, active.model);
     } catch (err) { log.warn('provider_turn_meter_failed', { message: redactWithKey(String(err?.message || err), null).slice(0, 120) }); }
   }
   return { ...summary, usageTotals: totals, metered: true, provider: active.provider, model: active.model, switched: pick.switched, tools: tools.map((t) => t.name), entry: catalogEntry(conn.catalogId)?.id };

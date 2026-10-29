@@ -100,3 +100,22 @@ test('state is per user: another user\'s flag does not move this user, and B has
   assert.equal(pickTurnProvider(a, { ...REQ, db }).switched, false);
   assert.equal(pickTurnProvider(b, { ...REQ, db }).switched, false);
 });
+
+test('learned limits (LLMIDE_ROUTER_LEARN=on): a key at 90 percent of its learned rpm is skipped for this turn, only toward the user\'s own list', async () => {
+  const { upsertLearned } = await import('../kb/learned-limits.mjs');
+  const { recordUsage } = await import('../kb/usage.mjs');
+  const { db, a } = setup();
+  conns.updateSettings(a, { fallbackEnabled: true, fallbackOrder: ORDER }, db);
+  for (let i = 0; i < 9; i += 1) recordUsage(db, { userId: a, provider: REQ.provider, model: REQ.model, source: 'api', endpoint: '/x', inputTokens: 1, outputTokens: 1 });
+  process.env.LLMIDE_ROUTER_LEARN = 'on';
+  try {
+    upsertLearned(db, a, { provider: REQ.provider, model: REQ.model, rpm: 10 });
+    const p = pickTurnProvider(a, { ...REQ, db });
+    assert.equal(p.provider, 'custom:cat-cerebras');
+    assert.equal(p.skipped[0].reason, 'limit_near');
+    // Off: the same state changes nothing.
+    delete process.env.LLMIDE_ROUTER_LEARN;
+    _clearCooldownsForTests();
+    assert.equal(pickTurnProvider(a, { ...REQ, db }).switched, false);
+  } finally { delete process.env.LLMIDE_ROUTER_LEARN; }
+});

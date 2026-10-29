@@ -21,6 +21,7 @@ import { getDb } from '../kb/db.mjs';
 import { windowStart, toSqliteLocal, getRateLimits } from '../kb/usage.mjs';
 import { catalogEntry, modelCapability } from '../server/provider-catalog.mjs';
 import { getConnection, getSettings } from '../server/provider-connections.mjs';
+import { limitNear } from '../kb/learned-limits.mjs';
 
 function quotaFlagged(db, userId, provider, model, now) {
   try {
@@ -102,6 +103,14 @@ export function pickTurnProvider(userId, { provider, model, needsTools = false, 
     }
     if (quotaFlagged(db, userId, c.provider, m, now)) { skipped.push({ provider: c.provider, reason: 'quota' }); continue; }
     if (rateLimited(userId, c.provider, now)) { skipped.push({ provider: c.provider, reason: 'rate_limited' }); continue; }
+    // Learned per-key limit (LLMIDE_ROUTER_LEARN=on): at 90 percent of a limit this key has shown, skip it
+    // for this turn and park it briefly so the next picks agree. Never mid-stream; only to the user's own list.
+    const near = limitNear(db, userId, c.provider, m, now);
+    if (near.near) {
+      noteProviderRateLimited(userId, c.provider, 30_000);
+      skipped.push({ provider: c.provider, reason: 'limit_near' });
+      continue;
+    }
     if (i === 0) return { ...requested, skipped };
     return {
       provider: c.provider, model: m, switched: true, skipped,
