@@ -3157,6 +3157,10 @@ export type PostKbIndexReconcileRequest = {
     manifest: ManifestEntry[];
     /** true deletes the extra rows. Default false: report only. */
     prune?: boolean;
+    /** Keys the Mac could not index (unparseable, unavailable, unsendable). They are never pruned and are not reported as extra. At most 20 000. */
+    keep?: string[];
+    /** Required with prune: true and an empty manifest. Without it that request is refused (409 EMPTY_MANIFEST_REFUSED), so an emptied or unmounted folder cannot delete the index. */
+    allowEmpty?: boolean;
   };
 };
 
@@ -3172,6 +3176,8 @@ export type PostKbIndexReconcileResponse200 = {
 };
 
 export type PostKbIndexReconcileResponse400 = CommonError;
+
+export type PostKbIndexReconcileResponse409 = CommonError;
 
 /** Request parts for `DELETE /kb/index/notes/:key` (schema/http/index.schema.json). */
 export type DeleteKbIndexNotesKeyRequest = {
@@ -3223,6 +3229,12 @@ export type PostKbIndexScanRequest = {
     prune?: boolean;
     /** At most 500 per chunk. */
     entries: ManifestEntry[];
+    /** Final chunk only: the entries the whole scan carries. The server compares it with the sum of the received chunks (409 SCAN_TOTAL_MISMATCH). */
+    totalEntries?: number;
+    /** Final chunk only: keys never pruned (unindexable on the Mac). */
+    keep?: string[];
+    /** Final chunk only: an all-empty scan with prune is refused (409 EMPTY_SCAN_REFUSED) unless this is true. */
+    allowEmpty?: boolean;
   };
 };
 
@@ -3994,6 +4006,16 @@ export type GetKbLiveIdStatusResponse200 = {
   durable: boolean;
   /** When an unacked durable capture expires (7 days after finalize). */
   expiresAt: string | null;
+  /** Lines the server holds (finalized) or held when acked. */
+  lines?: number;
+  /** The ack hash: SHA-256 of the redacted transcript. */
+  hash?: string;
+  /** SHA-256 of the sanitized (speaker, text) lines before redaction: what the extension recomputes. Null for a capture finalized before migration 0051. */
+  captionHash?: string | null;
+  /** Language stored with the capture. */
+  language?: string;
+  /** Capture start, Unix ms. */
+  startedAt?: number | null;
 };
 
 /** Request parts for `GET /kb/live/unacked` (schema/http/lifecycle.schema.json). */
@@ -4016,6 +4038,8 @@ export type GetKbLiveUnackedResponse200 = {
     durable: boolean;
     /** Database-source rows only. */
     expiresAt?: string;
+    /** Language stored with the capture. */
+    language?: string;
   })[];
 };
 
@@ -4250,6 +4274,12 @@ export type PostKbLiveIdAppendRequest = {
       };
     }[];
     meetingTitle?: string;
+    /** Unix ms start of the capture (after 2000, not in the future; 400 otherwise). Absent: the earliest caption ts. */
+    startedAt?: number;
+    /** Language tag of the capture (e.g. ja, en-US); stored with the capture. */
+    language?: string;
+    /** Capture duration in seconds (0 to 7 days). Absent: newest caption ts minus start. */
+    durationSec?: number;
   };
 };
 
@@ -4274,6 +4304,23 @@ export type PostKbLiveIdFinalizeRequest = {
   params: {
     id: string;
   };
+  body: {
+    /** The COMPLETE transcript. The server sanitizes it, drops empty lines, keeps repeated lines, and holds exactly that for the ack to verify; over 2000 lines is 413 CAPTURE_TOO_LARGE and nothing changes. */
+    captions?: {
+      speaker?: string;
+      text?: string;
+      ts?: number;
+      source?: string;
+    }[];
+    /** Replaces the session title. */
+    meetingTitle?: string;
+    /** Unix ms start of the capture (after 2000, not in the future; 400 otherwise). Absent: the earliest caption ts. */
+    startedAt?: number;
+    /** Language tag of the capture (e.g. ja, en-US); stored with the capture. */
+    language?: string;
+    /** Capture duration in seconds (0 to 7 days). Absent: newest caption ts minus start. */
+    durationSec?: number;
+  };
 };
 
 export type PostKbLiveIdFinalizeResponse200 = {
@@ -4283,12 +4330,18 @@ export type PostKbLiveIdFinalizeResponse200 = {
   /** the meetings row written by crash-recovery was removed */
   dbCleaned: boolean;
   cleanupError: string | null;
+  /** SHA-256 of the held sanitized (speaker, text) lines; the extension recomputes it to verify the copy. */
+  captionHash?: string;
 } | {
   sessionId: string;
   finalized: true;
   /** 0: the id was never seen, so the route answers the empty summary */
   captionCount: number;
+  /** SHA-256 of the held sanitized (speaker, text) lines; the extension recomputes it to verify the copy. */
+  captionHash?: string;
 };
+
+export type PostKbLiveIdFinalizeResponse400 = CommonError;
 
 export type PostKbLiveIdFinalizeResponse401 = CommonError;
 
@@ -6777,6 +6830,7 @@ export interface ApiEndpoints {
     responses: {
       200: PostKbIndexReconcileResponse200;
       400: PostKbIndexReconcileResponse400;
+      409: PostKbIndexReconcileResponse409;
     };
   };
   "DELETE /kb/index/notes/:key": {
@@ -7218,6 +7272,7 @@ export interface ApiEndpoints {
     request: PostKbLiveIdFinalizeRequest;
     responses: {
       200: PostKbLiveIdFinalizeResponse200;
+      400: PostKbLiveIdFinalizeResponse400;
       401: PostKbLiveIdFinalizeResponse401;
     };
   };

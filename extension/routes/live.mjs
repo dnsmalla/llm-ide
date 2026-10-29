@@ -14,7 +14,7 @@
 
 import {
   appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
-  ackLiveSession, liveSessionStatus, listUnackedLiveSessions,
+  ackLiveSession, liveSessionStatus, listUnackedLiveSessions, validateCaptureMeta,
 } from '../agents/live-sessions.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect, readJsonBody, decodeParam } from '../core/utils.mjs';
 import { tryConsume } from '../server/rate-limit.mjs';
@@ -85,7 +85,7 @@ export async function handleLiveRoutes(req, res, ctx) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'sessionId and captions[] required' } });
       return true;
     }
-    const result = appendCaptions(userId, sessionId, body.captions, body.meetingTitle);
+    const result = appendCaptions(userId, sessionId, body.captions, body.meetingTitle, validateCaptureMeta(body));
     sendJSON(res, 200, result);
     return true;
   }
@@ -93,7 +93,20 @@ export async function handleLiveRoutes(req, res, ctx) {
   // POST /kb/live/:sessionId/finalize
   if (req.method === 'POST' && url.endsWith('/finalize')) {
     const sessionId = decodeURIComponent(url.slice('/kb/live/'.length, -'/finalize'.length));
-    const result = finalizeSession(userId, sessionId);
+    // Optional body (additive): { captions, meetingTitle, startedAt, language,
+    // durationSec }. With `captions` the client sends its COMPLETE transcript and
+    // the server holds exactly that (lossless, empties dropped) for the ack to verify.
+    const body = await readJsonBody(req, 4 * 1024 * 1024);
+    const meta = validateCaptureMeta(body);
+    if (body.captions !== undefined && !Array.isArray(body.captions)) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'captions must be an array' } });
+      return true;
+    }
+    const result = finalizeSession(userId, sessionId, {
+      ...meta,
+      ...(Array.isArray(body.captions) ? { captions: body.captions } : {}),
+      ...(typeof body.meetingTitle === 'string' ? { meetingTitle: body.meetingTitle } : {}),
+    });
     sendJSON(res, 200, result || { sessionId, finalized: true, captionCount: 0 });
     return true;
   }

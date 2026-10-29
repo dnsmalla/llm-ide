@@ -188,11 +188,11 @@ Endpoints with no client caller (42):
 | `/kb/outcomes/retry-failed` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1352` | - | - | comments/docs only |
 | `/kb/outcomes/task/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1335` | - | - | comments/docs only |
 | `/kb/outcomes/stats` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:1346` | - | - | comments/docs only |
-| `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:105` | `LlmIdeAPIClient+Live.swift` | `useRemoteSessions.ts` | - |
-| `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:210` | `LlmIdeAPIClient+Live.swift` | `useRemoteSessions.ts` | - |
-| `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:73` | - | `capture-live.ts`, `useLiveSync.ts` | - |
+| `/kb/live/sessions` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:118` | `LlmIdeAPIClient+Live.swift` | `useRemoteSessions.ts` | - |
+| `/kb/live/:id` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:223` | `LlmIdeAPIClient+Live.swift` | `useRemoteSessions.ts` | - |
+| `/kb/live/:id/append` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:73` | - | `useLiveSync.ts` | - |
 | `/kb/live/:id/finalize` | ALL_ENDPOINTS | POST | token | core | `extension/routes/live.mjs:94` | - | `capture-live.ts` | - |
-| `/kb/live/:id/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:111` | - | `useRemoteTranscript.ts` | - |
+| `/kb/live/:id/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:124` | - | `useRemoteTranscript.ts` | - |
 | `/kb/agent/dispatch` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:71` | `LlmIdeAPIClient+Agent.swift` | `useAgent.ts` | - |
 | `/kb/agent/stop` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent.mjs:91` | `LlmIdeAPIClient+Agent.swift`, `SystemBridge.swift` | `useAgent.ts` | - |
 | `/kb/agent/runs` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent.mjs:103` | `LlmIdeAPIClient+Agent.swift` | `useAgent.ts` | - |
@@ -225,14 +225,14 @@ Endpoints with no client caller (42):
 | `/kb/session-purges` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:119` | - | - | tests only |
 | `/kb/archive-receipts` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:112` | - | - | tests only |
 | `/kb/index/notes` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:24` | `LlmIdeAPIClient+Index.swift` | - | - |
-| `/kb/index/notes/:key` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/index-routes.mjs:48` | `LlmIdeAPIClient+Index.swift` | - | - |
+| `/kb/index/notes/:key` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/index-routes.mjs:50` | `LlmIdeAPIClient+Index.swift` | - | - |
 | `/kb/index/reconcile` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:31` | `LlmIdeAPIClient+Index.swift` | - | - |
-| `/kb/index/scan` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:42` | `LlmIdeAPIClient+Index.swift` | - | - |
-| `/kb/index/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/index-routes.mjs:55` | `LlmIdeAPIClient+Index.swift` | - | - |
+| `/kb/index/scan` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:44` | `LlmIdeAPIClient+Index.swift` | - | - |
+| `/kb/index/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/index-routes.mjs:57` | `LlmIdeAPIClient+Index.swift` | - | - |
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:62` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:681` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:682` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:270` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:282` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:307` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -242,7 +242,7 @@ Endpoints with no client caller (42):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:456` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:506` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:551` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:705` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:706` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:598` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:780` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:795` | - | - | tests only |
@@ -300,7 +300,7 @@ Endpoints with no client caller (42):
 
 ## Consistency
 
-Checked: 202 roster entries, 729 Swift files, 49 extension source files.
+Checked: 202 roster entries, 729 Swift files, 50 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 

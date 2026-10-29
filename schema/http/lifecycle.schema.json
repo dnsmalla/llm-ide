@@ -539,6 +539,37 @@
                 "null"
               ],
               "description": "When an unacked durable capture expires (7 days after finalize)."
+            },
+            "lines": {
+              "type": "integer",
+              "x-optional": true,
+              "description": "Lines the server holds (finalized) or held when acked."
+            },
+            "hash": {
+              "type": "string",
+              "x-optional": true,
+              "description": "The ack hash: SHA-256 of the redacted transcript."
+            },
+            "captionHash": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "x-optional": true,
+              "description": "SHA-256 of the sanitized (speaker, text) lines before redaction: what the extension recomputes. Null for a capture finalized before migration 0051."
+            },
+            "language": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Language stored with the capture."
+            },
+            "startedAt": {
+              "type": [
+                "number",
+                "null"
+              ],
+              "x-optional": true,
+              "description": "Capture start, Unix ms."
             }
           }
         }
@@ -611,6 +642,11 @@
                   "expiresAt": {
                     "type": "string",
                     "description": "Database-source rows only."
+                  },
+                  "language": {
+                    "type": "string",
+                    "x-optional": true,
+                    "description": "Language stored with the capture."
                   }
                 }
               }

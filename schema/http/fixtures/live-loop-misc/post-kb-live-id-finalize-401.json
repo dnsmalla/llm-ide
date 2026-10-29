@@ -4,7 +4,8 @@
   "request": {
     "params": {
       "id": "sess-example-1"
-    }
+    },
+    "body": {}
   },
   "response": {
     "error": {

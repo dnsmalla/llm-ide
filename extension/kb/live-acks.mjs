@@ -26,7 +26,7 @@ const iso = (ms) => new Date(ms).toISOString();
 export function getLiveAck(userId, sessionId) {
   requireUser(userId);
   return lazyPrepare(getDb(), `
-    SELECT session_id, note_key_hash, content_hash, lines, outcome, acked_at
+    SELECT session_id, note_key_hash, content_hash, lines, outcome, acked_at, caption_hash, language, started_at
       FROM live_acks WHERE owner_user_id = ? AND session_id = ?
   `).get(userId, sessionId) ?? null;
 }
@@ -41,7 +41,7 @@ export function deleteLiveAck(userId, sessionId) {
 export function getCrashRow(userId, sessionId) {
   requireUser(userId);
   return lazyPrepare(getDb(), `
-    SELECT session_id, title, started_at, duration_sec, transcript, lines, content_hash, bytes, expires_at
+    SELECT session_id, title, started_at, duration_sec, transcript, lines, content_hash, bytes, expires_at, caption_hash, language
       FROM live_crash_rows WHERE owner_user_id = ? AND session_id = ?
   `).get(userId, sessionId) ?? null;
 }
@@ -64,7 +64,7 @@ export function putCrashRow(userId, sessionId, capture, {
   maxSessions = MAX_UNACKED_PER_USER, maxBytes = MAX_UNACKED_BYTES_PER_USER, now = Date.now(),
 } = {}) {
   requireUser(userId);
-  const { title, startedAt, durationSec = 0, transcript, lines } = capture;
+  const { title, startedAt, durationSec = 0, transcript, lines, captionHash = '', language = '' } = capture;
   if (typeof transcript !== 'string' || !Number.isInteger(lines) || lines < 0) {
     throw errValidation('capture needs a transcript string and a line count');
   }
@@ -77,11 +77,11 @@ export function putCrashRow(userId, sessionId, capture, {
   lazyPrepare(getDb(), `
     INSERT OR REPLACE INTO live_crash_rows
       (session_id, owner_user_id, title, started_at, duration_sec, transcript, lines,
-       content_hash, bytes, finalized_at, expires_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+       content_hash, bytes, finalized_at, expires_at, caption_hash, language)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(sessionId, userId, String(title || 'Meeting').slice(0, 300), String(startedAt),
     Math.max(0, Math.round(durationSec)), transcript, lines, transcriptHash(transcript), bytes,
-    iso(now), expiresAt);
+    iso(now), expiresAt, String(captionHash), String(language).slice(0, 35));
   return { durable: true, expiresAt };
 }
 
@@ -89,7 +89,7 @@ export function putCrashRow(userId, sessionId, capture, {
 export function listCrashRows(userId) {
   requireUser(userId);
   return lazyPrepare(getDb(), `
-    SELECT session_id, title, started_at, duration_sec, lines, content_hash, expires_at
+    SELECT session_id, title, started_at, duration_sec, lines, content_hash, expires_at, language
       FROM live_crash_rows r
      WHERE owner_user_id = ?
        AND NOT EXISTS (SELECT 1 FROM live_acks a WHERE a.owner_user_id = r.owner_user_id AND a.session_id = r.session_id)
@@ -101,15 +101,16 @@ export function listCrashRows(userId) {
  * Record the ack and delete the durable copy in ONE transaction. If either step
  * fails, neither happens: the capture stays unacked and nothing is lost.
  */
-export function ackCapture(userId, sessionId, { noteKey, hash, lines, now = Date.now() }) {
+export function ackCapture(userId, sessionId, { noteKey, hash, lines, captionHash = '', language = '', startedAt = '', now = Date.now() }) {
   requireUser(userId);
   const key = checkNoteKey(noteKey);
   const db = getDb();
   const tx = db.transaction(() => {
     lazyPrepare(db, `
-      INSERT INTO live_acks (session_id, owner_user_id, note_key_hash, content_hash, lines, outcome, acked_at)
-      VALUES (?, ?, ?, ?, ?, 'acked', ?)
-    `).run(sessionId, userId, noteKeyHash(key), hash, lines, iso(now));
+      INSERT INTO live_acks (session_id, owner_user_id, note_key_hash, content_hash, lines, outcome, acked_at,
+                             caption_hash, language, started_at)
+      VALUES (?, ?, ?, ?, ?, 'acked', ?, ?, ?, ?)
+    `).run(sessionId, userId, noteKeyHash(key), hash, lines, iso(now), String(captionHash), String(language), String(startedAt));
     lazyPrepare(db, 'DELETE FROM live_crash_rows WHERE owner_user_id = ? AND session_id = ?').run(userId, sessionId);
   });
   tx();

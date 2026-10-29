@@ -5,7 +5,8 @@
   "request": {
     "params": {
       "id": "sess-example-1"
-    }
+    },
+    "body": {}
   },
   "response": {
     "sessionId": "sess-example-1",

@@ -56,10 +56,13 @@ test('schema golden: note_index, the map, tombstones and ack ledger have the pla
   ]);
   assert.deepEqual(cols('live_acks'), [
     'session_id', 'owner_user_id', 'note_key_hash', 'content_hash', 'lines', 'outcome', 'acked_at',
+    // 0051: what the extension verifies before it releases its copy
+    'caption_hash', 'language', 'started_at',
   ]);
   assert.deepEqual(cols('live_crash_rows'), [
     'session_id', 'owner_user_id', 'title', 'started_at', 'duration_sec', 'transcript',
     'lines', 'content_hash', 'bytes', 'finalized_at', 'expires_at',
+    'caption_hash', 'language',
   ]);
 });
 

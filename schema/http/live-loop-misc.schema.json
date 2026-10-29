@@ -861,6 +861,21 @@
             },
             "meetingTitle": {
               "type": "string"
+            },
+            "startedAt": {
+              "type": "number",
+              "x-optional": true,
+              "description": "Unix ms start of the capture (after 2000, not in the future; 400 otherwise). Absent: the earliest caption ts."
+            },
+            "language": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Language tag of the capture (e.g. ja, en-US); stored with the capture."
+            },
+            "durationSec": {
+              "type": "number",
+              "x-optional": true,
+              "description": "Capture duration in seconds (0 to 7 days). Absent: newest caption ts minus start."
             }
           }
         }
@@ -915,6 +930,54 @@
               "type": "string"
             }
           }
+        },
+        "body": {
+          "type": "object",
+          "x-optional": true,
+          "properties": {
+            "captions": {
+              "type": "array",
+              "x-optional": true,
+              "description": "The COMPLETE transcript. The server sanitizes it, drops empty lines, keeps repeated lines, and holds exactly that for the ack to verify; over 2000 lines is 413 CAPTURE_TOO_LARGE and nothing changes.",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "speaker": {
+                    "type": "string"
+                  },
+                  "text": {
+                    "type": "string"
+                  },
+                  "ts": {
+                    "type": "number"
+                  },
+                  "source": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "meetingTitle": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Replaces the session title."
+            },
+            "startedAt": {
+              "type": "number",
+              "x-optional": true,
+              "description": "Unix ms start of the capture (after 2000, not in the future; 400 otherwise). Absent: the earliest caption ts."
+            },
+            "language": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Language tag of the capture (e.g. ja, en-US); stored with the capture."
+            },
+            "durationSec": {
+              "type": "number",
+              "x-optional": true,
+              "description": "Capture duration in seconds (0 to 7 days). Absent: newest caption ts minus start."
+            }
+          }
         }
       },
       "responses": {
@@ -948,6 +1011,11 @@
                     "string",
                     "null"
                   ]
+                },
+                "captionHash": {
+                  "type": "string",
+                  "x-optional": true,
+                  "description": "SHA-256 of the held sanitized (speaker, text) lines; the extension recomputes it to verify the copy."
                 }
               }
             },
@@ -968,12 +1036,20 @@
                 "captionCount": {
                   "type": "integer",
                   "description": "0: the id was never seen, so the route answers the empty summary"
+                },
+                "captionHash": {
+                  "type": "string",
+                  "x-optional": true,
+                  "description": "SHA-256 of the held sanitized (speaker, text) lines; the extension recomputes it to verify the copy."
                 }
               }
             }
           ]
         },
         "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "400": {
           "$ref": "_common#/$defs/Error"
         }
       }

@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/live/:id/finalize",
+  "status": 400,
+  "description": "A start time before 2000 (or in the future) is rejected, never silently ignored.",
+  "request": {
+    "params": {
+      "id": "sess-example-1"
+    },
+    "body": {
+      "startedAt": 5
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "startedAt must be a Unix ms timestamp after 2000 and not in the future"
+    }
+  }
+}
