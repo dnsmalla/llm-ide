@@ -42,12 +42,10 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 
 ## Loose ends (small, schedule with the phase that touches the file)
 
+- Storage hub (graph-kit web page) does not yet render `GET /kb/storage` `shadow` (server side shipped, API 87).
 - Settings screen for `lta.mode` (today: `defaults write`).
 - Sign-out seam for the note-index reconciler (fixed in N2).
-- Expose shadow metrics in the Storage hub (schema-gated).
 - Clear sheet: add the "older than N days" option (server supports it).
-- Auto-task and dispatch/review runs are not recorded in agent history (no server hook); legacy chat turns record no token totals.
-- Rollup can fold tool events of a run that stays open past retention.
 - `LLMIDE_DATA_DIR` line in `.env.example`; decide the `/health` addition's `SERVER_API_VERSION` bump.
 - Pin the extension origin (CORS currently allows every `chrome-extension://*`; Q22).
 - Quit-time delay verification on macOS logout (Q21); `llmide://` launch from Chrome (Q11).
