@@ -21,8 +21,6 @@ export interface UnifiedChatSession {
   messages?: UnifiedChatMessage[];
 }
 
-const SESSION_STORAGE_KEY = 'unifiedChatSessionId';
-
 function toClientMessage(m: { role: string; content: string; createdAt: number; seq?: number }): UnifiedChatMessage {
   return {
     role: m.role as UnifiedChatRole,
@@ -99,26 +97,20 @@ export async function clearChatSessionMessages(sessionId: string): Promise<void>
   if (!res.ok) throw new Error(`clear messages failed: ${res.status}`);
 }
 
-/** Resolve the active extension transcript session id (server-backed). */
+/**
+ * Resolve the active extension transcript session id from the SERVER (the one
+ * copy). Nothing is cached in chrome.storage: an unreachable server returns
+ * null and the caller shows "Mac app not running".
+ */
 export async function ensureTranscriptSessionId(): Promise<string | null> {
   try {
-    const stored = await chrome.storage?.local?.get(SESSION_STORAGE_KEY);
-    const existing = stored?.[SESSION_STORAGE_KEY];
-    if (typeof existing === 'string' && existing) {
-      const session = await getChatSession(existing, 1);
-      if (session) return existing;
-    }
     const sessions = await listChatSessions({ surface: 'extension', mode: 'transcript', limit: 1 });
-    if (sessions.length > 0) {
-      await chrome.storage?.local?.set({ [SESSION_STORAGE_KEY]: sessions[0].id });
-      return sessions[0].id;
-    }
+    if (sessions.length > 0) return sessions[0].id;
     const created = await createChatSession({
       title: 'Meeting chat',
       surface: 'extension',
       mode: 'transcript',
     });
-    await chrome.storage?.local?.set({ [SESSION_STORAGE_KEY]: created.id });
     return created.id;
   } catch {
     return null;

@@ -8,7 +8,7 @@ interface Props {
   messages: ChatViewMessage[];
   isLoading: boolean;
   error: string | null;
-  quotaWarning?: string | null;
+  offline?: boolean;
   hasTranscript: boolean;
   onSend: (message: string) => void;
   onClear: () => void;
@@ -29,7 +29,7 @@ export default function ChatView({
   messages,
   isLoading,
   error,
-  quotaWarning,
+  offline,
   hasTranscript,
   onSend,
   onClear,
@@ -102,9 +102,10 @@ export default function ChatView({
         </div>
       )}
 
-      {quotaWarning && (
+      {offline && (
         <div className="error-message quota-warning" role="alert">
-          {quotaWarning}
+          Mac app not running. Chat history lives in the Mac app; nothing is stored in this browser. Open LLM-IDE to
+          continue.
         </div>
       )}
       {/* role="log" + aria-live so screen readers announce new messages.

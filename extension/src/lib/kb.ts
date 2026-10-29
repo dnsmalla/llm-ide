@@ -33,6 +33,16 @@ export interface ConnectorResult {
   [k: string]: unknown;
 }
 
+export const OFFLINE_MESSAGE = 'Mac app not running. Open LLM-IDE to search your notes.';
+
+/** The local server cannot be reached (connection refused, timeout, breaker open). Nothing is stored for this case. */
+export class OfflineError extends Error {
+  constructor() {
+    super(OFFLINE_MESSAGE);
+    this.name = 'OfflineError';
+  }
+}
+
 async function postJSON<T>(path: string, body: unknown, timeoutMs = REQUEST_TIMEOUT_MS): Promise<T> {
   const serverUrl = await getServerUrl();
   const controller = new AbortController();
@@ -95,9 +105,15 @@ export async function searchKB(opts: { q?: string; kind?: KBSearchKind; limit?: 
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
   try {
-    const response = await authFetch(`${serverUrl}/kb/search?${params.toString()}`, {
-      signal: controller.signal,
-    });
+    let response: Response;
+    try {
+      response = await authFetch(`${serverUrl}/kb/search?${params.toString()}`, {
+        signal: controller.signal,
+      });
+    } catch {
+      throw new OfflineError();
+    }
+    if (response.status === 503) throw new OfflineError(); // circuit breaker: server unreachable
     if (!response.ok) {
       if (response.status === 404) {
         throw new Error('Search requires a newer server version. Please restart the server.');

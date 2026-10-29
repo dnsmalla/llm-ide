@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef } from 'react';
 import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
-import { listIssues } from '../../lib/kb';
+import { listIssues, OFFLINE_MESSAGE } from '../../lib/kb';
 import { errorText } from '../../lib/server-error';
 import {
   ensureTranscriptSessionId,
@@ -19,8 +19,8 @@ export interface ChatViewMessage {
 
 // How many prior messages we send to the LLM as context per /chat request.
 const MAX_HISTORY = 10;
-const STORAGE_KEY = 'chatMessages';
-const MAX_STORED_MESSAGES = 200;
+// Cleared once: the old local chat buffer (Q18: the extension stores nothing).
+const LEGACY_LOCAL_KEYS = ['chatMessages', 'unifiedChatSessionId'];
 
 function toChatMessage(m: UnifiedChatMessage): ChatViewMessage {
   return { role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp };
@@ -30,62 +30,52 @@ export function useChat() {
   const [messages, setMessages] = useState<ChatViewMessage[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [quotaWarning, setQuotaWarning] = useState<string | null>(null);
+  // true when the Mac-managed server cannot be reached: nothing is stored.
+  const [offline, setOffline] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
-  const hydratedRef = useRef(false);
   const sessionIdRef = useRef<string | null>(null);
   const serverBackedRef = useRef(false);
 
-  // Rehydrate from server (preferred) or chrome.storage fallback.
+  // Rehydrate from the server. There is no local fallback: when the server
+  // cannot be reached the chat is offline and holds only what is in memory.
+  const hydrate = useCallback(async (isCancelled: () => boolean) => {
+    try {
+      const sid = await ensureTranscriptSessionId();
+      if (isCancelled()) return;
+      if (!sid) {
+        setOffline(true);
+        return;
+      }
+      sessionIdRef.current = sid;
+      serverBackedRef.current = true;
+      const serverMsgs = await loadTranscriptMessages(sid);
+      if (isCancelled()) return;
+      setOffline(false);
+      setMessages(serverMsgs.filter((m) => m.role === 'user' || m.role === 'assistant').map(toChatMessage));
+    } catch {
+      if (!isCancelled()) setOffline(true);
+    }
+  }, []);
+
   useEffect(() => {
     let cancelled = false;
-    (async () => {
-      try {
-        const sid = await ensureTranscriptSessionId();
-        if (cancelled) return;
-        if (sid) {
-          sessionIdRef.current = sid;
-          serverBackedRef.current = true;
-          const serverMsgs = await loadTranscriptMessages(sid);
-          if (cancelled) return;
-          if (serverMsgs.length > 0) {
-            setMessages(serverMsgs.filter((m) => m.role === 'user' || m.role === 'assistant').map(toChatMessage));
-            hydratedRef.current = true;
-            return;
-          }
-        }
-      } catch {
-        // fall through to local storage
-      }
-      try {
-        const result = await chrome.storage?.local?.get(STORAGE_KEY);
-        const saved = result?.[STORAGE_KEY];
-        if (!cancelled && Array.isArray(saved)) setMessages(saved);
-      } catch {
-        /* ignore */
-      } finally {
-        if (!cancelled) hydratedRef.current = true;
-      }
-    })();
+    chrome.storage?.local?.remove(LEGACY_LOCAL_KEYS).catch(() => {});
+    void hydrate(() => cancelled);
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [hydrate]);
 
-  // Local fallback persistence when server sync unavailable.
+  // While offline, look for the Mac app again.
   useEffect(() => {
-    if (!hydratedRef.current || serverBackedRef.current) return;
-    const toStore = messages.length > MAX_STORED_MESSAGES ? messages.slice(-MAX_STORED_MESSAGES) : messages;
-    chrome.storage?.local?.set({ [STORAGE_KEY]: toStore }).catch((err: Error) => {
-      const msg = err?.message || String(err);
-      if (/QUOTA_BYTES|quota/i.test(msg)) {
-        setQuotaWarning(
-          "Chat history is approaching Chrome's 5 MB storage limit. " +
-            'Export what you want to keep, then click Clear chat.',
-        );
-      }
-    });
-  }, [messages]);
+    if (!offline) return;
+    let cancelled = false;
+    const t = setInterval(() => void hydrate(() => cancelled), 15_000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [offline, hydrate]);
 
   const sendMessage = useCallback(
     async (userMessage: string, transcript: string, language?: string) => {
@@ -179,6 +169,12 @@ export function useChat() {
         }
       } catch (err: unknown) {
         if (err instanceof DOMException && err.name === 'AbortError') return;
+        if (err instanceof TypeError) {
+          // fetch rejected: the server is not reachable.
+          setOffline(true);
+          setError(OFFLINE_MESSAGE);
+          return;
+        }
         setError(err instanceof Error ? err.message : 'Unknown error');
       } finally {
         clearTimeout(timeout);
@@ -193,13 +189,10 @@ export function useChat() {
     abortRef.current?.abort();
     setMessages([]);
     setError(null);
-    setQuotaWarning(null);
     setIsLoading(false);
     const sid = sessionIdRef.current;
     if (serverBackedRef.current && sid) {
       clearChatSessionMessages(sid).catch(() => {});
-    } else {
-      chrome.storage?.local?.remove(STORAGE_KEY).catch(() => {});
     }
   }, []);
 
@@ -224,5 +217,5 @@ export function useChat() {
     }
   }, [clearChat]);
 
-  return { messages, isLoading, error, quotaWarning, sendMessage, clearChat, createNewSession, deleteCurrentSession };
+  return { messages, isLoading, error, offline, sendMessage, clearChat, createNewSession, deleteCurrentSession };
 }
