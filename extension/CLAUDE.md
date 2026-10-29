@@ -12,6 +12,18 @@ Before merging caption/transcript/LLM changes, run through this against a real m
 - [ ] Works when extension loaded AFTER Meet tab opened
 - [ ] Works on Teams and Zoom web
 
+## Capture drafts and local storage (live-then-archive T5.2)
+
+The extension stores nothing of its own except an unfinished capture draft (`transcriptDraft:<id>` + `draftStage:<id>`), kept only until the server reports the capture acked by the Mac app. Run with `LLMIDE_LIVE_ACK=1` on the server (Mac-managed server) unless a row says otherwise.
+- [ ] Record 1+ min, Stop with the Mac app running: the draft is gone from `chrome.storage.local` only after the Mac note exists (status `acked`); before that it is still there
+- [ ] Stop with the Mac app/server CLOSED: the draft stays, the banner says "Mac app not running"; open the app, the capture is re-sent, the Mac writes the note, the draft disappears
+- [ ] Close the panel mid-recording, reopen after 2+ min: the transcript is restored in the live view, re-sent and released after the ack
+- [ ] Restart the server between Stop and the Mac ack: the draft is kept ("not confirmed copied" + Resend button), never deleted on an unknown status
+- [ ] Server WITHOUT `LLMIDE_LIVE_ACK`: the draft is kept ("kept in this browser: this server cannot confirm"), never deleted, at most 50
+- [ ] No `transcripts` or `chatMessages` key is written (`chrome.storage.local.get(null)` in the panel console)
+- [ ] Settings -> "Meetings saved in this browser (old)": lists old saved meetings read-only; nothing is sent until "Copy to Mac"; a copy is removed locally only after the Mac confirms; pressing twice sends once; closing the panel mid-copy and pressing again resumes
+- [ ] Chat with the Mac app closed: "Mac app not running", nothing is persisted; reopen the app, the banner clears by itself
+
 ## LLM Output
 - [ ] Primary language change → Notes/chat respond in that language
 - [ ] Questions H2 headings localized (対立/要確認/要説明)
