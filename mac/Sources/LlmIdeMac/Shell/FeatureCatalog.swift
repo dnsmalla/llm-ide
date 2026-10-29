@@ -141,6 +141,10 @@ enum FeatureCatalog {
         registry.register(slot: .agentHistory, id: "agent-history") {
             AnyView(AgentHistorySettingsCard(api: api))
         }
+        // Chat archive (live-then-archive): renders nothing while lta.mode is off. Chat is always compiled.
+        registry.register(slot: .agentHistory, id: "chat-archive", order: 10) {
+            AnyView(ChatArchiveSettingsCard())
+        }
         #if FEATURE_AUTOTASK
         registry.register(slot: .loopDefaults, id: "loop-defaults") {
             AnyView(LoopNewProjectDefaultsPanel())

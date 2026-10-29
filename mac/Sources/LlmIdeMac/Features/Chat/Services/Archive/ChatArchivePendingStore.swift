@@ -57,11 +57,26 @@ final class ChatArchivePendingStore: @unchecked Sendable {
         return load().deletes.contains { $0.id == id.uuidString }
     }
 
-    /// The tombstones `owner` still owes (entries recorded with no owner are owed by anyone).
+    /// The tombstones `owner` still owes. A tombstone is bound to the user who deleted the chat: an entry with
+    /// no owner is never sent by anyone (it cannot be attributed), and another user's is never sent.
     func deletes(for owner: String?) -> [DeleteEntry] {
+        guard let owner else { return [] }
         lock.lock(); defer { lock.unlock() }
-        return load().deletes.filter { $0.ownerUserId == nil || $0.ownerUserId == owner }
+        return load().deletes.filter { $0.ownerUserId == owner }
     }
+
+    func entry(_ id: UUID) -> DeleteEntry? {
+        lock.lock(); defer { lock.unlock() }
+        return load().deletes.first { $0.id == id.uuidString }
+    }
+
+    /// Entries nobody can send (no recorded owner), for the status line.
+    func unattributableCount() -> Int {
+        lock.lock(); defer { lock.unlock() }
+        return load().deletes.filter { $0.ownerUserId == nil }.count
+    }
+
+    func count(for owner: String) -> Int { deletes(for: owner).count }
 
     func removeDelete(_ id: UUID) { removeDelete(rawId: id.uuidString) }
 

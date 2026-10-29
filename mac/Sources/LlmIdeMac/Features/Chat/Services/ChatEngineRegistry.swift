@@ -163,6 +163,11 @@ final class ChatEngineRegistry {
         return .init(held: true, running: engine.hasPendingWork, messageCount: engine.messages.count)
     }
 
+    /// Reload every displayed engine's session list from disk (the signed-in user changed what is visible).
+    func refreshSessionLists() {
+        for engine in displayed.values { engine.refreshSessions() }
+    }
+
     /// Whether `sessionID` has a turn in flight right now, on any engine.
     /// Drives the "still working" marker in the session picker, so a chat
     /// left running is visibly distinct from one that was stopped.
@@ -468,7 +473,7 @@ extension ChatEngineRegistry: SessionScoped {
         // Live-then-archive `on` (plan Q5): the Mac files are now the only copy of a chat,
         // so a sign-out never wipes them. They are tagged with their owner, hidden from the
         // next user, and what an engine had not written yet is flushed first.
-        if ChatArchiveHost.shared.keepsChatsOnSignOut {
+        if ChatArchiveHost.shared.keepsChatsOnSignOut {   // `shadow` too: shadow never deletes
             flushAll()
             forgetAllForSignOut()
             ChatSessionStore.clearCurrentPointers()
@@ -476,6 +481,7 @@ extension ChatEngineRegistry: SessionScoped {
             return
         }
         forgetAllForSignOut()
-        ChatSessionStore.clear()
+        ChatSessionStore.clear()          // keeps chats that exist nowhere else (archived from the extension)
+        ChatArchiveHost.shared.clearUser()
     }
 }

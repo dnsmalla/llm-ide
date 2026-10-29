@@ -2211,21 +2211,24 @@ do {
                              serverUpdatedAt: nil, engine: .init(held: true, running: false, messageCount: 3000), inQuit: true) == .purge,
            "a whole archived chat (over the engine cap) agrees with an engine that holds it whole")
 
-    expect(L.ruleForExistingFile(exists: false, fileOrigin: nil, fileArchiveHash: nil, fileMessageCount: 0, fileHash: "", serverHash: "h", serverCount: 4) == .write,
+    let m = { (r: String, c: String) in L.WireMessage(role: r, content: c) }
+    expect(L.ruleForExistingFile(exists: false, fileOrigin: nil, fileIsPrefixOfServer: false, fileHash: "", serverHash: "h") == .write,
            "no file: write")
-    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileArchiveHash: "x", fileMessageCount: 4, fileHash: "h", serverHash: "h", serverCount: 4) == .alreadyMatches,
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileIsPrefixOfServer: true, fileHash: "h", serverHash: "h") == .alreadyMatches,
            "a file equal to the server: commit without rewriting")
-    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileArchiveHash: "x", fileMessageCount: 3, fileHash: "old", serverHash: "h", serverCount: 4) == .overwrite,
-           "a smaller stale copy this protocol wrote is replaced")
-    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileArchiveHash: "x", fileMessageCount: 5, fileHash: "other", serverHash: "h", serverCount: 4) == .conflict,
-           "a file with messages the server lacks is never overwritten")
-    expect(L.ruleForExistingFile(exists: true, fileOrigin: nil, fileArchiveHash: nil, fileMessageCount: 2, fileHash: "other", serverHash: "h", serverCount: 4) == .conflict,
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileIsPrefixOfServer: true, fileHash: "old", serverHash: "h") == .overwrite,
+           "an older snapshot (a strict prefix) this protocol wrote is replaced: nothing in it is lost")
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileIsPrefixOfServer: false, fileHash: "other", serverHash: "h") == .conflict,
+           "a file that differs from the server's rows in any other way is never overwritten")
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: nil, fileIsPrefixOfServer: true, fileHash: "other", serverHash: "h") == .conflict,
            "a chat the Mac created is never overwritten")
+    expect(L.isPrefix([m("user", "a")], of: [m("user", "a"), m("assistant", "b")]) && !L.isPrefix([m("user", "x")], of: [m("user", "a")])
+           && !L.isPrefix([m("user", "a"), m("user", "b")], of: [m("user", "a")]), "prefix is by position, content and length")
     expect(L.roleIsArchivable("user") && L.roleIsArchivable("assistant") && !L.roleIsArchivable("system"),
            "only roles the Mac model holds losslessly are archived")
-    expect(L.orphanIsDue(firstSeen: now, serverUpdatedAt: nil, now: now) == false
-           && L.orphanIsDue(firstSeen: now.addingTimeInterval(-8 * 86400), serverUpdatedAt: nil, now: now),
-           "an orphan is purged only after the 7-day grace")
+    expect(L.orphanIsDue(firstSeen: now, now: now) == false
+           && L.orphanIsDue(firstSeen: now.addingTimeInterval(-8 * 86400), now: now),
+           "an orphan is purged only 7 days after the Mac FIRST saw it missing (the server's old timestamp does not shorten it)")
 }
 
 if failures.isEmpty {

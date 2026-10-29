@@ -109,9 +109,10 @@ public enum ChatArchiveLogic {
     /// this long (a user delete whose tombstone was lost would explain it).
     public static let orphanGrace: TimeInterval = 7 * 24 * 3600
 
-    public static func orphanIsDue(firstSeen: Date, serverUpdatedAt: Date?, now: Date) -> Bool {
-        let anchor = min(firstSeen, serverUpdatedAt ?? firstSeen)
-        return now.timeIntervalSince(anchor) >= orphanGrace
+    /// Anchored on the FIRST time this Mac saw the orphan, never on the server's timestamp: a chat that was idle for
+    /// a month still gets its full 7 days from the moment the Mac first noticed the file was missing.
+    public static func orphanIsDue(firstSeen: Date, now: Date) -> Bool {
+        now.timeIntervalSince(firstSeen) >= orphanGrace
     }
 
     // MARK: extension chat archive
@@ -128,22 +129,27 @@ public enum ChatArchiveLogic {
         case write
         /// The Mac file is the archive already (its hash equals what the server holds): go to commit.
         case alreadyMatches
-        /// The Mac file is a stale earlier copy of this same archive: overwrite it.
+        /// The Mac file is an OLDER SNAPSHOT of this chat (every message of it is, in order, the start of what the
+        /// server holds): replacing it loses nothing.
         case overwrite
-        /// The Mac file holds messages the server does not (the user continued it, or it is another
-        /// chat): never overwrite; keep both and surface it.
+        /// The Mac file differs from the server's rows in any other way (it has messages the server lacks, or other
+        /// content): never overwritten; both are kept and it is surfaced.
         case conflict
     }
 
-    /// What to do when `sessions/<id>.json` already exists while the server still holds rows (C6, C15).
-    public static func ruleForExistingFile(exists: Bool, fileOrigin: String?, fileArchiveHash: String?,
-                                           fileMessageCount: Int, fileHash: String,
-                                           serverHash: String, serverCount: Int) -> ExistingFileRule {
+    /// What to do when `sessions/<id>.json` already exists while the server still holds rows (C6, C15). A differing
+    /// file is a conflict, except a strict prefix of the server's messages that this protocol wrote.
+    public static func ruleForExistingFile(exists: Bool, fileOrigin: String?, fileIsPrefixOfServer: Bool,
+                                           fileHash: String, serverHash: String) -> ExistingFileRule {
         guard exists else { return .write }
         if fileHash == serverHash { return .alreadyMatches }
-        // Only a file this protocol wrote may be replaced, and only by a copy that is not smaller.
-        if fileOrigin == "extension", fileArchiveHash != nil, fileMessageCount <= serverCount { return .overwrite }
+        if fileOrigin == "extension", fileIsPrefixOfServer { return .overwrite }
         return .conflict
+    }
+
+    /// True when `file` is a (possibly equal-length) prefix of `server`, message by message.
+    public static func isPrefix(_ file: [WireMessage], of server: [WireMessage]) -> Bool {
+        file.count <= server.count && zip(file, server).allSatisfy { $0 == $1 }
     }
 
     /// Roles the Mac chat model can hold losslessly. A server `system` message cannot be

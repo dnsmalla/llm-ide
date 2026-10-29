@@ -6,13 +6,15 @@ import os.log
 protocol ChatArchiveRemote: Sendable {
     func workingState() async throws -> LlmIdeAPIClient.WorkingStateResult
     func recordReceipt(chatSessionId: String, hash: String, count: Int) async throws
-    /// Working state only. Throws `.noReceipt` when any chat lacks a receipt (nothing purged then).
-    func purgeWorkingState(chatSessionIds: [String]) async throws -> Int
-    func extensionChats() async throws -> [LlmIdeAPIClient.ServerChatSummary]
+    /// Working state only. Throws `.noReceipt` when any chat lacks a receipt (nothing purged then). The result
+    /// names the chats the server skipped (`busy`, `staleReceipt`, orphan `refused`): those are NOT purged.
+    func purgeWorkingState(chatSessionIds: [String], orphan: Bool) async throws -> LlmIdeAPIClient.WorkingStatePurgeResult
+    /// EVERY server chat row of the user, any surface, read completely (an error if it cannot be).
+    func serverChats() async throws -> [LlmIdeAPIClient.ServerChatSummary]
     func beginArchive(chatSessionId: String, after: Int?, fence: Int?) async throws -> LlmIdeAPIClient.ArchiveSnapshot
     func commitArchive(chatSessionId: String, fence: Int, hash: String,
                        acceptIncomplete: Bool) async throws -> LlmIdeAPIClient.ArchiveCommitResult
-    func requestSessionPurge(chatSessionId: String) async throws -> LlmIdeAPIClient.SessionPurgeResult
+    func requestSessionPurge(chatSessionId: String, requestedAt: Date) async throws -> LlmIdeAPIClient.SessionPurgeResult
 }
 
 /// The server's refusals the archive protocol reacts to, mapped from HTTP status + code.
@@ -27,16 +29,31 @@ enum ChatArchiveRemoteError: Error, Equatable {
 protocol ChatArchiveStorage: Sendable {
     func fileExists(_ id: UUID) -> Bool
     func load(_ id: UUID) -> ChatSession?
-    /// Throws when the write did not land (disk full).
+    /// Throws when the write did not land or could not be flushed to stable storage (disk full).
     func write(_ session: ChatSession) throws
     func delete(_ id: UUID)
+    /// The store directory resolves, exists and holds at least one chat file. A missing file only means
+    /// "orphan" when this is true (an unmounted or unresolved directory must never look like deleted chats).
+    func storeLooksHealthy() -> Bool
 }
 
 struct FileChatArchiveStorage: ChatArchiveStorage {
     func fileExists(_ id: UUID) -> Bool { ChatSessionStore.fileExists(id: id) }
-    func load(_ id: UUID) -> ChatSession? { ChatSessionStore.load(id: id) }
-    func write(_ session: ChatSession) throws { try ChatSessionStore.saveOrThrow(session, touch: false) }
+    func load(_ id: UUID) -> ChatSession? { ChatSessionStore.loadUnfiltered(id: id) }
+    func write(_ session: ChatSession) throws {
+        try ChatSessionStore.saveOrThrow(session, touch: false)
+        // Flushed before anything on the server is deleted: a power loss after the commit must find the file.
+        guard ChatSessionStore.fullSync(id: session.id) else {
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(EIO), userInfo: [NSLocalizedDescriptionKey: "could not flush the chat file to disk"])
+        }
+    }
     func delete(_ id: UUID) { ChatSessionStore.deleteQuietly(id: id) }
+    func storeLooksHealthy() -> Bool {
+        guard let base = ChatSessionStore.supportDirectory else { return false }
+        let dir = base.appendingPathComponent("sessions", isDirectory: true)
+        guard let items = try? FileManager.default.contentsOfDirectory(atPath: dir.path) else { return false }
+        return items.contains { $0.hasSuffix(".json") }
+    }
 }
 
 extension LlmIdeAPIClient: ChatArchiveRemote {
@@ -44,11 +61,11 @@ extension LlmIdeAPIClient: ChatArchiveRemote {
     func recordReceipt(chatSessionId: String, hash: String, count: Int) async throws {
         try await recordArchiveReceipt(chatSessionId: chatSessionId, hash: hash, count: count)
     }
-    func purgeWorkingState(chatSessionIds: [String]) async throws -> Int {
-        do { return try await purgeChatWorkingState(chatSessionIds: chatSessionIds) }
+    func purgeWorkingState(chatSessionIds: [String], orphan: Bool) async throws -> WorkingStatePurgeResult {
+        do { return try await purgeChatWorkingState(chatSessionIds: chatSessionIds, orphan: orphan) }
         catch APIError.http(409, "NO_RECEIPT", _, _) { throw ChatArchiveRemoteError.noReceipt }
     }
-    func extensionChats() async throws -> [ServerChatSummary] { try await listExtensionChats() }
+    func serverChats() async throws -> [ServerChatSummary] { try await listServerChats() }
     func beginArchive(chatSessionId: String, after: Int?, fence: Int?) async throws -> ArchiveSnapshot {
         do { return try await archiveBegin(chatSessionId: chatSessionId, after: after, fence: fence) }
         catch APIError.http(409, "ARCHIVE_STALE", _, _) { throw ChatArchiveRemoteError.stale }
@@ -64,8 +81,8 @@ extension LlmIdeAPIClient: ChatArchiveRemote {
         catch APIError.http(409, "INCOMPLETE_ARCHIVE", _, _) { throw ChatArchiveRemoteError.incomplete }
         catch APIError.http(404, _, _, _) { throw ChatArchiveRemoteError.notFound }
     }
-    func requestSessionPurge(chatSessionId: String) async throws -> SessionPurgeResult {
-        try await queueSessionPurge(chatSessionId: chatSessionId, reason: "user_delete")
+    func requestSessionPurge(chatSessionId: String, requestedAt: Date) async throws -> SessionPurgeResult {
+        try await queueSessionPurge(chatSessionId: chatSessionId, reason: "user_delete", requestedAt: requestedAt)
     }
 }
 
@@ -95,6 +112,9 @@ struct ChatQuitReport: Equatable {
     var skipped: [String: String] = [:]
     var archivedExtension: [String: ChatArchiveOutcome] = [:]
     var errors: [String] = []
+    /// The sweep read everything it needed (working state, the full server chat list) and replayed the
+    /// tombstones; false means "run it again later" (backend down, a call failed).
+    var completed = false
 }
 
 enum ChatTombstoneOutcome: Equatable {
@@ -180,12 +200,12 @@ actor ChatArchiveService {
         do { state = try await deps.remote.workingState() }
         catch { report.errors.append("working-state: \(error)"); return report }
 
-        // Extension chats are archived, not receipt-verified against a Mac file.
-        // If the list cannot be read, stop: an extension chat (the ONLY copy of that conversation) must never be
-        // mistaken for a Mac chat whose file is missing, because an orphan is eventually purged server-side.
+        // A server chat row (any surface) is archived, not receipt-verified against a Mac file. The list must be read
+        // COMPLETELY (paged to the end): if it cannot be, stop. A chat with server rows (possibly the ONLY copy of that
+        // conversation) must never be mistaken for a Mac chat whose file is missing.
         let extList: [LlmIdeAPIClient.ServerChatSummary]
-        do { extList = try await deps.remote.extensionChats() }
-        catch { report.errors.append("extension-chats: \(error)"); return report }
+        do { extList = try await deps.remote.serverChats() }
+        catch { report.errors.append("server-chats: \(error)"); return report }
         let ext = Set(extList.map(\.id))
         var candidates: [(UUID, LlmIdeAPIClient.WorkingChat)] = []
         var orphanIds = Set<String>()
@@ -221,20 +241,36 @@ actor ChatArchiveService {
             }
         }
 
-        // Orphans: the Mac file is gone and no tombstone exists (the reverse sweep, plan 3.5 step 4).
+        // Orphans: the Mac file is gone and no tombstone exists (the reverse sweep, plan 3.5 step 4). A missing file
+        // only counts when the store directory resolves, exists and holds chats; otherwise nothing is an orphan (an
+        // unmounted or unresolved directory looks exactly like "every chat was deleted").
+        let storeHealthy = deps.storage.storeLooksHealthy()
+        if !storeHealthy, !orphanIds.isEmpty {
+            report.errors.append("store directory not healthy: \(orphanIds.count) missing files are not treated as orphans")
+            orphanIds.removeAll()
+        }
         deps.pending.retainOrphans(orphanIds)
         if mode == .on, epoch == myEpoch, deps.currentUser() == user {
+            var due: [String] = []
             for id in orphanIds {
                 let first = deps.pending.orphanFirstSeen(id, now: deps.now())
-                let server = state.sessions.first { $0.chatSessionId == id }.flatMap { ChatArchiveLogic.parseServerTime($0.updatedAt) }
-                guard ChatArchiveLogic.orphanIsDue(firstSeen: first, serverUpdatedAt: server, now: deps.now()) else { continue }
-                if let r = try? await deps.remote.requestSessionPurge(chatSessionId: id), r.purged == "done" {
-                    report.purged.append(id)
-                }
+                if ChatArchiveLogic.orphanIsDue(firstSeen: first, now: deps.now()) { due.append(id) }
+            }
+            // The WORKING-STATE purge only (orphan: true): never the delete tombstone, which also removes server chat rows.
+            var i = 0
+            while i < due.count, !Task.isCancelled {
+                let batch = Array(due[i..<min(i + 100, due.count)]); i += batch.count
+                do {
+                    let r = try await deps.remote.purgeWorkingState(chatSessionIds: batch, orphan: true)
+                    let notPurged = Set((r.busy ?? []) + (r.refused ?? []) + (r.staleReceipt ?? []))
+                    report.purged.append(contentsOf: batch.filter { !notPurged.contains($0) })
+                    for id in notPurged { report.skipped[id] = "orphanSkippedByServer" }
+                } catch { report.errors.append("orphan purge: \(error)") }
             }
         } else {
             for id in orphanIds { _ = deps.pending.orphanFirstSeen(id, now: deps.now()) }
         }
+        report.completed = report.errors.isEmpty
 
         guard mode == .on, !verified.isEmpty else { return report }
         guard epoch == myEpoch, deps.currentUser() == user else {
@@ -252,19 +288,27 @@ actor ChatArchiveService {
         while i < toPurge.count, !Task.isCancelled {
             let batch = Array(toPurge[i..<min(i + 100, toPurge.count)])
             i += batch.count
+            // The server may skip a chat (a turn started after our re-check, a receipt older than the chat's last
+            // use): that is "retry later", never success.
+            func record(_ r: LlmIdeAPIClient.WorkingStatePurgeResult, _ ids: [String]) {
+                for id in r.busy ?? [] { report.skipped[id] = "serverBusy" }
+                for id in r.staleReceipt ?? [] { report.skipped[id] = "staleReceipt" }
+                let notPurged = Set((r.busy ?? []) + (r.staleReceipt ?? []))
+                report.purged.append(contentsOf: ids.filter { !notPurged.contains($0) })
+            }
             do {
-                _ = try await deps.remote.purgeWorkingState(chatSessionIds: batch)
-                report.purged.append(contentsOf: batch)
+                record(try await deps.remote.purgeWorkingState(chatSessionIds: batch, orphan: false), batch)
             } catch ChatArchiveRemoteError.noReceipt {
                 // A receipt the server does not hold refuses the whole batch; retry one by one so the rest still clear.
                 for id in batch where !Task.isCancelled {
-                    do { _ = try await deps.remote.purgeWorkingState(chatSessionIds: [id]); report.purged.append(id) }
+                    do { record(try await deps.remote.purgeWorkingState(chatSessionIds: [id], orphan: false), [id]) }
                     catch { report.skipped[id] = "noReceipt" }
                 }
             } catch {
                 report.errors.append("purge: \(error)")
             }
         }
+        report.completed = report.errors.isEmpty
         return report
     }
 
@@ -300,10 +344,14 @@ actor ChatArchiveService {
 
     // MARK: - Extension chats (plan 3.3)
 
-    /// Archive every live extension chat (quit, sweep). Sequential: there is normally one.
+    /// Archive the extension's chat rows. `onlyIdleSince`: only chats idle for 30 minutes (the start sweep and the idle
+    /// timer: a chat the extension is using right now is not archived under it); the quit archives all of them.
+    /// Sequential: there is normally one.
     func archiveExtensionChats(onlyIdleSince idle: Bool = false) async -> [String: ChatArchiveOutcome] {
         guard deps.mode() != .off, deps.currentUser() != nil else { return [:] }
-        guard let chats = try? await deps.remote.extensionChats() else { return [:] }
+        guard let all = try? await deps.remote.serverChats() else { return [:] }
+        // Mac-surface rows are not the extension's; only `extension` and `any` rows are archived here.
+        let chats = all.filter { $0.surface == "extension" || $0.surface == "any" }
         var out: [String: ChatArchiveOutcome] = [:]
         for chat in chats {
             if Task.isCancelled { break }
@@ -355,13 +403,14 @@ actor ChatArchiveService {
 
             // 2. what is already on the Mac under this id (C6, C15).
             let existing: ChatSession? = deps.storage.fileExists(uuid) ? deps.storage.load(uuid) : nil
-            if deps.storage.fileExists(uuid), existing == nil { return .conflictKept }   // unreadable: never overwrite
-            let existingHash = existing.map { ChatArchiveLogic.archiveHash(Self.wire($0.messages)) } ?? ""
+            if deps.storage.fileExists(uuid), existing == nil { needsDecision[serverId] = .conflictKept; return .conflictKept }   // unreadable: never overwrite
+            let existingWire = existing.map { Self.wire($0.messages) } ?? []
+            let existingHash = existing.map { _ in ChatArchiveLogic.archiveHash(existingWire) } ?? ""
             let rule = ChatArchiveLogic.ruleForExistingFile(
-                exists: existing != nil, fileOrigin: existing?.origin, fileArchiveHash: existing?.archive?.hash,
-                fileMessageCount: existing?.messages.count ?? 0, fileHash: existingHash,
-                serverHash: incomingHash, serverCount: messages.count)
-            if rule == .conflict { return .conflictKept }
+                exists: existing != nil, fileOrigin: existing?.origin,
+                fileIsPrefixOfServer: ChatArchiveLogic.isPrefix(existingWire, of: incoming),
+                fileHash: existingHash, serverHash: incomingHash)
+            if rule == .conflict { needsDecision[serverId] = .conflictKept; return .conflictKept }
 
             // 3. write, read back, recompute from the FILE.
             var fileHash = existingHash
@@ -409,7 +458,7 @@ actor ChatArchiveService {
                 // A delete that raced the commit: honour it (the rows are gone either way).
                 if deps.pending.containsDelete(uuid) { deps.storage.delete(uuid) }
                 // The commit left a receipt, so the chat's agent mapping / SDK transcript / facts (derivative state) can go.
-                if mode == .on, stillMine() { _ = try? await deps.remote.purgeWorkingState(chatSessionIds: [serverId]) }
+                if mode == .on, stillMine() { _ = try? await deps.remote.purgeWorkingState(chatSessionIds: [serverId], orphan: false) }
                 return r.status == "deleted" ? .committed : .alreadyArchived
             } catch ChatArchiveRemoteError.stale {
                 continue                                            // an append raced in: begin again, same file name
@@ -436,15 +485,19 @@ actor ChatArchiveService {
     /// Record the intent to delete `id` BEFORE the file is removed. Durable, idempotent, synchronous.
     nonisolated func registerDeleteIntent(_ id: UUID) {
         guard deps.mode() == .on else { return }
-        deps.pending.addDelete(id: id, owner: deps.currentUser(), now: deps.now())
+        // Bound to the user who deleted it: with nobody signed in there is nobody to attribute it to, so nothing is recorded.
+        guard let owner = deps.currentUser() else { return }
+        deps.pending.addDelete(id: id, owner: owner, now: deps.now())
     }
 
     /// Send the tombstone. The local entry is removed only when the server confirms the purge is done; any
     /// other answer (queued, down, signed out) leaves it for the next start.
     func sendTombstone(_ id: UUID) async -> ChatTombstoneOutcome {
         guard deps.mode() == .on else { return .unreachable }
+        // Only the user who recorded the delete may send it; the original delete time travels with it (reuse guard).
+        guard let entry = deps.pending.entry(id), entry.ownerUserId != nil, entry.ownerUserId == deps.currentUser() else { return .unreachable }
         do {
-            let r = try await deps.remote.requestSessionPurge(chatSessionId: id.uuidString)
+            let r = try await deps.remote.requestSessionPurge(chatSessionId: id.uuidString, requestedAt: entry.requestedAt)
             if r.purged == "done" { deps.pending.removeDelete(id); return .done }
             deps.pending.bumpAttempt(id)
             return .queued
@@ -476,10 +529,13 @@ actor ChatArchiveService {
     /// anything is deleted), then Mac chats' working state.
     func sweep() async -> ChatQuitReport {
         guard deps.mode() != .off, deps.currentUser() != nil else { return ChatQuitReport() }
-        _ = await replayPendingDeletes()
-        let ext = await archiveExtensionChats()
+        let replay = await replayPendingDeletes()
+        // Only idle extension chats: at the start the extension may be using one right now.
+        let ext = await archiveExtensionChats(onlyIdleSince: true)
         var report = await archiveMacChats(inQuit: false)
         report.archivedExtension = ext
+        if replay.values.contains(.unreachable) { report.completed = false }
+        if ext.values.contains(where: { if case .failed = $0 { return true } else { return false } }) { report.completed = false }
         return report
     }
 
@@ -490,6 +546,16 @@ actor ChatArchiveService {
         var report = await archiveMacChats(inQuit: true)
         report.archivedExtension = ext
         return report
+    }
+
+    /// Extension chats the user must look at: an incomplete archive (the caps dropped messages) or a Mac file that
+    /// differs from the server's rows. Nothing was deleted for them.
+    func attention() -> [String: ChatArchiveOutcome] { needsDecision }
+
+    /// How many delete tombstones the signed-in user still owes the server.
+    func pendingDeleteCount() -> Int {
+        guard let user = deps.currentUser() else { return 0 }
+        return deps.pending.count(for: user)
     }
 
     /// The periodic idle archive (C14): extension chats idle for 30 minutes.

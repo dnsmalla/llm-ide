@@ -4,6 +4,12 @@ import Testing
 
 /// T4.2: every row of the plan's crash table (3.4, C1-C16), with a failure injected at each step against a fake server and
 /// a real temp chat store.
+private final class Counter: @unchecked Sendable {
+    private let lock = NSLock(); private var n = 0
+    func inc() { lock.lock(); n += 1; lock.unlock() }
+    var value: Int { lock.lock(); defer { lock.unlock() }; return n }
+}
+
 @MainActor
 @Suite("Chat archive: crash table", .serialized)
 struct ChatArchiveServiceTests {
@@ -167,29 +173,237 @@ struct ChatArchiveServiceTests {
         let extId = UUID()
         rig.remote.addExtensionChat(extId, extChat())
         rig.remote.addWorking(extId, updatedAt: rig.knobs.now.addingTimeInterval(-30 * 24 * 3600))
-        rig.remote.failures["extensionChats"] = 99
+        rig.remote.failures["serverChats"] = 99
         let r = await rig.service.archiveMacChats(inQuit: false)
         #expect(!r.errors.isEmpty && rig.remote.tombstones.isEmpty && rig.remote.chats[extId.uuidString] != nil)
     }
 
     // MARK: orphans (reverse sweep, 7-day grace)
 
-    @Test func orphan_is_purged_only_after_the_grace() async {
+    @Test func orphan_is_purged_only_after_the_grace_by_the_working_state_route_never_the_tombstone() async {
         let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.storage.healthyOverride = true
         let id = UUID(); rig.remote.addWorking(id, updatedAt: rig.knobs.now)
         _ = await rig.service.sweep()
-        #expect(rig.remote.tombstones.isEmpty)
+        #expect(rig.remote.orphanPurged.isEmpty)
         rig.knobs.now = rig.knobs.now.addingTimeInterval(8 * 24 * 3600)
         let r = await rig.service.sweep()
-        #expect(rig.remote.tombstones == [id.uuidString] && r.purged == [id.uuidString])
+        #expect(rig.remote.orphanPurged == [id.uuidString] && r.purged == [id.uuidString])
+        #expect(rig.remote.tombstones.isEmpty, "the full-delete tombstone route is never used for an orphan")
+    }
+
+    @Test func an_old_server_timestamp_does_not_shorten_the_grace() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.storage.healthyOverride = true
+        let id = UUID(); rig.remote.addWorking(id, updatedAt: rig.knobs.now.addingTimeInterval(-90 * 24 * 3600))
+        _ = await rig.service.sweep()
+        #expect(rig.remote.orphanPurged.isEmpty, "first seen today: 7 days from today")
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(6 * 24 * 3600)
+        _ = await rig.service.sweep()
+        #expect(rig.remote.orphanPurged.isEmpty)
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(2 * 24 * 3600)
+        _ = await rig.service.sweep()
+        #expect(rig.remote.orphanPurged == [id.uuidString])
+    }
+
+    @Test func an_unhealthy_store_directory_purges_nothing_ever() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.storage.healthyOverride = false
+        let id = UUID(); rig.remote.addWorking(id)
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(30 * 24 * 3600)
+        _ = await rig.service.sweep()
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(30 * 24 * 3600)
+        let r = await rig.service.sweep()
+        #expect(rig.remote.orphanPurged.isEmpty && rig.remote.purgedWorkingState.isEmpty)
+        #expect(r.completed == false, "a sweep that could not trust the store is not complete")
+    }
+
+    @Test func the_real_store_check_needs_an_existing_non_empty_directory() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let real = FileChatArchiveStorage()
+        #expect(real.storeLooksHealthy() == false, "no sessions directory yet")
+        rig.macChat(UUID())
+        #expect(real.storeLooksHealthy() == true)
+    }
+
+    @Test func a_chat_with_server_rows_is_never_an_orphan_even_when_the_server_refuses_to_say_so() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.storage.healthyOverride = true
+        let ext = UUID()
+        rig.remote.chats[ext.uuidString] = .init(id: ext.uuidString, messages: [("user", "only copy")], surface: "mac")   // any surface
+        rig.remote.addWorking(ext, updatedAt: rig.knobs.now.addingTimeInterval(-60 * 24 * 3600))
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(30 * 24 * 3600)
+        _ = await rig.service.sweep(); _ = await rig.service.sweep()
+        #expect(rig.remote.orphanPurged.isEmpty && rig.remote.chats[ext.uuidString] != nil)
+    }
+
+    @Test func the_server_skipping_an_orphan_is_not_counted_as_purged() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.storage.healthyOverride = true
+        let id = UUID(); rig.remote.addWorking(id); rig.remote.purgeBusyIDs = [id.uuidString]
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(8 * 24 * 3600)
+        _ = await rig.service.sweep()
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(8 * 24 * 3600)
+        let r = await rig.service.sweep()
+        #expect(r.purged.isEmpty && r.skipped[id.uuidString] == "orphanSkippedByServer")
     }
 
     @Test func orphan_in_shadow_is_never_purged() async {
         let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.storage.healthyOverride = true
         rig.knobs.mode = .shadow
         let id = UUID(); rig.remote.addWorking(id, updatedAt: rig.knobs.now.addingTimeInterval(-30 * 24 * 3600))
+        rig.knobs.now = rig.knobs.now.addingTimeInterval(30 * 24 * 3600)
         _ = await rig.service.sweep()
+        #expect(rig.remote.orphanPurged.isEmpty)
+    }
+
+    // MARK: the server skips (busy / stale receipt) is "retry later", never success
+
+    @Test func a_turn_that_started_after_the_recheck_is_reported_busy_by_the_server_and_not_counted_purged() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let id = UUID(); rig.macChat(id); rig.remote.addWorking(id)
+        rig.remote.purgeBusyIDs = [id.uuidString]
+        let r = await rig.service.quit()
+        #expect(r.purged.isEmpty && r.skipped[id.uuidString] == "serverBusy")
+        #expect(rig.remote.workingIDs() == [id.uuidString])
+        rig.remote.purgeBusyIDs = []
+        #expect(await rig.service.sweep().purged == [id.uuidString])
+    }
+
+    @Test func a_stale_receipt_is_retry_later_too() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let id = UUID(); rig.macChat(id); rig.remote.addWorking(id)
+        rig.remote.purgeStaleIDs = [id.uuidString]
+        let r = await rig.service.quit()
+        #expect(r.purged.isEmpty && r.skipped[id.uuidString] == "staleReceipt")
+        #expect(rig.remote.callCount("recordReceipt") == 1)
+        rig.remote.purgeStaleIDs = []
+        #expect(await rig.service.sweep().purged == [id.uuidString], "the next pass re-verifies the file and records a fresh receipt")
+        #expect(rig.remote.callCount("recordReceipt") == 2)
+    }
+
+    // MARK: sweep scope and completion
+
+    @Test func the_start_sweep_leaves_an_active_extension_chat_but_the_quit_archives_it() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let active = UUID(), idle = UUID()
+        rig.remote.addExtensionChat(active, extChat(), updatedAt: Date().addingTimeInterval(-60))
+        rig.remote.addExtensionChat(idle, extChat(), updatedAt: Date().addingTimeInterval(-3600))
+        let s = await rig.service.sweep()
+        #expect(s.archivedExtension[idle.uuidString] == .committed && s.archivedExtension[active.uuidString] == nil)
+        #expect(rig.remote.chats[active.uuidString] != nil)
+        let q = await rig.service.quit()
+        #expect(q.archivedExtension[active.uuidString] == .committed)
+    }
+
+    @Test func a_sweep_that_cannot_reach_the_server_is_not_complete() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.remote.failures["workingState"] = 1
+        #expect(await rig.service.sweep().completed == false)
+        #expect(await rig.service.sweep().completed == true)
+    }
+
+    @Test func backoff_retries_until_the_backend_is_up_then_stops() async {
+        let down = Counter()
+        let slept = Counter()
+        let tries = await ChatArchiveBackoff.run(delays: [5, 15, 45, 135, 300], sleep: { _ in slept.inc() }) {
+            down.inc()
+            return down.value >= 3                       // the backend comes up on the third attempt
+        }
+        #expect(tries == 3 && slept.value == 3)
+        let never = await ChatArchiveBackoff.run(delays: [1, 2], sleep: { _ in }) { false }
+        #expect(never == 2, "the schedule is bounded")
+    }
+
+    @Test func the_real_sweep_survives_a_backend_that_is_down_then_up() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let id = UUID(); rig.macChat(id); rig.remote.addWorking(id)
+        rig.remote.failures["workingState"] = 2
+        let service = rig.service!
+        let tries = await ChatArchiveBackoff.run(delays: [0, 0, 0, 0], sleep: { _ in }) { await service.sweep().completed }
+        #expect(tries == 3 && rig.remote.workingIDs().isEmpty)
+    }
+
+    // MARK: conflicts and incomplete archives are surfaced
+
+    @Test func conflicts_and_incomplete_archives_are_listed_for_the_settings_card() async throws {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let conflict = UUID(), incomplete = UUID()
+        rig.remote.addExtensionChat(conflict, extChat()); rig.remote.addExtensionChat(incomplete, extChat())
+        rig.remote.chats[incomplete.uuidString]!.pruned = 3
+        _ = await rig.service.archiveExtensionChat(conflict.uuidString)           // committed, file exists
+        rig.remote.addExtensionChat(conflict, extChat() + [("user", "different")])
+        var f = try #require(ChatSessionStore.load(id: conflict))
+        f.messages[0].content = "edited on the Mac"
+        try ChatSessionStore.saveOrThrow(f, touch: false)
+        _ = await rig.service.archiveExtensionChat(conflict.uuidString)
+        _ = await rig.service.archiveExtensionChat(incomplete.uuidString)
+        let a = await rig.service.attention()
+        #expect(a[conflict.uuidString] == .conflictKept && a[incomplete.uuidString] != nil)
+    }
+
+    @Test func a_file_that_differs_but_is_not_a_prefix_is_a_conflict_never_overwritten() async throws {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let id = UUID(); rig.remote.addExtensionChat(id, extChat(4))
+        rig.remote.failures["commitArchive"] = 1
+        _ = await rig.service.archiveExtensionChat(id.uuidString)                 // file written, rows kept
+        var f = try #require(ChatSessionStore.load(id: id))
+        f.messages[1].content = "the user edited this on the Mac"
+        try ChatSessionStore.saveOrThrow(f, touch: false)
+        rig.remote.chats[id.uuidString]!.messages.append(("user", "more"))
+        #expect(await rig.service.archiveExtensionChat(id.uuidString) == .conflictKept)
+        #expect(ChatSessionStore.load(id: id)?.messages[1].content == "the user edited this on the Mac")
+    }
+
+    @Test func the_archive_file_is_flushed_to_disk_before_the_commit() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let id = UUID(); rig.remote.addExtensionChat(id, extChat())
+        #expect(await rig.service.archiveExtensionChat(id.uuidString) == .committed)
+        #expect(ChatSessionStore.fullSync(id: id), "F_FULLFSYNC (or fsync) of the file and its directory succeeds")
+    }
+
+    // MARK: tombstones are bound to their user
+
+    @Test func a_delete_with_nobody_signed_in_records_nothing_and_an_ownerless_entry_is_never_sent() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        rig.knobs.user = nil
+        let id = UUID()
+        rig.service.registerDeleteIntent(id)
+        #expect(!rig.pending.containsDelete(id))
+        rig.pending.addDelete(id: id, owner: nil)                     // an entry of unknown origin
+        rig.knobs.user = "user-B"
+        #expect(rig.pending.deletes(for: "user-B").isEmpty)
+        #expect(await rig.service.sendTombstone(id) == .unreachable)
         #expect(rig.remote.tombstones.isEmpty)
+    }
+
+    @Test func the_tombstone_carries_the_original_delete_time_and_a_busy_answer_keeps_it_pending() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let id = UUID()
+        let t0 = Date(timeIntervalSince1970: 1_800_000_000)
+        rig.pending.addDelete(id: id, owner: "user-A", now: t0)
+        rig.remote.tombstoneBusy = true
+        #expect(await rig.service.sendTombstone(id) == .queued)
+        #expect(rig.remote.tombstoneRequestedAt[id.uuidString] == t0)
+        #expect(rig.pending.containsDelete(id))
+    }
+
+    // MARK: extension list paging
+
+    @Test func the_pager_reads_every_page_and_refuses_a_server_that_ignores_the_offset() async throws {
+        let all = (0..<450).map { "c\($0)" }
+        let got = try await LlmIdeAPIClient.readAllPages(pageSize: 200, id: { $0 }) { offset in
+            Array(all[offset..<min(offset + 200, all.count)])
+        }
+        #expect(got.count == 450 && Set(got).count == 450)
+        let exact = try await LlmIdeAPIClient.readAllPages(pageSize: 200, id: { $0 }) { offset in
+            Array(all[min(offset, 400)..<min(offset + 200, 400)])
+        }
+        #expect(exact.count == 400, "an exactly-full last page is followed by an empty one")
+        await #expect(throws: URLError.self) {
+            _ = try await LlmIdeAPIClient.readAllPages(pageSize: 200, id: { $0 }) { _ in Array(all[0..<200]) }
+        }
     }
 
     // MARK: extension chats (option D)
@@ -225,7 +439,7 @@ struct ChatArchiveServiceTests {
 
     @Test func C5_crash_after_begin_before_file_write_sweep_begins_again() async {
         let rig = await ArchiveRig.make(); defer { rig.close() }
-        let id = UUID(); rig.remote.addExtensionChat(id, extChat())
+        let id = UUID(); rig.remote.addExtensionChat(id, extChat(), updatedAt: Date().addingTimeInterval(-3600))
         _ = try? await rig.remote.beginArchive(chatSessionId: id.uuidString, after: nil, fence: nil)   // the crashed run
         #expect(rig.remote.chats[id.uuidString]?.lifecycle == "archiving" && !ChatSessionStore.fileExists(id: id))
         let r = await rig.service.sweep()
@@ -234,7 +448,7 @@ struct ChatArchiveServiceTests {
 
     @Test func C6_file_written_commit_fails_rows_and_file_both_exist_then_sweep_commits() async {
         let rig = await ArchiveRig.make(); defer { rig.close() }
-        let id = UUID(); rig.remote.addExtensionChat(id, extChat())
+        let id = UUID(); rig.remote.addExtensionChat(id, extChat(), updatedAt: Date().addingTimeInterval(-3600))
         rig.remote.failures["commitArchive"] = 1
         let first = await rig.service.archiveExtensionChat(id.uuidString)
         if case .failed = first {} else { Issue.record("expected failed, got \(first)") }
@@ -289,7 +503,7 @@ struct ChatArchiveServiceTests {
 
     @Test func C9_disk_full_nothing_is_committed_and_rows_stay() async {
         let rig = await ArchiveRig.make(); defer { rig.close() }
-        let id = UUID(); rig.remote.addExtensionChat(id, extChat())
+        let id = UUID(); rig.remote.addExtensionChat(id, extChat(), updatedAt: Date().addingTimeInterval(-3600))
         rig.storage.failWrites = true
         let out = await rig.service.archiveExtensionChat(id.uuidString)
         if case .failed(let why) = out { #expect(why.contains("write")) } else { Issue.record("expected failed") }
@@ -460,6 +674,7 @@ struct ChatArchiveServiceTests {
         rig.service.registerDeleteIntent(id); rig.service.registerDeleteIntent(id)
         #expect(rig.pending.deletes(for: "user-A").count == 1)
         #expect(await rig.service.sendTombstone(id) == .done)
+        rig.service.registerDeleteIntent(id)                       // a second delete of the same id (the UI path records it again)
         #expect(await rig.service.sendTombstone(id) == .done)
         #expect(rig.pending.deletes(for: "user-A").isEmpty)
     }

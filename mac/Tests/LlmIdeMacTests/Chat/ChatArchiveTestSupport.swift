@@ -15,6 +15,7 @@ final class FakeArchiveRemote: ChatArchiveRemote, @unchecked Sendable {
         var truncated = 0
         var updatedAt: Double = Date().timeIntervalSince1970
         var projectId: String?
+        var surface = "extension"
     }
     struct Injected: Error, CustomStringConvertible { let call: String; var description: String { "injected failure in \(call)" } }
 
@@ -33,6 +34,11 @@ final class FakeArchiveRemote: ChatArchiveRemote, @unchecked Sendable {
     /// Run just before the named call's effect (to race something in).
     var before: [String: () -> Void] = [:]
     var purgeAnswer = "done"
+    var purgeBusyIDs: Set<String> = []
+    var purgeStaleIDs: Set<String> = []
+    var orphanPurged: [String] = []
+    var tombstoneRequestedAt: [String: Date] = [:]
+    var tombstoneBusy = false
     var commitStaleTimes = 0
     var rowsAfterTombstone: Bool = false
 
@@ -64,22 +70,27 @@ final class FakeArchiveRemote: ChatArchiveRemote, @unchecked Sendable {
         lock.lock(); receipts[chatSessionId] = (hash, count); lock.unlock()
     }
 
-    func purgeWorkingState(chatSessionIds: [String]) async throws -> Int {
+    func purgeWorkingState(chatSessionIds: [String], orphan: Bool) async throws -> LlmIdeAPIClient.WorkingStatePurgeResult {
         try await enter("purgeWorkingState")
         lock.lock(); defer { lock.unlock() }
-        if chatSessionIds.contains(where: { receipts[$0] == nil }) { throw ChatArchiveRemoteError.noReceipt }
+        if !orphan, chatSessionIds.contains(where: { receipts[$0] == nil }) { throw ChatArchiveRemoteError.noReceipt }
         var n = 0
+        var busy: [String] = [], stale: [String] = [], refused: [String] = []
         for id in chatSessionIds {
+            if orphan, chats[id] != nil { refused.append(id); continue }
+            if purgeBusyIDs.contains(id) { busy.append(id); continue }
+            if purgeStaleIDs.contains(id) { stale.append(id); continue }
             if let i = working.firstIndex(where: { $0.chatSessionId == id }) { working.remove(at: i); n += 1 }
             purgedWorkingState.append(id)
+            if orphan { orphanPurged.append(id) }
         }
-        return n
+        return .init(purged: n, busy: busy, staleReceipt: stale, refused: orphan ? refused : nil)
     }
 
-    func extensionChats() async throws -> [LlmIdeAPIClient.ServerChatSummary] {
-        try await enter("extensionChats")
+    func serverChats() async throws -> [LlmIdeAPIClient.ServerChatSummary] {
+        try await enter("serverChats")
         lock.lock(); defer { lock.unlock() }
-        return chats.values.map { .init(id: $0.id, title: $0.title, surface: "extension", mode: "transcript",
+        return chats.values.map { .init(id: $0.id, title: $0.title, surface: $0.surface, mode: "transcript",
                                         projectId: $0.projectId, createdAt: 1_700_000_000, updatedAt: $0.updatedAt) }
     }
 
@@ -123,15 +134,16 @@ final class FakeArchiveRemote: ChatArchiveRemote, @unchecked Sendable {
         return .init(deleted: true, status: "deleted")
     }
 
-    func requestSessionPurge(chatSessionId: String) async throws -> LlmIdeAPIClient.SessionPurgeResult {
+    func requestSessionPurge(chatSessionId: String, requestedAt: Date) async throws -> LlmIdeAPIClient.SessionPurgeResult {
         try await enter("requestSessionPurge")
         lock.lock(); defer { lock.unlock() }
         tombstones.append(chatSessionId)
-        if purgeAnswer == "done" {
+        tombstoneRequestedAt[chatSessionId] = requestedAt
+        if purgeAnswer == "done", !tombstoneBusy {
             working.removeAll { $0.chatSessionId == chatSessionId }
             chats[chatSessionId] = nil
         }
-        return .init(queued: true, purged: purgeAnswer)
+        return .init(queued: true, purged: tombstoneBusy ? "pending" : purgeAnswer, busy: tombstoneBusy ? true : nil, skippedReused: nil)
     }
 
     // helpers
@@ -158,6 +170,8 @@ final class FlakyArchiveStorage: ChatArchiveStorage, @unchecked Sendable {
     private let lock = NSLock()
     var failWrites = false
     var writes = 0
+    /// nil = ask the real store; otherwise the answer `storeLooksHealthy` gives.
+    var healthyOverride: Bool?
     func fileExists(_ id: UUID) -> Bool { real.fileExists(id) }
     func load(_ id: UUID) -> ChatSession? { real.load(id) }
     func write(_ session: ChatSession) throws {
@@ -166,6 +180,7 @@ final class FlakyArchiveStorage: ChatArchiveStorage, @unchecked Sendable {
         try real.write(session)
     }
     func delete(_ id: UUID) { real.delete(id) }
+    func storeLooksHealthy() -> Bool { healthyOverride ?? real.storeLooksHealthy() }
 }
 
 /// Mutable knobs a test turns while a service runs.

@@ -1,42 +1,80 @@
 import Foundation
 import os.log
 
+private let archiveHostLog = Logger(subsystem: "com.llmide.macapp", category: "ChatArchive")
+
+/// What the Settings card shows (live-then-archive).
+struct ChatArchiveStatus: Equatable {
+    var mode: LiveThenArchiveMode
+    var userId: String?
+    /// Older chat files with no owner, awaiting an explicit claim.
+    var unowned: Int
+    /// Extension chats kept on the server because the archive is incomplete or a Mac file differs.
+    var attention: Int
+    /// Delete tombstones the server has not confirmed yet.
+    var pendingDeletes: Int
+}
+
+/// Retry schedule for the start sweep: a backend that is not up yet must not cost the whole recovery.
+enum ChatArchiveBackoff {
+    /// 5 s, then roughly tripling to a 5 minute cap, for a bounded number of tries.
+    static let defaultDelays: [TimeInterval] = [5, 15, 45, 135, 300, 300, 300, 300, 300, 300]
+
+    /// Run `attempt` (true = the sweep completed) until it completes, the schedule is exhausted, or the task is
+    /// cancelled. Returns the number of attempts made. `sleep` is injectable for tests.
+    static func run(delays: [TimeInterval] = defaultDelays,
+                    sleep: @Sendable (TimeInterval) async -> Void = { try? await Task.sleep(for: .seconds($0)) },
+                    attempt: @Sendable () async -> Bool) async -> Int {
+        var tries = 0
+        for delay in delays {
+            if Task.isCancelled { return tries }
+            await sleep(delay)
+            if Task.isCancelled { return tries }
+            tries += 1
+            if await attempt() { return tries }
+        }
+        return tries
+    }
+}
+
 /// The app-side home of the live-then-archive chat lifecycle: owns the `ChatArchiveService`, wires the quit hook,
 /// the start sweep, the idle timer and the delete-everywhere intent, and tells the chat store who is signed in.
 ///
-/// `lta.mode = off` (the default): `install` does NOTHING, so the quit sequence, the delete path and the sign-out
-/// wipe are exactly what they were. Shell calls `install` once at boot.
+/// `lta.mode = off` (the default): no service, no quit hook, no delete tombstone; the only thing installed is the
+/// owner filter, which hides a chat file stamped with another user (such files exist only after the mode was `on`).
 @MainActor
 final class ChatArchiveHost {
     static let shared = ChatArchiveHost()
-    private static let log = Logger(subsystem: "com.llmide.macapp", category: "ChatArchive")
-
     private(set) var service: ChatArchiveService?
     private(set) var mode: LiveThenArchiveMode = .off
     /// The signed-in user, mirrored thread-safely (the session store is main-actor; the archive actor is not).
     private let currentUserBox = LockedString()
-    private let lastUser = LockedString()
     private var idleTask: Task<Void, Never>?
     private var sweepTask: Task<Void, Never>?
     private var installed = false
 
     /// Last report of the quit or sweep, for diagnostics and tests.
     private(set) var lastReport: ChatQuitReport?
+    /// How many sweep attempts the last start needed (diagnostics).
+    private(set) var sweepAttempts = 0
 
-    /// Sign-out keeps the chat files (never wipes) only in `on`.
-    var keepsChatsOnSignOut: Bool { mode == .on && service != nil }
+    /// Sign-out keeps the chat files (never wipes) in `shadow` and `on`.
+    var keepsChatsOnSignOut: Bool { mode != .off && service != nil }
     /// True when a user delete is cleaned up through the tombstone path instead of the best-effort calls.
     var ownsDelete: Bool { mode == .on && service != nil }
 
-    /// Wire everything for `mode`. Call once at boot; a mode of `off` returns without touching anything.
+    /// Wire everything for `mode`. Call once at boot.
     func install(api: LlmIdeAPIClient, mode: LiveThenArchiveMode,
                  activeProjectId: @escaping @Sendable () async -> String?) {
-        guard mode != .off, !installed else { return }
+        guard !installed else { return }
         installed = true
         self.mode = mode
         let box = currentUserBox
         let user: @Sendable () -> String? = { box.get() }
-        ChatSessionStore.ownership = .init(stamp: true, filter: mode == .on, currentUserId: user)
+        // Another user's chat file is hidden and not loadable, in every mode (files tagged with an owner only exist
+        // once `shadow` or `on` has stamped them).
+        ChatSessionStore.ownership = .init(stamp: mode != .off, filter: true, currentUserId: user)
+        guard mode != .off else { return }
         let service = ChatArchiveService(.init(
             remote: api,
             storage: FileChatArchiveStorage(),
@@ -57,20 +95,24 @@ final class ChatArchiveHost {
         }
     }
 
-    /// The session became authenticated: claim unowned files for this user, run the recovery sweep (off the
-    /// launch critical path) and start the idle archive. Idempotent.
+    /// The session became authenticated. Runs in every mode: it tells the store who is signed in and reloads the
+    /// lists. In `shadow`/`on` it also starts the recovery sweep (retried with backoff until the backend is up and
+    /// the sweep completes) and the idle archive. Nothing is claimed: older chats stay as they are until the user
+    /// presses "Claim".
     func signedIn(userId: String) {
-        guard let service else { return }
-        lastUser.set(userId)
         currentUserBox.set(userId)
-        ChatSessionStore.stampUnowned(owner: userId)
+        ChatEngineRegistry.shared.refreshSessionLists()
+        guard let service else { return }
+        Task.detached(priority: .utility) { ChatSessionStore.pruneStaleTags() }
         sweepTask?.cancel()
-        sweepTask = Task { [weak self] in
-            try? await Task.sleep(for: .seconds(3))
-            guard !Task.isCancelled else { return }
-            let report = await service.sweep()
-            await MainActor.run { self?.lastReport = report }
-            Self.log.info("lta sweep: purged=\(report.purged.count) skipped=\(report.skipped.count) errors=\(report.errors.count)")
+        sweepTask = Task { [self] in
+            let tries = await ChatArchiveBackoff.run {
+                let report = await service.sweep()
+                await MainActor.run { self.lastReport = report }
+                archiveHostLog.info("lta sweep: completed=\(report.completed) purged=\(report.purged.count) skipped=\(report.skipped.count) errors=\(report.errors.count, privacy: .public)")
+                return report.completed
+            }
+            await MainActor.run { self.sweepAttempts = tries }
         }
         idleTask?.cancel()
         idleTask = Task {
@@ -82,15 +124,16 @@ final class ChatArchiveHost {
         }
     }
 
-    /// A definitive sign-out (called by the engine registry in `on`). Files stay; the departing user's unowned
-    /// chats are claimed so the next user never inherits them; anything in flight aborts.
+    /// A definitive sign-out in `shadow`/`on` (called by the engine registry). Files stay; anything in flight aborts.
     func didSignOut() {
         sweepTask?.cancel(); sweepTask = nil
         idleTask?.cancel(); idleTask = nil
         currentUserBox.clear()
-        if let owner = lastUser.get() { ChatSessionStore.stampUnowned(owner: owner) }
         if let service { Task { await service.signedOut() } }
     }
+
+    /// Sign-out in `off`: only forget who was signed in.
+    func clearUser() { currentUserBox.clear() }
 
     /// The tail of a user delete in `on`: send the tombstone (the intent was recorded before the file went).
     func finishDelete(_ id: UUID) async {
@@ -99,34 +142,50 @@ final class ChatArchiveHost {
         _ = await service.sendTombstone(id)
     }
 
-    /// Test seam: stand in for `install` with a ready service and mode (the real one is once-per-process).
+    // MARK: Settings card
+
+    func status() async -> ChatArchiveStatus {
+        let unowned = await Task.detached(priority: .utility) { ChatSessionStore.unownedCount() }.value
+        let attention = await service?.attention().count ?? 0
+        let pending = await service?.pendingDeleteCount() ?? 0
+        return ChatArchiveStatus(mode: mode, userId: currentUserBox.get(), unowned: unowned, attention: attention, pendingDeletes: pending)
+    }
+
+    /// The explicit "Claim N older chats for <user>" action. Off the main actor; lists refresh after.
+    @discardableResult
+    func claimOlderChats() async -> Int {
+        guard let user = currentUserBox.get() else { return 0 }
+        let n = await Task.detached(priority: .userInitiated) { ChatSessionStore.claimUnowned(owner: user) }.value
+        ChatEngineRegistry.shared.refreshSessionLists()
+        return n
+    }
+
+    /// The user accepted an incomplete archive of an extension chat.
+    func acceptIncompleteArchive(_ serverChatId: String) async {
+        _ = await service?.acceptIncomplete(serverChatId)
+    }
+
+    // MARK: Test seams
+
     func installForTesting(mode: LiveThenArchiveMode, service: ChatArchiveService?) {
         self.mode = mode
         self.service = service
         installed = true
     }
 
-    /// Test seam: back to the never-installed state, including the store hooks `install` set.
     func resetForTesting() {
         sweepTask?.cancel(); idleTask?.cancel()
         sweepTask = nil; idleTask = nil
         service = nil
         mode = .off
         installed = false
-        currentUserBox.clear(); lastUser.clear()
+        currentUserBox.clear()
         ChatSessionStore.ownership = nil
         ChatSessionStore.onUserDelete = nil
     }
 
-    /// Test seam: set who is signed in without running a sweep.
     func setUserForTesting(_ id: String?) {
-        if let id { currentUserBox.set(id); lastUser.set(id) } else { currentUserBox.clear() }
-    }
-
-    /// Extension chats waiting for the user to accept an incomplete archive.
-    func chatsNeedingDecision() async -> [String: ChatArchiveOutcome] {
-        guard let service else { return [:] }
-        return await service.needsDecision
+        if let id { currentUserBox.set(id) } else { currentUserBox.clear() }
     }
 }
 

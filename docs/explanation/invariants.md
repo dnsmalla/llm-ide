@@ -754,14 +754,18 @@ layout's — a real repo graph genuinely arrives fragmented.
 
 #### ✅ MUST preserve
 
-- **`lta.mode = off` is today's behaviour exactly**: no async quit hook is registered, `deleteSession` keeps its best-effort server calls, sign-out wipes the store.
-- **Never delete before verify.** A Mac chat's working state is purged only after the file is verified and a receipt recorded; an extension chat's rows are deleted only against the hash the Mac recomputed from the file it wrote.
-- **A quit reply is always sent** after the async hooks (the 6 s cap); anything cut is finished by the next start's sweep. The backend is killed at `willTerminate`, after that reply.
-- **The user's delete intent is written (`pending-deletes.json`) before the file is removed**, and kept until the server says `done`.
-- **Never wipe the chat store on sign-out in `on`**; chats are tagged with `ownerUserId` and filtered per user.
+- **`lta.mode = off` is today's behaviour**: no async quit hook, `deleteSession` keeps its best-effort server calls, sign-out wipes ordinary chats. The one exception is a chat that exists nowhere else (`origin == "extension"` or an archive digest): it is never wiped, in any mode.
+- **Never delete before verify.** A Mac chat's working state is purged only after the file is verified and a receipt recorded; an extension chat's rows are deleted only against the hash the Mac recomputed from the file it wrote, after the file was flushed to disk.
+- **The server refuses to purge under a turn.** `POST /agent/v2/sessions/purge`, the tombstone routes and `purgeChat` skip a chat with a turn in flight (`busy`) or a receipt older than the chat's last use (`staleReceipt`); the client treats both as retry later.
+- **An orphan is purged by the working-state route only**, 7 days after the Mac first saw it missing, never when the store directory is unresolved or empty or the server chat list was not read completely, and never if the chat still has server rows.
+- **A quit reply is always sent** after the async hooks (the 6 s cap); anything cut is finished by the next start's sweep (retried with backoff). The backend is killed at `willTerminate`, after the reply.
+- **The user's delete intent is written (`pending-deletes.json`, with the user and the time) before the file is removed**, kept until the server says `done`, and sent only by that user.
+- **Ownership is never claimed silently.** New files are stamped at creation; older chats stay visible until the explicit "Claim" action, which patches the raw JSON (one key, every other byte preserved). Another user's file is not loadable and cannot be overwritten.
+- **Sign-out never wipes in `shadow` or `on`.**
 
 #### ❌ DO NOT
 
 - Call `ChatSessionStore.delete` for cleanup the user did not ask for (use `deleteQuietly`); it records a tombstone.
 - Put a non-chat JSON file in `sessions/` (every `*.json` there is read as a chat).
-- Treat a failed extension-chat list as empty in the sweep (an extension chat would look like an orphan).
+- Treat a failed or partial server chat list as complete (a chat with rows would look like an orphan).
+- Round-trip a chat file through the model just to add a tag (it drops what this build cannot read).

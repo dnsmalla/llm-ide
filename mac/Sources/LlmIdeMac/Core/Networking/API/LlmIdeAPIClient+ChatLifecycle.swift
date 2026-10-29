@@ -41,19 +41,33 @@ extension LlmIdeAPIClient {
     struct WorkingStatePurgeRequest: Encodable {
         let chatSessionIds: [String]
         let verified: Bool
+        /// The Mac file is gone: working state only, a chat with server rows is refused.
+        let orphan: Bool?
     }
 
-    struct WorkingStatePurgeResult: Codable, Equatable { let purged: Int }
+    struct WorkingStatePurgeResult: Codable, Equatable {
+        let purged: Int
+        /// A turn is running on these: not purged, retry later.
+        let busy: [String]?
+        /// Used after their receipt was written: not purged, verify the file again.
+        let staleReceipt: [String]?
+        /// orphan only: chats that still have server rows.
+        let refused: [String]?
+    }
 
     struct SessionPurgeRequest: Encodable {
         let chatSessionId: String
         let reason: String
+        /// ISO time of the user's delete, kept across retries.
+        let requestedAt: String?
     }
 
     struct SessionPurgeResult: Codable, Equatable {
         let queued: Bool
         /// done | pending | failed
         let purged: String
+        let busy: Bool?
+        let skippedReused: Bool?
     }
 
     /// A live server chat row (the extension's rolling session), listing shape.
@@ -119,25 +133,45 @@ extension LlmIdeAPIClient {
 
     /// `POST /agent/v2/sessions/purge`: working state only (mapping, SDK transcript, facts).
     /// 409 NO_RECEIPT when any chat has no receipt; nothing is purged then.
-    func purgeChatWorkingState(chatSessionIds: [String]) async throws -> Int {
-        let r: WorkingStatePurgeResult = try await post(
+    func purgeChatWorkingState(chatSessionIds: [String], orphan: Bool = false) async throws -> WorkingStatePurgeResult {
+        try await post(
             "/agent/v2/sessions/purge",
-            body: WorkingStatePurgeRequest(chatSessionIds: chatSessionIds, verified: true),
+            body: WorkingStatePurgeRequest(chatSessionIds: chatSessionIds, verified: true, orphan: orphan ? true : nil),
             authenticated: true)
-        return r.purged
     }
 
     /// `POST /kb/session-purges`: the delete-everywhere tombstone (durable before it purges).
-    func queueSessionPurge(chatSessionId: String, reason: String = "user_delete") async throws -> SessionPurgeResult {
+    func queueSessionPurge(chatSessionId: String, reason: String = "user_delete",
+                           requestedAt: Date? = nil) async throws -> SessionPurgeResult {
         try await post("/kb/session-purges",
-                       body: SessionPurgeRequest(chatSessionId: chatSessionId, reason: reason),
+                       body: SessionPurgeRequest(chatSessionId: chatSessionId, reason: reason,
+                                                 requestedAt: requestedAt.map { ISO8601DateFormatter().string(from: $0) }),
                        authenticated: true)
     }
 
-    /// `GET /kb/chat/sessions?surface=extension`: live extension chats on the server.
-    func listExtensionChats() async throws -> [ServerChatSummary] {
-        let r: ServerChatList = try await get("/kb/chat/sessions?surface=extension&limit=200", authenticated: true)
-        return r.sessions
+    /// `GET /kb/chat/sessions`: EVERY server chat row of the user, any surface, paged by offset until a short
+    /// page. A caller that decides "this chat is not on the server" from the result needs the whole list.
+    func listServerChats() async throws -> [ServerChatSummary] {
+        try await Self.readAllPages(pageSize: 200, id: \.id) { offset in
+            let r: ServerChatList = try await self.get("/kb/chat/sessions?limit=200&offset=\(offset)", authenticated: true)
+            return r.sessions
+        }
+    }
+
+    /// Read a list to its end through `fetch(offset)`. A server that ignores `offset` would repeat page one forever:
+    /// that is an unreadable list (an error), never a complete one. Bounded by `maxPages`.
+    static func readAllPages<T>(pageSize: Int, maxPages: Int = 500, id: (T) -> String,
+                                fetch: (Int) async throws -> [T]) async throws -> [T] {
+        var all: [T] = []
+        var seen = Set<String>()
+        for _ in 0..<maxPages {
+            let page = try await fetch(all.count)
+            if !page.isEmpty, page.allSatisfy({ seen.contains(id($0)) }) { throw URLError(.cannotParseResponse) }
+            for item in page { seen.insert(id(item)) }
+            all += page
+            if page.count < pageSize { return all }
+        }
+        throw URLError(.dataLengthExceedsMaximum)
     }
 
     /// `POST /kb/chat/sessions/:id/archive/begin`. First page without `after`; a continuation
