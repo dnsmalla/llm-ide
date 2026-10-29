@@ -405,3 +405,37 @@ test('a store failure leaves OS state\'s storage null and recentRuns empty; the 
   }
   agent.closeAgentDb();
 });
+
+test('GET /kb/storage: shadow block is null before any compare, then counts only', async () => {
+  const handle = freshAgent();
+  const a = user('shadow1');
+  let body = (await call('GET', '/kb/storage', null, a)).json();
+  assert.deepEqual(body.shadow, { usage: null, noteIndex: null });
+  const { SHADOW_META_KEY } = await import('../kb/agent-usage.mjs');
+  agent.writeMeta(handle, SHADOW_META_KEY, JSON.stringify({
+    ok: false, at: '2026-10-28T03:00:00.000Z', scope: 'all', mismatches: 2,
+    windows: { days7: { cutoff: 'x', ledgerRows: 5, shadowRows: 4, mismatchedKeys: 2 } },
+    sample: [{ window: 'days7', provider: 'SECRET-PROVIDER', model: 'SECRET-MODEL', fields: ['n'] }],
+  }));
+  agent.writeMeta(handle, 'last_note_index_compare', JSON.stringify({
+    ok: false, state: 'stale', at: '2026-10-28T03:05:00.000Z', pairs: 3, stalePairs: 3, scoredQueries: 0, meanOverlap: 1,
+    mismatchedQueries: 0, mismatchedPairs: 0, sample: [{ query: 'SECRET QUERY TEXT' }],
+  }));
+  const res = await call('GET', '/kb/storage', null, a);
+  body = res.json();
+  assert.equal(body.shadow.usage.state, 'mismatch');
+  assert.equal(body.shadow.usage.mismatches, 2);
+  assert.deepEqual(body.shadow.usage.windows.days7, { ledgerRows: 5, shadowRows: 4, mismatchedKeys: 2 });
+  assert.equal(body.shadow.noteIndex.state, 'stale');
+  assert.equal(body.shadow.noteIndex.stalePairs, 3);
+  assert.ok(!res._body.includes('SECRET'), 'no sample text, query, provider or model leaks');
+});
+
+test('GET /kb/storage: a garbled shadow value does not break the report', async () => {
+  const handle = freshAgent();
+  const a = user('shadow2');
+  agent.writeMeta(handle, 'last_note_index_compare', '{not json');
+  const res = await call('GET', '/kb/storage', null, a);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().shadow.noteIndex, null);
+});

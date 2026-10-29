@@ -380,6 +380,8 @@ Run through this against a real meeting before merging:
 - **MUST preserve:** every write to `agent.db` is best-effort. Enqueueing never throws and never blocks a model turn; a failed batch is dropped and counted in `store_meta.dropped_rows`. A corrupt file is quarantined under a unique `agent.db.corrupt-<ts>[-n]` name and recreated; a boot never fails because of it.
 - **MUST preserve:** live state (sessions, memory, permissions, approvals, personas, feedback, `model_limits`, `quota_state`, `usage_ledger`) stays in the main DB. Cleaning never touches it. Tests use a temp `agent.db` derived from the test DB path, never `kb/agent.db`.
 - **DO NOT** store prompts, responses, tool arguments or error messages in `agent.db`. Codes, counts, sizes and ids only.
+- **MUST preserve (rollup vs open runs):** the rollup never folds a run still `running`, nor that run's tool events and composition rows; they stay raw and fold after the run closes. Run recording (chat, Loop, meeting, auto-task, dispatch, review) is best-effort and never changes a run's result.
+- **MUST preserve (shadow metrics):** the `shadow` block of `GET /kb/storage` carries counts only (state, windows, pairs, scored queries, mean overlap, timestamps). No query text, sample rows, provider or model names.
 - **MUST preserve (usage shadow):** `usage_ledger` in the main DB is authoritative. `agent.db` `usage_calls` is a shadow only: it mirrors each ledger row after the boot step has set its id floor, and no budget or limit read uses it yet. Budget reads must fail closed to the ledger whenever `agent.db` is down, quarantined or mismatched (a lost shadow row would otherwise loosen a cap). `Clear` never deletes `usage_calls`.
 
 ## GitHub PR / codegen-apply (`extension/agents/github-pr.mjs`)

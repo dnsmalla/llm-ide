@@ -269,6 +269,123 @@
               ]
             }
           }
+        },
+        "shadow": {
+          "type": "object",
+          "description": "Counts from the last shadow comparisons (usage ledger vs agent.db, note index vs legacy search). No query text, no row content. Absent when the store could not be read.",
+          "required": [
+            "usage",
+            "noteIndex"
+          ],
+          "properties": {
+            "usage": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "The last usage ledger compare; null when none has run.",
+              "required": [
+                "state",
+                "at",
+                "scope",
+                "mismatches",
+                "windows"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "mismatch"
+                  ]
+                },
+                "at": {
+                  "type": "string"
+                },
+                "scope": {
+                  "type": "string",
+                  "enum": [
+                    "all",
+                    "user"
+                  ]
+                },
+                "mismatches": {
+                  "type": "integer"
+                },
+                "windows": {
+                  "type": "object",
+                  "additionalProperties": {
+                    "type": "object",
+                    "required": [
+                      "ledgerRows",
+                      "shadowRows",
+                      "mismatchedKeys"
+                    ],
+                    "properties": {
+                      "ledgerRows": {
+                        "type": "integer"
+                      },
+                      "shadowRows": {
+                        "type": "integer"
+                      },
+                      "mismatchedKeys": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "noteIndex": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "The last note-index compare; null when none has run.",
+              "required": [
+                "state",
+                "at",
+                "pairs",
+                "stalePairs",
+                "scoredQueries",
+                "meanOverlap",
+                "mismatchedQueries",
+                "mismatchedPairs"
+              ],
+              "properties": {
+                "state": {
+                  "type": "string",
+                  "enum": [
+                    "ok",
+                    "not-evaluated",
+                    "stale",
+                    "mismatch"
+                  ]
+                },
+                "at": {
+                  "type": "string"
+                },
+                "pairs": {
+                  "type": "integer"
+                },
+                "stalePairs": {
+                  "type": "integer"
+                },
+                "scoredQueries": {
+                  "type": "integer"
+                },
+                "meanOverlap": {
+                  "type": "number"
+                },
+                "mismatchedQueries": {
+                  "type": "integer"
+                },
+                "mismatchedPairs": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
         }
       },
       "description": "The storage report (same as GET /kb/storage). null when the store could not be read; the rest of the OS state is unaffected."

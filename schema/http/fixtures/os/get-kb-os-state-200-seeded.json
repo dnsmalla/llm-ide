@@ -351,6 +351,31 @@
       "agentStore": {
         "health": "ok",
         "state": "ok"
+      },
+      "shadow": {
+        "usage": {
+          "state": "ok",
+          "at": "2026-10-28T03:00:00.000Z",
+          "scope": "all",
+          "mismatches": 0,
+          "windows": {
+            "days7": {
+              "ledgerRows": 12,
+              "shadowRows": 12,
+              "mismatchedKeys": 0
+            }
+          }
+        },
+        "noteIndex": {
+          "state": "ok",
+          "at": "2026-10-28T03:05:00.000Z",
+          "pairs": 2,
+          "stalePairs": 0,
+          "scoredQueries": 18,
+          "meanOverlap": 0.97,
+          "mismatchedQueries": 0,
+          "mismatchedPairs": 0
+        }
       }
     },
     "agents": {

@@ -182,6 +182,32 @@ export type AgentHistoryStorageReport = {
     health: "ok" | "degraded" | "down";
     state: "closed" | "ok" | "down";
   };
+  /** Counts from the last shadow comparisons (usage ledger vs agent.db, note index vs legacy search). No query text, no row content. Absent when the store could not be read. */
+  shadow?: {
+    /** The last usage ledger compare; null when none has run. */
+    usage: {
+      state: "ok" | "mismatch";
+      at: string;
+      scope: "all" | "user";
+      mismatches: number;
+      windows: Record<string, {
+          ledgerRows: number;
+          shadowRows: number;
+          mismatchedKeys: number;
+        }>;
+    } | null;
+    /** The last note-index compare; null when none has run. */
+    noteIndex: {
+      state: "ok" | "not-evaluated" | "stale" | "mismatch";
+      at: string;
+      pairs: number;
+      stalePairs: number;
+      scoredQueries: number;
+      meanOverlap: number;
+      mismatchedQueries: number;
+      mismatchedPairs: number;
+    } | null;
+  };
 };
 
 /** One agent run for the System view. No prompt, message or error text: codes only. */
@@ -1203,6 +1229,32 @@ export type OsStorageReport = {
   agentStore: {
     health: "ok" | "degraded" | "down";
     state: "closed" | "ok" | "down";
+  };
+  /** Counts from the last shadow comparisons (usage ledger vs agent.db, note index vs legacy search). No query text, no row content. Absent when the store could not be read. */
+  shadow?: {
+    /** The last usage ledger compare; null when none has run. */
+    usage: {
+      state: "ok" | "mismatch";
+      at: string;
+      scope: "all" | "user";
+      mismatches: number;
+      windows: Record<string, {
+          ledgerRows: number;
+          shadowRows: number;
+          mismatchedKeys: number;
+        }>;
+    } | null;
+    /** The last note-index compare; null when none has run. */
+    noteIndex: {
+      state: "ok" | "not-evaluated" | "stale" | "mismatch";
+      at: string;
+      pairs: number;
+      stalePairs: number;
+      scoredQueries: number;
+      meanOverlap: number;
+      mismatchedQueries: number;
+      mismatchedPairs: number;
+    } | null;
   };
 } | null;
 

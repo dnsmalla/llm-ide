@@ -13,6 +13,8 @@ import crypto from 'node:crypto';
 import { getDb } from './db.mjs';
 import { knowledgeCounts } from './os-state.mjs';
 import { agentStoreStatus, flushAgentQueue, getAgentDb } from './agent-db.mjs';
+import { lastShadowCompare } from './agent-usage.mjs';
+import { lastNoteIndexCompare } from './note-index-shadow.mjs';
 import { storageStats, DEFAULT_RETENTION_DAYS } from './agent-store.mjs';
 
 export const PREVIEW_TTL_MS = 5 * 60 * 1000;
@@ -94,6 +96,42 @@ export function checkPreview(userId, previewId, { scope, beforeDays = null, now 
 
 const sum = (rows, keys) => keys.reduce((n, k) => n + (Number(rows?.[k]) || 0), 0);
 
+const int = (v) => (Number.isFinite(Number(v)) ? Math.max(0, Math.trunc(Number(v))) : 0);
+
+/**
+ * The last shadow comparisons, counts only: no query text, no sample rows, no
+ * provider or model names. Each side is null when it has never run (or the
+ * store is down). The compares are fleet-wide jobs, so this is the same for
+ * every user; it reveals no per-user data.
+ */
+export function shadowMetrics() {
+  let usage = null;
+  let noteIndex = null;
+  try {
+    const u = lastShadowCompare();
+    if (u && typeof u.at === 'string') {
+      usage = {
+        state: u.ok ? 'ok' : 'mismatch', at: u.at, scope: u.scope === 'user' ? 'user' : 'all', mismatches: int(u.mismatches),
+        windows: Object.fromEntries(Object.entries(u.windows || {}).map(([k, w]) => [k, {
+          ledgerRows: int(w?.ledgerRows), shadowRows: int(w?.shadowRows), mismatchedKeys: int(w?.mismatchedKeys),
+        }])),
+      };
+    }
+  } catch { /* report what is readable */ }
+  try {
+    const n = lastNoteIndexCompare();
+    if (n && typeof n.at === 'string' && typeof n.state === 'string') {
+      noteIndex = {
+        state: ['ok', 'not-evaluated', 'stale', 'mismatch'].includes(n.state) ? n.state : 'mismatch',
+        at: n.at, pairs: int(n.pairs), stalePairs: int(n.stalePairs), scoredQueries: int(n.scoredQueries),
+        meanOverlap: Number.isFinite(Number(n.meanOverlap)) ? Number(n.meanOverlap) : 0,
+        mismatchedQueries: int(n.mismatchedQueries), mismatchedPairs: int(n.mismatchedPairs),
+      };
+    }
+  } catch { /* report what is readable */ }
+  return { usage, noteIndex };
+}
+
 /** The GET /kb/storage report for one user. Never throws; a down store is reported. */
 export function storageReport(userId, { db = getDb(), now = new Date() } = {}) {
   const agent = storageStats(userId, { db: getAgentDb() ?? undefined, now });
@@ -134,6 +172,7 @@ export function storageReport(userId, { db = getDb(), now = new Date() } = {}) {
       watermark: u.lastRolledDay,
     } : null,
     agentStore: { health: store.health, state: store.state },
+    shadow: shadowMetrics(),
   };
 }
 
