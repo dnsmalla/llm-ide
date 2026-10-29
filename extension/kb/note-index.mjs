@@ -269,28 +269,26 @@ export function indexStatus(userId, { projectId } = {}) {
 }
 
 /**
- * Internal FTS search over the derived note rows (kind 'note'), for the Phase 2
- * shadow compare only. The public search() never returns these rows until the
- * Phase 3 read switch. Hits are hydrated through note_index_search and filtered
- * to the caller's rows, so FTS (which is shared by all users) never leaks a row.
- * Returns [{ noteId, meetingId, title, date, projectId, rank }], best first.
+ * Internal FTS search over the derived note rows (kind 'note'), for the shadow
+ * compare and the Phase 3 read path. The public search() never returns these rows
+ * until Phase 3. The owner filter runs in SQL, before LIMIT: FTS is shared by every
+ * user, so filtering after LIMIT would starve a user whose matches rank low (the
+ * window fills with other users' rows). Returns [{ noteId, meetingId, title, date,
+ * projectId, rank }], best first.
  */
-export function searchNoteIndex(userId, { q, limit = 10, projectId } = {}) {
+export function noteIndexHits(userId, { q, limit = 10, projectId, db = getDb() } = {}) {
   requireUser(userId);
   const filter = buildSearchFilter(q);
-  const db = getDb();
   const cap = Math.max(1, Math.min(Number(limit) || 10, 100));
-  // A query with no searchable token (for example a single CJK character pair that
-  // splits into one-character runs) lists the newest rows, as search() does for
-  // meetings. Mirroring that keeps the shadow compare an honest comparison.
+  const pid = projectId === undefined ? null : projectIdOf(projectId);
+  const parse = (meta) => { try { return JSON.parse(meta) || {}; } catch { return {}; } };
+  // A query with no searchable token lists the newest rows, as search() does for meetings.
   if (!filter) {
-    const pid = projectId === undefined ? null : projectIdOf(projectId);
     return lazyPrepare(db, `
       SELECT id, title, date, project_id, meta FROM note_index
        WHERE user_id = ? AND (? IS NULL OR project_id = ?)
        ORDER BY date DESC LIMIT ?`).all(userId, pid, pid, cap).map((n) => {
-      let meta = {};
-      try { meta = JSON.parse(n.meta) || {}; } catch { meta = {}; }
+      const meta = parse(n.meta);
       return {
         noteId: n.id,
         meetingId: typeof meta.meetingId === 'string' ? meta.meetingId : null,
@@ -301,23 +299,31 @@ export function searchNoteIndex(userId, { q, limit = 10, projectId } = {}) {
       };
     });
   }
+  // The owner filter runs in JS over ALL matches, before the top-K cut. (A `rowid IN (SELECT ...)`
+  // in SQL costs a lookup per matched row, about 2.4 s for 4 000 matches at 50 000 notes; the
+  // FTS match with bm25 over every match is about 130 ms even for a 50 000-row term.) Because
+  // every match is considered, a user whose notes rank low is not starved by other users' rows.
   const where = searchFilterSql(filter);
-  const sql = `SELECT rowid AS rowid, ${where.rank} AS rank
-    FROM search
-    WHERE ${where.where} AND kind = 'note'
-    ORDER BY rank LIMIT ?`;
-  const hits = lazyPrepare(db, sql).all(...where.params, cap * 4);
-  const hydrate = lazyPrepare(db, `
-    SELECT n.id, n.title, n.date, n.project_id, n.meta
+  const matches = lazyPrepare(db, `SELECT rowid AS rowid, ${where.rank} AS rank
+    FROM search WHERE ${where.where} AND kind = 'note'`).all(...where.params);
+  const ownedRows = new Map(lazyPrepare(db, `
+    SELECT m.search_rowid AS rid, n.id AS nid
       FROM note_index_search m JOIN note_index n ON n.id = m.note_id
-     WHERE m.search_rowid = ? AND n.user_id = ?`);
+     WHERE n.user_id = ?${pid === null ? '' : ' AND n.project_id = ?'}`).all(...(pid === null ? [userId] : [userId, pid]))
+    .map((r) => [r.rid, r.nid]));
+  const owned = [];
+  for (const h of matches) {
+    const nid = ownedRows.get(h.rowid);
+    if (nid !== undefined) owned.push({ nid, rank: h.rank });
+  }
+  owned.sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
+  const hydrate = lazyPrepare(db, 'SELECT id, title, date, project_id, meta FROM note_index WHERE id = ? AND user_id = ?');
   const out = [];
-  for (const h of hits) {
-    const n = hydrate.get(h.rowid, userId);
+  for (const h of owned) {
+    if (out.length >= cap) break;
+    const n = hydrate.get(h.nid, userId);
     if (!n) continue;
-    if (projectId !== undefined && n.project_id !== projectIdOf(projectId)) continue;
-    let meta = {};
-    try { meta = JSON.parse(n.meta) || {}; } catch { meta = {}; }
+    const meta = parse(n.meta);
     out.push({
       noteId: n.id,
       meetingId: typeof meta.meetingId === 'string' ? meta.meetingId : null,
@@ -326,10 +332,12 @@ export function searchNoteIndex(userId, { q, limit = 10, projectId } = {}) {
       projectId: n.project_id,
       rank: h.rank,
     });
-    if (out.length >= cap) break;
   }
   return out;
 }
+
+/** The internal note search (kept for callers of the earlier name). */
+export const searchNoteIndex = noteIndexHits;
 
 // ---------------------------------------------------------------------------
 // Chunked scan (live-then-archive Phase 2, plan 3.8): a library too large for one
