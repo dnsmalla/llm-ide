@@ -9,7 +9,7 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | # | Task | Who | State |
 |---|---|---|---|
 | N1 | First-launch check: data moved to Application Support (verified 2026-10-29: live server on the new `data.db`/`agent.db`, `.pre-move` copies removed); shadow mode on. Remaining: confirm chats, settings, OS page, Storage hub look right. | you | data move done |
-| N6 | Fix: a server started on the old repo `kb/` wrote a new `.dev-secrets.json` before the "data moved" guard refused to boot (seen 2026-10-29 19:28). Run the tripwire before any secrets or files are created. | me | after Phase 4 |
+| N6 | Fixed (3a110360): the moved-kb guard now runs before any secrets or files are created; tests use in-memory secrets. Stray `kb/.dev-secrets.json` from 19:28 awaits your delete. | you | open |
 | N2 | Live-then-archive Phase 2 review fixes (reconciler safety: partial scans, sign-out, manifest chunking, compare noise, event-loop bounds). | me | agent running |
 | N3 | Live-then-archive Phase 5, extension part (T5.2): draft kept until acked, legacy "copy to Mac", no local chat buffer, "Mac app not running" state. | me | agent running |
 | N4 | One independent review of N2 and N3, then the full gate and one push, then rebuild the app. | me | after N2, N3 |
@@ -19,7 +19,7 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 
 | # | Task | Who | Gate |
 |---|---|---|---|
-| X1 | Phase 4: async quit archive (`.terminateLater`), crash-recovery sweep, delete-everywhere with tombstones, sign-out/multi-user (`ownerUserId`), phone path. Highest-risk Mac change. | me | crash-injection suite green; manual 20-chat quit/relaunch run |
+| X1 | Phase 4: async quit archive, crash-recovery sweep, delete-everywhere, sign-out/multi-user, phone path. **Built, reviewed twice, pushed (a7a73f05); app rebuilt.** Remaining: the manual quit/relaunch run with `lta.mode=on`. | you + me | manual run |
 | X5 | Ledger step B (agent store Stage 2): move budget readers to `usage_calls` only after 7 days of zero mismatches; **fail closed** to the ledger. | me/you | go/no-go by you |
 | X6 | Verify and remove leftovers after the first launch: `.pre-move` files are auto-removed on the second healthy boot; confirm they are gone. | me | after N1 |
 
