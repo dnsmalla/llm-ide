@@ -15,7 +15,9 @@ Not covered here: the Claude path (`llm_agent/sdk/`, see [claude-linker](../expl
 |---|---|
 | `extension/server/provider-catalog.json` | The catalog: 11 entries (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, generic OpenAI-compatible endpoint) |
 | `extension/server/provider-catalog.mjs` | Loads the catalog; chat-model filter; `modelCapability()`; `TOOL_MODES` |
-| `extension/server/base-url-guard.mjs` | SSRF guard for provider base URLs (two postures) |
+| `extension/server/ip-classifier.mjs` | The one classifier for every IP spelling |
+| `extension/server/base-url-guard.mjs` | Literal base-URL guard, operator gate, `joinBaseUrl` |
+| `extension/server/pinned-fetch.mjs` | Connect-time pin: classify every resolved address, dial the checked one |
 | `extension/server/provider-connections.mjs` | Per-user connections, settings, vault key placement |
 | `extension/server/custom-providers.mjs` | Falls back to a connection for `custom:cat-…` ids |
 | `extension/providers/provider-models.mjs` | Live model list (cached), static fallback, connection test |
@@ -36,6 +38,7 @@ Evaluated 2026-10-29 against the registry and the installed tree (`npm view`, `n
 | Licence | Apache-2.0 for every package in the new tree |
 | New packages | 10: `ai`, `@ai-sdk/gateway`, `@ai-sdk/openai-compatible`, `@ai-sdk/provider`, `@ai-sdk/provider-utils`, `@opentelemetry/api`, `@standard-schema/spec`, `@vercel/oidc`, `json-schema`, `undici`. `zod` and `eventsource-parser` were already installed. Unpacked size about 12 MB |
 | Install scripts | None in any of them (`hasInstallScript` is absent); installed with `--ignore-scripts` regardless |
+| `npm audit` result | Re-run after the fix commits: 15 advisories, identical to the baseline before the dependency was added; none in `ai`, `@ai-sdk/*`, `@opentelemetry/api`, `@vercel/oidc`, `@standard-schema/spec`, `json-schema` or `undici` |
 | Provenance | `npm audit signatures`: all packages have verified registry signatures; 75 attestations verified (the `ai` package carries a SLSA v1 provenance statement) |
 | `npm audit` | No new advisory. The 15 existing advisories (including `zod` 4.4.3, GHSA-mrhx-c7xc-m3w5) are unchanged and are not caused by this change |
 | Tool calling | The library runs the model/tool loop (`streamText` with `stopWhen: stepCountIs(n)`), validates nothing itself unless told (our bridge checks arguments), and streams tool input deltas. Every catalog provider has a dedicated `@ai-sdk/*` package with tool support; this implementation uses the single OpenAI-compatible package for all of them, verified against a recorded `/chat/completions` stream (`extension/tests/fixtures/provider-adapter/`). Gemini is reached through its documented OpenAI-compatible endpoint, which accepts `tools` |
@@ -63,19 +66,22 @@ All state is per user (`user_flags` flag `provider.catalog`, JSON), plus the vau
 - The Mac's whole-list `POST /kb/custom-providers` sync cannot remove a connection: it writes a different flag. `getCustomProvider('custom:cat-…')` falls back to the connection, so the existing `resolveCustomProviderDispatch` serves it unchanged.
 - `fallbackOrder` accepts only the caller's own connections (anything else is dropped on write and on disconnect); at most 20 entries. `toolOverrides` holds at most 400 `'<connection id>/<model id>'` booleans.
 
-## §4 Base URL rules
+## §4 Base URL and network rules
 
-`assertProviderBaseUrl(url, { allowPrivate })`:
+Three layers, one classifier. `extension/server/ip-classifier.mjs` canonicalises every IP spelling to 16 bytes (IPv4 in decimal, hex or octal as the URL parser normalises it, IPv6 with `::`, embedded dotted quads, IPv4-mapped `::ffff:a.b.c.d` and `::ffff:7f00:1`, IPv4-compatible `::a.b.c.d`, NAT64 `64:ff9b::/96`, 6to4 `2002::/16`) and applies one table:
 
-| Rule | Strict (hosted entries) | `allowPrivate` (Ollama; generic endpoint with the user's opt-in) |
-|---|---|---|
-| Scheme | `https` only | `https`, or `http` for a private host |
-| `localhost`, `127/8`, `10/8`, `172.16/12`, `192.168/16`, `::1`, `fc00::/7`, `*.local` | refused | allowed |
-| `169.254/16`, `fe80::/10`, `0.0.0.0`, `::` (link-local, cloud metadata) | refused | **refused** |
-| Credentials in the URL | refused | refused |
-| DNS resolving to a private address | refused (`assertSafeBaseUrlResolved`) | not checked (the user said the host is theirs) |
+| Class | Ranges | Hosted entries | `allowPrivate` + operator gate |
+|---|---|---|---|
+| public | everything else | allowed | allowed |
+| private | `127/8`, `::1`, `10/8`, `172.16/12`, `192.168/16`, `100.64/10` (CGNAT), `fc00::/7` (ULA, except the metadata address), `fec0::/10` | refused | allowed |
+| never | `169.254/16` and `fe80::/10` (link-local, cloud metadata `169.254.169.254`, `fd00:ec2::254`), `0/8`, `::`, `224/4` and `ff00::/8` (multicast), `240/4` incl. broadcast, `192.0.0/24`, `192.0.2/24`, `198.18/15`, `198.51.100/24`, `203.0.113/24`, `2001:db8::/32`, Teredo | **refused** | **refused** |
 
-A hosted entry has a fixed base URL: a connect request naming another host is a 400, so a key cannot be pointed at a host the catalog never named. Only `openai-compatible` (and `ollama`, for a non-default host) takes one. Every outgoing request uses `redirect: 'error'`.
+1. **Literal check** (`assertProviderBaseUrl`, and `assertSafeBaseUrl` for the legacy custom provider): scheme (`https`; `http` only to a private target under the opt-in), no credentials, **no query string or fragment** (so a `#` or `?` cannot swallow the path a request URL is built from; request URLs are built with `joinBaseUrl`, which uses the URL API), and an IP-literal host is classified.
+2. **Connect-time pin** (`server/pinned-fetch.mjs`): the model list, the connection test and every chat request of a turn go through one fetch whose socket `lookup` resolves the name once, classifies EVERY returned address, refuses the connection if any is refused, and dials exactly the checked address. There is no second resolution, so a DNS-rebinding answer cannot change the target; each new connection is checked again. Redirects are refused. A refusal is an error with `code: 'SSRF_BLOCKED'`.
+3. **Abort, never fall back.** A refusal ends the operation: `POST /kb/providers/catalog/models` and `/turn` answer 403 `PROVIDER_BLOCKED`, a streaming turn ends with an `error` event of the same code, and `test` reports `ok:false`. A refused target is never answered from the static model list or a cached list.
+4. **Operator gate** `LLMIDE_ALLOW_PRIVATE_PROVIDERS` (`1` on, `0` off). Unset, private targets are allowed exactly when the server is bound to this machine only (no `LLMIDE_ALLOW_REMOTE=1`). On a remotely bound server they are refused (at connect, and again at use for an existing connection) unless the variable is `1`. A private target needs both the connection's own opt-in and this gate.
+
+A hosted entry has a fixed base URL: a connect request naming another host is a 400, so a key cannot be pointed at a host the catalog never named. `openai-compatible` takes one. Ollama's own address is `localhost`; another host (even another loopback spelling is fine, a LAN or public host is not) needs the same explicit private-network opt-in as the generic endpoint. Every outgoing request uses no redirects.
 
 ## §5 Routes
 
@@ -88,7 +94,7 @@ All token-protected, additive, in `ALL_ENDPOINTS`. Shapes: `schema/http/provider
 | `POST /kb/providers/catalog/disconnect` | `{ id }` | Removes the key and the fallback slot; `removed:false` when the caller had no such connection |
 | `POST /kb/providers/catalog/test` | `{ id }` | One free `GET <base>/models`. Always 200 `{ ok, detail, modelCount? }`; `detail` is redacted |
 | `POST /kb/providers/catalog/models` | `{ id, refresh? }` | `{ models:[{ id, toolsSupported, toolsSource, streaming, contextWindow }], source, detail? }` |
-| `GET` and `PUT /kb/providers/settings` | The two switches, the order, the overrides | PUT is a patch; unknown fields ignored |
+| `GET` and `PUT /kb/providers/settings` | `toolsEnabled`, `fallbackEnabled`, `egressAutoApprove` (all default false), the order, the overrides | PUT is a patch; unknown fields ignored |
 | `POST /kb/providers/turn` | A tool-capable turn (SSE) | See §7 |
 
 Rate limits: `test` and `models` use `llmFast`; `connect`, `disconnect` and `PUT settings` use `kbWrite`; `turn` uses `agentTurn`. `test` and `models` have a 30 s route budget.
@@ -114,8 +120,11 @@ Model lists come from `GET <base>/models`, cached ten minutes per user and conne
 Order of checks, each refused with a plain JSON error before any event: the user's `toolsEnabled` switch (409 `PROVIDER_TOOLS_DISABLED`, default off), message and model present (400), the connection exists (404 `PROVIDER_NOT_CONNECTED`), the key is present (400 `PROVIDER_NO_KEY`), the fallback pick (§8), the capability check (400 `MODEL_LACKS_TOOLS`). Then it streams the agent/v2 vocabulary:
 
 - `notice` kind `provider_fallback` (only after a switch), then `init` (`sessionId` is the approval session id; `capabilities:['provider-adapter']`), then `delta`, `tool_use_start`, `tool_args_delta`, `tool_result`, `usage` and `approval_request` (`ToolApproval`), ending in `result` or one `error` (`code`, `message`, `retryable`; codes `PROVIDER_AUTH`, `PROVIDER_RATE_LIMITED`, `PROVIDER_UNAVAILABLE`, `PROVIDER_ERROR`, `ABORTED`).
+- `agentContext.workspaceRoot` is normalised exactly as the Claude engine does (`path.resolve(expandTilde(root))`) before the readable roots, the `run-bash` cwd and the saved-rule scope are derived; a relative root is a 400.
 - Tools are the registry (`llm_agent/tools/registry.mjs`) minus `ask-internal` and `ask-subagent` (nested Claude loops). A restricted mode (`ask`, `plan`, `assist_plan`, `review`, `document`) mounts `allowedToolNames(mode)`; `execute` mounts the rest, including `run-bash`.
 - The permission gate is the registry's: `run-bash` gates itself (blocked patterns, auto-safe commands, saved project rules, else parks an approval); any other `act` entry with a `gate` is gated in the bridge the same way. A parked approval is answered with `POST /agent/v2/decision` using `init.sessionId`; the registry checks user and session. Arguments are checked against the skill schema before a handler runs.
+- **Untrusted tool output.** What the model is shown of a tool result is framed (`<<<TOOL_RESULT name="…">>>` … `<<<END_TOOL_RESULT>>>`) with a line saying it is untrusted data to be used as information and never followed, and any `<<<`/`>>>` inside it is neutralised so it cannot close the frame. The UI event keeps the raw result.
+- **Network-egress tools ask first.** `fetch-url` and `web-search` park an approval in a provider turn (a hostile page can steer a model into leaking through them) unless the user sets `egressAutoApprove`.
 - Step cap 12 per turn, 8192 output tokens per call, no library retries. Usage is metered through `recordUsage` under the connection's provider id and endpoint `/kb/providers/turn`.
 - Client disconnect aborts the turn and unparks its approvals.
 
@@ -136,11 +145,13 @@ A turn never changes provider or model while it streams. A 429 mid-turn ends tha
 
 - **Free tiers.** Stacking several providers' free tiers to get around a limit can violate their terms. The product offers an ordered list the user writes and nothing more: no rotation, no load spreading, no key pooling, fallback off by default, and the Settings text says to check each provider's terms. Whether to rely on it is the user's decision.
 - **Tool quality varies by model.** A weak tool model in `execute` or `plan` can loop or do damage. Mitigations: the capability flag (unknown means no tools), tool-heavy modes refuse a model without tools, the same permission gate for every provider, a step cap, and a per-model override the user owns. A bench scenario set for the adapter is part of the second half.
+- **SSRF.** Covered by §4: one classifier for every IP spelling, a connect-time pin on every request, an operator gate for private targets, and abort on refusal. Residual: a hostname that is private by construction (`*.local`) is only trusted under the opt-in, and the OS resolver is trusted to answer for names.
+- **Prompt injection.** Tool results are framed as data and the two egress tools ask first (§7); the permission gate is unchanged.
 - **Keys.** Accepted once, vault only; the library's default error logging is off; error text is redacted with the key; the adapter's fetch cannot leave the connection's host or follow a redirect.
 
 ## §10 Tests
 
-`extension/tests/provider-*.test.mjs` (catalog, connections, models, adapter incl. recorded wire, fallback, turn, wire conformance, routes) and `mac/Tests/LlmIdeMacTests/ProviderCatalogModelTests.swift`. No test reaches a real provider.
+`extension/tests/ip-classifier.test.mjs`, `pinned-fetch.test.mjs` (a real local server, a fake resolver, a rebinding sequence), `eslint-ai-sdk-fence.test.mjs` and `provider-*.test.mjs` (catalog, connections, models, adapter incl. recorded wire, fallback, turn, wire conformance, routes) and `mac/Tests/LlmIdeMacTests/ProviderCatalogModelTests.swift`. No test reaches a real provider.
 
 ## Regeneration checklist
 
