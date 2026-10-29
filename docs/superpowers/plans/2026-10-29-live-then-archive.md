@@ -20,7 +20,8 @@ Research basis: read-only pass at `cbd562a0`. Inputs: [data-lifecycle](../../kit
 - **Q3:** a meeting-attached chat has a new `meetingId` field and is deleted when the meeting file is verified, **no undo, no grace period**.
 - **Q4:** redact **when building the index**; Mac files stay raw; chats are redacted only while live in the DB.
 - **Q5:** **never wipe** the Mac chat store on sign-out; files are tagged with their owner (`ownerUserId`) so another user never sees them (this also answers the multi-user part of Q6).
-- Still open: Q2 (continue an ended chat, default replay), Q6 beyond the owner filter, Q7-Q15 (defaults in section 8 apply until answered).
+- **Q18 (accepted the recommendation, 2026-10-29):** **remove** the extension's local chat buffer (`chatMessages`, 200 msgs); when the server is unreachable the extension shows "Mac app not running" and stores nothing. Capture drafts remain only until the Mac acks.
+- Still open: Q2 (continue an ended chat, default replay), Q6 beyond the owner filter, Q7-Q17, Q19-Q22 (defaults in section 8 apply until answered).
 
 ### 0.2 Defaults pending user confirmation (NOT decided, marked DEFAULT-ASSUMPTION everywhere they bite)
 
