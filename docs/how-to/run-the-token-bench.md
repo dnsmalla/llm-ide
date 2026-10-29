@@ -7,10 +7,23 @@ on-demand or nightly gate, not a push gate, because a real run spends tokens.
 
 ## What it runs
 
-`schema/bench/scenarios.json` (version 2) defines seven scenarios: a greeting,
+`schema/bench/scenarios.json` (version 3) defines thirteen scenarios. The first seven
+(version 2, unchanged, so a version-2 baseline still covers them; the file lists
+`compatibleWith: [2]`) are: a greeting,
 explain a file, one small edit, one plan step, a two-turn cache check, a
 long-tool-results read (three ~10 KB files), and a five-turn chat that shows the
 cache-read slope. Each scenario sample opens a new v2 chat. The bench reseeds its
+Version 3 adds six: `repo-search` (a read-only multi-hop search, where a leaner
+prompt once cost 55 % more), `auto-mode` (mode `auto`, so the mode classifier runs;
+in `--fake` it is sent as `ask`, because the real classifier is a paid call),
+`mode-switch` (two turns, `ask` then `execute`), `cache-slope-12` (twelve turns),
+`mcp-two-servers` (two stub stdio MCP servers from
+`scripts/bench-fixtures/fake-mcp-server.mjs`, registered for the bench user while the
+scenario runs; the registry goes to a temp directory, never your real plugins directory)
+and `ended-chat-continue` (the SDK session is deleted before turn 3 and that turn is
+sent fresh with the chat's history, as the Mac does after a restart). Whether the SDK
+subprocess really loads the two stub servers was not verified offline: check
+`mcpServers` in a real run's `init` event before trusting that scenario.
 temp workspace before every sample. It runs each scenario `--repeat` times (default
 3) and compares medians.
 
@@ -34,10 +47,12 @@ node scripts/token-bench.mjs --baseline   # REAL run; writes the baseline (commi
 make token-bench-fake                     # no model calls; the whole pipeline on a fake engine
 ```
 
-Flags: `--model <id>` (default: the `fast` model in `schema/models/anthropic-models.json`),
+Flags: `--env KEY=VAL` (repeatable, see below), `--only id,id` (run a subset; not with
+`--baseline`), `--compare a.json b.json` (see below), `--model <id>` (default: the `fast` model in `schema/models/anthropic-models.json`),
 `--repeat <n>` (default 3), `--baseline-file <path>`, `--out <path>` (results JSON;
 default in `$TMPDIR`), `--threshold-tokens 15`, `--threshold-time 30`,
-`--time-floor-ms 500`, `--time-advisory` (time is reported but never fails).
+`--time-floor-ms 500`, `--threshold-hops 20` (`--compare` only), `--time-advisory`
+(time is reported but never fails).
 
 Exit codes:
 
@@ -46,12 +61,50 @@ Exit codes:
 - `2`: no baseline, a baseline that is not comparable, or an error.
 
 A baseline is comparable only when its model, its fake flag, its scenario-set
-version and its billing weights match the run. Anything else exits `2` with the
+version (or a version the scenario file lists in `compatibleWith`), its `--env`
+overrides and its billing weights match the run. Anything else exits `2` with the
 mismatch listed. A time regression counts only when it is also more than
 `--time-floor-ms` slower, so jitter on quick turns does not fail the gate.
 
 Ctrl-C or SIGTERM stops the child server and removes the temp directory. A stop
 escalates to SIGKILL after 5 s.
+
+## A/B a flag: `--env` and `--compare`
+
+The committed baseline is a regression gate, not an A/B instrument. To judge one
+change, run the control and the variant back to back (same model, same `--repeat`,
+preferably 5, in one sitting) and compare the two results files:
+
+```bash
+node scripts/token-bench.mjs --repeat 5 --out a.json                      # control
+node scripts/token-bench.mjs --repeat 5 --env LLMIDE_V2_COMPACT_PROMPT=1 --out b.json
+node scripts/token-bench.mjs --compare a.json b.json
+```
+
+`--env KEY=VAL` sets one variable in the child server after the `LLMIDE_*` strip. Only
+`LLMIDE_*` and `CLAUDE_CODE_*` names (upper case) are accepted. `CLAUDE_CODE_*` values
+reach the SDK subprocess; `LLMIDE_*` ones are read by the server only (the SDK
+subprocess drops them). Names the bench owns or that would break its isolation are
+refused: the port, host, DB, agent DB, data dir, backup dir, log file, plugin dir,
+secrets, remote-bind switches and `LLMIDE_BENCH_FAKE`. A run records its overrides in
+the results (`env`), and a baseline made with different overrides is "not comparable"
+(exit 2).
+
+`--compare` runs no server. It prints, per scenario, billable tokens, hops, time to
+first token and total time as `before -> after (delta, spread) verdict`. The spread is
+the larger of the two files' sample ranges. Verdicts: `no-result` (the delta is no
+larger than the spread, so noise explains it), `regression` (past a gate: tokens +15 %,
+time +30 % and over the floor, hops +20 %), `worse` or `better` (a real change of at
+least 5 %), `flat`. Exit 1 if any scenario shows a `regression`, 2 if the files are not
+comparable (model, fake flag, scenario version or weights differ). Results files from
+before this feature carry no samples; the report says "no samples" and the gate alone
+decides.
+
+Classifier and per-turn memory-extraction calls do not carry the turn's request id, so
+the turn's own rows never include them. The bench counts every other ledger row of the
+user written during a sample (plus a 2.5 s settle in real runs) as
+`helperBillableTokens` and `helperCalls`, shown beside the billable tokens and never
+added to them, so the committed baseline stays comparable.
 
 ## Environment isolation
 
@@ -76,8 +129,10 @@ and fail in a real run. `--baseline` refuses to run with `--fake`.
 
 ## Cost of a real run
 
-Estimate, not measured. Per run there are 13 turns in 7 scenarios, each sample in
-a new chat, and `--repeat 3` makes 21 chats and 39 turns in all. Each new chat
+Estimate, not measured. The 7 version-2 scenarios have 13 turns; version 3 has 13
+scenarios and 33 turns (`--repeat 3`: 39 chats, 99 turns), roughly 2.5 times the turns
+(the added turns are mostly cheap short ones, so expect 1.6 to 2.5 times the cost).
+Each sample is in a new chat. Each new chat
 writes the prompt prefix to the cache once, roughly 35k tokens going by the
 2026-09 measurement of a "hello" turn, at the cache-write rate. Tool turns add
 hops that re-read the transcript from cache and carry about 10 KB per seed file.

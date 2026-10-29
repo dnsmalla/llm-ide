@@ -23,8 +23,13 @@
 // Exit codes: 0 pass, 1 regression (or a real run whose tool scenarios made no
 // tool calls), 2 no/incomparable baseline or an error.
 //
+//   node scripts/token-bench.mjs --env KEY=VAL ...   repeatable; sets KEY in the child server
+//        (only LLMIDE_* / CLAUDE_CODE_* names; bench-owned and isolation names are refused)
+//   node scripts/token-bench.mjs --compare a.json b.json   no run: paired, spread-aware
+//        comparison of two results files (exit 1 on a gate regression)
+//
 // The child server inherits the caller's environment minus every LLMIDE_* variable
-// (the bench sets only its own). HOME is kept on purpose: the Claude CLI finds its
+// (the bench sets only its own, plus any --env). HOME is kept on purpose: the Claude CLI finds its
 // login through HOME (on macOS, the login keychain under ~/Library), so a temp HOME
 // would break auth. Baselines are therefore machine- and account-dependent.
 
@@ -49,6 +54,39 @@ const WEIGHTS = { cacheRead: CACHE_READ_WEIGHT, cacheWrite: CACHE_WRITE_WEIGHT }
 const DEFAULT_REPEAT = 3;
 const FORBIDDEN_MODES = new Set(['auto', 'auto_read_only']);
 const LEDGER_ENDPOINT = '/agent/v2/stream';
+const FIXTURE_MCP = path.join(ROOT, 'scripts', 'bench-fixtures', 'fake-mcp-server.mjs');
+// Real runs wait this long after a sample for fire-and-forget helper calls
+// (memory extraction) to reach the ledger before they are counted.
+const HELPER_SETTLE_MS = 2500;
+
+// --env: only these name families reach the child server. LLMIDE_* are server
+// switches; CLAUDE_CODE_* pass through the server to the SDK subprocess (the
+// SDK subprocess env drops LLMIDE_*, see sdk/subprocess-env.mjs).
+const ENV_NAME_RE = /^(LLMIDE_|CLAUDE_CODE_)[A-Z0-9_]+$/;
+// Names the bench owns or that would break its isolation (real DB, real data
+// dir, real log, remote bind, the fake-engine switch).
+const RESERVED_ENV = new Set([
+  'LLMIDE_PORT', 'LLMIDE_HOST', 'LLMIDE_DB_PATH', 'LLMIDE_AGENT_DB_PATH', 'LLMIDE_JWT_SECRET',
+  'LLMIDE_VAULT_KEY', 'LLMIDE_BACKUP_INTERVAL_HOURS', 'LLMIDE_BACKUP_DIR', 'LLMIDE_ENGINE_PREWARM',
+  'LLMIDE_BENCH_FAKE', 'LLMIDE_DATA_DIR', 'LLMIDE_LOG_FILE', 'LLMIDE_PLUGIN_DIR',
+  'LLMIDE_ALLOW_REMOTE', 'LLMIDE_ALLOW_REMOTE_REGISTRATION',
+]);
+
+/**
+ * Parses one `--env KEY=VAL`. The value may contain '=' and may be empty.
+ * @returns {[string, string]}
+ */
+export function parseEnvAssignment(text) {
+  const eq = String(text).indexOf('=');
+  if (eq <= 0) throw new Error(`--env needs KEY=VAL, got "${text}"`);
+  const key = text.slice(0, eq);
+  const value = text.slice(eq + 1);
+  if (!ENV_NAME_RE.test(key)) {
+    throw new Error(`--env ${key}: only LLMIDE_* and CLAUDE_CODE_* names (upper case) are allowed through to the child server`);
+  }
+  if (RESERVED_ENV.has(key)) throw new Error(`--env ${key}: owned by the bench (isolation or fake switch); refused`);
+  return [key, value];
+}
 
 /** The cheapest capable model: the picker entry flagged `fast` in anthropic-models.json. */
 export function defaultBenchModel(modelsFile = MODELS_FILE) {
@@ -126,7 +164,11 @@ export function comparabilityProblems(current, baseline) {
   const problems = [];
   if (baseline.model !== current.model) problems.push(`model: baseline ${baseline.model} vs run ${current.model}`);
   if (Boolean(baseline.fake) !== Boolean(current.fake)) problems.push(`fake: baseline ${baseline.fake} vs run ${current.fake}`);
-  if (baseline.scenariosVersion !== current.scenariosVersion) {
+  // A newer scenario set may declare the older versions it still contains
+  // unchanged (`compatibleWith` in scenarios.json); the baseline then covers
+  // its own scenarios and the run's extra ones show as "new".
+  const compatible = Array.isArray(current.scenariosCompatibleWith) ? current.scenariosCompatibleWith : [];
+  if (baseline.scenariosVersion !== current.scenariosVersion && !compatible.includes(baseline.scenariosVersion)) {
     problems.push(`scenariosVersion: baseline ${baseline.scenariosVersion} vs run ${current.scenariosVersion}`);
   }
   if (JSON.stringify(baseline.weights) !== JSON.stringify(current.weights)) {
@@ -149,6 +191,103 @@ export function toolExpectationFailures(current) {
 function pctChange(base, cur) {
   if (!base) return cur > 0 ? Infinity : 0;
   return ((cur - base) / base) * 100;
+}
+
+const range = (xs) => {
+  const v = (xs || []).filter((x) => x != null && Number.isFinite(x));
+  return v.length >= 2 ? Math.max(...v) - Math.min(...v) : null;
+};
+
+/**
+ * Verdict for one metric of a paired comparison (`a` = before, `b` = after).
+ * `spread` is the larger of the two runs' sample ranges in the metric's unit
+ * (null when a file carries no samples). A delta that does not exceed the
+ * spread is "no-result": the run-to-run noise explains it.
+ *  - regression: past the gate (gatePct, and floor in the metric's unit)
+ *  - worse / better: a real change of at least betterPct, under the gate / an improvement
+ *  - flat: a real change smaller than betterPct
+ */
+export function metricVerdict({ a, b, spread, gatePct, floor = 0, betterPct = 5 }) {
+  if (a == null || b == null) return { verdict: 'n/a', deltaPct: null, delta: null, spreadKnown: spread != null };
+  const delta = b - a;
+  const deltaPct = pctChange(a, b);
+  let verdict;
+  if (spread != null && Math.abs(delta) <= spread) verdict = 'no-result';
+  else if (deltaPct > gatePct && delta > floor) verdict = 'regression';
+  else if (deltaPct >= betterPct) verdict = 'worse';
+  else if (deltaPct <= -betterPct) verdict = 'better';
+  else verdict = 'flat';
+  return { verdict, delta, deltaPct, spread, spreadKnown: spread != null };
+}
+
+/**
+ * Paired, spread-aware comparison of two results files (`--compare a b`), for
+ * judging one change without a committed baseline. Per scenario: billable
+ * tokens, hops, time to first token and total time, each with a verdict.
+ * Gates (plan 6.1): tokens +15%, time +30% (and the floor), median hops +20%.
+ * @returns {{ rows: object[], failed: boolean }}
+ */
+export function compareRuns(a, b, {
+  tokenPct = 15, timePct = 30, timeFloorMs = 500, hopsPct = 20,
+} = {}) {
+  const bById = new Map(b.scenarios.map((s) => [s.id, s]));
+  const rows = [];
+  for (const sa of a.scenarios) {
+    const sb = bById.get(sa.id);
+    if (!sb) { rows.push({ id: sa.id, status: 'only-in-a', failed: false }); continue; }
+    const spread = (xa, xb) => {
+      const ra = range(xa); const rb = range(xb);
+      return ra == null && rb == null ? null : Math.max(ra ?? 0, rb ?? 0);
+    };
+    const tokens = metricVerdict({
+      a: sa.billableTokens, b: sb.billableTokens, spread: spread(sa.billableSamples, sb.billableSamples), gatePct: tokenPct,
+    });
+    const hops = metricVerdict({
+      a: sa.hops, b: sb.hops, spread: spread(sa.hopsSamples, sb.hopsSamples), gatePct: hopsPct,
+    });
+    const ttft = metricVerdict({
+      a: sa.ttftMs, b: sb.ttftMs, spread: spread(sa.ttftMsSamples, sb.ttftMsSamples), gatePct: timePct, floor: timeFloorMs,
+    });
+    const time = metricVerdict({
+      a: sa.totalMs, b: sb.totalMs, spread: spread(sa.totalMsSamples, sb.totalMsSamples), gatePct: timePct, floor: timeFloorMs,
+    });
+    const failed = [tokens, hops, time].some((m) => m.verdict === 'regression');
+    rows.push({
+      id: sa.id, status: failed ? 'REGRESSION' : 'ok', failed, tokens, hops, ttft, time,
+      helperA: sa.helperBillableTokens ?? null, helperB: sb.helperBillableTokens ?? null,
+    });
+  }
+  for (const sb of b.scenarios) {
+    if (!a.scenarios.some((x) => x.id === sb.id)) rows.push({ id: sb.id, status: 'only-in-b', failed: false });
+  }
+  return { rows, failed: rows.some((r) => r.failed) };
+}
+
+/** Text report for compareRuns. */
+export function formatCompare(a, b, comparison, labels = ['A', 'B']) {
+  const f = (n) => (n == null ? '-' : Math.round(n).toLocaleString('en-US'));
+  const pct = (n) => (n == null || !Number.isFinite(n) ? '-' : `${n >= 0 ? '+' : ''}${n.toFixed(1)}%`);
+  const cell = (m, base, cur) => `${f(base)} -> ${f(cur)} (${pct(m.deltaPct)}${m.spreadKnown ? `, spread ${f(m.spread)}` : ', no samples'}) ${m.verdict}`;
+  const lines = [];
+  lines.push(`A = ${labels[0]}  (${a.model}, repeat ${a.repeat}, env ${JSON.stringify(a.env || {})})`);
+  lines.push(`B = ${labels[1]}  (${b.model}, repeat ${b.repeat}, env ${JSON.stringify(b.env || {})})`);
+  lines.push('a delta no larger than the sample spread is "no-result"; gates: tokens/time/hops per the thresholds');
+  const byIdA = new Map(a.scenarios.map((s) => [s.id, s]));
+  const byIdB = new Map(b.scenarios.map((s) => [s.id, s]));
+  for (const r of comparison.rows) {
+    lines.push('');
+    if (r.status === 'only-in-a' || r.status === 'only-in-b') { lines.push(`${r.id}: ${r.status} (not compared)`); continue; }
+    const sa = byIdA.get(r.id); const sb = byIdB.get(r.id);
+    lines.push(`${r.id}  [${r.status}]`);
+    lines.push(`  billable  ${cell(r.tokens, sa.billableTokens, sb.billableTokens)}`);
+    lines.push(`  hops      ${cell(r.hops, sa.hops, sb.hops)}`);
+    lines.push(`  ttft ms   ${cell(r.ttft, sa.ttftMs, sb.ttftMs)}`);
+    lines.push(`  total ms  ${cell(r.time, sa.totalMs, sb.totalMs)}`);
+    if (r.helperA != null || r.helperB != null) {
+      lines.push(`  helper calls (classifier/memory, not in billable)  ${f(r.helperA)} -> ${f(r.helperB)} billable`);
+    }
+  }
+  return lines.join('\n');
 }
 
 /** Renders the current results (and the comparison, when there is one) as text. */
@@ -187,11 +326,37 @@ export function loadScenarios(file = DEFAULT_SCENARIOS) {
     if (!s.id || !s.mode || !Array.isArray(s.turns) || s.turns.length === 0) {
       throw new Error(`${file}: scenario needs id, mode and turns: ${JSON.stringify(s)}`);
     }
-    if (FORBIDDEN_MODES.has(s.mode)) {
+    // An auto mode is the point of a `classifier: true` scenario (v3 auto-mode)
+    // and a mistake anywhere else: it would put the classifier in the measurement.
+    if (FORBIDDEN_MODES.has(s.mode) && s.classifier !== true) {
       throw new Error(`${file}: scenario ${s.id} uses mode "${s.mode}"; the bench pins explicit modes (the classifier would be part of the measurement)`);
     }
+    if (s.turnModes !== undefined) {
+      if (!Array.isArray(s.turnModes) || s.turnModes.length !== s.turns.length
+        || s.turnModes.some((m) => typeof m !== 'string' || FORBIDDEN_MODES.has(m))) {
+        throw new Error(`${file}: scenario ${s.id}: turnModes must list one explicit mode per turn`);
+      }
+    }
+    if (s.dropSessionBefore !== undefined) {
+      if (!Array.isArray(s.dropSessionBefore)
+        || s.dropSessionBefore.some((i) => !Number.isInteger(i) || i < 1 || i >= s.turns.length)) {
+        throw new Error(`${file}: scenario ${s.id}: dropSessionBefore must be turn indexes in 1..${s.turns.length - 1}`);
+      }
+    }
+    if (s.fakeMcp !== undefined && (!Number.isInteger(s.fakeMcp) || s.fakeMcp < 1 || s.fakeMcp > 4)) {
+      throw new Error(`${file}: scenario ${s.id}: fakeMcp must be an integer 1..4`);
+    }
   }
-  return { version: cfg.version, scenarios: cfg.scenarios };
+  const ids = new Set();
+  for (const s of cfg.scenarios) {
+    if (ids.has(s.id)) throw new Error(`${file}: duplicate scenario id ${s.id}`);
+    ids.add(s.id);
+  }
+  return {
+    version: cfg.version,
+    compatibleWith: Array.isArray(cfg.compatibleWith) ? cfg.compatibleWith : [],
+    scenarios: cfg.scenarios,
+  };
 }
 
 /**
@@ -209,17 +374,52 @@ export function ledgerRowsForTurns(db, userId, turnIds) {
   ).all(userId, ...turnIds);
 }
 
+/** The newest usage_ledger id of a user (0 when none): the cut-off for helper rows. */
+export function maxLedgerId(db, userId) {
+  return db.prepare('SELECT COALESCE(MAX(id), 0) AS m FROM usage_ledger WHERE user_id = ?').get(userId).m;
+}
+
+/**
+ * Usage rows written after `afterId` that are NOT part of a turn's own rows:
+ * the classifier and the per-turn memory extraction call `runClaude` with no
+ * request id and no `/agent/v2/stream` endpoint, so the turn metering never
+ * sees them. Reported beside the billable tokens, never added to them (that
+ * would change comparability with committed baselines).
+ * @returns {{ calls: number, billable: number, raw: object }}
+ */
+export function helperUsageSince(db, userId, afterId) {
+  const rows = db.prepare(
+    `SELECT input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens
+       FROM usage_ledger
+      WHERE user_id = ? AND id > ?
+        AND (endpoint IS NULL OR NOT (endpoint = '${LEDGER_ENDPOINT}' OR endpoint LIKE '${LEDGER_ENDPOINT}:%'))`,
+  ).all(userId, afterId);
+  const raw = rows.reduce((a, r) => ({
+    input: a.input + (r.input_tokens || 0),
+    output: a.output + (r.output_tokens || 0),
+    cacheRead: a.cacheRead + (r.cache_read_tokens || 0),
+    cacheWrite: a.cacheWrite + (r.cache_creation_tokens || 0),
+  }), { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+  return { calls: rows.length, billable: billableTokens(raw), raw };
+}
+
 /**
  * The child server's environment: the caller's, minus every LLMIDE_* variable
  * (and NODE_ENV, NODE_TEST_CONTEXT), plus the bench's own settings. HOME is kept
  * so the Claude CLI login still resolves.
  */
-export function buildChildEnv(base, { port, dbPath, jwtSecret, vaultKey, fake }) {
+export function buildChildEnv(base, {
+  port, dbPath, jwtSecret, vaultKey, fake, extraEnv = {}, pluginDir = null,
+}) {
   const env = {};
   for (const [k, v] of Object.entries(base)) {
     if (k.startsWith('LLMIDE_') || k === 'NODE_ENV' || k === 'NODE_TEST_CONTEXT') continue;
     env[k] = v;
   }
+  // --env values are applied after the strip and BEFORE the bench's own
+  // settings, which therefore always win (reserved names are refused anyway).
+  for (const [k, v] of Object.entries(extraEnv)) parseEnvAssignment(`${k}=${v}`);
+  Object.assign(env, extraEnv);
   Object.assign(env, {
     LLMIDE_PORT: String(port),
     LLMIDE_HOST: '127.0.0.1',
@@ -230,6 +430,7 @@ export function buildChildEnv(base, { port, dbPath, jwtSecret, vaultKey, fake })
     LLMIDE_ENGINE_PREWARM: '0',
   });
   if (fake) env.LLMIDE_BENCH_FAKE = '1';
+  if (pluginDir) env.LLMIDE_PLUGIN_DIR = pluginDir;
   return env;
 }
 
@@ -284,8 +485,10 @@ function freePort() {
 
 const KILL_AFTER_MS = 5000;
 
-async function startServer({ fake, dir, port }) {
+async function startServer({ fake, dir, port, extraEnv, pluginDir }) {
   const env = buildChildEnv(process.env, {
+    extraEnv,
+    pluginDir,
     port,
     dbPath: path.join(dir, 'bench.db'),
     jwtSecret: randomBytes(36).toString('hex'),
@@ -379,12 +582,15 @@ async function openTurnStream(body, base, token) {
   }
 }
 
-async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, model, message }) {
+async function streamTurn({
+  base, token, chatSessionId, workspaceRoot, mode, model, message, extraBody = {},
+}) {
   // accept-edits: the bench workspace is a throwaway temp dir, and with the
   // default ('ask') an edit waits on an approval prompt the bench never answers.
   const body = JSON.stringify({
     message, mode, model, provider: 'anthropic', permissionMode: 'accept-edits',
     agentContext: { chatSessionId, workspaceRoot },
+    ...extraBody,
   });
   // `started` is the successful attempt's request start, so waits for the
   // limiter are not billed as turn time.
@@ -393,6 +599,7 @@ async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, mod
   let error = null;
   let sdkSessionId = null;
   let declined = 0;
+  let reply = '';
   let buf = '';
   const decoder = new TextDecoder();
   try {
@@ -406,6 +613,7 @@ async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, mod
         if (!line) continue;
         const ev = JSON.parse(line.slice(6));
         if (ev.type === 'delta' && ttftMs === null) ttftMs = performance.now() - started;
+        if (ev.type === 'delta' && typeof ev.text === 'string') reply += ev.text;
         if (ev.type === 'error') error = `${ev.code}: ${ev.message}`;
         if (ev.type === 'init' && ev.sessionId) sdkSessionId = ev.sessionId;
         // Nobody answers a question or an approval in a bench run: decline it
@@ -423,7 +631,7 @@ async function streamTurn({ base, token, chatSessionId, workspaceRoot, mode, mod
     }
     throw err;
   }
-  return { ttftMs, totalMs: performance.now() - started, error, declined };
+  return { ttftMs, totalMs: performance.now() - started, error, declined, reply };
 }
 
 async function declineDecision({ base, token, requestId, sdkSessionId }) {
@@ -462,16 +670,72 @@ async function meterTurn(ctx, seenTurnIds) {
   return { comp, raw };
 }
 
+async function dropSdkSession(ctx, chatSessionId) {
+  const r = await fetch(`${ctx.base}/agent/v2/session`, {
+    method: 'DELETE',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.token}` },
+    body: JSON.stringify({ chatSessionId }),
+  });
+  if (!r.ok) throw new Error(`drop session HTTP ${r.status}: ${await r.text()}`);
+}
+
+async function authedJson(ctx, method, url, body) {
+  const r = await fetch(`${ctx.base}${url}`, {
+    method,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${ctx.token}` },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!r.ok) throw new Error(`${method} ${url} HTTP ${r.status}: ${await r.text()}`);
+  return r.json();
+}
+
+/** Registers, consents to and enables `count` stub stdio MCP servers for the bench user. */
+export async function enableFakeMcpServers(ctx, count) {
+  const ids = [];
+  for (let i = 1; i <= count; i += 1) {
+    const added = await authedJson(ctx, 'POST', '/auth/me/mcp-plugins/add', {
+      name: `benchmcp${i}`, command: process.execPath, args: [FIXTURE_MCP, `benchmcp${i}`],
+    });
+    const id = added.plugin.id;
+    await authedJson(ctx, 'POST', '/auth/me/mcp-plugins/consent', { id, consented: true });
+    await authedJson(ctx, 'POST', '/auth/me/mcp-plugins/toggle', { id, enabled: true });
+    ids.push(id);
+  }
+  return ids;
+}
+
+async function removeFakeMcpServers(ctx, ids) {
+  for (const id of ids) {
+    try { await authedJson(ctx, 'DELETE', `/auth/me/mcp-plugins/${id}`); } catch { /* temp registry */ }
+  }
+}
+
 /** One sample of one scenario: a fresh workspace and a fresh chat, every turn metered. */
 async function runSample({ scenario, ctx }) {
   seedWorkspace(ctx.workspaceRoot);
   const chatSessionId = randomUUID();
   const turns = [];
-  for (const message of scenario.turns) {
+  const ledgerMark = maxLedgerId(ctx.ledger, ctx.userId);
+  const dropBefore = new Set(scenario.dropSessionBefore || []);
+  const history = [];
+  for (const [index, message] of scenario.turns.entries()) {
+    let extraBody = {};
+    if (dropBefore.has(index)) {
+      // An ended chat: the SDK session and its transcript are gone, and the
+      // client continues the same chat with fresh:true plus its own history
+      // (what the Mac sends after SESSION_UNRESUMABLE).
+      await dropSdkSession(ctx, chatSessionId);
+      extraBody = { fresh: true, history: [...history] };
+    }
+    // The fake engine has no classifier seam: an auto-mode turn would call the
+    // real classifier (a paid model call), so a fake run sends `ask` instead.
+    let mode = scenario.turnModes?.[index] ?? scenario.mode;
+    if (ctx.fake && FORBIDDEN_MODES.has(mode)) mode = 'ask';
     const t = await streamTurn({
       base: ctx.base, token: ctx.token, chatSessionId, workspaceRoot: ctx.workspaceRoot,
-      mode: scenario.mode, model: ctx.model, message,
+      mode, model: ctx.model, message, extraBody,
     });
+    history.push({ role: 'user', content: message }, { role: 'assistant', content: t.reply || '(no text)' });
     if (t.error) throw new Error(`scenario ${scenario.id}: ${t.error}`);
     const { comp, raw } = await meterTurn(ctx, ctx.seenTurnIds);
     turns.push({
@@ -500,7 +764,11 @@ async function runSample({ scenario, ctx }) {
     cacheWrite: turns.reduce((n, t) => n + t.raw.cacheWrite, 0),
   };
   const ttfts = turns.map((t) => t.ttftMs).filter((v) => v != null);
+  if (!ctx.fake) await new Promise((r) => setTimeout(r, HELPER_SETTLE_MS));
+  const helper = helperUsageSince(ctx.ledger, ctx.userId, ledgerMark);
   return {
+    helperBillable: helper.billable,
+    helperCalls: helper.calls,
     billableTokens: billableTokens(raw),
     totalMs: Math.round(turns.reduce((n, t) => n + t.totalMs, 0)),
     ttftMs: ttfts.length ? Math.round(ttfts.reduce((a, b) => a + b, 0) / ttfts.length) : null,
@@ -533,6 +801,15 @@ function aggregate(scenario, samples) {
       cacheWrite: median3((s) => s.raw.cacheWrite),
     },
     billableSamples: samples.map((s) => s.billableTokens),
+    // Sample lists let --compare judge a delta against the run's own spread.
+    totalMsSamples: samples.map((s) => s.totalMs),
+    ttftMsSamples: samples.map((s) => s.ttftMs),
+    hopsSamples: samples.map((s) => s.hops),
+    // Classifier / memory-extraction calls the turn rows never see (not in billableTokens).
+    helperBillableTokens: median3((s) => s.helperBillable),
+    helperCalls: median3((s) => s.helperCalls),
+    ...(scenario.classifier ? { classifier: true } : {}),
+    ...(scenario.fakeMcp ? { fakeMcp: scenario.fakeMcp } : {}),
     perTurn: medianSample.turns.map((t) => ({
       hops: t.hops, billable: t.billable, input: t.raw.input, output: t.raw.output,
       cacheRead: t.raw.cacheRead, cacheWrite: t.raw.cacheWrite,
@@ -546,27 +823,37 @@ function aggregate(scenario, samples) {
  * @returns {Promise<object>} results (schema token-bench/2)
  */
 export async function runBench({
-  fake = false, model, scenarios, scenariosVersion = 1, repeat = DEFAULT_REPEAT, log = () => {},
+  fake = false, model, scenarios, scenariosVersion = 1, compatibleWith = [], repeat = DEFAULT_REPEAT,
+  extraEnv = {}, log = () => {},
 }) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-token-bench-'));
   liveDirs.add(dir);
   const workspaceRoot = path.join(dir, 'workspace');
   const port = await freePort();
-  const server = await startServer({ fake, dir, port });
+  // Stub MCP servers are registered in a registry file; keep it in the temp dir,
+  // never in the user's real plugins directory.
+  const needsMcp = scenarios.some((s) => s.fakeMcp);
+  const pluginDir = needsMcp ? path.join(dir, 'plugins', 'p') : null;
+  const server = await startServer({ fake, dir, port, extraEnv, pluginDir });
   try {
     const { userId, token } = await registerAndLogin(server.base);
     const { DatabaseSync } = await import('node:sqlite');
     const ledger = new DatabaseSync(path.join(dir, 'bench.db'), { readOnly: true });
     try {
       const ctx = {
-        base: server.base, token, userId, ledger, workspaceRoot, model, seenTurnIds: new Set(),
+        base: server.base, token, userId, ledger, workspaceRoot, model, fake, seenTurnIds: new Set(),
       };
       const results = [];
       for (const scenario of scenarios) {
         const samples = [];
-        for (let i = 0; i < repeat; i += 1) {
-          log(`running ${scenario.id} (${i + 1}/${repeat}) ...`);
-          samples.push(await runSample({ scenario, ctx }));
+        const mcpIds = scenario.fakeMcp ? await enableFakeMcpServers(ctx, scenario.fakeMcp) : [];
+        try {
+          for (let i = 0; i < repeat; i += 1) {
+            log(`running ${scenario.id} (${i + 1}/${repeat}) ...`);
+            samples.push(await runSample({ scenario, ctx }));
+          }
+        } finally {
+          await removeFakeMcpServers(ctx, mcpIds);
         }
         results.push(aggregate(scenario, samples));
       }
@@ -577,6 +864,8 @@ export async function runBench({
         model,
         repeat,
         scenariosVersion,
+        scenariosCompatibleWith: compatibleWith,
+        env: extraEnv,
         weights: WEIGHTS,
         scenarios: results,
       };
@@ -590,11 +879,12 @@ export async function runBench({
   }
 }
 
-function parseArgs(argv) {
+export function parseArgs(argv) {
   const opts = {
+    env: {}, compare: null, only: null,
     fake: false, baseline: false, model: null, baselineFile: DEFAULT_BASELINE, out: null,
     scenarios: DEFAULT_SCENARIOS, repeat: DEFAULT_REPEAT,
-    tokenPct: 15, timePct: 30, timeFloorMs: 500, timeAdvisory: false,
+    tokenPct: 15, timePct: 30, timeFloorMs: 500, timeAdvisory: false, hopsPct: 20,
   };
   const need = (i, flag) => {
     if (argv[i + 1] == null || argv[i + 1].startsWith('--')) throw new Error(`${flag} needs a value`);
@@ -605,6 +895,18 @@ function parseArgs(argv) {
     if (a === '--fake') opts.fake = true;
     else if (a === '--baseline') opts.baseline = true;
     else if (a === '--time-advisory') opts.timeAdvisory = true;
+    else if (a === '--env') {
+      const [k, v] = parseEnvAssignment(need(i, a));
+      if (k in opts.env) throw new Error(`--env ${k} given twice`);
+      opts.env[k] = v; i += 1;
+    } else if (a === '--compare') {
+      if (argv[i + 1] == null || argv[i + 2] == null || argv[i + 1].startsWith('--') || argv[i + 2].startsWith('--')) {
+        throw new Error('--compare needs two results files: --compare a.json b.json');
+      }
+      opts.compare = [argv[i + 1], argv[i + 2]]; i += 2;
+    } else if (a === '--only') {
+      opts.only = need(i, a).split(',').map((x) => x.trim()).filter(Boolean); i += 1;
+    } else if (a === '--threshold-hops') { opts.hopsPct = Number(need(i, a)); i += 1; }
     else if (a === '--model') { opts.model = need(i, a); i += 1; }
     else if (a === '--baseline-file') { opts.baselineFile = need(i, a); i += 1; }
     else if (a === '--out') { opts.out = need(i, a); i += 1; }
@@ -616,6 +918,9 @@ function parseArgs(argv) {
     else throw new Error(`unknown flag: ${a}`);
   }
   if (!Number.isInteger(opts.repeat) || opts.repeat < 1) throw new Error('--repeat must be a positive integer');
+  if (opts.compare && (opts.baseline || opts.fake || Object.keys(opts.env).length || opts.only)) {
+    throw new Error('--compare reads two files and runs nothing: it cannot be combined with --baseline, --fake, --env or --only');
+  }
   return opts;
 }
 
@@ -627,20 +932,53 @@ function installSignalCleanup() {
   }
 }
 
+function runCompareCommand(opts) {
+  const [fileA, fileB] = opts.compare;
+  const a = JSON.parse(fs.readFileSync(fileA, 'utf8'));
+  const b = JSON.parse(fs.readFileSync(fileB, 'utf8'));
+  const problems = comparabilityProblems(b, a);
+  if (problems.length) {
+    console.error(`${fileA} and ${fileB} are not comparable:\n  ${problems.join('\n  ')}`);
+    return 2;
+  }
+  const comparison = compareRuns(a, b, {
+    tokenPct: opts.tokenPct, timePct: opts.timePct, timeFloorMs: opts.timeFloorMs, hopsPct: opts.hopsPct,
+  });
+  console.log(formatCompare(a, b, comparison, [fileA, fileB]));
+  if (comparison.failed) {
+    console.log(`\nFAILED: B regressed A by > ${opts.tokenPct}% tokens, > ${opts.timePct}% time (and > ${opts.timeFloorMs} ms) or > ${opts.hopsPct}% hops, beyond the sample spread`);
+    return 1;
+  }
+  console.log('\nPASS: no scenario regressed beyond its spread');
+  return 0;
+}
+
 async function main(argv) {
   const opts = parseArgs(argv);
+  if (opts.compare) return runCompareCommand(opts);
   if (opts.baseline && opts.fake) {
     console.error('refusing to write a baseline from --fake: its numbers are synthetic');
     return 2;
   }
   installSignalCleanup();
   const model = opts.model || defaultBenchModel();
-  const { version, scenarios } = loadScenarios(opts.scenarios);
+  const loaded = loadScenarios(opts.scenarios);
+  const { version, compatibleWith } = loaded;
+  let { scenarios } = loaded;
+  if (opts.only) {
+    const unknown = opts.only.filter((id) => !scenarios.some((s) => s.id === id));
+    if (unknown.length) throw new Error(`--only: unknown scenario id(s): ${unknown.join(', ')}`);
+    scenarios = scenarios.filter((s) => opts.only.includes(s.id));
+    if (opts.baseline) throw new Error('--only cannot write a baseline: a baseline must hold the whole scenario set');
+  }
+  if (Object.keys(opts.env).length) {
+    console.error(`token bench: child server env overrides: ${Object.entries(opts.env).map(([k, v]) => `${k}=${v}`).join(' ')}`);
+  }
   if (!opts.fake) {
     console.error(`token bench: REAL run on ${model} — spends tokens (${scenarios.length} scenarios x ${opts.repeat} repeats).`);
   }
   const current = await runBench({
-    fake: opts.fake, model, scenarios, scenariosVersion: version, repeat: opts.repeat, log: (m) => console.error(m),
+    fake: opts.fake, model, scenarios, scenariosVersion: version, compatibleWith, repeat: opts.repeat, extraEnv: opts.env, log: (m) => console.error(m),
   });
 
   // A private directory, not a predictable name in the shared temp dir.
@@ -663,7 +1001,12 @@ async function main(argv) {
     return 2;
   }
   const baseline = JSON.parse(fs.readFileSync(opts.baselineFile, 'utf8'));
+  if (opts.only) baseline.scenarios = baseline.scenarios.filter((b) => opts.only.includes(b.id));
   const problems = comparabilityProblems(current, baseline);
+  // A flag-toggled run is a different measurement from the committed baseline.
+  if (JSON.stringify(baseline.env || {}) !== JSON.stringify(current.env || {})) {
+    problems.push(`env: baseline ${JSON.stringify(baseline.env || {})} vs run ${JSON.stringify(current.env || {})}`);
+  }
   if (problems.length) {
     console.error(`baseline ${opts.baselineFile} is not comparable with this run:\n  ${problems.join('\n  ')}`);
     return 2;

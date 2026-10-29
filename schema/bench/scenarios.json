@@ -1,34 +1,58 @@
 {
   "_comment": [
-    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17). Version 2.",
+    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17). Version 3.",
+    "Version 3 = the seven version-2 scenarios, UNCHANGED, plus six added ones (agent-kit K1 T0.2).",
+    "`compatibleWith: [2]`: a version-2 baseline still covers its own seven scenarios; the new",
+    "ones show as \"new\" until a version-3 baseline is committed.",
     "Every sample opens a NEW v2 chat (one chat per scenario sample; every turn of",
     "a multi-turn scenario reuses that chat). The bench reseeds its temp workspace",
     "before each sample (notes.txt ~10 KB, data/part-1..3.txt ~10 KB each).",
-    "`mode` is sent explicitly; auto modes are refused, so the classifier never runs.",
+    "`mode` is sent explicitly; an auto mode is refused unless the scenario sets",
+    "`classifier: true` (auto-mode: the classifier is the thing measured). In a --fake run",
+    "such a turn is sent as `ask` (the fake engine has no classifier seam and the real one",
+    "is a paid call). Classifier and memory-extraction calls are reported as helperBillableTokens /",
+    "helperCalls beside the billable tokens, not inside them.",
+    "`turnModes`: one explicit mode per turn (mode-switch).",
+    "`dropSessionBefore`: turn indexes before which the chat's SDK session is deleted and the turn",
+    "is sent fresh with the chat's history (ended-chat-continue; what the Mac sends after a restart).",
+    "`fakeMcp`: N stub stdio MCP servers (scripts/bench-fixtures/fake-mcp-server.mjs) are registered,",
+    "consented and enabled for the bench user for the scenario's samples (mcp-two-servers).",
     "`expectTools`: the scenario should make at least one tool round trip (hops > 1).",
     "A real run fails when it does not; a --fake run only warns.",
     "Change a prompt, a seed file or this file's version only together with a new",
     "token-baseline.json. Bump `version` on any such change."
   ],
-  "version": 2,
+  "version": 3,
   "scenarios": [
-    { "id": "greeting", "mode": "ask", "turns": ["hi"] },
+    {
+      "id": "greeting",
+      "mode": "ask",
+      "turns": [
+        "hi"
+      ]
+    },
     {
       "id": "explain-file",
       "mode": "ask",
       "expectTools": true,
-      "turns": ["Read notes.txt and explain in three sentences what it is about."]
+      "turns": [
+        "Read notes.txt and explain in three sentences what it is about."
+      ]
     },
     {
       "id": "small-edit",
       "mode": "execute",
       "expectTools": true,
-      "turns": ["In notes.txt, change the first word 'alpha' to 'beta' and tell me when it is done."]
+      "turns": [
+        "In notes.txt, change the first word 'alpha' to 'beta' and tell me when it is done."
+      ]
     },
     {
       "id": "plan-step",
       "mode": "plan",
-      "turns": ["Plan one step: add a second line to notes.txt that says 'gamma'."]
+      "turns": [
+        "Plan one step: add a second line to notes.txt that says 'gamma'."
+      ]
     },
     {
       "id": "two-turn-reuse",
@@ -57,6 +81,76 @@
         "Reply with the word 'three' only.",
         "What code word did I ask you to remember? Reply with the word only."
       ]
+    },
+    {
+      "id": "repo-search",
+      "mode": "ask",
+      "expectTools": true,
+      "turns": [
+        "Search the workspace without editing anything (use Glob, Grep and Read). Which file under data/ has the most lines that contain the phrase 'Tool output', and what is the first heading of each of the three files under data/? Answer in two short lines."
+      ]
+    },
+    {
+      "id": "auto-mode",
+      "mode": "auto",
+      "classifier": true,
+      "turns": [
+        "Could you tell me roughly what notes.txt is about, in one sentence?"
+      ]
+    },
+    {
+      "id": "mode-switch",
+      "mode": "ask",
+      "turnModes": [
+        "ask",
+        "execute"
+      ],
+      "expectTools": true,
+      "turns": [
+        "Read notes.txt and tell me its first word. Reply with the word only.",
+        "Now change that first word in notes.txt to 'omega' and tell me when it is done."
+      ]
+    },
+    {
+      "id": "cache-slope-12",
+      "mode": "ask",
+      "turns": [
+        "Remember the code word is 'birch'. Reply with OK only.",
+        "Reply with the word 'one' only.",
+        "Reply with the word 'two' only.",
+        "Reply with the word 'three' only.",
+        "Reply with the word 'four' only.",
+        "Reply with the word 'five' only.",
+        "Reply with the word 'six' only.",
+        "Reply with the word 'seven' only.",
+        "Reply with the word 'eight' only.",
+        "Reply with the word 'nine' only.",
+        "Reply with the word 'ten' only.",
+        "What code word did I ask you to remember? Reply with the word only."
+      ]
+    },
+    {
+      "id": "mcp-two-servers",
+      "mode": "ask",
+      "fakeMcp": 2,
+      "turns": [
+        "hi"
+      ]
+    },
+    {
+      "id": "ended-chat-continue",
+      "mode": "ask",
+      "dropSessionBefore": [
+        2
+      ],
+      "turns": [
+        "Remember the code word is 'maple'. Reply with OK only.",
+        "Reply with the word 'ready' only.",
+        "What code word did I ask you to remember? Reply with the word only."
+      ]
     }
+  ],
+  "compatibleWith": [
+    2
   ]
 }

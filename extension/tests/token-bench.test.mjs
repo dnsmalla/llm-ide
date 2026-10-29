@@ -16,9 +16,12 @@ import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 
 import {
-  billableTokens, buildChildEnv, comparabilityProblems, compareResults, defaultBenchModel,
-  ledgerRowsForTurns, loadScenarios, median, runBench, toolExpectationFailures,
+  billableTokens, buildChildEnv, comparabilityProblems, compareResults, compareRuns, defaultBenchModel,
+  formatCompare, helperUsageSince, ledgerRowsForTurns, loadScenarios, maxLedgerId, median, metricVerdict,
+  parseArgs, parseEnvAssignment, runBench, toolExpectationFailures,
 } from '../../scripts/token-bench.mjs';
+import { handleMessage as mcpHandle, toolsFor as mcpTools } from '../../scripts/bench-fixtures/fake-mcp-server.mjs';
+import { quickMode } from '../llm_agent/runtime/mode-classify.mjs';
 import { benchFakeEngineEnabled } from '../routes/agent-v2.mjs';
 
 const EXT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -51,18 +54,77 @@ test('defaultBenchModel is the cheapest (fast) picker model from anthropic-model
   assert.equal(defaultBenchModel(), cfg.models.find((m) => m.fast).id);
 });
 
-test('loadScenarios reads the committed set (version 2) with the tool-expecting scenarios marked', () => {
-  const { version, scenarios } = loadScenarios(SCENARIOS);
-  assert.equal(version, 2);
-  assert.deepEqual(scenarios.map((s) => s.id), [
-    'greeting', 'explain-file', 'small-edit', 'plan-step', 'two-turn-reuse', 'long-tool-results', 'cache-slope',
-  ]);
+const V2_IDS = ['greeting', 'explain-file', 'small-edit', 'plan-step', 'two-turn-reuse', 'long-tool-results', 'cache-slope'];
+const V3_IDS = ['repo-search', 'auto-mode', 'mode-switch', 'cache-slope-12', 'mcp-two-servers', 'ended-chat-continue'];
+
+test('loadScenarios reads the committed set (version 3 = the v2 seven unchanged + six) with tool scenarios marked', () => {
+  const { version, scenarios, compatibleWith } = loadScenarios(SCENARIOS);
+  assert.equal(version, 3);
+  assert.deepEqual(compatibleWith, [2]);
+  assert.deepEqual(scenarios.map((s) => s.id), [...V2_IDS, ...V3_IDS]);
   assert.equal(scenarios.find((s) => s.id === 'two-turn-reuse').turns.length, 2);
   assert.equal(scenarios.find((s) => s.id === 'cache-slope').turns.length, 5);
   assert.deepEqual(
     scenarios.filter((s) => s.expectTools).map((s) => s.id),
-    ['explain-file', 'small-edit', 'long-tool-results'],
+    ['explain-file', 'small-edit', 'long-tool-results', 'repo-search', 'mode-switch'],
   );
+});
+
+test('the v2 scenarios are byte-for-byte what the committed v2 baseline measured (comparability)', () => {
+  const { scenarios } = loadScenarios(SCENARIOS);
+  const v2 = scenarios.filter((s) => V2_IDS.includes(s.id));
+  const baseline = JSON.parse(fs.readFileSync(path.join(ROOT, 'schema', 'bench', 'token-baseline.json'), 'utf8'));
+  assert.deepEqual(v2.map((s) => s.id), baseline.scenarios.map((s) => s.id));
+  for (const s of v2) {
+    const b = baseline.scenarios.find((x) => x.id === s.id);
+    assert.equal(s.mode, b.mode, `${s.id} mode`);
+    assert.equal(s.turns.length, b.turns, `${s.id} turn count`);
+    assert.equal(Boolean(s.expectTools), b.expectTools, `${s.id} expectTools`);
+    for (const key of ['classifier', 'turnModes', 'dropSessionBefore', 'fakeMcp']) assert.equal(s[key], undefined, `${s.id} ${key}`);
+  }
+});
+
+test('v3 scenarios: auto-mode really reaches the classifier; the others use the features they name', () => {
+  const { scenarios } = loadScenarios(SCENARIOS);
+  const by = (id) => scenarios.find((s) => s.id === id);
+  assert.equal(by('auto-mode').mode, 'auto');
+  assert.equal(by('auto-mode').classifier, true);
+  assert.equal(quickMode(by('auto-mode').turns[0]), null, 'a quickMode hit would skip the classifier model call');
+  assert.deepEqual(by('mode-switch').turnModes, ['ask', 'execute']);
+  assert.equal(by('cache-slope-12').turns.length, 12);
+  assert.equal(by('mcp-two-servers').fakeMcp, 2);
+  assert.deepEqual(by('ended-chat-continue').dropSessionBefore, [2]);
+  assert.ok(by('repo-search').expectTools);
+});
+
+test('loadScenarios validates the v3 fields', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-bench-scen-v3-'));
+  try {
+    const file = path.join(dir, 's.json');
+    const bad = (sc, re) => {
+      fs.writeFileSync(file, JSON.stringify({ version: 3, scenarios: [{ id: 'x', mode: 'ask', turns: ['a', 'b'], ...sc }] }));
+      assert.throws(() => loadScenarios(file), re);
+    };
+    bad({ turnModes: ['ask'] }, /turnModes/);
+    bad({ turnModes: ['ask', 'auto'] }, /turnModes/);
+    bad({ dropSessionBefore: [0] }, /dropSessionBefore/);
+    bad({ dropSessionBefore: [2] }, /dropSessionBefore/);
+    bad({ fakeMcp: 0 }, /fakeMcp/);
+    fs.writeFileSync(file, JSON.stringify({ version: 3, scenarios: [{ id: 'x', mode: 'auto', classifier: true, turns: ['a'] }] }));
+    assert.equal(loadScenarios(file).scenarios[0].mode, 'auto');
+    fs.writeFileSync(file, JSON.stringify({ version: 3, scenarios: [{ id: 'x', mode: 'ask', turns: ['a'] }, { id: 'x', mode: 'ask', turns: ['a'] }] }));
+    assert.throws(() => loadScenarios(file), /duplicate scenario id/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('a v2 baseline stays comparable with a v3 run (compatibleWith) and not with an unrelated version', () => {
+  const base = run([scenario('a', 100, 1000)], { scenariosVersion: 2 });
+  const cur = run([scenario('a', 100, 1000)], { scenariosVersion: 3, scenariosCompatibleWith: [2] });
+  assert.deepEqual(comparabilityProblems(cur, base), []);
+  assert.equal(comparabilityProblems({ ...cur, scenariosCompatibleWith: [] }, base).length, 1);
+  assert.equal(comparabilityProblems(cur, { ...base, scenariosVersion: 1 }).length, 1, 'only versions the run lists');
 });
 
 test('loadScenarios refuses an auto mode: the classifier must not be part of the measurement', () => {
@@ -187,6 +249,187 @@ test('buildChildEnv strips every LLMIDE_* variable, keeps HOME, and sets only th
   assert.equal(buildChildEnv(base, { port: 1, dbPath: 'd', jwtSecret: 'j', vaultKey: 'v', fake: true }).LLMIDE_BENCH_FAKE, '1');
 });
 
+test('parseEnvAssignment: LLMIDE_* and CLAUDE_CODE_* only, bench-owned and isolation names refused', () => {
+  assert.deepEqual(parseEnvAssignment('LLMIDE_V2_COMPACT_PROMPT=1'), ['LLMIDE_V2_COMPACT_PROMPT', '1']);
+  assert.deepEqual(parseEnvAssignment('CLAUDE_CODE_DISABLE_TERMINAL_TITLE=1'), ['CLAUDE_CODE_DISABLE_TERMINAL_TITLE', '1']);
+  assert.deepEqual(parseEnvAssignment('LLMIDE_X=a=b'), ['LLMIDE_X', 'a=b'], 'the value may contain =');
+  assert.deepEqual(parseEnvAssignment('LLMIDE_X='), ['LLMIDE_X', ''], 'an empty value is allowed');
+  for (const bad of ['PATH=/x', 'HOME=/tmp/h', 'ANTHROPIC_API_KEY=k', 'llmide_x=1', 'LLMIDE_', 'NOEQUALS', '=1', 'NODE_ENV=production']) {
+    assert.throws(() => parseEnvAssignment(bad), /--env/, bad);
+  }
+  for (const owned of ['LLMIDE_DB_PATH', 'LLMIDE_PORT', 'LLMIDE_DATA_DIR', 'LLMIDE_BENCH_FAKE', 'LLMIDE_ALLOW_REMOTE', 'LLMIDE_AGENT_DB_PATH']) {
+    assert.throws(() => parseEnvAssignment(`${owned}=1`), /owned by the bench/, owned);
+  }
+});
+
+test('parseArgs: --env is repeatable, --compare takes two files, bad combinations are refused', () => {
+  const a = parseArgs(['--env', 'LLMIDE_A=1', '--env', 'CLAUDE_CODE_B=2', '--only', 'greeting,auto-mode']);
+  assert.deepEqual(a.env, { LLMIDE_A: '1', CLAUDE_CODE_B: '2' });
+  assert.deepEqual(a.only, ['greeting', 'auto-mode']);
+  assert.deepEqual(parseArgs([]).env, {});
+  assert.deepEqual(parseArgs(['--compare', 'a.json', 'b.json']).compare, ['a.json', 'b.json']);
+  assert.throws(() => parseArgs(['--env']), /needs a value/);
+  assert.throws(() => parseArgs(['--env', 'LLMIDE_A=1', '--env', 'LLMIDE_A=2']), /given twice/);
+  assert.throws(() => parseArgs(['--env', 'HOME=/x']), /--env/);
+  assert.throws(() => parseArgs(['--compare', 'a.json']), /two results files/);
+  assert.throws(() => parseArgs(['--compare', 'a.json', '--fake']), /two results files/);
+  assert.throws(() => parseArgs(['--compare', 'a.json', 'b.json', '--fake']), /cannot be combined/);
+  assert.throws(() => parseArgs(['--compare', 'a.json', 'b.json', '--env', 'LLMIDE_A=1']), /cannot be combined/);
+  assert.throws(() => parseArgs(['--unknown']), /unknown flag/);
+});
+
+test('buildChildEnv passes --env values through after the strip, and the bench settings still win', () => {
+  const base = { HOME: '/h', LLMIDE_V2_COMPACT_PROMPT: '1', CLAUDE_CODE_X: 'inherited' };
+  const env = buildChildEnv(base, {
+    port: 1, dbPath: '/t/b.db', jwtSecret: 'j', vaultKey: 'v', fake: false,
+    extraEnv: { LLMIDE_V2_AUTOCOMPACT_WINDOW: '100000', CLAUDE_CODE_X: 'override' },
+  });
+  assert.equal(env.LLMIDE_V2_COMPACT_PROMPT, undefined, 'inherited LLMIDE_* is still stripped');
+  assert.equal(env.LLMIDE_V2_AUTOCOMPACT_WINDOW, '100000');
+  assert.equal(env.CLAUDE_CODE_X, 'override');
+  assert.equal(env.LLMIDE_DB_PATH, '/t/b.db');
+  // A reserved name smuggled past parseArgs is still refused here.
+  assert.throws(() => buildChildEnv(base, {
+    port: 1, dbPath: 'd', jwtSecret: 'j', vaultKey: 'v', fake: false, extraEnv: { LLMIDE_DB_PATH: '/real.db' },
+  }), /owned by the bench/);
+  assert.equal(buildChildEnv(base, { port: 1, dbPath: 'd', jwtSecret: 'j', vaultKey: 'v', fake: false, pluginDir: '/t/p' }).LLMIDE_PLUGIN_DIR, '/t/p');
+  assert.equal(buildChildEnv(base, { port: 1, dbPath: 'd', jwtSecret: 'j', vaultKey: 'v', fake: false }).LLMIDE_PLUGIN_DIR, undefined);
+});
+
+test('metricVerdict: a delta inside the spread is no-result; gates, better, worse and flat otherwise', () => {
+  const v = (a, b, spread, extra = {}) => metricVerdict({ a, b, spread, gatePct: 15, ...extra }).verdict;
+  assert.equal(v(1000, 1300, 400), 'no-result', '+30% but the samples themselves span 400');
+  assert.equal(v(1000, 1300, 299), 'regression');
+  assert.equal(v(1000, 1300, null), 'regression', 'without samples the gate decides');
+  assert.equal(v(1000, 1100, 50), 'worse', 'real, +10%, under the 15% gate');
+  assert.equal(v(1000, 800, 50), 'better');
+  assert.equal(v(1000, 1020, 5), 'flat');
+  assert.equal(v(1000, 1000, 0), 'no-result', 'zero delta is inside any spread');
+  assert.equal(v(1000, 1030, 0), 'flat');
+  assert.equal(v(1000, 1150, 150), 'no-result', 'delta equal to the spread is not larger than it');
+  assert.equal(v(null, 5, 1), 'n/a');
+  assert.equal(v(1000, 1400, 0, { floor: 500 }), 'worse', 'an absolute floor: +40% but only 400 over');
+  assert.equal(metricVerdict({ a: 1000, b: 1600, spread: 0, gatePct: 15, floor: 500 }).verdict, 'regression');
+});
+
+const sc = (id, o = {}) => ({
+  id, billableTokens: 10000, totalMs: 5000, ttftMs: 1000, hops: 2,
+  billableSamples: [9800, 10000, 10200], totalMsSamples: [4900, 5000, 5100], ttftMsSamples: [950, 1000, 1050], hopsSamples: [2, 2, 2],
+  ...o,
+});
+
+test('compareRuns: a quiet pair passes; a real >15% token rise fails; noise-sized rises are no-result', () => {
+  const a = run([sc('x'), sc('y'), sc('z')]);
+  // x: +30% tokens, samples tight -> regression. y: +30% but samples span 8000 -> no-result.
+  // z: tokens -20% -> better.
+  const b = run([
+    sc('x', { billableTokens: 13000, billableSamples: [12800, 13000, 13200] }),
+    sc('y', { billableTokens: 13000, billableSamples: [8000, 13000, 16000] }),
+    sc('z', { billableTokens: 8000, billableSamples: [7800, 8000, 8200] }),
+  ]);
+  const c = compareRuns(a, b);
+  const by = (id) => c.rows.find((r) => r.id === id);
+  assert.equal(by('x').tokens.verdict, 'regression');
+  assert.equal(by('x').failed, true);
+  assert.equal(by('y').tokens.verdict, 'no-result');
+  assert.equal(by('y').failed, false);
+  assert.equal(by('z').tokens.verdict, 'better');
+  assert.equal(c.failed, true);
+  assert.equal(compareRuns(a, a).failed, false);
+  assert.equal(compareRuns(a, a).rows[0].tokens.verdict, 'no-result', 'identical runs: delta 0 is inside the spread');
+});
+
+test('compareRuns: time needs 30% and the 500 ms floor; hops need 20%; a scenario in one file only is not compared', () => {
+  const a = run([sc('t'), sc('h'), sc('only-a')]);
+  const b = run([
+    sc('t', { totalMs: 7000, totalMsSamples: [6950, 7000, 7050] }), // +40%, +2000 ms
+    sc('h', { hops: 3, hopsSamples: [3, 3, 3] }), // +50% hops
+    sc('only-b'),
+  ]);
+  const c = compareRuns(a, b);
+  assert.equal(c.rows.find((r) => r.id === 't').time.verdict, 'regression');
+  assert.equal(c.rows.find((r) => r.id === 'h').hops.verdict, 'regression');
+  assert.equal(c.rows.find((r) => r.id === 'only-a').status, 'only-in-a');
+  assert.equal(c.rows.find((r) => r.id === 'only-b').status, 'only-in-b');
+  const quick = compareRuns(run([sc('q', { totalMs: 300, totalMsSamples: [299, 300, 301] })]),
+    run([sc('q', { totalMs: 450, totalMsSamples: [449, 450, 451] })]));
+  assert.equal(quick.rows[0].time.verdict, 'worse', '+50% but only 150 ms: under the floor');
+  assert.equal(quick.failed, false);
+  // Files with no samples (old results): the gate decides and the report says so.
+  const old = (o) => ({ id: 'o', billableTokens: o, totalMs: 1000, hops: 1, raw: {}, turns: 1 });
+  const noSamples = compareRuns(run([old(1000)]), run([old(1300)]));
+  assert.equal(noSamples.rows[0].tokens.spreadKnown, false);
+  assert.equal(noSamples.rows[0].tokens.verdict, 'regression');
+  assert.match(formatCompare(run([old(1000)]), run([old(1300)]), noSamples), /no samples/);
+});
+
+test('formatCompare reports tokens, hops, ttft and time per scenario with the spread', () => {
+  const a = run([sc('x')]);
+  const b = run([sc('x', { billableTokens: 13000, billableSamples: [12800, 13000, 13200], helperBillableTokens: 700 })], { env: { LLMIDE_FLAG: '1' } });
+  const text = formatCompare(a, b, compareRuns(a, b), ['a.json', 'b.json']);
+  for (const needle of ['billable', 'hops', 'ttft ms', 'total ms', 'spread 400', 'regression', 'LLMIDE_FLAG', 'a.json']) {
+    assert.ok(text.includes(needle), `report mentions ${needle}`);
+  }
+});
+
+test('helperUsageSince counts rows outside the turn endpoints after a cut-off, per user', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec(`CREATE TABLE usage_ledger (id INTEGER PRIMARY KEY AUTOINCREMENT, user_id TEXT, endpoint TEXT, input_tokens INT,
+    output_tokens INT, cache_read_tokens INT, cache_creation_tokens INT, request_id TEXT)`);
+  const ins = db.prepare('INSERT INTO usage_ledger (user_id, endpoint, input_tokens, output_tokens, cache_read_tokens, cache_creation_tokens) VALUES (?,?,?,?,?,?)');
+  ins.run('u1', null, 999, 999, 0, 0); // before the cut-off
+  const mark = maxLedgerId(db, 'u1');
+  ins.run('u1', '/agent/v2/stream', 100, 10, 0, 0); // a turn's own row: not helper
+  ins.run('u1', '/agent/v2/stream:internal', 100, 10, 0, 0); // SDK-internal model: already in the turn
+  ins.run('u1', null, 200, 20, 1000, 0); // classifier / memory extraction
+  ins.run('u1', 'something-else', 50, 5, 0, 80);
+  ins.run('u2', null, 7777, 7777, 0, 0); // another user
+  const h = helperUsageSince(db, 'u1', mark);
+  assert.equal(h.calls, 2);
+  assert.equal(h.billable, billableTokens({ input: 250, output: 25, cacheRead: 1000, cacheWrite: 80 }));
+  assert.equal(helperUsageSince(db, 'u1', maxLedgerId(db, 'u1')).calls, 0);
+  db.close();
+});
+
+test('the stub MCP server speaks enough stdio MCP: initialize, tools/list, tools/call, notifications', () => {
+  const init = mcpHandle({ jsonrpc: '2.0', id: 1, method: 'initialize' }, 's1');
+  assert.equal(init.result.serverInfo.name, 's1');
+  assert.ok(init.result.capabilities.tools);
+  assert.equal(mcpHandle({ jsonrpc: '2.0', method: 'notifications/initialized' }, 's1'), null);
+  const list = mcpHandle({ jsonrpc: '2.0', id: 2, method: 'tools/list' }, 's1');
+  assert.deepEqual(list.result.tools.map((t) => t.name), ['s1_lookup', 's1_status']);
+  assert.notDeepEqual(mcpTools('s1').map((t) => t.name), mcpTools('s2').map((t) => t.name), 'two servers never share a tool name');
+  assert.equal(mcpHandle({ jsonrpc: '2.0', id: 3, method: 'tools/call', params: { name: 's1_status' } }, 's1').result.content[0].text, 'ok');
+  assert.equal(mcpHandle({ jsonrpc: '2.0', id: 4, method: 'nope' }, 's1').error.code, -32601);
+  // And as a real child process over stdio.
+  const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'bench-fixtures', 'fake-mcp-server.mjs'), 's9'], {
+    input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', encoding: 'utf8',
+  });
+  assert.match(r.stdout, /"s9_lookup"/);
+});
+
+test('CLI: --compare reads two files, runs nothing, exits 0 / 1 / 2', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-bench-compare-test-'));
+  try {
+    const w = (name, obj) => { const f = path.join(dir, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
+    const base = run([sc('x')], { repeat: 3 });
+    const worse = run([sc('x', { billableTokens: 14000, billableSamples: [13900, 14000, 14100] })], { repeat: 3 });
+    const cli = (...files) => spawnSync(process.execPath, [BENCH, '--compare', ...files], { encoding: 'utf8' });
+    const a = w('a.json', base);
+    const same = cli(a, w('same.json', base));
+    assert.equal(same.status, 0, same.stdout + same.stderr);
+    assert.match(same.stdout, /PASS/);
+    const bad = cli(a, w('b.json', worse));
+    assert.equal(bad.status, 1, bad.stdout + bad.stderr);
+    assert.match(bad.stdout, /FAILED: B regressed A/);
+    const other = cli(a, w('c.json', { ...worse, model: 'another-model' }));
+    assert.equal(other.status, 2);
+    assert.match(other.stderr, /not comparable/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('the fake engine seam needs LLMIDE_BENCH_FAKE=1, the --bench-fake flag, and no production', () => {
   assert.equal(benchFakeEngineEnabled({ LLMIDE_BENCH_FAKE: '1' }, ['node', 'server.mjs', '--bench-fake']), true);
   assert.equal(benchFakeEngineEnabled({ LLMIDE_BENCH_FAKE: '1' }, ['node', 'server.mjs']), false, 'env alone is not enough');
@@ -199,13 +442,14 @@ test('the fake engine seam needs LLMIDE_BENCH_FAKE=1, the --bench-fake flag, and
 });
 
 test('runBench --fake end to end: every turn metered, cache reused on the second turn', async () => {
-  const { scenarios, version } = loadScenarios(SCENARIOS);
+  const { scenarios, version, compatibleWith } = loadScenarios(SCENARIOS);
   const results = await runBench({
-    fake: true, model: FAKE_MODEL, scenarios, scenariosVersion: version, repeat: 1,
+    fake: true, model: FAKE_MODEL, scenarios, scenariosVersion: version, compatibleWith, repeat: 1,
   });
   assert.equal(results.fake, true);
-  assert.equal(results.scenariosVersion, 2);
-  assert.equal(results.scenarios.length, 7);
+  assert.equal(results.scenariosVersion, 3);
+  assert.deepEqual(results.scenariosCompatibleWith, [2]);
+  assert.equal(results.scenarios.length, 13);
   for (const s of results.scenarios) {
     assert.ok(s.billableTokens > 0, `${s.id} billable`);
     assert.ok(s.raw.output > 0, `${s.id} output`);
@@ -220,7 +464,13 @@ test('runBench --fake end to end: every turn metered, cache reused on the second
   const greeting = results.scenarios.find((s) => s.id === 'greeting');
   assert.equal(greeting.raw.cacheRead, 0, 'a fresh chat reads nothing from cache');
   // The fake makes one API call per turn, so the tool scenarios warn in fake mode.
-  assert.equal(toolExpectationFailures(results).length, 3);
+  assert.equal(toolExpectationFailures(results).length, 5);
+  const ended = results.scenarios.find((s) => s.id === 'ended-chat-continue');
+  assert.equal(ended.perTurn[2].cacheRead, 0, 'after the SDK session is dropped the third turn starts a fresh session');
+  assert.ok(ended.perTurn[1].cacheRead > 0);
+  assert.equal(results.scenarios.find((s) => s.id === 'cache-slope-12').perTurn.length, 12);
+  for (const s of results.scenarios) assert.equal(s.helperCalls, 0, `${s.id}: the fake makes no helper calls`);
+  assert.deepEqual(results.env, {});
 });
 
 test('CLI: --baseline --fake is refused (synthetic numbers are never a baseline)', () => {
