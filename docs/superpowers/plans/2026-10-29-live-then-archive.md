@@ -1,6 +1,6 @@
 # Live-then-archive: one stored copy, live in the server DB, archived to the Mac app
 
-Status: plan, not started. Branch: `main` (no feature branches, no push). Date: 2026-10-29.
+Status: plan; **Phase 0 executed 2026-10-29** (section 11 has the evidence; later phases not started). Branch: `main` (no feature branches, no push). Date: 2026-10-29.
 Research basis: read-only pass at `cbd562a0`. Inputs: [data-lifecycle](../../kits/data-lifecycle.md) (the decided rules 1a and 1b), [agent-kit](../../kits/agent-kit.md) and [knowledge-kit](../../kits/knowledge-kit.md) (K0 maps and the "User decisions 2026-10-29" sections), [invariants](../../explanation/invariants.md), `CLAUDE.md`, and the shape of [2026-10-28-agent-store](2026-10-28-agent-store.md). Every `path:line` below was re-read in this pass unless the row says **(from K0, not re-read)**. Items marked **(confirm T0)** must be checked in Phase 0 before code depends on them. Nothing was run and no real `data.db` or Mac store was opened.
 
 ## 0. Decisions
@@ -47,6 +47,15 @@ Moving metadata off the server; per-user Mac folders (flagged as a question); pl
 | F9 | **A tombstone pattern already exists** for cross-store purges that must survive a failure: `pending_agent_purges` (migration `0049`) replayed at boot by `kb/agent-jobs.mjs:43-57`. Reuse it for delete-everywhere. | `extension/kb/migrations/0049_pending_agent_purges.sql`, `extension/kb/db.mjs:955,1049` |
 | F10 | **Sign-out wipes the only copy.** `resetForSignOut` does `ChatSessionStore.clear()`. | `Features/Chat/Services/ChatEngineRegistry.swift:459-462` |
 | F11 | **Nothing feeds `/kb/generate-plan` a real meeting.** No Mac caller; the extension pins the route but its own comment says it never sends a real transcript. So the planner's `getMeeting` dependency is cheap to re-point. | `mac/Sources/APIContractLab/Routes.swift:200`, `extension/src/sidepanel/App.tsx:183`, `extension/agents/planner.mjs:8,136-141` |
+| F12 | **(Phase 0)** The planned `note_index` update/delete triggers (3.8) delete their FTS row with `DELETE FROM search WHERE meeting_id = ...`; `meeting_id` is UNINDEXED in FTS5, so that is a full scan. Measured: a 20 KB upsert-as-update costs p50 55 ms / p95 79 ms at 50k rows against a 20 ms budget (insert is 0.6 / 15 ms). Migration `0037` already solved this for `sources` with a rowid mapping table. | `extension/scripts/bench-note-index.mjs`; `0037_search_source_rowid.sql` |
+| F13 | **(Phase 0)** A meeting note without `platform` frontmatter does not decode (`MeetingFrontmatter.platform` is required), so `FolderIndexer.upsert` (called under `try?`) silently never indexes it: it is invisible to Library and would be invisible to the reconcile feed. | `Core/Notes/Models/MeetingFrontmatter.swift`, `FolderIndexer.swift`; test `LtaOldFormatFixtureTests` |
+| F14 | **(Phase 0)** N-1 hole: a session file with the new keys (`meetingId`, `ownerUserId`, `origin`, `archive`) decodes on an old Mac but the keys are **dropped when that Mac re-saves** the file. An old Mac that touches a chat strips its owner and meeting tags. | `LtaOldFormatFixtureTests.unknownKeysAreDroppedOnResave` |
+| F15 | **(Phase 0)** The extension's chat still has a local store: `chrome.storage.local` key `chatMessages` (200 messages) used whenever the server session cannot be created. "Extension stores nothing" (0.1 rule 5) is not true today for chat either; only the meeting transcripts were in the plan. | `extension/src/sidepanel/hooks/useChat.ts:22-23,40-82` |
+| F16 | **(Phase 0)** CORS allows **every** `chrome-extension://*` origin, not one extension id (CLAUDE.md says `<id>`); auth is still a JWT on every non-public route. | `extension/server.mjs:522-541` |
+| F17 | **(Phase 0)** `deleteSdkTranscripts` already scans the operator's ambient `~/.claude` as well as the per-user home, so risk R9/DL5 ("subscription turns cannot be deleted") is **wrong**: they are deletable per session id. | `extension/llm_agent/sdk/transcripts.mjs:26-40` |
+| F18 | **(Phase 0)** The extension-captured note is written by AppShell from the **Mac mirror's in-memory captions** (human-only, growing utterances merged in place), not from the server buffer. The ack's `lines` must be compared with the mirrored count, not the server's `captionCount`; a Mac that joined late holds a partial transcript while the server buffer is complete. A failed write sets `recoveryError` and the mirror never retries (deduped per session), while the server already deleted its crash row at finalize (F3). | `Shell/AppShell.swift:169,1197-1290`, `LiveSessionMirror.swift:264-306` |
+| F19 | **(Phase 0)** Extension-captured notes never reach the server index today: `generateNoteForLiveSession` does not call `ingestMeeting`. DL15 is a behaviour gain, not a regression risk, and `/kb/stats.meetings` (a `COUNT(*)` on `meetings`) reads 0 after Phase 6 unless re-pointed (T3.1). | `AppShell.swift:1197-1290`, `kb/meetings.mjs:295-298` |
+| F20 | **(Phase 0)** `plans.meeting_id` is `REFERENCES meetings(id) ON DELETE SET NULL` (`0001_initial.sql:123`, `foreign_keys=ON`). Deleting legacy meeting rows (5.1) silently detaches plans from their meeting; the plan and its FTS row survive (pinned by test). | `tests/lta-legacy-fixtures.test.mjs` |
 
 ---
 
@@ -90,7 +99,7 @@ The user wants one copy that is "live in the DB, archived to the Mac at app quit
 | `chat_sessions`, `chat_messages` | `0023_unified_chat_sessions.sql` | `kb/chat-sessions.mjs:33-158`; routes `routes/chat.mjs:21-125`; extension `src/lib/unified-chat.ts:35-128` | extension only (F8) | Stay as the live store of the extension chat; rows deleted at archive commit |
 | `agent_sessions` (C3) | `0029` | `kb/agent-sessions.mjs:40,66,88,102` | v2 engine | Purged at quit/sweep/delete |
 | `session_memory` (C4) | earlier migration, keyed by chat UUID without FK | `kb/session-memory.mjs:87,182` | v2 engine (`resolveChatSessionId` `:23`) | Purged with the session |
-| SDK transcript jsonl (C2) | `<dataDir>/agent-sdk/<userId>` or operator `~/.claude` | `llm_agent/sdk/transcripts.mjs` **(from K0, not re-read)**; deleted by `deleteSdkTranscripts` in `routes/agent-v2.mjs:751-770` | SDK resume | Purged with the session. Subscription turns write into the operator's `~/.claude` and cannot be deleted by this route (confirm T0, risk R9) |
+| SDK transcript jsonl (C2) | `<dataDir>/agent-sdk/<userId>` or operator `~/.claude` | `llm_agent/sdk/transcripts.mjs` **(from K0, not re-read)**; deleted by `deleteSdkTranscripts` in `routes/agent-v2.mjs:751-770` | SDK resume | Purged with the session. Subscription (ambient) turns write into the operator's `~/.claude`; `deleteSdkTranscripts` scans that root too (per file, by session id), so they are deletable (resolved in T0.2, F17) |
 | Live caption ring buffer | memory only, `agents/live-sessions.mjs:43-44` (2 000 captions, 30 min TTL) | `routes/live.mjs:36-60` | Mac mirror, extension remote views | Kept; deletion moves from "at finalize" to "at ack" |
 | `pending_agent_purges` | `0049` | `kb/db.mjs:955` | `kb/agent-jobs.mjs:43-57` | Pattern reused (3.5) |
 
@@ -229,7 +238,7 @@ Account delete: `deleteUserCascade` (`kb/db.mjs:946-1044`) must delete the new t
 
 1. Extension: `useLiveSync` pushes captions (existing). The draft (`transcriptDraft:<id>`) stays as a crash buffer.
 2. Stop: `POST /kb/live/:id/finalize` (existing). Server: **no longer deletes the crash row or the buffer at finalize**; it marks the session `finalized` and keeps it until acked (changes `live-sessions.mjs:231-249`).
-3. Mac: `LiveSessionMirror` sees `finalized`, posts `.liveSessionFinalized` (existing, `:264-305`); the existing note-generation path (receiver in AppShell, **not traced**, confirm T0) writes the file. New: after the file is written and verified, the Mac calls `POST /kb/live/:id/ack {noteKey, hash, lines}`.
+3. Mac: `LiveSessionMirror` sees `finalized`, posts `.liveSessionFinalized` (existing, `:264-305`); the receiver is `Shell/AppShell.swift:169`, which runs `generateNoteForLiveSession` (`:1197-1290`): it writes the file from the **mirror's in-memory captions**, calls `PartialRecovery.cleanup` unconditionally and sets `recoveryError` on failure (resolved in T0.2, F18). New: after the file is written and verified, the Mac calls `POST /kb/live/:id/ack {noteKey, hash, lines}`.
 4. Server on ack: delete the buffer and the crash `meetings` row, keep a 24 h ack tombstone `{id, ackedAt}` in memory + a row in a small `live_acks` table (survives restart; no content).
 5. Extension: after `finalize`, polls `GET /kb/live/:id/status` → `{state: live|finalized|acked|unknown}`; deletes its draft only on `acked`. On `unknown` (server restarted, tombstone gone) it keeps the draft and shows "not confirmed copied" instead of discarding (extension data-loss rule).
 6. Unacked sessions: eviction by TTL no longer deletes a finalized-but-unacked session (F3). The Mac at start calls `GET /kb/live/unacked` and writes files for any session found (adoption), then acks. The crash row is the only thing that survives a server restart, which is why it must not be dropped at finalize.
@@ -270,6 +279,28 @@ Account delete: `deleteUserCascade` (`kb/db.mjs:946-1044`) must delete the new t
 - **Open the app:** the service worker already calls `GET /launch-app?to=transcript` on the **server** (`service-worker.ts:18-19`, `server.mjs:683`), which needs the server up. A custom URL scheme for the Mac app (`DeepLinkRouter` exists in Shell) could launch it when the server is down; whether `llmide://` is registered in `Info.plist` and CORS/Chrome allows it is **not verified** (confirm T0, Q11).
 - A Mac app closed with an **adopted/dev server still running** is the one case where reads work with the Mac closed; archive-at-quit then never happens, so the sweep (next Mac start) owns it. Documented, not special-cased.
 
+**T0.1 verification (2026-10-29, read-only).** Every route in the first table exists in `extension/server.mjs` `ALL_ENDPOINTS` and is served by the file shown. All sit behind the same chain: `setCORS` (`server.mjs:522-553`) then `OPTIONS` answered 200 (`:589`) then `authenticate` (`server/auth.mjs:64-82`, bearer JWT, revocation checks) then per-(profile, user) rate limit then `handleKB` (`/kb*`, `/agent/v2*`). Public (no JWT): `/`, `/health`, `/auth/*` entry points and `/launch-app` (`auth.mjs:30-42`).
+
+| Route | Served at | Auth / limit | Extension caller | Status |
+|---|---|---|---|---|
+| `GET /kb/search` | `routes/router.mjs:274` (`kb.search`, kinds allowlist `:279-285`, limit cap 100) | JWT | `src/lib/kb.ts:89-98` | exists |
+| `POST /kb/conflict-questions` | `routes/router.mjs:1417` (`runClaude`, profile `llm`, `server.mjs:471`) | JWT | `kb.ts:114-125` | exists; **calls the model, not stored data** (history input is empty today, see 3.6 D) |
+| `GET /kb/stats` | `routes/router.mjs:440` -> `kb/meetings.mjs:271-318` (`computeStats`: counts of `meetings`, `entities`, `sources`, `plans`, `plan_tasks`, `review_items`, outcomes; 2 s TTL cache) | JWT | `kb.ts:128-133` (returns `null` on any failure) | exists; `meetings`/`entities` come from the legacy tables (F19) |
+| `POST /chat` | `server/ai-routes.mjs:348`, profile `llmFast` | JWT | `useChat.ts:145` | exists |
+| `/kb/chat/sessions*` | `routes/chat.mjs:21-125` | JWT | `src/lib/unified-chat.ts` | exists |
+| `GET /kb/live/sessions`, `/:id`, `/:id/stream`, `POST /:id/append`, `/:id/finalize` | `routes/live.mjs:33-173` (`liveAppend` rate profile) | JWT | `useRemoteSessions.ts:12`, `useRemoteTranscript.ts:30`, `useLiveSync.ts` | exists |
+| `GET /kb/agent/runs`, `/kb/agent/feedback/stats` | `routes/agent.mjs:103,324` | JWT | `useAgent.ts:87`, `AgentStatsBadge.tsx:26` | exists |
+| `GET /launch-app` | `server.mjs:683-757` (302 to `llmide://<tab>?session=`) | **public** | `src/background/service-worker.ts:18-19` | exists; needs the server up |
+
+CORS, exactly: an `Origin` is echoed (never `*`) with `Allow-Credentials: true` when it starts with `chrome-extension://` (**any extension id**, F16), `http(s)://localhost:`, `127.0.0.1:`, `[::1]:`, or is in `LLMIDE_CORS_ORIGINS` (`server.mjs:530-541`). Otherwise no ACAO header, so the browser blocks the response. Methods GET/POST/PUT/PATCH/DELETE/OPTIONS; headers `Content-Type, Authorization, X-Request-ID`. The Chrome extension origin therefore passes CORS and is limited only by the JWT. The server also needs the extension to be signed in as a user: tenancy is per `user_id`, so the Mac and the extension must use the same server account for the extension to see the Mac's notes and for the Mac to archive the extension's chat (Q17).
+
+On `ECONNREFUSED` the extension has three behaviours, none of which read stored data:
+- `authFetch` (`src/lib/config.ts:318-343`) rethrows the fetch error and counts a failure; after 5 consecutive failures a 10 s circuit breaker (`:295-300`) answers synthetic 503s without touching the network.
+- Health: `App.tsx:236-285` polls `GET /` with a timeout; a failure sets `serverOnline=false`, which renders "Can't reach the local server. Make sure `node server.mjs` is running." with Copy-command and Retry (`App.tsx:520-545`). The text is wrong for a Mac-managed server and is the banner the offline spec in 3.7 replaces.
+- Reads: `searchKB` throws, `getKBStats` swallows to `null`, `useChat` shows the error text and falls back to `chrome.storage.local` `chatMessages` (F15).
+
+`llmide://`: registered as `CFBundleURLSchemes` `llmide` and `meetnotes` in the `Info.plist` that `mac/Scripts/build.sh:241-252` writes, so **only a built `.app` registers it** (a raw `swift build` binary has no plist). Handled by `.onOpenURL` -> `DeepLinkRouter.handle` (`Shell/LlmIdeMacApp.swift:521`, `Shell/DeepLinkRouter.swift:44-47`, tabs allowlisted `:96-98`). The extension does not navigate to it directly: the service worker comment (`service-worker.ts:7-14`) says MV3 blocks it and uses the server's 302, which needs the server up, so **today there is no way to launch the app from the extension when the server is down**. Whether `chrome.tabs.create({url: 'llmide://...'})` works from the service worker is unverified without a browser (Q11).
+
 ### 3.8 The rebuildable index
 
 **Table** (migration `0050`):
@@ -308,6 +339,8 @@ CREATE TRIGGER trg_note_index_ad AFTER DELETE ON note_index BEGIN
 END;
 ```
 
+**Phase 0 correction (F12):** the update and delete triggers above scan the FTS table (UNINDEXED `meeting_id`). T1.1 must use the `0037` pattern: a `search_note_rowid(note_id PRIMARY KEY, search_rowid)` mapping filled by the insert trigger (`last_insert_rowid()`) and `DELETE FROM search WHERE rowid = (SELECT search_rowid ...)` in the update/delete triggers. The SQL above is the shape, not the final text.
+
 The `'n:'` prefix keeps legacy `meetings` ids and index ids from colliding during the shadow phase. No field exists that is not recomputable from the file: `note_key`, `title`, `date`, `duration`, `participants`, `meta.projectId` come from the frontmatter, `body_text` from the redacted body, `content_hash`/`mtime` from the file. **`hidden` is not stored**: the Mac does not feed hidden notes, which removes the non-rebuildable `hidden` bit from the index (knowledge-kit 5.1).
 
 **Feed: a Mac-driven reconcile, recommended over a Node file scan.**
@@ -333,12 +366,12 @@ Both satisfy "rebuild reads only Mac files". A first (smaller, safer), B only if
 
 | Call | Baseline | Budget |
 |---|---|---|
-| `search` p95 on 10 k rows | 22.8 to 27.5 ms | 50 ms (no regression: same FTS table) |
-| Single note upsert (server side) | not built | p95 20 ms |
-| Reconcile compare, 5 000 notes | not built | server under 300 ms, manifest about 300 KB |
-| Full rebuild, 5 000 notes of 20 KB | not built | under 60 s on the dev machine (T0.3 measures; `ingestSources` did 10 k rows of 2 KB in 5.0 s) |
+| `search` p95 on 10 k rows | 22.8 to 27.5 ms (knowledge-kit); **T0.3: 30 to 42 ms** on a denser corpus; **50 k rows: 182 to 260 ms** | 50 ms at 10 k (met); **at 50 k the budget is missed by about 4x: state a row ceiling or add a per-project filter before FTS (Q16)** |
+| Single note upsert (server side) | T0.3 proxy on `meetings`, 20 KB: insert p50 0.6 / p95 15 ms; update p50 55 / p95 79 ms (full FTS scan, F12) | p95 20 ms (needs the rowid-mapped triggers) |
+| Reconcile compare, 5 000 notes | T0.3 proxy (SQL scan + map compare): p95 2.4 to 3.3 ms; manifest 306 KiB | server under 300 ms (met with a wide margin; prune deletes not measured) |
+| Full rebuild, 5 000 notes of 20 KB | T0.3 proxy: 7.8 s server-side (batches of 100); Node file scan of 5 000 x 20 KB (95 MiB) 0.32 s warm; Swift `FolderIndexer` cold scan 8.3 s (debug build) and 0.16 s unchanged re-scan | under 60 s (met; the Swift parse dominates, so measure release in T2.1) |
 | Note finalize to searchable | today: after `ingestMeeting` POST | under 2 s, off the finalize path, best-effort |
-| Mac quit sequence | not built | whole `.terminateLater` window under 6 s, default reply on cap |
+| Mac quit sequence | **needs T4.1** (it cannot be timed without the async quit hook) | whole `.terminateLater` window under 6 s, default reply on cap; note `BackendManager.terminateSpawnedBackend` already blocks the main thread up to 5 s at `willTerminate` |
 
 ### 3.9 Redaction (R4) and the index
 
@@ -408,7 +441,7 @@ Dry-run report first: for each server meeting row, find the Mac file by `id` in 
 2. **Unmatched** (row exists, no Mac file; for example a capture whose file was removed): **export first** to `source/meetings/imported/YYYY/MM/<id>.md` (verified read-back), then eligible. Never delete an unmatched row without the export.
 3. **Mismatch** (file exists, text differs beyond redaction): keep both, report, ask.
 
-Safety rails before the first delete: `VACUUM INTO kb/backups/data-pre-lta-<ts>.db` (a time-boxed rollback copy, deleted by a job after 30 days; **a deliberate temporary exception to "one copy" that needs the user's yes, Q13**); the delete runs in batches of 100 in one transaction each; `entities` rows follow via `ON DELETE CASCADE` (`0001_initial.sql:21`); FTS rows follow via `trg_meetings_ad`. `plans`/`outcomes` do not reference `meetings` by FK in `0001` (only `entities` does; confirm T0 for later migrations).
+Safety rails before the first delete: `VACUUM INTO kb/backups/data-pre-lta-<ts>.db` (a time-boxed rollback copy, deleted by a job after 30 days; **a deliberate temporary exception to "one copy" that needs the user's yes, Q13**); the delete runs in batches of 100 in one transaction each; `entities` rows follow via `ON DELETE CASCADE` (`0001_initial.sql:21`); FTS rows follow via `trg_meetings_ad`. `outcomes` does not reference `meetings`; `entities` cascades and **`plans.meeting_id` is set to NULL** (`0001_initial.sql:123`, F20, pinned by `lta-legacy-fixtures.test.mjs`); no later migration adds another reference.
 
 N-1: an **old Mac** keeps POSTing `/kb/ingest`. The server keeps accepting it; once `LLMIDE_LTA_PURGE=1` the route writes `note_index` (redacted body, `note_key = 'legacy:' + id`) instead of `meetings`, so an old Mac does not recreate duplicates. A **new Mac against an old server** gets 404 on `/kb/index/*` and keeps its legacy `ingestMeeting` call (the pattern `AgentV2Selection.swift:222-228` already uses, from K0), because `lta.mode` falls back to `off` for that server.
 
@@ -434,12 +467,12 @@ Gates for every task: `make test` (extension, with `NODE_TEST_CONTEXT`), `make c
 
 ### Phase 0: verify and baseline (no behaviour change)
 
-**T0.1 Verify the extension's Mac-side API (S).** Confirm every route in 3.7 exists, its auth and CORS behaviour, and what the extension does on `ECONNREFUSED` (`kb.ts`, `useChat.ts`, `App.tsx:261`). Confirm `llmide://` registration and whether Chrome can launch it (Q11). Output: a table appended to this plan's section 3.7, no new file.
-**T0.2 Close the "not traced" items (S).** The AppShell receiver of `.liveSessionFinalized` and what writes the file for extension captures; `plans`/`outcomes` FKs to `meetings`; where a "meeting-attached chat" would be opened (none exists, F6); whether subscription turns write SDK transcripts outside the data dir (R9); `deleteSdkTranscripts` coverage; `/kb/stats` data source.
-**T0.3 Baselines (S).** Measure the 3.8 budget table on a seeded temp DB (10 k and 50 k notes) and a 5 000-note Mac corpus; quit sequence timing with 30 sessions.
-**T0.4 Old-format fixtures (M).** Real captured: a Mac `sessions/*.json` (with and without `engine`, `projectId`), a meeting `.md` with and without `platform`, a `data.db` with `meetings`+`entities`+FTS and `chat_sessions`. Needed by every migration test (K1a rule). `ChatSessionV1Fixtures.swift` is a seed (from K0).
+**T0.1 Verify the extension's Mac-side API (S). DONE (table in 3.7).** Confirm every route in 3.7 exists, its auth and CORS behaviour, and what the extension does on `ECONNREFUSED` (`kb.ts`, `useChat.ts`, `App.tsx:261`). Confirm `llmide://` registration and whether Chrome can launch it (Q11). Output: a table appended to this plan's section 3.7, no new file.
+**T0.2 Close the "not traced" items (S). DONE (section 11).** The AppShell receiver of `.liveSessionFinalized` and what writes the file for extension captures; `plans`/`outcomes` FKs to `meetings`; where a "meeting-attached chat" would be opened (none exists, F6); whether subscription turns write SDK transcripts outside the data dir (R9); `deleteSdkTranscripts` coverage; `/kb/stats` data source.
+**T0.3 Baselines (S). DONE except quit timing, which needs T4.1 (section 11).** Measure the 3.8 budget table on a seeded temp DB (10 k and 50 k notes) and a 5 000-note Mac corpus; quit sequence timing with 30 sessions.
+**T0.4 Old-format fixtures (M). DONE (section 11).** Real captured: a Mac `sessions/*.json` (with and without `engine`, `projectId`), a meeting `.md` with and without `platform`, a `data.db` with `meetings`+`entities`+FTS and `chat_sessions`. Needed by every migration test (K1a rule). `ChatSessionV1Fixtures.swift` is a seed (from K0).
 
-Exit: all "confirm T0" items resolved or turned into questions; baselines committed in the PR description.
+Exit: all "confirm T0" items resolved or turned into questions (done: section 11 and Q16 to Q21); baselines recorded in section 11. **Findings that change later phases:** F12 (T1.1 triggers must be rowid-mapped), F13 (T2.1 needs a decision on platform-less notes, Q19), F14 (N-1 rule for the new session keys, T4.2), F18 (T5.1 ack compares with the mirror's count and Mac write failure must be retried), F19/F20 (T3.1 stats re-point, T6.3 plan detach), 50k-row search (Q16).
 
 ### Phase 1: server foundations (additive, nothing wired)
 
@@ -522,7 +555,7 @@ Agent token estimate, at the plan's 0.4 to 0.7 M per task: about 11 to 19 M. If 
 | DL2 | **Finalized extension meeting only in server RAM until the Mac acks** (F3, exists today) | Ack protocol (T5.1); finalized-unacked never TTL-evicted; crash row retained; Mac adoption at start; extension keeps draft until `acked` |
 | DL3 | **Meeting-attached chat deleted at meeting end** is irreversible, and "meeting end" can fire by accident | Delete only after the meeting file verified; no deletion if the meeting is unfinished; optional 24 h grace (Q3, deviates from "no archive") |
 | DL4 | Quit archive skipped by crash, kill, power loss, OS shutdown time limit | Everything on the quit path is a derivative or already on disk (option B); the extension chat rows are not deleted before verified commit; sweep at next start |
-| DL5 | Purge of the SDK transcript removes the ability to resume with cache; **subscription turns** write into the operator's `~/.claude` that this route cannot delete | Documented cost (R2b); T0.2 checks coverage; if uncovered, those transcripts remain outside the DB and are reported (not a "second copy" the server owns) |
+| DL5 | Purge of the SDK transcript removes the ability to resume with cache; **subscription turns** write into the operator's `~/.claude`, which `deleteSdkTranscripts` also scans (F17) | Documented cost (R2b); coverage resolved in T0.2 (F17); legacy `claude -p` turns outside the agent-v2 mapping are not keyed to a chat id and are not purged |
 | DL6 | Index drift becomes a second copy of note text | Reconcile + drop-and-rebuild proof test + counts invariant; body is derived and redacted; `hidden` never indexed |
 | DL7 | Old duplicate migration deletes the only copy (unmatched rows) | Export-before-delete, dry-run, backup (`VACUUM INTO`), batched, rollback drill (T6.4) |
 | DL8 | Sign-out wipe (F10) destroys finished chats | Archive-then-wipe or never wipe (Q5); recommended never wipe |
@@ -558,19 +591,28 @@ Rows the **plan cannot** protect: a user who deletes the project folder or the M
 | Q13 | Allow the **time-boxed** `data-pre-lta` backup (30 days) as a deliberate exception to one copy? | yes; no (rollback = rebuild from files only, no restore of unmatched rows) | yes, 30 days, deleted by a job |
 | Q14 | Metadata stays on the server (R7) | confirm; move some | confirm |
 | Q15 | Plans (R6) | out of scope; files single copy; server rows stay | out of scope for this plan |
+| Q16 | **(T0.3)** Search latency at 50 k notes is 182 to 260 ms against a 50 ms budget (10 k: 30 to 42 ms). Is a ceiling acceptable? | state a supported ceiling (10 k to 20 k notes per user); filter by project before FTS; accept | state the ceiling in docs and add a project pre-filter only if a real corpus is near it (a 5 000-note Mac corpus is far below) |
+| Q17 | **(T0.1)** Must the Mac and the extension be signed in as the **same server account**? Archive, index and search are per `user_id`. | same account required (document, detect and show a banner); allow different | required; detect a mismatch (extension `/auth/me` vs the Mac's user) and show it |
+| Q18 | **(T0.1/F15)** The extension still keeps a local chat copy (`chatMessages`, 200 msgs) when the server is unreachable. Keep as a crash buffer, or remove to honour "stores nothing"? | keep as buffer until the server accepts it, then delete; remove (chat fails closed offline) | remove with Phase 5 (rule 5), and show the offline banner |
+| Q19 | **(T0.2/F13)** Notes without `platform` frontmatter are invisible to Library and to the index. | tolerant decode (default platform) as its own small Mac task before Phase 2; leave and report the count in the Storage hub | tolerant decode first; it is a product change, so it is not done in Phase 0 |
+| Q20 | **(T0.2)** A meeting-attached chat has no place to live: `ChatEngineRegistry` holds one displayed engine per `ChatScope` and `ChatPanelRequest` carries no session id, and Library's meeting detail embeds no chat today. | new scope `.meeting` (enum fan-out into `ChatScope+Shell` and mobile lists); `.quick`/`.explorer` session tagged `meetingId`, opened with `switchDisplayedSession` and a `ChatPanelRequest.meetingId` | a `ChatPanelRequest.meetingId` plus a keyed engine in the registry (Q3 stays the field; this decides the seam) |
+| Q21 | **(T0.2)** Does macOS give `.terminateLater` enough time at logout/shutdown? Unverified (no Apple docs tool in this session). | measure in T4.1 on logout, restart and Cmd-Q; accept that logout may cut the 6 s cap | measure in T4.1; the sweep is the guarantee either way |
+| Q22 | **(T0.1/F16)** Pin the extension origin to one id? CORS allows every `chrome-extension://*`. | pin via `LLMIDE_CORS_ORIGINS` and drop the prefix rule; leave (JWT is the gate) | leave for this plan (separate security task), now that the extension reads all notes |
 
 ---
 
 ## 9. What I could not verify
 
-- Nothing was run; no real `data.db`, Mac store or token bench was opened. The latency budgets are design numbers except the knowledge-kit baselines (also from a synthetic corpus).
-- The AppShell receiver of `.liveSessionFinalized` and exactly what writes the file for an extension capture (F2 shows the notification, not the writer).
-- Whether `llmide://` is registered and launchable from the extension.
-- Whether subscription turns' SDK transcripts (operator `~/.claude`) are deletable through `deleteSdkTranscripts`.
-- `plans`/`outcomes` foreign keys to `meetings` after `0001`; the `/kb/stats` data source; the SDK transcript module `llm_agent/sdk/transcripts.mjs` line numbers (from K0, not re-read).
-- Line numbers for the extension's `storage.ts` writers (from K0).
-- That every `.liveSessionFinalized` consumer tolerates a later ack call (the Library path was not read).
-- That macOS lets a `.terminateLater` window run for 6 s on logout/restart (it may not; the sweep is the guarantee).
+Resolved in Phase 0 and removed from this list: the AppShell receiver and file writer (F18), the `plans`/`outcomes` FKs (F20), SDK transcript coverage (F17), the `/kb/stats` source (F19), the `llmide://` registration, and the `AppDelegate`/`AppTerminationHooks` structure (section 11).
+
+Still open after Phase 0:
+- Nothing in Phase 0 opened a real `data.db`, Mac store or token bench; the numbers are synthetic and from one machine (section 11). `search` at 10 k rows is denser than the knowledge-kit corpus, so compare only the ratio.
+- That Chrome lets the extension open `llmide://` directly from the service worker (Q11), and whether a prompt appears. Needs a browser.
+- That macOS gives `.terminateLater` a 6 s window at logout/restart (Q21). Quit timing with 30 sessions needs the async hook (T4.1).
+- Whether the Mac and extension are signed in as the same account in practice (Q17).
+- That every `.liveSessionFinalized` consumer tolerates a later ack call: only AppShell consumes it (`grep`: one `onReceive`), so this is likely true, but the ack call is new and untested.
+- Swift timing was a debug build; a release number is needed in T2.1.
+- Line numbers for the extension's `storage.ts` writers are still from K0.
 
 ## 10. Notes for the implementer
 
@@ -579,3 +621,40 @@ Rows the **plan cannot** protect: a user who deletes the project folder or the M
 - Every state-mutating server helper takes `userId` first; the tombstone and `live_acks` tables use `owner_user_id`/no user column on purpose (3.5).
 - Order within each phase: server, then Mac, then extension, because old clients must keep working (N-1) and every route is additive until Phase 6.
 - Commit on `main`, no branches, Conventional Commits, one concern per commit, do not push.
+
+## 11. Phase 0 evidence (2026-10-29)
+
+**Commits:** bench `5848da7c`, server fixtures `a7982977`, Mac fixtures `f6f3ab98`, plan edits in the commit that adds this section.
+
+**Machine:** Apple M3 Pro, 11 cores, 18 GiB, macOS 26.6.2 (Darwin 25.6.0 arm64), Node 22.23.1, 25 GiB free on the data volume. Synthetic data only, throwaway DB under the temp dir, real data never opened.
+
+**T0.2 resolutions**
+- `.liveSessionFinalized`: posted by `LiveSessionMirror` (`:306`), received at `Shell/AppShell.swift:169`, written by `generateNoteForLiveSession` (`:1197-1290`): `MeetingFileStore.createPartial` (platform `chrome-extension`) then `appendCaption` per mirrored caption, `finalize`, `PartialRecovery.cleanup` (unconditional), `indexer.fullScan`, then the summary. No `ingestMeeting`. See F18, F19.
+- FKs: only `entities.meeting_id` (CASCADE) and `plans.meeting_id` (SET NULL) reference `meetings` (migrations grep). F20.
+- Meeting-attached chat seam: none exists. `ChatScope` (`Core/Contracts/ChatScope.swift:12-18`) has no meeting case, `ChatPanelRequest` (`Core/Contracts/ChatPanelProviding.swift:11-22`) has no id, `ChatEngineRegistry.engine(for:)` (`:133`) returns one displayed engine per scope, and only Review, Explorer, Visual and DocGen embed `ChatPanelView`. A `meetingId` can go on `ChatSession` (decode-tolerant) and `ChatPanelRequest`, opened from `Features/Library/Views/MeetingDetailView.swift`. Q20.
+- SDK transcripts: `agent-v2` routes to `deleteSdkTranscripts` (`routes/agent-v2.mjs:751-770`), which scans the per-user home (`config.agentSdkDir/<userId>`, default next to the DB) and the ambient `CLAUDE_CONFIG_DIR`/`~/.claude`, per file by session id. F17.
+- `/kb/stats`: `kb.stats` -> `computeStats` (`kb/meetings.mjs:295-318`), counts from `meetings`, `entities`, `sources`, `plans`, `plan_tasks`, `review_items` and outcomes. F19.
+- Quit structure confirmed: `applicationShouldTerminate` is a synchronous drafts confirm (`AppDelegate.swift:98-101`); `applicationWillTerminate` runs `IncidentStore.flushPendingSave()` then `AppTerminationHooks.runAll()` (`:171-176`); the only registered hook is Chat's `flushAll` (`LlmIdeMacApp.swift:199`); `BackendManager` observes `willTerminate` and runs `terminateSpawnedBackend()`, which SIGTERMs the child and **blocks the main thread up to 5 s** before SIGKILL (`BackendManager.swift:207-246`).
+
+**T0.3 numbers** (`node extension/scripts/bench-note-index.mjs`; 2 KB transcripts, `meetings` as proxy for the unbuilt `note_index`; 5 queries, 20 runs each, `kind=meeting`, limit 20; times in ms)
+
+| | 10 000 rows | 50 000 rows |
+|---|---|---|
+| seed (s) / DB size | 2.5 s / 128 MiB | 12.2 s / 634 MiB |
+| search "budget review" p50 / p95 | 29.7 / 30.0 | 208 / 260 |
+| "rollback" | 29.5 / 32.0 | 179 / 190 |
+| "ab" (2 chars, LIKE path) | 34.0 / 34.5 | 177 / 182 |
+| "予算" (CJK, 2 chars) | 37.2 / 38.2 | 204 / 213 |
+| "設計 見積" | 41.3 / 41.7 | 222 / 232 |
+| search without `kind` | 22.2 / 23.4 | 125 / 209 |
+| empty query (list newest 100) | 0.1 / 0.3 | 0.1 / 0.2 |
+| hydrate `getMeeting` by id | < 0.1 | < 0.1 |
+| reconcile compare, 5 000 notes | 1.8 / 3.3 | 1.8 / 2.4 |
+
+Other: 20 KB upsert insert p50 0.6 / p95 15.2; update p50 55.4 / p95 79.1 (at about 60 k rows, F12); rebuild 5 000 x 20 KB in batches of 100: 7.8 s; Node scan of 5 000 files / 95 MiB: 0.32 s warm (corpus write 1.3 s); Swift debug `FolderIndexer.fullScan` of 5 000 x 20 KB: cold 8.3 s, unchanged re-scan 0.16 s (`LTA_BENCH_NOTES=5000 swift test --filter LtaOldFormatFixtureTests`). Quit sequence with 30 sessions: **needs T4.1** (no async hook exists; timing the synchronous flush alone would say nothing about the new path). Search scales roughly linearly with rows (5x rows, 6x latency), so the 50 ms budget holds only up to about 10 k to 12 k notes (Q16).
+
+**T0.4 fixtures**
+- `extension/tests/fixtures/lta/build-legacy-db.mjs` (`seedLegacyDb(userId)`): built through the real migrations and helpers (`ingestMeeting`, `savePlan`, `createChatSession`/`appendChatMessage`, agent session mapping, session memory): 3 meetings (English with entities, Japanese, one with a redacted secret), a plan linked to a meeting, an extension chat with 2 messages, a Mac chat id with an `agent_sessions` row and a memory fact. Tests: `extension/tests/lta-legacy-fixtures.test.mjs` (3 pass).
+- `mac/Tests/LlmIdeMacTests/Fixtures/lta/`: `session-v2-engine-project.json`, `session-v2-no-engine-no-project.json` (written by `AppJSON.encoder`), `meeting-with-platform.md`, `meeting-without-platform.md` (written by `FrontmatterCoder`, then the `platform` line removed). Tests: `LtaOldFormatFixtureTests` (8 pass), regenerate with `LLMIDE_REGEN_LTA_FIXTURES=1`. They pin: both session shapes decode; unknown keys are dropped on re-save (F14); a note without `platform` fails to decode and `fullScan` skips it (F13).
+- A real-DB-derived fixture was deliberately not made (the real data must not be opened); the K1a rule "real captured" is met by encoder-generated files, so a captured sample from the user's machine remains a nice-to-have before T6.3.
+
