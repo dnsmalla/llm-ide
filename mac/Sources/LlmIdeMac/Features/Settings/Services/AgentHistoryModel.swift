@@ -90,6 +90,38 @@ enum AgentHistoryMessages {
     }
 }
 
+/// Which rows a Clear covers by age. `all` sends no `beforeDays`; the others send the cutoff, in days,
+/// that the server's `beforeDays` (0...3650) takes.
+enum AgentHistoryClearAge: Hashable, CaseIterable, Sendable {
+    case all
+    case olderThan7
+    case olderThan30
+    case olderThan90
+
+    var beforeDays: Int? {
+        switch self {
+        case .all: return nil
+        case .olderThan7: return 7
+        case .olderThan30: return 30
+        case .olderThan90: return 90
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .all: return "All"
+        case .olderThan7: return "Older than 7 days"
+        case .olderThan30: return "Older than 30 days"
+        case .olderThan90: return "Older than 90 days"
+        }
+    }
+
+    /// Sentence fragment for the sheet title and hints.
+    var phrase: String {
+        beforeDays.map { "older than \($0) days" } ?? "all"
+    }
+}
+
 /// Parses the ISO-8601 times the server sends, with or without fractional seconds.
 enum AgentHistoryDates {
     static func parse(_ iso: String) -> Date? {
@@ -140,6 +172,8 @@ final class AgentHistoryModel: ObservableObject {
     @Published private(set) var clearPhase: ClearPhase = .idle
     /// Set only when a stale preview was counted again successfully.
     @Published private(set) var clearNotice: String?
+    /// The age choice of the Clear in progress (or the last one). Changing it through `setClearAge` re-runs the preview.
+    @Published private(set) var clearAge: AgentHistoryClearAge = .all
     @Published private(set) var compacting = false
     @Published private(set) var compactMessage: String?
     @Published private(set) var compactIsError = false
@@ -202,9 +236,26 @@ final class AgentHistoryModel: ObservableObject {
     /// Step one: a dry run. Opens the sheet with the counts; deletes nothing.
     /// Ignored while a Clear step is already running, so overlapping taps
     /// cannot start two dry runs.
-    func beginClear(scope: LlmIdeAPIClient.AgentHistoryClearScope) async {
+    func beginClear(scope: LlmIdeAPIClient.AgentHistoryClearScope, age: AgentHistoryClearAge = .all) async {
         guard clearPhase == .idle else { return }
+        clearAge = age
         await runClearStep { gen in await self.previewStep(scope, gen: gen, notice: nil) }
+    }
+
+    /// The user picked another age in the open sheet. The old preview no longer describes what would be
+    /// deleted, so it is dropped and the history is counted again; the confirm button only ever sends the
+    /// id of a preview made for the current choice. Ignored while counting or deleting.
+    func setClearAge(_ age: AgentHistoryClearAge) async {
+        guard age != clearAge else { return }
+        switch clearPhase {
+        case let .confirming(scope, _), let .previewing(scope):
+            clearAge = age
+            // Drop the old preview at once, so a confirm tap cannot pair its id with the new choice.
+            clearPhase = .previewing(scope)
+            await runClearStep { gen in await self.previewStep(scope, gen: gen, notice: nil) }
+        default:
+            return
+        }
     }
 
     /// Step two: the real clear, with the preview's id. On a stale, expired or
@@ -256,7 +307,7 @@ final class AgentHistoryModel: ObservableObject {
         clearPhase = .previewing(scope)
         clearNotice = nil
         do {
-            let preview = try await api.previewAgentHistoryClear(scope: scope, beforeDays: nil)
+            let preview = try await api.previewAgentHistoryClear(scope: scope, beforeDays: clearAge.beforeDays)
             guard gen == generation else { return }
             guard preview.previewId != nil else {
                 clearPhase = .failed("The server did not return a preview. Nothing was deleted.")
@@ -274,7 +325,7 @@ final class AgentHistoryModel: ObservableObject {
                              previewId: String, gen: Int) async {
         clearPhase = .clearing(scope)
         do {
-            let result = try await api.performAgentHistoryClear(scope: scope, beforeDays: nil, previewId: previewId)
+            let result = try await api.performAgentHistoryClear(scope: scope, beforeDays: clearAge.beforeDays, previewId: previewId)
             guard gen == generation else { return }
             clearPhase = .cleared(result)
             await refreshReport()

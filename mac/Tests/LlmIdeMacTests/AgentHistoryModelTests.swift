@@ -51,6 +51,8 @@ final class AgentHistoryModelTests: XCTestCase {
         var compact: Result<LlmIdeAPIClient.AgentHistoryCompactResult, Error>?
         private(set) var storageCalls = 0
         private(set) var previewCalls: [Scope] = []
+        private(set) var previewBeforeDays: [Int?] = []
+        private(set) var performBeforeDays: [Int?] = []
         private(set) var performedIds: [String] = []
         private(set) var retentionSaves: [Int] = []
 
@@ -70,11 +72,13 @@ final class AgentHistoryModelTests: XCTestCase {
         }
         func previewAgentHistoryClear(scope: Scope, beforeDays: Int?) async throws -> Result_ {
             previewCalls.append(scope)
+            previewBeforeDays.append(beforeDays)
             if let previewGate { await previewGate.wait() }
             return try previews.removeFirst().get()
         }
         func performAgentHistoryClear(scope: Scope, beforeDays: Int?, previewId: String) async throws -> Result_ {
             performedIds.append(previewId)
+            performBeforeDays.append(beforeDays)
             if let performGate { await performGate.wait() }
             return try performs.removeFirst().get()
         }
@@ -419,5 +423,87 @@ final class AgentHistoryModelTests: XCTestCase {
         XCTAssertNotNil(AgentHistoryDates.parse("2026-10-28T09:00:00.000Z"))
         XCTAssertNotNil(AgentHistoryDates.parse("2026-10-28T09:00:00Z"))
         XCTAssertNil(AgentHistoryDates.parse("yesterday"))
+    }
+
+    // MARK: - Clear by age
+
+    func testDefaultClearSendsNoCutoff() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [.success(Self.preview(total: 1, id: "a"))]
+        api.performs = [.success(Self.deleted(total: 1))]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw)
+        await model.confirmClear()
+        XCTAssertEqual(api.previewBeforeDays, [nil])
+        XCTAssertEqual(api.performBeforeDays, [nil])
+    }
+
+    func testAgeChoiceReachesPreviewAndRealClear() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [.success(Self.preview(total: 2, id: "a"))]
+        api.performs = [.success(Self.deleted(total: 2))]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw, age: .olderThan30)
+        XCTAssertEqual(api.previewBeforeDays, [30])
+        await model.confirmClear()
+        XCTAssertEqual(api.performBeforeDays, [30])
+        XCTAssertEqual(api.performedIds, ["a"])
+    }
+
+    func testChangingTheAgeRerunsThePreviewAndConfirmUsesTheNewId() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [.success(Self.preview(total: 9, id: "all")), .success(Self.preview(total: 3, id: "d7"))]
+        api.performs = [.success(Self.deleted(total: 3))]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw)
+        await model.setClearAge(.olderThan7)
+        XCTAssertEqual(api.previewBeforeDays, [nil, 7])
+        XCTAssertEqual(model.clearPhase, .confirming(.raw, Self.preview(total: 3, id: "d7")))
+        await model.confirmClear()
+        XCTAssertEqual(api.performedIds, ["d7"], "the old preview's id must never pair with the new age")
+        XCTAssertEqual(api.performBeforeDays, [7])
+    }
+
+    func testChangingTheAgeDropsTheOldPreviewImmediately() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [.success(Self.preview(total: 9, id: "all")), .success(Self.preview(total: 3, id: "d90"))]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw)
+        let gate = Gate()
+        api.previewGate = gate
+        let change = Task { await model.setClearAge(.olderThan90) }
+        await waitUntil { model.clearPhase == .previewing(.raw) }
+        await model.confirmClear()            // no preview to confirm while counting
+        XCTAssertTrue(api.performedIds.isEmpty)
+        gate.open()
+        await change.value
+        XCTAssertEqual(model.clearPhase, .confirming(.raw, Self.preview(total: 3, id: "d90")))
+    }
+
+    func testSettingTheSameAgeOrOutsideTheSheetDoesNothing() async throws {
+        let api = FakeAPI(report: try Self.report())
+        let model = makeModel(api)
+        await model.setClearAge(.olderThan7)          // sheet closed
+        XCTAssertTrue(api.previewBeforeDays.isEmpty)
+        XCTAssertEqual(model.clearPhase, .idle)
+        api.previews = [.success(Self.preview(total: 1, id: "a"))]
+        await model.beginClear(scope: .raw)
+        await model.setClearAge(.all)                 // same choice
+        XCTAssertEqual(api.previewBeforeDays, [nil])
+    }
+
+    func testStalePreviewRecountKeepsTheAge() async throws {
+        let api = FakeAPI(report: try Self.report())
+        api.previews = [.success(Self.preview(total: 3, id: "a")), .success(Self.preview(total: 2, id: "b"))]
+        api.performs = [.failure(Self.staleError())]
+        let model = makeModel(api)
+        await model.beginClear(scope: .raw, age: .olderThan90)
+        await model.confirmClear()
+        XCTAssertEqual(api.previewBeforeDays, [90, 90])
+    }
+
+    func testAgeWording() {
+        XCTAssertEqual(AgentHistoryClearAge.allCases.map(\.beforeDays), [nil, 7, 30, 90])
+        XCTAssertEqual(AgentHistoryClearAge.olderThan30.phrase, "older than 30 days")
     }
 }
