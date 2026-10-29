@@ -211,6 +211,37 @@ for (const n of sizes) {
   results.corpusScanNode = { writeCorpusSec: r1(writeSec), warm: scan(), warm2: scan() };
 }
 
+// note_index trigger path (live-then-archive T1.1, F12): 10 000 seeded rows of
+// 2 KiB, then 200 updates and 200 inserts of 20 KiB bodies through the real
+// AFTER UPDATE / AFTER INSERT triggers (rowid-mapped FTS). Budget: p95 under 20 ms.
+{
+  const ni = d.prepare('INSERT INTO note_index (user_id, project_id, note_key, title, date, body_text, content_hash, mtime_ms) VALUES (?,?,?,?,?,?,?,?)');
+  const small = text(2048);
+  d.transaction(() => {
+    for (let i = 0; i < 10000; i++) ni.run(U, 'p0', `seed/${i}.md`, `seed ${i}`, '2026-01-01T00:00:00.000Z', small, `s${i}`, i);
+  })();
+  const upd = d.prepare('UPDATE note_index SET body_text = ?, content_hash = ? WHERE user_id = ? AND project_id = ? AND note_key = ?');
+  const bodies = Array.from({ length: 200 }, () => text(20 * 1024));
+  const updMs = bodies.map((b, i) => {
+    const a = performance.now();
+    upd.run(b, `u${i}`, U, 'p0', `seed/${i}.md`);
+    return performance.now() - a;
+  });
+  const insMs = bodies.map((b, i) => {
+    const a = performance.now();
+    ni.run(U, 'p0', `new/${i}.md`, `new ${i}`, '2026-01-02T00:00:00.000Z', b, `n${i}`, i);
+    return performance.now() - a;
+  });
+  results.noteIndex10k = {
+    rows: 10000,
+    update20KiB: summ(updMs),
+    insert20KiB: summ(insMs),
+    budgetP95Ms: 20,
+    ftsRowsMatchNotes: d.prepare("SELECT COUNT(*) AS n FROM search WHERE meeting_id LIKE 'n:%'").get().n
+      === d.prepare('SELECT COUNT(*) AS n FROM note_index').get().n,
+  };
+}
+
 cleanup();
 if (jsonOnly) console.log(JSON.stringify(results));
 else console.log(JSON.stringify(results, null, 2));

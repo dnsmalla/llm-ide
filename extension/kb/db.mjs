@@ -977,6 +977,13 @@ export function deleteUserCascade(userId) {
     counts.agent_ask_messages = del('DELETE FROM agent_ask_messages WHERE user_id = ?');
     counts.chat_messages = del('DELETE FROM chat_messages WHERE user_id = ?');
     counts.chat_sessions = del('DELETE FROM chat_sessions WHERE user_id = ?');
+    // migration 0050 — derived note index (FTS rows follow by trigger), and the
+    // live-then-archive tombstones and ack ledger, which carry owner_user_id
+    // (not user_id: see the header of 0049/0050). Removed here so an account
+    // delete leaves no per-user row behind.
+    counts.note_index = del('DELETE FROM note_index WHERE user_id = ?');
+    counts.pending_session_purges = del('DELETE FROM pending_session_purges WHERE owner_user_id = ?');
+    counts.live_acks = del('DELETE FROM live_acks WHERE owner_user_id = ?');
     counts.refresh_tokens  = del('DELETE FROM refresh_tokens WHERE user_id = ?');
     // migration 0008 — password-reset tokens are tied to a user; if we
     // skip these the column hangs as a dangling reference after the

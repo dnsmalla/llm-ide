@@ -167,6 +167,7 @@ test('cascade is transactional — counts add up across every table', () => {
     'agent_feedback', 'agent_ask_messages', 'refresh_tokens',
     'email_seen', 'email_state', 'slack_seen', 'slack_state',
     'activity', 'activity_seen',
+    'note_index', 'pending_session_purges', 'live_acks',
     'audit_anonymised', 'user',
   ];
   for (const k of expectedKeys) {
