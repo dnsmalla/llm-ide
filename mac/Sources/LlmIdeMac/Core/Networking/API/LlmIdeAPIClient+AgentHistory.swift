@@ -62,11 +62,24 @@ extension LlmIdeAPIClient {
         public let groups: [StorageGroup]
         public let agentHistory: AgentHistorySummary?
         public let agentStore: AgentStoreHealth
+        /// Counts from the last shadow comparisons; absent when the store could not be read or the server is older.
+        public let shadow: ShadowReport?
 
         /// The agent history group, when the server sent one.
         public var agentHistoryGroup: StorageGroup? {
             groups.first { $0.key == "agent_history" }
         }
+    }
+
+    /// The `shadow` block of the storage report: one section per comparison. Only the state and time are read; the
+    /// per-comparison counts are for diagnostics and stay in the wire shape.
+    public struct ShadowReport: Codable, Equatable, Sendable {
+        public struct Section: Codable, Equatable, Sendable {
+            public let state: String
+            public let at: String?
+        }
+        public let usage: Section?
+        public let noteIndex: Section?
     }
 
     /// GET and PUT /kb/agent-history/settings. `retentionDays` is clamped by the
