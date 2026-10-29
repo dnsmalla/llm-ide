@@ -255,7 +255,15 @@ export default function App() {
   // now — the extension just captures and supports the AI surfaces
   // (notes, agent questions, chat).
 
-  const unconfirmed = draftRelease.reports.filter((r) => r.outcome !== 'released' && r.outcome !== 'active' && r.outcome !== 'retained' && r.outcome !== 'too-large' && r.outcome !== 'storage-error' && r.outcome !== 'blocked-full');
+  const unconfirmed = draftRelease.reports.filter(
+    (r) =>
+      r.outcome !== 'released' &&
+      r.outcome !== 'active' &&
+      r.outcome !== 'retained' &&
+      r.outcome !== 'too-large' &&
+      r.outcome !== 'storage-error' &&
+      r.outcome !== 'blocked-full',
+  );
 
   const checkServer = useCallback(async () => {
     try {
@@ -581,12 +589,24 @@ export default function App() {
             {unconfirmed.length === 1
               ? '1 capture is kept here until the Mac app confirms it has a copy.'
               : `${unconfirmed.length} captures are kept here until the Mac app confirms they have a copy.`}
-            {unconfirmed.some((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed' || r.outcome === 'partial' || r.outcome === 'partial-acked')
+            {unconfirmed.some(
+              (r) =>
+                r.outcome === 'not-confirmed' ||
+                r.outcome === 'resend-failed' ||
+                r.outcome === 'partial' ||
+                r.outcome === 'partial-acked',
+            )
               ? ' Some are not confirmed copied.'
               : ''}
           </span>
           {unconfirmed
-            .filter((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed' || r.outcome === 'partial' || r.outcome === 'partial-acked')
+            .filter(
+              (r) =>
+                r.outcome === 'not-confirmed' ||
+                r.outcome === 'resend-failed' ||
+                r.outcome === 'partial' ||
+                r.outcome === 'partial-acked',
+            )
             .map((r) => (
               <button
                 key={r.id}

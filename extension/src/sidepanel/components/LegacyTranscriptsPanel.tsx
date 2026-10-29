@@ -106,11 +106,7 @@ export default function LegacyTranscriptsPanel() {
         <button className="btn btn-sm" disabled={running || selected.size === 0} onClick={copy}>
           {running ? 'Copying…' : `Copy ${selected.size || ''} to Mac`}
         </button>
-        <button
-          className="btn btn-sm"
-          disabled={running}
-          onClick={() => setSelected(new Set(items.map((t) => t.id)))}
-        >
+        <button className="btn btn-sm" disabled={running} onClick={() => setSelected(new Set(items.map((t) => t.id)))}>
           Select all
         </button>
       </div>

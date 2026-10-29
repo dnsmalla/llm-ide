@@ -224,10 +224,16 @@ export async function expectedOf(c: CaptureLike, now = Date.now()): Promise<Expe
   const stamps = captions.map((x) => x.ts).filter((t) => Number.isFinite(t) && t >= MIN_TS && t <= now + 5 * 60_000);
   if (stamps.length > 0) payload.startedAt = Math.min(...stamps);
   if (c.language && LANG_RE.test(c.language)) payload.language = c.language;
-  if (Number.isFinite(c.duration) && c.duration >= 0 && c.duration <= 7 * 24 * 3600) payload.durationSec = Math.round(c.duration);
+  if (Number.isFinite(c.duration) && c.duration >= 0 && c.duration <= 7 * 24 * 3600)
+    payload.durationSec = Math.round(c.duration);
   const lines = countLines(captions);
   const bytes = new TextEncoder().encode(JSON.stringify(payload)).length;
-  return { payload, lines, captionHash: await captionHash(captions), tooLarge: lines > SERVER_MAX_CAPTIONS || bytes > MAX_BODY_BYTES };
+  return {
+    payload,
+    lines,
+    captionHash: await captionHash(captions),
+    tooLarge: lines > SERVER_MAX_CAPTIONS || bytes > MAX_BODY_BYTES,
+  };
 }
 
 /** The server's copy equals what we would send (lines, hash, language, start). */
@@ -266,12 +272,22 @@ export function setDraftStage(area: StorageArea, id: string, stage: DraftStage, 
 function markResent(area: StorageArea, id: string, now: number): Promise<void> {
   return locked(async () => {
     const cur = readStage((await area.get(STAGE_PREFIX + id)) ?? {}, id);
-    await area.set({ [STAGE_PREFIX + id]: { stage: cur?.stage ?? 'recording', at: cur?.at ?? now, resentAt: now } satisfies StageRecord });
+    await area.set({
+      [STAGE_PREFIX + id]: {
+        stage: cur?.stage ?? 'recording',
+        at: cur?.at ?? now,
+        resentAt: now,
+      } satisfies StageRecord,
+    });
   });
 }
 
 /** Writes (or refreshes) the draft. A no-op once the capture was released. Rejects on a storage error. */
-export function saveTranscriptDraft(area: StorageArea, input: Omit<Draft, 'updatedAt'>, now = Date.now()): Promise<void> {
+export function saveTranscriptDraft(
+  area: StorageArea,
+  input: Omit<Draft, 'updatedAt'>,
+  now = Date.now(),
+): Promise<void> {
   return locked(async () => {
     const stageRec = readStage((await area.get(STAGE_PREFIX + input.id)) ?? {}, input.id);
     if (stageRec?.stage === 'released') return;
@@ -433,7 +449,8 @@ export async function stopCapture(
   } catch {
     send = 'failed';
   }
-  if (storageError) memoryCaptures.set(snap.id, { draft: snap, stage: send === 'sent' ? 'awaiting-ack' : 'finalizing' });
+  if (storageError)
+    memoryCaptures.set(snap.id, { draft: snap, stage: send === 'sent' ? 'awaiting-ack' : 'finalizing' });
   return { storageError, send };
 }
 
@@ -461,7 +478,8 @@ export async function resendDraft(
   if (stage === 'recording' && st.state === 'acked') return 'refused';
   // Someone may still be recording it.
   if (stage === 'recording' && st.state === 'live' && now - draft.updatedAt < DRAFT_STALE_MS) return 'refused';
-  if ((stage === 'recording' || stage === 'finalizing') && (await retainedCount(area)) >= MAX_RETAINED) return 'blocked-full';
+  if ((stage === 'recording' || stage === 'finalizing') && (await retainedCount(area)) >= MAX_RETAINED)
+    return 'blocked-full';
   await setDraftStage(area, draft.id, 'finalizing', now);
   await markResent(area, draft.id, now);
   const r = await api.finalize(draft.id, exp.payload);
@@ -506,7 +524,8 @@ export interface ReconcileOptions {
 function mayAutoResend(draft: Draft, rec: StageRecord | null, opts: ReconcileOptions, now: number): boolean {
   if (opts.autoResend === false) return false;
   if (rec?.resentAt && now - rec.resentAt < RESEND_BACKOFF_MS) return false;
-  if (draft.owner && opts.panelId && draft.owner !== opts.panelId && now - draft.updatedAt < DRAFT_STALE_MS) return false;
+  if (draft.owner && opts.panelId && draft.owner !== opts.panelId && now - draft.updatedAt < DRAFT_STALE_MS)
+    return false;
   return true;
 }
 
@@ -525,7 +544,8 @@ async function flushMemory(area: StorageArea, api: LiveApi, now: number, reports
       try {
         const exp = await expectedOf(m.draft, now);
         const r = await api.finalize(id, exp.tooLarge ? undefined : exp.payload);
-        if (r.ok && !exp.tooLarge && r.captionCount === exp.lines && r.captionHash === exp.captionHash) m.stage = r.ackRequired ? 'awaiting-ack' : 'no-ack';
+        if (r.ok && !exp.tooLarge && r.captionCount === exp.lines && r.captionHash === exp.captionHash)
+          m.stage = r.ackRequired ? 'awaiting-ack' : 'no-ack';
       } catch {
         /* retry next pass */
       }
@@ -661,7 +681,7 @@ async function pruneMarkers(area: StorageArea, now: number): Promise<void> {
       if (!key.startsWith(STAGE_PREFIX)) continue;
       const rec = value as Partial<StageRecord>;
       const old = now - (rec?.at ?? 0) > RELEASED_MARKER_TTL_MS;
-      const orphan = !((DRAFT_PREFIX + key.slice(STAGE_PREFIX.length)) in all);
+      const orphan = !(DRAFT_PREFIX + key.slice(STAGE_PREFIX.length) in all);
       if (old && (rec?.stage === 'released' || orphan)) drop.push(key);
     }
     if (drop.length) await locked(() => area.remove(drop));
@@ -673,7 +693,17 @@ async function pruneMarkers(area: StorageArea, now: number): Promise<void> {
 /** A downloadable JSON copy of a retained draft (the user's way out when the store is full). */
 export function exportDraftJson(draft: Draft): string {
   return JSON.stringify(
-    { exportedAt: new Date().toISOString(), id: draft.id, meetingTitle: draft.meetingTitle, date: draft.date, duration: draft.duration, language: draft.language, speakerNames: draft.speakerNames, transcript: draft.transcript, segments: draft.segments },
+    {
+      exportedAt: new Date().toISOString(),
+      id: draft.id,
+      meetingTitle: draft.meetingTitle,
+      date: draft.date,
+      duration: draft.duration,
+      language: draft.language,
+      speakerNames: draft.speakerNames,
+      transcript: draft.transcript,
+      segments: draft.segments,
+    },
     null,
     2,
   );
@@ -770,7 +800,11 @@ export async function importLegacyTranscript(
   const exp = await expectedOf(t, opts.now);
   if (exp.lines === 0) return { ...base, outcome: 'skipped-empty' };
   if (exp.tooLarge) {
-    return { ...base, outcome: 'skipped-large', detail: `more than ${SERVER_MAX_CAPTIONS} lines or over the request size limit` };
+    return {
+      ...base,
+      outcome: 'skipped-large',
+      detail: `more than ${SERVER_MAX_CAPTIONS} lines or over the request size limit`,
+    };
   }
   const captureId = await legacyCaptureId(t);
 
@@ -785,7 +819,11 @@ export async function importLegacyTranscript(
         if (!f.ok) return { ...base, outcome: 'error', detail: 'finalize failed' };
         if (!f.ackRequired) return { ...base, outcome: 'no-ack-protocol' };
         if (f.captionCount !== exp.lines || f.captionHash !== exp.captionHash) {
-          return { ...base, outcome: 'mismatch', detail: `server holds ${f.captionCount} lines, expected ${exp.lines}` };
+          return {
+            ...base,
+            outcome: 'mismatch',
+            detail: `server holds ${f.captionCount} lines, expected ${exp.lines}`,
+          };
         }
       }
 
@@ -795,10 +833,16 @@ export async function importLegacyTranscript(
         if (!st.ok) return { ...base, outcome: 'unreachable' };
         if (st.state === 'acked') {
           if (!serverHoldsExpected(st, exp)) {
-            return { ...base, outcome: 'mismatch', detail: 'the acked copy differs from the local one; local copy kept' };
+            return {
+              ...base,
+              outcome: 'mismatch',
+              detail: 'the acked copy differs from the local one; local copy kept',
+            };
           }
           const gone = await deleteLegacyLocal(area, t.id);
-          return gone ? { ...base, outcome: 'copied' } : { ...base, outcome: 'error', detail: 'local delete could not be verified' };
+          return gone
+            ? { ...base, outcome: 'copied' }
+            : { ...base, outcome: 'error', detail: 'local delete could not be verified' };
         }
         if (st.state === 'expired') return { ...base, outcome: 'error', detail: 'the Mac did not confirm in time' };
         if (i < polls) await sleep(opts.pollMs ?? 2000);

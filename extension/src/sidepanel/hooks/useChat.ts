@@ -239,5 +239,16 @@ export function useChat() {
     }
   }, [clearChat]);
 
-  return { messages, isLoading, error, offline, legacyChat, exportLegacyChat, sendMessage, clearChat, createNewSession, deleteCurrentSession };
+  return {
+    messages,
+    isLoading,
+    error,
+    offline,
+    legacyChat,
+    exportLegacyChat,
+    sendMessage,
+    clearChat,
+    createNewSession,
+    deleteCurrentSession,
+  };
 }

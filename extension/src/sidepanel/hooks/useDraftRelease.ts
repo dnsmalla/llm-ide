@@ -38,7 +38,9 @@ export function useDraftRelease(activeSessionId: string | null, isRecording: boo
       );
       if (out) {
         setReports(out);
-        const manual = new Set(out.filter((r) => r.outcome === 'retained' || r.outcome === 'too-large').map((r) => r.id));
+        const manual = new Set(
+          out.filter((r) => r.outcome === 'retained' || r.outcome === 'too-large').map((r) => r.id),
+        );
         setKept((await listDrafts(chromeArea())).map((e) => e.draft).filter((d) => manual.has(d.id)));
       }
     } catch {

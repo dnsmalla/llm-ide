@@ -49,6 +49,9 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 - Pin the extension origin (CORS currently allows every `chrome-extension://*`; Q22).
 - Quit-time delay verification on macOS logout (Q21); `llmide://` launch from Chrome (Q11).
 - Real-corpus checks that fixtures cannot give: platform-less note count, hidden-note semantics, iCloud placeholders.
+- Flaky under full-gate load (pass alone): `loop-contract-lab` "project environment inspector" fake-Python probes (7 asserts, 2026-10-29 push), `ExplorerTreeStoreWatchTests.testStartWatchingSeesDeletesAndRenames`. Harden their timeouts instead of re-running.
+- Live capture: the Mac must ack with the server's authoritative `lines`/`hash` (`GET /kb/live/unacked`), and dedupe a re-sent capture by session id so it does not write a second note (T5.1).
+- Two Macs on one account can flap note-index keys (detected and logged, not prevented; device scoping deferred).
 
 ## Quality gates that never get skipped
 
