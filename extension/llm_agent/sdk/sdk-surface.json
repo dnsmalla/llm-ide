@@ -1,6 +1,78 @@
 {
   "sdkVersion": "0.3.301",
   "items": {
+    "functions.createSdkMcpServer": {
+      "status": "adopted",
+      "where": "tools.mjs, loop-agent.mjs"
+    },
+    "functions.deleteSession": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+    },
+    "functions.filterEscalatingDefaultMode": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.foldSessionSummary": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.forkSession": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+    },
+    "functions.getSessionInfo": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.getSessionMessages": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+    },
+    "functions.getSubagentMessages": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.importSessionToStore": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.listSessions": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+    },
+    "functions.listSubagents": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.prewarm": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.query": {
+      "status": "adopted",
+      "where": "engine.mjs, loop-agent.mjs, models.mjs"
+    },
+    "functions.renameSession": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.resolveSettings": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.startup": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.tagSession": {
+      "status": "needs-human",
+      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+    },
+    "functions.tool": {
+      "status": "adopted",
+      "where": "tools.mjs, loop-agent.mjs"
+    },
     "messages.SDKAPIRetryMessage": {
       "status": "needs-human",
       "reason": "seed: not yet reviewed"
@@ -637,6 +709,10 @@
       "status": "needs-human",
       "reason": "seed: not yet reviewed"
     },
+    "tools.OfferChromeSetupInput": {
+      "status": "ignored",
+      "reason": "Claude Code's own offer to set up the user's Chrome; LLM-IDE drives its browser surface through the extension, nothing to adopt"
+    },
     "tools.ProjectsInput": {
       "status": "needs-human",
       "reason": "seed: not yet reviewed"
@@ -688,10 +764,6 @@
     "tools.ShowOnboardingRolePickerInput": {
       "status": "needs-human",
       "reason": "seed: not yet reviewed"
-    },
-    "tools.OfferChromeSetupInput": {
-      "status": "ignored",
-      "reason": "Claude Code's own offer to set up the user's Chrome; LLM-IDE drives its browser surface through the extension, nothing to adopt"
     },
     "tools.TaskCreateInput": {
       "status": "needs-human",

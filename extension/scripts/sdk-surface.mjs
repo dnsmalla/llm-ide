@@ -33,10 +33,13 @@ export function extractSurface(sdkDir) {
     messages: union.split('|').map((s) => s.trim()).filter(Boolean),
     query: topLevelNames(block(sdk, 'export declare interface Query '), /^ {4}([A-Za-z_$][\w$]*)\(/gm),
     tools: toolUnion.split('|').map((s) => s.trim()).filter((s) => s.endsWith('Input')),
+    // Module-level functions (listSessions, forkSession, ...). Optional: an SDK
+    // without any exports none, unlike the four categories above.
+    functions: [...sdk.matchAll(/^export declare function ([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]),
   };
   const items = [];
   for (const [category, names] of Object.entries(categories)) {
-    if (names.length === 0) throw new Error(`sdk-surface: no ${category} found`);
+    if (names.length === 0 && category !== 'functions') throw new Error(`sdk-surface: no ${category} found`);
     // The union splits take whatever text sits between `|`s; a generic, an
     // inline object or a comment there would land in the batch the agent
     // reads, so anything that is not a bare identifier is refused outright.

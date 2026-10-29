@@ -20,6 +20,23 @@ test('extracts top-level options, message members, query methods and tools', () 
   ]);
 });
 
+test('lists module-level exported functions, and an SDK with none is not an error', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-surface-'));
+  try {
+    for (const f of ['package.json', 'sdk-tools.d.ts']) fs.copyFileSync(path.join(FIXTURE, f), path.join(dir, f));
+    fs.writeFileSync(path.join(dir, 'sdk.d.ts'), `${fs.readFileSync(path.join(FIXTURE, 'sdk.d.ts'), 'utf8')}
+export declare function listSessions(_options?: unknown): Promise<unknown[]>;
+export declare function tool<Schema extends object>(_name: string): void;
+export declare function internalHelper(): void;
+`);
+    const fns = extractSurface(dir).items.filter((i) => i.startsWith('functions.'));
+    assert.deepEqual(fns, ['functions.internalHelper', 'functions.listSessions', 'functions.tool']);
+    assert.equal(extractSurface(FIXTURE).items.some((i) => i.startsWith('functions.')), false);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('throws when a category is empty', () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdk-surface-'));
   try {
