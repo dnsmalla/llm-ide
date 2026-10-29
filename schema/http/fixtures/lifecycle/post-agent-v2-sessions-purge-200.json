@@ -12,6 +12,8 @@
     }
   },
   "response": {
-    "purged": 2
+    "purged": 2,
+    "busy": [],
+    "staleReceipt": []
   }
 }

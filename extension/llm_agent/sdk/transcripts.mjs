@@ -65,3 +65,32 @@ function deleteTranscriptsUnder(root, sdkSessionId, { allowDirRm }) {
     }
   }
 }
+
+/**
+ * Newest modification time (epoch ms, 0 when none) of the transcript files of `sdkSessionId`, read-only.
+ * The reuse guard of a delete tombstone uses it when the agent_sessions mapping is already gone: a
+ * transcript written after the delete was requested means the chat was used again.
+ */
+export function sdkTranscriptMtimeMs(userId, sdkSessionId) {
+  if (typeof sdkSessionId !== 'string' || !/^[0-9a-fA-F-]{16,}$/.test(sdkSessionId)) return 0;
+  const ambientRoot = process.env.CLAUDE_CONFIG_DIR || path.join(os.homedir(), '.claude');
+  const roots = [ambientRoot];
+  const perUserHome = agentSdkHomeFor(userId);
+  if (perUserHome) roots.push(perUserHome);
+  let newest = 0;
+  for (const root of roots) {
+    const projectsDir = path.join(root, 'projects');
+    let workspaces = [];
+    try { workspaces = fs.readdirSync(projectsDir); } catch { continue; }
+    for (const name of workspaces) {
+      const entryPath = path.join(projectsDir, name);
+      let files;
+      try { files = fs.readdirSync(entryPath); } catch { continue; }
+      for (const file of files) {
+        if (!file.includes(sdkSessionId)) continue;
+        try { newest = Math.max(newest, fs.statSync(path.join(entryPath, file)).mtimeMs); } catch { /* gone */ }
+      }
+    }
+  }
+  return newest;
+}

@@ -178,6 +178,14 @@ export function anyChatTurnInFlight() {
   return inFlightTurns.size > 0;
 }
 
+/** True while this user's v2 turn runs on `chatSessionId` (the purge routes refuse a busy chat). */
+export function isChatTurnInFlight(userId, chatSessionId) {
+  for (const turn of inFlightTurns.values()) {
+    if (turn.userId === userId && turn.chatSessionId === chatSessionId) return true;
+  }
+  return false;
+}
+
 export function listInFlightChatTurns(userId) {
   const out = [];
   for (const turn of inFlightTurns.values()) {

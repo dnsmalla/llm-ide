@@ -285,6 +285,30 @@ export function sdkIdsForChats(userId, chatSessionIds) {
   return [...out];
 }
 
+/** Epoch ms of the SDK mapping's last use (0 when there is no mapping). */
+export function agentSessionLastUsedMs(userId, chatSessionId) {
+  requireUser(userId);
+  const t = lazyPrepare(getDb(),
+    'SELECT MAX(last_used_at) AS t FROM agent_sessions WHERE user_id = ? AND mac_chat_session_id = ?',
+  ).get(userId, chatSessionId)?.t;
+  if (!t) return 0;
+  // SQLite datetime('now') is "YYYY-MM-DD HH:MM:SS" in UTC.
+  return Date.parse(/Z|[+-]\d\d:?\d\d$/.test(t) ? t : `${String(t).replace(' ', 'T')}Z`) || 0;
+}
+
+/**
+ * Is a receipt too old to authorise a purge? A turn that started after the receipt was written (the mapping's
+ * last use is in a later second than the receipt; SQLite stamps whole seconds and a turn still running is caught by the in-flight check) means the file the receipt vouched for is not the whole chat.
+ */
+export function receiptIsStale(userId, chatSessionId) {
+  const rec = getArchiveReceipt(userId, chatSessionId);
+  if (!rec) return false;
+  const used = agentSessionLastUsedMs(userId, chatSessionId);
+  if (!used) return false;
+  const committed = Date.parse(rec.committed_at) || 0;
+  return Math.floor(used / 1000) > Math.floor(committed / 1000);
+}
+
 /**
  * The last time anything of this chat was used: its SDK mapping, its server chat
  * row, or a session-memory fact (any of them written after a delete was requested
@@ -303,7 +327,7 @@ export function chatLastActivityMs(userId, chatSessionId) {
     'SELECT MAX(created_at) AS t FROM session_memory WHERE user_id = ? AND session_id = ?',
   ).get(userId, chatSessionId)?.t;
   return Math.max(
-    agent ? Date.parse(agent) || 0 : 0,
+    agent ? agentSessionLastUsedMs(userId, chatSessionId) : 0,   // UTC-aware: SQLite stamps UTC text
     chat ? Math.round(chat * 1000) : 0,
     memory ? Math.round(memory * 1000) : 0,
   );
@@ -314,7 +338,7 @@ export function chatLastActivityMs(userId, chatSessionId) {
  * before anything is removed, so a replay can still delete the files. Re-queuing
  * the same chat refreshes the request time and merges the ids.
  */
-export function enqueueSessionPurge(userId, chatSessionId, reason = 'user_delete') {
+export function enqueueSessionPurge(userId, chatSessionId, reason = 'user_delete', { requestedAt = null } = {}) {
   requireUser(userId);
   if (typeof chatSessionId !== 'string' || !chatSessionId) throw errValidation('chatSessionId is required');
   if (!SESSION_PURGE_REASONS.has(reason)) throw errValidation(`reason must be one of ${[...SESSION_PURGE_REASONS].join(', ')}`);
@@ -324,14 +348,17 @@ export function enqueueSessionPurge(userId, chatSessionId, reason = 'user_delete
       'SELECT sdk_session_ids FROM pending_session_purges WHERE deleted_chat_id = ? AND owner_user_id = ?',
     ).get(chatSessionId, userId);
     const ids = new Set([...(prior ? JSON.parse(prior.sdk_session_ids) : []), ...sdkIdsForChats(userId, [chatSessionId])]);
+    // The request time is the user's delete time. A re-request (the Mac re-sends at every start) keeps the
+    // EARLIEST time, so the reuse guard (DL16) still sees a chat used after the original delete.
+    const asked = requestedAt ?? nowIso();
     lazyPrepare(db, `
       INSERT INTO pending_session_purges (deleted_chat_id, owner_user_id, reason, attempts, requested_at, sdk_session_ids, state, next_attempt_at)
       VALUES (?, ?, ?, 0, ?, ?, 'pending', ?)
       ON CONFLICT (deleted_chat_id, owner_user_id) DO UPDATE SET
-        reason = excluded.reason, requested_at = excluded.requested_at,
+        reason = excluded.reason, requested_at = MIN(requested_at, excluded.requested_at),
         sdk_session_ids = excluded.sdk_session_ids, state = 'pending', attempts = 0,
         next_attempt_at = excluded.next_attempt_at
-    `).run(chatSessionId, userId, reason, nowIso(), JSON.stringify([...ids]), nowIso());
+    `).run(chatSessionId, userId, reason, asked, JSON.stringify([...ids]), nowIso());
   });
   tx();
 }

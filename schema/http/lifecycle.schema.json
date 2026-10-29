@@ -152,12 +152,28 @@
         "200": {
           "type": "object",
           "required": [
-            "purged"
+            "purged",
+            "busy",
+            "staleReceipt"
           ],
           "properties": {
             "purged": {
               "type": "integer",
               "description": "Chats whose working state was removed. Unknown ids count as zero; the call is idempotent."
+            },
+            "busy": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Chats with a turn running right now: not purged, retry later."
+            },
+            "staleReceipt": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Chats used after their receipt was written: not purged, the caller must verify the file again."
             }
           }
         },
@@ -183,6 +199,10 @@
             "reason": {
               "type": "string",
               "description": "user_delete (default) or meeting_end. Any other value is a 400 VALIDATION_FAILED."
+            },
+            "requestedAt": {
+              "type": "string",
+              "description": "ISO time of the user's delete (kept across retries; the earliest time wins, for the reuse guard). Ignored when in the future or older than a year."
             }
           }
         }
@@ -207,6 +227,16 @@
                 "failed"
               ],
               "description": "done: working state, transcripts and server chat rows are gone. pending: retried later with backoff. failed: gave up after the attempt cap (see working-state)."
+            },
+            "busy": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "A turn is running on the chat: the tombstone stays pending."
+            },
+            "skippedReused": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "The chat was used after the delete was requested: kept, tombstone dropped."
             }
           }
         },
