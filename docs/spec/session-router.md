@@ -37,6 +37,7 @@ Each is on only when set to exactly `on`. There is no automatic-switch switch: t
 | `extension/kb/agent-migrations/0004_route_events.sql` | `agent_route_events` (agent.db, history only) |
 | `extension/kb/chat-route.mjs` | Route store: get, put with compare-and-set, pending, counters, delete, history |
 | `extension/kb/learned-limits.mjs` | Learned per-key limits |
+| `extension/providers/compress.mjs` | Optional adapter prompt compression |
 | `extension/providers/route-policy.mjs` | Pure policy: the pick, warmth, cache TTL table, switch cost, cap state |
 | `extension/providers/handoff.mjs` | The handoff note and last turns |
 | `extension/routes/agent-v2-router.mjs` | The turn hooks and the three routes |

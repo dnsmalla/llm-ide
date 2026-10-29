@@ -19,6 +19,8 @@ import { redactWithKey } from '../../core/redact-secrets.mjs';
 import { resolveCustomProviderDispatch } from '../../providers/providers.mjs';
 import { createChatModel, runToolTurn } from '../../providers/adapter/index.mjs';
 import { pickTurnProvider, noteProviderRateLimited } from '../../providers/provider-fallback.mjs';
+import { routerCompressEnabled } from '../../core/router-flags.mjs';
+import { compressHistory, wrapToolsForCompression } from '../../providers/compress.mjs';
 import { learnFrom429 } from '../../kb/learned-limits.mjs';
 import { listConnectionModels } from '../../providers/provider-models.mjs';
 import { getConnection, getSettings } from '../../server/provider-connections.mjs';
@@ -127,10 +129,13 @@ export async function runProviderTurn({ userId, provider, model, message, histor
         detail: { from: provider, to: active.provider, model: active.model, reason: pick.skipped[0]?.reason ?? null } });
     } catch { /* best effort */ }
   }
-  const tools = cap.toolsSupported
+  // Optional compression (LLMIDE_ROUTER_COMPRESS=on, default off): tool outputs are capped and deduped for this turn.
+  const compress = routerCompressEnabled();
+  const built = cap.toolsSupported
     ? buildProviderTools({ userId, agentContext, mode, sessionKey, emit: send, signal, currentMessage: message,
       egressNeedsApproval: !getSettings(userId, db).egressAutoApprove })
     : [];
+  const tools = compress ? wrapToolsForCompression(built) : built;
   if (!cap.toolsSupported) {
     send({ type: 'notice', kind: 'tools_unavailable', level: 'warning', text: `${active.model} is not known to support tools; this turn runs without them.`, data: { model: active.model } });
   }
@@ -166,7 +171,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     summary = await runToolTurn({
       model: chatModel,
       system: systemFor({ mode, model: active.model, connName: conn.name, workspaceRoot: agentContext?.workspaceRoot, toolNames: tools.map((t) => t.name) }),
-      messages: [...cleanHistory(history), { role: 'user', content: message.slice(0, MAX_CONTENT) }],
+      messages: [...(compress ? compressHistory(cleanHistory(history)).messages : cleanHistory(history)), { role: 'user', content: message.slice(0, MAX_CONTENT) }],
       tools, maxOutputTokens: MAX_OUTPUT_TOKENS, onEvent: sink, signal, apiKey: dispatch.apiKey, maxBillableTokens,
     });
   } finally {

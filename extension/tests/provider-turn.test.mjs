@@ -368,3 +368,24 @@ test('the adapter\'s own requests are pinned: a provider whose name resolves to 
   assert.equal(err.code, 'PROVIDER_BLOCKED');
   assert.ok(!evs.some((e) => e.type === 'result'));
 });
+
+test('compression is OFF by default; with it on the model sees trimmed history and a capped tool result, adapter turn only', async () => {
+  const history = Array.from({ length: 24 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `h${i} ${'y'.repeat(6000)}` }));
+  const s = setup();
+  const off = await turn(s, { args: { history } }, [textStep('hi')]);
+  const sentOff = JSON.stringify(off.model.doStreamCalls[0].prompt);
+  assert.ok(sentOff.length > 100_000, 'off: the history goes through untouched (up to the 40 turn cap)');
+
+  process.env.LLMIDE_ROUTER = 'on';
+  process.env.LLMIDE_ROUTER_COMPRESS = 'on';
+  try {
+    const on = await turn(s, { args: { history } }, [textStep('hi')]);
+    const sentOn = JSON.stringify(on.model.doStreamCalls[0].prompt);
+    assert.ok(sentOn.length < sentOff.length * 0.8, 'on: old turns are trimmed');
+    assert.match(sentOn, /characters omitted/);
+    // Needs the router too: the compression flag alone does nothing.
+    delete process.env.LLMIDE_ROUTER;
+    const alone = await turn(s, { args: { history } }, [textStep('hi')]);
+    assert.ok(JSON.stringify(alone.model.doStreamCalls[0].prompt).length > 100_000);
+  } finally { delete process.env.LLMIDE_ROUTER; delete process.env.LLMIDE_ROUTER_COMPRESS; }
+});
