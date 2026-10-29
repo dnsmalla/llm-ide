@@ -1,0 +1,55 @@
+# Roadmap: now, next, later
+
+Updated 2026-10-29. Principle (user, 2026-10-29): **professional quality over speed.** No safety gate is compressed to hit a date. A phase ships only when its exit gate, its independent review and the full pre-push gate are green.
+
+Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-gated (real data must accumulate).
+
+## Now (recent to do)
+
+| # | Task | Who | State |
+|---|---|---|---|
+| N1 | First-launch check of the rebuilt app: quit the server on port 3456 (`kill 55610`), open `mac/LlmIdeMac.app`, confirm meetings, chats, settings, OS page, Storage hub, Settings → Agent history. This also moves `data.db` to Application Support. | you | blocking; starts the shadow clock |
+| N2 | Live-then-archive Phase 2 review fixes (reconciler safety: partial scans, sign-out, manifest chunking, compare noise, event-loop bounds). | me | agent running |
+| N3 | Live-then-archive Phase 5, extension part (T5.2): draft kept until acked, legacy "copy to Mac", no local chat buffer, "Mac app not running" state. | me | agent running |
+| N4 | One independent review of N2 and N3, then the full gate and one push, then rebuild the app. | me | after N2, N3 |
+| N5 | Decide the three questions that block code: **Q19** (notes without `platform` frontmatter are invisible), **Q2** (continue an ended normal chat: replay or read-only), **Q16** (search latency at 50k notes). | you | open |
+
+## Next (after the Now list, in order)
+
+| # | Task | Who | Gate |
+|---|---|---|---|
+| X1 | Phase 4: async quit archive (`.terminateLater`), crash-recovery sweep, delete-everywhere with tombstones, sign-out/multi-user (`ownerUserId`), phone path. Highest-risk Mac change. | me | crash-injection suite green; manual 20-chat quit/relaunch run |
+| X2 | Phase 5, Mac side: T5.1 ack after verify + unacked adoption at start; T5.3 meeting-attached chat (`meetingId`, no undo). | me | C-series meeting matrix |
+| X3 | Shadow soak with `lta.mode=shadow` on the real corpus: 7 days, topK(10) overlap, countDelta 0, drift clean. | wait | exit gate of Phase 2 |
+| X4 | Phase 3: read-path switch (server reads from `note_index`, extension reads live, token bench guard). | me | 7 more days with reads on `index` |
+| X5 | Ledger step B (agent store Stage 2): move budget readers to `usage_calls` only after 7 days of zero mismatches; **fail closed** to the ledger. | me/you | go/no-go by you |
+| X6 | Verify and remove leftovers after the first launch: `.pre-move` files are auto-removed on the second healthy boot; confirm they are gone. | me | after N1 |
+
+## Later
+
+| # | Task | Notes |
+|---|---|---|
+| L1 | Phase 6: delete-path switch and legacy migration (destructive; own gate, export-before-delete, 30-day `VACUUM INTO` backup, rollback drill). | after X3 and X4 are clean |
+| L2 | Knowledge-kit K1: files stay the truth, server keeps a rebuildable index. Needs the remaining knowledge questions (Q6, Q7, Q9, Q12, Q13) and the plugin/MCP UI owner (Q4). | after the lifecycle build |
+| L3 | Agent-kit K1: chat state per the lifecycle decision; classic engine fate (Q3); SDK surface triage (129 unreviewed items); dead routes (Q7) with API version bump. | after L2 starts |
+| L4 | Docs-kit K2-K4 (remove proof, Tauri screens, retire Swift path after one release default-on). | gated by release cadence |
+| L5 | Other kits in plan order: work, workspace, capture, automation (job runner first), sync. | plan: kit-by-kit migration |
+| L6 | Graph layout in Rust/WASM (spike done: 16% faster, shared kernel). Revisit when the Tauri work starts. | spikes/layout-t0.md |
+| L7 | Tauri desktop + relay (ADR 0018). | Phase 0 PoC gate |
+
+## Loose ends (small, schedule with the phase that touches the file)
+
+- Settings screen for `lta.mode` (today: `defaults write`).
+- Sign-out seam for the note-index reconciler (fixed in N2).
+- Expose shadow metrics in the Storage hub (schema-gated).
+- Clear sheet: add the "older than N days" option (server supports it).
+- Auto-task and dispatch/review runs are not recorded in agent history (no server hook); legacy chat turns record no token totals.
+- Rollup can fold tool events of a run that stays open past retention.
+- `LLMIDE_DATA_DIR` line in `.env.example`; decide the `/health` addition's `SERVER_API_VERSION` bump.
+- Pin the extension origin (CORS currently allows every `chrome-extension://*`; Q22).
+- Quit-time delay verification on macOS logout (Q21); `llmide://` launch from Chrome (Q11).
+- Real-corpus checks that fixtures cannot give: platform-less note count, hidden-note semantics, iCloud placeholders.
+
+## Quality gates that never get skipped
+
+Independent Sonnet review for data-touching code; `make regression`; contract gates; feature-boundary gate; markdownlint before every push; old-format fixtures for every migration (N-1 readable, rollback tested); real-data checks before any destructive switch; nothing deleted without a verified copy.
