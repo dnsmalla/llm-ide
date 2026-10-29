@@ -30,9 +30,17 @@ function readDevSecretsFile(file) {
  * @param {object} opts
  * @param {string} opts.primaryFile file to read first and to create when no key exists
  * @param {string|null} [opts.legacyFile] fallback file (the repo kb copy), read only if the primary is missing
+ * @param {boolean} [opts.ephemeral] generate in memory only: read no file, write no file (test runs)
  * @returns {{jwtSecret: string, vaultKey: string, source: string, generated: boolean}}
  */
-export function loadDevSecrets({ primaryFile, legacyFile = null }) {
+export function loadDevSecrets({ primaryFile, legacyFile = null, ephemeral = false }) {
+  if (ephemeral) {
+    return {
+      jwtSecret: crypto.randomBytes(48).toString('base64url'),
+      vaultKey:  crypto.randomBytes(48).toString('base64url'),
+      source: 'memory', generated: true,
+    };
+  }
   if (fs.existsSync(primaryFile)) return { ...readDevSecretsFile(primaryFile), generated: false };
   if (legacyFile && legacyFile !== primaryFile && fs.existsSync(legacyFile)) {
     return { ...readDevSecretsFile(legacyFile), generated: false };

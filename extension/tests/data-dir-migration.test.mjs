@@ -558,3 +558,15 @@ console.log(JSON.stringify({ status: report.status, reason: report.reason }));
   copy.close();
   assert.equal(fs.existsSync(path.join(dataDir, '.migrating-lock')), false);
 });
+
+test('the tripwire stays quiet for a custom DB path with both secrets supplied', () => {
+  const kb = path.join(root, 'kb');
+  fs.mkdirSync(kb, { recursive: true });
+  fs.writeFileSync(path.join(kb, 'MOVED-TO-APP-SUPPORT.txt'), 'moved');
+  const quiet = runDataDirMigration({
+    env: { LLMIDE_DB_PATH: path.join(work, 'x.db'), LLMIDE_JWT_SECRET: 'j'.repeat(48), LLMIDE_VAULT_KEY: 'v'.repeat(48) }, root,
+  });
+  assert.equal(quiet.status, 'skipped');
+  const noSecrets = runDataDirMigration({ env: { LLMIDE_DB_PATH: path.join(work, 'x.db') }, root });
+  assert.equal(noSecrets.status, 'refused');
+});

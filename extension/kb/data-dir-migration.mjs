@@ -41,7 +41,7 @@ import fs from 'fs';
 import path from 'path';
 import Database from 'better-sqlite3';
 import { setDataDirOverride, setDataMigrationReport } from '../core/data-dir.mjs';
-import { legacyTripwire, MOVED_NOTICE } from './legacy-tripwire.mjs';
+import { legacyTripwire, MOVED_NOTICE } from '../core/legacy-tripwire.mjs';
 
 const MARKER = 'migrated-from.json';
 const DEV_SECRETS = '.dev-secrets.json';
@@ -110,7 +110,10 @@ function runMigration({
     const rawDataDir = typeof env.LLMIDE_DATA_DIR === 'string' ? env.LLMIDE_DATA_DIR.trim() : '';
     if (!rawDataDir) {
       // The repo kb layout. After a move it must not be opened as if it were fresh.
-      if (!env.NODE_TEST_CONTEXT) {
+      // A custom DB path with both secrets supplied writes nothing to the repo kb
+      // (spawned test servers, labs), so there is nothing to protect.
+      const nothingInRepoKb = Boolean(env.LLMIDE_DB_PATH?.trim() && env.LLMIDE_JWT_SECRET && env.LLMIDE_VAULT_KEY);
+      if (!env.NODE_TEST_CONTEXT && !nothingInRepoKb) {
         const trip = legacyTripwire({ root, env });
         if (trip?.refuse) {
           report.notes.push(trip.message);

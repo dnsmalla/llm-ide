@@ -15,6 +15,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { resolveDataLayout, getDataDirOverride } from './data-dir.mjs';
 import { loadDevSecrets } from './dev-secrets.mjs';
+import { legacyTripwire } from './legacy-tripwire.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(__dirname, '..', '..');
@@ -176,6 +177,15 @@ if (IS_TEST_RUN && !process.env.LLMIDE_AGENT_DB_PATH) {
 // the legacy file there), else <repo>/kb. See core/dev-secrets.mjs.
 const LEGACY_DEV_SECRETS_FILE = path.join(ROOT, 'kb', '.dev-secrets.json');
 function persistedDevSecrets() {
+  // A test run never reads or writes a real secrets file (it used to create
+  // <repo>/kb/.dev-secrets.json); each process gets throwaway in-memory keys.
+  if (IS_TEST_RUN) return loadDevSecrets({ primaryFile: '', ephemeral: true });
+  // The repo kb was moved to the app data dir: resolving secrets here would
+  // create a fresh key file in the old location. Refuse before any file I/O.
+  if (!DATA_LAYOUT.dataDir) {
+    const trip = legacyTripwire({ root: ROOT, env: process.env });
+    if (trip?.refuse) throw new Error(trip.message);
+  }
   const primaryFile = DATA_LAYOUT.dataDir
     ? path.join(DATA_LAYOUT.dataDir, '.dev-secrets.json')
     : LEGACY_DEV_SECRETS_FILE;
