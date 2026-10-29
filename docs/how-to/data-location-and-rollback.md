@@ -101,6 +101,15 @@ do: run with `LLMIDE_DATA_DIR=<dir>` (the Mac app does this), or restore
 `kb/data.db`. `LLMIDE_ALLOW_EMPTY_LEGACY=1` overrides it. The Mac app's
 adopted-server path is unchanged.
 
+The refusal happens before any file is written: `core/config.mjs` also applies
+the tripwire before it resolves dev secrets, so any process that imports config
+(not only `server.mjs`) fails without creating `kb/.dev-secrets.json`. Test runs
+(`NODE_TEST_CONTEXT`) use in-memory throwaway secrets and never read or write a
+secrets file. `tests/moved-repo-kb-boot.test.mjs` asserts the kb listing is
+unchanged after a refused boot. A spawned server with a custom `LLMIDE_DB_PATH` and
+both secrets in its environment writes nothing to the repo kb, so the tripwire
+lets it through.
+
 ## Forks
 
 After the move, a legacy `data.db` that exists again, together with the MOVED

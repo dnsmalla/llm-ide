@@ -391,6 +391,7 @@ Run through this against a real meeting before merging:
 - **MUST preserve:** nothing is deleted before the committed copy is fsynced and verified again (integrity_check, counts, `sqlite_sequence`, secrets bytes, agent-sdk manifest). Originals become `<name>.pre-move`, kept for one boot, and are deleted only by a later boot that opened the DB healthily.
 - **DO NOT** remove a `data.db` from the retry path, and treat a zero-byte or table-less `data.db` with no marker as not migrated (move it aside as `data.db.empty-<stamp>`).
 - **DO NOT** start the repo-kb layout on a moved kb (`MOVED-TO-APP-SUPPORT.txt` present, `kb/data.db` absent): the tripwire refuses unless `LLMIDE_ALLOW_EMPTY_LEGACY=1`.
+- **DO NOT** resolve dev secrets (or create any file) in the repo kb on a moved kb: `core/config.mjs` applies the tripwire before `loadDevSecrets`, and test runs use ephemeral in-memory secrets.
 - **DO NOT** prune backups outside the data dir's `backups/`, and never in the repo-kb layout (`config.backupPrune`).
 - **Known limit:** Node has no `F_FULLFSYNC`; on macOS the fsync is a plain fsync, so the `.pre-move` copies are the protection against power loss.
 
