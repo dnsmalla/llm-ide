@@ -228,6 +228,7 @@ struct LibraryView: View {
     private func content(vm: LibraryViewModel) -> some View {
         VStack(spacing: 0) {
             searchBar(filter: Bindable(vm).filter)
+            NoteIndexStatusLine()
             mainList(vm: vm)
         }
     }
@@ -1839,5 +1840,22 @@ struct LibraryView: View {
         }
         // Refresh the list.
         try? vm?.refresh()
+    }
+}
+
+/// One quiet line when some notes could not be indexed (counts only, no alert). Empty when none.
+private struct NoteIndexStatusLine: View {
+    @ObservedObject private var center = NoteIndexStatusCenter.shared
+
+    var body: some View {
+        if let text = center.summary {
+            Text(text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 4)
+                .accessibilityIdentifier("library.noteIndexStatus")
+        }
     }
 }

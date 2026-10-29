@@ -417,6 +417,8 @@ public struct LlmIdeMacApp: App {
                 // would just 401 in a loop; when signed in, we want
                 // immediate visibility of any active extension session.
                 .onChange(of: session.isAuthenticated) { _, authed in
+                    // The derived note feed (lta Phase 2) restarts on the next sign-in, for the same project.
+                    NoteIndexHost.shared.sessionAuthenticationChanged(authed)
                     // Single lifecycle entry point: reconciles liveMirror and
                     // the graph updater (both auth-scoped modules) on login
                     // AND logout, replacing the old direct start()/stop().
