@@ -1429,6 +1429,8 @@ export type Settings = {
   fallbackOrder: FallbackEntry[];
   /** '<connection id>/<model id>' to the user's own tools yes/no */
   toolOverrides: Record<string, boolean>;
+  /** false (default): fetch-url and web-search ask for approval in a provider turn, because a hostile page can steer a model into leaking through them; true restores Claude parity */
+  egressAutoApprove: boolean;
 };
 
 export type SettingsPatch = {
@@ -1436,6 +1438,7 @@ export type SettingsPatch = {
   fallbackEnabled?: boolean;
   fallbackOrder?: FallbackEntry[];
   toolOverrides?: Record<string, boolean>;
+  egressAutoApprove?: boolean;
 };
 
 export type ModelCapability = {
@@ -5682,6 +5685,8 @@ export type PostKbProvidersCatalogModelsResponse200 = {
   detail?: string;
 };
 
+export type PostKbProvidersCatalogModelsResponse403 = CommonError;
+
 export type PostKbProvidersCatalogModelsResponse404 = CommonError;
 
 /** Request parts for `GET /kb/providers/settings` (schema/http/provider-catalog.schema.json). */
@@ -5725,6 +5730,8 @@ export type PostKbProvidersTurnResponse200 = unknown;
 export type PostKbProvidersTurnResponse400 = CommonError;
 
 export type PostKbProvidersTurnResponse401 = CommonError;
+
+export type PostKbProvidersTurnResponse403 = CommonError;
 
 export type PostKbProvidersTurnResponse404 = CommonError;
 
@@ -7931,6 +7938,7 @@ export interface ApiEndpoints {
     request: PostKbProvidersCatalogModelsRequest;
     responses: {
       200: PostKbProvidersCatalogModelsResponse200;
+      403: PostKbProvidersCatalogModelsResponse403;
       404: PostKbProvidersCatalogModelsResponse404;
     };
   };
@@ -7953,6 +7961,7 @@ export interface ApiEndpoints {
       200: PostKbProvidersTurnResponse200;
       400: PostKbProvidersTurnResponse400;
       401: PostKbProvidersTurnResponse401;
+      403: PostKbProvidersTurnResponse403;
       404: PostKbProvidersTurnResponse404;
       409: PostKbProvidersTurnResponse409;
     };

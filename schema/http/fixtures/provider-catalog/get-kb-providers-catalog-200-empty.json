@@ -141,7 +141,8 @@
       "toolsEnabled": false,
       "fallbackEnabled": false,
       "fallbackOrder": [],
-      "toolOverrides": {}
+      "toolOverrides": {},
+      "egressAutoApprove": false
     }
   }
 }

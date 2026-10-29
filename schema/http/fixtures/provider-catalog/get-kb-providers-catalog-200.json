@@ -173,7 +173,8 @@
       ],
       "toolOverrides": {
         "cat-groq/brand-new-model": true
-      }
+      },
+      "egressAutoApprove": false
     }
   }
 }

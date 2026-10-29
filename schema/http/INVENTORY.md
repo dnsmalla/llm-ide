@@ -161,13 +161,13 @@ Endpoints with no client caller (38):
 | `/kb/conflict-questions` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:1456` | - | `kb.ts` | - |
 | `/kb/providers/verify` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:167` | `LlmIdeAPIClient+Providers.swift` | - | - |
 | `/kb/providers/models` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:217` | `LlmIdeAPIClient+Providers.swift` | - | - |
-| `/kb/providers/catalog` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:62` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/catalog/connect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:75` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/catalog/disconnect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:85` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/catalog/test` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:90` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/catalog/models` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:90` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/settings` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:66` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/turn` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:98` | - | - | tests only |
+| `/kb/providers/catalog` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:63` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/catalog/connect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:76` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/catalog/disconnect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:87` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/catalog/test` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:92` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/catalog/models` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:92` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/settings` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:67` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/turn` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:107` | - | - | tests only |
 | `/kb/agent-sdk` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:200` | `LlmIdeAPIClient+AgentSdk.swift` | - | - |
 | `/kb/agent-sdk/update` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:205` | `LlmIdeAPIClient+AgentSdk.swift` | - | - |
 | `/kb/custom-providers` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:259` | `LlmIdeAPIClient+Providers.swift` | - | - |

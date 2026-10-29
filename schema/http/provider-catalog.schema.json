@@ -1,5 +1,5 @@
 {
-  "description": "Provider catalog (agent-kit K1 Phase 6, server API v90): the built-in catalog of model providers (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, and any OpenAI-compatible endpoint), the caller's connections to them, per-model capability flags, the two opt-in switches (tool-capable chat, cross-provider fallback), and the tool-capable provider turn. Roster: all 8 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/provider-catalog.mjs, mounted by extension/routes/router.mjs, and all are token-protected and on the core feature set. A key is accepted in the connect body once, goes to the per-user vault (custom.<id>.apiKey) and is never returned. A connection dispatches as the provider id custom:<id> (id is cat-<catalog id>, plus -<slug> for the generic endpoint). Every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: /catalog/test and /catalog/models share llmFast, /catalog/connect, /catalog/disconnect and PUT /settings share kbWrite, /turn uses agentTurn (429 is not declared; the bucket answers it uniformly). The stream of POST /kb/providers/turn is the agent/v2 event vocabulary (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice); approvals are answered through POST /agent/v2/decision with init.sessionId. A refusal before the first event is a plain JSON error (409 PROVIDER_TOOLS_DISABLED, 404 PROVIDER_NOT_CONNECTED, 400 PROVIDER_NO_KEY | MODEL_LACKS_TOOLS | VALIDATION_FAILED). Not captured: a fallback switch (the notice event with kind provider_fallback) and a live provider list; both are exercised by extension/tests. Fixtures are produced by driving the real router in-process with a stand-in for fetch, because the routes reach third-party hosts.",
+  "description": "Provider catalog (agent-kit K1 Phase 6, server API v90): the built-in catalog of model providers (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, and any OpenAI-compatible endpoint), the caller's connections to them, per-model capability flags, the two opt-in switches (tool-capable chat, cross-provider fallback), and the tool-capable provider turn. Roster: all 8 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/provider-catalog.mjs, mounted by extension/routes/router.mjs, and all are token-protected and on the core feature set. A key is accepted in the connect body once, goes to the per-user vault (custom.<id>.apiKey) and is never returned. A connection dispatches as the provider id custom:<id> (id is cat-<catalog id>, plus -<slug> for the generic endpoint). Every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: /catalog/test and /catalog/models share llmFast, /catalog/connect, /catalog/disconnect and PUT /settings share kbWrite, /turn uses agentTurn (429 is not declared; the bucket answers it uniformly). The stream of POST /kb/providers/turn is the agent/v2 event vocabulary (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice); approvals are answered through POST /agent/v2/decision with init.sessionId. A refusal before the first event is a plain JSON error (409 PROVIDER_TOOLS_DISABLED, 404 PROVIDER_NOT_CONNECTED, 403 PROVIDER_BLOCKED when the network guard refuses the provider's address, 400 PROVIDER_NO_KEY | MODEL_LACKS_TOOLS | VALIDATION_FAILED). Not captured: a fallback switch (the notice event with kind provider_fallback) and a live provider list; both are exercised by extension/tests. Fixtures are produced by driving the real router in-process with a stand-in for fetch, because the routes reach third-party hosts.",
   "$defs": {
     "Connection": {
       "type": "object",
@@ -119,7 +119,8 @@
         "toolsEnabled",
         "fallbackEnabled",
         "fallbackOrder",
-        "toolOverrides"
+        "toolOverrides",
+        "egressAutoApprove"
       ],
       "properties": {
         "toolsEnabled": {
@@ -142,6 +143,10 @@
             "type": "boolean"
           },
           "description": "'<connection id>/<model id>' to the user's own tools yes/no"
+        },
+        "egressAutoApprove": {
+          "type": "boolean",
+          "description": "false (default): fetch-url and web-search ask for approval in a provider turn, because a hostile page can steer a model into leaking through them; true restores Claude parity"
         }
       }
     },
@@ -165,6 +170,9 @@
           "additionalProperties": {
             "type": "boolean"
           }
+        },
+        "egressAutoApprove": {
+          "type": "boolean"
         }
       }
     },
@@ -407,6 +415,9 @@
         },
         "404": {
           "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
         }
       }
     },
@@ -503,6 +514,9 @@
           "$ref": "_common#/$defs/Error"
         },
         "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
           "$ref": "_common#/$defs/Error"
         }
       }

@@ -22,6 +22,7 @@ import {
 import { listConnectionModels, testConnection } from '../providers/provider-models.mjs';
 import { runProviderTurn, ProviderTurnError } from '../llm_agent/adapter/provider-turn.mjs';
 import { logger } from '../core/logger.mjs';
+import { redactWithKey } from '../core/redact-secrets.mjs';
 
 const log = logger.child({ component: 'provider-catalog-route' });
 const STATUS_FOR = { VALIDATION_FAILED: 400, NOT_FOUND: 404, LIMIT: 409 };
@@ -78,7 +79,8 @@ export async function handleProviderCatalog(req, res, { userId, url }) {
       const connection = connectProvider(userId, b, db);
       sendJSON(res, 200, { ok: true, connection });
     } catch (e) {
-      err(res, STATUS_FOR[e?.code] || 500, e?.code || 'INTERNAL', String(e?.message || e).slice(0, 300));
+      // The submitted key is redacted from whatever the error says, defensively.
+      err(res, STATUS_FOR[e?.code] || 500, e?.code || 'INTERNAL', redactWithKey(String(e?.message || e), typeof b.apiKey === 'string' ? b.apiKey : null).slice(0, 300));
     }
     return true;
   }
@@ -92,7 +94,14 @@ export async function handleProviderCatalog(req, res, { userId, url }) {
     const conn = getConnection(String(b.id || ''), userId, db);
     if (!conn) { err(res, 404, 'NOT_FOUND', 'That provider is not connected'); return true; }
     if (path.endsWith('/test')) sendJSON(res, 200, await testConnection(userId, conn, { db }));
-    else sendJSON(res, 200, await listConnectionModels(userId, conn, { refresh: b.refresh === true, db }));
+    else {
+      try { sendJSON(res, 200, await listConnectionModels(userId, conn, { refresh: b.refresh === true, db })); }
+      catch (e) {
+        // A refused address is an error, not a static list the UI would then trust.
+        if (e?.code !== 'SSRF_BLOCKED') throw e;
+        err(res, 403, 'PROVIDER_BLOCKED', String(e.message).slice(0, 300));
+      }
+    }
     return true;
   }
   if (m === 'POST' && path === '/kb/providers/turn') return handleTurn(req, res, userId, db);
@@ -121,7 +130,7 @@ async function handleTurn(req, res, userId, db) {
     });
   } catch (e) {
     if (e instanceof ProviderTurnError && !streaming) { err(res, e.status, e.code, e.message); return true; }
-    log.error('provider_turn_failed', { code: e?.code, message: String(e?.message || e).slice(0, 200) });
+    log.error('provider_turn_failed', { code: e?.code, message: redactWithKey(String(e?.message || e), null).slice(0, 200) });
     if (!streaming) { err(res, 500, 'INTERNAL', 'The provider turn failed'); return true; }
     onEvent({ type: 'error', code: 'INTERNAL', message: 'The provider turn failed', retryable: false });
   }

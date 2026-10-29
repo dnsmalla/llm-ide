@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/providers/turn",
+  "status": 403,
+  "description": "Captured by driving the real router in-process on a temp DB. The operator closed LLMIDE_ALLOW_PRIVATE_PROVIDERS after a private-network connection was made, so the network guard refuses its address. No external network.",
+  "request": {
+    "body": {
+      "provider": "custom:cat-openai-compatible-lan",
+      "model": "m",
+      "message": "hi",
+      "mode": "ask"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROVIDER_BLOCKED",
+      "message": "SSRF guard: Base URL must use https"
+    }
+  }
+}

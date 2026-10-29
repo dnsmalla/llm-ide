@@ -9,6 +9,7 @@ import { freshDb } from './provider-test-env.mjs';
 
 const { handleKB } = await import('../routes/router.mjs');
 const models = await import('../providers/provider-models.mjs');
+const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');
 const { _clearCooldownsForTests } = await import('../providers/provider-fallback.mjs');
 
 const here = path.dirname(fileURLToPath(import.meta.url));
@@ -48,8 +49,10 @@ async function call(userId, method, url, body) {
 async function withFetch(handler, fn) {
   const original = globalThis.fetch;
   const calls = [];
-  globalThis.fetch = async (url, init) => { calls.push({ url: String(url), init }); return handler(String(url), init); };
-  try { return await fn(calls); } finally { globalThis.fetch = original; }
+  const stand = async (url, init) => { calls.push({ url: String(url), init }); return handler(String(url), init); };
+  globalThis.fetch = stand;
+  _setPinnedFetchForTests(stand);
+  try { return await fn(calls); } finally { globalThis.fetch = original; _setPinnedFetchForTests(null); }
 }
 const json = (b, s = 200) => new Response(JSON.stringify(b), { status: s, headers: { 'content-type': 'application/json' } });
 
@@ -60,7 +63,7 @@ test('catalog lists every provider with no connection for a fresh user, switches
   const b = res.json();
   assert.equal(b.providers.length, 11);
   assert.ok(b.providers.every((p) => p.connections.length === 0));
-  assert.deepEqual(b.settings, { toolsEnabled: false, fallbackEnabled: false, fallbackOrder: [], toolOverrides: {} });
+  assert.deepEqual(b.settings, { toolsEnabled: false, fallbackEnabled: false, fallbackOrder: [], toolOverrides: {}, egressAutoApprove: false });
 });
 
 test('connect never echoes the key, and the catalog then shows a key is present', async () => {
@@ -125,7 +128,7 @@ test('settings round trip; unknown fields ignored; disconnect clears the key', a
   await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'groq', apiKey: KEY });
   let res = await call(a, 'PUT', '/kb/providers/settings', { toolsEnabled: true, fallbackEnabled: true, fallbackOrder: [{ provider: 'custom:cat-groq' }, { provider: 'custom:cat-nobody' }], evil: 1 });
   assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.json(), { toolsEnabled: true, fallbackEnabled: true, fallbackOrder: [{ provider: 'custom:cat-groq' }], toolOverrides: {} });
+  assert.deepEqual(res.json(), { toolsEnabled: true, fallbackEnabled: true, fallbackOrder: [{ provider: 'custom:cat-groq' }], toolOverrides: {}, egressAutoApprove: false });
   assert.deepEqual((await call(a, 'GET', '/kb/providers/settings')).json(), res.json());
   res = await call(a, 'POST', '/kb/providers/catalog/disconnect', { id: 'cat-groq' });
   assert.deepEqual(res.json(), { ok: true, removed: true });
@@ -180,4 +183,34 @@ test('the existing verify and models routes are untouched by the new handler', a
   const { users: [a] } = freshDb();
   const res = await call(a, 'POST', '/kb/providers/verify', { provider: 'skynet' });
   assert.equal(res.statusCode, 400);
+});
+
+test('a refused address answers 403 PROVIDER_BLOCKED on models and the turn, never a static list', async () => {
+  const { users: [a] } = freshDb();
+  models._clearModelCacheForTests();
+  await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'openai-compatible', slug: 'lan', baseURL: 'http://192.168.1.9:3001/v1', allowPrivate: true });
+  await call(a, 'PUT', '/kb/providers/settings', { toolsEnabled: true });
+  const prev = process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS;
+  process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS = '0';
+  try {
+    const m = await call(a, 'POST', '/kb/providers/catalog/models', { id: 'cat-openai-compatible-lan' });
+    assert.equal(m.statusCode, 403);
+    assert.equal(m.json().error.code, 'PROVIDER_BLOCKED');
+    const t = await call(a, 'POST', '/kb/providers/turn', { provider: 'custom:cat-openai-compatible-lan', model: 'x', message: 'hi', mode: 'ask' });
+    assert.equal(t.statusCode, 403);
+    assert.equal(t.json().error.code, 'PROVIDER_BLOCKED');
+    const c = await call(a, 'POST', '/kb/providers/catalog/test', { id: 'cat-openai-compatible-lan' });
+    assert.equal(c.json().ok, false);
+  } finally {
+    if (prev === undefined) delete process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS; else process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS = prev;
+  }
+});
+
+test('a submitted key is redacted even if an error message were to carry it', async () => {
+  const { users: [a] } = freshDb();
+  // the slug check echoes user input in its message; a key-shaped slug must not survive in the answer
+  const key = 'sk-echo-0123456789abcdefghij';
+  const res = await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'openai-compatible', slug: key, apiKey: key, baseURL: 'https://x.example.com/v1' });
+  assert.equal(res.statusCode, 400);
+  assert.ok(!res._body.includes(key));
 });

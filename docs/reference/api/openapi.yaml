@@ -9945,6 +9945,12 @@ paths:
                   detail:
                     type: "string"
                     description: "Why the list is static or stale"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
         "404":
           description: "Not Found"
           content:
@@ -10145,6 +10151,12 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "401":
           description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
           content:
             application/json:
               schema:
@@ -15435,6 +15447,7 @@ components:
         - "fallbackEnabled"
         - "fallbackOrder"
         - "toolOverrides"
+        - "egressAutoApprove"
       properties:
         toolsEnabled:
           type: "boolean"
@@ -15451,6 +15464,9 @@ components:
           additionalProperties:
             type: "boolean"
           description: "'<connection id>/<model id>' to the user's own tools yes/no"
+        egressAutoApprove:
+          type: "boolean"
+          description: "false (default): fetch-url and web-search ask for approval in a provider turn, because a hostile page can steer a model into leaking through them; true restores Claude parity"
     SettingsPatch:
       type: "object"
       properties:
@@ -15466,6 +15482,8 @@ components:
           type: "object"
           additionalProperties:
             type: "boolean"
+        egressAutoApprove:
+          type: "boolean"
     SkillEntry:
       type: "object"
       required:
