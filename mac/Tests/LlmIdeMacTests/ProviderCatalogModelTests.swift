@@ -16,13 +16,14 @@ final class ProviderCatalogDecodingTests: XCTestCase {
             "baseURL":"https://api.groq.com/openai/v1","allowPrivate":false,"enabled":true,"hasKey":true}]}],
          "settings":{"toolsEnabled":false,"fallbackEnabled":true,
            "fallbackOrder":[{"provider":"custom:cat-groq","model":"llama-3.3-70b-versatile"},{"provider":"custom:cat-xai"}],
-           "toolOverrides":{"cat-groq/x":true}}}
+           "toolOverrides":{"cat-groq/x":true},"egressAutoApprove":false}}
         """)
         XCTAssertEqual(r.providers[0].connections[0].provider, "custom:cat-groq")
         XCTAssertTrue(r.providers[0].connections[0].hasKey)
         XCTAssertFalse(r.settings.toolsEnabled)
         XCTAssertEqual(r.settings.fallbackOrder.map(\.model), ["llama-3.3-70b-versatile", nil])
         XCTAssertEqual(r.settings.toolOverrides["cat-groq/x"], true)
+        XCTAssertFalse(r.settings.egressAutoApprove)
     }
 
     func testModelListDecodesCapabilityFlags() throws {
@@ -149,6 +150,7 @@ final class ProviderCatalogModelTests: XCTestCase {
         await model.load()
         XCTAssertFalse(model.settings.toolsEnabled)
         XCTAssertFalse(model.settings.fallbackEnabled)
+        XCTAssertFalse(model.settings.egressAutoApprove, "fetch-url and web-search ask first unless the user opts out")
         await model.update { $0.toolsEnabled = true }
         XCTAssertTrue(model.settings.toolsEnabled)
         XCTAssertEqual(api.savedSettings.count, 1)

@@ -165,6 +165,11 @@ struct ProviderCatalogSettingsCard: View {
                 set: { on in Task { await model.update { $0.toolsEnabled = on } } }))
             SettingsHint("Off by default. When on, a model with the tools badge can read files, search, and run commands in a chat turn, behind the same approvals as Claude. Without it these providers answer without tools.")
 
+            Toggle("Let these models fetch URLs and search the web without asking", isOn: Binding(
+                get: { model.settings.egressAutoApprove },
+                set: { on in Task { await model.update { $0.egressAutoApprove = on } } }))
+            SettingsHint("Off by default: fetch-url and web-search ask first on these providers, because a hostile page can steer a model into sending what it has read to a web address.")
+
             Toggle("Fall back to the next provider when one is rate-limited", isOn: Binding(
                 get: { model.settings.fallbackEnabled },
                 set: { on in Task { await model.update { $0.fallbackEnabled = on } } }))

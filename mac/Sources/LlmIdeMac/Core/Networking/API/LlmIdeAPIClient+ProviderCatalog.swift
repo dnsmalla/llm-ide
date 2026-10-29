@@ -55,9 +55,13 @@ extension LlmIdeAPIClient {
         public var fallbackOrder: [CatalogFallbackEntry]
         /// "<connection id>/<model id>" -> the user's own tools yes/no.
         public var toolOverrides: [String: Bool]
+        /// false (default): fetch-url and web-search ask for approval in a provider turn.
+        public var egressAutoApprove: Bool
 
         public init(toolsEnabled: Bool = false, fallbackEnabled: Bool = false,
-                    fallbackOrder: [CatalogFallbackEntry] = [], toolOverrides: [String: Bool] = [:]) {
+                    fallbackOrder: [CatalogFallbackEntry] = [], toolOverrides: [String: Bool] = [:],
+                    egressAutoApprove: Bool = false) {
+            self.egressAutoApprove = egressAutoApprove
             self.toolsEnabled = toolsEnabled
             self.fallbackEnabled = fallbackEnabled
             self.fallbackOrder = fallbackOrder
