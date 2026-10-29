@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/index/scan",
+  "status": 409,
+  "description": "The final chunk arrived but a chunk of the scan never did: nothing is pruned.",
+  "request": {
+    "body": {
+      "projectId": "alpha",
+      "scanId": "scan-0003-abcd",
+      "index": 1,
+      "total": 3,
+      "complete": true,
+      "prune": true,
+      "entries": []
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SCAN_INCOMPLETE",
+      "message": "the scan is missing 1 of 3 chunks; nothing was pruned"
+    }
+  }
+}

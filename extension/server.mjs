@@ -281,12 +281,13 @@ const HOST = config.host;
 //   v77 — GET /kb/usage/turn-composition?limit= → { turns: [...] }: the caller's newest v2 chat turns' measured context split (migration 0044): LLM-IDE parts as approximate tokens (chars/4), the SDK's own end-of-turn categories (sdk_*), tool-result size and user MCP server count. Additive; read-only.
 //   v78 — GET /kb/meeting/:id?include=transcript adds `transcript` (the stored transcript text) to the record; the default response is unchanged (no transcript). Used by the Mac's Doc Gen.
 //   v79 — GET /kb/os/state: the read-only System view aggregate (feature set + kit table, health checks, this user's running chat turns / meeting-agent runs / live sessions with their cancel routes, activity, token usage by window, turn composition, knowledge counts). No model call, no write. Additive. Also GET /kb/os/stream: a per-user SSE change channel (hello, then activity / usage / turn-start / turn-end / agent-run / live-session events carrying only {type, at}; the client re-fetches /kb/os/state).
+//   v85 — live-then-archive Phase 2: chunked note-index scan (POST /kb/index/scan; the final chunk with complete:true may prune).
 //   v84 — live-then-archive Phase 1 (additive, nothing calls them yet): the derived note index (POST /kb/index/notes, POST /kb/index/reconcile, DELETE /kb/index/notes/:key, GET /kb/index/status); chat lifecycle (GET /kb/agent/working-state, POST /agent/v2/sessions/purge with verified:true, POST /kb/chat/sessions/:id/archive/begin and /commit (409 ARCHIVE_STALE), POST /kb/session-purges); live-capture acks (POST /kb/live/:id/ack, GET /kb/live/:id/status, GET /kb/live/unacked). Finalize keeps an unacked capture only when LLMIDE_LIVE_ACK=1; otherwise unchanged.
 //   v83 — Agent store (Stage 1c): GET /kb/storage (storage groups and the agent-history summary), GET and PUT /kb/agent-history/settings (retention 7..365 days), POST /kb/agent-history/clear (dry run returns counts and a previewId; a real clear needs it, 409 preview_stale when the counts moved), POST /kb/agent-history/compact (409 busy while a chat or meeting-agent run is in flight). GET /kb/os/state adds storage and agents.recentRuns. Additive.
 //   v82 — docs-kit K1 hardening: GET /kb/docs/templates and /kb/docs/commands add `truncated` and `scannedFolders` (a family is scanned to at most 2000 folders); DELETE /kb/docs/* adds `folderRemoved` (only the template/command file is removed, the folder is removed only when empty); PUT and DELETE refuse ingest layouts and the ingest folder names (meeting-note, email-note) with 400/409 RESERVED_FOLDER; POST /kb/projects/register answers every root refusal as one INVALID_ROOT and caps a user at 200 projects (409 TOO_MANY_PROJECTS). Additive except the register error collapse.
 //   v81 — docs-kit K1: GET/PUT/DELETE /kb/docs/templates[/:folder] and GET/PUT/DELETE /kb/docs/commands[/:folder] (Doc Gen project template and command files under the project's templates/ and commands/, addressed by ?project=<id>), POST /kb/docs/seed (kit defaults, write-if-absent), POST /kb/projects/register ({id, root}: the per-user project id -> folder map the docs routes resolve through, validated like the System bridge's roots). All in the doc_gen group: with doc_gen off they answer 404 feature_disabled. Additive; no existing shape changes.
 //   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
-const SERVER_API_VERSION = 84;
+const SERVER_API_VERSION = 85;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -422,6 +423,7 @@ const ALL_ENDPOINTS = [
   '/kb/index/notes',
   '/kb/index/notes/:key',
   '/kb/index/reconcile',
+  '/kb/index/scan',
   '/kb/index/status',
   '/kb/os/state',
   '/kb/os/stream',
@@ -528,7 +530,7 @@ function rateLimitProfile(url, method) {
   // Local filesystem symlink install of the skills kit into a project path.
   if (url === '/kb/project/install-skills') return 'kbWrite';
   // live-then-archive Phase 1 (plan section 4.1): cheap local writes, no model call.
-  if (url === '/kb/index/notes' || url === '/kb/index/reconcile') return 'kbWrite';
+  if (url === '/kb/index/notes' || url === '/kb/index/reconcile' || url === '/kb/index/scan') return 'kbWrite';
   if (url === '/kb/session-purges' || url === '/agent/v2/sessions/purge' || url === '/kb/archive-receipts') return 'kbWrite';
   if (/^\/kb\/chat\/sessions\/[^/]+\/archive\/(begin|commit)$/.test(url)) return 'kbWrite';
   if (/^\/kb\/live\/[^/]+\/ack$/.test(url)) return 'kbWrite';

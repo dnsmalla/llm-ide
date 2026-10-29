@@ -1,0 +1,34 @@
+{
+  "endpoint": "POST /kb/index/scan",
+  "status": 200,
+  "description": "Example data. The final chunk of two: every chunk arrived, so the scan prunes the one row no chunk named.",
+  "request": {
+    "body": {
+      "projectId": "alpha",
+      "scanId": "scan-0001-abcd",
+      "index": 1,
+      "total": 2,
+      "complete": true,
+      "prune": true,
+      "entries": [
+        {
+          "noteKey": "meetings/2026/10/review.md",
+          "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ]
+    }
+  },
+  "response": {
+    "missing": [],
+    "stale": [
+      "meetings/2026/10/review.md"
+    ],
+    "extra": [
+      "meetings/2026/09/old.md"
+    ],
+    "pruned": 1,
+    "received": 2,
+    "total": 2,
+    "complete": true
+  }
+}

@@ -330,3 +330,111 @@ export function searchNoteIndex(userId, { q, limit = 10, projectId } = {}) {
   }
   return out;
 }
+
+// ---------------------------------------------------------------------------
+// Chunked scan (live-then-archive Phase 2, plan 3.8): a library too large for one
+// reconcile request (about 6 000 notes) is sent as chunks of one scan. Chunks only
+// classify (missing, stale) and record the keys they saw. The FINAL chunk
+// (complete: true) compares the whole scan with the index and, only when `prune`
+// is true, deletes the rows no chunk named. Scan state is in memory with an idle
+// TTL, so a restart or an expiry costs a 409 and never a prune.
+// ---------------------------------------------------------------------------
+
+export const MAX_SCAN_CHUNKS = 100;          // 100 chunks x 500 notes = 50 000 notes per scan
+export const MAX_SCAN_CHUNK_ENTRIES = 500;
+export const SCAN_TTL_MS = 15 * 60 * 1000;   // idle time before a scan is forgotten
+export const MAX_OPEN_SCANS = 4;             // per user, so a client cannot exhaust memory
+const SCAN_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
+const SCAN_LOOKUP_CHUNK = 400;               // keys per IN (...) lookup (bound-parameter safety)
+const scans = new Map();                     // userId\0projectId\0scanId -> state
+
+function sweepScans(now) {
+  for (const [key, s] of scans) if (now - s.touched > SCAN_TTL_MS) scans.delete(key);
+}
+
+/** Test seam: forget every open scan. */
+export function resetNoteIndexScans() {
+  scans.clear();
+}
+
+function indexedHashes(db, userId, pid, keys) {
+  const found = new Map();
+  for (let i = 0; i < keys.length; i += SCAN_LOOKUP_CHUNK) {
+    const part = keys.slice(i, i + SCAN_LOOKUP_CHUNK);
+    const sql = `SELECT note_key, content_hash FROM note_index
+                  WHERE user_id = ? AND project_id = ? AND note_key IN (${part.map(() => '?').join(',')})`;
+    for (const r of db.prepare(sql).all(userId, pid, ...part)) found.set(r.note_key, r.content_hash);
+  }
+  return found;
+}
+
+/**
+ * One chunk of a scan. Returns { missing, stale, extra, pruned, received, total, complete }.
+ * `extra` and `pruned` are only non-empty on the final chunk. Throws:
+ *   400 VALIDATION_FAILED for a malformed chunk,
+ *   429 SCAN_LIMIT when the user already has MAX_OPEN_SCANS open scans,
+ *   409 SCAN_INCOMPLETE on the final chunk when some chunk never arrived (nothing is pruned).
+ */
+export function scanNoteChunk(userId, input, { now = Date.now() } = {}) {
+  requireUser(userId);
+  const body = input && typeof input === 'object' ? input : {};
+  const pid = projectIdOf(body.projectId);
+  const scanId = body.scanId;
+  if (typeof scanId !== 'string' || !SCAN_ID_RE.test(scanId)) throw errValidation('scanId must be 8 to 64 letters, digits or dashes');
+  const { index, total } = body;
+  if (!Number.isInteger(total) || total < 1 || total > MAX_SCAN_CHUNKS) throw errValidation(`total must be 1 to ${MAX_SCAN_CHUNKS}`);
+  if (!Number.isInteger(index) || index < 0 || index >= total) throw errValidation('index must be 0 to total-1');
+  const complete = body.complete === undefined ? false : body.complete;
+  const prune = body.prune === undefined ? false : body.prune;
+  if (typeof complete !== 'boolean' || typeof prune !== 'boolean') throw errValidation('complete and prune must be booleans');
+  if (prune && !complete) throw errValidation('prune is only allowed on the final chunk (complete: true)');
+  if (!Array.isArray(body.entries) || body.entries.length > MAX_SCAN_CHUNK_ENTRIES) {
+    throw errValidation(`entries must be an array of at most ${MAX_SCAN_CHUNK_ENTRIES}`);
+  }
+  const entries = body.entries.map((e) => ({
+    noteKey: checkNoteKey(e?.noteKey),
+    contentHash: str(e?.contentHash, 'contentHash', 128),
+  }));
+
+  sweepScans(now);
+  const key = [userId, pid, scanId].join('\u0000');
+  let s = scans.get(key);
+  if (!s) {
+    let open = 0;
+    for (const k of scans.keys()) if (k.startsWith(`${userId}\u0000`)) open += 1;
+    if (open >= MAX_OPEN_SCANS) throw new AppError('SCAN_LIMIT', 'too many open index scans; wait for them to finish', { status: 429 });
+    s = { total, received: new Set(), seen: new Set(), touched: now };
+    scans.set(key, s);
+  } else if (s.total !== total) {
+    throw errValidation('total differs from the first chunk of this scan');
+  }
+  s.touched = now;
+
+  const db = getDb();
+  const held = indexedHashes(db, userId, pid, entries.map((e) => e.noteKey));
+  const missing = [];
+  const stale = [];
+  for (const e of entries) {
+    s.seen.add(e.noteKey);
+    if (!held.has(e.noteKey)) missing.push(e.noteKey);
+    else if (held.get(e.noteKey) !== e.contentHash) stale.push(e.noteKey);
+  }
+  s.received.add(index);
+
+  if (!complete) {
+    return { missing, stale, extra: [], pruned: 0, received: s.received.size, total, complete: false };
+  }
+  scans.delete(key);
+  if (s.received.size !== total) {
+    throw new AppError('SCAN_INCOMPLETE', `the scan is missing ${total - s.received.size} of ${total} chunks; nothing was pruned`, { status: 409 });
+  }
+  const indexedKeys = db.prepare('SELECT note_key FROM note_index WHERE user_id = ? AND project_id = ?')
+    .all(userId, pid).map((r) => r.note_key);
+  const extra = indexedKeys.filter((k) => !s.seen.has(k)).sort();
+  let pruned = 0;
+  if (prune && extra.length > 0) {
+    const del = db.prepare('DELETE FROM note_index WHERE user_id = ? AND project_id = ? AND note_key = ?');
+    db.transaction((keys) => { for (const k of keys) pruned += del.run(userId, pid, k).changes; })(extra);
+  }
+  return { missing, stale, extra, pruned, received: total, total, complete: true };
+}

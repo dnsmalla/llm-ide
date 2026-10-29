@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/index/scan",
+  "status": 400,
+  "description": "Pruning needs the final chunk: prune without complete is refused before any state changes.",
+  "request": {
+    "body": {
+      "scanId": "scan-0002-abcd",
+      "index": 0,
+      "total": 1,
+      "complete": false,
+      "prune": true,
+      "entries": []
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "prune is only allowed on the final chunk (complete: true)"
+    }
+  }
+}

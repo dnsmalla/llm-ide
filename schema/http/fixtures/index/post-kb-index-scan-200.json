@@ -1,0 +1,35 @@
+{
+  "endpoint": "POST /kb/index/scan",
+  "status": 200,
+  "description": "Example data. A non-final chunk: classifies its keys (one missing, one stale) and prunes nothing.",
+  "request": {
+    "body": {
+      "projectId": "alpha",
+      "scanId": "scan-0001-abcd",
+      "index": 0,
+      "total": 2,
+      "complete": false,
+      "entries": [
+        {
+          "noteKey": "meetings/2026/10/standup.md",
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "noteKey": "meetings/2026/10/new.md",
+          "contentHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ]
+    }
+  },
+  "response": {
+    "missing": [
+      "meetings/2026/10/new.md"
+    ],
+    "stale": [],
+    "extra": [],
+    "pruned": 0,
+    "received": 1,
+    "total": 2,
+    "complete": false
+  }
+}

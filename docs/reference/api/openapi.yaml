@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 84
+  x-api-version: 85
 servers:
   - url: "https://{host}"
     variables:
@@ -6790,6 +6790,97 @@ paths:
                     description: "Rows deleted (only with prune true)."
         "400":
           description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/index/scan:
+    post:
+      tags:
+        - "index"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "scanId"
+                - "index"
+                - "total"
+                - "entries"
+              properties:
+                projectId:
+                  type: "string"
+                scanId:
+                  type: "string"
+                  description: "8 to 64 letters, digits or dashes; one value per scan, chosen by the client."
+                index:
+                  type: "integer"
+                  description: "0-based chunk number, below total."
+                total:
+                  type: "integer"
+                  description: "Chunks in the scan (1 to 100). Every chunk of one scan repeats it."
+                complete:
+                  type: "boolean"
+                  description: "true on the final chunk: the scan is compared with the index. Default false."
+                prune:
+                  type: "boolean"
+                  description: "true (final chunk only) deletes the rows no chunk named. Default false."
+                entries:
+                  type: "array"
+                  items:
+                    "$ref": "#/components/schemas/ManifestEntry"
+                  description: "At most 500 per chunk."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "missing"
+                  - "stale"
+                  - "extra"
+                  - "pruned"
+                  - "received"
+                  - "total"
+                  - "complete"
+                properties:
+                  missing:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "Keys in this chunk that the index lacks."
+                  stale:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "Keys in this chunk indexed with another hash."
+                  extra:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "Final chunk only: indexed keys no chunk named."
+                  pruned:
+                    type: "integer"
+                    description: "Final chunk with prune: rows deleted."
+                  received:
+                    type: "integer"
+                    description: "Chunks of this scan received so far."
+                  total:
+                    type: "integer"
+                  complete:
+                    type: "boolean"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
           content:
             application/json:
               schema:

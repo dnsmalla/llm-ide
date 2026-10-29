@@ -3,13 +3,14 @@
 //
 //   POST   /kb/index/notes                 { projectId?, notes[≤100] } -> { upserted, unchanged, skippedHidden, truncated }
 //   POST   /kb/index/reconcile             { projectId?, manifest[], prune? } -> { missing[], stale[], extra[], pruned }
+//   POST   /kb/index/scan                  { projectId?, scanId, index, total, complete?, prune?, entries[≤500] } -> { missing[], stale[], extra[], pruned, received, total, complete }
 //   DELETE /kb/index/notes/:key?projectId= -> { deleted }
 //   GET    /kb/index/status?projectId=     -> { notes, ftsRows, consistent, lastIndexedAt }
 //
 // Nothing calls these yet (T2.1 wires the Mac). Every route is scoped to the
 // authenticated user; the router passes userId.
 import { sendJSON, readJsonBody, decodeParam } from '../core/utils.mjs';
-import { upsertNotes, reconcileNotes, deleteNote, indexStatus } from '../kb/note-index.mjs';
+import { upsertNotes, reconcileNotes, deleteNote, indexStatus, scanNoteChunk } from '../kb/note-index.mjs';
 
 // Upserts carry bodies, so they get the tightest limit: 1 MB (50 notes of at
 // most 512 KiB each is 25 MB, so the byte cap is the real bound on a batch).
@@ -35,6 +36,12 @@ export async function handleIndexRoutes(req, res, { userId, url }) {
       prune: body.prune === true,
     });
     sendJSON(res, 200, result);
+    return true;
+  }
+
+  if (req.method === 'POST' && path === '/kb/index/scan') {
+    const body = await readJsonBody(req, BATCH_BYTES);
+    sendJSON(res, 200, scanNoteChunk(userId, body));
     return true;
   }
 

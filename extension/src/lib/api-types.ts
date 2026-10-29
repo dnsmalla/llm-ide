@@ -3207,6 +3207,44 @@ export type GetKbIndexStatusResponse200 = {
   lastIndexedAt: string | null;
 };
 
+/** Request parts for `POST /kb/index/scan` (schema/http/index.schema.json). */
+export type PostKbIndexScanRequest = {
+  body: {
+    projectId?: string;
+    /** 8 to 64 letters, digits or dashes; one value per scan, chosen by the client. */
+    scanId: string;
+    /** 0-based chunk number, below total. */
+    index: number;
+    /** Chunks in the scan (1 to 100). Every chunk of one scan repeats it. */
+    total: number;
+    /** true on the final chunk: the scan is compared with the index. Default false. */
+    complete?: boolean;
+    /** true (final chunk only) deletes the rows no chunk named. Default false. */
+    prune?: boolean;
+    /** At most 500 per chunk. */
+    entries: ManifestEntry[];
+  };
+};
+
+export type PostKbIndexScanResponse200 = {
+  /** Keys in this chunk that the index lacks. */
+  missing: string[];
+  /** Keys in this chunk indexed with another hash. */
+  stale: string[];
+  /** Final chunk only: indexed keys no chunk named. */
+  extra: string[];
+  /** Final chunk with prune: rows deleted. */
+  pruned: number;
+  /** Chunks of this scan received so far. */
+  received: number;
+  total: number;
+  complete: boolean;
+};
+
+export type PostKbIndexScanResponse400 = CommonError;
+
+export type PostKbIndexScanResponse409 = CommonError;
+
 /** Request parts for `GET /kb/search` (schema/http/kb-sources.schema.json). */
 export type GetKbSearchRequest = {
   query: {
@@ -6752,6 +6790,14 @@ export interface ApiEndpoints {
     request: GetKbIndexStatusRequest;
     responses: {
       200: GetKbIndexStatusResponse200;
+    };
+  };
+  "POST /kb/index/scan": {
+    request: PostKbIndexScanRequest;
+    responses: {
+      200: PostKbIndexScanResponse200;
+      400: PostKbIndexScanResponse400;
+      409: PostKbIndexScanResponse409;
     };
   };
   "GET /kb/search": {

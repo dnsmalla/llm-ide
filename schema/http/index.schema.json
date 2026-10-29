@@ -1,5 +1,5 @@
 {
-  "description": "The derived note index (live-then-archive Phase 1, plan 3.8). Always on, per user and per project. The index is rebuildable from the Mac note files and holds no unique data: body_text is a redacted, capped copy (200 KiB, UTF-8) built when the row is written. Hidden notes are never stored (skippedHidden counts them). Nothing calls these routes yet.",
+  "description": "The derived note index (live-then-archive Phase 1, plan 3.8). Always on, per user and per project. The index is rebuildable from the Mac note files and holds no unique data: body_text is a redacted, capped copy (200 KiB, UTF-8) built when the row is written. Hidden notes are never stored (skippedHidden counts them). Chunked scans (POST /kb/index/scan) let a library larger than one reconcile request be checked; only a complete final chunk may prune.",
   "$defs": {
     "Note": {
       "type": "object",
@@ -284,6 +284,108 @@
               ]
             }
           }
+        }
+      }
+    },
+    "POST /kb/index/scan": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "scanId",
+            "index",
+            "total",
+            "entries"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string"
+            },
+            "scanId": {
+              "type": "string",
+              "description": "8 to 64 letters, digits or dashes; one value per scan, chosen by the client."
+            },
+            "index": {
+              "type": "integer",
+              "description": "0-based chunk number, below total."
+            },
+            "total": {
+              "type": "integer",
+              "description": "Chunks in the scan (1 to 100). Every chunk of one scan repeats it."
+            },
+            "complete": {
+              "type": "boolean",
+              "description": "true on the final chunk: the scan is compared with the index. Default false."
+            },
+            "prune": {
+              "type": "boolean",
+              "description": "true (final chunk only) deletes the rows no chunk named. Default false."
+            },
+            "entries": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ManifestEntry"
+              },
+              "description": "At most 500 per chunk."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "missing",
+            "stale",
+            "extra",
+            "pruned",
+            "received",
+            "total",
+            "complete"
+          ],
+          "properties": {
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Keys in this chunk that the index lacks."
+            },
+            "stale": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Keys in this chunk indexed with another hash."
+            },
+            "extra": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Final chunk only: indexed keys no chunk named."
+            },
+            "pruned": {
+              "type": "integer",
+              "description": "Final chunk with prune: rows deleted."
+            },
+            "received": {
+              "type": "integer",
+              "description": "Chunks of this scan received so far."
+            },
+            "total": {
+              "type": "integer"
+            },
+            "complete": {
+              "type": "boolean"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
         }
       }
     }
