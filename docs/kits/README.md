@@ -17,3 +17,5 @@ a design: it changes no code, and it is revised as each later step lands.
 | graph-kit (Code Graph, OS view, graph engine plugin) | `code_graph_3d` | K0 map | [graph-kit.md](graph-kit.md) |
 | knowledge-kit (Library, KB sources and search, connectors, ReviewConflicts) | none (always on) | K0 map | [knowledge-kit.md](knowledge-kit.md) |
 | agent-kit (Chat, ClaudeLink, llm_agent, providers, plugins, MCP, LLM sources, agent history) | `agent_chat` (never off) | K0 map | [agent-kit.md](agent-kit.md) |
+
+Cross-kit principle (user decision 2026-10-29): [data-lifecycle.md](data-lifecycle.md) - one stored copy of each kind of data, live in the server DB while a session runs, archived once into the Mac app at the end, with the server rows deleted. The web and the extension are connectors with no data access of their own. It applies to knowledge-kit and agent-kit (K1a) and is the reference for every kit's data plan.

@@ -198,6 +198,38 @@ No consumer reads both stores for one question.
 - **Pattern B** (fetch only, Mac writes files): the route returns items (`router.mjs:648-665`), the Mac saves raw files (`EmailSource.swift:91`), classifies by `/kb/email/classify` or the manifest engine's classify route, writes a note with `EmailNoteWriter` or `SourceConnectorNoteWriter`, then `markEmailSeen` (`:61`). Dedupe is by content hash against existing notes (`:70-73`) plus the server seen-set. Declarative connectors need a manifest in `Resources/source_connectors/` and the server defs in `mcp-connector-defs.mjs`.
 - **Server to files** (the reverse): `ProjectExporter` on project close (`ProjectStore.swift:290-312`) and the manual `LegacyExporter` (`AppShell.swift:996-1012`, from `/kb/export-all`).
 
+## User decisions 2026-10-29
+
+The user decided an architecture principle that applies to both kits (full text and the table of every data kind: [data-lifecycle.md](data-lifecycle.md)). In the user's words: "i want best and no duplicate data save but can be accessible from mac app and mobile app. the web is connector but extension is to call mac app, no data access to that." For meetings: "current is good, capture in extension and copy to mac app".
+
+Read as: (1) **one stored copy** of each kind of data, readable by the Mac app and, through it, the phone; (2) **live then archive**: a live session's working data sits in the server DB, and at session end it is written once into the Mac app's files (`source/`, `llm-doc/`) and the server rows are deleted; (3) the web and external services are **ingest sources only**, and the extension captures and copies to the Mac app with **no data access of its own**; (4) metadata-only history (`agent.db`, `usage_ledger`) is not a transcript and is outside the rule (**my assumption, to be confirmed**, R7 in the lifecycle page).
+
+What this changes for this kit, by reading:
+
+- **Files are the single copy** for notes and meetings. That answers the K1a direction (section 6 option A's "files stay the truth") and rules out options B and C (server DB as truth; push to the server), which are two-copy designs.
+- **The server copy of a Mac meeting goes.** Today the server gets a redacted duplicate after the file is finalized (`CaptionScraper.swift:354`; `kb/meetings.mjs:26-30`). The server `meetings` rows, the `search` FTS rows made from them and `getMeeting` / `getMeetingTranscript` for ended meetings disappear with it.
+- **What breaks:** (a) the agent's `search_kb` (`search-kb.mjs:27`) and the planner grounding (`agents/planner.mjs:8-9`, E13 and E14) cannot see ended meetings; (b) `/kb/search` kinds `meeting|action|decision|blocker` and the history block of `/kb/conflict-questions` (`router.mjs:1428-1432`), already empty for entities, lose their meeting source; (c) the extension's `searchKB`, `conflictQuestions`, `getKBStats` (`kb.ts:89,114,128`) are read access to stored data and conflict with the extension rule; (d) `os-kit` counts of `meetings` (E16); (e) `ProjectExporter` and `LegacyExporter` copy server rows into files and would have nothing to copy. The phone is unaffected: it reads files through the Mac (`LlmDocBrowser`, E10).
+- **A gap this decision exposes (not in section 2c):** the extension has its own meeting store, `chrome.storage.local` keys `transcripts` (cap 50) and `transcriptDraft:<id>` (`extension/src/lib/storage.ts:6-12,47-104`, written by `useTranscript.ts:6-7,215`). Under the principle it can hold only the in-progress draft. I could not find the code that copies a finished extension capture to the Mac app (lifecycle page, section 8).
+
+### Status of Q1 to Q14 after the decision
+
+| # | Status | How |
+|---|---|---|
+| Q1 | **Answered** for truth: files (option A's truth, never B or C). **Open** for the index: a server-side derived index is allowed only if the user says a rebuildable index is not a duplicate (lifecycle R3) | One copy on the Mac |
+| Q2 | **Partially answered, still open** | Once server meeting rows are deleted, server FTS cannot serve ended meetings, so agent search needs a derived index (R3) or a Mac-side index. The token-bench condition stands |
+| Q3 | **Answered, moot for meetings** | No server copy remains to delete. Stays alive only for a derived index and for the `hidden` tombstone, which is Mac-only and not rebuildable (`LibraryView.swift:1827-1835`) |
+| Q4 | **Answered: stop** (Mac meetings are not duplicated to the server) | The server never gets the transcript after the file is final. If a live working copy is wanted during capture, it is deleted at the end. Capture itself stays as is |
+| Q5 | **Narrowed, still open** | Entities are server rows that nothing fills. With no server meeting rows they cannot be a source of truth; the choice is retire the table and kinds, or derive from the Mac note. Recommendation unchanged (retire), now cheaper |
+| Q6 | Open | Unaffected |
+| Q7 | Open | Unaffected (agent-kit Q4) |
+| Q8 | **Answered by consequence** | `ProjectExporter`'s second `.md` and `LegacyExporter` are second copies of server rows; with no server meeting rows they are retired. The user did not name them; confirm |
+| Q9 | Open | Unaffected |
+| Q10 | **Partially answered** | Needed only if a server-side index is built (R3); a Mac-side index needs no server root registration |
+| Q11 | **Partially answered** | Moot if the index lives on the Mac; stays if the server reads the notes folder |
+| Q12 | Open | Unaffected |
+| Q13 | Open | Unaffected |
+| Q14 | **Open, sharper** | The archive is one Mac store with no per-user folder, while the live rows are per user: who owns an archived file after a user switch |
+
 ## 6. K1a data plan (home of the state after K1)
 
 K1a is tests and fixtures only. Constraints from the plan: one-way migration, N-1 readability, rollback with the Swift path kept one release behind a preference, migration test with a real old-format fixture. `mac/Tests/LlmIdeMacTests/Fixtures/` today holds only `docgen/`; **no notes fixtures exist**, so K1a must first capture real old-format files (meeting `.md` with and without `platform`, `llm-doc` notes with `index.json`, legacy `library_items.json`, `index.sqlite` at user_version 1, 2 and 3 with a hidden row).
@@ -217,7 +249,7 @@ Constraint from the token plan: putting notes into the shared FTS table changes 
 
 ## 7. Open questions for the user
 
-Options are listed; the leaning is my recommendation only.
+Options are listed; the leaning is my recommendation only. **2026-10-29: Q1, Q3, Q4 and Q8 are answered, Q2, Q5, Q10, Q11 partially, by the decision above; the table below is the original list.**
 
 | # | Question | Options | Leaning |
 |---|---|---|---|
@@ -237,6 +269,17 @@ Options are listed; the leaning is my recommendation only.
 | Q14 | One KB user per Mac user: are notes on disk per user? | single user assumed, per-user folders | single user |
 
 ## 8. K1 task breakdown (proposal, assumes option A)
+
+**Revised 2026-10-29** (see "User decisions 2026-10-29"). The table below is the original. What changes:
+
+- **Tasks 2 to 5 (Node reader, index, routes, Mac read switch) become conditional on lifecycle R3** (is a derived rebuildable index a duplicate?). If yes, the index must be derived, never a second copy of note text, and may sit on either side. If no, agent search reads a Mac-side index and tasks 2 to 4 are replaced by a Mac index service behind a Core seam.
+- **Task 6 (hide and delete propagation, entities) shrinks:** delete propagation is moot for meetings; only the `hidden` tombstone and the entities decision (retire) remain.
+- **New A: stop the server meeting copy.** Remove the `ingestMeeting` POST for Mac captures (`CaptionScraper.swift:354`) or keep it only as a live working row deleted at end; delete existing `meetings` and `entities` rows and the derived `search` rows once the file is verified. One-way migration, so it needs the real old-format fixtures of task 1.
+- **New B: end-of-session archive with verify-then-delete and crash recovery,** and a startup sweep for items present in both places (lifecycle section 4). For Mac meetings the archive already exists (the file); the new work is verify and delete.
+- **New C: retire `ProjectExporter` and `LegacyExporter`** (Q8), and fix or remove the `sources.mjs:2-4` comment (P10).
+- **New D: the agent and planner read path for ended meetings** (E13, E14): a route to the Mac index, or the derived index of R3. Without it `search_kb` and the planner lose past meetings.
+- **New E (extension, with capture-kit):** reduce `storage.ts` to the in-progress draft and remove the read views in `kb.ts`; blocked on finding the extension-to-Mac copy path.
+- Size: tasks 1, 7, 8, 9 stay; 2 to 5 are 5 to 6.5 tasks if R3 is yes, about 2 if it is no and a Mac index is used; A to E add about 3 to 4. Total stays near 10 to 13, but the content is different.
 
 Size is in tasks of about 1.5 to 3 k lines each, at the plan's 0.4 to 0.7 M agent tokens per task.
 
