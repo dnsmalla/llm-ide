@@ -96,21 +96,21 @@ let apiRoutes: [Route] = [
     route("PUT /kb/agent-history/settings", "AgentHistorySettings", LlmIdeAPIClient.AgentHistorySettings.self),  // setAgentHistoryRetention
     route("POST /kb/agent-history/clear", "AgentHistoryClearResult", LlmIdeAPIClient.AgentHistoryClearResult.self),  // previewAgentHistoryClear, performAgentHistoryClear
     route("POST /kb/agent-history/compact", "AgentHistoryCompactResult", LlmIdeAPIClient.AgentHistoryCompactResult.self),  // compactAgentHistory
+    route("POST /kb/index/notes", "IndexUpsertResult", LlmIdeAPIClient.IndexUpsertResult.self),  // indexUpsertNotes
+    route("POST /kb/index/reconcile", "IndexReconcileResult", LlmIdeAPIClient.IndexReconcileResult.self),  // indexReconcile
+    route("DELETE /kb/index/notes/:key", "IndexDeleteResult", LlmIdeAPIClient.IndexDeleteResult.self),  // indexDeleteNote
+    route("GET /kb/index/status", "IndexStatusResult", LlmIdeAPIClient.IndexStatusResult.self),  // indexStatus
 ]
 
 /// 2xx fixture endpoints this table does not decode, with the reason.
 let apiSkipped: [(endpoint: String, reason: String)] = [
-    ("DELETE /kb/index/notes/:key", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("GET /kb/agent/working-state", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
-    ("GET /kb/index/status", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("GET /kb/live/:id/status", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("GET /kb/live/unacked", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /agent/v2/sessions/purge", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/archive-receipts", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/chat/sessions/:id/archive/begin", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/chat/sessions/:id/archive/commit", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
-    ("POST /kb/index/notes", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
-    ("POST /kb/index/reconcile", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/live/:id/ack", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/session-purges", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/summarize", "Mac decodes a private SummarizeResp, then builds MeetingSummary itself; not in this table yet"),

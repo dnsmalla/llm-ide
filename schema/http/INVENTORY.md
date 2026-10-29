@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 189 token, 12 public
 - Handler found: 199; no handler found: 2
-- No Mac and no extension caller: 47 (tests only: 32, comments/docs only: 15, no reference: 0)
+- No Mac and no extension caller: 43 (tests only: 29, comments/docs only: 14, no reference: 0)
 
 By first path segment:
 
@@ -46,7 +46,7 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (47):
+Endpoints with no client caller (43):
 
 - `/agent-sdk/spike` — tests only
 - `/kb/entity/:id` — tests only
@@ -81,10 +81,6 @@ Endpoints with no client caller (47):
 - `/agent/v2/sessions/purge` — tests only
 - `/kb/session-purges` — tests only
 - `/kb/archive-receipts` — tests only
-- `/kb/index/notes` — tests only
-- `/kb/index/notes/:key` — tests only
-- `/kb/index/reconcile` — comments/docs only
-- `/kb/index/status` — tests only
 - `/` — tests only
 - `/auth/reset-request` — tests only
 - `/auth/reset-confirm` — tests only
@@ -229,10 +225,10 @@ Endpoints with no client caller (47):
 | `/agent/v2/sessions/purge` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:80` | - | - | tests only |
 | `/kb/session-purges` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:119` | - | - | tests only |
 | `/kb/archive-receipts` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:112` | - | - | tests only |
-| `/kb/index/notes` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:23` | - | - | tests only |
-| `/kb/index/notes/:key` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/index-routes.mjs:41` | - | - | tests only |
-| `/kb/index/reconcile` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:30` | - | - | comments/docs only |
-| `/kb/index/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/index-routes.mjs:48` | - | - | tests only |
+| `/kb/index/notes` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:23` | `LlmIdeAPIClient+Index.swift` | - | - |
+| `/kb/index/notes/:key` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/index-routes.mjs:41` | `LlmIdeAPIClient+Index.swift` | - | - |
+| `/kb/index/reconcile` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:30` | `LlmIdeAPIClient+Index.swift` | - | - |
+| `/kb/index/status` | ALL_ENDPOINTS | GET | token | core | `extension/routes/index-routes.mjs:48` | `LlmIdeAPIClient+Index.swift` | - | - |
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:62` | - | - | tests only |
@@ -304,7 +300,7 @@ Endpoints with no client caller (47):
 
 ## Consistency
 
-Checked: 201 roster entries, 726 Swift files, 46 extension source files.
+Checked: 201 roster entries, 727 Swift files, 46 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
