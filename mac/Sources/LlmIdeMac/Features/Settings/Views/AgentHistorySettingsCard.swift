@@ -7,6 +7,7 @@ import SwiftUI
 struct AgentHistorySettingsCard: View {
     @EnvironmentObject var theme: ThemeStore
     @StateObject private var model: AgentHistoryModel
+    @StateObject private var archiveMode = LiveThenArchiveSettingModel()
     @State private var clearScope: LlmIdeAPIClient.AgentHistoryClearScope = .raw
 
     init(api: LlmIdeAPIClient) {
@@ -33,6 +34,9 @@ struct AgentHistorySettingsCard: View {
 
                 storageRows
                 summaryLines
+
+                Divider()
+                archiveModeRow
 
                 Divider()
                 retentionRow
@@ -105,6 +109,50 @@ struct AgentHistorySettingsCard: View {
             Text("The agent history store is down. Restart the backend to reopen it.")
                 .font(Typography.caption)
                 .foregroundStyle(theme.current.danger)
+        }
+    }
+
+    // MARK: - Chat archive mode
+
+    private var archiveModeRow: some View {
+        VStack(alignment: .leading, spacing: Spacing.xs) {
+            HStack {
+                Text("Chat archive")
+                    .font(Typography.body)
+                    .foregroundStyle(theme.current.text)
+                Spacer()
+                Picker("Chat archive mode", selection: Binding(
+                    get: { archiveMode.selected },
+                    set: { archiveMode.choose($0) }
+                )) {
+                    ForEach([LiveThenArchiveMode.off, .shadow, .on], id: \.self) { mode in
+                        Text(LiveThenArchiveWording.title(mode)).tag(mode)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .accessibilityLabel("Chat archive mode")
+                .frame(maxWidth: 220)
+            }
+            SettingsHint(LiveThenArchiveWording.explanation(archiveMode.selected))
+            if archiveMode.needsRestart {
+                Text("\(LiveThenArchiveWording.restartNote) This session is still running with \(LiveThenArchiveWording.title(archiveMode.launchMode)).")
+                    .font(Typography.caption)
+                    .foregroundStyle(theme.current.warning)
+                    .fixedSize(horizontal: false, vertical: true)
+            } else {
+                SettingsHint(LiveThenArchiveWording.restartNote)
+            }
+        }
+        .confirmationDialog(
+            LiveThenArchiveWording.offConfirmTitle,
+            isPresented: Binding(get: { archiveMode.pendingOff }, set: { if !$0 { archiveMode.cancelOff() } }),
+            titleVisibility: .visible
+        ) {
+            Button("Turn off at next launch", role: .destructive) { archiveMode.confirmOff() }
+            Button("Cancel", role: .cancel) { archiveMode.cancelOff() }
+        } message: {
+            Text(LiveThenArchiveWording.offConfirmMessage)
         }
     }
 
@@ -197,6 +245,8 @@ private struct ClearHistorySheet: View {
                 .font(Typography.title)
                 .foregroundStyle(theme.current.text)
 
+            agePicker
+
             content
 
             if let notice = model.clearNotice {
@@ -235,10 +285,29 @@ private struct ClearHistorySheet: View {
         .interactiveDismissDisabled(!model.canDismissClear)
     }
 
+    /// Only while a choice can still change what the preview counts.
+    @ViewBuilder
+    private var agePicker: some View {
+        switch model.clearPhase {
+        case .previewing, .confirming:
+            Picker("Age", selection: Binding(
+                get: { model.clearAge },
+                set: { age in Task { await model.setClearAge(age) } }
+            )) {
+                ForEach(AgentHistoryClearAge.allCases, id: \.self) { Text($0.label).tag($0) }
+            }
+            .pickerStyle(.menu)
+            .accessibilityLabel("Which history to delete by age")
+        default:
+            EmptyView()
+        }
+    }
+
     private var title: String {
         switch model.clearPhase {
         case let .clearing(scope), let .previewing(scope), let .confirming(scope, _):
-            return scope == .all ? "Clear all agent history" : "Clear raw agent history"
+            let what = scope == .all ? "agent history" : "raw agent history"
+            return model.clearAge == .all ? "Clear all \(what)" : "Clear \(what) \(model.clearAge.phrase)"
         case .cleared: return "History cleared"
         default: return "Clear agent history"
         }

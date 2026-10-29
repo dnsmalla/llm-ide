@@ -15,6 +15,10 @@ enum LiveThenArchiveMode: String, Sendable {
 
     static let defaultsKey = "lta.mode"
 
+    /// The mode this launch runs with, read once on first use (boot). Services read THIS, never `current()`,
+    /// so a change made in Settings applies at the next launch and cannot half-switch a running app.
+    static let launchValue: LiveThenArchiveMode = current()
+
     /// Unknown or missing values mean `off`: a typo must never turn new work on.
     static func current(_ defaults: UserDefaults = .standard) -> LiveThenArchiveMode {
         LiveThenArchiveMode(rawValue: defaults.string(forKey: defaultsKey) ?? "") ?? .off

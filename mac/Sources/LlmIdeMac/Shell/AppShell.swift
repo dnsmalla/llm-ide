@@ -886,7 +886,7 @@ struct AppShell: View {
     /// Starts the derived note-index feed for the open project when `lta.mode` is
     /// not off (plan Phase 2). Read once per environment, so it applies on the next start.
     private func startNoteIndex(_ env: AppEnvironment) {
-        guard LiveThenArchiveMode.current() != .off,
+        guard LiveThenArchiveMode.launchValue != .off,
               let projectId = projectStore.activeProject?.bundle.id else {
             NoteIndexHost.shared.stop()
             return

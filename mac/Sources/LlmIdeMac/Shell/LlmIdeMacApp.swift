@@ -202,7 +202,7 @@ public struct LlmIdeMacApp: App {
         // Live-then-archive (lta.mode shadow/on): the async quit archive, the start sweep, delete-everywhere and the
         // sign-out rule. A no-op when the mode is off (the default), so nothing above or below changes.
         ChatArchiveHost.shared.install(
-            api: client, mode: LiveThenArchiveMode.current(),
+            api: client, mode: LiveThenArchiveMode.launchValue,
             activeProjectId: { await MainActor.run { projectStoreInstance.activeProject?.bundle.id } })
         self._activityStore = State(wrappedValue: activity)
         self.api = client
