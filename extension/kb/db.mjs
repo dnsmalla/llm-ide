@@ -310,6 +310,10 @@ export function search(userId, { q, kind, limit = 20, projectId, codeRoot, maxCa
   if (kind) {
     where += ' AND kind = ?';
     params.push(kind);
+  } else {
+    // Derived note rows (kind 'note', migration 0050) are reached only by an
+    // explicit kind, so they cannot fill the cap*4 window of other searches.
+    where += " AND kind <> 'note'";
   }
   if (typeof codeRoot === 'string' && codeRoot) {
     const root = codeRoot.replace(/\/+$/, '');

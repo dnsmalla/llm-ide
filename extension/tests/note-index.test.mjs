@@ -91,6 +91,9 @@ test('redaction at build: a pasted key is removed from body_text and title, the 
   assert.ok(!row.body_text.includes(key), 'body is redacted');
   assert.ok(!row.title.includes(key), 'title is redacted');
   assert.ok(row.body_text.includes('for the demo'), 'surrounding text survives');
+  const fts = conn.prepare("SELECT body, title FROM search WHERE meeting_id = ?").all('\u0001note:' + conn.prepare("SELECT id FROM note_index WHERE user_id = ? AND note_key = 'secret/s.md'").get(U).id);
+  assert.equal(fts.length, 1);
+  assert.ok(!fts[0].body.includes(key) && !fts[0].title.includes(key), 'the FTS row text is redacted too');
 });
 
 test('the body is capped at 200 KiB on a UTF-8 boundary and reported as truncated', () => {

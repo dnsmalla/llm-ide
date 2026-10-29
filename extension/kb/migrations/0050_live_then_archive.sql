@@ -26,7 +26,11 @@ CREATE TABLE note_index (
 );
 CREATE INDEX idx_note_index_user_date ON note_index(user_id, date DESC);
 
--- FTS rides the shared `search` table so ranking and kinds stay unchanged.
+-- FTS rides the shared `search` table. Note rows carry kind 'note' (every
+-- kind-filtered query in kb/db.mjs excludes it unless asked for) and the
+-- meeting_id '\u0001note:<id>', a prefix that /kb/ingest and ingestMeeting
+-- refuse (control characters). A client meeting id can therefore never name a
+-- note row, so a meeting delete cannot remove another user's note FTS row.
 -- The update and delete triggers find the old FTS row BY ROWID through this
 -- map, never by `meeting_id` (UNINDEXED: a scan of the whole virtual table,
 -- measured 55 ms p50 per 20 KB update at 50k rows, F12). Same pattern as 0037.
@@ -38,7 +42,7 @@ CREATE TABLE note_index_search (
 CREATE TRIGGER trg_note_index_ai
 AFTER INSERT ON note_index BEGIN
   INSERT INTO search (meeting_id, entity_id, kind, title, body)
-  VALUES ('n:' || NEW.id, NULL, NEW.kind, NEW.title, NEW.body_text);
+  VALUES (char(1) || 'note:' || NEW.id, NULL, 'note', NEW.title, NEW.body_text);
   INSERT OR REPLACE INTO note_index_search (note_id, search_rowid)
   VALUES (NEW.id, last_insert_rowid());
 END;
@@ -49,7 +53,7 @@ AFTER UPDATE ON note_index BEGIN
    WHERE rowid = (SELECT search_rowid FROM note_index_search WHERE note_id = OLD.id);
   DELETE FROM note_index_search WHERE note_id = OLD.id;
   INSERT INTO search (meeting_id, entity_id, kind, title, body)
-  VALUES ('n:' || NEW.id, NULL, NEW.kind, NEW.title, NEW.body_text);
+  VALUES (char(1) || 'note:' || NEW.id, NULL, 'note', NEW.title, NEW.body_text);
   INSERT OR REPLACE INTO note_index_search (note_id, search_rowid)
   VALUES (NEW.id, last_insert_rowid());
 END;

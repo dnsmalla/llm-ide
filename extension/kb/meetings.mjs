@@ -13,6 +13,7 @@ import {
   requireUser,
 } from './db.mjs';
 import { outcomeStats as outcomeStatsImpl } from './outcomes.mjs';
+import { errValidation } from '../core/errors.mjs';
 import { recordActivity } from './activity.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactSecretsForStorage } from '../core/redact-secrets.mjs';
@@ -26,8 +27,21 @@ const ALLOWED_KINDS = new Set(['action', 'decision', 'blocker']);
 // (or pasted into a transcript) would otherwise be replayed into every later
 // LLM call. Redaction happens HERE, not in the route, so every caller of
 // ingestMeeting gets it. Secrets only: emails and names are meeting content.
+// Reserved FTS id prefix of derived note rows (migration 0050). Client meeting
+// ids must not reach it, and control characters are never valid in an id.
+export const RESERVED_MEETING_ID_PREFIX = '\u0001note:';
+export function checkMeetingId(id) {
+  const s = String(id ?? '');
+  if (/[\u0000-\u001f\u007f]/.test(s) || s.startsWith(RESERVED_MEETING_ID_PREFIX)) {
+    throw errValidation('meeting id contains control characters or a reserved prefix');
+  }
+  if (s.length > 200) throw errValidation('meeting id is longer than 200 characters');
+  return s;
+}
+
 export function ingestMeeting(userId, input) {
   requireUser(userId);
+  checkMeetingId(input?.id);
   const db = getDb();
   const transcriptRaw = typeof input.transcript === 'string' ? input.transcript : '';
   const transcript = redactSecretsForStorage(transcriptRaw);

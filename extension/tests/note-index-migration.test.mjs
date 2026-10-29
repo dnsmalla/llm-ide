@@ -42,7 +42,7 @@ const insNote = (over = {}) => conn.prepare(`
   ...over,
 });
 const ftsFor = (id) => conn.prepare(
-  "SELECT rowid, kind, title, body FROM search WHERE meeting_id = ?").all(`n:${id}`);
+  "SELECT rowid, kind, title, body FROM search WHERE meeting_id = ?").all(`\u0001note:${id}`);
 
 test('schema golden: note_index, the map, tombstones and ack ledger have the planned columns', () => {
   assert.deepEqual(cols('note_index'), [
@@ -84,7 +84,7 @@ test('insert indexes exactly one FTS row, findable by its body', () => {
   const id = Number(insNote().lastInsertRowid);
   const rows = ftsFor(id);
   assert.equal(rows.length, 1);
-  assert.equal(rows[0].kind, 'meeting');
+  assert.equal(rows[0].kind, 'note');
   assert.equal(rows[0].title, 'Budget review');
   assert.equal(rows[0].body, 'the rollback plan');
   const map = conn.prepare('SELECT search_rowid FROM note_index_search WHERE note_id = ?').get(id);
@@ -98,9 +98,9 @@ test('update replaces the FTS row in place: one row, new body, map follows', () 
   assert.deepEqual(rows.map((r) => r.body), ['alpha beta'], 'no duplicate, no stale body');
   const map = conn.prepare('SELECT search_rowid FROM note_index_search WHERE note_id = ?').get(id);
   assert.equal(map.search_rowid, rows[0].rowid);
-  const hit = conn.prepare("SELECT meeting_id FROM search WHERE search MATCH 'alpha' AND meeting_id = ?").all(`n:${id}`);
+  const hit = conn.prepare("SELECT meeting_id FROM search WHERE search MATCH 'alpha' AND meeting_id = ?").all(`\u0001note:${id}`);
   assert.equal(hit.length, 1, 'the new body is searchable');
-  const old = conn.prepare("SELECT meeting_id FROM search WHERE search MATCH 'rollback' AND meeting_id = ?").all(`n:${id}`);
+  const old = conn.prepare("SELECT meeting_id FROM search WHERE search MATCH 'rollback' AND meeting_id = ?").all(`\u0001note:${id}`);
   assert.equal(old.length, 0, 'the old body is gone from the index');
 });
 
@@ -117,7 +117,7 @@ test('parity: after many writes the FTS row count equals the note count', () => 
   conn.prepare("UPDATE note_index SET body_text = 'changed' WHERE note_key LIKE 'meetings/parity/%' AND id % 2 = 0").run();
   conn.prepare("DELETE FROM note_index WHERE note_key LIKE 'meetings/parity/%' AND id % 5 = 0").run();
   const notes = conn.prepare("SELECT COUNT(*) AS n FROM note_index").get().n;
-  const fts = conn.prepare("SELECT COUNT(*) AS n FROM search WHERE meeting_id LIKE 'n:%'").get().n;
+  const fts = conn.prepare("SELECT COUNT(*) AS n FROM search WHERE meeting_id LIKE '\u0001note:%'").get().n;
   const mapped = conn.prepare('SELECT COUNT(*) AS n FROM note_index_search').get().n;
   assert.equal(fts, notes);
   assert.equal(mapped, notes);
@@ -134,4 +134,28 @@ test('user-delete cascade removes the user notes and their FTS rows, not another
   assert.equal(counts.live_acks, 1);
   assert.deepEqual(ftsFor(doomed), []);
   assert.equal(ftsFor(mine).length, 1, 'the other user\'s note and its FTS row survive');
+});
+
+test('note FTS rows are kind note and never reached by an unfiltered search', async () => {
+  const kinds = conn.prepare("SELECT kind FROM search WHERE meeting_id = ?").all(`\u0001note:${Number(insNote({ note_key: 'k/kind.md', body_text: 'zebrafish memo' }).lastInsertRowid)}`).map((r) => r.kind);
+  assert.deepEqual(kinds, ['note']);
+  const { search } = await import('../kb/db.mjs');
+  assert.deepEqual(search(U, { q: 'zebrafish' }).map((h) => h.title), [], 'an unfiltered search does not return note rows');
+  assert.deepEqual(search(U, { q: 'zebrafish', kind: 'meeting' }), [], 'nor a meeting-kind search');
+});
+
+test('a client meeting id cannot name a note row: the reserved prefix and control characters are refused', async () => {
+  const { ingestMeeting } = await import('../kb/meetings.mjs');
+  assert.throws(() => ingestMeeting(U, { id: '\u0001note:1', title: 'x', transcript: 'y' }), /reserved prefix|control/);
+  assert.throws(() => ingestMeeting(U, { id: 'bad\nid', title: 'x', transcript: 'y' }), /control/);
+  assert.throws(() => ingestMeeting(U, { id: 'n'.repeat(201), title: 'x', transcript: 'y' }), /longer/);
+});
+
+test('colliding ids: user B\'s meeting "n:N" and its delete cannot remove user A\'s note FTS row', async () => {
+  const { ingestMeeting, deleteMeeting } = await import('../kb/meetings.mjs');
+  const mine = Number(insNote({ user_id: U, note_key: 'collide/a.md', body_text: 'alphaunique note' }).lastInsertRowid);
+  // The id that used to produce the same FTS meeting_id as the note's old 'n:' prefix.
+  ingestMeeting(V, { id: `n:${mine}`, title: 'B', transcript: 'bravo' });
+  deleteMeeting(V, `n:${mine}`);
+  assert.equal(ftsFor(mine).length, 1, 'A\'s note FTS row survives B\'s meeting delete');
 });
