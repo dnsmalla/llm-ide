@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 189 token, 12 public
 - Handler found: 199; no handler found: 2
-- No Mac and no extension caller: 47 (tests only: 30, comments/docs only: 17, no reference: 0)
+- No Mac and no extension caller: 47 (tests only: 32, comments/docs only: 15, no reference: 0)
 
 By first path segment:
 
@@ -77,9 +77,9 @@ Endpoints with no client caller (47):
 - `/kb/chat/sessions/:id/archive/commit` — tests only
 - `/kb/live/:id/ack` — comments/docs only
 - `/kb/live/:id/status` — comments/docs only
-- `/kb/agent/working-state` — comments/docs only
+- `/kb/agent/working-state` — tests only
 - `/agent/v2/sessions/purge` — tests only
-- `/kb/session-purges` — comments/docs only
+- `/kb/session-purges` — tests only
 - `/kb/archive-receipts` — tests only
 - `/kb/index/notes` — tests only
 - `/kb/index/notes/:key` — tests only
@@ -225,10 +225,10 @@ Endpoints with no client caller (47):
 | `/kb/live/unacked` | ALL_ENDPOINTS | GET | token | core | `extension/routes/live.mjs:37` | `LlmIdeAPIClient+Live.swift` | - | - |
 | `/kb/live/:id/ack` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:46` | - | - | comments/docs only |
 | `/kb/live/:id/status` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/live.mjs:67` | - | - | comments/docs only |
-| `/kb/agent/working-state` | ALL_ENDPOINTS | GET | token | core | `extension/routes/lifecycle-routes.mjs:67` | - | - | comments/docs only |
-| `/agent/v2/sessions/purge` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:72` | - | - | tests only |
-| `/kb/session-purges` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:111` | - | - | comments/docs only |
-| `/kb/archive-receipts` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:104` | - | - | tests only |
+| `/kb/agent/working-state` | ALL_ENDPOINTS | GET | token | core | `extension/routes/lifecycle-routes.mjs:75` | - | - | tests only |
+| `/agent/v2/sessions/purge` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:80` | - | - | tests only |
+| `/kb/session-purges` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:119` | - | - | tests only |
+| `/kb/archive-receipts` | ALL_ENDPOINTS | POST | token | core | `extension/routes/lifecycle-routes.mjs:112` | - | - | tests only |
 | `/kb/index/notes` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:23` | - | - | tests only |
 | `/kb/index/notes/:key` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/index-routes.mjs:41` | - | - | tests only |
 | `/kb/index/reconcile` | ALL_ENDPOINTS | POST | token | core | `extension/routes/index-routes.mjs:30` | - | - | comments/docs only |

@@ -1,7 +1,7 @@
 {
   "endpoint": "GET /kb/agent/working-state",
   "status": 200,
-  "description": "Example data. Two chats hold server working state: one with a mapped SDK session and facts, one with facts only.",
+  "description": "Example data. Two chats hold server working state. One purge is retrying and one gave up after eight attempts.",
   "response": {
     "sessions": [
       {
@@ -16,6 +16,15 @@
         "factCount": 1,
         "updatedAt": null
       }
-    ]
+    ],
+    "purges": {
+      "pending": 1,
+      "failed": [
+        {
+          "chatSessionId": "9a8b7c6d-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+          "attempts": 8
+        }
+      ]
+    }
   }
 }

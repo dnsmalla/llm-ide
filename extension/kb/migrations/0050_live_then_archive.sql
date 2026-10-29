@@ -113,6 +113,13 @@ CREATE TABLE pending_session_purges (
   reason          TEXT NOT NULL DEFAULT 'user_delete',  -- user_delete | meeting_end
   attempts        INTEGER NOT NULL DEFAULT 0,
   requested_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
+  -- The SDK transcript ids are captured here BEFORE the mappings are removed, so a
+  -- crash between the file deletes and the row deletes stays replayable.
+  sdk_session_ids TEXT NOT NULL DEFAULT '[]',
+  -- pending: retried with backoff (next_attempt_at); failed: gave up after the cap,
+  -- surfaced in GET /kb/agent/working-state until someone looks.
+  state           TEXT NOT NULL DEFAULT 'pending',
+  next_attempt_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   PRIMARY KEY (deleted_chat_id, owner_user_id)
 );
 

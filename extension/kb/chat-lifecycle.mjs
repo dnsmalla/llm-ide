@@ -268,32 +268,97 @@ export function archiveCommit(userId, sessionId, { fence, hash, acceptIncomplete
   return tx(userId, sessionId, fence, hash, acceptIncomplete);
 }
 
+export const PURGE_MAX_ATTEMPTS = 8;
+
+/** SDK session ids this chat has mapped (what its transcript files are named by). */
+export function sdkIdsForChats(userId, chatSessionIds) {
+  requireUser(userId);
+  const db = getDb();
+  const out = new Set();
+  const stmt = lazyPrepare(db, `
+    SELECT sdk_session_id FROM agent_sessions
+     WHERE user_id = ? AND mac_chat_session_id = ? AND sdk_session_id IS NOT NULL
+  `);
+  for (const id of chatSessionIds) {
+    for (const r of stmt.all(userId, id)) out.add(r.sdk_session_id);
+  }
+  return [...out];
+}
+
 /**
- * Record a delete-everywhere tombstone. Re-queuing the same chat refreshes the
- * request time (the replay compares it with the chat's last use).
+ * The last time anything of this chat was used: its SDK mapping, its server chat
+ * row, or a session-memory fact (any of them written after a delete was requested
+ * means the chat is live again). Epoch milliseconds, 0 when nothing exists.
+ */
+export function chatLastActivityMs(userId, chatSessionId) {
+  requireUser(userId);
+  const db = getDb();
+  const agent = lazyPrepare(db,
+    'SELECT MAX(last_used_at) AS t FROM agent_sessions WHERE user_id = ? AND mac_chat_session_id = ?',
+  ).get(userId, chatSessionId)?.t;
+  const chat = lazyPrepare(db,
+    'SELECT updated_at AS t FROM chat_sessions WHERE user_id = ? AND id = ?',
+  ).get(userId, chatSessionId)?.t;
+  const memory = lazyPrepare(db,
+    'SELECT MAX(created_at) AS t FROM session_memory WHERE user_id = ? AND session_id = ?',
+  ).get(userId, chatSessionId)?.t;
+  return Math.max(
+    agent ? Date.parse(agent) || 0 : 0,
+    chat ? Math.round(chat * 1000) : 0,
+    memory ? Math.round(memory * 1000) : 0,
+  );
+}
+
+/**
+ * Record a delete-everywhere tombstone. The SDK transcript ids are captured now,
+ * before anything is removed, so a replay can still delete the files. Re-queuing
+ * the same chat refreshes the request time and merges the ids.
  */
 export function enqueueSessionPurge(userId, chatSessionId, reason = 'user_delete') {
   requireUser(userId);
   if (typeof chatSessionId !== 'string' || !chatSessionId) throw errValidation('chatSessionId is required');
   if (!SESSION_PURGE_REASONS.has(reason)) throw errValidation(`reason must be one of ${[...SESSION_PURGE_REASONS].join(', ')}`);
-  lazyPrepare(getDb(), `
-    INSERT INTO pending_session_purges (deleted_chat_id, owner_user_id, reason, attempts, requested_at)
-    VALUES (?, ?, ?, 0, ?)
-    ON CONFLICT (deleted_chat_id, owner_user_id) DO UPDATE SET
-      reason = excluded.reason, requested_at = excluded.requested_at
-  `).run(chatSessionId, userId, reason, nowIso());
+  const db = getDb();
+  const tx = db.transaction(() => {
+    const prior = lazyPrepare(db,
+      'SELECT sdk_session_ids FROM pending_session_purges WHERE deleted_chat_id = ? AND owner_user_id = ?',
+    ).get(chatSessionId, userId);
+    const ids = new Set([...(prior ? JSON.parse(prior.sdk_session_ids) : []), ...sdkIdsForChats(userId, [chatSessionId])]);
+    lazyPrepare(db, `
+      INSERT INTO pending_session_purges (deleted_chat_id, owner_user_id, reason, attempts, requested_at, sdk_session_ids, state, next_attempt_at)
+      VALUES (?, ?, ?, 0, ?, ?, 'pending', ?)
+      ON CONFLICT (deleted_chat_id, owner_user_id) DO UPDATE SET
+        reason = excluded.reason, requested_at = excluded.requested_at,
+        sdk_session_ids = excluded.sdk_session_ids, state = 'pending', attempts = 0,
+        next_attempt_at = excluded.next_attempt_at
+    `).run(chatSessionId, userId, reason, nowIso(), JSON.stringify([...ids]), nowIso());
+  });
+  tx();
 }
 
-/** Tombstones this user still owes, with the chat's last use for the reuse check (DL16). */
+/**
+ * Tombstones this user still owes, oldest first. `dueAt` is when the next attempt
+ * may run; `lastActivityMs` is the chat's last use, for the reuse guard.
+ */
 export function listSessionPurges(userId) {
   requireUser(userId);
-  return lazyPrepare(getDb(), `
-    SELECT p.deleted_chat_id AS chatSessionId, p.reason, p.attempts, p.requested_at AS requestedAt,
-           (SELECT MAX(a.last_used_at) FROM agent_sessions a
-             WHERE a.user_id = p.owner_user_id AND a.mac_chat_session_id = p.deleted_chat_id) AS lastUsedAt
-      FROM pending_session_purges p WHERE p.owner_user_id = ?
-     ORDER BY p.requested_at
+  const rows = lazyPrepare(getDb(), `
+    SELECT deleted_chat_id AS chatSessionId, reason, attempts, requested_at AS requestedAt,
+           sdk_session_ids AS sdk, state, next_attempt_at AS dueAt
+      FROM pending_session_purges WHERE owner_user_id = ?
+     ORDER BY requested_at
   `).all(userId);
+  return rows.map((r) => ({
+    chatSessionId: r.chatSessionId,
+    reason: r.reason,
+    attempts: r.attempts,
+    requestedAt: r.requestedAt,
+    requestedMs: Date.parse(r.requestedAt),
+    sdkSessionIds: JSON.parse(r.sdk),
+    state: r.state,
+    dueAt: r.dueAt,
+    lastActivityMs: chatLastActivityMs(userId, r.chatSessionId),
+  }));
 }
 
 export function completeSessionPurge(userId, chatSessionId) {
@@ -303,9 +368,37 @@ export function completeSessionPurge(userId, chatSessionId) {
   ).run(userId, chatSessionId).changes > 0;
 }
 
-export function failSessionPurge(userId, chatSessionId) {
+/**
+ * Record a failed attempt. The next try waits 2^attempts minutes (capped at an
+ * hour). After PURGE_MAX_ATTEMPTS the tombstone is 'failed': it stops retrying and
+ * is listed in the working-state status until it is resolved.
+ */
+export function failSessionPurge(userId, chatSessionId, { now = Date.now() } = {}) {
   requireUser(userId);
-  lazyPrepare(getDb(),
-    'UPDATE pending_session_purges SET attempts = attempts + 1 WHERE owner_user_id = ? AND deleted_chat_id = ?',
-  ).run(userId, chatSessionId);
+  const db = getDb();
+  const row = lazyPrepare(db,
+    'SELECT attempts FROM pending_session_purges WHERE owner_user_id = ? AND deleted_chat_id = ?',
+  ).get(userId, chatSessionId);
+  if (!row) return null;
+  const attempts = row.attempts + 1;
+  const state = attempts >= PURGE_MAX_ATTEMPTS ? 'failed' : 'pending';
+  const waitMin = Math.min(2 ** attempts, 60);
+  lazyPrepare(db, `
+    UPDATE pending_session_purges SET attempts = ?, state = ?, next_attempt_at = ?
+     WHERE owner_user_id = ? AND deleted_chat_id = ?
+  `).run(attempts, state, new Date(now + waitMin * 60_000).toISOString(), userId, chatSessionId);
+  return { attempts, state };
+}
+
+/** Counts for the status surface: how many tombstones are retrying, and which gave up. */
+export function sessionPurgeStatus(userId) {
+  requireUser(userId);
+  const rows = lazyPrepare(getDb(), `
+    SELECT deleted_chat_id AS chatSessionId, state, attempts FROM pending_session_purges
+     WHERE owner_user_id = ? ORDER BY requested_at
+  `).all(userId);
+  return {
+    pending: rows.filter((r) => r.state === 'pending').length,
+    failed: rows.filter((r) => r.state === 'failed').map((r) => ({ chatSessionId: r.chatSessionId, attempts: r.attempts })),
+  };
 }

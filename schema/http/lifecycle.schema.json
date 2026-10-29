@@ -79,13 +79,46 @@
         "200": {
           "type": "object",
           "required": [
-            "sessions"
+            "sessions",
+            "purges"
           ],
           "properties": {
             "sessions": {
               "type": "array",
               "items": {
                 "$ref": "#/$defs/WorkingChat"
+              }
+            },
+            "purges": {
+              "type": "object",
+              "required": [
+                "pending",
+                "failed"
+              ],
+              "properties": {
+                "pending": {
+                  "type": "integer",
+                  "description": "Tombstones still retrying (with backoff)."
+                },
+                "failed": {
+                  "type": "array",
+                  "description": "Tombstones that gave up after the attempt cap; resolve them, they do not retry.",
+                  "items": {
+                    "type": "object",
+                    "required": [
+                      "chatSessionId",
+                      "attempts"
+                    ],
+                    "properties": {
+                      "chatSessionId": {
+                        "type": "string"
+                      },
+                      "attempts": {
+                        "type": "integer"
+                      }
+                    }
+                  }
+                }
               }
             }
           }
@@ -170,9 +203,10 @@
               "type": "string",
               "enum": [
                 "done",
-                "pending"
+                "pending",
+                "failed"
               ],
-              "description": "done: working state and server chat rows are gone. pending: the tombstone stays and is replayed later."
+              "description": "done: working state, transcripts and server chat rows are gone. pending: retried later with backoff. failed: gave up after the attempt cap (see working-state)."
             }
           }
         },

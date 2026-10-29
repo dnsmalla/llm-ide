@@ -52,6 +52,7 @@ test('schema golden: note_index, the map, tombstones and ack ledger have the pla
   assert.deepEqual(cols('note_index_search'), ['note_id', 'search_rowid']);
   assert.deepEqual(cols('pending_session_purges'), [
     'deleted_chat_id', 'owner_user_id', 'reason', 'attempts', 'requested_at',
+    'sdk_session_ids', 'state', 'next_attempt_at',
   ]);
   assert.deepEqual(cols('live_acks'), [
     'session_id', 'owner_user_id', 'note_key_hash', 'content_hash', 'lines', 'outcome', 'acked_at',

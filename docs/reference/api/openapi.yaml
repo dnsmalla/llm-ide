@@ -4626,11 +4626,34 @@ paths:
                 type: "object"
                 required:
                   - "sessions"
+                  - "purges"
                 properties:
                   sessions:
                     type: "array"
                     items:
                       "$ref": "#/components/schemas/WorkingChat"
+                  purges:
+                    type: "object"
+                    required:
+                      - "pending"
+                      - "failed"
+                    properties:
+                      pending:
+                        type: "integer"
+                        description: "Tombstones still retrying (with backoff)."
+                      failed:
+                        type: "array"
+                        description: "Tombstones that gave up after the attempt cap; resolve them, they do not retry."
+                        items:
+                          type: "object"
+                          required:
+                            - "chatSessionId"
+                            - "attempts"
+                          properties:
+                            chatSessionId:
+                              type: "string"
+                            attempts:
+                              type: "integer"
   /kb/analyze-risks:
     post:
       summary: "Re-compute LLM risk assessment for a plan"
@@ -10188,7 +10211,8 @@ paths:
                     enum:
                       - "done"
                       - "pending"
-                    description: "done: working state and server chat rows are gone. pending: the tombstone stays and is replayed later."
+                      - "failed"
+                    description: "done: working state, transcripts and server chat rows are gone. pending: retried later with backoff. failed: gave up after the attempt cap (see working-state)."
         "400":
           description: "Bad Request"
           content:

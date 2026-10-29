@@ -3791,6 +3791,15 @@ export type GetKbAgentWorkingStateRequest = Record<string, never>;
 
 export type GetKbAgentWorkingStateResponse200 = {
   sessions: WorkingChat[];
+  purges: {
+    /** Tombstones still retrying (with backoff). */
+    pending: number;
+    /** Tombstones that gave up after the attempt cap; resolve them, they do not retry. */
+    failed: {
+      chatSessionId: string;
+      attempts: number;
+    }[];
+  };
 };
 
 /** Request parts for `POST /agent/v2/sessions/purge` (schema/http/lifecycle.schema.json). */
@@ -3824,8 +3833,8 @@ export type PostKbSessionPurgesRequest = {
 export type PostKbSessionPurgesResponse202 = {
   /** The tombstone is durable before the purge is attempted. */
   queued: true;
-  /** done: working state and server chat rows are gone. pending: the tombstone stays and is replayed later. */
-  purged: "done" | "pending";
+  /** done: working state, transcripts and server chat rows are gone. pending: retried later with backoff. failed: gave up after the attempt cap (see working-state). */
+  purged: "done" | "pending" | "failed";
 };
 
 export type PostKbSessionPurgesResponse400 = CommonError;
