@@ -292,7 +292,8 @@ const HOST = config.host;
 //   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
 //   v88 — POST /kb/complete { prompt, language?, model?, provider?, tier?, framing? } → { reply, usage? }: a plain one-shot completion (no tools, no history, no SSE; tier 'subagent' = LLMIDE_SUBAGENT_MODEL; framing 'code-assist' = the legacy /code-assist prompt wrapper). Same provider-config refusal envelope as /code-assist (400 PROVIDER_UNAVAILABLE). llmFast bucket; metered under endpoint '/kb/complete'; recorded in agent history (source loop, engine complete). The Mac's RegressionRunner moves onto it; /code-assist is unchanged. Additive.
 //   v89 — POST /chat answers 410 { error: { code: 'ENDPOINT_REMOVED', message, details: { use: '/agent/v2/stream', removedInApiVersion: 89 } } } (body not read; deleted with the classic runtime, API 92). The extension side-panel chat is a live client of POST /agent/v2/stream: a turn with `agentContext.surface: 'extension'` and no workspaceRoot runs in a server-owned scratch folder. /kb/chat/sessions* are unchanged (the live-then-archive protocol still uses them). The extension's MIN_SERVER_API_VERSION is 89.
-const SERVER_API_VERSION = 90;
+//   v91 — session router (agent-kit K1 Phase 6b, additive; every part off unless LLMIDE_ROUTER=on): GET /agent/v2/session/route?chatSessionId= (the chat's route: provider, model, pin, billable-token cap and counters, warm map, switchSeq, pending change), PUT /agent/v2/session/route { chatSessionId, provider?, model?, tokenLimit? (null/0 clears), tokensUsed?, ifSeq? } (409 ROUTE_CONFLICT with details.current for a stale ifSeq, 409 ROUTER_DISABLED, 503 ROUTE_UNAVAILABLE; a change during a turn answers appliesAt 'next_turn'), GET /agent/v2/session/route/history?chatSessionId= (switch history from agent.db; { events, degraded }). /agent/v2/stream answers 409 SESSION_TOKEN_LIMIT { details: { used, limit } } and 503 ROUTE_UNAVAILABLE before any model call, and emits notice kinds `route_switch` and `session_budget` (additive; old clients ignore them). Migration 0053, agent.db migration 0004.
+const SERVER_API_VERSION = 91;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -313,6 +314,8 @@ const ALL_ENDPOINTS = [
   '/agent/v2/decision',
   '/agent/v2/session',
   '/agent/v2/cancel',
+  '/agent/v2/session/route',
+  '/agent/v2/session/route/history',
   '/kb/loop/agent-run',
   '/kb/complete',
   '/generate-questions',
@@ -472,6 +475,7 @@ function rateLimitProfile(url, method) {
     if (path === '/kb/usage/limits')           return 'kbWrite';
     if (path === '/kb/agent-history/settings') return 'kbWrite';
     if (path === '/kb/providers/settings')     return 'kbWrite';
+    if (path === '/agent/v2/session/route')    return 'kbWrite';
     if (path.startsWith('/kb/issue-schedule')) return 'kbWrite';
     if (path.startsWith('/kb/docs/')) return 'kbWrite';
     if (path.startsWith('/kb/index/notes/')) return 'kbWrite';

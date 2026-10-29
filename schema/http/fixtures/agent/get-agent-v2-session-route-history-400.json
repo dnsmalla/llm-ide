@@ -1,0 +1,13 @@
+{
+  "endpoint": "GET /agent/v2/session/route/history",
+  "status": 400,
+  "request": {
+    "query": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "chatSessionId is required"
+    }
+  }
+}

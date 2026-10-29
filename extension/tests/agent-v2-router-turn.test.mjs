@@ -109,7 +109,7 @@ test('cap: a chat at its limit is refused 409 BEFORE any model call and the rate
   const { req, res } = await turn(chat, { runTurn: async () => { called += 1; return { usageTotals: {} }; } });
   assert.equal(res.statusCode, 409);
   const err = res.json().error;
-  assert.deepEqual([err.code, err.used, err.limit], ['SESSION_TOKEN_LIMIT', 100, 100]);
+  assert.deepEqual([err.code, err.details.used, err.details.limit], ['SESSION_TOKEN_LIMIT', 100, 100]);
   assert.equal(called, 0);
   assert.equal(req.refunded >= 1, true);
   await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, tokenLimit: 400 });
@@ -242,7 +242,7 @@ test('two windows: a stale ifSeq loses with 409 ROUTE_CONFLICT and the current r
   assert.equal(w2.res.statusCode, 409);
   const body = w2.res.json().error;
   assert.equal(body.code, 'ROUTE_CONFLICT');
-  assert.equal(body.current.tokenLimit, 20);
+  assert.equal(body.details.current.tokenLimit, 20);
 });
 
 test('bad caps and providers are 400s: negative, huge, fractional, string, unknown provider', async () => {

@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 90
+  x-api-version: 91
 servers:
   - url: "https://{host}"
     variables:
@@ -208,6 +208,229 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /agent/v2/session/route:
+    get:
+      tags:
+        - "agent"
+      parameters:
+        - name: "chatSessionId"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/RouteState"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    put:
+      tags:
+        - "agent"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "chatSessionId"
+              properties:
+                chatSessionId:
+                  type: "string"
+                provider:
+                  type: "string"
+                  description: "anthropic or custom:<id>; sent with model, '' with '' unpins"
+                model:
+                  type: "string"
+                tokenLimit:
+                  type:
+                    - "integer"
+                    - "null"
+                  description: "whole billable tokens; null or 0 clears; negative, fractional or above 1e12 is 400"
+                tokensUsed:
+                  type: "integer"
+                  description: "re-seeds the counter of a chat whose route was purged at quit; ignored while the row already has usage"
+                ifSeq:
+                  type:
+                    - "integer"
+                    - "null"
+                  description: "the switchSeq last read; a stale value is 409 ROUTE_CONFLICT"
+      responses:
+        "200":
+          description: "One chat's route (K1 Phase 6b). `enabled` is false when the server runs without LLMIDE_ROUTER=on: the record then reads as the empty default and PUT answers 409 ROUTER_DISABLED. `capEnforced` says whether LLMIDE_ROUTER_CAP=on, i.e. whether tokenLimit is enforced or only stored. provider '' and model '' = not pinned: the client's own pick governs."
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "enabled"
+                  - "capEnforced"
+                  - "chatSessionId"
+                  - "provider"
+                  - "model"
+                  - "pinned"
+                  - "pinnedBy"
+                  - "tokenLimit"
+                  - "used"
+                  - "remaining"
+                  - "stickyUntil"
+                  - "warm"
+                  - "switchSeq"
+                  - "pending"
+                  - "updatedAt"
+                  - "appliesAt"
+                  - "changed"
+                properties:
+                  enabled:
+                    type: "boolean"
+                  capEnforced:
+                    type: "boolean"
+                  chatSessionId:
+                    type: "string"
+                  provider:
+                    type: "string"
+                    description: "anthropic, custom:<id>, or '' when not pinned"
+                  model:
+                    type: "string"
+                  pinned:
+                    type: "boolean"
+                  pinnedBy:
+                    enum:
+                      - "user"
+                      - "router"
+                  tokenLimit:
+                    type:
+                      - "integer"
+                      - "null"
+                    description: "billable tokens for the chat; null = no cap"
+                  used:
+                    type: "object"
+                    required:
+                      - "in"
+                      - "out"
+                      - "cacheWrite"
+                      - "cacheRead"
+                      - "billable"
+                    properties:
+                      in:
+                        type: "integer"
+                      out:
+                        type: "integer"
+                      cacheWrite:
+                        type: "integer"
+                      cacheRead:
+                        type: "integer"
+                        description: "shown, never counted against the cap"
+                      billable:
+                        type: "integer"
+                        description: "input + output + cache write: what the session cap counts"
+                  remaining:
+                    type:
+                      - "integer"
+                      - "null"
+                  stickyUntil:
+                    type:
+                      - "string"
+                      - "null"
+                    description: "UTC ISO; the time the last turn's prompt cache is expected to expire"
+                  warm:
+                    type: "object"
+                    additionalProperties:
+                      type: "string"
+                    description: "'<provider>|<model>' to the last cache touch (UTC ISO)"
+                  switchSeq:
+                    type: "integer"
+                    description: "compare-and-set version: send it back as ifSeq"
+                  pending:
+                    type:
+                      - "object"
+                      - "null"
+                    description: "a provider/model change made during a turn, applied at the next turn start"
+                    properties:
+                      provider:
+                        type: "string"
+                      model:
+                        type: "string"
+                      pinnedBy:
+                        type: "string"
+                      requestedAt:
+                        type: "string"
+                  updatedAt:
+                    type:
+                      - "string"
+                      - "null"
+                  appliesAt:
+                    enum:
+                      - "now"
+                      - "next_turn"
+                  changed:
+                    type: "boolean"
+                  coldSwitch:
+                    type: "boolean"
+                    description: "present when the pick changed: the new side's cache is cold"
+                  estimatedPrefillTokens:
+                    type: "integer"
+                    description: "about what the next turn pays to prefill the handoff"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "503":
+          description: "Service Unavailable"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /agent/v2/session/route/history:
+    get:
+      tags:
+        - "agent"
+      parameters:
+        - name: "chatSessionId"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "events"
+                  - "degraded"
+                properties:
+                  events:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/RouteEvent"
+                  degraded:
+                    type: "boolean"
+                    description: "true when agent.db is down: the list is empty, routing is unaffected"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /agent/v2/sessions/purge:
     post:
       tags:
@@ -360,9 +583,21 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
         "429":
           description: "Rate limited"
           x-undeclared: true
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "503":
+          description: "Service Unavailable"
           content:
             application/json:
               schema:
@@ -15312,6 +15547,60 @@ components:
           type: "integer"
         expired:
           type: "integer"
+    RouteEvent:
+      type: "object"
+      required:
+        - "id"
+        - "at"
+        - "kind"
+        - "fromProvider"
+        - "fromModel"
+        - "toProvider"
+        - "toModel"
+        - "reason"
+        - "coldPrefillTokens"
+        - "handoffChars"
+      properties:
+        id:
+          type: "integer"
+        at:
+          type: "string"
+        kind:
+          enum:
+            - "switch"
+            - "cap_reached"
+            - "cap_changed"
+            - "cooldown"
+            - "handoff_built"
+        fromProvider:
+          type:
+            - "string"
+            - "null"
+        fromModel:
+          type:
+            - "string"
+            - "null"
+        toProvider:
+          type:
+            - "string"
+            - "null"
+        toModel:
+          type:
+            - "string"
+            - "null"
+        reason:
+          type:
+            - "string"
+            - "null"
+          description: "user | rate_limit | error | cap, or the handoff source (client | extractive)"
+        coldPrefillTokens:
+          type:
+            - "integer"
+            - "null"
+        handoffChars:
+          type:
+            - "integer"
+            - "null"
     RouteRef:
       type: "object"
       required:
@@ -15323,6 +15612,104 @@ components:
           description: "anthropic | openai | google | deepseek | jev | custom:<id>"
         model:
           type: "string"
+    RouteState:
+      description: "One chat's route (K1 Phase 6b). `enabled` is false when the server runs without LLMIDE_ROUTER=on: the record then reads as the empty default and PUT answers 409 ROUTER_DISABLED. `capEnforced` says whether LLMIDE_ROUTER_CAP=on, i.e. whether tokenLimit is enforced or only stored. provider '' and model '' = not pinned: the client's own pick governs."
+      type: "object"
+      required:
+        - "enabled"
+        - "capEnforced"
+        - "chatSessionId"
+        - "provider"
+        - "model"
+        - "pinned"
+        - "pinnedBy"
+        - "tokenLimit"
+        - "used"
+        - "remaining"
+        - "stickyUntil"
+        - "warm"
+        - "switchSeq"
+        - "pending"
+        - "updatedAt"
+      properties:
+        enabled:
+          type: "boolean"
+        capEnforced:
+          type: "boolean"
+        chatSessionId:
+          type: "string"
+        provider:
+          type: "string"
+          description: "anthropic, custom:<id>, or '' when not pinned"
+        model:
+          type: "string"
+        pinned:
+          type: "boolean"
+        pinnedBy:
+          enum:
+            - "user"
+            - "router"
+        tokenLimit:
+          type:
+            - "integer"
+            - "null"
+          description: "billable tokens for the chat; null = no cap"
+        used:
+          type: "object"
+          required:
+            - "in"
+            - "out"
+            - "cacheWrite"
+            - "cacheRead"
+            - "billable"
+          properties:
+            in:
+              type: "integer"
+            out:
+              type: "integer"
+            cacheWrite:
+              type: "integer"
+            cacheRead:
+              type: "integer"
+              description: "shown, never counted against the cap"
+            billable:
+              type: "integer"
+              description: "input + output + cache write: what the session cap counts"
+        remaining:
+          type:
+            - "integer"
+            - "null"
+        stickyUntil:
+          type:
+            - "string"
+            - "null"
+          description: "UTC ISO; the time the last turn's prompt cache is expected to expire"
+        warm:
+          type: "object"
+          additionalProperties:
+            type: "string"
+          description: "'<provider>|<model>' to the last cache touch (UTC ISO)"
+        switchSeq:
+          type: "integer"
+          description: "compare-and-set version: send it back as ifSeq"
+        pending:
+          type:
+            - "object"
+            - "null"
+          description: "a provider/model change made during a turn, applied at the next turn start"
+          properties:
+            provider:
+              type: "string"
+            model:
+              type: "string"
+            pinnedBy:
+              type: "string"
+            requestedAt:
+              type: "string"
+        updatedAt:
+          type:
+            - "string"
+            - "null"
     ScheduleItem:
       type: "object"
       required:

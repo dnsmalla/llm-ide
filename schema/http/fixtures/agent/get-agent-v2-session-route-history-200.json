@@ -1,0 +1,38 @@
+{
+  "endpoint": "GET /agent/v2/session/route/history",
+  "status": 200,
+  "request": {
+    "query": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273"
+    }
+  },
+  "response": {
+    "events": [
+      {
+        "id": 2,
+        "at": "2026-10-30T10:02:00.000Z",
+        "kind": "handoff_built",
+        "fromProvider": null,
+        "fromModel": null,
+        "toProvider": "custom:cat-groq",
+        "toModel": "llama-3.3-70b-versatile",
+        "reason": "extractive",
+        "coldPrefillTokens": null,
+        "handoffChars": 1820
+      },
+      {
+        "id": 1,
+        "at": "2026-10-30T10:01:59.000Z",
+        "kind": "switch",
+        "fromProvider": "anthropic",
+        "fromModel": "claude-sonnet-5-5",
+        "toProvider": "custom:cat-groq",
+        "toModel": "llama-3.3-70b-versatile",
+        "reason": "user",
+        "coldPrefillTokens": 1500,
+        "handoffChars": null
+      }
+    ],
+    "degraded": false
+  }
+}

@@ -1,0 +1,44 @@
+{
+  "endpoint": "PUT /agent/v2/session/route",
+  "status": 200,
+  "request": {
+    "body": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "tokenLimit": null
+    }
+  },
+  "response": {
+    "enabled": true,
+    "capEnforced": true,
+    "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+    "provider": "anthropic",
+    "model": "claude-sonnet-5-5",
+    "pinned": true,
+    "pinnedBy": "user",
+    "tokenLimit": null,
+    "used": {
+      "in": 1200,
+      "out": 340,
+      "cacheWrite": 800,
+      "cacheRead": 15000,
+      "billable": 2340
+    },
+    "remaining": null,
+    "stickyUntil": "2026-10-30T10:05:00.000Z",
+    "warm": {
+      "anthropic|claude-sonnet-5-5": "2026-10-30T10:00:00.000Z"
+    },
+    "switchSeq": 3,
+    "pending": {
+      "provider": "anthropic",
+      "model": "claude-opus-5-5",
+      "pinnedBy": "user",
+      "requestedAt": "2026-10-30T10:01:00.000Z"
+    },
+    "updatedAt": "2026-10-30T10:00:00.000Z",
+    "appliesAt": "next_turn",
+    "changed": true
+  }
+}

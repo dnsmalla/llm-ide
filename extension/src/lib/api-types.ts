@@ -141,6 +141,58 @@ export type ApprovalGrant = {
   grantedAt: string;
 };
 
+/** One chat's route (K1 Phase 6b). `enabled` is false when the server runs without LLMIDE_ROUTER=on: the record then reads as the empty default and PUT answers 409 ROUTER_DISABLED. `capEnforced` says whether LLMIDE_ROUTER_CAP=on, i.e. whether tokenLimit is enforced or only stored. provider '' and model '' = not pinned: the client's own pick governs. */
+export type RouteState = {
+  enabled: boolean;
+  capEnforced: boolean;
+  chatSessionId: string;
+  /** anthropic, custom:<id>, or '' when not pinned */
+  provider: string;
+  model: string;
+  pinned: boolean;
+  pinnedBy: "user" | "router";
+  /** billable tokens for the chat; null = no cap */
+  tokenLimit: number | null;
+  used: {
+    in: number;
+    out: number;
+    cacheWrite: number;
+    /** shown, never counted against the cap */
+    cacheRead: number;
+    /** input + output + cache write: what the session cap counts */
+    billable: number;
+  };
+  remaining: number | null;
+  /** UTC ISO; the time the last turn's prompt cache is expected to expire */
+  stickyUntil: string | null;
+  /** '<provider>|<model>' to the last cache touch (UTC ISO) */
+  warm: Record<string, string>;
+  /** compare-and-set version: send it back as ifSeq */
+  switchSeq: number;
+  /** a provider/model change made during a turn, applied at the next turn start */
+  pending: {
+    provider?: string;
+    model?: string;
+    pinnedBy?: string;
+    requestedAt?: string;
+  } | null;
+  updatedAt: string | null;
+};
+
+export type RouteEvent = {
+  id: number;
+  at: string;
+  kind: "switch" | "cap_reached" | "cap_changed" | "cooldown" | "handoff_built";
+  fromProvider: string | null;
+  fromModel: string | null;
+  toProvider: string | null;
+  toModel: string | null;
+  /** user | rate_limit | error | cap, or the handoff source (client | extractive) */
+  reason: string | null;
+  coldPrefillTokens: number | null;
+  handoffChars: number | null;
+};
+
 /** One data group of the Storage hub. agent_history carries bytes (approximate) and the clear/compact actions; the main-DB groups carry rows per user and no bytes (SQLite sizes whole files, not users). */
 export type AgentHistoryStorageGroup = {
   key: "agent_history" | "search_index" | "code_graph" | "sources" | "meetings";
@@ -1738,6 +1790,10 @@ export type PostAgentV2StreamResponse200 = ReadonlyArray<AgentV2Event>;
 
 export type PostAgentV2StreamResponse400 = CommonError;
 
+export type PostAgentV2StreamResponse409 = CommonError;
+
+export type PostAgentV2StreamResponse503 = CommonError;
+
 /** Request parts for `POST /agent/v2/decision` (schema/http/agent.schema.json). */
 export type PostAgentV2DecisionRequest = {
   body: {
@@ -2269,6 +2325,98 @@ export type DeleteKbChatSessionsIdMessagesRequest = {
 export type DeleteKbChatSessionsIdMessagesResponse200 = {
   cleared: number;
 };
+
+/** Request parts for `GET /agent/v2/session/route` (schema/http/agent.schema.json). */
+export type GetAgentV2SessionRouteRequest = {
+  query: {
+    chatSessionId?: string;
+  };
+};
+
+export type GetAgentV2SessionRouteResponse200 = RouteState;
+
+export type GetAgentV2SessionRouteResponse400 = CommonError;
+
+/** Request parts for `PUT /agent/v2/session/route` (schema/http/agent.schema.json). */
+export type PutAgentV2SessionRouteRequest = {
+  body: {
+    chatSessionId: string;
+    /** anthropic or custom:<id>; sent with model, '' with '' unpins */
+    provider?: string;
+    model?: string;
+    /** whole billable tokens; null or 0 clears; negative, fractional or above 1e12 is 400 */
+    tokenLimit?: number | null;
+    /** re-seeds the counter of a chat whose route was purged at quit; ignored while the row already has usage */
+    tokensUsed?: number;
+    /** the switchSeq last read; a stale value is 409 ROUTE_CONFLICT */
+    ifSeq?: number | null;
+  };
+};
+
+/** One chat's route (K1 Phase 6b). `enabled` is false when the server runs without LLMIDE_ROUTER=on: the record then reads as the empty default and PUT answers 409 ROUTER_DISABLED. `capEnforced` says whether LLMIDE_ROUTER_CAP=on, i.e. whether tokenLimit is enforced or only stored. provider '' and model '' = not pinned: the client's own pick governs. */
+export type PutAgentV2SessionRouteResponse200 = {
+  enabled: boolean;
+  capEnforced: boolean;
+  chatSessionId: string;
+  /** anthropic, custom:<id>, or '' when not pinned */
+  provider: string;
+  model: string;
+  pinned: boolean;
+  pinnedBy: "user" | "router";
+  /** billable tokens for the chat; null = no cap */
+  tokenLimit: number | null;
+  used: {
+    in: number;
+    out: number;
+    cacheWrite: number;
+    /** shown, never counted against the cap */
+    cacheRead: number;
+    /** input + output + cache write: what the session cap counts */
+    billable: number;
+  };
+  remaining: number | null;
+  /** UTC ISO; the time the last turn's prompt cache is expected to expire */
+  stickyUntil: string | null;
+  /** '<provider>|<model>' to the last cache touch (UTC ISO) */
+  warm: Record<string, string>;
+  /** compare-and-set version: send it back as ifSeq */
+  switchSeq: number;
+  /** a provider/model change made during a turn, applied at the next turn start */
+  pending: {
+    provider?: string;
+    model?: string;
+    pinnedBy?: string;
+    requestedAt?: string;
+  } | null;
+  updatedAt: string | null;
+  appliesAt: "now" | "next_turn";
+  changed: boolean;
+  /** present when the pick changed: the new side's cache is cold */
+  coldSwitch?: boolean;
+  /** about what the next turn pays to prefill the handoff */
+  estimatedPrefillTokens?: number;
+};
+
+export type PutAgentV2SessionRouteResponse400 = CommonError;
+
+export type PutAgentV2SessionRouteResponse409 = CommonError;
+
+export type PutAgentV2SessionRouteResponse503 = CommonError;
+
+/** Request parts for `GET /agent/v2/session/route/history` (schema/http/agent.schema.json). */
+export type GetAgentV2SessionRouteHistoryRequest = {
+  query: {
+    chatSessionId?: string;
+  };
+};
+
+export type GetAgentV2SessionRouteHistoryResponse200 = {
+  events: RouteEvent[];
+  /** true when agent.db is down: the list is empty, routing is unaffected */
+  degraded: boolean;
+};
+
+export type GetAgentV2SessionRouteHistoryResponse400 = CommonError;
 
 /** Request parts for `GET /kb/docs/templates` (schema/http/docs.schema.json). */
 export type GetKbDocsTemplatesRequest = {
@@ -6342,6 +6490,8 @@ export interface ApiEndpoints {
     responses: {
       200: PostAgentV2StreamResponse200;
       400: PostAgentV2StreamResponse400;
+      409: PostAgentV2StreamResponse409;
+      503: PostAgentV2StreamResponse503;
     };
   };
   "POST /agent/v2/decision": {
@@ -6577,6 +6727,29 @@ export interface ApiEndpoints {
     request: DeleteKbChatSessionsIdMessagesRequest;
     responses: {
       200: DeleteKbChatSessionsIdMessagesResponse200;
+    };
+  };
+  "GET /agent/v2/session/route": {
+    request: GetAgentV2SessionRouteRequest;
+    responses: {
+      200: GetAgentV2SessionRouteResponse200;
+      400: GetAgentV2SessionRouteResponse400;
+    };
+  };
+  "PUT /agent/v2/session/route": {
+    request: PutAgentV2SessionRouteRequest;
+    responses: {
+      200: PutAgentV2SessionRouteResponse200;
+      400: PutAgentV2SessionRouteResponse400;
+      409: PutAgentV2SessionRouteResponse409;
+      503: PutAgentV2SessionRouteResponse503;
+    };
+  };
+  "GET /agent/v2/session/route/history": {
+    request: GetAgentV2SessionRouteHistoryRequest;
+    responses: {
+      200: GetAgentV2SessionRouteHistoryResponse200;
+      400: GetAgentV2SessionRouteHistoryResponse400;
     };
   };
   "GET /kb/docs/templates": {

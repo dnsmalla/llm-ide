@@ -1,0 +1,43 @@
+{
+  "endpoint": "PUT /agent/v2/session/route",
+  "status": 200,
+  "request": {
+    "body": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+      "provider": "custom:cat-groq",
+      "model": "llama-3.3-70b-versatile",
+      "tokenLimit": 50000,
+      "tokensUsed": 2340,
+      "ifSeq": 2
+    }
+  },
+  "response": {
+    "enabled": true,
+    "capEnforced": true,
+    "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+    "provider": "custom:cat-groq",
+    "model": "llama-3.3-70b-versatile",
+    "pinned": true,
+    "pinnedBy": "user",
+    "tokenLimit": 50000,
+    "used": {
+      "in": 1200,
+      "out": 340,
+      "cacheWrite": 800,
+      "cacheRead": 15000,
+      "billable": 2340
+    },
+    "remaining": 47660,
+    "stickyUntil": "2026-10-30T10:05:00.000Z",
+    "warm": {
+      "anthropic|claude-sonnet-5-5": "2026-10-30T10:00:00.000Z"
+    },
+    "switchSeq": 3,
+    "pending": null,
+    "updatedAt": "2026-10-30T10:00:00.000Z",
+    "appliesAt": "now",
+    "changed": true,
+    "coldSwitch": true,
+    "estimatedPrefillTokens": 1500
+  }
+}

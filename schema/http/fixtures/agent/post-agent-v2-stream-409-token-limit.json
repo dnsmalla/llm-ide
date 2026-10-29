@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /agent/v2/stream",
+  "status": 409,
+  "request": {
+    "body": {
+      "message": "continue",
+      "mode": "ask",
+      "agentContext": {
+        "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+        "workspaceRoot": "/example/workspace"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SESSION_TOKEN_LIMIT",
+      "message": "This chat reached its session token limit. Raise the limit to continue.",
+      "details": {
+        "used": 50120,
+        "limit": 50000
+      }
+    }
+  }
+}

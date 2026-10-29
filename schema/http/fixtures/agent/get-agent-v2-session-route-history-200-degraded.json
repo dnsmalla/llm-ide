@@ -1,0 +1,13 @@
+{
+  "endpoint": "GET /agent/v2/session/route/history",
+  "status": 200,
+  "request": {
+    "query": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273"
+    }
+  },
+  "response": {
+    "events": [],
+    "degraded": true
+  }
+}

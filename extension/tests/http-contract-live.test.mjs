@@ -118,6 +118,11 @@ const SKIP_RULES = [
       || (fx.endpoint === 'POST /kb/providers/catalog/connect' && fx.status === 409),
   },
   {
+    why: 'session router (K1 P6b): the replay server runs with LLMIDE_ROUTER off, where PUT answers 409 ROUTER_DISABLED and a stream is never capped. The rows are covered with the router on by tests/agent-v2-router-turn.test.mjs',
+    when: (fx) => fx.endpoint === 'PUT /agent/v2/session/route'
+      || (fx.endpoint === 'POST /agent/v2/stream' && (fx.status === 503 || (fx.status === 409 && fx.response?.error?.code === 'SESSION_TOKEN_LIMIT'))),
+  },
+  {
     why: 'needs state from a dry run of the same server (a previewId signed in this process) or a run in flight',
     when: (fx) => /^POST \/kb\/agent-history\/(clear|compact)$/.test(fx.endpoint) && (fx.status < 300 || fx.status === 409),
   },

@@ -1,5 +1,5 @@
 {
-  "description": "The agent and code-assist surface that is not streamed by the legacy route: the v2 chat engine's non-stream routes (/agent/v2/decision, /agent/v2/session, /agent/v2/cancel) and its SSE turn (/agent/v2/stream, whose events are in schema/agent-v2), the meeting-agent dispatch and its runs, feedback and personas, the agent catalogue and libraries (catalog, commands, generation and skill libraries), the per-user memory and tool-approval stores (project memory, session memory, tool approvals), the free-text ask and its history, and the unified chat sessions (/kb/chat/*). Rows: POST /agent/v2/stream, POST /agent/v2/decision, DELETE /agent/v2/session, POST /agent/v2/cancel, POST /kb/agent/dispatch, POST /kb/agent/stop, GET /kb/agent/runs, POST /kb/agent/feedback, GET /kb/agent/feedback/{stats,by-task}, GET and PUT /kb/agent/persona, GET and POST /kb/agent/personas, PUT /kb/agent/personas/active, PUT and DELETE /kb/agent/personas/:id, GET /kb/agent/{catalog,commands,generation-library,skill-library}, GET and DELETE /kb/agent/{project-memory,tool-approvals,session-memory}, POST /kb/agent/ask, GET and DELETE /kb/agent/ask/history, GET and POST /kb/chat/sessions, GET, PATCH and DELETE /kb/chat/sessions/:id, POST and DELETE /kb/chat/sessions/:id/messages. Not in this group: /chat and /code-assist (notes-generation and the legacy streams), /kb/loop/agent-run (loop), /kb/usage/summary and /kb/agent-sdk (providers), /kb/live/sessions (live), /kb/plan-task/update (planning), /kb/project/install-skills (kb-sources). Fixtures are captured from node server.mjs on a temp DB (127.0.0.1, seeded through the API and through the server's own kb/ helpers while the server was stopped). Model turns use the bench fake engine (LLMIDE_BENCH_FAKE=1 with --bench-fake: no model call) for /agent/v2/stream and the stub CLI (LLMIDE_ANTHROPIC_CLI, scrubbed to /example/stub-cli.mjs) for /kb/agent/ask, so no fixture carries a model's output. Repo paths are /example/repo and the workspace is /example/workspace. Exceptions, each stated on its response: POST /agent/v2/decision 200 is transcribed from the handler (a parked approval is needed to capture it); GET /kb/agent/commands 200 is x-unspecified (commands come from enabled plugins, and no plugin in the capture declares one). The catalog's plugin subagents are open: the entry shape is the plugin's own manifest and no capture plugin declares one, so the item is typed as an open object. Request fields the fixtures do not exercise are x-optional (the v2 stream's turn options and the decision's answer fields), not dropped. The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says.",
+  "description": "The agent and code-assist surface that is not streamed by the legacy route: the v2 chat engine's non-stream routes (/agent/v2/decision, /agent/v2/session, /agent/v2/cancel) and its SSE turn (/agent/v2/stream, whose events are in schema/agent-v2), the meeting-agent dispatch and its runs, feedback and personas, the agent catalogue and libraries (catalog, commands, generation and skill libraries), the per-user memory and tool-approval stores (project memory, session memory, tool approvals), the free-text ask and its history, and the unified chat sessions (/kb/chat/*). Rows: POST /agent/v2/stream, POST /agent/v2/decision, DELETE /agent/v2/session, POST /agent/v2/cancel, GET and PUT /agent/v2/session/route, GET /agent/v2/session/route/history, POST /kb/agent/dispatch, POST /kb/agent/stop, GET /kb/agent/runs, POST /kb/agent/feedback, GET /kb/agent/feedback/{stats,by-task}, GET and PUT /kb/agent/persona, GET and POST /kb/agent/personas, PUT /kb/agent/personas/active, PUT and DELETE /kb/agent/personas/:id, GET /kb/agent/{catalog,commands,generation-library,skill-library}, GET and DELETE /kb/agent/{project-memory,tool-approvals,session-memory}, POST /kb/agent/ask, GET and DELETE /kb/agent/ask/history, GET and POST /kb/chat/sessions, GET, PATCH and DELETE /kb/chat/sessions/:id, POST and DELETE /kb/chat/sessions/:id/messages. Not in this group: /chat and /code-assist (notes-generation and the legacy streams), /kb/loop/agent-run (loop), /kb/usage/summary and /kb/agent-sdk (providers), /kb/live/sessions (live), /kb/plan-task/update (planning), /kb/project/install-skills (kb-sources). Fixtures are captured from node server.mjs on a temp DB (127.0.0.1, seeded through the API and through the server's own kb/ helpers while the server was stopped). Model turns use the bench fake engine (LLMIDE_BENCH_FAKE=1 with --bench-fake: no model call) for /agent/v2/stream and the stub CLI (LLMIDE_ANTHROPIC_CLI, scrubbed to /example/stub-cli.mjs) for /kb/agent/ask, so no fixture carries a model's output. Repo paths are /example/repo and the workspace is /example/workspace. Exceptions, each stated on its response: POST /agent/v2/decision 200 is transcribed from the handler (a parked approval is needed to capture it); GET /kb/agent/commands 200 is x-unspecified (commands come from enabled plugins, and no plugin in the capture declares one). The catalog's plugin subagents are open: the entry shape is the plugin's own manifest and no capture plugin declares one, so the item is typed as an open object. Request fields the fixtures do not exercise are x-optional (the v2 stream's turn options and the decision's answer fields), not dropped. The 400 for a malformed JSON body (every JSON route) is not declared per route, as SCHEMA.md says. Session router (K1 Phase 6b, API 91): GET and PUT /agent/v2/session/route (the per-chat provider/model pick and billable-token cap) and GET /agent/v2/session/route/history (switch history from agent.db, degraded:true when it is down). PUT answers 409 ROUTE_CONFLICT (details.current) for a stale ifSeq or ROUTER_DISABLED, 503 ROUTE_UNAVAILABLE when the store fails. /agent/v2/stream additionally answers 409 SESSION_TOKEN_LIMIT (details {used, limit}) and 503 ROUTE_UNAVAILABLE, both before any model call, only with LLMIDE_ROUTER=on.",
   "$defs": {
     "Ok": {
       "type": "object",
@@ -428,6 +428,216 @@
           "type": "string"
         }
       }
+    },
+    "RouteState": {
+      "description": "One chat's route (K1 Phase 6b). `enabled` is false when the server runs without LLMIDE_ROUTER=on: the record then reads as the empty default and PUT answers 409 ROUTER_DISABLED. `capEnforced` says whether LLMIDE_ROUTER_CAP=on, i.e. whether tokenLimit is enforced or only stored. provider '' and model '' = not pinned: the client's own pick governs.",
+      "type": "object",
+      "required": [
+        "enabled",
+        "capEnforced",
+        "chatSessionId",
+        "provider",
+        "model",
+        "pinned",
+        "pinnedBy",
+        "tokenLimit",
+        "used",
+        "remaining",
+        "stickyUntil",
+        "warm",
+        "switchSeq",
+        "pending",
+        "updatedAt"
+      ],
+      "properties": {
+        "enabled": {
+          "type": "boolean"
+        },
+        "capEnforced": {
+          "type": "boolean"
+        },
+        "chatSessionId": {
+          "type": "string"
+        },
+        "provider": {
+          "type": "string",
+          "description": "anthropic, custom:<id>, or '' when not pinned"
+        },
+        "model": {
+          "type": "string"
+        },
+        "pinned": {
+          "type": "boolean"
+        },
+        "pinnedBy": {
+          "enum": [
+            "user",
+            "router"
+          ]
+        },
+        "tokenLimit": {
+          "type": [
+            "integer",
+            "null"
+          ],
+          "description": "billable tokens for the chat; null = no cap"
+        },
+        "used": {
+          "type": "object",
+          "required": [
+            "in",
+            "out",
+            "cacheWrite",
+            "cacheRead",
+            "billable"
+          ],
+          "properties": {
+            "in": {
+              "type": "integer"
+            },
+            "out": {
+              "type": "integer"
+            },
+            "cacheWrite": {
+              "type": "integer"
+            },
+            "cacheRead": {
+              "type": "integer",
+              "description": "shown, never counted against the cap"
+            },
+            "billable": {
+              "type": "integer",
+              "description": "input + output + cache write: what the session cap counts"
+            }
+          }
+        },
+        "remaining": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "stickyUntil": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "UTC ISO; the time the last turn's prompt cache is expected to expire"
+        },
+        "warm": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "string"
+          },
+          "description": "'<provider>|<model>' to the last cache touch (UTC ISO)"
+        },
+        "switchSeq": {
+          "type": "integer",
+          "description": "compare-and-set version: send it back as ifSeq"
+        },
+        "pending": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "a provider/model change made during a turn, applied at the next turn start",
+          "properties": {
+            "provider": {
+              "type": "string"
+            },
+            "model": {
+              "type": "string"
+            },
+            "pinnedBy": {
+              "type": "string"
+            },
+            "requestedAt": {
+              "type": "string"
+            }
+          }
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      }
+    },
+    "RouteEvent": {
+      "type": "object",
+      "required": [
+        "id",
+        "at",
+        "kind",
+        "fromProvider",
+        "fromModel",
+        "toProvider",
+        "toModel",
+        "reason",
+        "coldPrefillTokens",
+        "handoffChars"
+      ],
+      "properties": {
+        "id": {
+          "type": "integer"
+        },
+        "at": {
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "switch",
+            "cap_reached",
+            "cap_changed",
+            "cooldown",
+            "handoff_built"
+          ]
+        },
+        "fromProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fromModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toProvider": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "toModel": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "user | rate_limit | error | cap, or the handoff source (client | extractive)"
+        },
+        "coldPrefillTokens": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "handoffChars": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
     }
   },
   "endpoints": {
@@ -535,6 +745,12 @@
           "x-events": "schema/agent-v2/agent-v2.schema.json"
         },
         "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "503": {
           "$ref": "_common#/$defs/Error"
         }
       }
@@ -1922,6 +2138,276 @@
               "type": "integer"
             }
           }
+        }
+      }
+    },
+    "GET /agent/v2/session/route": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "chatSessionId": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/RouteState"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /agent/v2/session/route": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "chatSessionId"
+          ],
+          "properties": {
+            "chatSessionId": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string",
+              "x-optional": true,
+              "description": "anthropic or custom:<id>; sent with model, '' with '' unpins"
+            },
+            "model": {
+              "type": "string",
+              "x-optional": true
+            },
+            "tokenLimit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "x-optional": true,
+              "description": "whole billable tokens; null or 0 clears; negative, fractional or above 1e12 is 400"
+            },
+            "tokensUsed": {
+              "type": "integer",
+              "x-optional": true,
+              "description": "re-seeds the counter of a chat whose route was purged at quit; ignored while the row already has usage"
+            },
+            "ifSeq": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "x-optional": true,
+              "description": "the switchSeq last read; a stale value is 409 ROUTE_CONFLICT"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "description": "One chat's route (K1 Phase 6b). `enabled` is false when the server runs without LLMIDE_ROUTER=on: the record then reads as the empty default and PUT answers 409 ROUTER_DISABLED. `capEnforced` says whether LLMIDE_ROUTER_CAP=on, i.e. whether tokenLimit is enforced or only stored. provider '' and model '' = not pinned: the client's own pick governs.",
+          "type": "object",
+          "required": [
+            "enabled",
+            "capEnforced",
+            "chatSessionId",
+            "provider",
+            "model",
+            "pinned",
+            "pinnedBy",
+            "tokenLimit",
+            "used",
+            "remaining",
+            "stickyUntil",
+            "warm",
+            "switchSeq",
+            "pending",
+            "updatedAt",
+            "appliesAt",
+            "changed"
+          ],
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "capEnforced": {
+              "type": "boolean"
+            },
+            "chatSessionId": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string",
+              "description": "anthropic, custom:<id>, or '' when not pinned"
+            },
+            "model": {
+              "type": "string"
+            },
+            "pinned": {
+              "type": "boolean"
+            },
+            "pinnedBy": {
+              "enum": [
+                "user",
+                "router"
+              ]
+            },
+            "tokenLimit": {
+              "type": [
+                "integer",
+                "null"
+              ],
+              "description": "billable tokens for the chat; null = no cap"
+            },
+            "used": {
+              "type": "object",
+              "required": [
+                "in",
+                "out",
+                "cacheWrite",
+                "cacheRead",
+                "billable"
+              ],
+              "properties": {
+                "in": {
+                  "type": "integer"
+                },
+                "out": {
+                  "type": "integer"
+                },
+                "cacheWrite": {
+                  "type": "integer"
+                },
+                "cacheRead": {
+                  "type": "integer",
+                  "description": "shown, never counted against the cap"
+                },
+                "billable": {
+                  "type": "integer",
+                  "description": "input + output + cache write: what the session cap counts"
+                }
+              }
+            },
+            "remaining": {
+              "type": [
+                "integer",
+                "null"
+              ]
+            },
+            "stickyUntil": {
+              "type": [
+                "string",
+                "null"
+              ],
+              "description": "UTC ISO; the time the last turn's prompt cache is expected to expire"
+            },
+            "warm": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "string"
+              },
+              "description": "'<provider>|<model>' to the last cache touch (UTC ISO)"
+            },
+            "switchSeq": {
+              "type": "integer",
+              "description": "compare-and-set version: send it back as ifSeq"
+            },
+            "pending": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "description": "a provider/model change made during a turn, applied at the next turn start",
+              "properties": {
+                "provider": {
+                  "type": "string"
+                },
+                "model": {
+                  "type": "string"
+                },
+                "pinnedBy": {
+                  "type": "string"
+                },
+                "requestedAt": {
+                  "type": "string"
+                }
+              }
+            },
+            "updatedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "appliesAt": {
+              "enum": [
+                "now",
+                "next_turn"
+              ]
+            },
+            "changed": {
+              "type": "boolean"
+            },
+            "coldSwitch": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "present when the pick changed: the new side's cache is cold"
+            },
+            "estimatedPrefillTokens": {
+              "type": "integer",
+              "x-optional": true,
+              "description": "about what the next turn pays to prefill the handoff"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "503": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /agent/v2/session/route/history": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "chatSessionId": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "events",
+            "degraded"
+          ],
+          "properties": {
+            "events": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/RouteEvent"
+              }
+            },
+            "degraded": {
+              "type": "boolean",
+              "description": "true when agent.db is down: the list is empty, routing is unaffected"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
         }
       }
     }

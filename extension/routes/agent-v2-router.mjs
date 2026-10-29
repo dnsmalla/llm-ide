@@ -80,7 +80,7 @@ export function beginRouteTurn({ db, userId, chatSessionId, requested, apply = f
 export function sendRouteRefusal(req, res, refusal) {
   req.rateLimitRefund?.();   // a refusal is not a turn (same rule as TURN_IN_PROGRESS)
   sendJSON(res, refusal.status, {
-    error: { code: refusal.code, message: refusal.message, ...(refusal.used !== undefined ? { used: refusal.used, limit: refusal.limit } : {}) },
+    error: { code: refusal.code, message: refusal.message, ...(refusal.used !== undefined ? { details: { used: refusal.used, limit: refusal.limit } } : {}) },
   });
 }
 
@@ -187,7 +187,7 @@ export function routeWire(route, chatSessionId, env = process.env) {
 
 const sendRouteError = (res, err) => {
   if (err instanceof RouteError) {
-    sendJSON(res, err.status, { error: { code: err.code, message: err.message, ...(err.extra ?? {}) } });
+    sendJSON(res, err.status, { error: { code: err.code, message: err.message, ...(err.extra ? { details: err.extra } : {}) } });
     return true;
   }
   throw err;

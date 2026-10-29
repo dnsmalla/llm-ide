@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /agent/v2/session/route",
+  "status": 503,
+  "request": {
+    "body": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+      "tokenLimit": 9000
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ROUTE_UNAVAILABLE",
+      "message": "The chat route store is unavailable, so this turn was not started. Try again."
+    }
+  }
+}

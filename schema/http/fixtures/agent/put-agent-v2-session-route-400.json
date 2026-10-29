@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /agent/v2/session/route",
+  "status": 400,
+  "request": {
+    "body": {
+      "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+      "tokenLimit": -1
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "tokenLimit must be a whole number of tokens, or null"
+    }
+  }
+}
