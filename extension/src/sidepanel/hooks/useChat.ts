@@ -3,6 +3,13 @@ import { getServerUrl, REQUEST_TIMEOUT_MS, authFetch } from '../../lib/config';
 import { listIssues, OFFLINE_MESSAGE } from '../../lib/kb';
 import { errorText } from '../../lib/server-error';
 import {
+  settleLegacyChat,
+  discardLegacyChat,
+  legacyChatJson,
+  type LegacyChatMessage,
+  type LegacyChatArea,
+} from '../../lib/legacy-chat';
+import {
   ensureTranscriptSessionId,
   loadTranscriptMessages,
   appendChatMessage,
@@ -19,8 +26,6 @@ export interface ChatViewMessage {
 
 // How many prior messages we send to the LLM as context per /chat request.
 const MAX_HISTORY = 10;
-// Cleared once: the old local chat buffer (Q18: the extension stores nothing).
-const LEGACY_LOCAL_KEYS = ['chatMessages', 'unifiedChatSessionId'];
 
 function toChatMessage(m: UnifiedChatMessage): ChatViewMessage {
   return { role: m.role as 'user' | 'assistant', content: m.content, timestamp: m.timestamp };
@@ -32,6 +37,8 @@ export function useChat() {
   const [error, setError] = useState<string | null>(null);
   // true when the Mac-managed server cannot be reached: nothing is stored.
   const [offline, setOffline] = useState(false);
+  // The old local chat buffer, when it is the only copy (offered for Export).
+  const [legacyChat, setLegacyChat] = useState<LegacyChatMessage[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const sessionIdRef = useRef<string | null>(null);
   const serverBackedRef = useRef(false);
@@ -44,6 +51,8 @@ export function useChat() {
       if (isCancelled()) return;
       if (!sid) {
         setOffline(true);
+        // Server not reached: never remove the old buffer; surface it if it holds messages.
+        void settleLegacyChat(chrome.storage?.local as unknown as LegacyChatArea, false).then(setLegacyChat);
         return;
       }
       sessionIdRef.current = sid;
@@ -51,6 +60,8 @@ export function useChat() {
       const serverMsgs = await loadTranscriptMessages(sid);
       if (isCancelled()) return;
       setOffline(false);
+      // The server answered: an empty old buffer may go; a non-empty one is offered for export.
+      void settleLegacyChat(chrome.storage?.local as unknown as LegacyChatArea, true).then(setLegacyChat);
       setMessages(serverMsgs.filter((m) => m.role === 'user' || m.role === 'assistant').map(toChatMessage));
     } catch {
       if (!isCancelled()) setOffline(true);
@@ -59,7 +70,6 @@ export function useChat() {
 
   useEffect(() => {
     let cancelled = false;
-    chrome.storage?.local?.remove(LEGACY_LOCAL_KEYS).catch(() => {});
     void hydrate(() => cancelled);
     return () => {
       cancelled = true;
@@ -196,6 +206,18 @@ export function useChat() {
     }
   }, []);
 
+  /** Save the old local buffer to a file, then remove it. */
+  const exportLegacyChat = useCallback(async () => {
+    const url = URL.createObjectURL(new Blob([legacyChatJson(legacyChat)], { type: 'application/json' }));
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'llm-ide-old-chat.json';
+    a.click();
+    setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    await discardLegacyChat(chrome.storage.local as unknown as LegacyChatArea).catch(() => {});
+    setLegacyChat([]);
+  }, [legacyChat]);
+
   const createNewSession = useCallback(async () => {
     try {
       clearChat();
@@ -217,5 +239,5 @@ export function useChat() {
     }
   }, [clearChat]);
 
-  return { messages, isLoading, error, offline, sendMessage, clearChat, createNewSession, deleteCurrentSession };
+  return { messages, isLoading, error, offline, legacyChat, exportLegacyChat, sendMessage, clearChat, createNewSession, deleteCurrentSession };
 }

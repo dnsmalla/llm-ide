@@ -9,6 +9,8 @@ interface Props {
   isLoading: boolean;
   error: string | null;
   offline?: boolean;
+  legacyChatCount?: number;
+  onExportLegacyChat?: () => void;
   hasTranscript: boolean;
   onSend: (message: string) => void;
   onClear: () => void;
@@ -30,6 +32,8 @@ export default function ChatView({
   isLoading,
   error,
   offline,
+  legacyChatCount = 0,
+  onExportLegacyChat,
   hasTranscript,
   onSend,
   onClear,
@@ -99,6 +103,16 @@ export default function ChatView({
               🗑 Delete
             </button>
           )}
+        </div>
+      )}
+
+      {legacyChatCount > 0 && (
+        <div className="quota-warning" role="status">
+          {legacyChatCount} message{legacyChatCount === 1 ? '' : 's'} from an older version are still only in this
+          browser. Export them to keep them; the extension no longer stores chat.{' '}
+          <button className="btn btn-sm" onClick={onExportLegacyChat}>
+            Export
+          </button>
         </div>
       )}
 

@@ -2,8 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { MsgType, isMessage } from '../../lib/messages';
 import { debug } from '../../lib/config';
 import { isValidCaption } from '../../content/caption-validation';
-import { saveTranscriptDraft, listDrafts, DRAFT_STALE_MS } from '../../lib/capture-store';
-import { chromeArea } from '../../lib/capture-live';
+import { saveTranscriptDraft, listDrafts, stopCapture, DRAFT_STALE_MS } from '../../lib/capture-store';
+import { chromeArea, httpLiveApi, PANEL_ID } from '../../lib/capture-live';
 import { isSupportedUrl, stripPlatformSuffix } from '../../lib/platforms';
 
 export interface TranscriptSegment {
@@ -172,20 +172,39 @@ export function useTranscript() {
       transcript: segs.map((s) => `[${names[s.speaker] || s.speaker}] ${s.text}`).join('\n'),
       segments: segs,
       speakerNames: names,
+      owner: PANEL_ID,
     };
   }, []);
 
-  // Stop: write the FINAL snapshot as the draft. The draft is NOT deleted here;
-  // it is released only when the server reports the capture acked by the Mac
-  // (useDraftRelease). There is no local history any more. Idempotent: the
-  // session id is cleared first, so a second call finds nothing to save.
+  // Stop: store the FINAL snapshot as the draft and send the COMPLETE transcript
+  // to the server (stopCapture). The draft is NOT deleted here; it is released
+  // only when the server holds an identical copy that the Mac acked
+  // (useDraftRelease). Each step is independent: a failed storage write never
+  // prevents the send (the capture is then held in memory), and a failed send
+  // never loses the draft. Idempotent: the session id is cleared first.
   const persistSession = useCallback(() => {
     const snap = snapshot();
     sessionIdRef.current = null;
     if (!snap) return;
-    saveTranscriptDraft(chromeArea(), snap).catch(() => {
-      setSaveError('Local crash buffer is full or unavailable. Download the transcript before closing this panel.');
-    });
+    stopCapture(chromeArea(), httpLiveApi, snap)
+      .then((r) => {
+        if (r.storageError) {
+          setSaveError(
+            'This capture could not be stored in the browser (storage full or unavailable). It is kept in memory and still being sent to the Mac app. Download the transcript before closing this panel.',
+          );
+        } else if (r.send === 'blocked-full') {
+          setSaveError(
+            'Too many captures are kept in this browser (the server cannot confirm copies). Export or delete some in the list below; this capture stays here and was not sent.',
+          );
+        } else if (r.send === 'too-large') {
+          setSaveError(
+            'This capture is longer than the Mac app can hold (2000 lines). The part the server has was sent; the full transcript stays in this browser: download it.',
+          );
+        }
+      })
+      .catch(() => {
+        setSaveError('Failed to save or send the transcript. Download it before closing this panel.');
+      });
   }, [snapshot]);
 
   // The message listener is registered once; reach persistSession via a ref.

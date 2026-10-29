@@ -1,8 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 import { isValidCaption } from '../../content/caption-validation';
-import { setDraftStage, recordFinalize } from '../../lib/capture-store';
-import { chromeArea, httpLiveApi } from '../../lib/capture-live';
 import type { TranscriptSegment } from './useTranscript';
 
 const PUSH_DEBOUNCE_MS = 800;
@@ -153,18 +151,9 @@ export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: 
     pushPendingSegments(sessionId, segments, meetingTitle, lastPushedIndex, lastPushedTexts)
       .catch(() => {})
       .finally(async () => {
-        try {
-          // Mark the draft 'finalizing' BEFORE the request, so a crash between
-          // the request and the response still counts as "finalize was sent".
-          // The draft itself is deleted only when the server reports the
-          // capture acked (useDraftRelease); the stage records what the server
-          // said: ackRequired -> awaiting-ack, otherwise no-ack (kept).
-          await setDraftStage(chromeArea(), sessionId, 'finalizing');
-          const result = await httpLiveApi.finalize(sessionId);
-          await recordFinalize(chromeArea(), sessionId, result);
-        } catch {
-          /* the draft stays 'finalizing'; the release loop retries */
-        }
+        // Finalize is owned by useTranscript.persistSession -> stopCapture: it sends
+        // the COMPLETE transcript, so a failed incremental push above cannot make the
+        // server's copy short.
         setSyncStatus('idle');
       });
     // deps intentionally narrow — re-run only on recording transitions

@@ -246,8 +246,9 @@ Sources: `extension/src/lib/storage.ts`, `extension/src/sidepanel/hooks/useTrans
 
 | Key | Type | Written by | Purpose |
 |-----|------|-----------|---------|
-| `transcripts` | `SavedTranscript[]` | `lib/storage.ts:49` | Persisted meeting transcripts (capped at `MAX_TRANSCRIPTS`) |
-| `chatMessages` | `ChatMessage[]` | `hooks/useChat.ts:49` | Chat history, pruned to the most recent `MAX_STORED_MESSAGES = 200` on write — see §4.3 |
+| `transcriptDraft:<id>` + `draftStage:<id>` | `Draft` + stage record | `lib/capture-store.ts` | A capture draft, kept ONLY until the server holds an identical copy that the Mac acked (see §4.3). The only meeting data the extension stores |
+| `transcripts` | `SavedTranscript[]` | none (legacy, read-only) | Meetings saved by older versions. Nothing writes it; Settings lists it and offers an explicit verified "Copy to Mac" that deletes a local copy only after the ack |
+| `chatMessages` | `ChatMessage[]` | none (legacy) | The old local chat buffer. Never written any more (Q18); removed only after the server answered and it is empty, or after the user exported it (`lib/legacy-chat.ts`) |
 | `primaryLang` | `string` | `hooks/useTranscript.ts:276` | Primary language code preference |
 | `secondaryLang` | `string` | `hooks/useTranscript.ts:281` | Secondary (bilingual) language code preference |
 | `bilingual` | `boolean` | `hooks/useTranscript.ts:286` | Bilingual mode toggle |
@@ -287,10 +288,11 @@ The raw `segments` array is stored alongside the rendered `transcript` string so
 
 | Constant | Value | File:line | Enforced on |
 |----------|-------|-----------|-------------|
-| `MAX_TRANSCRIPTS` | `50` | `lib/storage.ts:10` | Number of saved meetings; oldest entries are pruned first on every `saveTranscript()` call |
+| `MAX_RETAINED` | `50` | `lib/capture-store.ts` | Flag-off (no-ack) local copies. At the cap NOTHING is dropped: Stop refuses to finalize (the server would delete its copy) and the UI offers Export and Delete per item |
+| `SERVER_MAX_CAPTIONS` | `2000` | `lib/capture-store.ts` | A longer capture cannot be held by the server; it is never released, kept here for Export |
 | `MAX_SEGMENTS` | `5000` | `hooks/useTranscript.ts:45` | In-memory live segments; oldest are dropped when exceeded (`next.slice(-MAX_SEGMENTS)`) |
 
-`chrome.storage.local` has a ~5 MB per-extension quota (`lib/storage.ts:7–8`). `saveTranscript()` catches quota errors, drops the oldest half of saved transcripts, and retries once. If the retry also fails, it throws `StorageQuotaError` so the UI can surface a "transcript not saved" warning (`lib/storage.ts:50–62`). Chat history is pruned to the most recent `MAX_STORED_MESSAGES = 200` messages before each write (`hooks/useChat.ts:45–48`); the UI warns with a `quotaWarning` string if a write fails (`hooks/useChat.ts:52–57`).
+`chrome.storage.local` has a ~5 MB per-extension quota. Nothing is ever dropped to make room. At Stop the final draft is written, then the COMPLETE transcript is sent with `POST /kb/live/:id/finalize` (sanitized, lossless, language, start, duration, speaker renames applied); each step is independent, so a failed storage write never prevents the send (the capture is then held in memory and a persistent error is shown) and a failed send never loses the draft. A draft is released only when `GET /kb/live/:id/status` answers `acked` AND its `lines`, `captionHash`, `language` and `startedAt` equal what the draft would send (`serverHoldsExpected`); a short, truncated or unverifiable copy keeps the draft, is re-sent whole (idempotent, with a 5-minute back-off) and shows in the banner. Draft writes, stage changes and the release run under one lock (`navigator.locks` plus an in-process queue); the release is compare-and-set against the draft it verified. The chat keeps no local buffer: with the server unreachable it shows "Mac app not running" and stores nothing.
 
 ### 4.4 Speaker-name persistence
 
@@ -298,7 +300,7 @@ The raw `segments` array is stored alongside the rendered `transcript` string so
 
 ### 4.5 Chat-history retention
 
-The `chatMessages` key retains the most recent `MAX_STORED_MESSAGES = 200` messages — the write path prunes with `messages.slice(-MAX_STORED_MESSAGES)` before persisting (`hooks/useChat.ts:19`, `45–48`), bounding storage growth. When making an LLM request, only the trailing `MAX_HISTORY = 10` messages are sent as context to `/chat` (`hooks/useChat.ts:13`, `75`). The retained history is restored on mount.
+There is none. The chat is read from the server on mount and held in memory only; `chatMessages` is no longer written (Q18). When making an LLM request, only the trailing `MAX_HISTORY = 10` messages are sent as context to `/chat`.
 
 ---
 
@@ -390,7 +392,7 @@ const REQUIRED_ENDPOINTS = [
 
 - the reported `endpoints` list is empty / absent (treated as stale);
 - any endpoint in `REQUIRED_ENDPOINTS` is absent from the reported list (`missing` array);
-- **the server is below the version floor** — `MIN_SERVER_API_VERSION = 84` (`App.tsx:86`) and `apiVersion < MIN_SERVER_API_VERSION` (a missing/non-numeric `apiVersion` is coerced to `0`, so an old server fails this even when all endpoint names line up). The stale reason becomes `` [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`] ``.
+- **the server is below the version floor** — `MIN_SERVER_API_VERSION = 86` (`App.tsx:86`) and `apiVersion < MIN_SERVER_API_VERSION` (a missing/non-numeric `apiVersion` is coerced to `0`, so an old server fails this even when all endpoint names line up). The stale reason becomes `` [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`] ``.
 
 This mirrors the Mac client's handshake (`BackendManager.minimumServerApiVersion = 43`). The UI renders a "Server needs to be restarted" banner when `serverOnline && serverStale` is truthy (`App.tsx:507–518`). The health check repeats every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS = 30_000` ms (`lib/config.ts:467`, `App.tsx:308`).
 

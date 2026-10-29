@@ -2,7 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   readLegacyTranscripts,
   importLegacyTranscripts,
-  expectedCapture,
+  countLines,
   toCaptions,
   type LegacyReport,
   type LegacyTranscript,
@@ -14,7 +14,6 @@ const runLocked = lockRunner('llmide-legacy-import');
 const OUTCOME_TEXT: Record<LegacyReport['outcome'], string> = {
   copied: 'copied to the Mac, local copy removed',
   waiting: 'sent; waiting for the Mac app to confirm (run again later)',
-  'kept-merged': 'copied, local copy kept',
   'skipped-large': 'too large for a verified copy, kept here',
   'skipped-empty': 'empty, kept here',
   'no-ack-protocol': 'this server cannot confirm copies; nothing was sent or deleted',
@@ -86,7 +85,7 @@ export default function LegacyTranscriptsPanel() {
       </p>
       <ul className="kb-results">
         {items.map((t) => {
-          const e = expectedCapture(toCaptions(t.segments));
+          const lines = countLines(toCaptions(t.segments, t.speakerNames));
           return (
             <li key={t.id} className="kb-hit">
               <label>
@@ -97,7 +96,7 @@ export default function LegacyTranscriptsPanel() {
                   onChange={() => toggle(t.id)}
                   aria-label={`Select ${t.meetingTitle || 'Untitled meeting'}`}
                 />{' '}
-                {t.meetingTitle || 'Untitled meeting'} · {(t.date || '').split('T')[0]} · {e.valid} lines
+                {t.meetingTitle || 'Untitled meeting'} · {(t.date || '').split('T')[0]} · {lines} lines
               </label>
             </li>
           );

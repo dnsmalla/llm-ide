@@ -19,10 +19,15 @@ The extension stores nothing of its own except an unfinished capture draft (`tra
 - [ ] Stop with the Mac app/server CLOSED: the draft stays, the banner says "Mac app not running"; open the app, the capture is re-sent, the Mac writes the note, the draft disappears
 - [ ] Close the panel mid-recording, reopen after 2+ min: the transcript is restored in the live view, re-sent and released after the ack
 - [ ] Restart the server between Stop and the Mac ack: the draft is kept ("not confirmed copied" + Resend button), never deleted on an unknown status
-- [ ] Server WITHOUT `LLMIDE_LIVE_ACK`: the draft is kept ("kept in this browser: this server cannot confirm"), never deleted, at most 50
+- [ ] Server WITHOUT `LLMIDE_LIVE_ACK`: the draft is kept and listed with Export and Delete; with 50 kept, Stop refuses to finalize (error shown, capture stays) until you delete or export one. Nothing is ever dropped automatically
+- [ ] Record past 2000 lines: the capture is never released; it is listed with Export and Delete
+- [ ] Rename a speaker, set a language, Stop: the Mac note carries the display names, the language, the real start time and duration (not the Stop time)
+- [ ] Fill storage (or block it in devtools) and Stop: a persistent red error appears, the capture is still sent, and the draft appears once space is back
+- [ ] Two panels open: only the recording panel finalizes its capture; the other re-sends it only after the draft is 2 minutes stale
 - [ ] No `transcripts` or `chatMessages` key is written (`chrome.storage.local.get(null)` in the panel console)
 - [ ] Settings -> "Meetings saved in this browser (old)": lists old saved meetings read-only; nothing is sent until "Copy to Mac"; a copy is removed locally only after the Mac confirms; pressing twice sends once; closing the panel mid-copy and pressing again resumes
 - [ ] Chat with the Mac app closed: "Mac app not running", nothing is persisted; reopen the app, the banner clears by itself
+- [ ] Upgrading from a build that kept `chatMessages`: a non-empty old buffer is NOT deleted; the chat tab offers Export, and only that (or an empty buffer after the server answered) removes it
 
 ## LLM Output
 - [ ] Primary language change → Notes/chat respond in that language

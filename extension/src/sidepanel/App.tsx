@@ -83,7 +83,7 @@ const REQUIRED_ENDPOINTS = [
 // silently used here. Bump this in lockstep with SERVER_API_VERSION whenever a
 // contract change lands that this client depends on. A NEWER server is fine
 // (backward-compatible), so we only flag servers BELOW this floor.
-const MIN_SERVER_API_VERSION = 84;
+const MIN_SERVER_API_VERSION = 86;
 
 export default function App() {
   // Auth gate is the very first hook so login renders before any of the
@@ -255,8 +255,7 @@ export default function App() {
   // now — the extension just captures and supports the AI surfaces
   // (notes, agent questions, chat).
 
-  const unconfirmed = draftRelease.reports.filter((r) => r.outcome !== 'released' && r.outcome !== 'active' && r.outcome !== 'retained');
-  const retainedCount = draftRelease.reports.filter((r) => r.outcome === 'retained').length;
+  const unconfirmed = draftRelease.reports.filter((r) => r.outcome !== 'released' && r.outcome !== 'active' && r.outcome !== 'retained' && r.outcome !== 'too-large' && r.outcome !== 'storage-error' && r.outcome !== 'blocked-full');
 
   const checkServer = useCallback(async () => {
     try {
@@ -540,10 +539,39 @@ export default function App() {
         </div>
       )}
 
-      {retainedCount > 0 && (
+      {draftRelease.reports.some((r) => r.outcome === 'storage-error') && (
+        <div className="error-message" role="alert">
+          A capture could not be stored in this browser (storage full or unavailable). It is held in memory and keeps
+          being sent to the Mac app. Download its transcript before closing this panel.
+        </div>
+      )}
+
+      {draftRelease.reports.some((r) => r.outcome === 'blocked-full') && (
+        <div className="error-message" role="alert">
+          Too many captures are kept in this browser, so new ones are not finalized. Export or delete some below.
+        </div>
+      )}
+
+      {draftRelease.kept.length > 0 && (
         <div className="quota-warning" role="status">
-          {retainedCount} capture{retainedCount === 1 ? '' : 's'} kept in this browser: this server cannot confirm that
-          the Mac app has a copy, so they are not deleted.
+          <span>
+            {draftRelease.kept.length} capture{draftRelease.kept.length === 1 ? '' : 's'} kept in this browser because
+            the Mac app cannot confirm a complete copy (an old server, or longer than 2000 lines). Nothing is deleted
+            automatically.
+          </span>
+          <ul>
+            {draftRelease.kept.map((d) => (
+              <li key={d.id}>
+                {d.meetingTitle}{' '}
+                <button className="btn btn-sm" onClick={() => draftRelease.exportKept(d)}>
+                  Export
+                </button>{' '}
+                <button className="btn btn-sm" onClick={() => void draftRelease.deleteKept(d)}>
+                  Delete
+                </button>
+              </li>
+            ))}
+          </ul>
         </div>
       )}
 
@@ -553,12 +581,12 @@ export default function App() {
             {unconfirmed.length === 1
               ? '1 capture is kept here until the Mac app confirms it has a copy.'
               : `${unconfirmed.length} captures are kept here until the Mac app confirms they have a copy.`}
-            {unconfirmed.some((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed')
+            {unconfirmed.some((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed' || r.outcome === 'partial' || r.outcome === 'partial-acked')
               ? ' Some are not confirmed copied.'
               : ''}
           </span>
           {unconfirmed
-            .filter((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed')
+            .filter((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed' || r.outcome === 'partial' || r.outcome === 'partial-acked')
             .map((r) => (
               <button
                 key={r.id}
@@ -704,6 +732,8 @@ export default function App() {
               isLoading={chat.isLoading}
               error={chat.error}
               offline={chat.offline}
+              legacyChatCount={chat.legacyChat.length}
+              onExportLegacyChat={chat.exportLegacyChat}
               hasTranscript={transcript.fullTranscript.length > 0}
               onSend={(msg) => chat.sendMessage(msg, transcript.fullTranscript, transcript.primaryLang)}
               onClear={chat.clearChat}

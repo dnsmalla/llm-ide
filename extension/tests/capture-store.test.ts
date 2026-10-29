@@ -1,301 +1,431 @@
-// Capture drafts are released only on the Mac's ack (live-then-archive T5.2),
-// the legacy `transcripts` copy to the Mac is verified and resumable, and the
-// extension stores no chat. Pure logic: no browser, no server.
+// Capture drafts are released only when the server provably holds an identical
+// copy that the Mac acked (live-then-archive T5.2 + review fixes). Pure logic over
+// a fake chrome.storage and a fake server: no browser, no network.
 import { test, beforeEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import {
   saveTranscriptDraft,
   setDraftStage,
   getDraftStage,
-  recordFinalize,
+  stopCapture,
   reconcileDrafts,
   resendDraft,
   listDrafts,
+  deleteDraft,
+  expectedOf,
+  toCaptions,
   importLegacyTranscript,
   importLegacyTranscripts,
   legacyCaptureId,
   readLegacyTranscripts,
+  setDraftLock,
+  memoryCaptureIds,
+  _clearMemoryCapturesForTests,
   DRAFT_STALE_MS,
-  MAX_NO_ACK_DRAFTS,
+  MAX_RETAINED,
   type LiveApi,
   type LiveState,
   type StorageArea,
   type StatusResult,
+  type FinalizePayload,
   type LegacyTranscript,
+  type Draft,
 } from '../src/lib/capture-store.ts';
 
-const T0 = 1_800_000_000_000;
+const T0 = Date.UTC(2026, 9, 29, 3, 0, 0); // plausible capture start
+const DAY = 24 * 3600 * 1000;
 
-function fakeArea(opts: { failSet?: () => boolean } = {}) {
+// ─── fakes ─────────────────────────────────────────────────────────────
+
+function fakeArea(opts: { failSet?: (items: Record<string, unknown>) => boolean; delayMs?: number } = {}) {
   const store = new Map<string, unknown>();
+  const wait = () => (opts.delayMs ? new Promise((r) => setTimeout(r, opts.delayMs)) : Promise.resolve());
   const area: StorageArea = {
     async get(keys) {
+      await wait();
       if (keys == null) return Object.fromEntries([...store].map(([k, v]) => [k, structuredClone(v)]));
       const ks = Array.isArray(keys) ? keys : [keys];
       return Object.fromEntries(ks.filter((k) => store.has(k)).map((k) => [k, structuredClone(store.get(k))]));
     },
     async set(items) {
-      if (opts.failSet?.()) throw new Error('QUOTA_BYTES quota exceeded');
+      await wait();
+      if (opts.failSet?.(items)) throw new Error('QUOTA_BYTES quota exceeded');
       for (const [k, v] of Object.entries(items)) store.set(k, structuredClone(v));
     },
     async remove(keys) {
+      await wait();
       for (const k of Array.isArray(keys) ? keys : [keys]) store.delete(k);
     },
   };
   return { store, area };
 }
 
-interface FakeServer {
+type Cap = { speaker: string; text: string; ts: number };
+const clean = (s: string) => s.replace(/\s+/g, ' ').trim();
+const hashOf = (list: Cap[]) =>
+  createHash('sha256').update(list.map((c) => `${clean(c.speaker)}\0${clean(c.text)}`).join('\n'), 'utf8').digest('hex');
+
+interface Held {
+  lines: number;
+  hash: string;
+  language: string;
+  startedAt: number | null;
+}
+class FakeServer {
   api: LiveApi;
-  calls: string[];
-  states: Map<string, LiveState>;
-  captions: Map<string, number>;
-  reachable: boolean;
-  ackRequired: boolean;
-  /** when set, finalize reports this captionCount instead of the held count */
-  finalizeCount?: number;
-  /** server-side dedupe like the real one: drop in-batch repeats */
-  dedupe: boolean;
+  calls: string[] = [];
+  states = new Map<string, LiveState>();
+  held = new Map<string, Held>();
+  /** the streamed (live) buffer per id, used when finalize has no payload */
+  stream = new Map<string, Cap[]>();
+  reachable = true;
+  ackRequired = true;
+  /** simulate an old/short server: transform what it keeps */
+  mangle: ((list: Cap[]) => Cap[]) | null = null;
+  /** simulate a server that does not store language/start */
+  ignoreMeta = false;
+  failFinalize = false;
+  lastPayload: FinalizePayload | undefined;
+  constructor() {
+    this.api = {
+      status: async (id): Promise<StatusResult> => {
+        this.calls.push(`status:${id}`);
+        if (!this.reachable) return { ok: false };
+        const state = this.states.get(id) ?? 'unknown';
+        const h = this.held.get(id);
+        if (h && (state === 'finalized' || state === 'acked')) {
+          return { ok: true, state, durable: true, lines: h.lines, captionHash: h.hash, language: h.language, startedAt: h.startedAt };
+        }
+        return { ok: true, state, durable: true };
+      },
+      finalize: async (id, payload) => {
+        this.calls.push(`finalize:${id}${payload ? ':payload' : ':plain'}`);
+        this.lastPayload = payload;
+        if (!this.reachable || this.failFinalize) return { ok: false, ackRequired: false, captionCount: 0, durable: false };
+        let list: Cap[] = payload ? payload.captions.filter((c) => clean(c.speaker) && clean(c.text)) : (this.stream.get(id) ?? []);
+        if (this.mangle) list = this.mangle(list);
+        const h: Held = {
+          lines: list.length,
+          hash: hashOf(list),
+          language: this.ignoreMeta ? '' : (payload?.language ?? ''),
+          startedAt: this.ignoreMeta ? null : (payload?.startedAt ?? (list.length ? Math.min(...list.map((c) => c.ts)) : null)),
+        };
+        this.held.set(id, h);
+        if (list.length > 0) this.states.set(id, 'finalized');
+        return { ok: true, ackRequired: this.ackRequired && list.length > 0, captionCount: list.length, captionHash: h.hash, durable: true };
+      },
+    };
+  }
+  ack(id: string) {
+    this.states.set(id, 'acked');
+  }
+  count(prefix: string) {
+    return this.calls.filter((c) => c.startsWith(prefix)).length;
+  }
 }
 
-function fakeServer(over: Partial<FakeServer> = {}): FakeServer {
-  const srv: FakeServer = {
-    calls: [],
-    states: new Map(),
-    captions: new Map(),
-    reachable: true,
-    ackRequired: true,
-    dedupe: true,
-    ...over,
-    api: undefined as unknown as LiveApi,
-  };
-  srv.api = {
-    async status(id): Promise<StatusResult> {
-      srv.calls.push(`status:${id}`);
-      if (!srv.reachable) return { ok: false };
-      return { ok: true, state: srv.states.get(id) ?? 'unknown', durable: true };
-    },
-    async append(id, _t, caps) {
-      srv.calls.push(`append:${id}`);
-      if (!srv.reachable) return { ok: false, accepted: 0, finalized: false };
-      const seen = new Set<string>();
-      for (const c of caps) seen.add(`${c.speaker}\0${c.text.replace(/\s+/g, ' ').trim()}`);
-      const n = srv.dedupe ? seen.size : caps.length;
-      srv.captions.set(id, n);
-      srv.states.set(id, 'live');
-      return { ok: true, accepted: n, finalized: false };
-    },
-    async finalize(id) {
-      srv.calls.push(`finalize:${id}`);
-      if (!srv.reachable) return { ok: false, ackRequired: false, captionCount: 0, durable: false };
-      const held = srv.captions.get(id) ?? 0;
-      if (held > 0) srv.states.set(id, 'finalized');
-      return { ok: true, ackRequired: srv.ackRequired && held > 0, captionCount: srv.finalizeCount ?? held, durable: true };
-    },
-  };
-  return srv;
-}
-
-function draft(id: string, n = 2, title = 'Standup') {
-  const segments = Array.from({ length: n }, (_, i) => ({
-    text: `line ${i}`,
-    timestamp: T0 + i,
-    isFinal: true,
-    speaker: 'A',
-  }));
+function draft(id: string, n = 3, over: Partial<Draft> = {}): Omit<Draft, 'updatedAt'> {
+  const segments = Array.from({ length: n }, (_, i) => ({ text: `line ${i}`, timestamp: T0 + i * 1000, isFinal: true, speaker: 'A' }));
   return {
     id,
-    meetingTitle: title,
+    meetingTitle: 'Standup',
     date: new Date(T0).toISOString(),
     duration: 60,
     language: 'ja',
     transcript: segments.map((s) => `[A] ${s.text}`).join('\n'),
     segments,
     speakerNames: {},
+    ...over,
   };
 }
 
 let fx = fakeArea();
 beforeEach(() => {
   fx = fakeArea();
+  _clearMemoryCapturesForTests();
+  setDraftLock(null);
 });
 
-// ─── Drafts ───────────────────────────────────────────────────────────
+const stored = (id: string) => fx.store.has(`transcriptDraft:${id}`);
+const NOW = T0 + 10 * 60_000;
 
-test('draft is kept while the server has not acked (finalized, waiting)', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('d1'), T0);
-  await setDraftStage(fx.area, 'd1', 'awaiting-ack');
-  srv.states.set('d1', 'finalized');
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + 5000 });
-  assert.equal(r[0].outcome, 'waiting');
-  assert.ok(fx.store.has('transcriptDraft:d1'));
+// ─── release rules ────────────────────────────────────────────────────
+
+test('Stop sends the complete transcript; the draft is kept until the Mac acks', async () => {
+  const srv = new FakeServer();
+  const r = await stopCapture(fx.area, srv.api, draft('d1', 5), NOW);
+  assert.equal(r.send, 'sent');
+  assert.equal(srv.lastPayload?.captions.length, 5);
+  assert.equal(srv.lastPayload?.language, 'ja');
+  assert.equal(srv.lastPayload?.startedAt, T0);
+  assert.equal(srv.lastPayload?.durationSec, 60);
+  assert.equal(await getDraftStage(fx.area, 'd1'), 'awaiting-ack');
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
+  assert.equal(rep[0].outcome, 'waiting');
+  assert.ok(stored('d1'));
 });
 
-test('draft is kept when the status is unreachable, however often we ask', async () => {
-  const srv = fakeServer({ reachable: false });
-  await saveTranscriptDraft(fx.area, draft('d2'), T0);
-  await setDraftStage(fx.area, 'd2', 'awaiting-ack');
-  for (let i = 0; i < 3; i += 1) {
-    const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + 10_000 });
-    assert.equal(r[0].outcome, 'unreachable');
-  }
-  assert.ok(fx.store.has('transcriptDraft:d2'));
-  assert.ok(!srv.calls.some((c) => c.startsWith('append') || c.startsWith('finalize')));
+test('released only after an ack of a verified-identical copy; a late checkpoint cannot resurrect it', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('d2', 5), NOW);
+  srv.ack('d2');
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
+  assert.equal(rep[0].outcome, 'released');
+  assert.ok(!stored('d2'));
+  await saveTranscriptDraft(fx.area, draft('d2', 5), NOW + 2000); // closing panel's late write
+  assert.ok(!stored('d2'));
 });
 
-test('a throwing status call keeps the draft', async () => {
-  const srv = fakeServer();
+test('unreachable or throwing status keeps the draft, every time', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('u1'), NOW);
+  srv.reachable = false;
+  for (let i = 0; i < 3; i += 1) assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 }))[0].outcome, 'unreachable');
+  srv.reachable = true;
   srv.api.status = async () => {
     throw new Error('boom');
   };
-  await saveTranscriptDraft(fx.area, draft('d3'), T0);
-  await setDraftStage(fx.area, 'd3', 'awaiting-ack');
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 });
-  assert.equal(r[0].outcome, 'unreachable');
-  assert.ok(fx.store.has('transcriptDraft:d3'));
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 }))[0].outcome, 'unreachable');
+  assert.ok(stored('u1'));
 });
 
-test('draft is deleted only after acked, and a late checkpoint cannot resurrect it', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('d4'), T0);
-  await setDraftStage(fx.area, 'd4', 'awaiting-ack');
-  srv.states.set('d4', 'acked');
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + 1 });
-  assert.equal(r[0].outcome, 'released');
-  assert.ok(!fx.store.has('transcriptDraft:d4'));
-  await saveTranscriptDraft(fx.area, draft('d4'), T0 + 2); // late write from a closing panel
-  assert.ok(!fx.store.has('transcriptDraft:d4'));
+test('Scenario A: the server ends up with a SHORT copy (lost pushes): not released even after an ack', async () => {
+  const srv = new FakeServer();
+  srv.mangle = (l) => l.slice(0, 2); // only 2 of 5 lines survive
+  const r = await stopCapture(fx.area, srv.api, draft('a1', 5), NOW);
+  assert.equal(r.send, 'partial');
+  assert.equal(await getDraftStage(fx.area, 'a1'), 'finalizing', 'never marked awaiting-ack');
+  srv.ack('a1');
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000, autoResend: false });
+  assert.equal(rep[0].outcome, 'partial-acked');
+  assert.ok(stored('a1'));
 });
 
-test('an ack for an id this panel never finalized is not trusted (id reuse)', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('d5'), T0);
-  srv.states.set('d5', 'acked');
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS + 1 });
-  assert.equal(r[0].outcome, 'not-confirmed');
-  assert.ok(fx.store.has('transcriptDraft:d5'));
+test('Scenario B: more than 2000 lines is never sent as complete and never released', async () => {
+  const srv = new FakeServer();
+  const r = await stopCapture(fx.area, srv.api, draft('b1', 2100), NOW);
+  assert.equal(r.send, 'too-large');
+  assert.deepEqual(srv.calls.filter((c) => c.startsWith('finalize')), ['finalize:b1:plain']);
+  srv.ack('b1'); // the Mac acked the truncated streamed copy
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
+  assert.equal(rep[0].outcome, 'too-large');
+  assert.ok(stored('b1'));
 });
 
-test('expired, unknown after awaiting-ack, and non-durable all keep the draft', async () => {
-  const srv = fakeServer();
-  for (const [id, state] of [['e1', 'expired'], ['e2', 'unknown']] as const) {
-    await saveTranscriptDraft(fx.area, draft(id), T0);
-    await setDraftStage(fx.area, id, 'awaiting-ack');
-    srv.states.set(id, state);
-  }
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + 1 });
-  assert.deepEqual(r.map((x) => x.outcome), ['not-confirmed', 'not-confirmed']);
-  assert.equal((await listDrafts(fx.area)).length, 2);
-  assert.ok(!srv.calls.some((c) => c.startsWith('append')), 'never auto-resends an awaiting capture');
+test('Scenario C: a server that merges repeated lines (old behaviour) holds a short copy: kept', async () => {
+  const srv = new FakeServer();
+  srv.mangle = (l) => {
+    const seen = new Set<string>();
+    return l.filter((c) => (seen.has(c.text) ? false : (seen.add(c.text), true)));
+  };
+  const same = draft('c1', 4, { segments: Array.from({ length: 4 }, (_, i) => ({ text: 'はい。', timestamp: T0 + i, isFinal: true, speaker: 'A' })) });
+  const r = await stopCapture(fx.area, srv.api, same, NOW);
+  assert.equal(r.send, 'partial');
+  srv.ack('c1');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000, autoResend: false }))[0].outcome, 'partial-acked');
+  assert.ok(stored('c1'));
 });
 
-test('flag off (no ackRequired): the draft is retained and never deleted or polled', async () => {
-  const srv = fakeServer({ ackRequired: false });
-  await saveTranscriptDraft(fx.area, draft('f1'), T0);
-  srv.captions.set('f1', 2);
-  const f = await srv.api.finalize('f1');
-  await recordFinalize(fx.area, 'f1', f);
+test('repeated lines are kept by the lossless copy and the draft is released', async () => {
+  const srv = new FakeServer();
+  const same = draft('c2', 4, { segments: Array.from({ length: 4 }, (_, i) => ({ text: 'はい。', timestamp: T0 + i, isFinal: true, speaker: 'A' })) });
+  assert.equal((await stopCapture(fx.area, srv.api, same, NOW)).send, 'sent');
+  srv.ack('c2');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1 }))[0].outcome, 'released');
+});
+
+test('wrong-hash ack (same line count, different content) keeps the draft', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('h1', 3), NOW);
+  const h = srv.held.get('h1')!;
+  srv.held.set('h1', { ...h, hash: 'f'.repeat(64) });
+  srv.ack('h1');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1, autoResend: false }))[0].outcome, 'partial-acked');
+  assert.ok(stored('h1'));
+});
+
+test('a server that does not store language/start (old) keeps the draft', async () => {
+  const srv = new FakeServer();
+  srv.ignoreMeta = true;
+  await stopCapture(fx.area, srv.api, draft('m1', 3), NOW);
+  srv.ack('m1');
+  assert.notEqual((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1, autoResend: false }))[0].outcome, 'released');
+  assert.ok(stored('m1'));
+});
+
+test('an old status with no lines/hash (API < 86) never releases', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('o1', 3), NOW);
+  srv.api.status = async () => ({ ok: true, state: 'acked', durable: false });
+  assert.notEqual((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1, autoResend: false }))[0].outcome, 'released');
+  assert.ok(stored('o1'));
+});
+
+test('a partial finalized copy is repaired by an automatic whole-draft re-send, then verified', async () => {
+  const srv = new FakeServer();
+  srv.mangle = (l) => l.slice(0, 1);
+  await stopCapture(fx.area, srv.api, draft('p1', 4), NOW);
+  srv.mangle = null; // the server is fine now
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
+  assert.equal(rep[0].outcome, 'resent');
+  assert.equal(await getDraftStage(fx.area, 'p1'), 'awaiting-ack');
+  srv.ack('p1');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 2000 }))[0].outcome, 'released');
+});
+
+test('the automatic re-send backs off (no 15-second hammering of a server that stays short)', async () => {
+  const srv = new FakeServer();
+  srv.mangle = (l) => l.slice(0, 1);
+  await stopCapture(fx.area, srv.api, draft('p2', 4), NOW);
+  await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
+  const before = srv.count('finalize');
+  await reconcileDrafts(fx.area, srv.api, { now: NOW + 16_000 });
+  assert.equal(srv.count('finalize'), before);
+  assert.ok(stored('p2'));
+});
+
+test('server restarted between finalize and ack: kept, and a manual resend repairs it', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('r1', 3), NOW);
+  srv.states.clear();
+  srv.held.clear(); // restarted, non-durable
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1 }))[0].outcome, 'not-confirmed');
+  const [entry] = await listDrafts(fx.area);
+  assert.equal(await resendDraft(fx.area, srv.api, entry, { now: NOW + 2 }), 'sent');
+  srv.ack('r1');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 3 }))[0].outcome, 'released');
+});
+
+test('resend refuses a stale recording draft whose id is acked (it must not be promoted)', async () => {
+  const srv = new FakeServer();
+  await saveTranscriptDraft(fx.area, draft('s1'), T0);
+  srv.ack('s1');
+  const [entry] = await listDrafts(fx.area);
+  assert.equal(await resendDraft(fx.area, srv.api, entry, { now: T0 + DRAFT_STALE_MS * 2 }), 'refused');
+  assert.equal(srv.count('finalize'), 0);
+  assert.equal(await getDraftStage(fx.area, 's1'), null);
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS * 2 }))[0].outcome, 'not-confirmed');
+  assert.ok(stored('s1'));
+});
+
+test('a stale recording draft whose server session is still live is never finalized behind its panel', async () => {
+  const srv = new FakeServer();
+  await saveTranscriptDraft(fx.area, draft('k1'), T0);
+  srv.states.set('k1', 'live');
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS * 3 });
+  assert.equal(rep[0].outcome, 'active');
+  assert.equal(srv.count('finalize'), 0);
+});
+
+test('crash recovery: a stale unfinalized draft is sent once, verified, released after the ack', async () => {
+  const srv = new FakeServer();
+  await saveTranscriptDraft(fx.area, draft('c9', 3), T0);
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS + 1 });
+  assert.equal(rep[0].outcome, 'resent');
+  assert.equal(srv.count('finalize'), 1);
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS + 2 }))[0].outcome, 'waiting');
+  srv.ack('c9');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS + 3 }))[0].outcome, 'released');
+});
+
+test('speaker renames travel with the capture and are part of the verified hash', async () => {
+  const srv = new FakeServer();
+  const d = draft('n1', 2, { speakerNames: { A: 'Alice' } });
+  await stopCapture(fx.area, srv.api, d, NOW);
+  assert.ok(srv.lastPayload!.captions.every((c) => c.speaker === 'Alice'));
+  const exp = await expectedOf(d);
+  assert.equal(srv.held.get('n1')!.hash, exp.captionHash);
+  srv.ack('n1');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 1 }))[0].outcome, 'released');
+});
+
+// ─── flag off, the cap, and "never drop" ──────────────────────────────
+
+test('flag off: retained, never polled, never deleted', async () => {
+  const srv = new FakeServer();
+  srv.ackRequired = false;
+  assert.equal((await stopCapture(fx.area, srv.api, draft('f1'), NOW)).send, 'sent');
   assert.equal(await getDraftStage(fx.area, 'f1'), 'no-ack');
   srv.calls.length = 0;
-  srv.states.set('f1', 'acked'); // even a surprising ack answer is not consulted
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS * 100 });
-  assert.equal(r[0].outcome, 'retained');
-  assert.ok(fx.store.has('transcriptDraft:f1'));
+  srv.ack('f1');
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + DAY * 30 }))[0].outcome, 'retained');
+  assert.ok(stored('f1'));
   assert.deepEqual(srv.calls, []);
 });
 
-test('flag-off copies are capped, oldest first', async () => {
-  const srv = fakeServer();
-  for (let i = 0; i < MAX_NO_ACK_DRAFTS + 3; i += 1) {
-    await saveTranscriptDraft(fx.area, draft(`n${i}`), T0 + i);
-    await setDraftStage(fx.area, `n${i}`, 'no-ack');
+test('the 51st retained draft: nothing is dropped, finalize is refused, the capture stays; deleting one unblocks', async () => {
+  const srv = new FakeServer();
+  srv.ackRequired = false;
+  for (let i = 0; i < MAX_RETAINED; i += 1) {
+    assert.equal((await stopCapture(fx.area, srv.api, draft(`n${i}`), NOW + i)).send, 'sent');
   }
-  await reconcileDrafts(fx.area, srv.api, { now: T0 + 1000 });
-  const left = (await listDrafts(fx.area)).map((e) => e.draft.id);
-  assert.equal(left.length, MAX_NO_ACK_DRAFTS);
-  assert.ok(!left.includes('n0') && left.includes(`n${MAX_NO_ACK_DRAFTS + 2}`));
+  const finalizesBefore = srv.count('finalize');
+  const r = await stopCapture(fx.area, srv.api, draft('n-extra'), NOW + 999);
+  assert.equal(r.send, 'blocked-full');
+  assert.equal(srv.count('finalize'), finalizesBefore, 'no finalize: the server must not drop its copy while we have no room');
+  assert.ok(stored('n-extra'), 'the 51st capture itself is kept');
+  const drafts = await listDrafts(fx.area);
+  assert.equal(drafts.length, MAX_RETAINED + 1);
+  for (let i = 0; i < MAX_RETAINED; i += 1) assert.ok(stored(`n${i}`), `n${i} still there`);
+  // reconcile (even much later) drops nothing
+  await reconcileDrafts(fx.area, srv.api, { now: NOW + 400 * DAY });
+  assert.equal((await listDrafts(fx.area)).length, MAX_RETAINED + 1);
+  // the user deletes one: the next Stop works
+  await deleteDraft(fx.area, 'n0');
+  assert.equal((await stopCapture(fx.area, srv.api, draft('n-after'), NOW + 1000)).send, 'sent');
 });
 
-test('finalize that captured nothing leaves the draft finalizing (so it is re-sent, not parked)', async () => {
-  await saveTranscriptDraft(fx.area, draft('z1'), T0);
-  await setDraftStage(fx.area, 'z1', 'finalizing');
-  await recordFinalize(fx.area, 'z1', { ok: true, ackRequired: false, captionCount: 0, durable: false });
-  assert.equal(await getDraftStage(fx.area, 'z1'), 'finalizing');
-  await recordFinalize(fx.area, 'z1', { ok: false, ackRequired: true, captionCount: 5, durable: true });
-  assert.equal(await getDraftStage(fx.area, 'z1'), 'finalizing');
+test('a stale unsent draft is not auto-finalized while the retained store is full', async () => {
+  const srv = new FakeServer();
+  srv.ackRequired = false;
+  for (let i = 0; i < MAX_RETAINED; i += 1) await stopCapture(fx.area, srv.api, draft(`n${i}`), NOW);
+  await saveTranscriptDraft(fx.area, draft('late'), T0);
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + DAY });
+  assert.equal(rep.find((r) => r.id === 'late')!.outcome, 'blocked-full');
+  assert.equal(srv.calls.filter((c) => c === 'finalize:late:payload').length, 0);
 });
 
-test('stage never moves backwards (two panels, late writes)', async () => {
-  await setDraftStage(fx.area, 'm1', 'awaiting-ack');
-  await setDraftStage(fx.area, 'm1', 'finalizing');
-  await setDraftStage(fx.area, 'm1', 'recording');
-  assert.equal(await getDraftStage(fx.area, 'm1'), 'awaiting-ack');
-  await setDraftStage(fx.area, 'm1', 'no-ack'); // same rank, first decision wins
-  assert.equal(await getDraftStage(fx.area, 'm1'), 'awaiting-ack');
+// ─── storage failures ─────────────────────────────────────────────────
+
+test('a failing stage write does not stop the finalize; the failure is reported and the capture is held in memory', async () => {
+  let failStage = true;
+  const f = fakeArea({ failSet: (items) => failStage && Object.keys(items).some((k) => k.startsWith('draftStage:')) });
+  const srv = new FakeServer();
+  const r = await stopCapture(f.area, srv.api, draft('q1', 3), NOW);
+  assert.equal(srv.count('finalize'), 1, 'finalize ran regardless of the stage write');
+  assert.equal(r.storageError, true);
+  assert.ok(f.store.has('transcriptDraft:q1'), 'the draft itself was saved');
+  assert.deepEqual(memoryCaptureIds(), ['q1']);
+  const rep = await reconcileDrafts(f.area, srv.api, { now: NOW + 1 });
+  assert.ok(rep.some((x) => x.id === 'q1' && x.outcome === 'storage-error'), 'persistent error while storage fails');
+  failStage = false; // space is back
+  const rep2 = await reconcileDrafts(f.area, srv.api, { now: NOW + 2 });
+  assert.deepEqual(memoryCaptureIds(), []);
+  assert.ok(!rep2.some((x) => x.outcome === 'storage-error'));
+  assert.equal(await getDraftStage(f.area, 'q1'), 'awaiting-ack');
 });
 
-test('a live panel\'s draft and an actively recording id are left alone', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('r1'), T0);
-  await saveTranscriptDraft(fx.area, draft('r2'), T0 - DRAFT_STALE_MS * 2);
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + 1, activeIds: new Set(['r2']) });
-  assert.deepEqual(r.map((x) => x.outcome), ['active', 'active']);
-  assert.deepEqual(srv.calls, []);
+test('a throwing storage (every write fails) still sends the capture and keeps it in memory', async () => {
+  const f = fakeArea({ failSet: () => true });
+  const srv = new FakeServer();
+  const r = await stopCapture(f.area, srv.api, draft('q2', 3), NOW);
+  assert.equal(r.storageError, true);
+  assert.equal(srv.count('finalize'), 1);
+  assert.deepEqual(memoryCaptureIds(), ['q2']);
+  assert.equal(f.store.size, 0);
 });
 
-test('crash recovery: a stale unfinalized draft is re-pushed once and finalized, then waits for the ack', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('c1', 3), T0);
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS + 1 });
-  assert.equal(r[0].outcome, 'resent');
-  assert.equal(await getDraftStage(fx.area, 'c1'), 'awaiting-ack');
-  assert.ok(fx.store.has('transcriptDraft:c1'), 'still kept until acked');
-  assert.equal(srv.calls.filter((c) => c.startsWith('append')).length, 1);
-  // second pass (another panel / next poll) does not push again
-  const r2 = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS + 2 });
-  assert.equal(r2[0].outcome, 'waiting');
-  assert.equal(srv.calls.filter((c) => c.startsWith('append')).length, 1);
-  srv.states.set('c1', 'acked');
-  const r3 = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS + 3 });
-  assert.equal(r3[0].outcome, 'released');
-});
-
-test('server restart between finalize and ack (non-durable): kept, and a manual resend repairs it', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('s1'), T0);
-  await setDraftStage(fx.area, 's1', 'awaiting-ack');
-  srv.states.clear(); // restarted: unknown
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + 1 });
-  assert.equal(r[0].outcome, 'not-confirmed');
-  const [entry] = await listDrafts(fx.area);
-  assert.equal(await resendDraft(fx.area, srv.api, entry), true);
-  assert.equal(srv.states.get('s1'), 'finalized');
-  assert.ok(fx.store.has('transcriptDraft:s1'));
-});
-
-test('resend into a live server session only finalizes (no duplicate lines)', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('l1', 4), T0);
-  srv.states.set('l1', 'live');
-  srv.captions.set('l1', 3);
-  const [entry] = await listDrafts(fx.area);
-  await resendDraft(fx.area, srv.api, entry);
-  assert.ok(!srv.calls.includes('append:l1'));
-  assert.ok(srv.calls.includes('finalize:l1'));
-});
-
-test('a quota error while releasing keeps the draft', async () => {
+test('a failed release (storage error at the end) keeps the draft', async () => {
   let fail = false;
   const f = fakeArea({ failSet: () => fail });
-  const srv = fakeServer();
-  await saveTranscriptDraft(f.area, draft('q1'), T0);
-  await setDraftStage(f.area, 'q1', 'awaiting-ack');
-  srv.states.set('q1', 'acked');
+  const srv = new FakeServer();
+  await stopCapture(f.area, srv.api, draft('q3'), NOW);
+  srv.ack('q3');
   fail = true;
-  const r = await reconcileDrafts(f.area, srv.api, { now: T0 });
-  assert.notEqual(r[0].outcome, 'released');
-  assert.ok(f.store.has('transcriptDraft:q1'));
+  const rep = await reconcileDrafts(f.area, srv.api, { now: NOW + 1 });
+  assert.notEqual(rep[0].outcome, 'released');
+  assert.ok(f.store.has('transcriptDraft:q3'));
 });
 
 test('a draft write over quota rejects (callers surface it) and leaves the old draft', async () => {
@@ -307,24 +437,130 @@ test('a draft write over quota rejects (callers surface it) and leaves the old d
   assert.equal((await listDrafts(f.area))[0].draft.segments.length, 1);
 });
 
-// ─── Legacy import ────────────────────────────────────────────────────
+// ─── races ────────────────────────────────────────────────────────────
 
-function legacy(id: string, n = 3, text = (i: number) => `line ${i}`): LegacyTranscript {
-  const segments = Array.from({ length: n }, (_, i) => ({ text: text(i), timestamp: T0 + i, isFinal: true, speaker: 'A' }));
+test('save racing the release (slow storage): the released draft is not re-created and no banner remains', async () => {
+  const f = fakeArea({ delayMs: 2 });
+  fx = f;
+  const srv = new FakeServer();
+  await stopCapture(f.area, srv.api, draft('x1'), NOW);
+  srv.ack('x1');
+  const [rep] = await Promise.all([
+    reconcileDrafts(f.area, srv.api, { now: NOW + 1 }),
+    saveTranscriptDraft(f.area, draft('x1'), NOW + 2), // the closing panel's last checkpoint
+  ]);
+  assert.ok(rep.length === 1);
+  // Either the release won (the late save is then ignored) or the save won (the
+  // release is refused as stale and the next pass releases the identical copy):
+  // both end with no draft and nothing left to show.
+  await reconcileDrafts(f.area, srv.api, { now: NOW + 3 });
+  const settled = await reconcileDrafts(f.area, srv.api, { now: NOW + 4 });
+  assert.deepEqual(settled.filter((r) => r.id === 'x1'), [], 'no draft, so no banner');
+  assert.ok(!f.store.has('transcriptDraft:x1'));
+});
+
+test('a draft changed after its copy was verified is NOT released (compare-and-set)', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('x2', 3), NOW);
+  srv.ack('x2');
+  const realStatus = srv.api.status;
+  srv.api.status = async (id) => {
+    const st = await realStatus(id);
+    // the panel checkpoints a newer version while we were asking the server
+    await saveTranscriptDraft(fx.area, draft('x2', 4), NOW + 500);
+    return st;
+  };
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1 });
+  assert.notEqual(rep[0].outcome, 'released');
+  assert.equal((await listDrafts(fx.area))[0].draft.segments.length, 4, 'the newer content survives');
+});
+
+test('an orphan draft with a released marker is cleared only when the server copy matches it', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('x3', 3), NOW);
+  srv.ack('x3');
+  await setDraftStage(fx.area, 'x3', 'released', NOW);
+  // a DIFFERENT local content than what the server acked
+  fx.store.set('transcriptDraft:x3', { ...draft('x3', 5), updatedAt: NOW });
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1 });
+  assert.equal(rep[0].outcome, 'partial-acked');
+  assert.ok(stored('x3'), 'kept + banner, not silently deleted');
+  // matching content: cleared
+  fx.store.set('transcriptDraft:x3', { ...draft('x3', 3), updatedAt: NOW });
+  assert.equal((await reconcileDrafts(fx.area, srv.api, { now: NOW + 2 }))[0].outcome, 'released');
+  assert.ok(!stored('x3'));
+});
+
+test('stage is forward-only and first decision wins at equal rank', async () => {
+  await setDraftStage(fx.area, 'm1', 'awaiting-ack');
+  await setDraftStage(fx.area, 'm1', 'finalizing');
+  await setDraftStage(fx.area, 'm1', 'recording');
+  await setDraftStage(fx.area, 'm1', 'no-ack');
+  assert.equal(await getDraftStage(fx.area, 'm1'), 'awaiting-ack');
+});
+
+test('every mutation goes through the installed lock', async () => {
+  let held = 0;
+  let maxHeld = 0;
+  const order: string[] = [];
+  setDraftLock(async (fn) => {
+    held += 1;
+    maxHeld = Math.max(maxHeld, held);
+    order.push('in');
+    try {
+      return await fn();
+    } finally {
+      held -= 1;
+    }
+  });
+  const f = fakeArea({ delayMs: 1 });
+  await Promise.all([
+    saveTranscriptDraft(f.area, draft('l1'), T0),
+    setDraftStage(f.area, 'l1', 'finalizing'),
+    saveTranscriptDraft(f.area, draft('l2'), T0),
+    deleteDraft(f.area, 'l2'),
+  ]);
+  assert.equal(maxHeld, 1, 'never two holders at once');
+  assert.ok(order.length >= 4);
+});
+
+test('owner token: another panel does not re-send a fresh draft it does not own; its owner and stale drafts are re-sent', async () => {
+  const srv = new FakeServer();
+  await saveTranscriptDraft(fx.area, draft('o1', 3, { owner: 'panel-A' }), NOW);
+  await setDraftStage(fx.area, 'o1', 'finalizing');
+  const other = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000, panelId: 'panel-B' });
+  assert.equal(other[0].outcome, 'not-confirmed');
+  assert.equal(srv.count('finalize'), 0);
+  const owner = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000, panelId: 'panel-A' });
+  assert.equal(owner[0].outcome, 'resent');
+  // stale: the owner is gone, anyone may
+  const srv2 = new FakeServer();
+  const f2 = fakeArea();
+  await saveTranscriptDraft(f2.area, draft('o2', 3, { owner: 'panel-A' }), NOW);
+  await setDraftStage(f2.area, 'o2', 'finalizing');
+  const rep = await reconcileDrafts(f2.area, srv2.api, { now: NOW + DRAFT_STALE_MS + 1, panelId: 'panel-B' });
+  assert.equal(rep[0].outcome, 'resent');
+});
+
+// ─── legacy import ────────────────────────────────────────────────────
+
+function legacy(id: string, n = 3, over: Partial<LegacyTranscript> = {}): LegacyTranscript {
+  const segments = Array.from({ length: n }, (_, i) => ({ text: `line ${i}`, timestamp: T0 + i * 1000, isFinal: true, speaker: 'A' }));
   return {
     id,
     meetingTitle: `M ${id}`,
     date: new Date(T0).toISOString(),
-    duration: 10,
+    duration: 90,
+    language: 'en-US',
     transcript: segments.map((s) => `[A] ${s.text}`).join('\n'),
     segments,
     speakerNames: {},
+    ...over,
   };
 }
 const seedLegacy = (list: LegacyTranscript[]) => fx.store.set('transcripts', structuredClone(list));
 const legacyIds = () => ((fx.store.get('transcripts') as { id: string }[] | undefined) ?? []).map((t) => t.id);
-const noSleep = async () => {};
-const opts = { polls: 2, sleep: noSleep };
+const lopts = { polls: 2, sleep: async () => {} };
 
 test('legacy: read-only view never writes', async () => {
   seedLegacy([legacy('a'), legacy('b')]);
@@ -333,158 +569,146 @@ test('legacy: read-only view never writes', async () => {
   assert.equal(JSON.stringify([...fx.store]), before);
 });
 
-test('legacy: local copy deleted only after the Mac acks', async () => {
-  const srv = fakeServer();
-  const t = legacy('a');
+test('legacy: sends date, language, duration and renames; deletes only after ack of the identical copy', async () => {
+  const srv = new FakeServer();
+  const t = legacy('a', 3, { speakerNames: { A: 'Alice' } });
   seedLegacy([t, legacy('b')]);
-  const id = await legacyCaptureId(t);
-  // Not acked yet: stays, reports waiting.
-  const r1 = await importLegacyTranscript(fx.area, srv.api, t, opts);
+  const r1 = await importLegacyTranscript(fx.area, srv.api, t, lopts);
   assert.equal(r1.outcome, 'waiting');
+  assert.equal(srv.lastPayload?.startedAt, T0);
+  assert.equal(srv.lastPayload?.language, 'en-US');
+  assert.equal(srv.lastPayload?.durationSec, 90);
+  assert.ok(srv.lastPayload?.captions.every((c) => c.speaker === 'Alice'));
   assert.deepEqual(legacyIds(), ['a', 'b']);
-  // Mac acks later; re-running (resume) deletes exactly that item and sends nothing new.
+  srv.ack(await legacyCaptureId(t));
   srv.calls.length = 0;
-  srv.states.set(id, 'acked');
-  const r2 = await importLegacyTranscript(fx.area, srv.api, t, opts);
-  assert.equal(r2.outcome, 'copied');
+  assert.equal((await importLegacyTranscript(fx.area, srv.api, t, lopts)).outcome, 'copied');
   assert.deepEqual(legacyIds(), ['b']);
-  assert.ok(!srv.calls.some((c) => c.startsWith('append') || c.startsWith('finalize')));
+  assert.equal(srv.count('finalize'), 0);
+});
+
+test('legacy: a short server copy / wrong hash / lost metadata deletes nothing', async () => {
+  for (const setup of [
+    (s: FakeServer) => (s.mangle = (l) => l.slice(0, 1)),
+    (s: FakeServer) => (s.ignoreMeta = true),
+  ]) {
+    const f = fakeArea();
+    fx = f;
+    const srv = new FakeServer();
+    setup(srv);
+    const t = legacy('a', 3);
+    seedLegacy([t]);
+    const id = await legacyCaptureId(t);
+    const r = await importLegacyTranscript(f.area, srv.api, t, lopts);
+    srv.ack(id);
+    const r2 = await importLegacyTranscript(f.area, srv.api, t, lopts);
+    assert.notEqual(r.outcome, 'copied');
+    assert.notEqual(r2.outcome, 'copied');
+    assert.deepEqual(legacyIds(), ['a']);
+  }
+  // acked with a different hash
+  const srv = new FakeServer();
+  const t = legacy('w', 3);
+  seedLegacy([t]);
+  await importLegacyTranscript(fx.area, srv.api, t, lopts);
+  const id = await legacyCaptureId(t);
+  srv.held.set(id, { ...srv.held.get(id)!, hash: '0'.repeat(64) });
+  srv.ack(id);
+  assert.notEqual((await importLegacyTranscript(fx.area, srv.api, t, lopts)).outcome, 'copied');
+  assert.ok(legacyIds().includes('w'));
 });
 
 test('legacy: running twice (double click / two tabs) sends once', async () => {
-  const srv = fakeServer();
+  const srv = new FakeServer();
   const t = legacy('a');
   seedLegacy([t]);
-  await importLegacyTranscript(fx.area, srv.api, t, opts);
-  await importLegacyTranscript(fx.area, srv.api, t, opts);
-  assert.equal(srv.calls.filter((c) => c.startsWith('append')).length, 1);
-  assert.equal(srv.calls.filter((c) => c.startsWith('finalize')).length, 1);
+  await importLegacyTranscript(fx.area, srv.api, t, lopts);
+  await importLegacyTranscript(fx.area, srv.api, t, lopts);
+  assert.equal(srv.count('finalize'), 1);
   assert.deepEqual(legacyIds(), ['a']);
 });
 
 test('legacy: the single-flight lock reports busy and does nothing', async () => {
-  const srv = fakeServer();
+  const srv = new FakeServer();
   const t = legacy('a');
   seedLegacy([t]);
-  const r = await importLegacyTranscript(fx.area, srv.api, t, { ...opts, withLock: async () => null });
+  const r = await importLegacyTranscript(fx.area, srv.api, t, { ...lopts, withLock: async () => null });
   assert.equal(r.outcome, 'busy');
   assert.deepEqual(srv.calls, []);
 });
 
-test('legacy: server unreachable deletes nothing and stops the batch', async () => {
-  const srv = fakeServer({ reachable: false });
+test('legacy: unreachable deletes nothing and stops the batch; flag off deletes nothing', async () => {
+  const srv = new FakeServer();
+  srv.reachable = false;
   seedLegacy([legacy('a'), legacy('b')]);
-  const items = await readLegacyTranscripts(fx.area);
-  const rs = await importLegacyTranscripts(fx.area, srv.api, items, opts);
+  const rs = await importLegacyTranscripts(fx.area, srv.api, await readLegacyTranscripts(fx.area), lopts);
   assert.equal(rs.length, 1);
   assert.equal(rs[0].outcome, 'unreachable');
+  const srv2 = new FakeServer();
+  srv2.ackRequired = false;
+  assert.equal((await importLegacyTranscript(fx.area, srv2.api, legacy('a'), lopts)).outcome, 'no-ack-protocol');
   assert.deepEqual(legacyIds(), ['a', 'b']);
 });
 
-test('legacy: flag off (no ack protocol) deletes nothing', async () => {
-  const srv = fakeServer({ ackRequired: false });
-  seedLegacy([legacy('a')]);
-  const r = await importLegacyTranscript(fx.area, srv.api, legacy('a'), opts);
-  assert.equal(r.outcome, 'no-ack-protocol');
-  assert.deepEqual(legacyIds(), ['a']);
-});
-
-test('legacy: a server that holds a different line count deletes nothing', async () => {
-  const srv = fakeServer({ finalizeCount: 1 });
-  seedLegacy([legacy('a')]);
-  const r = await importLegacyTranscript(fx.area, srv.api, legacy('a'), opts);
-  assert.equal(r.outcome, 'mismatch');
-  assert.deepEqual(legacyIds(), ['a']);
-});
-
-test('legacy: an acked capture with merged repeat lines keeps the local copy', async () => {
-  const srv = fakeServer();
-  const t = legacy('a', 4, (i) => (i % 2 ? 'Yes.' : 'Yes.'));
+test('legacy: over 2000 lines is skipped and never sent', async () => {
+  const srv = new FakeServer();
+  const t = legacy('big', 2100);
   seedLegacy([t]);
-  const id = await legacyCaptureId(t);
-  await importLegacyTranscript(fx.area, srv.api, t, opts);
-  srv.states.set(id, 'acked');
-  const r = await importLegacyTranscript(fx.area, srv.api, t, opts);
-  assert.equal(r.outcome, 'kept-merged');
-  assert.deepEqual(legacyIds(), ['a']);
-});
-
-test('legacy: a capture over the server buffer is skipped, never sent', async () => {
-  const srv = fakeServer();
-  const t = legacy('big', 2100, (i) => `unique line ${i}`);
-  seedLegacy([t]);
-  const r = await importLegacyTranscript(fx.area, srv.api, t, opts);
-  assert.equal(r.outcome, 'skipped-large');
+  assert.equal((await importLegacyTranscript(fx.area, srv.api, t, lopts)).outcome, 'skipped-large');
   assert.deepEqual(srv.calls, []);
-  assert.deepEqual(legacyIds(), ['big']);
 });
 
-test('legacy: capture id is content-addressed, so an ack for different content with the same id is not trusted', async () => {
-  const srv = fakeServer();
+test('legacy: capture id is content-addressed (an ack for other content with the same id is not trusted)', async () => {
+  const srv = new FakeServer();
   const original = legacy('same');
-  const other = { ...legacy('same'), transcript: '[A] totally different', segments: [{ text: 'different', timestamp: T0, isFinal: true, speaker: 'A' }] };
+  const other = legacy('same', 2, { transcript: '[A] different' });
   assert.notEqual(await legacyCaptureId(original), await legacyCaptureId(other));
   seedLegacy([other]);
-  srv.states.set(await legacyCaptureId(original), 'acked'); // ack belongs to the OTHER content
-  const r = await importLegacyTranscript(fx.area, srv.api, other, opts);
+  srv.ack(await legacyCaptureId(original));
+  const r = await importLegacyTranscript(fx.area, srv.api, other, lopts);
   assert.notEqual(r.outcome, 'copied');
   assert.deepEqual(legacyIds(), ['same']);
-});
-
-test('legacy: crash mid-copy (append done, never finalized) resumes with a finalize, no second append', async () => {
-  const srv = fakeServer();
-  const t = legacy('a');
-  seedLegacy([t]);
-  const id = await legacyCaptureId(t);
-  await srv.api.append(id, 'x', [
-    { speaker: 'A', text: 'line 0', ts: 1, source: 's' },
-    { speaker: 'A', text: 'line 1', ts: 2, source: 's' },
-    { speaker: 'A', text: 'line 2', ts: 3, source: 's' },
-  ]);
-  srv.calls.length = 0;
-  const r = await importLegacyTranscript(fx.area, srv.api, t, opts);
-  assert.equal(r.outcome, 'waiting');
-  assert.ok(!srv.calls.some((c) => c.startsWith('append')));
-  assert.ok(srv.calls.some((c) => c.startsWith('finalize')));
-  assert.deepEqual(legacyIds(), ['a']);
 });
 
 test('legacy: a failed local delete (quota) is reported and the item is not lost', async () => {
   let fail = false;
   const f = fakeArea({ failSet: () => fail });
-  const srv = fakeServer();
+  fx = f;
+  const srv = new FakeServer();
   const t = legacy('a');
   f.store.set('transcripts', [structuredClone(t), structuredClone(legacy('b'))]);
-  srv.states.set(await legacyCaptureId(t), 'acked');
+  await importLegacyTranscript(f.area, srv.api, t, lopts);
+  srv.ack(await legacyCaptureId(t));
   fail = true;
-  const r = await importLegacyTranscript(f.area, srv.api, t, opts);
-  assert.equal(r.outcome, 'error');
+  assert.equal((await importLegacyTranscript(f.area, srv.api, t, lopts)).outcome, 'error');
   assert.equal((f.store.get('transcripts') as unknown[]).length, 2);
 });
 
-test('legacy: the other items are untouched when one is copied', async () => {
-  const srv = fakeServer();
-  const a = legacy('a');
-  seedLegacy([a, legacy('b'), legacy('c')]);
-  srv.states.set(await legacyCaptureId(a), 'acked');
-  await importLegacyTranscript(fx.area, srv.api, a, opts);
-  assert.deepEqual(legacyIds(), ['b', 'c']);
+test('toCaptions applies renames and drops empty lines', () => {
+  const caps = toCaptions(
+    [
+      { text: 'hi', timestamp: 1, isFinal: true, speaker: 'S1' },
+      { text: '', timestamp: 2, isFinal: true, speaker: 'S1' },
+    ],
+    { S1: 'Bob' },
+  );
+  assert.deepEqual(caps.map((c) => c.speaker), ['Bob']);
 });
 
-test('a stale recording draft whose server session is still live is not finalized behind its panel', async () => {
-  const srv = fakeServer();
-  await saveTranscriptDraft(fx.area, draft('k1'), T0);
-  srv.states.set('k1', 'live');
-  const r = await reconcileDrafts(fx.area, srv.api, { now: T0 + DRAFT_STALE_MS * 3 });
-  assert.equal(r[0].outcome, 'active');
-  assert.ok(!srv.calls.some((c) => c.startsWith('finalize') || c.startsWith('append')));
-});
-
-test('orphan stage markers older than a week are pruned, young ones are not', async () => {
-  const srv = fakeServer();
-  fx.store.set('draftStage:old', { stage: 'finalizing', at: T0 });
-  fx.store.set('draftStage:new', { stage: 'finalizing', at: T0 + 8 * 24 * 3600 * 1000 });
-  await reconcileDrafts(fx.area, srv.api, { now: T0 + 8 * 24 * 3600 * 1000 + 1 });
-  assert.ok(!fx.store.has('draftStage:old'));
-  assert.ok(fx.store.has('draftStage:new'));
+test('a finalized capture from before migration 0051 (no caption hash) cannot be verified: it is re-sent, never released', async () => {
+  const srv = new FakeServer();
+  await stopCapture(fx.area, srv.api, draft('z9', 3), NOW);
+  const real = srv.api.status;
+  let first = true;
+  srv.api.status = async (id) => {
+    const st = await real(id);
+    if (first && st.ok) {
+      first = false;
+      return { ...st, captionHash: null };
+    }
+    return st;
+  };
+  const rep = await reconcileDrafts(fx.area, srv.api, { now: NOW + 1000 });
+  assert.equal(rep[0].outcome, 'resent');
+  assert.ok(stored('z9'));
 });
