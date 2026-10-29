@@ -38,6 +38,7 @@
     "upserted": 1,
     "unchanged": 0,
     "skippedHidden": 1,
-    "truncated": 0
+    "truncated": 0,
+    "removed": 0
   }
 }

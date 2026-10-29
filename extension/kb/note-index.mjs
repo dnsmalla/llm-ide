@@ -138,11 +138,18 @@ export function upsertNotes(userId, notes, { projectId = '' } = {}) {
   if (notes.length > MAX_BATCH) throw errValidation(`at most ${MAX_BATCH} notes per batch`);
   const db = getDb();
   const stmt = lazyPrepare(db, UPSERT_SQL);
-  const counts = { upserted: 0, unchanged: 0, skippedHidden: 0, truncated: 0 };
+  const counts = { upserted: 0, unchanged: 0, skippedHidden: 0, truncated: 0, removed: 0 };
+  const del = lazyPrepare(db, 'DELETE FROM note_index WHERE user_id = ? AND project_id = ? AND note_key = ?');
   const tx = db.transaction((rows) => {
     for (const raw of rows) {
       const n = normaliseNote(raw, projectId);
-      if (!n) { counts.skippedHidden += 1; continue; }
+      if (!n) {
+        // A note that is hidden now (it was indexed while visible) leaves the
+        // index: its row and, by trigger, its FTS row are removed.
+        counts.skippedHidden += 1;
+        counts.removed += del.run(userId, projectIdOf(raw.projectId ?? projectId), checkNoteKey(raw.noteKey)).changes;
+        continue;
+      }
       if (n.bodyTruncated) counts.truncated += 1;
       const changes = stmt.run(
         userId, n.projectId, n.noteKey, n.kind, n.title, n.date, n.durationSec, n.participants,
@@ -201,9 +208,34 @@ export function deleteNote(userId, { projectId = '', noteKey } = {}) {
 }
 
 /**
- * Index health for one user (optionally one project): the note count, the
- * count of FTS rows those notes wrote, and whether they agree. The FTS count
- * is joined through note_index_search, so another user's rows never count.
+ * Rebuild the note FTS rows and their map from note_index (the source of truth).
+ * Deletes ONLY kind 'note' rows: the map's rowids are not trusted, because a
+ * rebuild of the `search` table renumbers rows and a stale map would point at
+ * another row. Any migration that rebuilds `search` must call this (see the
+ * header of migration 0050 and docs/explanation/invariants.md).
+ */
+export function rebuildNoteIndexSearch(db = getDb()) {
+  const tx = db.transaction(() => {
+    db.prepare("DELETE FROM search WHERE kind = 'note'").run();
+    db.prepare('DELETE FROM note_index_search').run();
+    const rows = db.prepare('SELECT id, title, body_text FROM note_index').all();
+    const ins = db.prepare(`INSERT INTO search (meeting_id, entity_id, kind, title, body)
+      VALUES (char(1) || 'note:' || CAST(? AS INTEGER), NULL, 'note', ?, ?)`);  // CAST: a JS number binds as REAL (note:1.0)
+    const map = db.prepare('INSERT INTO note_index_search (note_id, search_rowid) VALUES (?, ?)');
+    for (const r of rows) {
+      const rowid = Number(ins.run(r.id, r.title, r.body_text).lastInsertRowid);
+      map.run(r.id, rowid);
+    }
+    return rows.length;
+  });
+  return tx();
+}
+
+/**
+ * Index health for one user (optionally one project): the note count, how many
+ * of them have a map entry, and how many of those map entries point at the
+ * note's own FTS row. consistent is true only when all three agree, so a stale
+ * map (a renumbered `search` table) is reported instead of hidden.
  */
 export function indexStatus(userId, { projectId } = {}) {
   requireUser(userId);
@@ -212,15 +244,22 @@ export function indexStatus(userId, { projectId } = {}) {
   const scope = pid === null ? '' : ' AND n.project_id = ?';
   const args = pid === null ? [userId] : [userId, pid];
   const notes = db.prepare(`SELECT COUNT(*) AS n, MAX(indexed_at) AS last FROM note_index n WHERE n.user_id = ?${scope}`).get(...args);
-  const fts = db.prepare(`
+  const mapped = db.prepare(`
     SELECT COUNT(*) AS n FROM note_index_search m
       JOIN note_index n ON n.id = m.note_id
      WHERE n.user_id = ?${scope}
   `).get(...args).n;
+  const verified = db.prepare(`
+    SELECT COUNT(*) AS n FROM note_index n
+      JOIN note_index_search m ON m.note_id = n.id
+      JOIN search s ON s.rowid = m.search_rowid
+     WHERE n.user_id = ?${scope}
+       AND s.kind = 'note' AND s.meeting_id = char(1) || 'note:' || n.id
+  `).get(...args).n;
   return {
     notes: notes.n,
-    ftsRows: fts,
-    consistent: notes.n === fts,
+    ftsRows: verified,
+    consistent: notes.n === mapped && mapped === verified,
     lastIndexedAt: notes.last ?? null,
   };
 }

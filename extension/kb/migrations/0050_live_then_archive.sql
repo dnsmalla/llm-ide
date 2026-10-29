@@ -34,6 +34,10 @@ CREATE INDEX idx_note_index_user_date ON note_index(user_id, date DESC);
 -- The update and delete triggers find the old FTS row BY ROWID through this
 -- map, never by `meeting_id` (UNINDEXED: a scan of the whole virtual table,
 -- measured 55 ms p50 per 20 KB update at 50k rows, F12). Same pattern as 0037.
+-- WARNING for every later migration: a migration that rebuilds the `search`
+-- table (renumbering its rowids, as 0033 did) MUST call
+-- rebuildNoteIndexSearch(db) from kb/note-index.mjs, or the map below points at
+-- other rows. indexStatus() reports consistent:false until it is called.
 CREATE TABLE note_index_search (
   note_id      INTEGER PRIMARY KEY,
   search_rowid INTEGER NOT NULL

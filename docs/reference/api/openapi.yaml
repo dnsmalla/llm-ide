@@ -6553,6 +6553,7 @@ paths:
                   - "unchanged"
                   - "skippedHidden"
                   - "truncated"
+                  - "removed"
                 properties:
                   upserted:
                     type: "integer"
@@ -6565,6 +6566,9 @@ paths:
                   truncated:
                     type: "integer"
                     description: "Rows whose body was capped at 200 KiB."
+                  removed:
+                    type: "integer"
+                    description: "Rows removed because the note is now hidden (it was indexed while visible)."
         "400":
           description: "Bad Request"
           content:

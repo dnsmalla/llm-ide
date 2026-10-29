@@ -38,8 +38,8 @@ const note = (key, over = {}) => ({
 
 test('upsert is idempotent: the second send of the same batch writes nothing', () => {
   const batch = [note('meetings/a.md'), note('meetings/b.md')];
-  assert.deepEqual(ni.upsertNotes(U, batch), { upserted: 2, unchanged: 0, skippedHidden: 0, truncated: 0 });
-  assert.deepEqual(ni.upsertNotes(U, batch), { upserted: 0, unchanged: 2, skippedHidden: 0, truncated: 0 });
+  assert.deepEqual(ni.upsertNotes(U, batch), { upserted: 2, unchanged: 0, skippedHidden: 0, truncated: 0, removed: 0 });
+  assert.deepEqual(ni.upsertNotes(U, batch), { upserted: 0, unchanged: 2, skippedHidden: 0, truncated: 0, removed: 0 });
   assert.equal(ni.indexStatus(U).notes, 2);
   assert.equal(ni.indexStatus(U).consistent, true);
 });
@@ -108,7 +108,7 @@ test('the body is capped at 200 KiB on a UTF-8 boundary and reported as truncate
 
 test('hidden notes are never indexed and are counted', () => {
   const r = ni.upsertNotes(U, [note('hidden/h.md', { hidden: true })]);
-  assert.deepEqual(r, { upserted: 0, unchanged: 0, skippedHidden: 1, truncated: 0 });
+  assert.deepEqual(r, { upserted: 0, unchanged: 0, skippedHidden: 1, truncated: 0, removed: 0 });
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND note_key = 'hidden/h.md'").get(U).n, 0);
 });
 
@@ -130,4 +130,39 @@ test('validation: bad keys, oversized batches and bad shapes are refused', () =>
   assert.throws(() => ni.upsertNotes(U, [note('ok.md', { durationSec: -1 })]), /durationSec/);
   assert.throws(() => ni.reconcileNotes(U, { manifest: 'nope' }), /manifest/);
   assert.throws(() => ni.upsertNotes(null, []), /userId/);
+});
+
+test('a note indexed while visible and later hidden is REMOVED: row, FTS row and map', () => {
+  ni.upsertNotes(U, [note('vis/then-hidden.md', { body: 'soon hidden text' })]);
+  const id = conn.prepare("SELECT id FROM note_index WHERE user_id = ? AND note_key = 'vis/then-hidden.md'").get(U).id;
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM search WHERE meeting_id = ?").get('\u0001note:' + id).n, 1);
+  const r = ni.upsertNotes(U, [note('vis/then-hidden.md', { hidden: true })]);
+  assert.deepEqual(r, { upserted: 0, unchanged: 0, skippedHidden: 1, truncated: 0, removed: 1 });
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE id = ?").get(id).n, 0);
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM search WHERE meeting_id = ?").get('\u0001note:' + id).n, 0, 'FTS row gone');
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index_search WHERE note_id = ?").get(id).n, 0, 'map row gone');
+  assert.equal(ni.indexStatus(U).consistent, true);
+});
+
+test('moving a note to another project: reconcile removes the old project FTS row, the new project gets its own', () => {
+  ni.upsertNotes(U, [note('move/x.md', { body: 'movable words' })], { projectId: 'old-proj' });
+  const oldId = conn.prepare("SELECT id FROM note_index WHERE user_id = ? AND project_id = 'old-proj' AND note_key = 'move/x.md'").get(U).id;
+  ni.reconcileNotes(U, { projectId: 'old-proj', manifest: [], prune: true });
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM search WHERE meeting_id = ?").get('\u0001note:' + oldId).n, 0, 'old project FTS row removed');
+  ni.upsertNotes(U, [note('move/x.md', { body: 'movable words' })], { projectId: 'new-proj' });
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND note_key = 'move/x.md'").get(U).n, 1);
+  assert.equal(ni.indexStatus(U, { projectId: 'new-proj' }).consistent, true);
+});
+
+test('a search-table rebuild that renumbers rows is detected, and rebuildNoteIndexSearch restores it without touching other rows', () => {
+  ni.upsertNotes(U, [note('rb/a.md', { body: 'rebuild target' })]);
+  const id = conn.prepare("SELECT id FROM note_index WHERE user_id = ? AND note_key = 'rb/a.md'").get(U).id;
+  // An unrelated FTS row, and a map entry that now points at it (a renumbered table).
+  const other = Number(conn.prepare("INSERT INTO search (meeting_id, entity_id, kind, title, body) VALUES ('m-other', NULL, 'meeting', 'other', 'unrelated')").run().lastInsertRowid);
+  conn.prepare('UPDATE note_index_search SET search_rowid = ? WHERE note_id = ?').run(other, id);
+  assert.equal(ni.indexStatus(U).consistent, false, 'the stale map is reported');
+  const rebuilt = ni.rebuildNoteIndexSearch(conn);
+  assert.ok(rebuilt >= 1);
+  assert.equal(ni.indexStatus(U).consistent, true, 'the map is restored');
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM search WHERE rowid = ? AND meeting_id = 'm-other'").get(other).n, 1, 'the unrelated row is untouched');
 });

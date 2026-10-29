@@ -3143,6 +3143,8 @@ export type PostKbIndexNotesResponse200 = {
   skippedHidden: number;
   /** Rows whose body was capped at 200 KiB. */
   truncated: number;
+  /** Rows removed because the note is now hidden (it was indexed while visible). */
+  removed: number;
 };
 
 export type PostKbIndexNotesResponse400 = CommonError;
