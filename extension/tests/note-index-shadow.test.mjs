@@ -72,6 +72,8 @@ function seed(user, corpus = CORPUS, { pad = '' } = {}) {
     noteKey: `meetings/${id}.md`, title, date, durationSec: 60, participants: ['Ana'],
     body: `${title} transcript${pad}`, contentHash: `h-${id}${pad ? '-pad' : ''}`, mtimeMs: 1, meta: { meetingId: id },
   })), { projectId: '' });
+  // A complete pass (a reconcile) is what staleness is judged from.
+  ni.recordReconciledPass(user, '', NOW);
 }
 
 test('topKOverlap: shared ids over the longer list, below K as sets, two empty lists agree', () => {
@@ -139,14 +141,58 @@ test('a real mismatch fails the run and is logged as a warning without query tex
   }
 });
 
-test('a stale index (no upsert in seven days) is skipped, not compared', () => {
+test('a stale index (no complete pass in seven days) is skipped and the run is not ok', () => {
   const u = newUser();
   seed(u);
-  conn.prepare('UPDATE note_index SET indexed_at = ? WHERE user_id = ?').run('2020-01-01T00:00:00.000Z', u);
+  conn.prepare('DELETE FROM note_index_pass WHERE user_id = ?').run(u);
   const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: NOW });
   assert.equal(r.stalePairs, 1);
   assert.equal(r.scoredQueries, 0);
-  assert.equal(r.ok, true);
+  assert.equal(r.state, 'stale');
+  assert.equal(r.ok, false);
+});
+
+test('a stable library reconciled every interval is NOT stale, even if no row changed for eight days', () => {
+  const u = newUser();
+  seed(u);
+  // indexed_at is the real write time; the library then sits unchanged for eight days, but a
+  // complete pass runs each interval, so the last pass is recent.
+  const later = new Date(NOW.getTime() + 8 * 86400000);
+  ni.recordReconciledPass(u, '', new Date(later.getTime() - 3600000));
+  const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: later });
+  assert.equal(r.stalePairs, 0);
+  assert.ok(r.scoredQueries > 0);
+  assert.equal(r.state, 'ok');
+});
+
+test('zero scored queries on a non-empty index is not-evaluated, never ok', () => {
+  const u = newUser();
+  // titles with no searchable token (two-character words): nothing can be compared. The meeting
+  // exists on both sides, so the orphan rule does not fire.
+  const id = `nse-${u.replace(/[^a-z0-9]/gi, '').slice(-10)}`;
+  meetings.ingestMeeting(u, { id, title: 'a b', date: '2026-01-05T10:00:00.000Z', duration: 60, language: 'en',
+    participants: ['Ana'], transcript: 'a b', entities: [] });
+  ni.upsertNotes(u, [{ noteKey: 'x/1.md', title: 'a b', date: '2026-01-05T10:00:00.000Z', body: 'a b',
+    contentHash: 'x1', mtimeMs: 1, meta: { meetingId: id } }], { projectId: '' });
+  ni.recordReconciledPass(u, '', NOW);
+  const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: NOW });
+  assert.equal(r.scoredQueries, 0);
+  assert.equal(r.notEvaluatedPairs, 1);
+  assert.equal(r.state, 'not-evaluated');
+  assert.equal(r.ok, false);
+});
+
+test('an orphan share above the documented threshold fails the run', () => {
+  const u = newUser();
+  seed(u);
+  // 30 notes of the index name meetings that do not exist in the legacy table: far above 2 %
+  ni.upsertNotes(u, Array.from({ length: 30 }, (_, i) => ({ noteKey: `o/${i}.md`, title: `Orphan review ${i}`,
+    date: '2026-01-05T10:00:00.000Z', body: 'orphan', contentHash: `o${i}`, mtimeMs: 1, meta: { meetingId: `ghost-${i}` } })), { projectId: '' });
+  ni.recordReconciledPass(u, '', NOW);
+  const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: NOW });
+  assert.ok(r.orphanNotes >= 30);
+  assert.equal(r.ok, false);
+  assert.equal(r.state, 'mismatch');
 });
 
 test('an empty note index writes nothing: no store key, no day key (lta.mode off)', () => {

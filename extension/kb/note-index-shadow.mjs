@@ -13,7 +13,10 @@
 // upsert in NOTE_SHADOW_STALE_MS. Query text is never stored or logged.
 import { getDb, lazyPrepare, buildSearchFilter, searchFilterSql } from './db.mjs';
 import { getAgentDb, readMeta, writeMeta } from './agent-db.mjs';
-import { noteIndexHits, indexStatus } from './note-index.mjs';
+import { noteIndexHits, indexStatus, lastReconciledAt } from './note-index.mjs';
+
+/** A pair whose orphan notes (no legacy meeting) exceed this share of its notes fails the run. */
+export const NOTE_SHADOW_MAX_ORPHAN_SHARE = 0.02;
 
 export const NOTE_SHADOW_META_KEY = 'last_note_index_compare';
 /** Top-K used for the overlap metric. */
@@ -166,9 +169,10 @@ export function createNoteShadowRun({
   let current = null;
   let result = null;
 
+  // Staleness is judged from the last COMPLETE pass (reconcile or final scan), not from row
+  // changes: a stable library that is reconciled every interval is never stale.
   function staleAt(p) {
-    const last = lazyPrepare(db, 'SELECT MAX(indexed_at) AS last FROM note_index WHERE user_id = ? AND project_id = ?')
-      .get(p.user_id, p.project_id).last;
+    const last = lastReconciledAt(p.user_id, p.project_id);
     return !last || String(last) < cutoff;
   }
 
@@ -176,14 +180,25 @@ export function createNoteShadowRun({
     const scored = results.filter((r) => !r.error && !r.stale);
     const sumQueries = scored.reduce((s, r) => s + r.scoredQueries, 0);
     const weighted = scored.reduce((s, r) => s + r.meanOverlap * r.scoredQueries, 0);
+    const orphanHeavy = (r) => !r.stale && r.indexNotes > 0
+      && r.orphanNotes / r.indexNotes > NOTE_SHADOW_MAX_ORPHAN_SHARE;
     const mismatchedPairs = results.filter((r) => r.error || (!r.stale && (
-      r.countDelta !== 0 || !r.indexConsistent
+      r.countDelta !== 0 || !r.indexConsistent || orphanHeavy(r)
       || (r.scoredQueries > 0 && r.meanOverlap < NOTE_SHADOW_MIN_MEAN_OVERLAP)))).length;
+    // Nothing compared is not a pass: a non-empty index with zero scored queries is not evaluated.
+    const notEvaluatedPairs = results.filter((r) => !r.error && !r.stale && r.indexNotes > 0 && r.scoredQueries === 0).length;
+    const stalePairs = results.filter((r) => r.stale).length;
+    const state = mismatchedPairs > 0 ? 'mismatch'
+      : notEvaluatedPairs > 0 ? 'not-evaluated'
+        : stalePairs > 0 && scored.length === 0 ? 'stale'
+          : 'ok';
     const sorted = [...slices].sort((a, b) => a - b);
     const pct = (p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0);
     result = {
-      ok: mismatchedPairs === 0,
+      ok: state === 'ok',
+      state,
       at: now.toISOString(),
+      notEvaluatedPairs,
       scope: userId ? 'user' : 'all',
       pairs: results.length,
       stalePairs: results.filter((r) => r.stale).length,
