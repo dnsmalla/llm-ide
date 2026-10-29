@@ -92,13 +92,13 @@ enum NoteIndexScanner {
         for case let url as URL in enumerator {
             let name = url.lastPathComponent
             guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
-            let values: URLResourceValues
-            do { values = try url.resourceValues(forKeys: Set(keys)) } catch {
-                throw Failure(reason: "cannot stat \(name): \(error.localizedDescription)")
-            }
-            guard values.isRegularFile == true else { continue }
-            guard let mdate = values.contentModificationDate, let fsize = values.fileSize else {
-                throw Failure(reason: "no modification date or size for \(name)")
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            if values?.isDirectory == true { continue }
+            guard let mdate = values?.contentModificationDate, let fsize = values?.fileSize else {
+                // A dangling symlink is not a note (FolderIndexer skips it too) and must not
+                // stop every scan. Anything else that cannot be stat'ed is a real scan failure.
+                if !FileManager.default.fileExists(atPath: url.path) { continue }
+                throw Failure(reason: "cannot stat \(name)")
             }
             let key = FolderIndexer.relativePath(of: url, under: root)
             let mtimeMs = Int64(mdate.timeIntervalSince1970 * 1000)
@@ -109,6 +109,7 @@ enum NoteIndexScanner {
             } else {
                 let data: Data
                 do { data = try Data(contentsOf: url) } catch {
+                    if !FileManager.default.fileExists(atPath: url.path) { continue }   // dangling symlink
                     throw Failure(reason: "cannot read \(name): \(error.localizedDescription)")
                 }
                 entry = NoteIndexCacheEntry(mtimeMs: mtimeMs, size: size,

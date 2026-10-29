@@ -162,6 +162,20 @@ struct NoteIndexReconcilerTests {
         #expect(await h.server.rows.keys.sorted() == ["kept.md"])
     }
 
+    @Test func danglingSymlinkDoesNotStopTheScan() async throws {
+        let h = try Harness()
+        try h.write("a.md", Self.note(id: "a", title: "Alpha"))
+        let link = h.root.appendingPathComponent("broken.md")
+        try FileManager.default.createSymbolicLink(
+            atPath: link.path, withDestinationPath: h.base.appendingPathComponent("missing.md").path)
+        await h.server.seed("gone.md", "held")
+        let outcome = await h.reconciler().runOnce()
+        guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
+        #expect(stats.pruneAllowed)
+        #expect(await h.server.rows["a.md"] != nil)
+        #expect(await h.server.rows["gone.md"] == nil)
+    }
+
     @Test func platformLessNoteBlocksPruneButOthersStillSync() async throws {
         let h = try Harness()
         try h.write("good.md", Self.note(id: "g", title: "Good"))
