@@ -1,0 +1,23 @@
+{
+  "endpoint": "POST /kb/index/scan",
+  "status": 409,
+  "description": "An all-empty scan with prune is refused without allowEmpty: nothing is pruned.",
+  "request": {
+    "body": {
+      "projectId": "scan-empty",
+      "scanId": "scan-0006-abcd",
+      "index": 0,
+      "total": 1,
+      "complete": true,
+      "prune": true,
+      "totalEntries": 0,
+      "entries": []
+    }
+  },
+  "response": {
+    "error": {
+      "code": "EMPTY_SCAN_REFUSED",
+      "message": "an all-empty scan does not prune unless allowEmpty is true"
+    }
+  }
+}

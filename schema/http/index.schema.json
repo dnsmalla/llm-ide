@@ -158,6 +158,17 @@
             "prune": {
               "type": "boolean",
               "description": "true deletes the extra rows. Default false: report only."
+            },
+            "keep": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Keys the Mac could not index (unparseable, unavailable, unsendable). They are never pruned and are not reported as extra. At most 20 000."
+            },
+            "allowEmpty": {
+              "type": "boolean",
+              "description": "Required with prune: true and an empty manifest. Without it that request is refused (409 EMPTY_MANIFEST_REFUSED), so an emptied or unmounted folder cannot delete the index."
             }
           }
         }
@@ -200,6 +211,9 @@
           }
         },
         "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
           "$ref": "_common#/$defs/Error"
         }
       }
@@ -327,6 +341,21 @@
                 "$ref": "#/$defs/ManifestEntry"
               },
               "description": "At most 500 per chunk."
+            },
+            "totalEntries": {
+              "type": "integer",
+              "description": "Final chunk only: the entries the whole scan carries. The server compares it with the sum of the received chunks (409 SCAN_TOTAL_MISMATCH)."
+            },
+            "keep": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Final chunk only: keys never pruned (unindexable on the Mac)."
+            },
+            "allowEmpty": {
+              "type": "boolean",
+              "description": "Final chunk only: an all-empty scan with prune is refused (409 EMPTY_SCAN_REFUSED) unless this is true."
             }
           }
         }

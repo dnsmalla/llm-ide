@@ -26,7 +26,7 @@ import { handleChatRoutes } from './chat.mjs';
 import { handleIndexRoutes } from './index-routes.mjs';
 const CLIENT_REFUSAL_CODES = new Set([
   'PAYLOAD_TOO_LARGE', 'BATCH_TOO_LARGE', 'ACK_MISMATCH', 'UNACKED_CAPTURE', 'TOO_MANY_UNACKED',
-  'SCAN_INCOMPLETE', 'SCAN_LIMIT',
+  'SCAN_INCOMPLETE', 'SCAN_LIMIT', 'SCAN_TOTAL_MISMATCH', 'EMPTY_SCAN_REFUSED', 'EMPTY_MANIFEST_REFUSED',
 ]);
 import { handleLifecycleRoutes } from './lifecycle-routes.mjs';
 import { handleOsRoutes } from './os.mjs';

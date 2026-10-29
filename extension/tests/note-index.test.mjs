@@ -78,7 +78,7 @@ test('project scoping: the same key in two projects is two rows, and reconcile s
   ni.upsertNotes(U, [note('shared/x.md', { body: 'in alpha' })], { projectId: 'alpha' });
   ni.upsertNotes(U, [note('shared/x.md', { body: 'in beta' })], { projectId: 'beta' });
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND note_key = 'shared/x.md'").get(U).n, 2);
-  const r = ni.reconcileNotes(U, { projectId: 'alpha', manifest: [], prune: true });
+  const r = ni.reconcileNotes(U, { projectId: 'alpha', manifest: [], prune: true, allowEmpty: true });
   assert.ok(r.extra.includes('shared/x.md'));
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND project_id = 'beta' AND note_key = 'shared/x.md'").get(U).n, 1, 'the other project is untouched');
   assert.equal(ni.indexStatus(U, { projectId: 'beta' }).notes, 1);
@@ -117,7 +117,7 @@ test('per-user isolation: another user cannot read, reconcile or delete these no
   assert.equal(ni.indexStatus(V).notes, 0, 'V has no notes of its own');
   assert.equal(ni.deleteNote(V, { noteKey: 'iso/u.md' }), false, 'V cannot delete U\'s note');
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND note_key = 'iso/u.md'").get(U).n, 1);
-  const r = ni.reconcileNotes(V, { manifest: [], prune: true });
+  const r = ni.reconcileNotes(V, { manifest: [], prune: true, allowEmpty: true });
   assert.ok(!r.extra.includes('iso/u.md'), 'V\'s reconcile does not see U\'s notes');
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND note_key = 'iso/u.md'").get(U).n, 1);
 });
@@ -147,7 +147,7 @@ test('a note indexed while visible and later hidden is REMOVED: row, FTS row and
 test('moving a note to another project: reconcile removes the old project FTS row, the new project gets its own', () => {
   ni.upsertNotes(U, [note('move/x.md', { body: 'movable words' })], { projectId: 'old-proj' });
   const oldId = conn.prepare("SELECT id FROM note_index WHERE user_id = ? AND project_id = 'old-proj' AND note_key = 'move/x.md'").get(U).id;
-  ni.reconcileNotes(U, { projectId: 'old-proj', manifest: [], prune: true });
+  ni.reconcileNotes(U, { projectId: 'old-proj', manifest: [], prune: true, allowEmpty: true });
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM search WHERE meeting_id = ?").get('\u0001note:' + oldId).n, 0, 'old project FTS row removed');
   ni.upsertNotes(U, [note('move/x.md', { body: 'movable words' })], { projectId: 'new-proj' });
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND note_key = 'move/x.md'").get(U).n, 1);

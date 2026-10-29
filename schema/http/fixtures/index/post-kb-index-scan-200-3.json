@@ -1,0 +1,27 @@
+{
+  "endpoint": "POST /kb/index/scan",
+  "status": 200,
+  "description": "Example data. A confirmed empty library: an all-empty final chunk with prune and allowEmpty, on a project with no rows.",
+  "request": {
+    "body": {
+      "projectId": "scan-empty",
+      "scanId": "scan-0005-abcd",
+      "index": 0,
+      "total": 1,
+      "complete": true,
+      "prune": true,
+      "allowEmpty": true,
+      "totalEntries": 0,
+      "entries": []
+    }
+  },
+  "response": {
+    "missing": [],
+    "stale": [],
+    "extra": [],
+    "pruned": 0,
+    "received": 1,
+    "total": 1,
+    "complete": true
+  }
+}

@@ -166,15 +166,44 @@ export function upsertNotes(userId, notes, { projectId = '' } = {}) {
   return counts;
 }
 
+/** Keys the caller holds back from pruning (unindexable on the Mac). Bounded and checked. */
+export const MAX_KEEP = 20000;
+function keepSetOf(keep) {
+  if (keep === undefined || keep === null) return new Set();
+  if (!Array.isArray(keep) || keep.length > MAX_KEEP) throw errValidation(`keep must be an array of at most ${MAX_KEEP} keys`);
+  return new Set(keep.map((k) => checkNoteKey(k)));
+}
+
+/** Records that (user, project) had a complete pass now (changed or not). */
+export function recordReconciledPass(userId, projectId = '', now = new Date()) {
+  lazyPrepare(getDb(), `INSERT INTO note_index_pass (user_id, project_id, last_reconciled_at) VALUES (?, ?, ?)
+    ON CONFLICT (user_id, project_id) DO UPDATE SET last_reconciled_at = excluded.last_reconciled_at`)
+    .run(userId, projectIdOf(projectId), now.toISOString());
+}
+
+/** The last complete pass of (user, project), or null. */
+export function lastReconciledAt(userId, projectId = '') {
+  const row = lazyPrepare(getDb(), 'SELECT last_reconciled_at AS t FROM note_index_pass WHERE user_id = ? AND project_id = ?')
+    .get(userId, projectIdOf(projectId));
+  return row ? row.t : null;
+}
+
 /**
  * Compare a manifest of (noteKey, contentHash) with the index for one project.
- * Reports missing (in the manifest, not indexed), stale (indexed with another
- * hash) and extra (indexed, not in the manifest). `prune` deletes the extras.
+ * Reports missing (in the manifest, not indexed), stale (indexed with another hash) and
+ * extra (indexed, named by neither the manifest nor `keep`). `prune` deletes the extras.
+ * An empty manifest with prune is refused (409 EMPTY_MANIFEST_REFUSED) unless allowEmpty:
+ * an emptied or unmounted folder must not look like "every note was deleted".
  */
-export function reconcileNotes(userId, { projectId = '', manifest, prune = false } = {}) {
+export function reconcileNotes(userId, { projectId = '', manifest, keep, prune = false, allowEmpty = false, now = new Date() } = {}) {
   requireUser(userId);
   if (!Array.isArray(manifest)) throw errValidation('manifest must be an array');
   if (manifest.length > MAX_MANIFEST) throw errValidation(`manifest holds at most ${MAX_MANIFEST} entries`);
+  if (typeof prune !== 'boolean' || typeof allowEmpty !== 'boolean') throw errValidation('prune and allowEmpty must be booleans');
+  if (prune && manifest.length === 0 && !allowEmpty) {
+    throw new AppError('EMPTY_MANIFEST_REFUSED', 'an empty manifest does not prune unless allowEmpty is true', { status: 409 });
+  }
+  const kept = keepSetOf(keep);
   const pid = projectIdOf(projectId);
   const db = getDb();
   const indexed = new Map(lazyPrepare(db,
@@ -190,15 +219,13 @@ export function reconcileNotes(userId, { projectId = '', manifest, prune = false
     if (!indexed.has(key)) missing.push(key);
     else if (indexed.get(key) !== hash) stale.push(key);
   }
-  const extra = [...indexed.keys()].filter((k) => !seen.has(k));
+  const extra = [...indexed.keys()].filter((k) => !seen.has(k) && !kept.has(k));
   let pruned = 0;
   if (prune && extra.length > 0) {
     const del = lazyPrepare(db, 'DELETE FROM note_index WHERE user_id = ? AND project_id = ? AND note_key = ?');
-    const tx = db.transaction((keys) => {
-      for (const k of keys) pruned += del.run(userId, pid, k).changes;
-    });
-    tx(extra);
+    db.transaction((keys) => { for (const k of keys) pruned += del.run(userId, pid, k).changes; })(extra);
   }
+  recordReconciledPass(userId, pid, now);
   return { missing, stale, extra, pruned };
 }
 
@@ -282,56 +309,52 @@ export function noteIndexHits(userId, { q, limit = 10, projectId, db = getDb() }
   const cap = Math.max(1, Math.min(Number(limit) || 10, 100));
   const pid = projectId === undefined ? null : projectIdOf(projectId);
   const parse = (meta) => { try { return JSON.parse(meta) || {}; } catch { return {}; } };
-  // A query with no searchable token lists the newest rows, as search() does for meetings.
-  if (!filter) {
-    return lazyPrepare(db, `
-      SELECT id, title, date, project_id, meta FROM note_index
-       WHERE user_id = ? AND (? IS NULL OR project_id = ?)
-       ORDER BY date DESC LIMIT ?`).all(userId, pid, pid, cap).map((n) => {
-      const meta = parse(n.meta);
-      return {
-        noteId: n.id,
-        meetingId: typeof meta.meetingId === 'string' ? meta.meetingId : null,
-        title: n.title,
-        date: n.date,
-        projectId: n.project_id,
-        rank: null,
-      };
-    });
-  }
-  // The owner filter runs in JS over ALL matches, before the top-K cut. (A `rowid IN (SELECT ...)`
-  // in SQL costs a lookup per matched row, about 2.4 s for 4 000 matches at 50 000 notes; the
-  // FTS match with bm25 over every match is about 130 ms even for a 50 000-row term.) Because
-  // every match is considered, a user whose notes rank low is not starved by other users' rows.
-  const where = searchFilterSql(filter);
-  const matches = lazyPrepare(db, `SELECT rowid AS rowid, ${where.rank} AS rank
-    FROM search WHERE ${where.where} AND kind = 'note'`).all(...where.params);
-  const ownedRows = new Map(lazyPrepare(db, `
-    SELECT m.search_rowid AS rid, n.id AS nid
-      FROM note_index_search m JOIN note_index n ON n.id = m.note_id
-     WHERE n.user_id = ?${pid === null ? '' : ' AND n.project_id = ?'}`).all(...(pid === null ? [userId] : [userId, pid]))
-    .map((r) => [r.rid, r.nid]));
-  const owned = [];
-  for (const h of matches) {
-    const nid = ownedRows.get(h.rowid);
-    if (nid !== undefined) owned.push({ nid, rank: h.rank });
-  }
-  owned.sort((a, b) => (a.rank < b.rank ? -1 : a.rank > b.rank ? 1 : 0));
-  const hydrate = lazyPrepare(db, 'SELECT id, title, date, project_id, meta FROM note_index WHERE id = ? AND user_id = ?');
-  const out = [];
-  for (const h of owned) {
-    if (out.length >= cap) break;
-    const n = hydrate.get(h.nid, userId);
-    if (!n) continue;
+  const row = (n) => {
     const meta = parse(n.meta);
-    out.push({
+    return {
       noteId: n.id,
       meetingId: typeof meta.meetingId === 'string' ? meta.meetingId : null,
       title: n.title,
       date: n.date,
       projectId: n.project_id,
-      rank: h.rank,
-    });
+      rank: n.rank ?? null,
+    };
+  };
+  // A query with no searchable token lists the newest rows, as search() does for meetings.
+  if (!filter) {
+    return lazyPrepare(db, `
+      SELECT id, title, date, project_id, meta FROM note_index
+       WHERE user_id = ? AND (? IS NULL OR project_id = ?)
+       ORDER BY date DESC LIMIT ?`).all(userId, pid, pid, cap).map(row);
+  }
+  // Every FTS match is ranked (bm25), then owner rows are taken in rank order. The FTS row of a note
+  // names its note id (meeting_id = char(1) || 'note:' || id), so ownership is checked by primary key
+  // in bounded batches. Nothing proportional to the whole library is built per query, and no other
+  // user's rows can fill the window (the rank walk continues until `cap` owned rows are found).
+  const where = searchFilterSql(filter);
+  const matches = lazyPrepare(db, `SELECT meeting_id AS mid, ${where.rank} AS rank
+    FROM search WHERE ${where.where} AND kind = 'note'`).all(...where.params);
+  const ordered = [];
+  for (const m of matches) {
+    const id = Number(String(m.mid).slice(String(m.mid).indexOf('note:') + 5));
+    if (Number.isInteger(id)) ordered.push({ id, rank: m.rank });
+  }
+  ordered.sort((x, y) => (x.rank < y.rank ? -1 : x.rank > y.rank ? 1 : 0));
+  const out = [];
+  const LOOKUP = 400;
+  for (let i = 0; i < ordered.length && out.length < cap; i += LOOKUP) {
+    const part = ordered.slice(i, i + LOOKUP);
+    const rankOf = new Map(part.map((p) => [p.id, p.rank]));
+    const sql = `SELECT id, title, date, project_id, meta FROM note_index
+       WHERE user_id = ? AND id IN (${part.map(() => '?').join(',')})${pid === null ? '' : ' AND project_id = ?'}`;
+    const params = [userId, ...part.map((p) => p.id)];
+    if (pid !== null) params.push(pid);
+    const found = lazyPrepare(db, sql).all(...params).map((n) => ({ ...n, rank: rankOf.get(n.id) }));
+    found.sort((x, y) => (x.rank < y.rank ? -1 : x.rank > y.rank ? 1 : 0));
+    for (const n of found) {
+      if (out.length >= cap) break;
+      out.push(row(n));
+    }
   }
   return out;
 }
@@ -340,18 +363,20 @@ export function noteIndexHits(userId, { q, limit = 10, projectId, db = getDb() }
 export const searchNoteIndex = noteIndexHits;
 
 // ---------------------------------------------------------------------------
-// Chunked scan (live-then-archive Phase 2, plan 3.8): a library too large for one
-// reconcile request (about 6 000 notes) is sent as chunks of one scan. Chunks only
-// classify (missing, stale) and record the keys they saw. The FINAL chunk
-// (complete: true) compares the whole scan with the index and, only when `prune`
-// is true, deletes the rows no chunk named. Scan state is in memory with an idle
-// TTL, so a restart or an expiry costs a 409 and never a prune.
+// Chunked scan (live-then-archive Phase 2, plan 3.8). A library too large for one reconcile is
+// sent as chunks of one scan. Chunks classify (missing, stale) and record the keys and the entry
+// count they carried. The FINAL chunk (complete: true) declares totalEntries and may carry `keep`
+// (keys the Mac could not index: never pruned) and allowEmpty. The server compares the received
+// counts with totalEntries (409 SCAN_TOTAL_MISMATCH otherwise), refuses an all-empty scan with
+// prune unless allowEmpty (409 EMPTY_SCAN_REFUSED), and prunes only the rows that the chunks and
+// `keep` did not name. Scan state is in memory with an idle TTL: a restart or an expiry is a 409.
 // ---------------------------------------------------------------------------
 
 export const MAX_SCAN_CHUNKS = 100;          // 100 chunks x 500 notes = 50 000 notes per scan
 export const MAX_SCAN_CHUNK_ENTRIES = 500;
 export const SCAN_TTL_MS = 15 * 60 * 1000;   // idle time before a scan is forgotten
 export const MAX_OPEN_SCANS = 4;             // per user, so a client cannot exhaust memory
+export const PRUNE_BATCH = 2000;             // rows deleted per transaction; the loop yields between them
 const SCAN_ID_RE = /^[A-Za-z0-9-]{8,64}$/;
 const SCAN_LOOKUP_CHUNK = 400;               // keys per IN (...) lookup (bound-parameter safety)
 const scans = new Map();                     // userId\0projectId\0scanId -> state
@@ -365,6 +390,14 @@ export function resetNoteIndexScans() {
   scans.clear();
 }
 
+/** A new scan for (user, project) abandons the earlier unfinished ones: a retry never hits SCAN_LIMIT. */
+function abandonScansOf(userId, pid, keepScanId) {
+  const prefix = `${userId}\u0000${pid}\u0000`;
+  for (const k of [...scans.keys()]) {
+    if (k.startsWith(prefix) && k !== `${prefix}${keepScanId}`) scans.delete(k);
+  }
+}
+
 function indexedHashes(db, userId, pid, keys) {
   const found = new Map();
   for (let i = 0; i < keys.length; i += SCAN_LOOKUP_CHUNK) {
@@ -376,14 +409,28 @@ function indexedHashes(db, userId, pid, keys) {
   return found;
 }
 
+/** Deletes `keys` in batches of PRUNE_BATCH, yielding to the event loop between batches. */
+async function pruneInBatches(db, userId, pid, keys) {
+  const del = db.prepare('DELETE FROM note_index WHERE user_id = ? AND project_id = ? AND note_key = ?');
+  let pruned = 0;
+  for (let i = 0; i < keys.length; i += PRUNE_BATCH) {
+    const part = keys.slice(i, i + PRUNE_BATCH);
+    db.transaction(() => { for (const k of part) pruned += del.run(userId, pid, k).changes; })();
+    if (i + PRUNE_BATCH < keys.length) await new Promise((resolve) => setImmediate(resolve));
+  }
+  return pruned;
+}
+
 /**
- * One chunk of a scan. Returns { missing, stale, extra, pruned, received, total, complete }.
- * `extra` and `pruned` are only non-empty on the final chunk. Throws:
+ * One chunk of a scan. Non-final: { missing, stale, extra: [], pruned: 0, received, total, complete: false }.
+ * Final: the same plus extra, pruned, received = total, complete: true. Throws:
  *   400 VALIDATION_FAILED for a malformed chunk,
  *   429 SCAN_LIMIT when the user already has MAX_OPEN_SCANS open scans,
- *   409 SCAN_INCOMPLETE on the final chunk when some chunk never arrived (nothing is pruned).
+ *   409 SCAN_INCOMPLETE when a chunk never arrived, SCAN_TOTAL_MISMATCH when the received entry
+ *       counts differ from totalEntries, EMPTY_SCAN_REFUSED for an all-empty prune without allowEmpty.
+ *   Nothing is pruned on any refusal.
  */
-export function scanNoteChunk(userId, input, { now = Date.now() } = {}) {
+export async function scanNoteChunk(userId, input, { now = Date.now() } = {}) {
   requireUser(userId);
   const body = input && typeof input === 'object' ? input : {};
   const pid = projectIdOf(body.projectId);
@@ -394,8 +441,17 @@ export function scanNoteChunk(userId, input, { now = Date.now() } = {}) {
   if (!Number.isInteger(index) || index < 0 || index >= total) throw errValidation('index must be 0 to total-1');
   const complete = body.complete === undefined ? false : body.complete;
   const prune = body.prune === undefined ? false : body.prune;
-  if (typeof complete !== 'boolean' || typeof prune !== 'boolean') throw errValidation('complete and prune must be booleans');
+  const allowEmpty = body.allowEmpty === undefined ? false : body.allowEmpty;
+  if (typeof complete !== 'boolean' || typeof prune !== 'boolean' || typeof allowEmpty !== 'boolean') {
+    throw errValidation('complete, prune and allowEmpty must be booleans');
+  }
   if (prune && !complete) throw errValidation('prune is only allowed on the final chunk (complete: true)');
+  if (!complete && (body.totalEntries !== undefined || body.keep !== undefined || body.allowEmpty !== undefined)) {
+    throw errValidation('totalEntries, keep and allowEmpty belong to the final chunk (complete: true)');
+  }
+  if (complete && (!Number.isInteger(body.totalEntries) || body.totalEntries < 0)) {
+    throw errValidation('the final chunk must declare totalEntries (a non-negative integer)');
+  }
   if (!Array.isArray(body.entries) || body.entries.length > MAX_SCAN_CHUNK_ENTRIES) {
     throw errValidation(`entries must be an array of at most ${MAX_SCAN_CHUNK_ENTRIES}`);
   }
@@ -403,15 +459,17 @@ export function scanNoteChunk(userId, input, { now = Date.now() } = {}) {
     noteKey: checkNoteKey(e?.noteKey),
     contentHash: str(e?.contentHash, 'contentHash', 128),
   }));
+  const kept = complete ? keepSetOf(body.keep) : new Set();
 
   sweepScans(now);
   const key = [userId, pid, scanId].join('\u0000');
   let s = scans.get(key);
   if (!s) {
+    abandonScansOf(userId, pid, scanId);
     let open = 0;
     for (const k of scans.keys()) if (k.startsWith(`${userId}\u0000`)) open += 1;
     if (open >= MAX_OPEN_SCANS) throw new AppError('SCAN_LIMIT', 'too many open index scans; wait for them to finish', { status: 429 });
-    s = { total, received: new Set(), seen: new Set(), touched: now };
+    s = { total, counts: new Map(), seen: new Set(), touched: now };
     scans.set(key, s);
   } else if (s.total !== total) {
     throw errValidation('total differs from the first chunk of this scan');
@@ -427,22 +485,26 @@ export function scanNoteChunk(userId, input, { now = Date.now() } = {}) {
     if (!held.has(e.noteKey)) missing.push(e.noteKey);
     else if (held.get(e.noteKey) !== e.contentHash) stale.push(e.noteKey);
   }
-  s.received.add(index);
+  s.counts.set(index, entries.length);
 
   if (!complete) {
-    return { missing, stale, extra: [], pruned: 0, received: s.received.size, total, complete: false };
+    return { missing, stale, extra: [], pruned: 0, received: s.counts.size, total, complete: false };
   }
   scans.delete(key);
-  if (s.received.size !== total) {
-    throw new AppError('SCAN_INCOMPLETE', `the scan is missing ${total - s.received.size} of ${total} chunks; nothing was pruned`, { status: 409 });
+  if (s.counts.size !== total) {
+    throw new AppError('SCAN_INCOMPLETE', `the scan is missing ${total - s.counts.size} of ${total} chunks; nothing was pruned`, { status: 409 });
   }
-  const indexedKeys = db.prepare('SELECT note_key FROM note_index WHERE user_id = ? AND project_id = ?')
-    .all(userId, pid).map((r) => r.note_key);
-  const extra = indexedKeys.filter((k) => !s.seen.has(k)).sort();
-  let pruned = 0;
-  if (prune && extra.length > 0) {
-    const del = db.prepare('DELETE FROM note_index WHERE user_id = ? AND project_id = ? AND note_key = ?');
-    db.transaction((keys) => { for (const k of keys) pruned += del.run(userId, pid, k).changes; })(extra);
+  const received = [...s.counts.values()].reduce((sum, n) => sum + n, 0);
+  if (received !== body.totalEntries) {
+    throw new AppError('SCAN_TOTAL_MISMATCH', `the chunks carry ${received} entries but the scan declared ${body.totalEntries}; nothing was pruned`, { status: 409 });
   }
+  if (prune && received === 0 && !allowEmpty) {
+    throw new AppError('EMPTY_SCAN_REFUSED', 'an all-empty scan does not prune unless allowEmpty is true', { status: 409 });
+  }
+  // The prune set is computed in full before any row is deleted.
+  const extra = db.prepare('SELECT note_key FROM note_index WHERE user_id = ? AND project_id = ?')
+    .all(userId, pid).map((r) => r.note_key).filter((k) => !s.seen.has(k) && !kept.has(k)).sort();
+  const pruned = prune && extra.length > 0 ? await pruneInBatches(db, userId, pid, extra) : 0;
+  recordReconciledPass(userId, pid, new Date(now));
   return { missing, stale, extra, pruned, received: total, total, complete: true };
 }

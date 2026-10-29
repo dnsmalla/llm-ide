@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/index/reconcile",
+  "status": 409,
+  "description": "An empty manifest with prune is refused without allowEmpty: an emptied or unmounted folder must not delete the index.",
+  "request": {
+    "body": {
+      "projectId": "reconcile-fixture",
+      "manifest": [],
+      "prune": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "EMPTY_MANIFEST_REFUSED",
+      "message": "an empty manifest does not prune unless allowEmpty is true"
+    }
+  }
+}

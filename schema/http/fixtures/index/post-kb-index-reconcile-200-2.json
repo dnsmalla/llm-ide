@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /kb/index/reconcile",
+  "status": 200,
+  "description": "Example data. An emptied folder, confirmed: allowEmpty is sent, and the one key the Mac could not index is kept, so nothing is pruned for it.",
+  "request": {
+    "body": {
+      "projectId": "reconcile-fixture",
+      "manifest": [],
+      "keep": [
+        "meetings/2026/10/broken.md"
+      ],
+      "prune": true,
+      "allowEmpty": true
+    }
+  },
+  "response": {
+    "missing": [],
+    "stale": [],
+    "extra": [],
+    "pruned": 0
+  }
+}

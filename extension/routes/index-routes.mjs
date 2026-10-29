@@ -33,7 +33,9 @@ export async function handleIndexRoutes(req, res, { userId, url }) {
     const result = reconcileNotes(userId, {
       projectId: body.projectId ?? '',
       manifest: body.manifest,
+      keep: body.keep,
       prune: body.prune === true,
+      allowEmpty: body.allowEmpty === true,
     });
     sendJSON(res, 200, result);
     return true;
@@ -41,7 +43,7 @@ export async function handleIndexRoutes(req, res, { userId, url }) {
 
   if (req.method === 'POST' && path === '/kb/index/scan') {
     const body = await readJsonBody(req, BATCH_BYTES);
-    sendJSON(res, 200, scanNoteChunk(userId, body));
+    sendJSON(res, 200, await scanNoteChunk(userId, body));
     return true;
   }
 
