@@ -43,12 +43,35 @@ final class ExplorerTreeStoreWatchTests: XCTestCase {
     /// poll instead of sleeping once — the same shape `GitTruthStoreTests` uses
     /// for its own watcher assertion.
     private func waitForNames(_ expected: [String], in dir: URL,
-                              store: ExplorerTreeStore, timeout: TimeInterval = 8) async throws {
+                              store: ExplorerTreeStore, timeout: TimeInterval = 30) async throws {
         let deadline = Date().addingTimeInterval(timeout)
         while Date() < deadline, store.children(of: dir).map(\.name) != expected {
             try await Task.sleep(nanoseconds: 150_000_000)
         }
         XCTAssertEqual(store.children(of: dir).map(\.name), expected)
+    }
+
+    /// An FSEvents stream starts asynchronously: a change made right after `startWatching` can land before the
+    /// stream is live and is then never reported (under full-suite load that window is long). The test must not
+    /// assume the watcher is live, so it proves it: touch a sentinel file until the store shows it, then remove it
+    /// and wait for it to go. Only after that is the real change made, so the assertions that follow are unchanged.
+    private func waitUntilWatcherIsLive(in dir: URL, store: ExplorerTreeStore,
+                                        timeout: TimeInterval = 60) async throws {
+        let sentinel = dir.appendingPathComponent("zz-watcher-warmup.tmp")
+        let deadline = Date().addingTimeInterval(timeout)
+        var lastTouch = Date.distantPast
+        func present() -> Bool { store.children(of: dir).contains { $0.name == sentinel.lastPathComponent } }
+        while Date() < deadline, !present() {
+            if Date().timeIntervalSince(lastTouch) > 3 {   // re-trigger: an earlier event may predate the stream
+                try? FileManager.default.removeItem(at: sentinel)
+                FileManager.default.createFile(atPath: sentinel.path, contents: Data())
+                lastTouch = Date()
+            }
+            try await Task.sleep(nanoseconds: 150_000_000)
+        }
+        XCTAssertTrue(present(), "the watcher never reported the sentinel file")
+        try? FileManager.default.removeItem(at: sentinel)
+        while Date() < deadline, present() { try await Task.sleep(nanoseconds: 150_000_000) }
     }
 
     // MARK: - refreshLoaded
@@ -147,6 +170,8 @@ final class ExplorerTreeStoreWatchTests: XCTestCase {
 
         store.startWatching(root)
         defer { store.stopWatching() }
+        try await waitUntilWatcherIsLive(in: root, store: store)
+        XCTAssertEqual(store.children(of: root).map(\.name), ["設計.txt"])
 
         try FileManager.default.moveItem(at: root.appendingPathComponent("設計.txt"),
                                          to: root.appendingPathComponent("with space.txt"))
