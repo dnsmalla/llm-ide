@@ -22,6 +22,8 @@ import { handleAgentV2Routes } from './agent-v2.mjs';
 import { handlePlanningRoutes } from './planning.mjs';
 import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
+import { recordFinishedRun } from '../kb/agent-runs.mjs';
+import { randomUUID } from 'node:crypto';
 import { handleChatRoutes } from './chat.mjs';
 import { handleIndexRoutes } from './index-routes.mjs';
 const CLIENT_REFUSAL_CODES = new Set([
@@ -1093,6 +1095,19 @@ export async function handleKB(req, res) {
         runs: body.runs,
         requestId: body.requestId,
       });
+      // Agent history: the Mac's Auto Task runs report here when they finish,
+      // so a 'auto-task' usage report is one 'autotask' run (best-effort; a
+      // repeated requestId is the same run).
+      if (id != null && body.source === 'auto-task') {
+        recordFinishedRun(userId, {
+          runId: typeof body.requestId === 'string' && body.requestId
+            ? `autotask:${body.requestId.slice(0, 100)}` : `autotask:${randomUUID()}`,
+          source: 'autotask', engine: 'cli', provider: body.provider, model: body.model,
+          status: 'ok', stopReason: typeof body.stopReason === 'string' ? body.stopReason : undefined,
+          inputTokens: body.inputTokens, outputTokens: body.outputTokens,
+          cacheReadTokens: body.cacheReadTokens, cacheCreationTokens: body.cacheCreationTokens,
+        });
+      }
       sendJSON(res, 200, { ok: id != null, id });
       return true;
     }

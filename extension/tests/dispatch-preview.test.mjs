@@ -95,3 +95,19 @@ test('dispatchPlan: rejects a missing plan', async () => {
     /not found/,
   );
 });
+
+test('an external dispatch is recorded as a dispatch run; a preview is not', async () => {
+  const agent = await import('../kb/agent-db.mjs');
+  const ah = agent.getAgentDb();
+  assert.ok(ah);
+  seedPlan();
+  await dispatchPlan(U, { planId: 'plan1', target: 'preview' });
+  agent.flushAgentQueue();
+  assert.equal(ah.prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE source = 'dispatch' AND user_id = ?").get(U).n, 0);
+  await dispatchPlan(U, { planId: 'plan1', target: 'github', config: {} }).catch(() => {});
+  agent.flushAgentQueue();
+  const runs = ah.prepare("SELECT * FROM agent_runs WHERE source = 'dispatch' AND user_id = ?").all(U);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].mode, 'github');
+  assert.notEqual(runs[0].status, 'running');
+});

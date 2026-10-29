@@ -25,7 +25,7 @@ import { buildDispatch } from '../tools/registry.mjs';
 import { markRouteFailed } from '../../providers/route-health.mjs';
 import { callOpenAI, providerApiKey, customBaseUrl, resolveProvider, assertChatProvider, resolveCustomProviderDispatch, assertSafeBaseUrlResolved, providerHasCli, DEFAULT_DEEPSEEK_BASE, DEFAULT_GEMINI_OPENAI_BASE } from '../../providers/providers.mjs';
 import { skillsToOpenAITools } from './openai-tools.mjs';
-import { fastModelFor, recordUsage } from '../../kb/usage.mjs';
+import { currentTurnTokenTotals, fastModelFor, recordUsage, turnTokenUsageFields } from '../../kb/usage.mjs';
 import { classifyCodeAssistMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from './mode-classify.mjs';
 import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES, QUESTION_TOOL_NAME } from './mode-personas.mjs';
 import { pipelineSkillIdFor, buildExecuteBinding } from './plan-pipeline.mjs';
@@ -34,7 +34,7 @@ import { buildMcpConfigForUser } from '../../mcp/mcp-config.mjs';
 import { makeSecretReader } from '../../server/vault.mjs';
 import { getDb, recordToolEvents } from '../../kb/db.mjs';
 import { randomUUID } from 'node:crypto';
-import { beginAgentRun } from '../../kb/agent-runs.mjs';
+import { beginAgentRun, runTotals } from '../../kb/agent-runs.mjs';
 import { memoryPushEvent } from './memory-push-event.mjs';
 
 // Re-exported for the HTTP routes that historically imported these
@@ -127,6 +127,15 @@ function providerRefusal(message) {
   return Object.assign(new Error(message), { code: 'PROVIDER_UNAVAILABLE' });
 }
 
+// The turn's token totals when every model call reported usage (fail closed:
+// a partial sum is not recorded). Empty outside a counted turn.
+function legacyRunTotals() {
+  try {
+    const f = turnTokenUsageFields(currentTurnTokenTotals());
+    return f ? runTotals(f) : {};
+  } catch { return {}; }
+}
+
 // One legacy code-assist turn, recorded as an agent.db run (plan 2.5, engine
 // 'legacy'). The wrapper owns the run row; runCodeAssistTurn is the turn.
 export async function handleCodeAssist(args) {
@@ -137,12 +146,13 @@ export async function handleCodeAssist(args) {
   });
   try {
     const out = await runCodeAssistTurn({ ...args, runId });
-    agentRun.finish({ status: args.signal?.aborted ? 'cancelled' : 'ok' });
+    agentRun.finish({ status: args.signal?.aborted ? 'cancelled' : 'ok', ...legacyRunTotals() });
     return out;
   } catch (err) {
     agentRun.finish({
       status: args.signal?.aborted ? 'cancelled' : 'error',
       errorCode: err?.code || 'ENGINE_ERROR',
+      ...legacyRunTotals(),
     });
     throw err;
   }

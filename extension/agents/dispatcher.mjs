@@ -16,6 +16,8 @@ import { redactSecrets } from '../core/redact-secrets.mjs';
 import { jittered } from '../providers/runtime.mjs';
 import { logger } from '../core/logger.mjs';
 import { recordActivity } from '../kb/activity.mjs';
+import { withAgentRun } from '../kb/agent-runs.mjs';
+import { randomUUID } from 'node:crypto';
 
 const log = logger.child({ component: 'dispatcher' });
 
@@ -494,7 +496,20 @@ export function resolveDispatchItems(userId, { planId, taskIds } = {}) {
     .map(({ taskId, title, body }) => ({ taskId, title, body }));
 }
 
-export async function dispatchPlan(userId, { planId, target = 'preview', taskIds, config = {} }) {
+export async function dispatchPlan(userId, opts = {}) {
+  // A preview never leaves the machine and is not agent work. Every external
+  // dispatch (the /kb/dispatch route and an approved dispatch review both land
+  // here) is one 'dispatch' run in agent history: best-effort, never failing it.
+  if (!opts.target || opts.target === 'preview') return dispatchPlanInner(userId, opts);
+  return withAgentRun(
+    userId,
+    { runId: `dispatch:${randomUUID()}`, source: 'dispatch', engine: 'dispatch', mode: opts.target },
+    () => dispatchPlanInner(userId, opts),
+    { status: (out) => (out?.results?.length && out.results.every((r) => r.status === 'error') ? 'error' : 'ok') },
+  );
+}
+
+async function dispatchPlanInner(userId, { planId, target = 'preview', taskIds, config = {} }) {
   if (!ALLOWED_TARGETS.has(target)) {
     throw new Error(`Unknown dispatch target: ${target}`);
   }

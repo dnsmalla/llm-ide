@@ -15,6 +15,8 @@ import { openPullRequest } from '../agents/github-pr.mjs';
 import { runGuardrails } from '../guardrails/rules.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
+import { recordFinishedRun } from '../kb/agent-runs.mjs';
+import { randomUUID } from 'node:crypto';
 import { pickReviewPayload } from '../kb/review-payload.mjs';
 import { logger } from '../core/logger.mjs';
 import {
@@ -223,6 +225,9 @@ export async function handleReviewRoutes(req, res, ctx) {
           });
         }
         result = pr ? { ...apply, pr } : apply;
+        // Agent history: an applied review is one 'review' run (the dispatch
+        // kind is already recorded by dispatchPlan). Best-effort.
+        recordFinishedRun(userId, { runId: `review:${body.id}:${randomUUID()}`, source: 'review', engine: 'review', mode: item.kind, status: 'ok' });
       } else {
         throw new Error(`Unknown review kind: ${item.kind}`);
       }
@@ -239,6 +244,9 @@ export async function handleReviewRoutes(req, res, ctx) {
       sendJSON(res, 200, redactReviewItem(finished));
     } catch (err) {
       const message = redactSecrets(err.message || 'execution failed');
+      if (item.kind === 'codegen-apply') {
+        recordFinishedRun(userId, { runId: `review:${body.id}:${randomUUID()}`, source: 'review', engine: 'review', mode: item.kind, status: 'error', errorCode: err?.code || 'REVIEW_EXECUTION_FAILED' });
+      }
       const finished = kb.setReviewStatus(userId, body.id, {
         status: 'failed',
         result: { error: message },

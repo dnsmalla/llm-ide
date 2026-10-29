@@ -335,6 +335,11 @@ export function countTurnTokens(totals, fn) {
   return turnTokens.run(totals, fn);
 }
 
+/** The running turn's totals (the object countTurnTokens was given), or null outside a turn. */
+export function currentTurnTokenTotals() {
+  return turnTokens.getStore() ?? null;
+}
+
 /** Mark a model call that produced no usage at all on the current turn (no-op outside a turn). */
 export function noteUnmeteredModelCall() {
   const totals = turnTokens.getStore();

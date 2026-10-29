@@ -193,3 +193,39 @@ test('POST /kb/usage/record rejects negative or non-integer token counts with 40
     assert.equal(res.statusCode, 400);
   }
 });
+
+test('POST /kb/usage/record with source auto-task also records an autotask agent run', async () => {
+  resetDb();
+  const agent = await import('../kb/agent-db.mjs');
+  const ah = agent.getAgentDb();
+  assert.ok(ah);
+  const userId = await newUser('autotask-run');
+  const res = makeRes();
+  await handleKB(makeReq({
+    method: 'POST', url: '/kb/usage/record', userId,
+    body: { provider: 'anthropic', model: 'claude-sonnet-5', source: 'auto-task', inputTokens: 11, outputTokens: 4, stopReason: 'end_turn' },
+  }), res);
+  assert.equal(res.statusCode, 200);
+  agent.flushAgentQueue();
+  const runs = ah.prepare("SELECT * FROM agent_runs WHERE user_id = ? AND source = 'autotask'").all(userId);
+  assert.equal(runs.length, 1);
+  assert.equal(runs[0].status, 'ok');
+  assert.equal(runs[0].input_tokens, 11);
+  assert.equal(runs[0].model, 'claude-sonnet-5');
+  // A non-auto-task usage report is not an agent run.
+  await handleKB(makeReq({ method: 'POST', url: '/kb/usage/record', userId, body: { provider: 'anthropic', model: 'm', source: 'cli' } }), makeRes());
+  agent.flushAgentQueue();
+  assert.equal(ah.prepare("SELECT COUNT(*) AS n FROM agent_runs WHERE user_id = ?").get(userId).n, 1);
+});
+
+test('the usage report still succeeds when agent.db is down', async () => {
+  resetDb();
+  const agent = await import('../kb/agent-db.mjs');
+  agent.closeAgentDb();
+  agent.setAgentDbForTests(null);
+  const userId = await newUser('autotask-down');
+  const res = makeRes();
+  await handleKB(makeReq({ method: 'POST', url: '/kb/usage/record', userId, body: { provider: 'anthropic', model: 'm', source: 'auto-task' } }), res);
+  assert.equal(res.statusCode, 200);
+  assert.equal(res.json().ok, true);
+});

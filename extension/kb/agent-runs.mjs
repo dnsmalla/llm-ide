@@ -53,3 +53,37 @@ export function beginAgentRun(userId, { runId, source, engine = null, mode = nul
     },
   };
 }
+
+/**
+ * Record a unit of work that is already over (or whose only observable moment
+ * is its end) as one open-then-close run. Best-effort: never throws, returns
+ * whether the close was queued. A repeated runId is a no-op (INSERT OR IGNORE
+ * plus close-only-if-running), so a retried report cannot double count.
+ */
+export function recordFinishedRun(userId, { runId, source, engine = null, mode = null, provider = null, model = null, startedMs = null, ...close } = {}) {
+  try {
+    const run = beginAgentRun(userId, { runId, source, engine, mode, provider, model });
+    return run.finish({ ...close, durationMs: close.durationMs ?? (startedMs ? Date.now() - startedMs : undefined) });
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Run `fn` as an agent run (open now, close once with the outcome). The run
+ * never changes the result: `fn`'s value or error passes through untouched.
+ * `totals(result)` may return close fields (tokens) and `status(result)` an
+ * override such as 'error' for a result that failed without throwing.
+ */
+export async function withAgentRun(userId, begin, fn, { totals, status } = {}) {
+  let run = null;
+  try { run = beginAgentRun(userId, begin); } catch { /* best effort */ }
+  try {
+    const out = await fn();
+    try { run?.finish({ status: status?.(out) || 'ok', ...(totals?.(out) || {}) }); } catch { /* best effort */ }
+    return out;
+  } catch (err) {
+    try { run?.finish({ status: 'error', errorCode: err?.code || 'RUN_ERROR' }); } catch { /* best effort */ }
+    throw err;
+  }
+}
