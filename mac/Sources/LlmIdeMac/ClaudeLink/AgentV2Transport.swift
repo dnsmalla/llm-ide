@@ -172,6 +172,12 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
     /// answerable instead of leaving it live until the next turn.
     var onApprovalResolved: (@MainActor (String) -> Void)?
 
+    /// Session router notices (server API v91): this turn runs on another provider or model than the
+    /// last one, and the chat's token meter crossed 80 percent or its limit. Display and bookkeeping
+    /// only; a server without the router never sends them.
+    var onRouteSwitch: (@MainActor (ChatRouteSwitchNotice) -> Void)?
+    var onSessionBudget: (@MainActor (ChatSessionBudgetNotice) -> Void)?
+
     init(streamer: AgentV2Streaming) {
         self.streamer = streamer
     }
@@ -271,6 +277,12 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
            let data = try? JSONEncoder().encode(agentContext),
            let dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] {
             body["agentContext"] = dict
+        }
+        // A routed chat (pinned provider, or just switched) has no server session to lean on: send the
+        // history the engine packed so the server can seed the turn (handoff note + last turns).
+        if input.routeSendsHistory, !fresh {
+            let history = Self.freshHistoryField(input.history)
+            if !history.isEmpty { body["history"] = history }
         }
         if fresh {
             body["fresh"] = true
@@ -450,6 +462,10 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
                 if level == "warning" || level == "error", !text.isEmpty {
                     onProgress(LlmIdeAPIClient.AgentProgress(label: text, phase: "notice"))
                 }
+            case .routeSwitch(let notice, _):
+                self.onRouteSwitch?(notice)
+            case .sessionBudget(let notice, _):
+                self.onSessionBudget?(notice)
             case .sdk:
                 break  // unknown/passthrough types: observable on the wire, not actionable here
             }

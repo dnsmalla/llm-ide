@@ -1,0 +1,1 @@
+{"type":"notice","kind":"route_switch","level":"info","text":"This chat now runs on llama-3.3-70b-versatile. The prompt cache starts cold on this turn.","data":{"from":{"provider":"anthropic","model":"claude-sonnet-5-5"},"to":{"provider":"custom:cat-groq","model":"llama-3.3-70b-versatile"},"reason":"user","cold":true,"estimatedPrefillTokens":1500}}

@@ -63,6 +63,26 @@ public enum AgentV2Conformance {
         AgentV2Event.decode(fromJSON: data)?.isAcceptedAfterTerminal
     }
 
+    /// How a `notice` wire event decodes, for the lab: `route_switch` and `session_budget` become
+    /// their typed notices, every other kind (or a router kind whose `data` does not decode) stays a
+    /// plain notice. `nil` when the payload does not decode at all.
+    public enum DecodedNotice: Equatable, Sendable {
+        case routeSwitch(ChatRouteSwitchNotice)
+        case sessionBudget(ChatSessionBudgetNotice)
+        case plain(kind: String, level: String)
+        case other
+    }
+
+    public static func decodedNotice(forJSON data: Data) -> DecodedNotice? {
+        guard let event = AgentV2Event.decode(fromJSON: data) else { return nil }
+        switch event {
+        case .routeSwitch(let n, _): return .routeSwitch(n)
+        case .sessionBudget(let n, _): return .sessionBudget(n)
+        case .notice(let kind, let level, _): return .plain(kind: kind, level: level)
+        default: return .other
+        }
+    }
+
     /// The tool → verb table, same reasoning.
     public static func verb(for tool: String?) -> String {
         ClaudeToolPresentation.verb(tool)
@@ -169,6 +189,11 @@ extension AgentV2Event {
             // NOTE: no `data` — the server's machine-readable detail; the Mac
             // renders kind/level/text only (runner ALLOWED_UNDECODED).
             return ["kind", "level", "text"]
+
+        case .routeSwitch, .sessionBudget:
+            // `data` is decoded for these two kinds (the schema types it as a free object, so the
+            // report names the leaf the runner sees).
+            return ["kind", "level", "text", "data"]
 
         case .sdk:
             // NOTE: no `subtype`, no `raw` — deliberately dropped.

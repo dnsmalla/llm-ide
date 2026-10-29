@@ -58,6 +58,9 @@ let apiRoutes: [Route] = [
     route("GET /auth/me/mcp-plugins/updates", "McpUpdateCheck", LlmIdeAPIClient.McpUpdateCheck.self),  // mcpUpdates
     route("POST /auth/me/mcp-plugins/:id/update", "McpUpdateAck", LlmIdeAPIClient.McpUpdateAck.self),  // updateMcpPlugin
     route("POST /kb/complete", "CompleteResponse", LlmIdeAPIClient.CompleteResponse.self),  // complete
+    route("GET /agent/v2/session/route", "ChatRouteState", LlmIdeAPIClient.ChatRouteState.self),  // chatRoute
+    route("PUT /agent/v2/session/route", "ChatRouteState", LlmIdeAPIClient.ChatRouteState.self),  // putChatRoute
+    route("GET /agent/v2/session/route/history", "ChatRouteHistory", LlmIdeAPIClient.ChatRouteHistory.self),  // chatRouteHistory
     route("GET /auth/google/status", "GoogleStatusResult", LlmIdeAPIClient.GoogleStatusResult.self),  // googleSignInStatus
     route("POST /auth/google/start", "GoogleStartResult", LlmIdeAPIClient.GoogleStartResult.self),  // googleSignInStart
     route("POST /auth/slack/start", "SlackConnectStartResult", LlmIdeAPIClient.SlackConnectStartResult.self),  // slackConnectStart

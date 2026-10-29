@@ -612,4 +612,44 @@ struct AgentV2TransportTests {
         #expect(result.reply == "legacy")
         #expect(result.mode == "plan")
     }
+
+    @Test("a routed chat sends its packed history on a non-fresh turn; an ordinary chat still sends none")
+    func routedTurnSendsHistory() async throws {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-r", claudeCodeVersion: nil, model: nil, tools: [], capabilities: [], mcpServers: [])),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil, durationMs: nil, sessionId: nil, stopReason: nil)),
+        ]
+        let transport = AgentV2Transport(streamer: stream)
+        var routed = ChatTransportInput(
+            message: "m", history: [.init(role: .user, content: "earlier"), .init(role: .assistant, content: "reply")],
+            attachments: [], skills: [], agentContext: nil, language: nil, model: nil, provider: nil, mode: nil)
+        routed.routeSendsHistory = true
+        _ = try await transport.roundTrip(routed, onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        let sent = try #require(stream.bodies.last?["history"] as? [[String: String]])
+        #expect(sent.count == 2 && sent[0]["content"] == "earlier")
+        #expect(stream.bodies.last?["fresh"] == nil)
+        routed.routeSendsHistory = false
+        _ = try await transport.roundTrip(routed, onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        #expect(stream.bodies.last?["history"] == nil)
+    }
+
+    @Test("router notices reach their callbacks and never break the turn")
+    func routerNoticesReachCallbacks() async throws {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-n", claudeCodeVersion: nil, model: nil, tools: [], capabilities: [], mcpServers: [])),
+            .routeSwitch(ChatRouteSwitchNotice(from: nil, to: .init(provider: "p", model: "m"), reason: "user", cold: true, estimatedPrefillTokens: 10), text: "t"),
+            .sessionBudget(ChatSessionBudgetNotice(used: 5, limit: 5, remaining: 0, level: "reached"), text: "t"),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil, durationMs: nil, sessionId: nil, stopReason: nil)),
+        ]
+        let transport = AgentV2Transport(streamer: stream)
+        var sw: ChatRouteSwitchNotice?
+        var bud: ChatSessionBudgetNotice?
+        transport.onRouteSwitch = { sw = $0 }
+        transport.onSessionBudget = { bud = $0 }
+        _ = try await transport.roundTrip(makeInput(), onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        #expect(sw?.to.model == "m" && sw?.cold == true)
+        #expect(bud?.level == "reached")
+    }
 }

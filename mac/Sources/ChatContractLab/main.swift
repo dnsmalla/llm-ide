@@ -2231,6 +2231,121 @@ do {
            "an orphan is purged only 7 days after the Mac FIRST saw it missing (the server's old timestamp does not shorten it)")
 }
 
+// MARK: - Session router (K1 Phase 6b): the pure logic of the per-chat route
+
+do {
+    typealias R = ChatRouteLogic
+    print("session router:")
+    expect(R.level(used: 0, limit: nil) == .none && R.level(used: 5, limit: 0) == .none, "no limit: no level")
+    expect(R.level(used: 79, limit: 100) == .ok && R.level(used: 80, limit: 100) == .warn
+           && R.level(used: 99, limit: 100) == .warn && R.level(used: 100, limit: 100) == .reached
+           && R.level(used: 500, limit: 100) == .reached, "ok under 80 percent, warn from 80, reached at the limit and over")
+
+    expect(R.parseLimit("200k") == .some(200_000) && R.parseLimit("1.5m") == .some(1_500_000)
+           && R.parseLimit("50,000") == .some(50_000) && R.parseLimit(" 7 ") == .some(7), "limit text: k, m, commas, spaces")
+    expect(R.parseLimit("") == .some(nil) && R.parseLimit("none") == .some(nil) && R.parseLimit("0") == .some(nil)
+           && R.parseLimit("OFF") == .some(nil), "empty, none, off and 0 mean no cap")
+    expect(R.parseLimit("-5") == nil && R.parseLimit("abc") == nil && R.parseLimit("1.5") == nil
+           && R.parseLimit("0.4") == nil && R.parseLimit("9999999999999m") == nil && R.parseLimit("nan") == nil
+           && R.parseLimit("inf") == nil, "negative, words, below one token and absurd sizes are refused")
+    expect(R.parseLimit("1e3") == .some(1_000) || R.parseLimit("1e3") == nil, "exponent text is either read or refused, never mis-read")
+
+    expect(R.compact(999) == "999" && R.compact(1_000) == "1k" && R.compact(12_345) == "12.3k"
+           && R.compact(1_500_000) == "1.5m" && R.compact(-4) == "0", "compact token counts")
+    expect(R.meterText(used: 12_345, limit: 200_000) == "12.3k / 200k", "meter: used / limit")
+    expect(R.meterText(used: 500, limit: nil) == "500", "meter: no limit shows only the use")
+    expect(R.meterText(used: 1_000, limit: 5_000, cacheRead: 90_000) == "1k / 5k (+90k cached reads)",
+           "cache reads are shown next to the meter, never added to it")
+
+    expect(R.raisedLimit(current: 200_000, used: 200_100) == 300_000, "raise: half again")
+    expect(R.raisedLimit(current: 1_000, used: 1_200) >= 51_200, "raise: never less than 50k above what is used")
+    expect(R.raisedLimit(current: 1_000, used: 1_200) % 1_000 == 0, "raise rounds to a thousand")
+    expect(R.raisedLimit(current: R.maxLimit, used: R.maxLimit) == R.maxLimit, "raise never passes the server's bound")
+    expect(R.raisedLimit(current: 0, used: 0) >= 50_000, "raise from nothing is still a usable number")
+
+    expect(R.coldSwitchWarning(estimatedTokens: 1_500).contains("1.5k")
+           && R.coldSwitchWarning(estimatedTokens: 0).contains("one full prompt")
+           && R.coldSwitchWarning(estimatedTokens: 1_500).contains("conversation itself is kept"),
+           "the cold-switch warning names the cost and what is kept")
+
+    let pinned = ChatRouteSettings(provider: "anthropic", model: "m", tokenLimit: 100_000, tokensUsed: 4_000)
+    let snap = { (seq: Int, used: Int, p: String, m: String, limit: Int?) in
+        ChatRouteSnapshot(provider: p, model: m, tokenLimit: limit, billableUsed: used, switchSeq: seq) }
+    expect(R.onOpen(file: pinned, server: snap(0, 0, "", "", nil)) == .restoreToServer(pinned),
+           "after a quit the server row is gone: the file re-creates it, tokens used included")
+    expect(R.onOpen(file: pinned, server: nil) == .restoreToServer(pinned), "an unreachable server read re-creates nothing it could not read, but offers the file's settings")
+    expect(R.onOpen(file: pinned, server: snap(3, 4_000, "anthropic", "m", 100_000)) == .none, "file and server agree: nothing to do")
+    expect(R.onOpen(file: pinned, server: snap(3, 9_000, "anthropic", "m", 100_000))
+           == .adoptServer(ChatRouteSettings(provider: "anthropic", model: "m", tokenLimit: 100_000, tokensUsed: 9_000)),
+           "a live server row is the truth: another window's turns are adopted")
+    expect(R.onOpen(file: nil, server: snap(0, 0, "", "", nil)) == .none && R.onOpen(file: ChatRouteSettings(), server: nil) == .none,
+           "a chat with no route settings sends nothing")
+    expect(R.onOpen(file: nil, server: snap(2, 10, "", "", 50)) == .adoptServer(ChatRouteSettings(provider: nil, model: nil, tokenLimit: 50, tokensUsed: 10)),
+           "an unpinned row with a limit is adopted without inventing a pin")
+
+    expect(!R.sendsHistory(settings: nil, changedSinceLastTurn: true)
+           && !R.sendsHistory(settings: ChatRouteSettings(tokenLimit: 5), changedSinceLastTurn: true),
+           "an unpinned chat never carries history for the router")
+    expect(!R.sendsHistory(settings: pinned, changedSinceLastTurn: false), "a pinned Claude chat resumes its own session")
+    expect(R.sendsHistory(settings: pinned, changedSinceLastTurn: true), "the first turn after a change carries the history")
+    expect(R.sendsHistory(settings: ChatRouteSettings(provider: "custom:cat-groq", model: "m"), changedSinceLastTurn: false),
+           "a pinned adapter chat has no server session: it carries history every turn")
+
+    expect(R.isOffered(routerPref: true, serverEnabled: nil, chatRunsOnAgentEngine: true)
+           && R.isOffered(routerPref: true, serverEnabled: true, chatRunsOnAgentEngine: true), "offered with the pref on, on the Agent engine")
+    expect(!R.isOffered(routerPref: false, serverEnabled: true, chatRunsOnAgentEngine: true)
+           && !R.isOffered(routerPref: true, serverEnabled: false, chatRunsOnAgentEngine: true)
+           && !R.isOffered(routerPref: true, serverEnabled: true, chatRunsOnAgentEngine: false),
+           "hidden with the pref off, the server router off, or on the classic engine")
+
+    expect(ChatRouteSettings().isEmpty && !ChatRouteSettings(tokensUsed: 1).isEmpty
+           && !ChatRouteSettings(provider: "a", model: "b").isEmpty && ChatRouteSettings(provider: "a", model: nil).isPinned == false,
+           "a pin needs both provider and model; an empty settings struct is not stored")
+
+    // The two env switches, from the preference.
+    let suite = UserDefaults(suiteName: "chat-route-lab-\(UUID().uuidString)")!
+    expect(ChatRoutePreference.backendEnvironment(suite).isEmpty, "default install: no router environment at all")
+    suite.set(true, forKey: ChatRoutePreference.capKey)
+    expect(ChatRoutePreference.backendEnvironment(suite).isEmpty, "the cap pref alone does nothing without the router")
+    suite.set(true, forKey: ChatRoutePreference.routerKey)
+    expect(ChatRoutePreference.backendEnvironment(suite) == ["LLMIDE_ROUTER": "on", "LLMIDE_ROUTER_CAP": "on"], "router and cap on")
+    suite.set(false, forKey: ChatRoutePreference.capKey)
+    expect(ChatRoutePreference.backendEnvironment(suite) == ["LLMIDE_ROUTER": "on"], "router on, cap off")
+
+    // The PUT body: clearing the cap is JSON null, leaving it alone is an absent key.
+    func body(_ patch: LlmIdeAPIClient.ChatRoutePatch) -> [String: Any] {
+        (try? JSONSerialization.jsonObject(with: JSONEncoder().encode(patch))) as? [String: Any] ?? [:]
+    }
+    let leave = body(.init(chatSessionId: "c"))
+    expect(leave["tokenLimit"] == nil && leave["provider"] == nil && leave["ifSeq"] == nil, "an untouched field is not sent")
+    let clear = body(.init(chatSessionId: "c", tokenLimit: .some(nil)))
+    expect(clear["tokenLimit"] is NSNull, "clearing the cap sends JSON null")
+    let set = body(.init(chatSessionId: "c", provider: "anthropic", model: "m", tokenLimit: .some(5_000), tokensUsed: 12, ifSeq: 4))
+    expect((set["tokenLimit"] as? Int) == 5_000 && (set["tokensUsed"] as? Int) == 12 && (set["ifSeq"] as? Int) == 4
+           && (set["provider"] as? String) == "anthropic" && (set["model"] as? String) == "m", "a full patch carries every field")
+
+    // The stream's router notices.
+    func json(_ s: String) -> Data { Data(s.utf8) }
+    typealias N = AgentV2Conformance
+    let sw = N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"route_switch","level":"info","text":"t","data":{"from":{"provider":"anthropic","model":"a"},"to":{"provider":"custom:cat-groq","model":"g"},"reason":"user","cold":true,"estimatedPrefillTokens":1500}}"#))
+    expect(sw == .routeSwitch(ChatRouteSwitchNotice(from: .init(provider: "anthropic", model: "a"), to: .init(provider: "custom:cat-groq", model: "g"),
+                                                     reason: "user", cold: true, estimatedPrefillTokens: 1_500)), "route_switch decodes with its data")
+    let first = N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"route_switch","level":"info","text":"t","data":{"from":null,"to":{"provider":"p","model":"m"}}}"#))
+    expect(first == .routeSwitch(ChatRouteSwitchNotice(from: nil, to: .init(provider: "p", model: "m"), reason: "user", cold: false, estimatedPrefillTokens: 0)),
+           "a first switch has no from, and missing optional fields default")
+    let bud = N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"session_budget","level":"warning","text":"t","data":{"used":50120,"limit":50000,"remaining":0,"level":"reached"}}"#))
+    expect(bud == .sessionBudget(ChatSessionBudgetNotice(used: 50_120, limit: 50_000, remaining: 0, level: "reached")), "session_budget decodes")
+    expect(N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"route_switch","level":"info","text":"t","data":{"nonsense":1}}"#)) == .plain(kind: "route_switch", level: "info"),
+           "a router notice whose data does not decode stays a plain notice, never dropped")
+    expect(N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"route_switch","level":"info","text":"t"}"#)) == .plain(kind: "route_switch", level: "info"),
+           "a router notice with no data stays plain")
+    expect(N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"retry","level":"warning","text":"t","data":{"attempt":2}}"#)) == .plain(kind: "retry", level: "warning"),
+           "other notice kinds are untouched")
+    expect(N.decodedNotice(forJSON: json(#"{"type":"notice","kind":"session_budget","level":"info","text":"t","data":{"used":1,"limit":2}}"#)) == .plain(kind: "session_budget", level: "info"),
+           "a budget notice missing its level stays plain")
+    expect(N.decodedNotice(forJSON: json("not json")) == nil, "garbage does not decode")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

@@ -69,7 +69,7 @@ authority, this is the explanation.
 
 | Field | Why |
 |---|---|
-| `notice.data` | Machine-readable detail for the server (audit, subscription limit store) and observers. The Mac renders `kind`/`level`/`text` only: one status line for `warning`/`error`, nothing for `info`. |
+| `notice.data` (kinds other than `route_switch` and `session_budget`) | Machine-readable detail for the server (audit, subscription limit store) and observers. The Mac renders `kind`/`level`/`text` only: one status line for `warning`/`error`, nothing for `info`. The two session-router kinds are the exception: the Mac decodes their `data` (the route control and meter). |
 | `sdk.subtype`, `sdk.raw` | The Mac keeps only `sdkType`; the payload is an observation channel for unknown SDK message types (`AgentV2Event.swift` `SdkWire`). |
 | `error.retryable` | **Not a deliberate choice — real drift.** The Mac infers retryability from `code == "SESSION_UNRESUMABLE"` alone, so a future retryable code is invisible to it. Listed so the gate stays green while the fix is scheduled; remove this row when `ErrorWire` gains the field. |
 | `approval_request.questions[].options[].preview` | Same: emitted (it is the SDK's own field) and undecodable, so option previews silently do not render. |

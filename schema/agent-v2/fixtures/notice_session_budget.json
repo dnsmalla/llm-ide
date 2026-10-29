@@ -1,0 +1,1 @@
+{"type":"notice","kind":"session_budget","level":"warning","text":"This chat reached its session token limit.","data":{"used":50120,"limit":50000,"remaining":0,"level":"reached"}}

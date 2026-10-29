@@ -329,6 +329,12 @@ enum AgentV2Event: Sendable, Equatable {
     /// line. A server that predates it sends nothing; an app that predates it
     /// decodes the type as `.sdk("notice")` and ignores it.
     case notice(kind: String, level: String, text: String)
+    /// `notice` kind `route_switch` (server API v91, session router): this turn runs on another
+    /// provider or model than the last one. `data` is decoded; a malformed one falls back to `.notice`.
+    case routeSwitch(ChatRouteSwitchNotice, text: String)
+    /// `notice` kind `session_budget` (server API v91): the chat crossed 80 percent of its token
+    /// limit, or reached it.
+    case sessionBudget(ChatSessionBudgetNotice, text: String)
     /// `{"type":"sdk","sdkType":…}` (observation passthrough) OR an event
     /// type this build doesn't know: the payload is the raw type string so
     /// new upstream capabilities stay observable on the wire.
@@ -372,6 +378,9 @@ enum AgentV2Event: Sendable, Equatable {
         case "error":
             return Self.payload(ErrorWire.self, data).map { .error(code: $0.code, message: $0.message) }
         case "notice":
+            // The two router kinds carry decoded `data`; every other kind (and a router kind whose
+            // data does not decode) stays the plain notice, so an unknown shape is never dropped.
+            if let routed = Self.payload(RouteNoticeWire.self, data), let event = routed.event { return event }
             return Self.payload(NoticeWire.self, data).map { .notice(kind: $0.kind, level: $0.level, text: $0.text) }
         case "sdk":
             return .sdk(Self.payload(SdkWire.self, data).flatMap { $0.sdkType })
@@ -422,6 +431,45 @@ enum AgentV2Event: Sendable, Equatable {
     private struct TasksWire: Decodable { let tasks: [AgentTask]; let continueNeeded: Bool }
     private struct TasksProgressWire: Decodable { let tasks: [AgentTask] }
     private struct NoticeWire: Decodable { let kind: String; let level: String; let text: String }
+    /// The router notices: `data` per `schema/http/agent.schema.json` notes and docs/spec/session-router.md.
+    private struct RouteNoticeWire: Decodable {
+        let kind: String
+        let text: String
+        let data: Detail?
+        struct Detail: Decodable {
+            struct End: Decodable { let provider: String; let model: String }
+            let from: End?
+            let to: End?
+            let reason: String?
+            let cold: Bool?
+            let estimatedPrefillTokens: Int?
+            let used: Int?
+            let limit: Int?
+            let remaining: Int?
+            let level: String?
+        }
+        var event: AgentV2Event? {
+            guard let d = data else { return nil }
+            switch kind {
+            case "route_switch":
+                guard let to = d.to else { return nil }
+                return .routeSwitch(
+                    ChatRouteSwitchNotice(
+                        from: d.from.map { .init(provider: $0.provider, model: $0.model) },
+                        to: .init(provider: to.provider, model: to.model),
+                        reason: d.reason ?? "user", cold: d.cold ?? false,
+                        estimatedPrefillTokens: d.estimatedPrefillTokens ?? 0),
+                    text: text)
+            case "session_budget":
+                guard let used = d.used, let limit = d.limit, let level = d.level else { return nil }
+                return .sessionBudget(
+                    ChatSessionBudgetNotice(used: used, limit: limit, remaining: d.remaining ?? max(0, limit - used), level: level),
+                    text: text)
+            default:
+                return nil
+            }
+        }
+    }
     private struct ErrorWire: Decodable { let code: String?; let message: String }
     /// `sdk` events carry the raw upstream message in `raw` — decoding it
     /// is not required to observe the type, and forcing it would make a

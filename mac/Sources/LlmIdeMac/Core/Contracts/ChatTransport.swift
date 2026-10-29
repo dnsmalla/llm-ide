@@ -164,6 +164,11 @@ struct ChatTransportInput: Sendable {
     /// default so existing call sites are unchanged.
     var routeFallback: TierRouteFallback? = nil
 
+    /// Session router (server API v91): the chat is pinned or just switched, so the transport sends
+    /// the packed `history` even on a non-fresh turn and the server seeds the turn from it. `var` with
+    /// a default so existing call sites are unchanged.
+    var routeSendsHistory: Bool = false
+
     /// Determine the provider string to send: `custom:<uuid>` verbatim for a
     /// custom provider, or the built-in tool's `provider` for everything else.
     /// Moved verbatim from `CodeAssistantPanel+Session.swift`'s

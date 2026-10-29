@@ -294,6 +294,16 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         set { v2.onModeResolved = newValue }
     }
 
+    /// Session router notices (v2 only; the legacy endpoint never sends them).
+    var onRouteSwitch: (@MainActor (ChatRouteSwitchNotice) -> Void)? {
+        get { v2.onRouteSwitch }
+        set { v2.onRouteSwitch = newValue }
+    }
+    var onSessionBudget: (@MainActor (ChatSessionBudgetNotice) -> Void)? {
+        get { v2.onSessionBudget }
+        set { v2.onSessionBudget = newValue }
+    }
+
     init(v2: AgentV2Transport,
          legacy: ChatTransport,
          isV2Enabled: @escaping () -> Bool = { AgentV2Selection.toggleEnabled() },
