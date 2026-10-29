@@ -10,6 +10,7 @@
 import crypto from 'node:crypto';
 import { getDb, requireUser, lazyPrepare } from './db.mjs';
 import { deleteAgentSession } from './agent-sessions.mjs';
+import { deleteRoute } from './chat-route.mjs';
 import { deleteSessionMemory } from './session-memory.mjs';
 import { errValidation } from '../core/errors.mjs';
 
@@ -81,6 +82,11 @@ export function listWorkingState(userId) {
     row.factCount = r.n;
     byId.set(r.id, row);
   }
+  // A chat that only has a route row (a cap set before its first turn) is working state as well: the
+  // orphan sweep must be able to reach it.
+  for (const r of lazyPrepare(db, 'SELECT chat_session_id AS id, updated_at FROM chat_session_route WHERE user_id = ?').all(userId)) {
+    if (!byId.has(r.id)) byId.set(r.id, { chatSessionId: r.id, sdkSession: null, factCount: 0, updatedAt: r.updated_at });
+  }
   return { sessions: [...byId.values()] };
 }
 
@@ -103,7 +109,10 @@ export function purgeWorkingState(userId, chatSessionIds) {
       const dropped = deleteAgentSession(db, userId, id);
       if (dropped?.sdkSessionId) sdkSessionIds.push(dropped.sdkSessionId);
       const hadFacts = deleteSessionMemory(userId, id) > 0;
-      if (dropped || hadFacts) purged += 1;
+      // The route row (cache warmth, stickiness, counters) is working state too: the Mac file keeps the
+      // chat's pick and limit and re-seeds it on the next open (plan 14.5).
+      const hadRoute = deleteRoute(db, userId, id) > 0;
+      if (dropped || hadFacts || hadRoute) purged += 1;
     }
   });
   tx(chatSessionIds);

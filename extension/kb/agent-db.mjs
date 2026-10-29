@@ -28,7 +28,7 @@ export const DEFAULT_HARD_BYTES = 1024 * 1024 * 1024;
 
 // Write kinds. `hard` size blocks the two bulk kinds; run closes, the open
 // rows and the activity feed keep working so the Agents hub stays truthful.
-const WRITE_KINDS = new Set(['runs', 'tool_events', 'composition', 'activity']);
+const WRITE_KINDS = new Set(['runs', 'tool_events', 'composition', 'activity', 'route_events']);
 const BLOCKED_AT_HARD = new Set(['tool_events', 'composition']);
 
 const state = {

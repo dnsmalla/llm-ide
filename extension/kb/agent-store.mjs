@@ -33,7 +33,7 @@ export const RUN_SOURCES = new Set(['chat', 'loop', 'meeting', 'autotask', 'disp
 // Tables that carry user_id. The user purge and the enumerator test use this.
 export const AGENT_USER_TABLES = Object.freeze([
   'agent_runs', 'agent_tool_events', 'turn_composition', 'activity', 'activity_seen',
-  'agent_daily', 'agent_daily_tools', 'agent_user_settings', 'usage_calls',
+  'agent_daily', 'agent_daily_tools', 'agent_user_settings', 'usage_calls', 'agent_route_events',
 ]);
 
 const clampInt = (v) => Math.max(0, Math.min(1_000_000_000, Math.trunc(Number(v) || 0)));
@@ -275,6 +275,8 @@ export function rollupOlderThan(userId, days, { db, now = new Date() } = {}) {
          AND turn_id NOT IN (SELECT run_id FROM agent_runs WHERE user_id = ? AND status = 'running')`,
     ).run(userId, horizon, userId, KEEP_TURNS_RAW, userId);
 
+    // Switch history follows the user's raw-history retention (metadata only, never enforcement).
+    handle.prepare('DELETE FROM agent_route_events WHERE user_id = ? AND day < ?').run(userId, horizon);
     const dailyPurged = handle.prepare('DELETE FROM agent_daily WHERE user_id = ? AND day < ?')
       .run(userId, keepCutoff).changes;
     const toolDailyPurged = handle.prepare('DELETE FROM agent_daily_tools WHERE user_id = ? AND day < ?')

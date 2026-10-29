@@ -1035,6 +1035,8 @@ export function deleteUserCascade(userId) {
       'agent_sessions', 'session_memory', 'code_graph_nodes', 'code_graph_edges',
       'code_graph_meta', 'tool_approvals', 'tool_permission_rules',
       'turn_tool_events', 'turn_composition',
+      // migration 0053 — session router (K1 Phase 6b)
+      'chat_session_route', 'provider_learned_limits',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }
