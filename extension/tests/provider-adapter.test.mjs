@@ -177,3 +177,33 @@ test('toLibraryTools keeps names and maps execute', async () => {
   const t = toLibraryTools([{ name: 'a', description: 'd', parameters: { type: 'object' }, execute: async () => 1 }]);
   assert.deepEqual(Object.keys(t), ['a']);
 });
+
+test('maxBillableTokens stops between model calls, cleanly, with the totals of the calls that ran', async () => {
+  const evs = [];
+  let ran = 0;
+  const out = await runToolTurn({
+    model: mockStream(toolStep('c1', 'echo', {}), toolStep('c2', 'echo', {}), textStep('never')),
+    messages: [{ role: 'user', content: 'x' }],
+    tools: [{ name: 'echo', description: 'e', parameters: { type: 'object' }, execute: async () => { ran += 1; return {}; } }],
+    onEvent: (e) => evs.push(e), maxBillableTokens: 20,   // one step bills 15; two bill 30
+  });
+  assert.equal(out.capStop, true);
+  assert.equal(out.ok, true, 'a deliberate stop is not an error');
+  assert.equal(out.failure, null);
+  assert.ok(out.usage.inputTokens + out.usage.outputTokens >= 20 && out.usage.inputTokens + out.usage.outputTokens <= 30, 'overshoot is at most one call');
+  assert.ok(!evs.some((e) => e.type === 'error'));
+  assert.equal(evs.at(-1).type, 'result');
+  assert.equal(evs.at(-1).stopReason, 'session_cap');
+  assert.ok(ran <= 2);
+});
+
+test('a caller abort is still an abort, not a cap stop; an invalid cap is ignored', async () => {
+  const ac = new AbortController();
+  ac.abort();
+  const out = await runToolTurn({ model: mockStream(textStep('x')), messages: [{ role: 'user', content: 'x' }], onEvent: () => {}, signal: ac.signal, maxBillableTokens: 5 });
+  assert.equal(out.ok, false);
+  assert.equal(out.capStop, false);
+  const out2 = await runToolTurn({ model: mockStream(textStep('x')), messages: [{ role: 'user', content: 'x' }], onEvent: () => {}, maxBillableTokens: -3 });
+  assert.equal(out2.ok, true);
+  assert.equal(out2.capStop, false);
+});

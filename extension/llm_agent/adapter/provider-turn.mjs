@@ -72,7 +72,7 @@ function systemFor({ mode, model, connName, workspaceRoot, toolNames }) {
  * @param {AbortSignal} [o.signal]
  * @param {object} [o.deps]     test seams: { db, fetchImpl, modelFor }
  */
-export async function runProviderTurn({ userId, provider, model, message, history, mode = 'ask', agentContext: rawAgentContext = {}, onEvent, signal, deps = {} }) {
+export async function runProviderTurn({ userId, provider, model, message, history, mode = 'ask', agentContext: rawAgentContext = {}, onEvent, signal, maxBillableTokens, deps = {} }) {
   let agentContext = rawAgentContext;
   const db = deps.db ?? getDb();
   if (!userId) throw new ProviderTurnError('AUTH_REQUIRED', 'Authenticated user required', 401);
@@ -165,7 +165,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
       model: chatModel,
       system: systemFor({ mode, model: active.model, connName: conn.name, workspaceRoot: agentContext?.workspaceRoot, toolNames: tools.map((t) => t.name) }),
       messages: [...cleanHistory(history), { role: 'user', content: message.slice(0, MAX_CONTENT) }],
-      tools, maxOutputTokens: MAX_OUTPUT_TOKENS, onEvent: sink, signal, apiKey: dispatch.apiKey,
+      tools, maxOutputTokens: MAX_OUTPUT_TOKENS, onEvent: sink, signal, apiKey: dispatch.apiKey, maxBillableTokens,
     });
   } finally {
     signal?.removeEventListener?.('abort', onAbort);
@@ -178,5 +178,5 @@ export async function runProviderTurn({ userId, provider, model, message, histor
       if (summary?.failure?.quota) flagQuota(db, userId, active.provider, active.model);
     } catch (err) { log.warn('provider_turn_meter_failed', { message: redactWithKey(String(err?.message || err), null).slice(0, 120) }); }
   }
-  return { ...summary, provider: active.provider, model: active.model, switched: pick.switched, tools: tools.map((t) => t.name), entry: catalogEntry(conn.catalogId)?.id };
+  return { ...summary, usageTotals: totals, metered: true, provider: active.provider, model: active.model, switched: pick.switched, tools: tools.map((t) => t.name), entry: catalogEntry(conn.catalogId)?.id };
 }

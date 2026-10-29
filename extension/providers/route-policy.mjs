@@ -86,7 +86,7 @@ export function lastTouched(warm) {
  * The route pick for a turn that is about to start. Never throws.
  *
  * @param {{ route: object|null, requested: {provider: string, model: string|null}, now?: Date }} o
- * @returns {{ provider: string, model: string|null, source: 'route'|'request', pinned: boolean,
+ * @returns {{ provider: string, model: string|null, source: 'route'|'request', pinned: boolean, changed: boolean,
  *             freshSession: boolean, cold: boolean, coldReason: string|null }}
  *   freshSession: the previous turn ran on another provider, so the Claude SDK session (if any) must
  *   not be resumed: the turn is seeded like an ended chat (plan 3.4), never from a cold transcript.
@@ -101,14 +101,15 @@ export function pickRoute({ route, requested, now = new Date() }) {
   const warm = isWarm(route?.warm, pick.provider, pick.model ?? '', now);
   let cold = false;
   let coldReason = null;
-  if (last && (last.provider !== pick.provider || last.model !== (pick.model ?? ''))) {
+  const changed = !!last && (last.provider !== pick.provider || last.model !== (pick.model ?? ''));
+  if (changed) {
     cold = !warm;
     coldReason = cold ? 'switch' : null;
   } else if (last && !warm) {
     cold = true;
     coldReason = 'expired';
   }
-  return { ...pick, pinned, freshSession: !!last && !sameProvider, cold, coldReason };
+  return { ...pick, pinned, changed, freshSession: !!last && !sameProvider, cold, coldReason };
 }
 
 /**

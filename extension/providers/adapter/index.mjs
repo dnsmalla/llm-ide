@@ -158,7 +158,7 @@ export function toWireError(err, { apiKey } = {}) {
  * @param {AbortSignal} [o.signal]
  * @param {string} [o.apiKey]  only used to redact error text
  */
-export async function runToolTurn({ model, system, messages, tools = [], maxSteps = DEFAULT_MAX_STEPS, maxOutputTokens, temperature, onEvent, signal, apiKey }) {
+export async function runToolTurn({ model, system, messages, tools = [], maxSteps = DEFAULT_MAX_STEPS, maxOutputTokens, temperature, onEvent, signal, apiKey, maxBillableTokens }) {
   const started = Date.now();
   const state = { open: new Map(), next: 0 };
   const totals = { inputTokens: 0, outputTokens: 0 };
@@ -167,13 +167,20 @@ export async function runToolTurn({ model, system, messages, tools = [], maxStep
   let ok = true;
   let text = '';
   let failure = null;   // { code, quota, status } of the error that ended the turn
+  // Session cap (K1 P6b): what is left of the chat's billable tokens. Checked between model calls, so
+  // the overshoot is bounded by one call; the stop is a clean end, not an error.
+  const cap = Number.isSafeInteger(maxBillableTokens) && maxBillableTokens > 0 ? maxBillableTokens : 0;
+  let capStop = false;
+  const ctl = new AbortController();
+  const relay = () => ctl.abort();
+  if (signal?.aborted) ctl.abort(); else signal?.addEventListener?.('abort', relay, { once: true });
   try {
     const result = streamText({
       model, system, messages,
       ...(tools.length ? { tools: toLibraryTools(tools), stopWhen: stepCountIs(Math.max(1, maxSteps)) } : {}),
       ...(maxOutputTokens ? { maxOutputTokens } : {}),
       ...(temperature != null ? { temperature } : {}),
-      abortSignal: signal,
+      abortSignal: ctl.signal,
       maxRetries: 0,   // retry/fallback policy is ours (fallback.mjs), never silent
       // The library's default is console.error(error), which prints the provider's
       // response body (it can echo the key). Errors reach us as the stream's
@@ -181,7 +188,10 @@ export async function runToolTurn({ model, system, messages, tools = [], maxStep
       onError: () => {},
     });
     for await (const part of result.fullStream) {
-      if (part.type === 'finish-step') { steps += 1; totals.inputTokens += part.usage?.inputTokens || 0; totals.outputTokens += part.usage?.outputTokens || 0; }
+      if (part.type === 'finish-step') {
+        steps += 1; totals.inputTokens += part.usage?.inputTokens || 0; totals.outputTokens += part.usage?.outputTokens || 0;
+        if (cap && !capStop && totals.inputTokens + totals.outputTokens >= cap) { capStop = true; ctl.abort(); }
+      }
       if (part.type === 'text-delta') text += part.text || '';
       if (part.type === 'finish') finishReason = part.finishReason ?? null;
       if (part.type === 'error') {
@@ -191,7 +201,7 @@ export async function runToolTurn({ model, system, messages, tools = [], maxStep
         onEvent({ type: 'error', code: e.code, message: e.message, retryable: e.retryable });
         continue;
       }
-      if (part.type === 'abort') { ok = false; continue; }
+      if (part.type === 'abort') { if (!capStop || signal?.aborted) ok = false; continue; }
       for (const ev of mapStreamPart(part, state, { apiKey })) onEvent(ev);
     }
   } catch (err) {
@@ -200,9 +210,15 @@ export async function runToolTurn({ model, system, messages, tools = [], maxStep
     failure = { code: e.code, status: e.status, quota: e.quota };
     onEvent({ type: 'error', code: e.code, message: e.message, retryable: e.retryable });
   }
+  signal?.removeEventListener?.('abort', relay);
+  if (capStop && !signal?.aborted) {
+    ok = true; failure = null;
+    onEvent({ type: 'delta', text: '\n\nStopped: this chat reached its session token limit (the limit is approximate to one reply). Raise the limit to continue.' });
+    finishReason = 'session_cap';
+  }
   if (ok) {
     onEvent({ type: 'result', subtype: finishReason === 'length' ? 'error_max_tokens' : 'success', costUsd: null,
       numTurns: steps, durationMs: Date.now() - started, sessionId: null, stopReason: finishReason });
   }
-  return { ok, text, steps, finishReason, usage: totals, failure };
+  return { ok, text, steps, finishReason, usage: totals, failure, capStop };
 }

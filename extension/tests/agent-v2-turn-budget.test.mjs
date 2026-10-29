@@ -174,3 +174,38 @@ test('the result usage floors a no-baseline fallback', async () => {
     assert.equal(usageTotals.outputTokens, 777);
   } finally { delete process.env.LLMIDE_V2_TURN_TOKEN_BUDGET; }
 });
+
+// --- session cap (K1 P6b T6b.3): the route passes what is left of the chat's cap ---
+
+test('maxBillableTokens interrupts the turn cleanly and the usage totals stay complete', async () => {
+  // Each hop bills 10 + 50+n + 1000 (input + output + cache write); cache reads never count.
+  const msgs = [...hop(1), ...hop(2), ...hop(3), ...hop(4)];
+  const { factory, state } = fakeQuery(msgs);
+  const events = [];
+  const out = await runAgentV2Turn({
+    message: 'go', userId: 'u-cap', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => events.push(e), queryFactory: factory, maxBillableTokens: 2000,
+  }, inject);
+  assert.equal(state.interrupted, 1, 'the SDK interrupt, not a kill');
+  assert.equal(out.usageTotals.stopReason, 'session_cap');
+  const usage = events.filter((e) => e.type === 'usage');
+  assert.equal(usage.length, 1, 'one usage event, so the route counts the turn once');
+  const billable = usage[0].inputTokens + usage[0].outputTokens + usage[0].cacheCreationTokens;
+  assert.ok(billable >= 2000 && billable < 2000 + 1100 * 2, `stopped within about one reply of the cap, got ${billable}`);
+  assert.equal(out.usageTotals.inputTokens + out.usageTotals.outputTokens + out.usageTotals.cacheCreationTokens, billable, 'result totals equal the streamed totals');
+  const result = events.find((e) => e.type === 'result');
+  assert.equal(result.subtype, 'success', 'a deliberate stop is not an error banner');
+  assert.ok(events.some((e) => e.type === 'delta' && /session token limit/.test(e.text)));
+});
+
+test('no maxBillableTokens, or an invalid one, changes nothing', async () => {
+  for (const cap of [undefined, 0, -5, 1.5, NaN, '100']) {
+    const { factory, state } = fakeQuery([...hop(1), ...hop(2)]);
+    const out = await runAgentV2Turn({
+      message: 'go', userId: 'u-cap2', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+      allowAmbientAuth: true, onEvent: () => {}, queryFactory: factory, maxBillableTokens: cap,
+    }, inject);
+    assert.equal(state.interrupted, 0, String(cap));
+    assert.notEqual(out.usageTotals.stopReason, 'session_cap');
+  }
+});

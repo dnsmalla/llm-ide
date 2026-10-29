@@ -250,6 +250,9 @@ export function turnTokenBudget(raw = process.env.LLMIDE_V2_TURN_TOKEN_BUDGET) {
   console.warn(`LLMIDE_V2_TURN_TOKEN_BUDGET=${raw} ignored — must be a non-negative integer (0 = off); using ${TURN_TOKEN_BUDGET_DEFAULT}`);
   return TURN_TOKEN_BUDGET_DEFAULT;
 }
+export function sessionCapNoticeText() {
+  return 'Stopped: this chat reached its session token limit (the limit is approximate to one reply). Raise the limit to continue.';
+}
 const fmtTokens = (n) => (n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1).replace(/\.0$/, '')}M` : `${Math.round(n / 1000)}k`);
 export function budgetNoticeText(processed, budget) {
   return `Stopped: this turn processed ${fmtTokens(processed)} tokens (budget ${fmtTokens(budget)}). Say "continue" to keep going.`;
@@ -1305,6 +1308,9 @@ export async function runAgentV2Turn(
     permissionMode = null,
     resumeSdkSessionId, onEvent, signal, abortController, allowAmbientAuth = false,
     queryFactory = sdkQueryFactory,
+    // Session router (K1 P6b): the chat's REMAINING billable tokens (input + output + cache write) under
+    // its session cap, or absent. Enforced like the turn budget below, in the unit the cap counts.
+    maxBillableTokens,
   } = {},
   {
     readSkill = readSkillInstructions, roots = buildReadableRoots, resolveBudget = resolveMaxBudgetUsd,
@@ -1823,8 +1829,12 @@ export async function runAgentV2Turn(
   const emitBudgetNotice = () => {
     if (!budgetStop || budgetNoticeSent) return;
     budgetNoticeSent = true;
-    onEvent?.({ type: 'delta', text: `\n\n${budgetNoticeText(budgetStop.processed, tokenBudget)}` });
+    onEvent?.({ type: 'delta', text: `\n\n${budgetStop.cap
+      ? sessionCapNoticeText()
+      : budgetNoticeText(budgetStop.processed, tokenBudget)}` });
   };
+  // The chat's session cap (routes/agent-v2.mjs passes what is left of it). A positive whole number or off.
+  const sessionCap = Number.isSafeInteger(maxBillableTokens) && maxBillableTokens > 0 ? maxBillableTokens : 0;
   // Max-merge one API response's usage snapshot (the blocks of a response
   // repeat it, and output grows as it streams), re-sum the turn, and enforce
   // the budget.
@@ -1836,6 +1846,18 @@ export async function runAgentV2Turn(
       cacheReadTokens: m('cacheReadTokens'), cacheCreationTokens: m('cacheCreationTokens'),
     });
     sumInto(usageTotals, [...streamedUsage.values()]);
+    if (sessionCap > 0 && !budgetStop) {
+      const billable = usageTotals.inputTokens + usageTotals.outputTokens + usageTotals.cacheCreationTokens;
+      if (billable >= sessionCap) {
+        budgetStop = { cap: true, billable, processed: billable };
+        // Same clean stop as the turn budget: the SDK interrupt ends the query with a result and the
+        // usage totals above (every response that streamed) stay complete for the route's counters.
+        try {
+          if (typeof q.interrupt === 'function') void Promise.resolve(q.interrupt()).catch(() => {});
+          else abortController?.abort();
+        } catch { /* already ending */ }
+      }
+    }
     if (tokenBudget > 0 && !budgetStop) {
       const processed = usageTotals.inputTokens + usageTotals.cacheReadTokens + usageTotals.cacheCreationTokens;
       if (processed > tokenBudget) {
@@ -2063,7 +2085,7 @@ export async function runAgentV2Turn(
   // Model round trips for the whole turn: the SDK's count, or the distinct API
   // responses streamed (which include subagents) if that is larger.
   usageTotals.turns = Math.max(usageTotals.numTurns, streamedUsage.size);
-  usageTotals.stopReason = budgetStop ? 'token_budget' : (result?.stopReason ?? null);
+  usageTotals.stopReason = budgetStop ? (budgetStop.cap ? 'session_cap' : 'token_budget') : (result?.stopReason ?? null);
   return { result, usageTotals, composition };
 
   // Sizes, counts and names only (migration 0040) — never prompt or tool text.

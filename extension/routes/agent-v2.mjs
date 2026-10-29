@@ -44,6 +44,12 @@ import { recordAgentTurnPhase } from '../server/metrics.mjs';
 import { logger } from '../core/logger.mjs';
 import { emitOsEvent } from '../core/os-events.mjs';
 import { extensionChatWorkspace } from '../core/extension-chat-workspace.mjs';
+import {
+  beginRouteTurn, createRouteTurn, routeSwitchNotice, runAdapterTurn, isAdapterProvider, sendRouteRefusal,
+  handleRouteGet, handleRoutePut, handleRouteHistory,
+} from './agent-v2-router.mjs';
+import { RouteError, deleteRoute } from '../kb/chat-route.mjs';
+import { routerEnabled } from '../core/router-flags.mjs';
 
 const log = logger.child({ component: 'agent-v2' });
 
@@ -302,6 +308,17 @@ export async function handleAgentV2Routes(
   if (req.method === 'POST' && url === '/agent/v2/cancel') {
     return handleV2Cancel(req, res, userId);
   }
+  // Session router (K1 P6b): the per-chat provider/model pick and token cap.
+  const routePath = url.split('?')[0];
+  if (req.method === 'GET' && routePath === '/agent/v2/session/route') {
+    return handleRouteGet(req, res, userId, getDb());
+  }
+  if (req.method === 'PUT' && routePath === '/agent/v2/session/route') {
+    return handleRoutePut(req, res, userId, getDb(), { isChatTurnInFlight });
+  }
+  if (req.method === 'GET' && routePath === '/agent/v2/session/route/history') {
+    return handleRouteHistory(req, res, userId);
+  }
 
   sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: `No agent/v2 route for ${req.method} ${url}` } });
   return true;
@@ -377,6 +394,20 @@ async function handleV2Stream(req, res, userId, deps) {
   if (inFlightChatSessions.has(lockKey)) {
     sendTurnInProgress(req, res);
     return true;
+  }
+  // Session router, early probe: a chat at its cap (or a route store that cannot be read) is refused
+  // BEFORE the classifier's model call below. Read-only; the authoritative check runs under the lock.
+  if (routerEnabled()) {
+    try {
+      const early = beginRouteTurn({
+        db: getDb(), userId, chatSessionId, apply: false,
+        requested: { provider: typeof body.provider === 'string' && body.provider ? body.provider : AGENT_SDK_PROVIDER, model: typeof body.model === 'string' ? body.model : null },
+      });
+      if (early.refusal) { sendRouteRefusal(req, res, early.refusal); return true; }
+    } catch (err) {
+      if (err instanceof RouteError) { sendRouteRefusal(req, res, err); return true; }
+      throw err;
+    }
   }
 
   // Mode resolution — parity with the legacy loop (llm_agent/runtime/
@@ -472,10 +503,32 @@ const PROVIDER_ERROR_CODES = new Set(['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UN
 
 // The rest of the turn, once this chat session's lock is held — split out so
 // the lock's try/finally above stays a thin wrapper around it.
-async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, model, provider, message, body, deps, turnStartedAt = Date.now()) {
+async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, requestedModel, requestedProvider, message, body, deps, turnStartedAt = Date.now()) {
   const db = getDb();
+  // Session router (K1 P6b), authoritative pass with the chat's lock held and BEFORE the SSE headers:
+  // fail closed (503 ROUTE_UNAVAILABLE), the cap (409 SESSION_TOKEN_LIMIT), a pending switch, the pick.
+  // Off (the default) this is `{ enabled: false }` and nothing below differs from before.
+  let begin;
+  try {
+    begin = beginRouteTurn({ db, userId, chatSessionId, apply: true, requested: { provider: requestedProvider, model: requestedModel } });
+  } catch (err) {
+    if (err instanceof RouteError) { sendRouteRefusal(req, res, err); return true; }
+    throw err;
+  }
+  if (begin.refusal) { sendRouteRefusal(req, res, begin.refusal); return true; }
+  const model = begin.enabled ? (begin.pick.model || requestedModel) : requestedModel;
+  const provider = begin.enabled ? (begin.pick.provider || requestedProvider) : requestedProvider;
+  // A provider change since the last turn never resumes a Claude SDK session: the turn is seeded like
+  // an ended chat (plan 3.4) from the history the client sent, never from a cold transcript.
+  const adapterTurn = begin.enabled && isAdapterProvider(provider);
+  const freshTurn = body.fresh === true || (begin.enabled && begin.pick.freshSession);
   const row = getOrCreateAgentSession(db, userId, chatSessionId);
-  const resumeSdkSessionId = body.fresh ? null : row.sdk_session_id;
+  const resumeSdkSessionId = freshTurn || adapterTurn ? null : row.sdk_session_id;
+  const routeTurn = begin.enabled
+    ? createRouteTurn({ db, userId, chatSessionId, begin, provider, model, send: (ev) => send(ev) })
+    : null;
+  // Billable tokens left under the chat's cap, handed to the engine as its ceiling (null = none).
+  const capRemaining = begin.enabled && begin.capOn && begin.cap.limit !== null ? begin.cap.remaining : null;
 
   // SSE framing identical to the legacy /code-assist + spike streams.
   res.writeHead(200, {
@@ -534,14 +587,22 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       firstTokenMs = Date.now() - turnStartedAt;
       recordAgentTurnPhase({ engine: 'v2', phase: 'first_token', durationMs: firstTokenMs });
     }
-    if (ev && typeof ev.sessionId === 'string' && ev.sessionId) currentSdkSessionId = ev.sessionId;
+    // An adapter turn's session key is not an SDK session: never bind it as the chat's resume id.
+    if (!adapterTurn && ev && typeof ev.sessionId === 'string' && ev.sessionId) currentSdkSessionId = ev.sessionId;
     if (typeof ev?.model === 'string' && ev.model) resolvedModel = ev.model;
     send(ev);
+    // The engine reports ONE usage event per turn, ahead of its result: counted here so the chat's
+    // counters move before any terminal event (a crash after this point loses nothing).
+    if (routeTurn && !adapterTurn && ev?.type === 'usage') routeTurn.commit(ev);
     toolAccounting.observe(ev);
     try { noticeEffects(ev); } catch { /* bookkeeping never breaks the stream */ }
     if (!initSeen && ev && ev.type === 'init') {
       initSeen = true;
       send({ type: 'mode_set', mode });
+      if (begin.enabled) {
+        const notice = routeSwitchNotice({ userId, chatSessionId, begin, provider, model });
+        if (notice) send(notice);
+      }
     }
     if (ev && ev.type === 'tool_result') emitTaskProgress();
   };
@@ -554,7 +615,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // never resume its model context, so every later message silently started
   // from zero while the UI still showed the whole transcript.
   const bindSdkSession = () => {
-    if (!currentSdkSessionId) return;
+    if (adapterTurn || !currentSdkSessionId) return;
     markAgentSessionUsed(db, userId, chatSessionId, {
       sdkSessionId: currentSdkSessionId, model: resolvedModel ?? model, mode,
     });
@@ -574,10 +635,14 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   try {
     // Set when the engine finished the turn (sizes only — migration 0040).
     let turnComposition = null;
+    let answeredBy = null;   // set by an adapter turn the start-of-turn fallback moved to another provider
     try {
-      const { usageTotals, composition } = await deps.runTurn({
+      const runTurn = adapterTurn ? (deps.runAdapterTurn ?? runAdapterTurn) : deps.runTurn;
+      const { usageTotals, composition, metered, answered } = await runTurn({
         message,
-        history: freshTurnHistory(body),
+        // An adapter has no session to resume: it is handed the client's history on every turn.
+        history: freshTurnHistory(adapterTurn ? { ...body, fresh: true } : (freshTurn ? { ...body, fresh: true } : body)),
+        maxBillableTokens: capRemaining ?? undefined,
         userId,
         mode,
         model,
@@ -623,6 +688,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       });
       turnComposition = composition ?? null;
       runUsage = usageTotals ?? null;
+      if (answered?.provider) answeredBy = answered;
       // From here the ENGINE has finished: a bookkeeping throw below is not a
       // failed run (it must not be recorded as 'error').
       runEngineDone = true;
@@ -636,8 +702,11 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       // is not passed.)
       const meteredModel = resolvedModel ?? model;
       bindSdkSession();
-      for (const row of ledgerRowsForTurn(meteredModel, usageTotals)) {
-        recordUsage(db, { userId, provider, requestId: turnId, ...row });
+      // An adapter turn wrote its own ledger row (llm_agent/adapter/provider-turn.mjs).
+      if (!metered) {
+        for (const row of ledgerRowsForTurn(meteredModel, usageTotals)) {
+          recordUsage(db, { userId, provider, requestId: turnId, ...row });
+        }
       }
       // Task parity with legacy /code-assist: emit after the SDK result so the
       // Mac can populate PlanTimelineCard and auto-continue when work remains.
@@ -670,11 +739,14 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
           // custom-provider registry hasn't been synced since the server
           // restarted" apart from a genuine engine failure. Everything else
           // stays ENGINE_ERROR.
-          const code = PROVIDER_ERROR_CODES.has(err?.code) ? err.code : 'ENGINE_ERROR';
+          const code = PROVIDER_ERROR_CODES.has(err?.code) || err?.name === 'ProviderTurnError' ? err.code : 'ENGINE_ERROR';
           send({ type: 'error', code, message: err?.message || 'agent v2 turn failed', retryable: false });
         }
       }
     }
+    // The chat's token counters, on EVERY exit path (success, error, Stop, cap trip): once. The engine
+    // already committed at its usage event; an adapter turn, or an exit with no usage event, commits here.
+    routeTurn?.commit(runUsage, answeredBy);
     // Every exit path — success, Stop, failure: a stopped turn's tool calls
     // still cost tokens and are exactly the data the report needs.
     const toolEvents = toolAccounting.events();
@@ -783,6 +855,8 @@ async function handleV2SessionDelete(req, res, userId) {
   // DELETE /kb/agent/session-memory (session memory keys on the same
   // chatSessionId — see resolveChatSessionId).
   try { deleteSessionMemory(userId, chatSessionId); } catch { /* best-effort, like the transcript cleanup */ }
+  // The chat's route row (pick, cap, counters) goes with the chat.
+  try { deleteRoute(getDb(), userId, chatSessionId); } catch { /* best-effort */ }
   sendJSON(res, 200, { ok: true, sdkSessionId });
   return true;
 }
