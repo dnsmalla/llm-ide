@@ -1,0 +1,10 @@
+data: {"id": "chatcmpl-rec1", "object": "chat.completion.chunk", "created": 1, "model": "llama-3.3-70b-versatile", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-rec1", "object": "chat.completion.chunk", "created": 1, "model": "llama-3.3-70b-versatile", "choices": [{"index": 0, "delta": {"content": "Created the task."}, "finish_reason": null}]}
+
+data: {"id": "chatcmpl-rec1", "object": "chat.completion.chunk", "created": 1, "model": "llama-3.3-70b-versatile", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]}
+
+data: {"id": "chatcmpl-rec2", "object": "chat.completion.chunk", "created": 2, "model": "llama-3.3-70b-versatile", "choices": [], "usage": {"prompt_tokens": 160, "completion_tokens": 5, "total_tokens": 165}}
+
+data: [DONE]
+
