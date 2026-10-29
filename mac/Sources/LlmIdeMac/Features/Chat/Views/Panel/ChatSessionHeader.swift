@@ -29,6 +29,11 @@ extension CodeAssistantPanel {
                 }
             }
             Spacer(minLength: 4)
+            // Session router (K1 P6b): drawn only with the router on and a chat on the Agent engine.
+            if ChatRouteControl.isOffered(engine: engine) {
+                ChatRouteControl(engine: engine, api: api,
+                                 claudeModels: modelState.models(for: .claudeCode).map(\.id))
+            }
             sessionDropdownButton
             clearChatButton
         }

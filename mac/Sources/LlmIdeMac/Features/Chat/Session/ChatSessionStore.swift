@@ -96,6 +96,7 @@ enum ChatSessionStore {
             do {
                 var s = try AppJSON.decoder.decode(ChatSession.self, from: data)
                 applyTags(&s)
+                applyRouteTag(&s)
                 if s.scope == scope, isVisibleToCurrentUser(s) { out.append(s) }
             } catch {
                 quarantine(url, error: error)
@@ -140,6 +141,7 @@ enum ChatSessionStore {
         do {
             var s = try AppJSON.decoder.decode(ChatSession.self, from: data)
             applyTags(&s)
+            applyRouteTag(&s)
             return s
         } catch {
             quarantine(url, error: error)
@@ -189,7 +191,8 @@ enum ChatSessionStore {
            let onDisk = rawOwner(at: url), onDisk != current { throw SaveError.foreignOwner }
         let data = try AppJSON.encoder.encode(bumped)
         try data.write(to: url, options: .atomic)
-        if ownership?.stamp == true { Tags.record(bumped) }
+        // The route mirror is kept whatever the ownership mode (it is the N-1 safety net for the pin and limit).
+        if ownership?.stamp == true || bumped.route != nil || Tags.tag(for: bumped.id)?.route != nil { Tags.record(bumped) }
     }
 
     /// The directory the chat store and its sidecar files live under (nil only if it cannot be made).
@@ -378,6 +381,12 @@ enum ChatSessionStore {
         if s.archive == nil, let h = tag.archiveHash, let c = tag.archiveCount { s.archive = .init(hash: h, count: c) }
     }
 
+    /// Re-add a route an old build stripped. LOAD only: a save that clears the route records the tag as
+    /// cleared (below), so a deliberate clear is never resurrected. Independent of the ownership mode.
+    private static func applyRouteTag(_ s: inout ChatSession) {
+        if s.route == nil, let route = Tags.tag(for: s.id)?.route { s.route = route }
+    }
+
     /// `chat-tags.json`, a sidecar in the BASE directory (not `sessions/`: every `*.json`
     /// there is read as a chat, and an old build would quarantine this one). It mirrors
     /// the three tags per chat id so an old build's re-save cannot lose them (F14). It is a
@@ -390,6 +399,8 @@ enum ChatSessionStore {
             /// The archive digest and count (an old build drops `archive` from the file on resave).
             var archiveHash: String?
             var archiveCount: Int?
+            /// The session router's pin, limit and tokens used (an old build drops `route` on resave).
+            var route: ChatRouteSettings?
         }
         private static let lock = NSLock()
         nonisolated(unsafe) private static var cache: [String: [String: Tag]] = [:]   // base path -> id -> tag
@@ -417,11 +428,11 @@ enum ChatSessionStore {
 
         static func record(_ s: ChatSession) {
             let tag = Tag(ownerUserId: s.ownerUserId, meetingId: s.meetingId, origin: s.origin,
-                          archiveHash: s.archive?.hash, archiveCount: s.archive?.count)
+                          archiveHash: s.archive?.hash, archiveCount: s.archive?.count, route: s.route)
             lock.lock(); defer { lock.unlock() }
             var map = load()
             guard map[s.id.uuidString] != tag else { return }
-            if tag.ownerUserId == nil, tag.meetingId == nil, tag.origin == nil, tag.archiveHash == nil {
+            if tag.ownerUserId == nil, tag.meetingId == nil, tag.origin == nil, tag.archiveHash == nil, tag.route == nil {
                 guard map.removeValue(forKey: s.id.uuidString) != nil else { return }
             } else {
                 map[s.id.uuidString] = tag

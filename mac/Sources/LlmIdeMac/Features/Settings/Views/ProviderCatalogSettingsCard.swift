@@ -12,6 +12,10 @@ struct ProviderCatalogSettingsCard: View {
     @StateObject private var model: ProviderCatalogModel
     @State private var connecting: LlmIdeAPIClient.CatalogProvider?
     @State private var expandedModels: Set<String> = []
+    /// Session router prefs (K1 P6b): read by BackendManager when it launches the server, so a change
+    /// applies at the NEXT backend start (a restart would end a running turn).
+    @AppStorage(ChatRoutePreference.routerKey) private var routerOn = false
+    @AppStorage(ChatRoutePreference.capKey) private var routerCapOn = false
 
     init(api: LlmIdeAPIClient) {
         _model = StateObject(wrappedValue: ProviderCatalogModel(api: api))
@@ -176,6 +180,13 @@ struct ProviderCatalogSettingsCard: View {
             SettingsHint("Off by default. Checked once, before a turn starts, and always reported in the chat; a turn never changes model while it runs. This only tries your list in your order. Stacking several free tiers can break a provider's terms; check each provider's before you rely on it.")
 
             if model.settings.fallbackEnabled { fallbackOrderEditor }
+
+            Toggle("Per-chat model and token limit (beta)", isOn: $routerOn)
+            SettingsHint("Off by default. Adds a small control to each Agent chat: pin the chat to a provider and model, and give it a token limit. Applies the next time the backend starts. Switching model loses the prompt cache, so the control says what the next turn will cost.")
+            if routerOn {
+                Toggle("Enforce the token limit", isOn: $routerCapOn)
+                SettingsHint("Counts input, output and cache-write tokens (cached reads are shown, not counted). A chat at its limit stops and offers a one-click raise. The limit is approximate to one reply. Also applies at the next backend start.")
+            }
         }
     }
 

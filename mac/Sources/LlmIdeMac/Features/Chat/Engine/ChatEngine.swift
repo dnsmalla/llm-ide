@@ -350,6 +350,9 @@ final class ChatEngine {
     /// UUID string of the chat currently loaded into `messages`. Empty until
     /// `handleOnAppearSessions()` resolves (or mints) one.
     var currentSessionIDString = ""
+    /// This chat's session-router state (K1 Phase 6b): the pin, the token limit and meter, the switch
+    /// history. Inert unless the router is on (Settings pref and the server's LLMIDE_ROUTER).
+    let route = ChatRouteModel()
     /// Memo for `currentSessionEngineMarker()`: the marker last loaded from
     /// disk, keyed by the session id it belongs to. The marker is stamped
     /// exactly once at mint (`AgentV2Selection.engineForNewChat`) and never
@@ -550,6 +553,7 @@ final class ChatEngine {
             guard let self else { return messages.map { $0.wireTurn() } }
             return self.historyForRequest(messages)
         }
+        route.onSettingsChanged = { [weak self] in self?.persistRouteSettings() }
         connectTransportObservers()
     }
 
@@ -614,6 +618,8 @@ final class ChatEngine {
             guard let self, !self.externalTurnActive else { return }
             self.resolvedMode = mode
         }
+        engineTransport.onRouteSwitch = { [weak self] notice in self?.route.apply(notice) }
+        engineTransport.onSessionBudget = { [weak self] notice in self?.route.apply(notice) }
         // D3 clean cut: selection is per-chat, so the composite must see the
         // CURRENT session's engine marker — only this engine knows which
         // chat is loaded. Unwired (nil), the composite stays fail-closed on
@@ -888,6 +894,12 @@ final class ChatEngine {
             if !isCancellation {
                 self.error = error.localizedDescription
                 markFailed(streamingID, error)
+                // Session router: a turn refused at the chat's token limit (402) tells the control to
+                // offer the one-click raise; the numbers ride in the error's details.
+                if case let APIError.http(status, code, _, details) = error, status == 402, code == "SESSION_TOKEN_LIMIT" {
+                    let d = details as? [String: Any]
+                    route.noteRefusedAtCap(used: d?["used"] as? Int, limit: d?["limit"] as? Int)
+                }
             }
         }
         // Drain the next queued message (FIFO) as a fresh, un-cancelled turn.
@@ -910,6 +922,8 @@ final class ChatEngine {
         } else {
             busy = false
             runTask = nil
+            // The server's counters moved with this turn: read and mirror them (inert with the router off).
+            route.turnFinished()
             // Land any debounced streaming write now the turn is over, so a
             // finished conversation is on disk immediately instead of up to
             // `persistDebounceNanos` later. A no-op when nothing is pending —
@@ -1515,6 +1529,8 @@ final class ChatEngine {
         ctx.sessionId = agent.agentSessionId
         ctx.chatSessionId = currentSessionIDString.isEmpty ? nil : currentSessionIDString
         input.agentContext = ctx
+        // A pinned or just-switched chat carries its packed history (server seeds the turn from it).
+        input.routeSendsHistory = route.sendsHistory
     }
 
     /// Mid-turn task list from the v2 stream. Display only: it moves the

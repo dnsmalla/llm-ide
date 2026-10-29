@@ -78,6 +78,16 @@ extension ChatEngine {
     /// any realistic conversation.
     static let persistedMessageCap = 500
 
+    /// Write just the route settings into the chat file (the control changed them, or the server's
+    /// counters moved): a load-modify-save that leaves the messages exactly as the file holds them.
+    func persistRouteSettings() {
+        guard let id = UUID(uuidString: currentSessionIDString), route.chatSessionId == currentSessionIDString,
+              var session = ChatSessionStore.load(id: id) else { return }
+        guard session.route != route.fileSettings else { return }
+        session.route = route.fileSettings
+        ChatSessionStore.save(session, touch: false)
+    }
+
     func persistCurrentChat() {
         // An immediate write subsumes any pending debounced one — dropping
         // the timer here is what keeps every existing (non-streaming) call
@@ -125,6 +135,7 @@ extension ChatEngine {
         // same, and `ChatEngineSessionTests.persistPreservesIdentity` still
         // pins it.)
         session.messages = capped
+        if route.chatSessionId == id.uuidString { session.route = route.fileSettings }
         if session.title == "New chat" || session.title.isEmpty {
             if let firstUser = capped.first(where: { $0.role == .user }) {
                 let raw = firstUser.content
@@ -443,6 +454,11 @@ extension ChatEngine {
         currentTurnAttachments = []
         currentTurnTruncatedPaths = []
         sessionEpoch += 1
+        // The incoming chat's route: its file settings, reconciled with the server's row (a purged
+        // row is re-created from them; K1 P6b, answer Q-R2).
+        route.sessionChanged(
+            id: currentSessionIDString,
+            file: UUID(uuidString: currentSessionIDString).flatMap { ChatSessionStore.load(id: $0)?.route })
         // Composer/attachment state the panel still owns (Task 14 moves it).
         // Order against the engine-owned resets above is immaterial — the two
         // sets of fields are disjoint.

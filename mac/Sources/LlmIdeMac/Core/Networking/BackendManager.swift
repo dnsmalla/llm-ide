@@ -92,6 +92,8 @@ final class BackendManager {
     /// feature route groups to load (comma-separated `AppFeature` raw values;
     /// unset/empty → all, the same semantics as `mac/Package.swift`).
     nonisolated static let featuresEnvKey = "LLMIDE_FEATURES"
+    /// The session router's server switches (extension/core/router-flags.mjs).
+    nonisolated static let routerEnvKeys: Set<String> = ["LLMIDE_ROUTER", "LLMIDE_ROUTER_CAP", "LLMIDE_ROUTER_COMPRESS", "LLMIDE_ROUTER_LEARN"]
     nonisolated static let dataDirEnvKey = "LLMIDE_DATA_DIR"
     nonisolated static let dataLocationEnvKeys = ["LLMIDE_DATA_DIR", "LLMIDE_DB_PATH", "LLMIDE_AGENT_DB_PATH"]
     /// Seconds to wait for a spawned backend's /health. 20 by default. 240 only
@@ -495,7 +497,8 @@ final class BackendManager {
     ///   locations follow the app, not the shell it was launched from.
     nonisolated static func childEnvironment(base: [String: String],
                                              featureKeys: [String]?,
-                                             dataDir: String? = nil) -> [String: String] {
+                                             dataDir: String? = nil,
+                                             routerEnv: [String: String] = [:]) -> [String: String] {
         // Build the child environment from an allowlist instead of inheriting
         // the full shell env. Passing the full inherited env would expose
         // unrelated ambient secrets (AWS_SECRET_ACCESS_KEY, GITHUB_TOKEN, etc.)
@@ -518,6 +521,11 @@ final class BackendManager {
         // must follow the user's ACTIVE toggles, so the inherited value is
         // always dropped and only the app's own state is written back.
         env.removeValue(forKey: featuresEnvKey)
+        // The session router (K1 P6b) changes which model answers and how many tokens a chat may spend,
+        // so an inherited switch from the launching shell never turns it on: only the app's own
+        // preference is written back (`ChatRoutePreference.backendEnvironment`).
+        for key in Self.routerEnvKeys { env.removeValue(forKey: key) }
+        for (k, v) in routerEnv where Self.routerEnvKeys.contains(k) { env[k] = v }
         // The token bench's fake-engine seam (scripts/token-bench.mjs --fake)
         // is a developer switch. An inherited value must never turn the
         // shipped app's chat into the synthetic engine, so it is dropped here
@@ -573,7 +581,8 @@ final class BackendManager {
         proc.environment = Self.childEnvironment(
             base: env,
             featureKeys: Self.featureKeysProvider(),
-            dataDir: dataDir)
+            dataDir: dataDir,
+            routerEnv: ChatRoutePreference.backendEnvironment())
 
         let stdOut = Pipe()
         let stdErr = Pipe()

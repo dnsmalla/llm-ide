@@ -162,6 +162,11 @@ extension ChatEngine {
     /// engine calls this one wiring instead of keeping its own copy.
     func wireDecisionPosting(api: LlmIdeAPIClient) {
         decisionPostingWired = true
+        // The session router's three calls ride the same wiring (inert unless the router is on).
+        route.wire(ChatRouteModel.API(
+            fetch: { try await api.chatRoute(chatSessionId: $0) },
+            put: { try await api.putChatRoute($0) },
+            history: { try await api.chatRouteHistory(chatSessionId: $0) }))
         postApprovalDecision = { requestId, sdkSessionId, answers in
             try await api.agentV2Decision(requestId: requestId,
                                           sdkSessionId: sdkSessionId,

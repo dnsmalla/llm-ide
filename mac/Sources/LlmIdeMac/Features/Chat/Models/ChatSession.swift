@@ -61,6 +61,10 @@ struct ChatSession: Identifiable, Codable, Equatable {
     var origin: String?
     /// For an archived extension chat: the digest and count the Mac verified.
     var archive: ArchiveInfo?
+    /// Session router (K1 P6b): the chat's pinned provider/model, its token limit and the billable
+    /// tokens used. The server's route row is purged at quit, so this is what re-creates it on the next
+    /// open. Optional with no storeVersion bump; also mirrored in `chat-tags.json` for an N-1 build.
+    var route: ChatRouteSettings?
 
     struct ArchiveInfo: Codable, Equatable {
         let hash: String
@@ -78,7 +82,9 @@ struct ChatSession: Identifiable, Codable, Equatable {
          meetingId: String? = nil,
          ownerUserId: String? = nil,
          origin: String? = nil,
-         archive: ArchiveInfo? = nil) {
+         archive: ArchiveInfo? = nil,
+         route: ChatRouteSettings? = nil) {
+        self.route = route
         self.meetingId = meetingId
         self.ownerUserId = ownerUserId
         self.origin = origin
@@ -95,7 +101,7 @@ struct ChatSession: Identifiable, Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case storeVersion, id, scope, title, createdAt, lastUsedAt, messages, history, engine, projectId
-        case meetingId, ownerUserId, origin, archive
+        case meetingId, ownerUserId, origin, archive, route
     }
 
     init(from decoder: Decoder) throws {
@@ -116,6 +122,7 @@ struct ChatSession: Identifiable, Codable, Equatable {
         self.ownerUserId = try? c.decode(String.self, forKey: .ownerUserId)
         self.origin = try? c.decode(String.self, forKey: .origin)
         self.archive = try? c.decode(ArchiveInfo.self, forKey: .archive)
+        self.route = try? c.decode(ChatRouteSettings.self, forKey: .route)
         // Decided by which key is PRESENT, never by whether the v2 decode
         // happened to throw: one message this build couldn't read used to
         // fail the `[ChatMessage]` decode, fall through to the v1 branch —
@@ -176,6 +183,7 @@ struct ChatSession: Identifiable, Codable, Equatable {
         try c.encodeIfPresent(ownerUserId, forKey: .ownerUserId)
         try c.encodeIfPresent(origin, forKey: .origin)
         try c.encodeIfPresent(archive, forKey: .archive)
+        try c.encodeIfPresent(route, forKey: .route)
     }
 }
 
