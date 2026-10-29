@@ -20,7 +20,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 process.env.LLMIDE_AGENT_DB_PATH = tmpAgent;
 for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`, tmpAgent, `${tmpAgent}-wal`, `${tmpAgent}-shm`]) fs.rmSync(f, { force: true });
 
-test('50 000 notes: slice times of the shadow compare', { skip: !ENABLED }, async () => {
+test('50 000 notes: slice times, search and prune cost', { skip: !ENABLED }, async () => {
   const db = await import('../kb/db.mjs');
   const users = await import('../server/users.mjs');
   const meetings = await import('../kb/meetings.mjs');
@@ -46,6 +46,7 @@ test('50 000 notes: slice times of the shadow compare', { skip: !ENABLED }, asyn
   }
   if (batch.length) ni.upsertNotes(U, batch.splice(0), { projectId: '' });
   const seeded = Date.now() - t0;
+  ni.recordReconciledPass(U, '', new Date());   // a complete pass, as the Mac's reconcile would record
 
   const start = Date.now();
   const run = shadow.createNoteShadowRun({ db: conn, agentDb, now: new Date(), sliceMs: shadow.NOTE_SHADOW_SLICE_MS });
@@ -54,8 +55,28 @@ test('50 000 notes: slice times of the shadow compare', { skip: !ENABLED }, asyn
   const r = run.result;
   console.log(`bench: seeded ${N} notes in ${seeded} ms; compare ${total} ms; slices ${JSON.stringify(r.slices)}; ` +
     `scoredQueries ${r.scoredQueries} meanOverlap ${r.meanOverlap.toFixed(3)} ok ${r.ok}`);
-  assert.equal(r.ok, true);
+  assert.equal(r.state, 'ok');
   assert.ok(r.slices.count >= 1);
+
+  // Owner-filtered search at this size: one query, timed, averaged over the daily query set.
+  const queries = shadow.buildNoteShadowQueries(conn, U, '', Math.floor(Date.now() / 86400000));
+  const q0 = performance.now();
+  for (const { q } of queries) ni.noteIndexHits(U, { q, limit: 10, projectId: '', db: conn });
+  const perQuery = (performance.now() - q0) / Math.max(1, queries.length);
+  console.log(`bench: noteIndexHits ${perQuery.toFixed(1)} ms per query over ${queries.length} queries`);
+
+  // The final-chunk prune of ~50 000 rows: batched, and the event loop keeps turning meanwhile.
+  let ticks = 0;
+  let pumping = true;
+  const pump = () => { if (pumping) { ticks += 1; setImmediate(pump); } };
+  setImmediate(pump);
+  const p0 = performance.now();
+  const pruned = await ni.scanNoteChunk(U, { projectId: '', scanId: 'bench-prune-0001', index: 0, total: 1, complete: true,
+    prune: true, allowEmpty: true, totalEntries: 0, entries: [] });
+  const pruneMs = performance.now() - p0;
+  pumping = false;
+  console.log(`bench: pruned ${pruned.pruned} rows in ${pruneMs.toFixed(0)} ms; event-loop turns during the prune: ${ticks}`);
+  assert.equal(pruned.pruned, N);
   db.closeDb();
   agent.closeAgentDb();
   for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`, tmpAgent, `${tmpAgent}-wal`, `${tmpAgent}-shm`]) fs.rmSync(f, { force: true });

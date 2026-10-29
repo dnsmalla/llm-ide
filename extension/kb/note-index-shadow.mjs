@@ -26,7 +26,7 @@ export const NOTE_SHADOW_MIN_MEAN_OVERLAP = 0.8;
 /** A pair whose index has had no upsert this long is skipped, not compared. */
 export const NOTE_SHADOW_STALE_MS = 7 * 86400000;
 /** Time budget per slice (the run yields to the event loop between slices). */
-export const NOTE_SHADOW_SLICE_MS = 200;
+export const NOTE_SHADOW_SLICE_MS = 100;
 export const NOTE_SHADOW_MAX_QUERIES = 20;
 const SAMPLE_CAP = 10;
 
@@ -105,9 +105,11 @@ export function* comparePairSteps(db, userId, projectId, seed) {
   const indexMeetings = lazyPrepare(db,
     "SELECT json_extract(meta, '$.meetingId') AS mid FROM note_index WHERE user_id = ? AND project_id = ? AND kind = 'meeting'",
   ).all(userId, projectId).map((r) => r.mid).filter((m) => typeof m === 'string' && m !== '');
+  yield 'scope-index';   // each heavy statement is its own unit, so a slice never holds two of them
   const legacyIds = new Set(lazyPrepare(db,
     "SELECT id FROM meetings WHERE user_id = ? AND COALESCE(json_extract(meta, '$.projectId'), '') = ?",
   ).all(userId, projectId).map((r) => r.id));
+  yield 'scope-legacy';
   const scope = new Set(indexMeetings.filter((m) => legacyIds.has(m)));
   const matchedRows = indexMeetings.filter((m) => legacyIds.has(m)).length;
   yield 'scope';
@@ -129,6 +131,7 @@ export function* comparePairSteps(db, userId, projectId, seed) {
     }
     yield 'query';
   }
+  yield 'status';
   const status = indexStatus(userId, { projectId });
   const mean = overlaps.length ? overlaps.reduce((s2, o) => s2 + o, 0) / overlaps.length : 1;
   return {
