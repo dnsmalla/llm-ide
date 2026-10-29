@@ -24,6 +24,7 @@ export async function handleChatRoutes(req, res, ctx) {
       surface: u.searchParams.get('surface') || undefined,
       mode: u.searchParams.get('mode') || undefined,
       limit: u.searchParams.has('limit') ? Number(u.searchParams.get('limit')) : undefined,
+      offset: u.searchParams.has('offset') ? Number(u.searchParams.get('offset')) : undefined,
     });
     sendJSON(res, 200, { sessions });
     return true;

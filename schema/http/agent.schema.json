@@ -1637,6 +1637,10 @@
             "limit": {
               "type": "string",
               "description": "The default is 50, with a minimum of 1 and a cap of 200."
+            },
+            "offset": {
+              "type": "string",
+              "description": "Skip this many rows (newest first, ties by id): page through every chat with limit."
             }
           }
         }

@@ -44,7 +44,7 @@ export function createChatSession(userId, { title, surface = 'any', mode = 'ask'
   return { id, title: normTitle(title), surface, mode, projectId: projectId || null, createdAt: ts, updatedAt: ts };
 }
 
-export function listChatSessions(userId, { surface, mode, limit } = {}) {
+export function listChatSessions(userId, { surface, mode, limit, offset } = {}) {
   requireUser(userId);
   const cap = Math.min(
     Math.max(Number.isFinite(limit) ? Number(limit) : DEFAULT_LIST_LIMIT, 1),
@@ -65,8 +65,8 @@ export function listChatSessions(userId, { surface, mode, limit } = {}) {
     sql += ' AND mode = ?';
     params.push(mode);
   }
-  sql += ' ORDER BY updated_at DESC LIMIT ?';
-  params.push(cap);
+  sql += ' ORDER BY updated_at DESC, id ASC LIMIT ? OFFSET ?';
+  params.push(cap, Number.isInteger(offset) && offset > 0 ? offset : 0);
   return lazyPrepare(db, sql).all(...params).map(rowToSession);
 }
 
@@ -94,6 +94,12 @@ function rowToMessage(row) {
     meta,
     createdAt: row.created_at,
   };
+}
+
+/** True when this user has a server chat row with this id (any surface). */
+export function chatSessionExists(userId, sessionId) {
+  requireUser(userId);
+  return !!lazyPrepare(getDb(), 'SELECT 1 FROM chat_sessions WHERE user_id = ? AND id = ?').get(userId, sessionId);
 }
 
 export function getChatSession(userId, sessionId, { messageLimit } = {}) {

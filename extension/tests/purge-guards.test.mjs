@@ -128,3 +128,32 @@ test('DL16 still works when the mapping is gone: a transcript written after the 
   assert.equal(r.skippedReused, 1);
   assert.equal(fs.existsSync(path.join(proj, `${SDK}.jsonl`)), true, 'the newer transcript was not deleted');
 });
+
+test('orphan purge removes working state only, refuses a chat that has server rows, skips a busy one', async () => {
+  const chats = await import('../kb/chat-sessions.mjs');
+  const orphan = 'pg-orphan-1';
+  mapped(orphan, sqlTime(Date.now() - 86_400_000 * 9));
+  const ext = chats.createChatSession(U, { title: 'ext', surface: 'extension', mode: 'transcript' }).id;
+  chats.appendChatMessage(U, ext, { role: 'user', content: 'only copy' });
+  mapped(ext, sqlTime(Date.now() - 86_400_000 * 9));
+  const busyOne = 'pg-orphan-busy';
+  mapped(busyOne);
+  setBusyCheckForTesting((uid, id) => id === busyOne);
+  const r = await srv.call('POST', '/agent/v2/sessions/purge', { chatSessionIds: [orphan, ext, busyOne], verified: true, orphan: true });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body, { purged: 1, busy: [busyOne], staleReceipt: [], refused: [ext] });
+  assert.equal(exists(orphan), false);
+  assert.equal(exists(ext), true, 'the extension chat keeps its mapping');
+  assert.equal(chats.getChatSession(U, ext) !== null, true, 'and its rows (the only copy) are untouched');
+  setBusyCheckForTesting();
+});
+
+test('chat session list pages with offset so a client can read every chat, any surface', async () => {
+  const chats = await import('../kb/chat-sessions.mjs');
+  for (let i = 0; i < 5; i += 1) chats.createChatSession(U, { title: `p${i}`, surface: i % 2 ? 'extension' : 'mac', mode: 'transcript' });
+  const a = await srv.call('GET', '/kb/chat/sessions?limit=3&offset=0');
+  const b = await srv.call('GET', '/kb/chat/sessions?limit=3&offset=3');
+  const ids = [...a.body.sessions, ...b.body.sessions].map((s) => s.id);
+  assert.equal(new Set(ids).size, ids.length, 'no row appears on two pages');
+  assert.ok(a.body.sessions.length === 3 && b.body.sessions.length >= 1);
+});

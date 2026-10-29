@@ -23,7 +23,7 @@ let busyCheck = isChatTurnInFlight;
 /** Test seam: replace (or, with no argument, restore) the in-flight-turn check. */
 export function setBusyCheckForTesting(fn) { busyCheck = fn ?? isChatTurnInFlight; }
 const isBusyNow = (userId, id) => busyCheck(userId, id);
-import { deleteChatSession } from '../kb/chat-sessions.mjs';
+import { deleteChatSession, chatSessionExists } from '../kb/chat-sessions.mjs';
 import {
   listWorkingState, purgeWorkingState, enqueueSessionPurge, listSessionPurges,
   completeSessionPurge, failSessionPurge, sessionPurgeStatus, sdkIdsForChats,
@@ -44,6 +44,18 @@ export function purgeChat(userId, chatSessionId, { deleteTranscripts = deleteSdk
   const { purged } = purgeWorkingState(userId, [chatSessionId]);
   deleteChatSession(userId, chatSessionId);
   return { purged, transcripts: ids.length };
+}
+
+/**
+ * Purge only the WORKING state of a chat (transcripts, mapping, facts): never its server chat rows.
+ * The orphan path uses it: a chat whose Mac file is missing has no receipt, and what it must be able to
+ * reach is derivative state only.
+ */
+export function purgeWorkingOnly(userId, chatSessionId, { deleteTranscripts = deleteSdkTranscripts, isBusy = isBusyNow } = {}) {
+  if (isBusy(userId, chatSessionId)) return { purged: 0, busy: true };
+  const ids = sdkIdsForChats(userId, [chatSessionId]);
+  for (const sdk of ids) deleteTranscripts(userId, sdk);
+  return { ...purgeWorkingState(userId, [chatSessionId]), busy: false };
 }
 
 /**
@@ -109,6 +121,22 @@ export async function handleLifecycleRoutes(req, res, { userId, url }) {
     }
     if (!Array.isArray(body.chatSessionIds) || body.chatSessionIds.length > MAX_PURGE_IDS) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: `chatSessionIds must be an array of up to ${MAX_PURGE_IDS}` } });
+      return true;
+    }
+    // `orphan: true`: the Mac file is gone, so there is no receipt to show. Working state ONLY is removed, a chat
+    // that still has server rows is refused (those rows may be the only copy), and a turn in flight is skipped.
+    if (body.orphan === true) {
+      let purged = 0;
+      const busy = [];
+      const refused = [];
+      for (const id of body.chatSessionIds) {
+        if (typeof id !== 'string' || !id) continue;
+        if (chatSessionExists(userId, id)) { refused.push(id); continue; }
+        const r = purgeWorkingOnly(userId, id);
+        if (r.busy) { busy.push(id); continue; }
+        purged += r.purged;
+      }
+      sendJSON(res, 200, { purged, busy, staleReceipt: [], refused });
       return true;
     }
     // A purge needs proof that each chat's transcript is in a file: an archive

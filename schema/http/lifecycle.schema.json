@@ -144,6 +144,11 @@
             "verified": {
               "type": "boolean",
               "description": "Must be true: the caller has checked the Mac file. Any other value is a 400 VALIDATION_FAILED."
+            },
+            "orphan": {
+              "type": "boolean",
+              "x-optional": true,
+              "description": "The Mac file is gone: no receipt is needed, ONLY working state is removed, and a chat that still has server chat rows is refused (listed in refused)."
             }
           }
         }
@@ -174,6 +179,14 @@
                 "type": "string"
               },
               "description": "Chats used after their receipt was written: not purged, the caller must verify the file again."
+            },
+            "refused": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true,
+              "description": "orphan only: chats that still have server rows and were not touched."
             }
           }
         },
