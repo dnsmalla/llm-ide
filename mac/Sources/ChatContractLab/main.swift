@@ -2176,6 +2176,58 @@ do {
     expect(TierDefaults.modesHelp(.coding) == "Used by Execute and Auto", "row help names the modes")
 }
 
+// Live-then-archive chat lifecycle (plan 3.2-3.5, T4.2): the pure decisions. The hash vectors were produced by the
+// server's own archiveHash (extension/kb/chat-lifecycle.mjs), so a drift in either implementation fails here.
+do {
+    typealias L = ChatArchiveLogic
+    expect(L.archiveHash([]) == "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+           "an empty message list hashes to SHA-256 of the empty string")
+    expect(L.archiveHash([.init(role: "user", content: "héllo"), .init(role: "assistant", content: "wörld ✓ 日本語 😀")])
+               == "b9275ae1740b03c21c3ee1c24cd702208869fe0f6112a981efc3f6e42829d168",
+           "the archive hash equals the server's for non-ASCII text")
+    expect(L.archiveHash([.init(role: "user", content: "ab"), .init(role: "user", content: "c")])
+               != L.archiveHash([.init(role: "user", content: "a"), .init(role: "user", content: "bc")]),
+           "length prefixes keep two different splits apart")
+
+    let file = L.FileFacts(exists: true, decoded: true, messageCount: 6, lastUsedAt: Date(), ownedByCurrentUser: true)
+    let now = Date()
+    expect(L.verdictForPurge(file: file, serverUpdatedAt: now, engine: .init(), inQuit: true) == .purge,
+           "a verified file with no engine is purged")
+    expect(L.verdictForPurge(file: .init(exists: false, decoded: false, messageCount: 0, lastUsedAt: nil),
+                             serverUpdatedAt: now, engine: .init(), inQuit: true) == .skip(.fileMissing),
+           "a missing file is never a reason to purge")
+    expect(L.verdictForPurge(file: file, serverUpdatedAt: now, engine: .init(held: true, running: true, messageCount: 6), inQuit: true)
+               == .skip(.engineRunning), "a running turn is never purged")
+    expect(L.verdictForPurge(file: file, serverUpdatedAt: now, engine: .init(held: true, running: false, messageCount: 9), inQuit: true)
+               == .skip(.engineCountMismatch), "an engine that has more messages than the file blocks the purge")
+    expect(L.verdictForPurge(file: file, serverUpdatedAt: now, engine: .init(held: true, running: false, messageCount: 6), inQuit: false)
+               == .skip(.engineHolds), "the start sweep leaves a chat an engine holds")
+    expect(L.verdictForPurge(file: file, serverUpdatedAt: now.addingTimeInterval(3600), engine: .init(), inQuit: true)
+               == .skip(.fileOlderThanServer), "a file older than the server's last use blocks the purge")
+    expect(L.verdictForPurge(file: .init(exists: true, decoded: true, messageCount: 2, lastUsedAt: now, ownedByCurrentUser: false),
+                             serverUpdatedAt: nil, engine: .init(), inQuit: true) == .skip(.ownedByOtherUser),
+           "another user's file is never verified")
+    expect(L.verdictForPurge(file: .init(exists: true, decoded: true, messageCount: 3000, lastUsedAt: now),
+                             serverUpdatedAt: nil, engine: .init(held: true, running: false, messageCount: 3000), inQuit: true) == .purge,
+           "a whole archived chat (over the engine cap) agrees with an engine that holds it whole")
+
+    expect(L.ruleForExistingFile(exists: false, fileOrigin: nil, fileArchiveHash: nil, fileMessageCount: 0, fileHash: "", serverHash: "h", serverCount: 4) == .write,
+           "no file: write")
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileArchiveHash: "x", fileMessageCount: 4, fileHash: "h", serverHash: "h", serverCount: 4) == .alreadyMatches,
+           "a file equal to the server: commit without rewriting")
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileArchiveHash: "x", fileMessageCount: 3, fileHash: "old", serverHash: "h", serverCount: 4) == .overwrite,
+           "a smaller stale copy this protocol wrote is replaced")
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: "extension", fileArchiveHash: "x", fileMessageCount: 5, fileHash: "other", serverHash: "h", serverCount: 4) == .conflict,
+           "a file with messages the server lacks is never overwritten")
+    expect(L.ruleForExistingFile(exists: true, fileOrigin: nil, fileArchiveHash: nil, fileMessageCount: 2, fileHash: "other", serverHash: "h", serverCount: 4) == .conflict,
+           "a chat the Mac created is never overwritten")
+    expect(L.roleIsArchivable("user") && L.roleIsArchivable("assistant") && !L.roleIsArchivable("system"),
+           "only roles the Mac model holds losslessly are archived")
+    expect(L.orphanIsDue(firstSeen: now, serverUpdatedAt: nil, now: now) == false
+           && L.orphanIsDue(firstSeen: now.addingTimeInterval(-8 * 86400), serverUpdatedAt: nil, now: now),
+           "an orphan is purged only after the 7-day grace")
+}
+
 if failures.isEmpty {
     print("chat-contract-lab: all assertions passed")
 } else {

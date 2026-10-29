@@ -44,6 +44,29 @@ struct ChatSession: Identifiable, Codable, Equatable {
     /// earlier turns discussing files that no longer exist.
     var projectId: String?
 
+    // --- Live-then-archive tags (plan 3.10, Phase 4). All OPTIONAL: a file
+    // without them decodes unchanged, and `storeVersion` stays 2. An OLD build
+    // decodes a tagged file but DROPS these keys when it re-saves it (F14); the
+    // tags are therefore also mirrored in the `chat-tags.json` sidecar that
+    // `ChatSessionStore` keeps outside `sessions/`, and re-applied on load.
+
+    /// The meeting this chat is attached to (deleted when that meeting's file is
+    /// verified, plan Q3). Nil for every chat today.
+    var meetingId: String?
+    /// The signed-in user the chat belongs to (plan Q5/C16): another user never
+    /// sees it. Nil on a file written before this existed = not yet claimed.
+    var ownerUserId: String?
+    /// Where the chat came from: `"extension"` for a chat archived from the
+    /// server's live rows. Nil for a chat the Mac created.
+    var origin: String?
+    /// For an archived extension chat: the digest and count the Mac verified.
+    var archive: ArchiveInfo?
+
+    struct ArchiveInfo: Codable, Equatable {
+        let hash: String
+        let count: Int
+    }
+
     init(id: UUID = UUID(),
          scope: ChatScope,
          title: String = "New chat",
@@ -51,7 +74,15 @@ struct ChatSession: Identifiable, Codable, Equatable {
          lastUsedAt: Date = Date(),
          messages: [ChatMessage] = [],
          engine: String? = nil,
-         projectId: String? = nil) {
+         projectId: String? = nil,
+         meetingId: String? = nil,
+         ownerUserId: String? = nil,
+         origin: String? = nil,
+         archive: ArchiveInfo? = nil) {
+        self.meetingId = meetingId
+        self.ownerUserId = ownerUserId
+        self.origin = origin
+        self.archive = archive
         self.id = id
         self.scope = scope
         self.title = title
@@ -64,6 +95,7 @@ struct ChatSession: Identifiable, Codable, Equatable {
 
     enum CodingKeys: String, CodingKey {
         case storeVersion, id, scope, title, createdAt, lastUsedAt, messages, history, engine, projectId
+        case meetingId, ownerUserId, origin, archive
     }
 
     init(from decoder: Decoder) throws {
@@ -79,6 +111,11 @@ struct ChatSession: Identifiable, Codable, Equatable {
         // Optional decode so files persisted before project identity existed
         // (every chat today) decode as "unknown project" — nil, never a throw.
         self.projectId = try? c.decode(String.self, forKey: .projectId)
+        // Live-then-archive tags: optional, never a throw (an old file has none).
+        self.meetingId = try? c.decode(String.self, forKey: .meetingId)
+        self.ownerUserId = try? c.decode(String.self, forKey: .ownerUserId)
+        self.origin = try? c.decode(String.self, forKey: .origin)
+        self.archive = try? c.decode(ArchiveInfo.self, forKey: .archive)
         // Decided by which key is PRESENT, never by whether the v2 decode
         // happened to throw: one message this build couldn't read used to
         // fail the `[ChatMessage]` decode, fall through to the v1 branch —
@@ -135,6 +172,10 @@ struct ChatSession: Identifiable, Codable, Equatable {
         try c.encode(messages, forKey: .messages)
         try c.encodeIfPresent(engine, forKey: .engine)
         try c.encodeIfPresent(projectId, forKey: .projectId)
+        try c.encodeIfPresent(meetingId, forKey: .meetingId)
+        try c.encodeIfPresent(ownerUserId, forKey: .ownerUserId)
+        try c.encodeIfPresent(origin, forKey: .origin)
+        try c.encodeIfPresent(archive, forKey: .archive)
     }
 }
 
