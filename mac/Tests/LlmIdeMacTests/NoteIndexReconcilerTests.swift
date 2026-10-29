@@ -273,6 +273,56 @@ struct NoteIndexReconcilerTests {
         #expect(await h.server.rows["gone.md"] == "held")
     }
 
+    /// A mutable signed-in user for the identity tests.
+    final class Identity {
+        var user: String?
+        init(_ user: String?) { self.user = user }
+    }
+
+    @Test func closingTheProjectStopsTheFeed() async throws {
+        let h = try Harness()
+        let identity = Identity("user-a")
+        let host = NoteIndexHost()
+        host.sessionUserId = { identity.user }
+        host.start(root: h.root, index: h.index, projectId: "p1", remote: h.server)
+        #expect(host.isRunning)
+        host.stop()
+        #expect(!host.isRunning)
+    }
+
+    @Test func signOutStopsTheFeedThroughTheSessionRegistry() async throws {
+        let h = try Harness()
+        let identity = Identity("user-a")
+        let host = NoteIndexHost()
+        host.sessionUserId = { identity.user }
+        host.start(root: h.root, index: h.index, projectId: "p1", remote: h.server)
+        #expect(host.isRunning)
+        SessionScopedRegistry.shared.resetAll()
+        #expect(!host.isRunning)
+    }
+
+    @Test func aStaleReconcilerSendsNothingForAnotherUser() async throws {
+        let h = try Harness()
+        try h.write("a.md", Self.note(id: "a", title: "Alpha"))
+        let identity = Identity("user-a")
+        let r = NoteIndexReconciler(root: h.root, index: h.index, projectId: "p1", remote: h.server,
+                                    boundUserId: "user-a", currentUserId: { identity.user })
+        identity.user = "user-b"
+        #expect(await r.runOnce() == .identityChanged)
+        #expect(await h.server.calls == 0)
+        identity.user = nil
+        #expect(await r.runOnce() == .identityChanged)
+        #expect(await h.server.calls == 0)
+    }
+
+    @Test func aFeedStartedWhileSignedOutDoesNotStart() async throws {
+        let h = try Harness()
+        let host = NoteIndexHost()
+        host.sessionUserId = { nil }
+        host.start(root: h.root, index: h.index, projectId: "p1", remote: h.server)
+        #expect(!host.isRunning)
+    }
+
     @Test func platformLessNoteBlocksPruneButOthersStillSync() async throws {
         let h = try Harness()
         try h.write("good.md", Self.note(id: "g", title: "Good"))

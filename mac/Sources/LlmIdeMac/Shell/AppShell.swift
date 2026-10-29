@@ -474,6 +474,7 @@ struct AppShell: View {
         // task always calls initEnv() against a fresh state instead of
         // the old project's AppEnvironment.
         .onReceive(NotificationCenter.default.publisher(for: .activeProjectChanged)) { _ in
+            NoteIndexHost.shared.stop()
             appEnv?.indexer.stopWatching()
             appEnv = nil
             envInitError = nil
@@ -878,7 +879,7 @@ struct AppShell: View {
             }
             // Live-then-archive (lta.mode shadow/on): a finalize or folder change asks
             // for a debounced server index pass. Off by default; no-op when not started.
-            Task { @MainActor in NoteIndexHost.folderChanged() }
+            Task { @MainActor in NoteIndexHost.shared.folderChanged() }
         }
     }
 
@@ -887,13 +888,15 @@ struct AppShell: View {
     private func startNoteIndex(_ env: AppEnvironment) {
         guard LiveThenArchiveMode.current() != .off,
               let projectId = projectStore.activeProject?.bundle.id else {
-            NoteIndexHost.stop()
+            NoteIndexHost.shared.stop()
             return
         }
-        NoteIndexHost.start(root: env.meetingsFolder, index: env.index, projectId: projectId, remote: api)
+        NoteIndexHost.shared.start(root: env.meetingsFolder, index: env.index, projectId: projectId, remote: api)
     }
 
     private func rebuildEnv() {
+        // The derived note feed belongs to the environment being dropped (project close or switch).
+        NoteIndexHost.shared.stop()
         // Drop the old env so its FolderIndexer kqueue source releases
         // its fd; the new env opens a fresh sqlite handle against the
         // new path on init.

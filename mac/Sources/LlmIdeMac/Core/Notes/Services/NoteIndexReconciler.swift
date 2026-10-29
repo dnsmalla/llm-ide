@@ -352,7 +352,13 @@ final class NoteIndexReconciler {
         /// The server did not answer. The loop retries with backoff.
         case failed(String)
         case cancelled
+        /// The signed-in user is no longer the one this feed was started for. Nothing was sent
+        /// after the change, and the reconciler has stopped.
+        case identityChanged
     }
+
+    /// Thrown before a request when the signed-in user has changed (never sent under another account).
+    struct IdentityChanged: Error {}
 
     static let debounce: Duration = .seconds(5)
     static let interval: Duration = .seconds(15 * 60)
@@ -363,6 +369,10 @@ final class NoteIndexReconciler {
     private let projectId: String
     private let remote: NoteIndexRemote
     private let fileSystem: NoteIndexFileSystem
+    /// The account this feed was started for, and how to read the account now. Every request
+    /// is preceded by a check, so a sign-out or a switch to another user stops the feed.
+    private let boundUserId: String?
+    private let currentUserId: (@MainActor () -> String?)?
     private var cache: [String: NoteIndexCacheEntry] = [:]
     /// Hidden notes already removed on the server: key -> the hash sent. Re-sent only when
     /// the hidden set changes, or when the server reports one of them back (see runOnce).
@@ -376,12 +386,21 @@ final class NoteIndexReconciler {
     private var wake: AsyncStream<Void>.Continuation?
 
     init(root: URL, index: MeetingIndex, projectId: String, remote: NoteIndexRemote,
-         fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem()) {
+         fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem(),
+         boundUserId: String? = nil, currentUserId: (@MainActor () -> String?)? = nil) {
         self.root = root
         self.index = index
         self.projectId = projectId
         self.remote = remote
         self.fileSystem = fileSystem
+        self.boundUserId = boundUserId
+        self.currentUserId = currentUserId
+    }
+
+    /// Throws if the signed-in user is not the bound one (or nobody is signed in).
+    private func verifyIdentity() throws {
+        guard let bound = boundUserId, let current = currentUserId else { return }
+        guard current() == bound else { throw IdentityChanged() }
     }
 
     /// Backoff after `n` consecutive failures: 5 s, 10 s, 20 s ... capped at 5 min.
@@ -446,6 +465,11 @@ final class NoteIndexReconciler {
         guard !running else { return .busy }
         running = true
         defer { running = false }
+        do { try verifyIdentity() } catch {
+            Self.log.notice("note index: signed-in user changed; feed stopped")
+            stop()
+            return .identityChanged
+        }
 
         let root = self.root, index = self.index, previous = self.cache, fileSystem = self.fileSystem
         let scan: NoteIndexScan
@@ -491,6 +515,7 @@ final class NoteIndexReconciler {
                 return .manifestTooLarge(stats)
             }
             try Task.checkCancellation()
+            try verifyIdentity()
             let result = try await remote.indexReconcile(projectId: projectId, manifest: manifest, prune: prune)
             stats.pruned = result.pruned
             // A hidden note the server still holds (it reappeared) is removed again.
@@ -522,6 +547,10 @@ final class NoteIndexReconciler {
             return .ok(stats)
         } catch is CancellationError {
             return .cancelled
+        } catch is IdentityChanged {
+            Self.log.notice("note index: signed-in user changed mid-pass; feed stopped")
+            stop()
+            return .identityChanged
         } catch {
             consecutiveFailures += 1
             Self.log.notice("note index pass failed (\(self.consecutiveFailures)): \(error.localizedDescription, privacy: .public)")
@@ -547,6 +576,7 @@ final class NoteIndexReconciler {
     /// server refused this content, so retrying it would fail the same way: the
     /// batch is counted as rejected and the pass goes on. Anything else is transient.
     private func send(_ batch: [LlmIdeAPIClient.IndexNoteInput]) async throws -> LlmIdeAPIClient.IndexUpsertResult? {
+        try verifyIdentity()
         do {
             return try await remote.indexUpsertNotes(projectId: projectId, notes: batch)
         } catch APIError.http(let status, _, _, _) where (400..<500).contains(status)
@@ -557,31 +587,58 @@ final class NoteIndexReconciler {
     }
 }
 
-/// The one reconciler the app runs. Shell starts it when an environment opens and
-/// `lta.mode` is not off; the termination hook stops it on quit.
+/// The one reconciler the app runs. Shell starts it when a project environment opens
+/// and `lta.mode` is not off. It stops on project close, on quit, and on sign-out
+/// (SessionScoped), and it never sends under a user other than the one it started for.
 @MainActor
-enum NoteIndexHost {
-    private static var current: NoteIndexReconciler?
-    private static var hookRegistered = false
+final class NoteIndexHost: SessionScoped {
+    static let shared = NoteIndexHost()
 
-    static func start(root: URL, index: MeetingIndex, projectId: String, remote: NoteIndexRemote) {
-        current?.stop()
-        let reconciler = NoteIndexReconciler(root: root, index: index, projectId: projectId, remote: remote)
+    /// The signed-in user id, read live. The composition root sets it once.
+    var sessionUserId: @MainActor () -> String? = { nil }
+
+    private var current: NoteIndexReconciler?
+    private var sessionRegistered = false
+    private var quitRegistered = false
+
+    init() {}
+
+    /// Whether a feed is running (for tests and diagnostics).
+    var isRunning: Bool { current != nil }
+
+    /// Starts (or replaces) the feed for `projectId`, bound to the user signed in now.
+    /// Signed out: nothing starts.
+    func start(root: URL, index: MeetingIndex, projectId: String, remote: NoteIndexRemote) {
+        stop()
+        guard let user = sessionUserId() else { return }
+        let reconciler = NoteIndexReconciler(
+            root: root, index: index, projectId: projectId, remote: remote,
+            boundUserId: user, currentUserId: sessionUserId)
         current = reconciler
         reconciler.start()
-        if !hookRegistered {
-            hookRegistered = true
-            AppTerminationHooks.register("note-index") { NoteIndexHost.stop() }
+        if !sessionRegistered {
+            sessionRegistered = true
+            SessionScopedRegistry.shared.register(self)
+        }
+        if !quitRegistered, self === NoteIndexHost.shared {
+            quitRegistered = true
+            AppTerminationHooks.register("note-index") { NoteIndexHost.shared.stop() }
         }
     }
 
     /// A notes folder changed (finalize, rename, hide): ask for a debounced pass.
-    static func folderChanged() {
+    func folderChanged() {
         current?.requestRun()
     }
 
-    static func stop() {
+    /// Stops the feed: project close, quit, sign-out.
+    func stop() {
         current?.stop()
         current = nil
+    }
+
+    /// SessionScoped: a definitive sign-out or account switch.
+    func resetForSignOut() {
+        stop()
     }
 }

@@ -154,6 +154,8 @@ public struct LlmIdeMacApp: App {
         }
         let store = SessionStore(server: cfg.serverURL)
         let client = LlmIdeAPIClient(baseURL: cfg.serverURL, sessionStore: store)
+        // The derived note feed (lta Phase 2) binds to the account signed in when it starts.
+        NoteIndexHost.shared.sessionUserId = { [weak store] in store?.user?.id }
         // Honour the user's Capture → poll-interval setting (stored in ms).
         let orchestrator = CaptionOrchestrator(
             pollInterval: max(0.05, TimeInterval(cfg.pollIntervalMs) / 1000.0))
