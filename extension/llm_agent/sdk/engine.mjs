@@ -71,6 +71,7 @@ import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { resolveCustomProviderDispatch, isDecisionOnlyProvider, DECISION_ONLY_MESSAGE } from '../../providers/providers.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage, mapContextUsage } from './events.mjs';
+import { adoptEnabled } from './adopt.mjs';
 import { cachedEffortLevels } from './models.mjs';
 import { buildLlmIdeServer, v2ToolDefinitionChars } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
@@ -1741,6 +1742,9 @@ export async function runAgentV2Turn(
   const usageTotals = {
     inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0,
     costUsd: 0, numTurns: 0, durationMs: 0,
+    // `thinkingTokens` (the SDK's estimate of the thinking inside outputTokens:
+    // a breakdown, never an addition) is set only once a frame arrives, so a
+    // turn without it keeps the shape every consumer already knows.
   };
   // messageId → that API response's largest usage snapshot (fallback only).
   const streamedUsage = new Map();
@@ -1835,6 +1839,20 @@ export async function runAgentV2Turn(
       if (msg?.type === 'system' && msg?.subtype === 'compact_boundary') compacted = true;
       if (msg?.type === 'system' && msg?.subtype === 'init') sdkInit = msg;
       if (msg?.type === 'stream_event') noteStreamEvent(msg);
+      if (msg?.type === 'system') {
+        if (msg.subtype === 'thinking_tokens' && adoptEnabled('THINKING_TOKENS')) {
+          // The delta is what adds up across frames; a negative or non-numeric
+          // one (a reset, a future shape) is ignored rather than subtracted.
+          const d = msg.estimated_tokens_delta;
+          if (Number.isFinite(d) && d > 0) usageTotals.thinkingTokens = (usageTotals.thinkingTokens ?? 0) + Math.round(d);
+        } else if (msg.subtype === 'model_refusal_fallback' && adoptEnabled('REFUSAL')
+          && msg.scope !== 'local' && Array.isArray(msg.retracted_message_uuids) && msg.retracted_message_uuids.length > 0) {
+          // The refused partial was retracted: it must not feed memory capture.
+          // The text already streamed to the client stays there (the wire has
+          // no message ids to retract; the `model_fallback` notice says so).
+          replyText = '';
+        }
+      }
       for (const ev of mapSdkMessage(msg)) {
         if (TURN_PROGRESS_EVENTS.has(ev.type)) progressed = true;
         if (ev.type === 'delta' && typeof ev.text === 'string') {

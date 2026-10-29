@@ -55,7 +55,7 @@ test('re-running the migrations is a no-op', () => {
   const db = new Database(path.join(tmp, 'agent-rerun.db'));
   const first = applyMigrations(db, { dir: AGENT_MIGRATIONS_DIR, table: agent.AGENT_MIGRATIONS_TABLE });
   const second = applyMigrations(db, { dir: AGENT_MIGRATIONS_DIR, table: agent.AGENT_MIGRATIONS_TABLE });
-  assert.equal(first.applied, 2);
+  assert.equal(first.applied, 3);
   assert.equal(second.applied, 0);
   db.close();
 });

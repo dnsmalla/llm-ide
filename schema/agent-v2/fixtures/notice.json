@@ -1,0 +1,1 @@
+{"type":"notice","kind":"retry","level":"warning","text":"The model API is not responding (attempt 2 of 10); retrying in 4s.","data":{"attempt":2,"maxRetries":10,"retryDelayMs":4200,"errorStatus":529,"noResponse":false}}

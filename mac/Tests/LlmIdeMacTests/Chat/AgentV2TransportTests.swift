@@ -356,6 +356,33 @@ struct AgentV2TransportTests {
         #expect(progressCount == 0)
     }
 
+    @Test("notice: warning/error show one status line, info is never shown, text still flows")
+    func noticeStatusLine() async throws {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-1", claudeCodeVersion: nil, model: nil,
+                               tools: [], capabilities: [], mcpServers: [])),
+            .notice(kind: "rate_limit", level: "info", text: "Claude usage within limits."),
+            .notice(kind: "retry", level: "warning", text: "Retrying in 4s."),
+            .notice(kind: "refusal", level: "error", text: "Declined."),
+            .notice(kind: "retry", level: "warning", text: ""),
+            .delta("answer"),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil,
+                                  durationMs: nil, sessionId: nil, stopReason: nil)),
+            .notice(kind: "retry", level: "warning", text: "after terminal"),
+        ]
+        let transport = AgentV2Transport(streamer: stream)
+        var labels: [String] = []
+        let result = try await transport.roundTrip(
+            makeInput(),
+            onProgress: { labels.append($0.label) },
+            onChunk: { _ in },
+            onApproval: { _ in }
+        )
+        #expect(result.reply == "answer")
+        #expect(labels == ["Retrying in 4s.", "Declined."])
+    }
+
     @Test("Events after the terminal result are ignored (post-result bookkeeping)")
     func postResultEventsIgnored() async throws {
         let stream = ScriptedAgentV2Stream()

@@ -30,7 +30,7 @@ reason, or the gate fails.
 
 | Variant | Emitter | Inside the linker? |
 |---|---|---|
-| `init` `delta` `tool_use_start` `tool_args_delta` `tool_result` `usage` `result` `sdk` | `llm_agent/sdk/events.mjs` (`mapSdkMessage`) | yes |
+| `init` `delta` `tool_use_start` `tool_args_delta` `tool_result` `usage` `result` `sdk` `notice` | `llm_agent/sdk/events.mjs` (`mapSdkMessage`, `mapNotice`) | yes |
 | `approval_request` (both kinds), `approval_resolved` | `llm_agent/sdk/engine.mjs` (`awaitToolApproval`, `canUseTool`'s AskUserQuestion branch) | yes |
 | `mode_set` `tasks` `error` | `routes/agent-v2.mjs` (`send(...)` in the stream handler) | **no** |
 | `context_usage` | `llm_agent/sdk/events.mjs` (`mapContextUsage`), emitted by `llm_agent/sdk/engine.mjs` after `result` | yes |
@@ -41,6 +41,20 @@ bound. Moving them inside is tracked separately. **They are not carried by an
 ESLint rule** — no such rule exists for event names; the roster check in
 `scripts/conformance-agent-v2.mjs` is what notices a new one, by scanning for
 `{ type: '...' }` literals and failing on any the schema does not declare.
+
+## `notice` (K1 P2, additive)
+
+One event for the SDK signals the app understands: `retry` (API retry in
+progress), `rate_limit` (subscription limit state), `permission_denied`,
+`model_fallback` (a refusal moved the turn to the fallback model) and `refusal`
+(refusal with no fallback). Each has an env kill switch
+(`LLMIDE_V2_ADOPT_RETRY|RATE_LIMIT|PERMISSION_DENIED|REFUSAL=0`) that restores
+the previous `sdk` passthrough. `level` is the visibility contract: `info` is
+bookkeeping and no client shows it, `warning`/`error` get one status line.
+A `notice` never carries `model` (the route meters under an event's `model`).
+An OLDER Mac decodes the unknown type as `.sdk("notice")` and ignores it, so no
+server API version bump is needed. A fallback's retracted partial text cannot be
+retracted on the wire (no message ids); the notice says a fallback happened.
 
 ## Deliberate non-decodes
 
@@ -55,6 +69,7 @@ authority, this is the explanation.
 
 | Field | Why |
 |---|---|
+| `notice.data` | Machine-readable detail for the server (audit, subscription limit store) and observers. The Mac renders `kind`/`level`/`text` only: one status line for `warning`/`error`, nothing for `info`. |
 | `sdk.subtype`, `sdk.raw` | The Mac keeps only `sdkType`; the payload is an observation channel for unknown SDK message types (`AgentV2Event.swift` `SdkWire`). |
 | `error.retryable` | **Not a deliberate choice — real drift.** The Mac infers retryability from `code == "SESSION_UNRESUMABLE"` alone, so a future retryable code is invisible to it. Listed so the gate stays green while the fix is scheduled; remove this row when `ErrorWire` gains the field. |
 | `approval_request.questions[].options[].preview` | Same: emitted (it is the SDK's own field) and undecodable, so option previews silently do not render. |

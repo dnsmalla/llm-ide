@@ -15,6 +15,7 @@ export function runTotals(usage) {
     outputTokens: usage?.outputTokens,
     cacheReadTokens: usage?.cacheReadTokens,
     cacheCreationTokens: usage?.cacheCreationTokens,
+    thinkingTokens: usage?.thinkingTokens,
   };
 }
 

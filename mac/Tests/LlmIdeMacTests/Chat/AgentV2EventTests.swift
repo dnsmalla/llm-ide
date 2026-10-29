@@ -223,6 +223,14 @@ struct AgentV2EventTests {
                 == .sdk(nil))
     }
 
+    @Test("notice decodes kind/level/text and ignores the server's data payload")
+    func noticeDecodes() {
+        #expect(decode(#"{"type":"notice","kind":"retry","level":"warning","text":"Retrying in 4s.","data":{"attempt":2}}"#)
+                == .notice(kind: "retry", level: "warning", text: "Retrying in 4s."))
+        // A notice missing a required field is dropped, never half-decoded.
+        #expect(decode(#"{"type":"notice","kind":"retry","level":"warning"}"#) == nil)
+    }
+
     // --- forward compatibility / robustness ---------------------------------
 
     @Test("unknown event type decodes to .sdk(rawTypeString)")

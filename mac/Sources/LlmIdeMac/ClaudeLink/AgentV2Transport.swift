@@ -443,6 +443,13 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
             case .error(let code, let message):
                 sawTerminal = true
                 failure.record(AgentV2Error.forStreamError(code: code, message: message))
+            case .notice(_, let level, let text):
+                // `info` is server bookkeeping (audit, limit state): never shown.
+                // `warning` / `error` become the status line, the same channel
+                // the "Thinking…" label uses; no transcript row, no new screen.
+                if level == "warning" || level == "error", !text.isEmpty {
+                    onProgress(LlmIdeAPIClient.AgentProgress(label: text, phase: "notice"))
+                }
             case .sdk:
                 break  // unknown/passthrough types: observable on the wire, not actionable here
             }

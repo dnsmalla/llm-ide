@@ -14,6 +14,8 @@
 // values") so new upstream capabilities are observable on the wire from
 // day one.
 
+import { adoptEnabled } from './adopt.mjs';
+
 const MAX_TOOL_RESULT_CHARS = 20_000;
 
 // --- Pure event mapping (unit-tested; no SDK objects required) ------------
@@ -134,9 +136,110 @@ export function mapSdkMessage(msg) {
     }];
   }
 
-  // Everything else (compact_boundary, informational, api_retry, …) rides
+  // SDK signals the app understands (retry, rate limit, permission denial,
+  // refusal and model fallback) become one `notice` event. A switched-off
+  // capability, a malformed message and every type we do not know fall through
+  // to the observation channel below, unchanged.
+  const notice = mapNotice(msg);
+  if (notice) return [notice];
+
+  // Thinking-token estimates arrive many times per turn. They are metered by
+  // the engine from the raw message (usageTotals.thinkingTokens), not shown, so
+  // they do not ride the observation channel either once adopted.
+  if (msg.type === 'system' && msg.subtype === 'thinking_tokens' && adoptEnabled('THINKING_TOKENS')
+    && Number.isFinite(msg.estimated_tokens_delta)) return [];
+
+  // Everything else (compact_boundary, informational, …) rides
   // the observation channel unchanged.
   return [{ type: 'sdk', sdkType: msg.type, subtype: msg.subtype ?? null, raw: msg }];
+}
+
+// --- Notices (K1 P2: A2 retry, A3 rate limit, A4 permission denied, A7 refusal)
+
+const NOTICE_TEXT_CAP = 300;
+const clip = (v, cap = NOTICE_TEXT_CAP) => (typeof v === 'string' ? v.replace(/\s+/g, ' ').trim().slice(0, cap) : '');
+const str = (v, cap = 128) => (typeof v === 'string' && v ? v.slice(0, cap) : null);
+const int = (v) => (Number.isFinite(v) ? Math.round(v) : null);
+const seconds = (ms) => `${Math.max(1, Math.round(ms / 1000))}s`;
+
+// `level` is the only thing a client needs to decide visibility: `info` is a
+// state signal for the server (audit, limits) that no UI should show;
+// `warning` and `error` are meant for the user. A `notice` never carries the
+// key `model`: the route meters under the first event's `model`, and a
+// fallback notice must not rename the turn's metered model.
+function notice(kind, level, text, data) {
+  return { type: 'notice', kind, level, text: clip(text), data };
+}
+
+/**
+ * One adopted SDK message → a `notice` event, or null when the message is not
+ * one of them, its capability is switched off, or it is too malformed to
+ * describe (those stay on the `sdk` observation channel). Exported pure for
+ * tests.
+ */
+export function mapNotice(msg) {
+  if (!msg || typeof msg !== 'object') return null;
+
+  if (msg.type === 'rate_limit_event' && adoptEnabled('RATE_LIMIT')) {
+    const info = msg.rate_limit_info;
+    if (!info || typeof info !== 'object') return null;
+    // An unknown status is never read as `allowed`: it is reported as 'unknown'
+    // and shown as a warning, so a newer SDK's new value cannot look healthy.
+    const status = ['allowed', 'allowed_warning', 'rejected'].includes(info.status) ? info.status : 'unknown';
+    const level = status === 'allowed' ? 'info' : (status === 'rejected' ? 'error' : 'warning');
+    const kindLabel = str(info.rateLimitType, 40);
+    const text = status === 'rejected' ? `Claude usage limit reached${kindLabel ? ` (${kindLabel})` : ''}.`
+      : status === 'allowed' ? 'Claude usage within limits.'
+      : `Approaching the Claude usage limit${kindLabel ? ` (${kindLabel})` : ''}.`;
+    return notice('rate_limit', level, text, {
+      status, rateLimitType: kindLabel, resetsAt: int(info.resetsAt),
+      utilization: Number.isFinite(info.utilization) ? info.utilization : null,
+      isUsingOverage: info.isUsingOverage === true || info.overageInUse === true,
+    });
+  }
+
+  if (msg.type !== 'system') return null;
+
+  if (msg.subtype === 'api_retry' && adoptEnabled('RETRY')) {
+    const attempt = int(msg.attempt);
+    const max = int(msg.max_retries);
+    if (attempt === null || max === null) return null;
+    const delay = int(msg.retry_delay_ms) ?? 0;
+    return notice('retry', 'warning',
+      `The model API is not responding (attempt ${attempt} of ${max}); retrying in ${seconds(delay)}.`,
+      { attempt, maxRetries: max, retryDelayMs: delay, errorStatus: int(msg.error_status), noResponse: !!msg.no_response });
+  }
+
+  if (msg.subtype === 'permission_denied' && adoptEnabled('PERMISSION_DENIED')) {
+    const tool = str(msg.tool_name);
+    if (!tool) return null;
+    // Audit only: the denied call already shows as an errored tool step, so the
+    // UI does not need a second line (level info).
+    return notice('permission_denied', 'info', `Permission denied for ${tool}.`, {
+      toolName: tool, toolUseId: str(msg.tool_use_id),
+      reasonType: str(msg.decision_reason_type, 64), subagent: typeof msg.agent_id === 'string' && msg.agent_id !== '',
+    });
+  }
+
+  if (msg.subtype === 'model_refusal_fallback' && adoptEnabled('REFUSAL')) {
+    const from = str(msg.original_model);
+    const to = str(msg.fallback_model);
+    if (!from || !to) return null;
+    return notice('model_fallback', 'warning',
+      `${from} declined this request; continued on ${to}.`,
+      { fromModel: from, toModel: to, direction: str(msg.direction, 16), scope: str(msg.scope, 16) ?? 'session',
+        category: str(msg.api_refusal_category, 64),
+        retractedMessages: Array.isArray(msg.retracted_message_uuids) ? msg.retracted_message_uuids.length : 0 });
+  }
+
+  if (msg.subtype === 'model_refusal_no_fallback' && adoptEnabled('REFUSAL')) {
+    const from = str(msg.original_model);
+    return notice('refusal', 'error',
+      `${from ?? 'The model'} declined this request and there is no fallback model.`,
+      { fromModel: from, category: str(msg.api_refusal_category, 64) });
+  }
+
+  return null;
 }
 
 /**

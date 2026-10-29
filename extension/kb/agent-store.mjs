@@ -96,13 +96,14 @@ export function enqueueRunClose(userId, runId, close = {}) {
     return enqueueAgentWrite('runs', `UPDATE agent_runs SET
          status = ?, ended_at = ?, duration_ms = ?, tool_calls = ?,
          input_tokens = ?, output_tokens = ?, cache_read_tokens = ?, cache_creation_tokens = ?,
-         stop_reason = ?, error_code = ?
+         stop_reason = ?, error_code = ?, thinking_tokens = ?
        WHERE user_id = ? AND run_id = ? AND status = 'running'`, [
       status, endedAt.toISOString(),
       clampInt(close.durationMs), clampInt(close.toolCalls),
       clampInt(close.inputTokens), clampInt(close.outputTokens),
       clampInt(close.cacheReadTokens), clampInt(close.cacheCreationTokens),
       clampStr(close.stopReason, 32), clampStr(close.errorCode, 64),
+      clampInt(close.thinkingTokens),
       userId, runId,
     ]);
   } catch {

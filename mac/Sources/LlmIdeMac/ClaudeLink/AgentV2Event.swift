@@ -322,6 +322,13 @@ enum AgentV2Event: Sendable, Equatable {
     /// route also emits a `retryable` flag this model deliberately does not
     /// carry yet; the code (e.g. SESSION_UNRESUMABLE) is the retry signal.
     case error(code: String?, message: String)
+    /// `{"type":"notice","kind":…,"level":…,"text":…}` — an SDK signal the
+    /// server understands (retry, rate limit, permission denial, model
+    /// fallback, refusal). `level` is the visibility contract: `info` is
+    /// server bookkeeping and never shown; `warning` / `error` get one status
+    /// line. A server that predates it sends nothing; an app that predates it
+    /// decodes the type as `.sdk("notice")` and ignores it.
+    case notice(kind: String, level: String, text: String)
     /// `{"type":"sdk","sdkType":…}` (observation passthrough) OR an event
     /// type this build doesn't know: the payload is the raw type string so
     /// new upstream capabilities stay observable on the wire.
@@ -364,6 +371,8 @@ enum AgentV2Event: Sendable, Equatable {
             return Self.payload(AgentV2Result.self, data).map { .result($0) }
         case "error":
             return Self.payload(ErrorWire.self, data).map { .error(code: $0.code, message: $0.message) }
+        case "notice":
+            return Self.payload(NoticeWire.self, data).map { .notice(kind: $0.kind, level: $0.level, text: $0.text) }
         case "sdk":
             return .sdk(Self.payload(SdkWire.self, data).flatMap { $0.sdkType })
         default:
@@ -412,6 +421,7 @@ enum AgentV2Event: Sendable, Equatable {
     private struct ModeSetWire: Decodable { let mode: String }
     private struct TasksWire: Decodable { let tasks: [AgentTask]; let continueNeeded: Bool }
     private struct TasksProgressWire: Decodable { let tasks: [AgentTask] }
+    private struct NoticeWire: Decodable { let kind: String; let level: String; let text: String }
     private struct ErrorWire: Decodable { let code: String?; let message: String }
     /// `sdk` events carry the raw upstream message in `raw` — decoding it
     /// is not required to observe the type, and forcing it would make a

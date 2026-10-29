@@ -705,3 +705,43 @@ export function getRateLimits(userId, provider) {
   if (!userId) return null;
   return _rateLimits.get(rlKey(userId, provider)) || null;
 }
+
+// ---------------------------------------------------------------------------
+// Claude subscription limit signal (in-memory; latest per user).
+//
+// The Agent SDK's `rate_limit_event` is the one REAL signal for subscription
+// limits (the header snapshot above covers API keys only). It is ADDITIVE: it
+// is recorded and readable, and nothing in budget enforcement (getLimits,
+// resolveModel, quota_state, flagQuota) reads it. Changing which model runs on
+// a rejected signal is a separate, bench-gated decision.
+//
+// Fail closed: an unrecognised status is stored as 'unknown', never as
+// 'allowed', and a malformed event stores nothing.
+// ---------------------------------------------------------------------------
+const _subscriptionLimit = new Map();   // userId → latest signal
+const SUBSCRIPTION_STATUSES = new Set(['allowed', 'allowed_warning', 'rejected']);
+
+/** Record the latest signal; returns the stored entry, or null if unusable. */
+export function recordSubscriptionLimit(userId, info, now = new Date()) {
+  if (!userId || !info || typeof info !== 'object') return null;
+  const status = SUBSCRIPTION_STATUSES.has(info.status) ? info.status : 'unknown';
+  const num = (v) => (Number.isFinite(v) ? v : null);
+  const entry = {
+    capturedAt: now.toISOString(),
+    status,
+    rateLimitType: typeof info.rateLimitType === 'string' ? info.rateLimitType.slice(0, 40) : null,
+    resetsAt: num(info.resetsAt),
+    utilization: num(info.utilization),
+    isUsingOverage: info.isUsingOverage === true,
+  };
+  _subscriptionLimit.set(String(userId), entry);
+  // Bounded: one entry per user, and users are few; still never unbounded.
+  while (_subscriptionLimit.size > 1000) _subscriptionLimit.delete(_subscriptionLimit.keys().next().value);
+  return entry;
+}
+
+/** The latest subscription limit signal for this user, or null. */
+export function getSubscriptionLimit(userId) {
+  if (!userId) return null;
+  return _subscriptionLimit.get(String(userId)) || null;
+}

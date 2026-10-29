@@ -46,6 +46,9 @@ const ALLOWED_UNDECODED = Object.freeze({
     subtype: 'Observation channel only — the Mac keeps sdkType. AgentV2Event.swift SdkWire.',
     raw: 'Same: the raw SDK message is not modelled on the Mac.',
   },
+  'notice.json': {
+    data: 'Machine-readable detail for the server and observers (audit, limits); the Mac renders only kind/level/text, like the sdk raw payload.',
+  },
   'error.json': {
     retryable: 'REAL DRIFT, not a choice: ErrorWire has no such field, so the Mac infers retryability from code == "SESSION_UNRESUMABLE" alone. Remove this entry when ErrorWire gains it.',
   },

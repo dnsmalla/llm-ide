@@ -78,7 +78,7 @@ test('a bad source or missing run id never throws', () => {
 
 test('runTotals maps a usage object to close fields and tolerates none', () => {
   assert.deepEqual(runTotals({ inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 }),
-    { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4 });
+    { inputTokens: 1, outputTokens: 2, cacheReadTokens: 3, cacheCreationTokens: 4, thinkingTokens: undefined });
   assert.equal(runTotals(null).inputTokens, undefined);
 });
 
@@ -144,4 +144,15 @@ test('legacy turn totals come from the running turn and fail closed when partial
     recordUsage(null, { userId: U, provider: 'p', model: 'm', inputTokens: 3, outputTokens: 1 });
   });
   assert.ok(turnTokenUsageFields(totals) === null || turnTokenUsageFields(totals).inputTokens === 3);
+});
+
+test('thinking tokens are a breakdown column on the run (migration 0003), 0 when absent', () => {
+  const db = fresh();
+  beginAgentRun(U, { runId: 'r-think', source: 'chat', engine: 'v2' })
+    .finish({ status: 'ok', ...runTotals({ inputTokens: 1, outputTokens: 900, thinkingTokens: 640 }) });
+  beginAgentRun(U, { runId: 'r-nothink', source: 'chat', engine: 'v2' })
+    .finish({ status: 'ok', ...runTotals({ inputTokens: 1, outputTokens: 9 }) });
+  assert.equal(row(db, 'r-think').thinking_tokens, 640);
+  assert.equal(row(db, 'r-think').output_tokens, 900, 'output keeps the full count: thinking is inside it, not added');
+  assert.equal(row(db, 'r-nothink').thinking_tokens, 0);
 });

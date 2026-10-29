@@ -74,8 +74,8 @@
       "where": "tools.mjs, loop-agent.mjs"
     },
     "messages.SDKAPIRetryMessage": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "events.mjs mapNotice (notice kind retry)"
     },
     "messages.SDKAssistantMessage": {
       "status": "adopted",
@@ -142,12 +142,12 @@
       "reason": "internal transport signal"
     },
     "messages.SDKModelRefusalFallbackMessage": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "events.mjs mapNotice, engine.mjs, notice-effects.mjs"
     },
     "messages.SDKModelRefusalNoFallbackMessage": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "events.mjs mapNotice, notice-effects.mjs"
     },
     "messages.SDKNotificationMessage": {
       "status": "ignored",
@@ -158,8 +158,8 @@
       "where": "events.mjs"
     },
     "messages.SDKPermissionDeniedMessage": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "events.mjs mapNotice, notice-effects.mjs (audit_log)"
     },
     "messages.SDKPluginInstallMessage": {
       "status": "ignored",
@@ -170,8 +170,8 @@
       "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKRateLimitEvent": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "events.mjs mapNotice, notice-effects.mjs, kb/usage.mjs recordSubscriptionLimit"
     },
     "messages.SDKResultMessage": {
       "status": "adopted",
@@ -206,8 +206,8 @@
       "reason": "later: background/task lifecycle; revisit with A9 (Task* tools) and A5 (subagents)"
     },
     "messages.SDKThinkingTokensMessage": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "engine.mjs usageTotals.thinkingTokens, agent_runs.thinking_tokens"
     },
     "messages.SDKToolProgressMessage": {
       "status": "ignored",

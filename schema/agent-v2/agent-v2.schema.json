@@ -141,6 +141,19 @@
       }
     },
     {
+      "title": "notice",
+      "description": "An SDK signal the app understands (K1 P2): kind retry | rate_limit | permission_denied | model_fallback | refusal. `level` decides visibility: info = server bookkeeping (audit, limits), never shown; warning/error = one status line. `data` is the machine-readable detail for the server and observers; the Mac does not decode it. Never carries `model`. Old clients decode an unknown type as the sdk passthrough.",
+      "additionalProperties": false,
+      "required": ["type", "kind", "level", "text"],
+      "properties": {
+        "type": { "const": "notice" },
+        "kind": { "type": "string" },
+        "level": { "enum": ["info", "warning", "error"] },
+        "text": { "type": "string" },
+        "data": {}
+      }
+    },
+    {
       "title": "approval_request (ToolApproval)",
       "additionalProperties": false,
       "required": ["type", "requestId", "kind", "toolName", "argsSummary"],

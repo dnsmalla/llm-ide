@@ -165,6 +165,11 @@ extension AgentV2Event {
             // decode it, so the Mac infers retryability from `code` alone.
             return ["code", "message"]
 
+        case .notice:
+            // NOTE: no `data` — the server's machine-readable detail; the Mac
+            // renders kind/level/text only (runner ALLOWED_UNDECODED).
+            return ["kind", "level", "text"]
+
         case .sdk:
             // NOTE: no `subtype`, no `raw` — deliberately dropped.
             return ["sdkType"]

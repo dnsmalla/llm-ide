@@ -33,6 +33,7 @@ import {
 import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
 import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
+import { createNoticeEffects } from '../llm_agent/sdk/notice-effects.mjs';
 import { recordToolEvents } from '../kb/tool-events.mjs';
 import { recordTurnComposition } from '../kb/turn-composition.mjs';
 import { beginAgentRun, runTotals } from '../kb/agent-runs.mjs';
@@ -518,6 +519,8 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   let runUsage = null;
   let runErrorCode = null;
   const toolAccounting = createToolAccounting();
+  // SDK signals (rate limit, permission denial, refusal): audit and record only.
+  const noticeEffects = createNoticeEffects({ userId, turnId, db, log });
   // Time to the first streamed text — what the user actually waits for.
   let firstTokenMs = null;
   const onEvent = (ev) => {
@@ -529,6 +532,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
     if (typeof ev?.model === 'string' && ev.model) resolvedModel = ev.model;
     send(ev);
     toolAccounting.observe(ev);
+    try { noticeEffects(ev); } catch { /* bookkeeping never breaks the stream */ }
     if (!initSeen && ev && ev.type === 'init') {
       initSeen = true;
       send({ type: 'mode_set', mode });
