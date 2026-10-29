@@ -15,6 +15,14 @@ struct ChatArchiveStatus: Equatable {
     var pendingDeletes: Int
 }
 
+/// What the attention list needs from the host; `ChatArchiveHost` conforms, tests substitute a fake.
+@MainActor
+protocol ChatArchiveDecisionHosting: AnyObject {
+    func attentionItems() async -> [ChatArchiveAttentionItem]
+    func acceptIncompleteArchive(_ serverChatId: String) async -> ChatArchiveOutcome
+    func dismissAttention(_ serverChatId: String) async
+}
+
 /// Retry schedule for the start sweep: a backend that is not up yet must not cost the whole recovery.
 enum ChatArchiveBackoff {
     /// 5 s, then roughly tripling to a 5 minute cap, for a bounded number of tries.
@@ -43,7 +51,7 @@ enum ChatArchiveBackoff {
 /// `lta.mode = off` (the default): no service, no quit hook, no delete tombstone; the only thing installed is the
 /// owner filter, which hides a chat file stamped with another user (such files exist only after the mode was `on`).
 @MainActor
-final class ChatArchiveHost {
+final class ChatArchiveHost: ChatArchiveDecisionHosting {
     static let shared = ChatArchiveHost()
     private(set) var service: ChatArchiveService?
     private(set) var mode: LiveThenArchiveMode = .off
@@ -161,8 +169,19 @@ final class ChatArchiveHost {
     }
 
     /// The user accepted an incomplete archive of an extension chat.
-    func acceptIncompleteArchive(_ serverChatId: String) async {
-        _ = await service?.acceptIncomplete(serverChatId)
+    @discardableResult
+    func acceptIncompleteArchive(_ serverChatId: String) async -> ChatArchiveOutcome {
+        await service?.acceptIncomplete(serverChatId) ?? .failed("archive is not running")
+    }
+
+    /// The chats waiting for a decision, for the Settings list.
+    func attentionItems() async -> [ChatArchiveAttentionItem] {
+        await service?.attentionItems() ?? []
+    }
+
+    /// "Keep on server": drop the chat from the list (its rows stay).
+    func dismissAttention(_ serverChatId: String) async {
+        await service?.dismissAttention(serverChatId)
     }
 
     // MARK: Test seams

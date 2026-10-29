@@ -86,6 +86,29 @@ extension LlmIdeAPIClient: ChatArchiveRemote {
     }
 }
 
+/// One extension chat waiting for the user's decision (Settings list).
+struct ChatArchiveAttentionItem: Equatable, Identifiable {
+    enum Reason: Equatable {
+        /// The live store dropped messages (caps); the archive written has fewer than the chat once had.
+        case incomplete(pruned: Int, truncated: Int)
+        /// A file on this Mac with the same id differs from the server's rows.
+        case conflict
+    }
+    var serverId: String
+    var title: String
+    /// Messages the server still holds for this chat.
+    var serverMessages: Int
+    /// Messages in the Mac file that differs (conflict only).
+    var macMessages: Int?
+    var reason: Reason
+    var id: String { serverId }
+    /// Only an incomplete archive can be accepted as is; a conflicting file is never overwritten.
+    var canArchiveAsIs: Bool {
+        if case .incomplete = reason { return true }
+        return false
+    }
+}
+
 enum ChatArchiveOutcome: Equatable {
     case committed
     case alreadyArchived
@@ -156,6 +179,8 @@ actor ChatArchiveService {
     private var epoch = 0
     /// Extension chats waiting for the user to accept an incomplete archive.
     private(set) var needsDecision: [String: ChatArchiveOutcome] = [:]
+    /// What the Settings list shows for each waiting chat (title and counts), recorded where the decision arises.
+    private var decisionInfo: [String: ChatArchiveAttentionItem] = [:]
 
     init(_ deps: Deps) { self.deps = deps }
 
@@ -403,14 +428,23 @@ actor ChatArchiveService {
 
             // 2. what is already on the Mac under this id (C6, C15).
             let existing: ChatSession? = deps.storage.fileExists(uuid) ? deps.storage.load(uuid) : nil
-            if deps.storage.fileExists(uuid), existing == nil { needsDecision[serverId] = .conflictKept; return .conflictKept }   // unreadable: never overwrite
+            if deps.storage.fileExists(uuid), existing == nil {
+                needsDecision[serverId] = .conflictKept
+                decisionInfo[serverId] = .init(serverId: serverId, title: snap.session.title, serverMessages: messages.count, macMessages: nil, reason: .conflict)
+                return .conflictKept
+            }   // unreadable: never overwrite
             let existingWire = existing.map { Self.wire($0.messages) } ?? []
             let existingHash = existing.map { _ in ChatArchiveLogic.archiveHash(existingWire) } ?? ""
             let rule = ChatArchiveLogic.ruleForExistingFile(
                 exists: existing != nil, fileOrigin: existing?.origin,
                 fileIsPrefixOfServer: ChatArchiveLogic.isPrefix(existingWire, of: incoming),
                 fileHash: existingHash, serverHash: incomingHash)
-            if rule == .conflict { needsDecision[serverId] = .conflictKept; return .conflictKept }
+            if rule == .conflict {
+                needsDecision[serverId] = .conflictKept
+                decisionInfo[serverId] = .init(serverId: serverId, title: snap.session.title, serverMessages: messages.count,
+                                               macMessages: existing?.messages.count, reason: .conflict)
+                return .conflictKept
+            }
 
             // 3. write, read back, recompute from the FILE.
             var fileHash = existingHash
@@ -447,6 +481,8 @@ actor ChatArchiveService {
             if snap.incomplete.incomplete, !acceptIncomplete {
                 let o = ChatArchiveOutcome.incomplete(pruned: snap.incomplete.prunedMessages, truncated: snap.incomplete.truncatedMessages)
                 needsDecision[serverId] = o
+                decisionInfo[serverId] = .init(serverId: serverId, title: snap.session.title, serverMessages: messages.count,
+                                               macMessages: nil, reason: .incomplete(pruned: snap.incomplete.prunedMessages, truncated: snap.incomplete.truncatedMessages))
                 return o
             }
 
@@ -455,6 +491,7 @@ actor ChatArchiveService {
                 let r = try await deps.remote.commitArchive(chatSessionId: serverId, fence: snap.fence, hash: fileHash,
                                                             acceptIncomplete: acceptIncomplete)
                 needsDecision[serverId] = nil
+                decisionInfo[serverId] = nil
                 // A delete that raced the commit: honour it (the rows are gone either way).
                 if deps.pending.containsDelete(uuid) { deps.storage.delete(uuid) }
                 // The commit left a receipt, so the chat's agent mapping / SDK transcript / facts (derivative state) can go.
@@ -465,6 +502,8 @@ actor ChatArchiveService {
             } catch ChatArchiveRemoteError.incomplete {
                 let o = ChatArchiveOutcome.incomplete(pruned: snap.incomplete.prunedMessages, truncated: snap.incomplete.truncatedMessages)
                 needsDecision[serverId] = o
+                decisionInfo[serverId] = .init(serverId: serverId, title: snap.session.title, serverMessages: messages.count,
+                                               macMessages: nil, reason: .incomplete(pruned: snap.incomplete.prunedMessages, truncated: snap.incomplete.truncatedMessages))
                 return o
             } catch ChatArchiveRemoteError.notFound {
                 return .goneOnServer
@@ -551,6 +590,21 @@ actor ChatArchiveService {
     /// Extension chats the user must look at: an incomplete archive (the caps dropped messages) or a Mac file that
     /// differs from the server's rows. Nothing was deleted for them.
     func attention() -> [String: ChatArchiveOutcome] { needsDecision }
+
+    /// The per-chat list behind the Settings card: title, counts and the reason, oldest id first for a stable order.
+    func attentionItems() -> [ChatArchiveAttentionItem] {
+        needsDecision.keys.sorted().map { id in
+            decisionInfo[id] ?? ChatArchiveAttentionItem(serverId: id, title: "", serverMessages: 0, macMessages: nil,
+                                                         reason: needsDecision[id] == .conflictKept ? .conflict : .incomplete(pruned: 0, truncated: 0))
+        }
+    }
+
+    /// "Keep on server": stop listing this chat. The rows stay on the server untouched; a later sweep or quit that
+    /// finds the same problem lists it again.
+    func dismissAttention(_ serverId: String) {
+        needsDecision[serverId] = nil
+        decisionInfo[serverId] = nil
+    }
 
     /// How many delete tombstones the signed-in user still owes the server.
     func pendingDeleteCount() -> Int {
