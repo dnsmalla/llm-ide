@@ -268,18 +268,28 @@ What this changes for this kit, by reading:
 - **What the live rows are:** `chat_sessions` + `chat_messages` (C5, migration `0023`) are the natural live tables, with their caps and write-time redaction (`kb/chat-sessions.mjs:166-170`). C3 (`agent_sessions`), C4 (`session_memory`) and the SDK transcript (C2) are working state that the end of the session deletes, through the existing delete route (`routes/agent-v2.mjs:751-770`).
 - **What breaks:** (a) **resuming an ended chat**: the SDK transcript is gone, so a new turn needs `fresh` plus archived history (`AgentV2Transport.swift:276-282`), which loses the prompt cache and session-memory continuity; (b) **sign-out** wipes the Mac store (`ChatEngineRegistry.swift:459-462`), which is now the only copy; (c) **a chat that never ends** keeps its rows on the server as the only copy; (d) the **extension chat** (`unified-chat.ts`, `/chat` at `useChat.ts:145`, `/kb/chat/sessions`) is the only consumer of C5 today and has no archive path to the Mac; (e) **per-message latency**: persisting through the server is now on the live path of every message, where the K1 budget assumed an off-stream shadow (section 8); (f) agent `search_kb` and the planner cannot see an ended chat unless a Mac-side index exists. The phone is unaffected after the end (it reads the Mac store, 5.4); a live session's visibility to the phone is open (lifecycle R5).
 
+**Second round, 2026-10-29 (decided, see [data-lifecycle.md](data-lifecycle.md) section 1a):**
+
+- A **meeting-attached chat** is **deleted when its meeting ends**: not archived, not continued.
+- A **normal Mac chat** is **saved in the Mac app** and kept until the **user** deletes it. Deleting a chat deletes it **everywhere** (Mac file, server rows, mapping, facts, SDK transcript).
+- The **live DB copy** of a chat or app session ends at **app quit**: archive, verify, delete; a **next-start recovery sweep** covers crashes. This replaces the open "chat that never ends" rule (R8).
+- An **ended normal chat can be opened**. **Continuing** it is **not decided** (lifecycle R2b). DEFAULT-ASSUMPTION, not a decision: replay archived history into a fresh SDK session; read-only is the alternative.
+- The **extension** calls the Mac app live for reads, including its own chat, and stores nothing (R1). The local Mac-app API for that is **unverified**.
+- A rebuildable index with no unique data may stay on the server (R3), so agent `search_kb` and the planner can read it for archived chats and notes.
+- Still open, each with a labelled default: R4 redaction timing, R5 live-session visibility with the Mac closed, R6 plans, R7 metadata stays on the server.
+
 ### Status of Q1 to Q11 after the decision
 
 | # | Status | How |
 |---|---|---|
-| Q1 | **Answered** | Live in the server DB, archive in the Mac chat store, rows deleted at end. Not A, B, C or D as written |
-| Q2 | **Partially answered, still open** | One archived copy on the Mac is raw today. The original reason for redaction (no secret replayed into later model calls) holds only during the live phase, so the open choice is live-only, also at archive, or never (lifecycle R4) |
+| Q1 | **Answered** | Live in the server DB; a normal chat is archived in the Mac chat store at app quit and kept until the user deletes it; a meeting-attached chat is deleted at meeting end; rows deleted. Not A, B, C or D as written |
+| Q2 | **Partially answered, still open** | One archived copy on the Mac is raw today. The original reason for redaction (no secret replayed into later model calls) holds only during the live phase, so the open choice is live-only, also at archive, or never (lifecycle R4, open; DEFAULT-ASSUMPTION: live phase only) |
 | Q3 | Open, one consumer fewer | The extension `/chat` leaves the picture if Q8's answer below stands; the other three consumers (legacy chats, non-Anthropic providers, Loop's RegressionRunner) remain |
 | Q4 | Open | Unaffected |
-| Q5 | **Partially answered, reframed** | The Mac store is per install and is now the only copy, so wiping it on sign-out destroys finished work. Open: archive-then-wipe, keep, or per-user folders (lifecycle risks) |
+| Q5 | **Partially answered, reframed** | The Mac store is per install and is now the only copy, kept until the user deletes it, so wiping it on sign-out destroys finished work. Open: archive-then-wipe, keep, or per-user folders (lifecycle risks) |
 | Q6 | Open | Personas are configuration (`kb/personas.mjs:9`), assumed to stay on the server, so the question is only ownership |
 | Q7 | Open | `agent_ask_messages` (C6) is not session data to archive; removal still proposed |
-| Q8 | **Answered by consequence** | The extension keeps no chat store. `/kb/chat/sessions` and `unified-chat.ts` go, and the side-panel chat either calls the Mac app live or is removed. Which of the two is lifecycle R1. `REQUIRED_ENDPOINTS` (`App.tsx:57-75`) must change with it |
+| Q8 | **Answered** (R1, 2026-10-29) | The extension keeps no chat store. `/kb/chat/sessions` and `unified-chat.ts` go, and the side-panel chat calls the Mac app live (decided; the call path is unverified). `REQUIRED_ENDPOINTS` (`App.tsx:57-75`) must change with it |
 | Q9 | Open | Unaffected |
 | Q10 | Open | Unaffected |
 | Q11 | Open | Unaffected |
@@ -349,13 +359,17 @@ Why not B or C alone: B leaves the property the plan cares about (the phone and 
 - **T3, T4 (shadow write, compare job):** replaced. There is no second truth to shadow; the live write is the only write during a session. The compare job becomes a verifier for the archive (archived file equals the live rows).
 - **T5 (one-time import of `sessions/*.json`):** not needed. The files are already the archive; nothing is uploaded.
 - **T6 (cutover reads and write-through):** becomes "live writes to the server, archive to `ChatSessionStore` at end". Still the riskiest task, now on the hot path.
-- **New: end-of-session archive with verify-then-delete and crash recovery.** Write the archive, read it back, then delete the rows, the `agent_sessions` mapping, the facts and the SDK transcript; a startup sweep repairs a session found in both places; an end rule for sessions that never end (lifecycle R8).
-- **New: resume after end** by replaying archived history into a fresh SDK session (lifecycle R2).
-- **New: Mac-side read path for agent `search_kb` and the planner** over archived chats and meetings, or a derived index (lifecycle R3).
+- **New: app-quit archive with verify-then-delete.** At app quit write the archive, read it back, then delete the rows, the `agent_sessions` mapping, the facts and the SDK transcript (R8, decided).
+- **New: startup recovery sweep.** A session found in both places is finished (delete); a live session with no archive, left by a crash, is archived first, never deleted.
+- **New: meeting-end cleanup of the meeting-attached chat.** At meeting end delete its rows, mapping, facts and SDK transcript; no archive (R2, decided).
+- **New: delete-everywhere on user chat delete.** The Mac file plus any server rows, mapping, facts, SDK transcript and index entry, retried at next start from a tombstone if a part fails.
+- **New: extension read path via live Mac calls.** Replace the extension's `/chat`, `/kb/chat/sessions`, search, conflict questions and stats with calls to the Mac app; first verify the local Mac-app API exists and is enough (R1).
+- **New: index rebuild-from-files job** for the rebuildable server index that `search_kb` and the planner read (R3, decided), with a drop-and-rebuild test.
+- **Conditional: resume of an ended normal chat** by replaying archived history into a fresh SDK session. Only if the user confirms continuing is wanted (lifecycle R2b, open; DEFAULT-ASSUMPTION yes); otherwise read-only.
 - **T7 (phone bridge):** mostly unchanged, because the phone reads the Mac store; the directory watcher stays (`MobileControlManager.swift:1630-1637`). Live-session visibility is lifecycle R5.
-- **T8 (unified delete and sign-out):** now also decides archive-before-wipe at sign-out.
+- **T8 (unified delete and sign-out):** user delete removes the chat everywhere (decided); also decides archive-before-wipe at sign-out.
 - **T9 (port Swift tests):** the Swift store tests are **not** ported or deleted, because `ChatSessionStore` stays as the archive.
-- **T10 (extension):** no longer optional; the extension chat store and routes are removed or turned into live calls to the Mac (Q8).
+- **T10 (extension):** no longer optional; the extension chat store and routes are removed and replaced by live calls to the Mac app (Q8, R1 decided), after the Mac API is verified.
 - **Budgets:** the per-message upsert line below no longer holds. Persisting is on the live path, so it must stay coalesced and off the stream path, with a measured budget before any change.
 - K4 (retire) no longer retires `ChatSessionStore`; it retires the server tables' durable role.
 
@@ -406,6 +420,7 @@ Total: 8–10 tasks, about 5–8 M agent tokens at the plan's 0.4–0.7 M per ta
 | R2 | Two writers on one session (Mac engine, phone engine) | Registry header | Single writer per session, version precondition on upsert |
 | R3 | Latency regression on the chat path | Bench baseline | Section 8 budgets; no added await before the first token |
 | R4 | Redaction or sign-out behaviour surprises users | 5.3 items 3, 4 | Q2, Q5 decided first |
+| R10 | A chat lives only in the DB until app quit; a crash or lost machine before quit loses the only copy; a meeting-attached chat deleted at meeting end cannot be recovered | lifecycle sections 4 and 6 | Next-start sweep archives before deleting; reliable meeting-end signal; DB backup during live sessions |
 | R5 | Classic engine retired while four consumers remain | section 4 | Q3; inventory callers; keep until each is migrated |
 | R6 | Plugin/MCP routes extracted from `auth-routes.mjs` (1 996 lines, shared auth namespace) | `auth-routes.mjs:985-1923` | Route-module extraction behind identical paths; contract fixtures (37 rows, 154-file group) as the gate |
 | R7 | SDK upgrades change behaviour under us | `package.json:31` exact pin; 129 unreviewed surface items | Q9; token bench on each bump |
