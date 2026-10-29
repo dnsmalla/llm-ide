@@ -5,7 +5,8 @@
   "request": {
     "body": {
       "chatSessionId": "5f1c2a7e-3b9d-4e8a-9c21-0d7e6b5a4f30",
-      "reason": "user_delete"
+      "reason": "user_delete",
+      "requestedAt": "2026-10-29T10:00:00.000Z"
     }
   },
   "response": {

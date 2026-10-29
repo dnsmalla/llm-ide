@@ -5,7 +5,8 @@
     "query": {
       "surface": "any",
       "mode": "ask",
-      "limit": "20"
+      "limit": "20",
+      "offset": "0"
     }
   },
   "response": {

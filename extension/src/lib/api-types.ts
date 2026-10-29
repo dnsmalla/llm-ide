@@ -2028,6 +2028,8 @@ export type GetKbChatSessionsRequest = {
     mode?: string;
     /** The default is 50, with a minimum of 1 and a cap of 200. */
     limit?: string;
+    /** Skip this many rows (newest first, ties by id): page through every chat with limit. */
+    offset?: string;
   };
 };
 
@@ -3859,12 +3861,20 @@ export type PostAgentV2SessionsPurgeRequest = {
     chatSessionIds: string[];
     /** Must be true: the caller has checked the Mac file. Any other value is a 400 VALIDATION_FAILED. */
     verified: boolean;
+    /** The Mac file is gone: no receipt is needed, ONLY working state is removed, and a chat that still has server chat rows is refused (listed in refused). */
+    orphan?: boolean;
   };
 };
 
 export type PostAgentV2SessionsPurgeResponse200 = {
   /** Chats whose working state was removed. Unknown ids count as zero; the call is idempotent. */
   purged: number;
+  /** Chats with a turn running right now: not purged, retry later. */
+  busy: string[];
+  /** Chats used after their receipt was written: not purged, the caller must verify the file again. */
+  staleReceipt: string[];
+  /** orphan only: chats that still have server rows and were not touched. */
+  refused?: string[];
 };
 
 export type PostAgentV2SessionsPurgeResponse400 = CommonError;
@@ -3877,6 +3887,8 @@ export type PostKbSessionPurgesRequest = {
     chatSessionId: string;
     /** user_delete (default) or meeting_end. Any other value is a 400 VALIDATION_FAILED. */
     reason?: string;
+    /** ISO time of the user's delete (kept across retries; the earliest time wins, for the reuse guard). Ignored when in the future or older than a year. */
+    requestedAt?: string;
   };
 };
 
@@ -3885,6 +3897,10 @@ export type PostKbSessionPurgesResponse202 = {
   queued: true;
   /** done: working state, transcripts and server chat rows are gone. pending: retried later with backoff. failed: gave up after the attempt cap (see working-state). */
   purged: "done" | "pending" | "failed";
+  /** A turn is running on the chat: the tombstone stays pending. */
+  busy?: boolean;
+  /** The chat was used after the delete was requested: kept, tombstone dropped. */
+  skippedReused?: boolean;
 };
 
 export type PostKbSessionPurgesResponse400 = CommonError;
