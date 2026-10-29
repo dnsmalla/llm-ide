@@ -22,6 +22,7 @@ import {
 } from '../../scripts/token-bench.mjs';
 import { handleMessage as mcpHandle, toolsFor as mcpTools } from '../../scripts/bench-fixtures/fake-mcp-server.mjs';
 import { quickMode } from '../llm_agent/runtime/mode-classify.mjs';
+import { restrictsTools } from '../llm_agent/runtime/mode-personas.mjs';
 import { benchFakeEngineEnabled } from '../routes/agent-v2.mjs';
 
 const EXT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -93,6 +94,8 @@ test('v3 scenarios: auto-mode really reaches the classifier; the others use the 
   assert.deepEqual(by('mode-switch').turnModes, ['ask', 'execute']);
   assert.equal(by('cache-slope-12').turns.length, 12);
   assert.equal(by('mcp-two-servers').fakeMcp, 2);
+  // User MCP servers are mounted only in an unrestricted mode (engine.mjs buildUserMcpServers).
+  assert.equal(restrictsTools(by('mcp-two-servers').mode), false, 'ask/plan/review/document load no user MCP servers');
   assert.deepEqual(by('ended-chat-continue').dropSessionBefore, [2]);
   assert.ok(by('repo-search').expectTools);
 });

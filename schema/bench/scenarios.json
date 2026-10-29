@@ -16,7 +16,7 @@
     "`dropSessionBefore`: turn indexes before which the chat's SDK session is deleted and the turn",
     "is sent fresh with the chat's history (ended-chat-continue; what the Mac sends after a restart).",
     "`fakeMcp`: N stub stdio MCP servers (scripts/bench-fixtures/fake-mcp-server.mjs) are registered,",
-    "consented and enabled for the bench user for the scenario's samples (mcp-two-servers).",
+    "consented and enabled for the bench user for the scenario's samples (mcp-two-servers runs in execute: user MCP servers are not mounted in ask/plan/review/document).",
     "`expectTools`: the scenario should make at least one tool round trip (hops > 1).",
     "A real run fails when it does not; a --fake run only warns.",
     "Change a prompt, a seed file or this file's version only together with a new",
@@ -131,7 +131,7 @@
     },
     {
       "id": "mcp-two-servers",
-      "mode": "ask",
+      "mode": "execute",
       "fakeMcp": 2,
       "turns": [
         "hi"
