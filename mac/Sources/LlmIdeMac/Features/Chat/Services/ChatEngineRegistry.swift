@@ -155,6 +155,14 @@ final class ChatEngineRegistry {
         return externalHolder?.heldEngine(for: sessionID)
     }
 
+    /// What the archive service needs to know about `sessionID` (live-then-archive): whether any engine
+    /// holds it (displayed, parked, or the phone's off-screen pool), whether a turn is in flight, and how
+    /// many messages the engine has. A chat a phone turn is running on counts as running here.
+    func archiveFacts(for sessionID: UUID) -> ChatArchiveLogic.EngineFacts {
+        guard let engine = liveEngine(for: sessionID) else { return .init() }
+        return .init(held: true, running: engine.hasPendingWork, messageCount: engine.messages.count)
+    }
+
     /// Whether `sessionID` has a turn in flight right now, on any engine.
     /// Drives the "still working" marker in the session picker, so a chat
     /// left running is visibly distinct from one that was stopped.
@@ -457,6 +465,16 @@ extension ChatEngineRegistry: SessionScoped {
     /// Engines first: a live one would otherwise write the previous user's
     /// chats straight back after the store is wiped.
     func resetForSignOut() {
+        // Live-then-archive `on` (plan Q5): the Mac files are now the only copy of a chat,
+        // so a sign-out never wipes them. They are tagged with their owner, hidden from the
+        // next user, and what an engine had not written yet is flushed first.
+        if ChatArchiveHost.shared.keepsChatsOnSignOut {
+            flushAll()
+            forgetAllForSignOut()
+            ChatSessionStore.clearCurrentPointers()
+            ChatArchiveHost.shared.didSignOut()
+            return
+        }
         forgetAllForSignOut()
         ChatSessionStore.clear()
     }

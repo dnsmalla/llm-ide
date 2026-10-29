@@ -199,6 +199,11 @@ public struct LlmIdeMacApp: App {
         // Chat's session writes are debounced; AppDelegate (Core) cannot name
         // the registry, so Shell hands it the flush to run at quit.
         AppTerminationHooks.register("chat sessions") { ChatEngineRegistry.shared.flushAll() }
+        // Live-then-archive (lta.mode shadow/on): the async quit archive, the start sweep, delete-everywhere and the
+        // sign-out rule. A no-op when the mode is off (the default), so nothing above or below changes.
+        ChatArchiveHost.shared.install(
+            api: client, mode: LiveThenArchiveMode.current(),
+            activeProjectId: { await MainActor.run { projectStoreInstance.activeProject?.bundle.id } })
         self._activityStore = State(wrappedValue: activity)
         self.api = client
         self.autoCapture = AutoCaptureService(capture: orchestrator, config: cfg,
@@ -419,6 +424,8 @@ public struct LlmIdeMacApp: App {
                 .onChange(of: session.isAuthenticated) { _, authed in
                     // The derived note feed (lta Phase 2) restarts on the next sign-in, for the same project.
                     NoteIndexHost.shared.sessionAuthenticationChanged(authed)
+                    // The chat archive (lta Phase 4): claim unowned chat files for this user and run the recovery sweep.
+                    if authed, let uid = session.user?.id { ChatArchiveHost.shared.signedIn(userId: uid) }
                     // Single lifecycle entry point: reconciles liveMirror and
                     // the graph updater (both auth-scoped modules) on login
                     // AND logout, replacing the old direct start()/stop().

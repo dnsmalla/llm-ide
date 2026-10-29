@@ -148,7 +148,9 @@ final class ChatMobileHost: MobileChatHosting {
         if ChatSessionStore.load(id: uid) != nil {
             ChatSessionStore.delete(id: uid)
         }
-        if let api {
+        if ChatArchiveHost.shared.ownsDelete {
+            await ChatArchiveHost.shared.finishDelete(uid)
+        } else if let api {
             _ = try? await api.forgetSessionMemory(sessionId: uid.uuidString)
         }
         // Drop any cached off-screen engine for this id too — a later

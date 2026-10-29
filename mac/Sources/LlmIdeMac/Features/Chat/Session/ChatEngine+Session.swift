@@ -86,7 +86,10 @@ extension ChatEngine {
         persistDebounceTask?.cancel()
         persistDebounceTask = nil
         guard let id = UUID(uuidString: currentSessionIDString) else { return }
-        let capped = Array(messages.suffix(Self.persistedMessageCap))
+        // Computed after the file is loaded (below): a file that ALREADY holds more than
+        // the cap is an archived extension chat (live-then-archive writes all of its
+        // messages, plan Q8/DL12) and capping it here would permanently drop its oldest
+        // turns the first time the user continues it.
         // The fallback (file missing — deleted under us, or a pointer that
         // outlived its file) stamps `projectId` the same way
         // `mintFreshSession()` does, and for the same reason: a `.quick`
@@ -96,6 +99,9 @@ extension ChatEngine {
         var session = ChatSessionStore.load(id: id)
             ?? ChatSession(id: id, scope: scope, projectId: projectIdForNewSession)
         session.scope = scope
+        let capped = session.messages.count > Self.persistedMessageCap
+            ? messages
+            : Array(messages.suffix(Self.persistedMessageCap))
         // An unassigned (pre-stamping) Explorer chat belongs to the first
         // project that WORKS in it — see `ChatSessionStore.list(for:visibleInProject:)`.
         // Only when the transcript actually changed: this method also runs
@@ -735,6 +741,12 @@ extension ChatEngine {
         // rather than detached: the chat file and the UI are already updated,
         // so a slow/failed forget delays nothing the user can see (and a
         // failure is recoverable by a later delete).
+        // Live-then-archive `on`: the tombstone (recorded before the file went, retried at every start until the
+        // server confirms) replaces both best-effort calls below. Otherwise exactly the legacy behaviour.
+        if ChatArchiveHost.shared.ownsDelete {
+            await ChatArchiveHost.shared.finishDelete(id)
+            return
+        }
         await forgetSessionMemory(id.uuidString)
         // Also drop the chat's SERVER-SIDE v2 session mapping. Same
         // best-effort reasoning as the forget above — and same ordering: the
