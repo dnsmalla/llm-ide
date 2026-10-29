@@ -93,11 +93,41 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return true
     }
 
+    /// True from the moment the async quit work starts until it replies to AppKit.
+    @MainActor private static var asyncQuitInFlight = false
+
     /// Unsaved editor text lives only in memory (`EditorDraftStore`), so quitting
     /// used to discard it with no word. Ask first when any file has unsaved edits.
+    ///
+    /// Then, only when Shell registered async quit hooks (`AppTerminationHooks.registerAsync`,
+    /// the live-then-archive chat archive — nothing is registered by default, so by default this
+    /// is the synchronous answer it always was): hold the quit with `.terminateLater`, run them
+    /// under a hard cap, and reply. The reply is sent whatever the hooks did (finished, failed, cut
+    /// by the cap): the next start finishes anything left. `BackendManager` kills the spawned
+    /// backend at `willTerminate`, which AppKit posts only after this reply, so the server is up
+    /// for the whole async phase.
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         MainActor.assumeIsolated {
-            Self.confirmDiscardUnsavedDrafts() ? .terminateNow : .terminateCancel
+            let decision = AppTerminationDecision.decide(
+                confirmDrafts: { Self.confirmDiscardUnsavedDrafts() },
+                hasAsyncHooks: AppTerminationHooks.hasAsyncHooks,
+                inFlight: Self.asyncQuitInFlight)
+            switch decision {
+            case .cancel:
+                return .terminateCancel
+            case .now:
+                return .terminateNow
+            case .later(let start):
+                if start {
+                    Self.asyncQuitInFlight = true
+                    Task { @MainActor in
+                        _ = await AppTerminationHooks.runAsyncHooks()
+                        Self.asyncQuitInFlight = false
+                        sender.reply(toApplicationShouldTerminate: true)
+                    }
+                }
+                return .terminateLater
+            }
         }
     }
 
