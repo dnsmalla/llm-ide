@@ -17,6 +17,9 @@ enum NoteIndexLimits {
     static let batchBytes = 900_000
     static let manifestBytes = 900_000
     static let manifestEntries = 20_000
+    /// Chunked scans (POST /kb/index/scan): entries per chunk and chunks per scan.
+    static let scanChunkEntries = 500
+    static let scanChunks = 100
     static let bodyBytes = 512 * 1024
     static let titleChars = 500
     static let dateChars = 64
@@ -34,6 +37,8 @@ protocol NoteIndexRemote: Sendable {
     func indexReconcile(projectId: String,
                         manifest: [LlmIdeAPIClient.IndexManifestEntry],
                         prune: Bool) async throws -> LlmIdeAPIClient.IndexReconcileResult
+    func indexScan(projectId: String, scanId: String, index: Int, total: Int, complete: Bool,
+                   prune: Bool, entries: [LlmIdeAPIClient.IndexManifestEntry]) async throws -> LlmIdeAPIClient.IndexScanResult
 }
 
 extension LlmIdeAPIClient: NoteIndexRemote {}
@@ -510,13 +515,20 @@ final class NoteIndexReconciler {
             let prune = scan.unparseable.isEmpty && scan.unavailable.isEmpty
                 && scan.unsendable.isEmpty && !manifest.isEmpty
             stats.pruneAllowed = prune
-            guard NoteIndexBatching.manifestFits(manifest) else {
-                Self.log.notice("note index manifest too large for one reconcile; skipped")
-                return .manifestTooLarge(stats)
-            }
             try Task.checkCancellation()
             try verifyIdentity()
-            let result = try await remote.indexReconcile(projectId: projectId, manifest: manifest, prune: prune)
+            let result: LlmIdeAPIClient.IndexReconcileResult
+            if NoteIndexBatching.manifestFits(manifest) {
+                result = try await remote.indexReconcile(projectId: projectId, manifest: manifest, prune: prune)
+            } else {
+                // A library too large for one request is sent as chunks of one scan. An older
+                // server has no chunk route: then nothing is reconciled and nothing is pruned.
+                guard let chunked = try await chunkedReconcile(manifest, prune: prune) else {
+                    Self.log.notice("note index manifest too large and the server has no chunked scan; skipped")
+                    return .manifestTooLarge(stats)
+                }
+                result = chunked
+            }
             stats.pruned = result.pruned
             // A hidden note the server still holds (it reappeared) is removed again.
             let reappeared = scan.hidden.filter { sentHidden[$0.key] != nil && result.extra.contains($0.key) }
@@ -556,6 +568,37 @@ final class NoteIndexReconciler {
             Self.log.notice("note index pass failed (\(self.consecutiveFailures)): \(error.localizedDescription, privacy: .public)")
             return .failed(error.localizedDescription)
         }
+    }
+
+    /// The reconcile of a manifest too large for one request, as chunks of one scan. Returns nil
+    /// when the server has no chunk route (HTTP 404). A failed or incomplete scan throws: the
+    /// final chunk is then refused by the server, so nothing is pruned.
+    private func chunkedReconcile(_ manifest: [LlmIdeAPIClient.IndexManifestEntry],
+                                  prune: Bool) async throws -> LlmIdeAPIClient.IndexReconcileResult? {
+        let parts = stride(from: 0, to: manifest.count, by: NoteIndexLimits.scanChunkEntries).map {
+            Array(manifest[$0..<min($0 + NoteIndexLimits.scanChunkEntries, manifest.count)])
+        }
+        guard parts.count <= NoteIndexLimits.scanChunks else { return nil }
+        let scanId = UUID().uuidString.lowercased()
+        var missing: [String] = []
+        var stale: [String] = []
+        var final: LlmIdeAPIClient.IndexScanResult?
+        for (i, part) in parts.enumerated() {
+            try Task.checkCancellation()
+            try verifyIdentity()
+            let last = i == parts.count - 1
+            do {
+                let r = try await remote.indexScan(projectId: projectId, scanId: scanId, index: i, total: parts.count,
+                                                   complete: last, prune: last && prune, entries: part)
+                missing += r.missing
+                stale += r.stale
+                if last { final = r }
+            } catch APIError.http(let status, _, _, _) where status == 404 {
+                return nil
+            }
+        }
+        guard let done = final else { throw NoteIndexScanner.Failure(reason: "chunked scan produced no final chunk") }
+        return LlmIdeAPIClient.IndexReconcileResult(missing: missing, stale: stale, extra: done.extra, pruned: done.pruned)
     }
 
     /// Removes hidden notes on the server and remembers what was sent.

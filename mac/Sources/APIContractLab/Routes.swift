@@ -100,6 +100,7 @@ let apiRoutes: [Route] = [
     route("POST /kb/index/reconcile", "IndexReconcileResult", LlmIdeAPIClient.IndexReconcileResult.self),  // indexReconcile
     route("DELETE /kb/index/notes/:key", "IndexDeleteResult", LlmIdeAPIClient.IndexDeleteResult.self),  // indexDeleteNote
     route("GET /kb/index/status", "IndexStatusResult", LlmIdeAPIClient.IndexStatusResult.self),  // indexStatus
+    route("POST /kb/index/scan", "IndexScanResult", LlmIdeAPIClient.IndexScanResult.self),  // indexScan
 ]
 
 /// 2xx fixture endpoints this table does not decode, with the reason.

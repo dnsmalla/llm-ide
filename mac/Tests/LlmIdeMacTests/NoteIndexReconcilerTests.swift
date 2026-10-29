@@ -21,6 +21,49 @@ struct NoteIndexReconcilerTests {
         private var upsertHook: (@Sendable () async -> Void)?
 
         func seed(_ key: String, _ hash: String) { rows[key] = hash }
+        private(set) var scanCalls = 0
+        private var scanDropIndex: Int?
+        private var scanUnsupported = false
+        private var scans: [String: (total: Int, received: Set<Int>, seen: Set<String>)] = [:]
+        /// Acknowledges chunk `i` but never records it (a lost chunk).
+        func dropScanChunk(_ i: Int?) { scanDropIndex = i }
+        /// Answers 404 for the chunk route (an older server).
+        func setScanUnsupported(_ on: Bool) { scanUnsupported = on }
+
+        func indexScan(projectId: String, scanId: String, index: Int, total: Int, complete: Bool,
+                       prune: Bool, entries: [LlmIdeAPIClient.IndexManifestEntry]) async throws -> LlmIdeAPIClient.IndexScanResult {
+            calls += 1
+            scanCalls += 1
+            if scanUnsupported { throw APIError.http(status: 404, code: "NOT_FOUND", message: "", details: nil) }
+            if let failure { throw failure }
+            var st = scans[scanId] ?? (total: total, received: [], seen: [])
+            var missing: [String] = [], stale: [String] = []
+            for e in entries {
+                st.seen.insert(e.noteKey)
+                if let held = rows[e.noteKey] {
+                    if held != e.contentHash { stale.append(e.noteKey) }
+                } else {
+                    missing.append(e.noteKey)
+                }
+            }
+            if index != scanDropIndex { st.received.insert(index) }
+            if !complete {
+                scans[scanId] = st
+                return .init(missing: missing, stale: stale, extra: [], pruned: 0,
+                             received: st.received.count, total: total, complete: false)
+            }
+            scans[scanId] = nil
+            guard st.received.count == total else {
+                throw APIError.http(status: 409, code: "SCAN_INCOMPLETE", message: "", details: nil)
+            }
+            let extra = rows.keys.filter { !st.seen.contains($0) }.sorted()
+            var pruned = 0
+            if prune {
+                for k in extra { rows.removeValue(forKey: k); pruned += 1 }
+            }
+            return .init(missing: missing, stale: stale, extra: extra, pruned: pruned,
+                         received: total, total: total, complete: true)
+        }
         func setFailure(_ error: Error?) { failure = error }
         func setUpsertHook(_ hook: (@Sendable () async -> Void)?) { upsertHook = hook }
 
@@ -321,6 +364,60 @@ struct NoteIndexReconcilerTests {
         host.sessionUserId = { nil }
         host.start(root: h.root, index: h.index, projectId: "p1", remote: h.server)
         #expect(!host.isRunning)
+    }
+
+    /// Writes the same note under `count` names, without touching the disk (metadata seam).
+    static func bigLibrary(_ count: Int, root: URL) throws -> (files: FakeFileSystem, hash: String) {
+        let text = note(id: "big", title: "Library note")
+        let data = Data(text.utf8)
+        let fake = FakeFileSystem()
+        for i in 0..<count {
+            let url = root.appendingPathComponent(String(format: "lib/n%05d.md", i))
+            fake.files[url] = data
+            fake.items.append(NoteIndexEntry(url: url, isDirectory: false, mtimeMs: 1,
+                                             size: Int64(data.count), dataless: false, danglingLink: false))
+        }
+        return (fake, NoteIndexScanner.sha256Hex(data))
+    }
+
+    @Test func twentyThousandNoteLibraryIsChunkedAndPrunesOnlyItsRemovedNotes() async throws {
+        let h = try Harness()
+        let (fake, hash) = try Self.bigLibrary(20_000, root: h.root)
+        for i in 0..<20_000 { await h.server.seed(String(format: "lib/n%05d.md", i), hash) }
+        // Two notes were removed from disk: they are the rows to prune, nothing else.
+        fake.items.removeAll { $0.url.lastPathComponent == "n00007.md" || $0.url.lastPathComponent == "n19999.md" }
+        let r = NoteIndexReconciler(root: h.root, index: h.index, projectId: "p1", remote: h.server, fileSystem: fake)
+        let outcome = await r.runOnce()
+        guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
+        #expect(stats.manifestEntries == 19_998)
+        #expect(stats.pruned == 2)
+        #expect(stats.missing == 0 && stats.stale == 0)
+        #expect(await h.server.scanCalls == 40)
+        #expect(await h.server.rows.count == 19_998)
+    }
+
+    @Test func aLostChunkPrunesNothing() async throws {
+        let h = try Harness()
+        let (fake, hash) = try Self.bigLibrary(8_000, root: h.root)
+        for i in 0..<8_000 { await h.server.seed(String(format: "lib/n%05d.md", i), hash) }
+        fake.items.removeLast()                       // one row is gone on disk ...
+        await h.server.dropScanChunk(1)               // ... and a chunk never reaches the server (16 chunks in all)
+        let r = NoteIndexReconciler(root: h.root, index: h.index, projectId: "p1", remote: h.server, fileSystem: fake)
+        let outcome = await r.runOnce()
+        guard case .failed = outcome else { Issue.record("expected failed, got \(outcome)"); return }
+        #expect(await h.server.rows.count == 8_000, "a scan with a missing chunk must not prune")
+    }
+
+    @Test func anOlderServerWithoutTheChunkRouteNeverPrunes() async throws {
+        let h = try Harness()
+        let (fake, hash) = try Self.bigLibrary(8_000, root: h.root)
+        for i in 0..<8_000 { await h.server.seed(String(format: "lib/n%05d.md", i), hash) }
+        fake.items.removeLast()
+        await h.server.setScanUnsupported(true)
+        let r = NoteIndexReconciler(root: h.root, index: h.index, projectId: "p1", remote: h.server, fileSystem: fake)
+        let outcome = await r.runOnce()
+        guard case .manifestTooLarge = outcome else { Issue.record("expected manifestTooLarge, got \(outcome)"); return }
+        #expect(await h.server.rows.count == 8_000)
     }
 
     @Test func platformLessNoteBlocksPruneButOthersStillSync() async throws {

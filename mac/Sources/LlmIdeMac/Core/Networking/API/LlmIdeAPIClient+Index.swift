@@ -81,6 +81,37 @@ extension LlmIdeAPIClient {
                        authenticated: true)
     }
 
+    /// One chunk of a chunked scan (`POST /kb/index/scan`). Non-final chunks classify
+    /// their keys; the final chunk (complete: true) may prune when prune is true.
+    struct IndexScanRequest: Encodable {
+        let projectId: String
+        let scanId: String
+        let index: Int
+        let total: Int
+        let complete: Bool
+        let prune: Bool
+        let entries: [IndexManifestEntry]
+    }
+
+    public struct IndexScanResult: Codable, Equatable {
+        public let missing: [String]
+        public let stale: [String]
+        public let extra: [String]
+        public let pruned: Int
+        public let received: Int
+        public let total: Int
+        public let complete: Bool
+    }
+
+    /// `POST /kb/index/scan`: one chunk of a library too large for one reconcile.
+    func indexScan(projectId: String, scanId: String, index: Int, total: Int,
+                   complete: Bool, prune: Bool, entries: [IndexManifestEntry]) async throws -> IndexScanResult {
+        try await post("/kb/index/scan",
+                       body: IndexScanRequest(projectId: projectId, scanId: scanId, index: index, total: total,
+                                              complete: complete, prune: prune, entries: entries),
+                       authenticated: true)
+    }
+
     /// `DELETE /kb/index/notes/:key`.
     func indexDeleteNote(projectId: String, noteKey: String) async throws -> IndexDeleteResult {
         try await delete(
