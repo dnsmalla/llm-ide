@@ -1,0 +1,115 @@
+{
+  "version": 1,
+  "note": "Built-in provider catalog. Hosted providers are OpenAI-compatible: the adapter speaks /chat/completions with tools. Static models are a fallback snapshot only; the live /models list wins where the provider offers one. toolsSupported here is what the provider documents; a model absent from the table falls back to the provider's toolsDefault.",
+  "providers": [
+    {
+      "id": "openai", "name": "OpenAI", "baseURL": "https://api.openai.com/v1", "keyRequired": true, "local": false,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^gpt-", "^o\\d", "^chatgpt-"],
+      "chatPatterns": ["^(gpt-|o\\d|chatgpt)"], "excludePatterns": ["embedding", "tts", "whisper", "audio", "image", "realtime", "moderation", "dall-e", "transcribe", "search"],
+      "docsUrl": "https://platform.openai.com/docs",
+      "models": [
+        { "id": "gpt-4o", "contextWindow": 128000, "toolsSupported": true },
+        { "id": "gpt-4o-mini", "contextWindow": 128000, "toolsSupported": true },
+        { "id": "gpt-4.1", "contextWindow": 1047576, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "google", "name": "Google Gemini", "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai", "keyRequired": true, "local": false,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^(models/)?gemini-"],
+      "chatPatterns": ["^(models/)?gemini-"], "excludePatterns": ["embedding", "aqa", "imagen", "tts"],
+      "docsUrl": "https://ai.google.dev/gemini-api/docs/openai",
+      "models": [
+        { "id": "gemini-2.5-flash", "contextWindow": 1048576, "toolsSupported": true },
+        { "id": "gemini-2.5-pro", "contextWindow": 1048576, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "mistral", "name": "Mistral", "baseURL": "https://api.mistral.ai/v1", "keyRequired": true, "local": false,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^(mistral|codestral|ministral|devstral|magistral|pixtral)-"],
+      "chatPatterns": [".*"], "excludePatterns": ["embed", "moderation", "ocr"],
+      "docsUrl": "https://docs.mistral.ai",
+      "models": [
+        { "id": "mistral-large-latest", "contextWindow": 128000, "toolsSupported": true },
+        { "id": "mistral-small-latest", "contextWindow": 32000, "toolsSupported": true },
+        { "id": "codestral-latest", "contextWindow": 256000, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "groq", "name": "Groq", "baseURL": "https://api.groq.com/openai/v1", "keyRequired": true, "local": false,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^llama-3\\.[123]", "^llama-4", "^qwen", "^openai/gpt-oss", "^moonshotai/"],
+      "chatPatterns": [".*"], "excludePatterns": ["whisper", "guard", "tts", "playai", "distil-whisper"],
+      "docsUrl": "https://console.groq.com/docs",
+      "models": [
+        { "id": "llama-3.3-70b-versatile", "contextWindow": 131072, "toolsSupported": true },
+        { "id": "llama-3.1-8b-instant", "contextWindow": 131072, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "deepseek", "name": "DeepSeek", "baseURL": "https://api.deepseek.com/v1", "keyRequired": true, "local": false,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^deepseek-chat"],
+      "chatPatterns": ["deepseek"], "excludePatterns": [],
+      "docsUrl": "https://api-docs.deepseek.com",
+      "models": [
+        { "id": "deepseek-chat", "contextWindow": 131072, "toolsSupported": true },
+        { "id": "deepseek-reasoner", "contextWindow": 131072, "toolsSupported": false }
+      ]
+    },
+    {
+      "id": "openrouter", "name": "OpenRouter", "baseURL": "https://openrouter.ai/api/v1", "keyRequired": true, "local": false,
+      "listKind": "openrouter", "toolsDefault": false, "toolPatterns": [],
+      "chatPatterns": [".*"], "excludePatterns": ["embedding"],
+      "docsUrl": "https://openrouter.ai/docs",
+      "notes": "The live list reports supported_parameters per model, so the tools flag is exact.",
+      "models": [
+        { "id": "openai/gpt-4o-mini", "contextWindow": 128000, "toolsSupported": true },
+        { "id": "anthropic/claude-sonnet-4.5", "contextWindow": 200000, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "xai", "name": "xAI", "baseURL": "https://api.x.ai/v1", "keyRequired": true, "local": false,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^grok-"],
+      "chatPatterns": ["^grok-"], "excludePatterns": ["image", "vision-preview"],
+      "docsUrl": "https://docs.x.ai",
+      "models": [
+        { "id": "grok-4", "contextWindow": 256000, "toolsSupported": true },
+        { "id": "grok-3-mini", "contextWindow": 131072, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "cerebras", "name": "Cerebras", "baseURL": "https://api.cerebras.ai/v1", "keyRequired": true, "local": false,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^llama", "^qwen", "^gpt-oss"],
+      "chatPatterns": [".*"], "excludePatterns": [],
+      "docsUrl": "https://inference-docs.cerebras.ai",
+      "models": [
+        { "id": "llama-3.3-70b", "contextWindow": 65536, "toolsSupported": true },
+        { "id": "gpt-oss-120b", "contextWindow": 131072, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "together", "name": "Together AI", "baseURL": "https://api.together.xyz/v1", "keyRequired": true, "local": false,
+      "listKind": "together", "toolsDefault": false, "toolPatterns": ["Llama-3\\.[123]", "Llama-4", "Qwen2\\.5", "Qwen3", "Mixtral", "gpt-oss", "DeepSeek-V3"],
+      "chatPatterns": [".*"], "excludePatterns": ["embed", "rerank"],
+      "docsUrl": "https://docs.together.ai",
+      "models": [
+        { "id": "meta-llama/Llama-3.3-70B-Instruct-Turbo", "contextWindow": 131072, "toolsSupported": true }
+      ]
+    },
+    {
+      "id": "ollama", "name": "Ollama (local)", "baseURL": "http://localhost:11434/v1", "keyRequired": false, "local": true, "allowPrivate": true,
+      "listKind": "openai", "toolsDefault": false,
+      "toolPatterns": ["^llama3\\.[123]", "^llama4", "^qwen2\\.5", "^qwen3", "^mistral", "^mixtral", "^command-r", "^granite3", "^gpt-oss", "^hermes3", "^firefunction"],
+      "chatPatterns": [".*"], "excludePatterns": ["embed", "nomic", "bge-", "minilm"],
+      "docsUrl": "https://github.com/ollama/ollama/blob/main/docs/openai.md",
+      "notes": "Talks to the Ollama on this machine. Tool support depends on the model; the flag is inferred from the model family and can be overridden.",
+      "models": []
+    },
+    {
+      "id": "openai-compatible", "name": "OpenAI-compatible endpoint", "baseURL": "", "keyRequired": false, "local": false, "allowPrivate": true, "customBaseURL": true,
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": [],
+      "chatPatterns": [".*"], "excludePatterns": ["embed"],
+      "docsUrl": "",
+      "notes": "Any server that implements /v1/chat/completions and /v1/models: LM Studio, vLLM, a plain gateway, a self-hosted FreeLLMAPI proxy. A private-network address needs an explicit opt-in.",
+      "models": []
+    }
+  ]
+}

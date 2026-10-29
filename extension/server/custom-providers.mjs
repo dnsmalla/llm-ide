@@ -14,6 +14,7 @@
 
 import { getDb } from '../kb/db.mjs';
 import { readBody, parseJSON, sendJSON } from '../core/utils.mjs';
+import { connectionAsCustomProvider } from './provider-connections.mjs';
 
 const FLAG = 'custom.providers';
 const MAX_PROVIDERS = 50;
@@ -85,7 +86,9 @@ function providersFor(userId, db) {
 
 /** The provider `providerId` (`custom:<uuid>`) registered by `userId`, or undefined. */
 export function getCustomProvider(providerId, userId, db = getDb()) {
-  return providersFor(userId, db).get(providerId);
+  // A provider-catalog connection (`custom:cat-…`) lives in its own flag, so the
+  // Mac's whole-list sync above can never wipe it.
+  return providersFor(userId, db).get(providerId) ?? connectionAsCustomProvider(providerId, userId, db);
 }
 
 /**
