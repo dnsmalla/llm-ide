@@ -51,3 +51,59 @@ test('the SDK query options carry no sandbox key by default, and the stated one 
   assert.deepEqual((await optionsFor('off')).sandbox, { enabled: false });
   assert.equal((await optionsFor('on')).sandbox.enabled, true);
 });
+
+// --- A6: options.fallbackModel -------------------------------------------------------
+
+const { chainFallbackModels, fallbackModelOption } = await import('../llm_agent/sdk/engine.mjs');
+
+const CHAIN = [
+  { model: 'm-a', enabled: true }, { model: 'm-b', enabled: false }, { model: 'm-c', enabled: true },
+  { model: 'm-d', enabled: true }, { model: 'm-e', enabled: true },
+];
+
+test('chainFallbackModels steps DOWN the chain, skips disabled, caps, never names the primary', () => {
+  assert.deepEqual(chainFallbackModels(CHAIN, 'm-a'), ['m-c', 'm-d']);
+  assert.deepEqual(chainFallbackModels(CHAIN, 'm-d'), ['m-e']);
+  assert.deepEqual(chainFallbackModels(CHAIN, 'm-e'), []);
+  assert.deepEqual(chainFallbackModels(CHAIN, 'unknown'), [], 'a model outside the chain has no fallback');
+  assert.deepEqual(chainFallbackModels(null, 'm-a'), []);
+  assert.deepEqual(chainFallbackModels(CHAIN, ''), []);
+});
+
+test('fallbackModelOption is OFF by default and fails closed to "no list"', () => {
+  const limits = () => ({ chains: { anthropic: CHAIN } });
+  const prev = process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL;
+  try {
+    delete process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL;
+    assert.equal(fallbackModelOption('u', 'm-a', { limits }), null, 'default off: the model that runs cannot change');
+    process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL = '1';
+    assert.equal(fallbackModelOption('u', 'm-a', { limits }), 'm-c,m-d');
+    assert.equal(fallbackModelOption('u', '', { limits }), null);
+    assert.equal(fallbackModelOption('', 'm-a', { limits }), null);
+    assert.equal(fallbackModelOption('u', 'm-a', { limits: () => { throw new Error('db down'); } }), null);
+  } finally {
+    if (prev === undefined) delete process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL; else process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL = prev;
+  }
+});
+
+test('the SDK query options carry fallbackModel only when opted in', async () => {
+  const run = async (flag) => {
+    const prev = process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL;
+    if (flag === undefined) delete process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL; else process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL = flag;
+    let seen = null;
+    try {
+      await runAgentV2Turn({
+        message: 'hi', userId: 'u-fb', mode: 'execute', model: 'claude-opus-5', agentContext: { workspaceRoot: process.cwd() },
+        allowAmbientAuth: true, onEvent: () => {},
+        queryFactory: (_p, o) => { seen = o; return (async function* () { yield { type: 'result', subtype: 'success', session_id: 's' }; })(); },
+      }, { readSkill: () => null, roots: () => [], sessionMemory: () => [], persistMemory: async () => null });
+    } finally {
+      if (prev === undefined) delete process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL; else process.env.LLMIDE_V2_ADOPT_FALLBACK_MODEL = prev;
+    }
+    return seen;
+  };
+  assert.ok(!('fallbackModel' in await run(undefined)));
+  const on = await run('1');
+  assert.ok(!('fallbackModel' in on) || typeof on.fallbackModel === 'string');
+  assert.equal(on.model, 'claude-opus-5', 'the primary is untouched either way');
+});

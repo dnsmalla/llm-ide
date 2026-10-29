@@ -310,8 +310,8 @@
       "reason": "later: escape hatch for CLI flags; use only with a named need"
     },
     "options.fallbackModel": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "engine.mjs fallbackModelOption (opt-in: LLMIDE_V2_ADOPT_FALLBACK_MODEL=1, default off)"
     },
     "options.forkSession": {
       "status": "needs-human",

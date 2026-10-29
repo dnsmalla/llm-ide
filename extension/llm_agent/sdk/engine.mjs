@@ -60,7 +60,7 @@ import { isBareGreeting } from '../runtime/memory-extract.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
-import { usdCapForModel } from '../../kb/usage.mjs';
+import { usdCapForModel, getLimits } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { selectSessionMemory } from '../runtime/session-memory-select.mjs';
@@ -889,6 +889,9 @@ export function buildEngineOptions(
       }
       : { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
     ...(compactWindow ? { settings: { autoCompactWindow: compactWindow } } : {}),
+    // The SDK's own refusal fallback (A6), fed from the user's same-provider
+    // model chain. Off by default: it can change which model answers.
+    ...(() => { const fb = fallbackModelOption(userId, typeof model === 'string' ? model : ''); return fb ? { fallbackModel: fb } : {}; })(),
     // Explicit command sandbox (A11); absent under the default `inherit`.
     ...(sandboxOptionFromEnv() ? { sandbox: sandboxOptionFromEnv() } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
@@ -1072,6 +1075,40 @@ export function sandboxOptionFromEnv(raw = process.env.LLMIDE_V2_SANDBOX) {
   if (v === 'off') return { enabled: false };
   if (v === 'on') return { enabled: true, failIfUnavailable: false, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false };
   return null;
+}
+
+/**
+ * The models after `model` in a priority-ordered chain that are enabled: where
+ * the same-provider fallback would step down to. Pure; exported for tests.
+ */
+export function chainFallbackModels(chain, model, { max = 2 } = {}) {
+  if (!Array.isArray(chain) || typeof model !== 'string' || !model) return [];
+  const at = chain.findIndex((m) => m?.model === model);
+  if (at < 0) return [];
+  return chain.slice(at + 1)
+    .filter((m) => m?.enabled && typeof m.model === 'string' && m.model && m.model !== model)
+    .map((m) => m.model)
+    .slice(0, max);
+}
+
+/**
+ * `options.fallbackModel` (K1 A6): a comma-separated list the SDK tries in
+ * order when the primary refuses. OFF unless `LLMIDE_V2_ADOPT_FALLBACK_MODEL=1`,
+ * because it can change which model answers a turn (the refusal path of the
+ * primary), and that needs the bench before it is a default. It reuses the
+ * user's own model chain (kb/usage getLimits), the same list our quota
+ * fallback steps down, and never names the primary. null = pass nothing.
+ */
+export function fallbackModelOption(userId, model, { limits = getLimits, db = null } = {}) {
+  if (!adoptEnabled('FALLBACK_MODEL', { defaultOn: false })) return null;
+  if (!userId || typeof model !== 'string' || !model) return null;
+  try {
+    const chain = limits(db ?? getDb(), userId, { provider: AGENT_SDK_PROVIDER }).chains?.[AGENT_SDK_PROVIDER];
+    const list = chainFallbackModels(chain, model);
+    return list.length ? list.join(',') : null;
+  } catch {
+    return null;   // best effort: no list is the default behaviour
+  }
 }
 
 // --- The turn runner ----------------------------------------------------------
