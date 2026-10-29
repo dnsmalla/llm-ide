@@ -48,7 +48,8 @@ import {
   beginRouteTurn, createRouteTurn, routeSwitchNotice, runAdapterTurn, isAdapterProvider, sendRouteRefusal,
   handleRouteGet, handleRoutePut, handleRouteHistory,
 } from './agent-v2-router.mjs';
-import { RouteError, deleteRoute } from '../kb/chat-route.mjs';
+import { RouteError, deleteRoute, setHandoffPointer, recordRouteEvent } from '../kb/chat-route.mjs';
+import { buildHandoff } from '../providers/handoff.mjs';
 import { routerEnabled } from '../core/router-flags.mjs';
 
 const log = logger.child({ component: 'agent-v2' });
@@ -527,6 +528,19 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   const routeTurn = begin.enabled
     ? createRouteTurn({ db, userId, chatSessionId, begin, provider, model, send: (ev) => send(ev) })
     : null;
+  // What the turn is seeded with. A provider switch carries the handoff (the client's summary if it sent
+  // one, else an extractive note of the older turns) plus the last turns, never the old transcript. An
+  // adapter has no session to resume, so it is handed the client's history on every turn.
+  let turnHistory;
+  const switching = begin.enabled && (begin.pick.freshSession || (begin.pick.changed && adapterTurn));
+  if (switching) {
+    const h = buildHandoff({ history: body.history, summary: typeof body.summary === 'string' ? body.summary.slice(0, 20_000) : null });
+    turnHistory = h.history;
+    recordRouteEvent(userId, chatSessionId, { kind: 'handoff_built', toProvider: provider, toModel: model, reason: h.source, handoffChars: h.noteChars });
+    if (typeof body.summaryUpTo === 'string') { try { setHandoffPointer(db, userId, chatSessionId, body.summaryUpTo); } catch { /* a pointer only */ } }
+  } else {
+    turnHistory = freshTurnHistory(adapterTurn || freshTurn ? { ...body, fresh: true } : body);
+  }
   // Billable tokens left under the chat's cap, handed to the engine as its ceiling (null = none).
   const capRemaining = begin.enabled && begin.capOn && begin.cap.limit !== null ? begin.cap.remaining : null;
 
@@ -641,7 +655,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
       const { usageTotals, composition, metered, answered } = await runTurn({
         message,
         // An adapter has no session to resume: it is handed the client's history on every turn.
-        history: freshTurnHistory(adapterTurn ? { ...body, fresh: true } : (freshTurn ? { ...body, fresh: true } : body)),
+        history: turnHistory,
         maxBillableTokens: capRemaining ?? undefined,
         userId,
         mode,

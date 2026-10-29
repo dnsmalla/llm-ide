@@ -298,6 +298,15 @@ export function deleteRoute(db, userId, chatSessionId) {
     .run(userId, chatSessionId).changes;
 }
 
+/** Record which message id the client's handoff note covers (a pointer, never the text; plan 14.5). */
+export function setHandoffPointer(db, userId, chatSessionId, upTo) {
+  requireUser(userId);
+  requireChatId(chatSessionId);
+  if (typeof upTo !== 'string' || !upTo || upTo.length > ID_MAX) return 0;
+  return lazyPrepare(db, `UPDATE chat_session_route SET handoff_up_to = ? WHERE user_id = ? AND chat_session_id = ?`)
+    .run(upTo, userId, chatSessionId).changes;
+}
+
 /** Chat ids that hold a route row for this user (the working-state listing). */
 export function listRouteChatIds(db, userId) {
   requireUser(userId);

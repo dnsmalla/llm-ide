@@ -318,9 +318,15 @@ test('switching back to Claude after another provider never resumes the old SDK 
   route.putRoute(db, A.id, chat, { provider: 'anthropic', model: 'm' });
   route.commitTurnUsage(db, A.id, chat, { inputTokens: 1 }, { provider: 'custom:cat-groq', model: 'llama', now: new Date(), ttlMs: 60_000 });
   const seen = [];
-  await turn(chat, { runTurn: okTurn(usageEv(1, 1), seen) }, { history: [{ role: 'user', content: 'first' }, { role: 'assistant', content: 'a' }] });
+  const long = Array.from({ length: 40 }, (_, i) => ({ role: i % 2 ? 'assistant' : 'user', content: `t${i} body` }));
+  await turn(chat, { runTurn: okTurn(usageEv(1, 1), seen) }, { history: long, summary: 'Mac file summary', summaryUpTo: 'msg-9' });
   assert.equal(seen[0].resumeSdkSessionId, undefined, 'a cold transcript is never resumed');
-  assert.equal(seen[0].history.length > 0, true, 'the client\'s history seeds the fresh session');
+  assert.match(seen[0].history[0].content, /Mac file summary/, 'the client\'s summary is the single copy of the note');
+  assert.ok(seen[0].history.length <= 8, 'a note and the last turns, not 40 turns');
+  const hist = route.listRouteEvents(A.id, chat).events;
+  assert.ok(hist.some((e) => e.kind === 'handoff_built' && e.reason === 'client'));
+  assert.equal(db.prepare('SELECT handoff_up_to, handoff_note FROM chat_session_route WHERE user_id = ? AND chat_session_id = ?').get(A.id, chat).handoff_note, null, 'the server stores no note text');
+  assert.equal(route.getRoute(db, A.id, chat).handoffUpTo, 'msg-9');
 });
 
 test('the history route lists switches newest first and answers degraded rather than failing', async () => {
