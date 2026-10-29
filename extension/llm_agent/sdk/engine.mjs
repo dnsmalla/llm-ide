@@ -889,6 +889,8 @@ export function buildEngineOptions(
       }
       : { type: 'preset', preset: 'claude_code', append: appendParts.join('\n\n'), snapshot: false },
     ...(compactWindow ? { settings: { autoCompactWindow: compactWindow } } : {}),
+    // Explicit command sandbox (A11); absent under the default `inherit`.
+    ...(sandboxOptionFromEnv() ? { sandbox: sandboxOptionFromEnv() } : {}),
     ...(typeof model === 'string' && model ? { model } : {}),
     // See effortForTurn. The runner drops it on a gateway turn.
     ...(turnEffort ? { effort: turnEffort } : {}),
@@ -1046,6 +1048,30 @@ export async function readContextUsage(q, { timeoutMs = CONTEXT_USAGE_TIMEOUT_MS
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * `options.sandbox` for the SDK's own command sandbox (K1 A11), from
+ * `LLMIDE_V2_SANDBOX`:
+ *   inherit (default, unset) pass nothing: whatever the operator's managed
+ *                            Claude Code settings decide today stays in force
+ *                            (they can force the sandbox on; see invariants.md
+ *                            on SandboxNetworkAccess). This is today's behaviour.
+ *   off                      state `enabled: false` ourselves.
+ *   on                       state `enabled: true`, with OUR gates staying
+ *                            authoritative: no auto-allow of sandboxed Bash
+ *                            (bashNeedsPerCallApproval still decides), no
+ *                            model-requested unsandboxed escape, and an
+ *                            unavailable sandbox degrades instead of failing
+ *                            the turn.
+ * Anything else is `inherit`, so a typo never changes the posture. Read per
+ * call (the env is the operator's switch, not a cached constant).
+ */
+export function sandboxOptionFromEnv(raw = process.env.LLMIDE_V2_SANDBOX) {
+  const v = typeof raw === 'string' ? raw.trim().toLowerCase() : '';
+  if (v === 'off') return { enabled: false };
+  if (v === 'on') return { enabled: true, failIfUnavailable: false, autoAllowBashIfSandboxed: false, allowUnsandboxedCommands: false };
+  return null;
 }
 
 // --- The turn runner ----------------------------------------------------------

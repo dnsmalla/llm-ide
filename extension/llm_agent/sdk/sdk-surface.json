@@ -430,8 +430,8 @@
       "reason": "approved top-15 (A13), token-affecting: pending-bench, not adopted in this phase"
     },
     "options.sandbox": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "engine.mjs sandboxOptionFromEnv (LLMIDE_V2_SANDBOX, default inherit)"
     },
     "options.sessionId": {
       "status": "needs-human",
