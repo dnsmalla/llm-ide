@@ -205,3 +205,56 @@ test('engine: an old-wire consumer is untouched when everything is switched off 
     env.forEach((n, i) => { if (prev[i] === undefined) delete process.env[`LLMIDE_V2_ADOPT_${n}`]; else process.env[`LLMIDE_V2_ADOPT_${n}`] = prev[i]; });
   }
 });
+
+// --- A12: query.mcpServerStatus ----------------------------------------------------
+
+const { readMcpServerStatus, mcpStatusNotice } = await import('../llm_agent/sdk/mcp-status.mjs');
+
+test('mcpStatusNotice flags only failed / needs-auth USER servers, without error text', () => {
+  assert.equal(mcpStatusNotice(null), null);
+  assert.equal(mcpStatusNotice([{ name: 'llmide', status: 'failed' }]), null, 'our own server is not a user problem');
+  assert.equal(mcpStatusNotice([{ name: 'a', status: 'connected' }, { name: 'b', status: 'pending' }, { name: 'c', status: 'disabled' }]), null);
+  const n = mcpStatusNotice([{ name: 'a', status: 'failed', error: 'spawn /secret/path ENOENT', tools: [] }, { name: 'b', status: 'needs-auth' }, { name: 'ok', status: 'connected', tools: [{ name: 't' }] }]);
+  assert.equal(n.kind, 'mcp_status');
+  assert.equal(n.level, 'warning');
+  assert.match(n.text, /a \(failed\), b \(needs-auth\)/);
+  assert.ok(!JSON.stringify(n).includes('/secret/path'));
+  assert.deepEqual(n.data.servers.find((s) => s.name === 'ok'), { name: 'ok', status: 'connected', tools: 1 });
+});
+
+test('readMcpServerStatus: a missing method, a throw and a hang all yield null', async () => {
+  assert.equal(await readMcpServerStatus({}), null);
+  assert.equal(await readMcpServerStatus({ mcpServerStatus: async () => { throw new Error('x'); } }), null);
+  assert.equal(await readMcpServerStatus({ mcpServerStatus: () => new Promise(() => {}) }, { timeoutMs: 20 }), null);
+  assert.deepEqual(await readMcpServerStatus({ mcpServerStatus: async () => [{ name: 'a', status: 'connected' }] }), [{ name: 'a', status: 'connected' }]);
+});
+
+test('engine: a failed user MCP server surfaces one notice after the result; no user server, no call', async () => {
+  let calls = 0;
+  const mk = (servers) => () => {
+    const it = (async function* () {
+      yield { type: 'system', subtype: 'init', session_id: 'sdk-m', tools: [], capabilities: [], mcp_servers: servers };
+      yield { type: 'result', subtype: 'success', session_id: 'sdk-m' };
+    })();
+    it.mcpServerStatus = async () => { calls += 1; return [{ name: 'user-x', status: 'failed' }]; };
+    return it;
+  };
+  const events = [];
+  await runAgentV2Turn({ message: 'hi', userId: 'u-mcp', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => events.push(e), queryFactory: mk([{ name: 'llmide', status: 'connected' }, { name: 'user-x', status: 'pending' }]) }, deps);
+  assert.equal(calls, 1);
+  assert.equal(events.filter((e) => e.type === 'notice' && e.kind === 'mcp_status').length, 1);
+
+  calls = 0;
+  const ev2 = [];
+  await runAgentV2Turn({ message: 'hi', userId: 'u-mcp', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => ev2.push(e), queryFactory: mk([{ name: 'llmide', status: 'connected' }]) }, deps);
+  assert.equal(calls, 0, 'only our own server mounted: nothing to ask');
+
+  calls = 0;
+  const ev3 = [];
+  await withEnvAsync('LLMIDE_V2_ADOPT_MCP_STATUS', '0', () => runAgentV2Turn({ message: 'hi', userId: 'u-mcp', mode: 'execute', agentContext: { workspaceRoot: process.cwd() },
+    allowAmbientAuth: true, onEvent: (e) => ev3.push(e), queryFactory: mk([{ name: 'user-x', status: 'pending' }]) }, deps));
+  assert.equal(calls, 0, 'kill switch');
+  assert.ok(!ev3.some((e) => e.type === 'notice'));
+});

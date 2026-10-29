@@ -142,7 +142,7 @@
     },
     {
       "title": "notice",
-      "description": "An SDK signal the app understands (K1 P2): kind retry | rate_limit | permission_denied | model_fallback | refusal. `level` decides visibility: info = server bookkeeping (audit, limits), never shown; warning/error = one status line. `data` is the machine-readable detail for the server and observers; the Mac does not decode it. Never carries `model`. Old clients decode an unknown type as the sdk passthrough.",
+      "description": "An SDK signal the app understands (K1 P2): kind retry | rate_limit | permission_denied | model_fallback | refusal | mcp_status (sent after the result, so the Mac, which stops at the terminal event, does not show it). `level` decides visibility: info = server bookkeeping (audit, limits), never shown; warning/error = one status line. `data` is the machine-readable detail for the server and observers; the Mac does not decode it. Never carries `model`. Old clients decode an unknown type as the sdk passthrough.",
       "additionalProperties": false,
       "required": ["type", "kind", "level", "text"],
       "properties": {

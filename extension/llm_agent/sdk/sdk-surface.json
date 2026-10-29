@@ -534,8 +534,8 @@
       "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.mcpServerStatus": {
-      "status": "needs-human",
-      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
+      "status": "adopted",
+      "where": "mcp-status.mjs, engine.mjs (read once per turn after the result)"
     },
     "query.readFile": {
       "status": "needs-human",

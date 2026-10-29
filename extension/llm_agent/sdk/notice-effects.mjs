@@ -68,6 +68,13 @@ export function createNoticeEffects({ userId, turnId, db, log, deps = {} }) {
       return;
     }
 
+    if (ev.kind === 'mcp_status') {
+      safe(() => log?.warn?.('agent_v2_mcp_status', {
+        turnId, servers: Array.isArray(data.servers) ? data.servers.map((x) => `${x.name}:${x.status}`).join(',') : '',
+      }));
+      return;
+    }
+
     if (ev.kind === 'retry') {
       safe(() => log?.warn?.('agent_v2_api_retry', {
         turnId, attempt: data.attempt, maxRetries: data.maxRetries, errorStatus: data.errorStatus,

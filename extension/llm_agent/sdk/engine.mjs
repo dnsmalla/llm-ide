@@ -72,6 +72,7 @@ import { resolveCustomProviderDispatch, isDecisionOnlyProvider, DECISION_ONLY_ME
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
 import { mapSdkMessage, mapContextUsage } from './events.mjs';
 import { adoptEnabled } from './adopt.mjs';
+import { readMcpServerStatus, mcpStatusNotice } from './mcp-status.mjs';
 import { cachedEffortLevels } from './models.mjs';
 import { buildLlmIdeServer, v2ToolDefinitionChars } from './tools.mjs';
 import { registerDecision, abortDecisionsForSession } from './decisions.mjs';
@@ -1737,6 +1738,7 @@ export async function runAgentV2Turn(
   // The context-usage read happens at most once per turn, even if the SDK
   // emits a second `result` (the session is released after the first).
   let contextUsageRead = false;
+  let mcpStatusRead = false;
   // The mapped context_usage event (SDK categories), kept for turn_composition.
   let contextUsageRaw = null;
   const usageTotals = {
@@ -1930,6 +1932,14 @@ export async function runAgentV2Turn(
             contextUsageRead = true;
             const contextUsage = await readContextUsage(q, { onRaw: (raw) => { contextUsageRaw = raw; } });
             if (contextUsage) onEvent?.(contextUsage);
+          }
+          // Live MCP state (A12): only when a user server is mounted, once per
+          // turn, never delaying or failing it. Skipped when switched off.
+          if (!mcpStatusRead && adoptEnabled('MCP_STATUS')
+            && (sdkInit?.mcp_servers ?? []).some((s) => s?.name && s.name !== RESERVED_MCP_NAME)) {
+            mcpStatusRead = true;
+            const notice = mcpStatusNotice(await readMcpServerStatus(q));
+            if (notice) onEvent?.(notice);
           }
           q.releaseInput?.();
         }
