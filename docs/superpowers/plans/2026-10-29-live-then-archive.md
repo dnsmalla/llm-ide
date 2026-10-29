@@ -678,3 +678,25 @@ Changes after the Sonnet review of Phase 2 (commits on main, feed still behind `
 - **Search:** the owner filter applies before the top-K cut (it used to starve a user whose matches ranked low).
 - **Timing (opt-in bench `LLMIDE_NOTE_SHADOW_BENCH=1`, 50 000 notes, temp DB, this machine):** seeding 35 s; the full compare 1.8 s over 7 slices; slice p50 258 ms, p95 295 ms, max 295 ms. The slice budget is 200 ms. The overshoot is the scope build for one 50 000-meeting pair (about 250 ms), which is a single unit. Splitting that unit is a follow-up.
 - **Rebuild proof:** the committed feed has a staleness guard (a Swift test compares it with the real scanner's output). A node test rebuilds from a manifest of real Mac note bytes and checks against the notes list, not against a generated feed.
+
+### 12.1 Second review round (2026-10-29)
+
+- **Prune per key, never all-or-nothing.** Unparseable, placeholder, unsendable and oversize keys go as `keep`; the other rows the folder no longer names are pruned. The Library shows a count line for the kept keys (`NoteIndexStatusCenter`, Core).
+- **Empty folder.** Pruned only after two complete empty passes, one reconcile interval apart, on the volume that last held notes (persisted per root). The server refuses an empty prune without `allowEmpty` (409 `EMPTY_MANIFEST_REFUSED` / `EMPTY_SCAN_REFUSED`). A missing or unmounted folder is a scan failure.
+- **Placeholders.** `.name.md.icloud` maps to `name.md` and is held, never read. A download status of not-downloaded or downloading, or a size with zero allocated blocks, marks a file as not materialized. Symlinks to folders are skipped.
+- **Scan totals.** The final chunk declares `totalEntries`; the server compares it with the received counts (409 `SCAN_TOTAL_MISMATCH`). A new scan abandons the project's unfinished scans, so retries never reach `SCAN_LIMIT`.
+- **Staleness and verdict.** `last_reconciled_at` per (user, project) (migration 0052) is written on every complete pass, changed or not. `ok` is true only for state `ok`; zero scored queries is `not-evaluated`; no complete pass in seven days is `stale`; orphans above 2 % of a pair's notes fail the run.
+- **Daily job.** A slice that throws, or a run with per-pair errors, writes no day key; it retries with backoff (1 min doubling to 1 h).
+- **Flaps** (a pruned note the folder names again within an hour) are counted and logged. Detection only: the index is not device-scoped (decided: a second Mac on one account can still flap a key; the count makes it visible).
+- **Sign-in.** The feed restarts on the next sign-in for the same project (`sessionAuthenticationChanged`), without a project reopen.
+
+Measured at 50 000 notes (opt-in bench `LLMIDE_NOTE_SHADOW_BENCH=1`, temp DB, this machine):
+
+| Unit | Result |
+|---|---|
+| Compare, whole run | 1.6 s over 10 slices |
+| Slice time, budget 100 ms | p50 168 ms, p95 193 ms, max 193 ms (a slice is the budget plus at most one unit, about 90 ms) |
+| Owner-filtered note search | 11.3 ms per query (20 queries) |
+| Final-chunk prune of 50 000 rows | 2.9 s, batched 2 000 per transaction; the event loop turned 24 times during it |
+
+Known limit: the budget is soft. A slice runs whole units, so a slice can exceed the budget by one unit (up to about 90 ms at this size).
