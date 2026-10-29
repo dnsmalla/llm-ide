@@ -288,3 +288,41 @@ test('requireUser: every per-user helper refuses a missing user', () => {
   assert.throws(() => store.clearHistory(undefined, { scope: 'raw', db }), /userId is required/);
   assert.throws(() => store.purgeUser(null, { db }), /userId is required/);
 });
+
+test('rollup keeps tool events and composition of a still-open run, folds them after it closes', () => {
+  insertRun('u1', { id: 'open', day: DAY(60), status: 'running' });
+  insertRun('u1', { id: 'done', day: DAY(60) });
+  insertTool('u1', { runId: 'open', day: DAY(60) });
+  insertTool('u1', { runId: 'done', day: DAY(60) });
+  insertComposition('u1', { turnId: 'open', day: DAY(60) });
+  for (let i = 0; i < store.KEEP_TURNS_RAW + 3; i += 1) insertComposition('u1', { turnId: `n${i}`, day: DAY(1) });
+  const res = store.rollupOlderThan('u1', 30, { db, now: NOW });
+  assert.equal(res.toolEventsFolded, 1, 'only the closed run folds');
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = 'open'").get().n, 1);
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM turn_composition WHERE turn_id = 'open'").get().n, 1);
+  assert.equal(db.prepare('SELECT SUM(calls) AS n FROM agent_daily_tools WHERE user_id = ?').get('u1').n, 1);
+  // It closes; the next rollup folds the rest, once.
+  db.prepare("UPDATE agent_runs SET status = 'ok' WHERE run_id = 'open'").run();
+  store.rollupOlderThan('u1', 30, { db, now: NOW });
+  store.rollupOlderThan('u1', 30, { db, now: NOW });
+  assert.equal(db.prepare("SELECT COUNT(*) AS n FROM agent_tool_events WHERE run_id = 'open'").get().n, 0);
+  assert.equal(db.prepare('SELECT SUM(calls) AS n FROM agent_daily_tools WHERE user_id = ?').get('u1').n, 2);
+  assert.equal(count('agent_runs', 'u1'), 0);
+});
+
+test('rollup of 50k rows with open runs stays correct and fast', () => {
+  const ins = db.prepare(`INSERT INTO agent_tool_events (user_id, run_id, day, engine, seq, tool, result_chars, is_error)
+    VALUES ('u1', ?, ?, 'v2', ?, 'Read', 1, 0)`);
+  db.transaction(() => {
+    for (let r = 0; r < 100; r += 1) {
+      insertRun('u1', { id: `r${r}`, day: DAY(50), status: r < 10 ? 'running' : 'ok' });
+      for (let i = 0; i < 500; i += 1) ins.run(`r${r}`, DAY(50), i);
+    }
+  })();
+  const t0 = Date.now();
+  const res = store.rollupOlderThan('u1', 30, { db, now: NOW });
+  assert.ok(Date.now() - t0 < 5000);
+  assert.equal(res.toolEventsFolded, 45000);
+  assert.equal(count('agent_tool_events', 'u1'), 5000);
+  assert.equal(db.prepare('SELECT SUM(calls) AS n FROM agent_daily_tools WHERE user_id = ?').get('u1').n, 45000);
+});

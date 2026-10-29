@@ -244,30 +244,35 @@ export function rollupOlderThan(userId, days, { db, now = new Date() } = {}) {
       .run(userId, horizon);
 
     const toolEventsFolded = handle.prepare(
-      'SELECT COUNT(*) AS n FROM agent_tool_events WHERE user_id = ? AND day < ?',
-    ).get(userId, horizon).n;
+      `SELECT COUNT(*) AS n FROM agent_tool_events WHERE user_id = ? AND day < ? AND run_id NOT IN (SELECT run_id FROM agent_runs WHERE user_id = ? AND status = 'running')`,
+    ).get(userId, horizon, userId).n;
     handle.prepare(
       `INSERT INTO agent_daily_tools (user_id, day, engine, tool, calls, errors, truncated, result_chars)
        SELECT user_id, day, engine, tool, COUNT(*), SUM(is_error), SUM(truncated), SUM(result_chars)
          FROM agent_tool_events
-        WHERE user_id = ? AND day < ?
+        WHERE user_id = ? AND day < ? AND run_id NOT IN (SELECT run_id FROM agent_runs WHERE user_id = ? AND status = 'running')
         GROUP BY day, engine, tool
        ON CONFLICT(user_id, day, engine, tool) DO UPDATE SET
          calls = agent_daily_tools.calls + excluded.calls,
          errors = agent_daily_tools.errors + excluded.errors,
          truncated = agent_daily_tools.truncated + excluded.truncated,
          result_chars = agent_daily_tools.result_chars + excluded.result_chars`,
-    ).run(userId, horizon);
-    handle.prepare('DELETE FROM agent_tool_events WHERE user_id = ? AND day < ?').run(userId, horizon);
+    ).run(userId, horizon, userId);
+    // A run still open keeps its tool events and composition rows until it
+    // closes; a later rollup folds them then (same rule as clearWhere).
+    handle.prepare(`DELETE FROM agent_tool_events WHERE user_id = ? AND day < ? AND run_id NOT IN (SELECT run_id FROM agent_runs WHERE user_id = ? AND status = 'running')`)
+      .run(userId, horizon, userId);
 
     const compositionsPruned = handle.prepare(
       `SELECT COUNT(*) AS n FROM turn_composition WHERE user_id = ? AND day < ?
-         AND id NOT IN (SELECT id FROM turn_composition WHERE user_id = ? ORDER BY id DESC LIMIT ?)`,
-    ).get(userId, horizon, userId, KEEP_TURNS_RAW).n;
+         AND id NOT IN (SELECT id FROM turn_composition WHERE user_id = ? ORDER BY id DESC LIMIT ?)
+         AND turn_id NOT IN (SELECT run_id FROM agent_runs WHERE user_id = ? AND status = 'running')`,
+    ).get(userId, horizon, userId, KEEP_TURNS_RAW, userId).n;
     handle.prepare(
       `DELETE FROM turn_composition WHERE user_id = ? AND day < ?
-         AND id NOT IN (SELECT id FROM turn_composition WHERE user_id = ? ORDER BY id DESC LIMIT ?)`,
-    ).run(userId, horizon, userId, KEEP_TURNS_RAW);
+         AND id NOT IN (SELECT id FROM turn_composition WHERE user_id = ? ORDER BY id DESC LIMIT ?)
+         AND turn_id NOT IN (SELECT run_id FROM agent_runs WHERE user_id = ? AND status = 'running')`,
+    ).run(userId, horizon, userId, KEEP_TURNS_RAW, userId);
 
     const dailyPurged = handle.prepare('DELETE FROM agent_daily WHERE user_id = ? AND day < ?')
       .run(userId, keepCutoff).changes;
