@@ -665,3 +665,16 @@ Other: 20 KB upsert insert p50 0.6 / p95 15.2; update p50 55.4 / p95 79.1 (at ab
 - `mac/Tests/LlmIdeMacTests/Fixtures/lta/`: `session-v2-engine-project.json`, `session-v2-no-engine-no-project.json` (written by `AppJSON.encoder`), `meeting-with-platform.md`, `meeting-without-platform.md` (written by `FrontmatterCoder`, then the `platform` line removed). Tests: `LtaOldFormatFixtureTests` (8 pass), regenerate with `LLMIDE_REGEN_LTA_FIXTURES=1`. They pin: both session shapes decode; unknown keys are dropped on re-save (F14); a note without `platform` fails to decode and `fullScan` skips it (F13).
 - A real-DB-derived fixture was deliberately not made (the real data must not be opened); the K1a rule "real captured" is met by encoder-generated files, so a captured sample from the user's machine remains a nice-to-have before T6.3.
 
+
+## 12. Phase 2 review fixes (2026-10-29)
+
+Changes after the Sonnet review of Phase 2 (commits on main, feed still behind `lta.mode`):
+
+- **Scan safety:** an unreadable folder fails the scan (the enumerator's error handler), never a partial prune. iCloud and Dropbox placeholders are never read and block pruning, like unparseable notes. Notes too large once escaped block pruning. Directories named like notes are skipped.
+- **Account and project:** the feed stops on project close, quit and sign-out (`NoteIndexHost`, `SessionScoped`), and it re-checks the signed-in user before every request.
+- **Large libraries:** `POST /kb/index/scan` (API 85) takes 500-entry chunks of one scan. Only the final chunk (`complete: true, prune: true`) prunes, and a missing chunk is a 409. A 20 000-note library is 40 chunks. An older server answers 404, which never prunes.
+- **Hidden notes** are sent once and again only on change or when the server reports them back. Oversize notes are counted, not dropped silently.
+- **Compare:** scoped to meetings that have a note in the index, per (user, project). Per-query overlap on the top 10 (as sets below 10 hits). A run fails only on a mean overlap below 0.8, an inconsistent index, or a duplicated meeting. LIKE-only queries are dropped. A pair whose index has had no upsert in seven days is skipped. No day key and no store key are written when there is no index.
+- **Search:** the owner filter applies before the top-K cut (it used to starve a user whose matches ranked low).
+- **Timing (opt-in bench `LLMIDE_NOTE_SHADOW_BENCH=1`, 50 000 notes, temp DB, this machine):** seeding 35 s; the full compare 1.8 s over 7 slices; slice p50 258 ms, p95 295 ms, max 295 ms. The slice budget is 200 ms. The overshoot is the scope build for one 50 000-meeting pair (about 250 ms), which is a single unit. Splitting that unit is a follow-up.
+- **Rebuild proof:** the committed feed has a staleness guard (a Swift test compares it with the real scanner's output). A node test rebuilds from a manifest of real Mac note bytes and checks against the notes list, not against a generated feed.

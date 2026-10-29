@@ -727,3 +727,18 @@ layout's — a real repo graph genuinely arrives fragmented.
 
 - Do not rely on the map's rowids after any change to `search`; rebuild from `note_index` instead.
 - Do not add a per-note kind other than `note` to `search` without updating the `kind <> 'note'` guard.
+
+### Live-then-archive Phase 2 (the Mac feed, `lta.mode`)
+
+- The Mac feeds the index only when `lta.mode` is `shadow` or `on` (default `off`, read at environment start). Nothing is written to the index or to agent.db's compare keys while it is off.
+- **Prune only on proof of a complete scan.** A pass prunes only when the scan read every item, the manifest is non-empty, and no file is unparseable, unavailable (an iCloud or Dropbox placeholder, never read), or unsendable (too large once escaped). A chunked scan prunes only on its final chunk with `complete: true, prune: true`, and the server refuses (409) when any chunk never arrived. An older server (no chunk route) never gets a prune.
+- **The feed is bound to one account.** It stops on project close, on quit and on sign-out (`NoteIndexHost` is `SessionScoped`), and every request re-checks the signed-in user, so a switch sends nothing under the new token.
+- The shadow compare scores only meetings that have a note in the index (per user and project). A run fails on a mean overlap below 0.8, an inconsistent index, or a duplicated meeting. It skips a pair whose index has had no upsert in seven days, and it never stores or logs query text.
+
+**To clear the index** (after `lta.mode` is turned off, or to reset a project): the index is derived, so deleting it loses nothing. Call `POST /kb/index/reconcile` with the project's id, `"manifest": []` and `"prune": true` as the signed-in user; every row of that project is removed. Re-enabling the mode rebuilds it from the Mac files.
+
+### ❌ DO NOT do these (Phase 2)
+
+- Do not prune from a pass that has a dropped, unreadable or unparseable item, or from a scan that is not the complete final chunk.
+- Do not send a feed under an account other than the one it started for.
+- Do not add a query that has no FTS term to the compare: it would scan the whole `search` table.
