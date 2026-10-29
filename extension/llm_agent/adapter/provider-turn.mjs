@@ -15,6 +15,7 @@ import { getDb } from '../../kb/db.mjs';
 import { recordUsage, flagQuota } from '../../kb/usage.mjs';
 import { recordActivity } from '../../kb/activity.mjs';
 import { logger } from '../../core/logger.mjs';
+import { redactWithKey } from '../../core/redact-secrets.mjs';
 import { resolveCustomProviderDispatch } from '../../providers/providers.mjs';
 import { createChatModel, runToolTurn } from '../../providers/adapter/index.mjs';
 import { pickTurnProvider, noteProviderRateLimited } from '../../providers/provider-fallback.mjs';
@@ -23,7 +24,7 @@ import { getConnection, getSettings } from '../../server/provider-connections.mj
 import { TOOL_MODES, catalogEntry } from '../../server/provider-catalog.mjs';
 import { personaForMode } from '../runtime/mode-personas.mjs';
 import { abortDecisionsForSession } from '../sdk/decisions.mjs';
-import { buildProviderTools } from './tool-bridge.mjs';
+import { buildProviderTools, normalizeWorkspaceRoot } from './tool-bridge.mjs';
 
 const log = logger.child({ component: 'provider-turn' });
 const MAX_HISTORY = 40;
@@ -71,7 +72,8 @@ function systemFor({ mode, model, connName, workspaceRoot, toolNames }) {
  * @param {AbortSignal} [o.signal]
  * @param {object} [o.deps]     test seams: { db, fetchImpl, modelFor }
  */
-export async function runProviderTurn({ userId, provider, model, message, history, mode = 'ask', agentContext = {}, onEvent, signal, deps = {} }) {
+export async function runProviderTurn({ userId, provider, model, message, history, mode = 'ask', agentContext: rawAgentContext = {}, onEvent, signal, deps = {} }) {
+  let agentContext = rawAgentContext;
   const db = deps.db ?? getDb();
   if (!userId) throw new ProviderTurnError('AUTH_REQUIRED', 'Authenticated user required', 401);
   if (!getSettings(userId, db).toolsEnabled) {
@@ -83,6 +85,11 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     throw new ProviderTurnError('PROVIDER_NOT_CONNECTED', 'That provider is not connected. Add it in Settings, Providers.', 404);
   }
   const needsTools = TOOL_MODES.has(mode);
+  // Same normalisation as the Claude engine; a relative root is refused.
+  let workspaceRoot;
+  try { workspaceRoot = normalizeWorkspaceRoot(agentContext?.workspaceRoot); }
+  catch (e) { throw new ProviderTurnError('VALIDATION_FAILED', e.message, 400); }
+  agentContext = { ...agentContext, workspaceRoot: workspaceRoot || undefined };
 
   // One decision, at the start; never revisited mid-stream.
   const pick = pickTurnProvider(userId, { provider, model, needsTools, db });
@@ -94,7 +101,13 @@ export async function runProviderTurn({ userId, provider, model, message, histor
   }
 
   // Capability: a tool mode refuses a model that cannot call tools; other modes run without tools.
-  const listing = await listConnectionModels(userId, conn, { fetchImpl: deps.fetchImpl, db });
+  let listing;
+  try { listing = await listConnectionModels(userId, conn, { fetchImpl: deps.fetchImpl, db }); }
+  catch (e) {
+    // A refused address aborts the turn; it is never answered from a static list.
+    if (e?.code === 'SSRF_BLOCKED') throw new ProviderTurnError('PROVIDER_BLOCKED', redactWithKey(e.message, dispatch.apiKey).slice(0, 300), 403);
+    throw e;
+  }
   const cap = listing.models.find((m) => m.id === active.model)
     ?? { toolsSupported: false, toolsSource: 'unknown' };
   if (needsTools && !cap.toolsSupported) {
@@ -114,7 +127,8 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     } catch { /* best effort */ }
   }
   const tools = cap.toolsSupported
-    ? buildProviderTools({ userId, agentContext, mode, sessionKey, emit: send, signal, currentMessage: message })
+    ? buildProviderTools({ userId, agentContext, mode, sessionKey, emit: send, signal, currentMessage: message,
+      egressNeedsApproval: !getSettings(userId, db).egressAutoApprove })
     : [];
   if (!cap.toolsSupported) {
     send({ type: 'notice', kind: 'tools_unavailable', level: 'warning', text: `${active.model} is not known to support tools; this turn runs without them.`, data: { model: active.model } });
@@ -122,9 +136,16 @@ export async function runProviderTurn({ userId, provider, model, message, histor
   send({ type: 'init', sessionId: sessionKey, claudeCodeVersion: null, model: active.model,
     tools: tools.map((t) => t.name), capabilities: ['provider-adapter'], mcpServers: [] });
 
-  const chatModel = deps.modelFor
-    ? deps.modelFor({ conn, apiKey: dispatch.apiKey, model: active.model })
-    : createChatModel({ name: conn.catalogId, baseURL: dispatch.baseUrl, apiKey: dispatch.apiKey, modelId: active.model, fetchImpl: deps.fetchImpl });
+  let chatModel;
+  try {
+    chatModel = deps.modelFor
+      ? deps.modelFor({ conn, apiKey: dispatch.apiKey, model: active.model })
+      : createChatModel({ name: conn.catalogId, baseURL: dispatch.baseUrl, apiKey: dispatch.apiKey, modelId: active.model,
+        allowPrivate: conn.allowPrivate, fetchImpl: deps.chatFetch });
+  } catch (e) {
+    if (e?.code === 'SSRF_BLOCKED') throw new ProviderTurnError('PROVIDER_BLOCKED', redactWithKey(e.message, dispatch.apiKey).slice(0, 300), 403);
+    throw e;
+  }
 
   const totals = { inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0 };
   const requestId = randomUUID();
@@ -155,7 +176,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
         recordUsage(db, { userId, provider: active.provider, model: active.model, source: 'api', endpoint: '/kb/providers/turn', requestId, ...totals });
       }
       if (summary?.failure?.quota) flagQuota(db, userId, active.provider, active.model);
-    } catch (err) { log.warn('provider_turn_meter_failed', { message: String(err?.message || err).slice(0, 120) }); }
+    } catch (err) { log.warn('provider_turn_meter_failed', { message: redactWithKey(String(err?.message || err), null).slice(0, 120) }); }
   }
   return { ...summary, provider: active.provider, model: active.model, switched: pick.switched, tools: tools.map((t) => t.name), entry: catalogEntry(conn.catalogId)?.id };
 }
