@@ -24,19 +24,22 @@ struct NoteIndexReconcilerTests {
         private(set) var scanCalls = 0
         private var scanDropIndex: Int?
         private var scanUnsupported = false
-        private var scans: [String: (total: Int, received: Set<Int>, seen: Set<String>)] = [:]
+        private var scans: [String: (total: Int, received: Set<Int>, seen: Set<String>, seenCount: Int)] = [:]
         /// Acknowledges chunk `i` but never records it (a lost chunk).
         func dropScanChunk(_ i: Int?) { scanDropIndex = i }
         /// Answers 404 for the chunk route (an older server).
         func setScanUnsupported(_ on: Bool) { scanUnsupported = on }
 
         func indexScan(projectId: String, scanId: String, index: Int, total: Int, complete: Bool,
-                       prune: Bool, entries: [LlmIdeAPIClient.IndexManifestEntry]) async throws -> LlmIdeAPIClient.IndexScanResult {
+                       prune: Bool, entries: [LlmIdeAPIClient.IndexManifestEntry],
+                       totalEntries: Int?, keep: [String]?, allowEmpty: Bool?) async throws -> LlmIdeAPIClient.IndexScanResult {
             calls += 1
             scanCalls += 1
             if scanUnsupported { throw APIError.http(status: 404, code: "NOT_FOUND", message: "", details: nil) }
             if let failure { throw failure }
-            var st = scans[scanId] ?? (total: total, received: [], seen: [])
+            var st = scans[scanId] ?? (total: total, received: [], seen: [], seenCount: 0)
+            st.seenCount += entries.count
+            let keptKeys = Set(keep ?? [])
             var missing: [String] = [], stale: [String] = []
             for e in entries {
                 st.seen.insert(e.noteKey)
@@ -56,7 +59,14 @@ struct NoteIndexReconcilerTests {
             guard st.received.count == total else {
                 throw APIError.http(status: 409, code: "SCAN_INCOMPLETE", message: "", details: nil)
             }
-            let extra = rows.keys.filter { !st.seen.contains($0) }.sorted()
+            let declared = totalEntries ?? -1
+            guard declared == st.seenCount else {
+                throw APIError.http(status: 409, code: "SCAN_TOTAL_MISMATCH", message: "", details: nil)
+            }
+            if prune && st.seenCount == 0 && allowEmpty != true {
+                throw APIError.http(status: 409, code: "EMPTY_SCAN_REFUSED", message: "", details: nil)
+            }
+            let extra = rows.keys.filter { !st.seen.contains($0) && !keptKeys.contains($0) }.sorted()
             var pruned = 0
             if prune {
                 for k in extra { rows.removeValue(forKey: k); pruned += 1 }
@@ -91,11 +101,16 @@ struct NoteIndexReconcilerTests {
 
         func indexReconcile(projectId: String,
                             manifest: [LlmIdeAPIClient.IndexManifestEntry],
-                            prune: Bool) async throws -> LlmIdeAPIClient.IndexReconcileResult {
+                            keep: [String],
+                            prune: Bool,
+                            allowEmpty: Bool) async throws -> LlmIdeAPIClient.IndexReconcileResult {
             calls += 1
             if let failure { throw failure }
             reconcileCalls.append((manifest.count, prune))
-            let named = Set(manifest.map(\.noteKey))
+            if prune && manifest.isEmpty && !allowEmpty {
+                throw APIError.http(status: 409, code: "EMPTY_MANIFEST_REFUSED", message: "", details: nil)
+            }
+            let named = Set(manifest.map(\.noteKey)).union(keep)
             var missing: [String] = [], stale: [String] = []
             for m in manifest {
                 if let held = rows[m.noteKey] {
@@ -222,6 +237,8 @@ struct NoteIndexReconcilerTests {
     /// A file system with metadata only for placeholders, so a test can prove they are never read.
     final class FakeFileSystem: NoteIndexFileSystem, @unchecked Sendable {
         var items: [NoteIndexEntry] = []
+        var volume: String? = "vol-A"
+        func volumeIdentifier(of root: URL) -> String? { volume }
         var files: [URL: Data] = [:]
         var reads: [URL] = []
         func entries(under root: URL) throws -> [NoteIndexEntry] { items }
@@ -247,14 +264,18 @@ struct NoteIndexReconcilerTests {
                            dataless: true, danglingLink: false),
         ]
         await h.server.seed("gone.md", "held")
+        await h.server.seed("cloud.md", "held")
         let r = NoteIndexReconciler(root: root, index: h.index, projectId: "p1", remote: h.server, fileSystem: fake)
         let outcome = await r.runOnce()
         guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
         #expect(stats.unavailable == 1)
-        #expect(!stats.pruneAllowed)
+        #expect(stats.kept == 1)
+        #expect(stats.keptByReason["unavailable"] == 1)
+        #expect(stats.pruneAllowed)
         #expect(fake.reads.allSatisfy { $0.lastPathComponent != "cloud.md" })
         #expect(await h.server.rows["good.md"] != nil)
-        #expect(await h.server.rows["gone.md"] == "held")
+        #expect(await h.server.rows["cloud.md"] == "held", "a placeholder's key is kept, never pruned")
+        #expect(await h.server.rows["gone.md"] == nil, "a deleted note still prunes")
     }
 
     @Test func unreadableSubdirectoryFailsTheScanInsteadOfPruning() async throws {
@@ -307,13 +328,14 @@ struct NoteIndexReconcilerTests {
         try h.write("escaped.md", Self.note(id: "e", title: "Escaped", body: String(repeating: "\u{1}", count: 400 * 1024)))
         try h.write("ok.md", Self.note(id: "o", title: "Ok"))
         await h.server.seed("gone.md", "held")
+        await h.server.seed("escaped.md", "held")
         let outcome = await h.reconciler().runOnce()
         guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
         #expect(stats.unsendable == 1)
-        #expect(!stats.pruneAllowed)
-        #expect(await h.server.rows["escaped.md"] == nil)
+        #expect(stats.pruneAllowed)
+        #expect(await h.server.rows["escaped.md"] == "held", "an unsendable note's key is kept")
         #expect(await h.server.rows["ok.md"] != nil)
-        #expect(await h.server.rows["gone.md"] == "held")
+        #expect(await h.server.rows["gone.md"] == nil)
     }
 
     /// A mutable signed-in user for the identity tests.
@@ -420,18 +442,169 @@ struct NoteIndexReconcilerTests {
         #expect(await h.server.rows.count == 8_000)
     }
 
+    @Test func anEmptiedFolderPrunesOnlyAfterTwoEmptyPassesOnTheSameVolume() async throws {
+        let h = try Harness()
+        try h.write("a.md", Self.note(id: "a", title: "Alpha"))
+        let first = h.reconciler()
+        guard case .ok = await first.runOnce() else { Issue.record("seed pass"); return }
+        #expect(await h.server.rows["a.md"] != nil)
+        try FileManager.default.removeItem(at: h.root.appendingPathComponent("a.md"))
+
+        // interval 0: the first empty pass only starts the confirmation, the second may prune.
+        let confirmer = NoteIndexReconciler(root: h.root, index: h.index, projectId: "p1", remote: h.server,
+                                            emptyConfirmInterval: 0)
+        guard case .ok(let one) = await confirmer.runOnce() else { Issue.record("first empty pass"); return }
+        #expect(!one.pruneAllowed)
+        #expect(one.emptyPending)
+        #expect(await h.server.rows["a.md"] != nil, "one empty pass deletes nothing")
+
+        guard case .ok(let two) = await confirmer.runOnce() else { Issue.record("second empty pass"); return }
+        #expect(two.pruneAllowed)
+        #expect(two.pruned == 1)
+        #expect(await h.server.rows["a.md"] == nil, "two empty passes on the same volume may prune")
+    }
+
+    @Test func anEmptyPassWithTheDefaultIntervalWaitsForTheConfirmationWindow() async throws {
+        let h = try Harness()
+        try h.write("b.md", Self.note(id: "b", title: "Beta"))
+        guard case .ok = await h.reconciler().runOnce() else { Issue.record("seed"); return }
+        try FileManager.default.removeItem(at: h.root.appendingPathComponent("b.md"))
+        let r = h.reconciler()          // default interval: 15 minutes
+        for _ in 0..<3 {
+            guard case .ok(let s) = await r.runOnce() else { Issue.record("pass"); return }
+            #expect(!s.pruneAllowed)
+        }
+        #expect(await h.server.rows["b.md"] != nil)
+    }
+
+    @Test func aVolumeChangeNeverPrunesAnEmptyFolder() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("vol-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let h = try Harness()
+        let fake = FakeFileSystem()
+        let note = root.appendingPathComponent("n.md")
+        let text = Data(Self.note(id: "n", title: "Notes").utf8)
+        fake.files[note] = text
+        fake.items = [NoteIndexEntry(url: note, isDirectory: false, mtimeMs: 1, size: Int64(text.count), dataless: false, danglingLink: false)]
+        fake.volume = "vol-A"
+        await h.server.seed("n.md", NoteIndexScanner.sha256Hex(text))
+        let r = NoteIndexReconciler(root: root, index: h.index, projectId: "p1", remote: h.server, fileSystem: fake,
+                                    emptyConfirmInterval: 0)
+        guard case .ok = await r.runOnce() else { Issue.record("non-empty pass"); return }
+        // the folder is now empty, but on another volume (an unmounted share, a different disk)
+        fake.items = []
+        fake.volume = "vol-B"
+        for _ in 0..<2 {
+            guard case .ok(let s) = await r.runOnce() else { Issue.record("empty pass"); return }
+            #expect(!s.pruneAllowed)
+        }
+        #expect(await h.server.rows["n.md"] != nil)
+    }
+
+    @Test func aMissingFolderIsAScanFailureNotAnEmptyFolder() async throws {
+        let h = try Harness()
+        try h.write("c.md", Self.note(id: "c", title: "Gamma"))
+        guard case .ok = await h.reconciler().runOnce() else { Issue.record("seed"); return }
+        try FileManager.default.removeItem(at: h.root)
+        let outcome = await h.reconciler().runOnce()
+        guard case .scanFailed = outcome else { Issue.record("expected scanFailed, got \(outcome)"); return }
+        #expect(await h.server.rows["c.md"] != nil)
+    }
+
+    @Test func aNoteDeletedThenRestoredIsCountedAsAFlap() async throws {
+        let h = try Harness()
+        try h.write("a.md", Self.note(id: "a", title: "Alpha"))
+        try h.write("b.md", Self.note(id: "b", title: "Beta"))
+        let r = h.reconciler()
+        guard case .ok = await r.runOnce() else { Issue.record("seed"); return }
+        try FileManager.default.removeItem(at: h.root.appendingPathComponent("b.md"))
+        guard case .ok(let gone) = await r.runOnce() else { Issue.record("prune pass"); return }
+        #expect(gone.pruned == 1)
+        #expect(gone.flaps == 0)
+        try Self.note(id: "b", title: "Beta").write(to: h.root.appendingPathComponent("b.md"), atomically: true, encoding: .utf8)
+        guard case .ok(let back) = await r.runOnce() else { Issue.record("restore pass"); return }
+        #expect(back.flaps == 1, "a pruned note the folder names again within the window is a flap")
+    }
+
+    @Test func theStatusLineNamesWhatCouldNotBeIndexed() async throws {
+        let h = try Harness()
+        try h.write("ok.md", Self.note(id: "ok", title: "Fine"))
+        try h.write("legacy.md", Self.note(id: "lg", title: "Legacy", platform: nil))
+        guard case .ok = await h.reconciler().runOnce() else { Issue.record("pass"); return }
+        let summary = NoteIndexStatusCenter.shared.summary
+        #expect(summary == "1 note could not be indexed: 1 with unreadable frontmatter")
+    }
+
+    @Test func aSymlinkToAFolderIsSkippedNotAScanFailure() async throws {
+        let h = try Harness()
+        try h.write("a.md", Self.note(id: "a", title: "Alpha"))
+        let dir = h.base.appendingPathComponent("elsewhere", isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        try FileManager.default.createSymbolicLink(atPath: h.root.appendingPathComponent("link.md").path,
+                                                   withDestinationPath: dir.path)
+        let outcome = await h.reconciler().runOnce()
+        guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
+        #expect(stats.manifestEntries == 1)
+        #expect(await h.server.rows.keys.sorted() == ["a.md"])
+    }
+
+    @Test func anICloudPlaceholderNameIsHeldAndNeverRead() async throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent("icl-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        let h = try Harness()
+        let fake = FakeFileSystem()
+        let placeholder = root.appendingPathComponent("sub/.cloud.md.icloud")
+        fake.items = [NoteIndexEntry(url: placeholder, isDirectory: false, mtimeMs: 1, size: 120,
+                                     dataless: false, danglingLink: false)]
+        await h.server.seed("sub/cloud.md", "held")
+        let r = NoteIndexReconciler(root: root, index: h.index, projectId: "p1", remote: h.server, fileSystem: fake)
+        let outcome = await r.runOnce()
+        guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
+        #expect(stats.keptByReason["unavailable"] == 1)
+        #expect(fake.reads.isEmpty, "a placeholder is never read")
+        #expect(await h.server.rows["sub/cloud.md"] == "held", "its key is held, not pruned")
+    }
+
+    @Test func theAllocatedSizeHeuristicTreatsZeroBlocksAsNotMaterialized() {
+        #expect(NoteIndexFileSystemHeuristics.isDataless(status: nil, downloading: nil, size: 120, allocated: 0))
+        #expect(!NoteIndexFileSystemHeuristics.isDataless(status: nil, downloading: nil, size: 120, allocated: 4096))
+        #expect(!NoteIndexFileSystemHeuristics.isDataless(status: nil, downloading: nil, size: 0, allocated: 0))
+        #expect(NoteIndexFileSystemHeuristics.isDataless(status: .notDownloaded, downloading: nil, size: 1, allocated: 1))
+        #expect(NoteIndexFileSystemHeuristics.isDataless(status: nil, downloading: true, size: nil, allocated: nil))
+        #expect(NoteIndexFileSystemHeuristics.iCloudPlaceholderTarget(".note.md.icloud") == "note.md")
+        #expect(NoteIndexFileSystemHeuristics.iCloudPlaceholderTarget(".note.txt.icloud") == nil)
+        #expect(NoteIndexFileSystemHeuristics.iCloudPlaceholderTarget("note.md") == nil)
+    }
+
+    @Test func aSignInRestartsTheFeedForTheSameProjectWithoutAReopen() async throws {
+        let h = try Harness()
+        let identity = Identity("user-a")
+        let host = NoteIndexHost()
+        host.sessionUserId = { identity.user }
+        host.start(root: h.root, index: h.index, projectId: "p1", remote: h.server)
+        #expect(host.isRunning)
+        host.resetForSignOut()
+        #expect(!host.isRunning)
+        // signed out: a sign-in with a new user brings the feed back for the same project
+        identity.user = "user-b"
+        host.sessionAuthenticationChanged(true)
+        #expect(host.isRunning)
+        host.stop()
+    }
+
     @Test func platformLessNoteBlocksPruneButOthersStillSync() async throws {
         let h = try Harness()
         try h.write("good.md", Self.note(id: "g", title: "Good"))
         try h.write("no-platform.md", Self.note(id: "p", title: "Legacy", platform: nil))
         await h.server.seed("gone.md", "held")
+        await h.server.seed("no-platform.md", "held")
         let outcome = await h.reconciler().runOnce()
         guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
-        #expect(!stats.pruneAllowed)
-        #expect(stats.pruned == 0)
+        #expect(stats.pruneAllowed)
+        #expect(stats.pruned == 1)
         #expect(await h.server.rows["good.md"] != nil)
-        #expect(await h.server.rows["no-platform.md"] == nil)
-        #expect(await h.server.rows["gone.md"] == "held")
+        #expect(await h.server.rows["no-platform.md"] == "held", "a key the Mac cannot index is kept")
+        #expect(await h.server.rows["gone.md"] == nil, "other deleted notes still prune")
     }
 
     @Test func oversizeBodyIsNeverSentOrManifested() async throws {

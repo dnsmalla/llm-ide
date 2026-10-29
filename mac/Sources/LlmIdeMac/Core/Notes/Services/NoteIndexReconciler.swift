@@ -4,14 +4,15 @@ import os.log
 
 // Feeds the server's derived note index (live-then-archive Phase 2, plan 3.8).
 //
-// The Mac note files are the only durable copy. This service reads them, sends
-// a manifest (key, content hash) to `POST /kb/index/reconcile`, and upserts only
-// the notes the server reports as missing or stale. Hidden notes are sent with
-// `hidden: true` so the server drops them. Nothing here changes what the legacy
+// The Mac note files are the only durable copy. This service reads them, sends a manifest
+// (key, content hash) to the server, and upserts only the notes the server reports as missing or
+// stale. Pruning is per key: a key the Mac cannot index (unparseable, unavailable, unsendable,
+// oversize) is sent as `keep` and never pruned, while every other row the folder no longer names is
+// pruned. An EMPTY folder prunes only after two complete empty passes, a reconcile interval apart,
+// on the same volume that last held notes (allowEmpty). Nothing here changes what the legacy
 // meeting path reads or writes; a failure here never reaches the UI.
 
-/// Server bounds the reconciler stays under (schema/http/index.schema.json and
-/// extension/kb/note-index.mjs). A value above a bound fails the whole batch.
+/// Server bounds the reconciler stays under (schema/http/index.schema.json and extension/kb/note-index.mjs).
 enum NoteIndexLimits {
     static let batchNotes = 50
     static let batchBytes = 900_000
@@ -27,18 +28,22 @@ enum NoteIndexLimits {
     static let participantChars = 200
     static let participantCount = 200
     static let metaChars = 200
+    /// A key that was pruned and comes back within this window counts as a flap.
+    static let flapWindow: TimeInterval = 3600
 }
 
-/// The two calls the reconciler makes. `LlmIdeAPIClient` conforms; tests pass an
-/// in-process fake that behaves like the server.
+/// The two-or-three calls the reconciler makes. `LlmIdeAPIClient` conforms; tests pass an in-process fake.
 protocol NoteIndexRemote: Sendable {
     func indexUpsertNotes(projectId: String,
                           notes: [LlmIdeAPIClient.IndexNoteInput]) async throws -> LlmIdeAPIClient.IndexUpsertResult
     func indexReconcile(projectId: String,
                         manifest: [LlmIdeAPIClient.IndexManifestEntry],
-                        prune: Bool) async throws -> LlmIdeAPIClient.IndexReconcileResult
+                        keep: [String],
+                        prune: Bool,
+                        allowEmpty: Bool) async throws -> LlmIdeAPIClient.IndexReconcileResult
     func indexScan(projectId: String, scanId: String, index: Int, total: Int, complete: Bool,
-                   prune: Bool, entries: [LlmIdeAPIClient.IndexManifestEntry]) async throws -> LlmIdeAPIClient.IndexScanResult
+                   prune: Bool, entries: [LlmIdeAPIClient.IndexManifestEntry],
+                   totalEntries: Int?, keep: [String]?, allowEmpty: Bool?) async throws -> LlmIdeAPIClient.IndexScanResult
 }
 
 extension LlmIdeAPIClient: NoteIndexRemote {}
@@ -50,7 +55,6 @@ enum NoteIndexKind: String, Sendable, Equatable {
     /// Not a meeting note (no frontmatter). Ignored, as FolderIndexer ignores it.
     case notNote
     /// Frontmatter present but not decodable (for example no `platform`, F13).
-    /// It cannot be indexed, and it blocks pruning for the run.
     case unparseable
     /// Larger than the server accepts for one body. Never sent.
     case oversize
@@ -78,11 +82,16 @@ struct NoteIndexScan: Sendable {
     var hidden: [NoteIndexFile] = []
     var unparseable: [String] = []
     var oversize: [String] = []
-    /// Notes that are indexable but whose upsert would exceed one request (JSON escaping).
+    /// Notes indexable on their own whose upsert would exceed one request (JSON escaping).
     var unsendable: [String] = []
-    /// Placeholders (iCloud, Dropbox) whose bytes are not on disk. Never read; blocks pruning.
+    /// Placeholders (iCloud, Dropbox) whose bytes are not on disk. Never read.
     var unavailable: [String] = []
     var cache: [String: NoteIndexCacheEntry] = [:]
+
+    /// Keys the Mac holds back from pruning: it cannot index them, but the server may hold them.
+    var kept: [String] {
+        Array(Set(unparseable + unavailable + unsendable + oversize)).sorted()
+    }
 }
 
 /// One item a walk found. Metadata only: the scanner decides whether to read it.
@@ -91,7 +100,7 @@ struct NoteIndexEntry: Sendable, Equatable {
     let isDirectory: Bool
     let mtimeMs: Int64?
     let size: Int64?
-    /// An iCloud/Dropbox placeholder: the metadata is there, the bytes are not.
+    /// Metadata says the bytes are not on this Mac (an iCloud or File Provider placeholder).
     let dataless: Bool
     /// A symlink whose target is gone. Not a note; skipped as FolderIndexer skips it.
     let danglingLink: Bool
@@ -99,26 +108,50 @@ struct NoteIndexEntry: Sendable, Equatable {
 
 /// The file-system seam the scanner uses. Disk in the app; a fake in tests.
 protocol NoteIndexFileSystem: Sendable {
-    /// Every item under `root`. Throws if any part of the walk failed: a partial
-    /// listing must never look like a complete one.
+    /// Throws unless the notes root is a readable directory (so a missing or unmounted folder
+    /// is a scan failure, never an empty scan).
+    func checkRoot(_ root: URL) throws
+    /// Every item under `root`. Throws if any part of the walk failed.
     func entries(under root: URL) throws -> [NoteIndexEntry]
     func read(_ url: URL) throws -> Data
+    /// An identity for the volume holding `root`, or nil when unknown.
+    func volumeIdentifier(of root: URL) -> String?
 }
 
-/// The real file system. The walk records every enumerator error (an unreadable
-/// subdirectory, a TCC denial, an unmounted volume) instead of skipping it.
+extension NoteIndexFileSystem {
+    func checkRoot(_ root: URL) throws {}
+    func volumeIdentifier(of root: URL) -> String? { nil }
+}
+
+/// The real file system. The walk records every enumerator error (an unreadable subdirectory,
+/// a permission denial, an unmounted volume) instead of skipping it.
 struct DiskNoteIndexFileSystem: NoteIndexFileSystem {
     /// Collects the first walk error from the enumerator's error handler.
     private final class WalkErrors {
         var first: String?
     }
 
+    func checkRoot(_ root: URL) throws {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: root.path, isDirectory: &isDir), isDir.boolValue,
+              FileManager.default.isReadableFile(atPath: root.path) else {
+            throw NoteIndexScanner.Failure(reason: "the notes folder is missing, not a folder, or not readable")
+        }
+    }
+
+    func volumeIdentifier(of root: URL) -> String? {
+        (try? root.resourceValues(forKeys: [.volumeIdentifierKey]).volumeIdentifier).map { String(describing: $0) }
+    }
+
     func entries(under root: URL) throws -> [NoteIndexEntry] {
         let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isDirectoryKey,
-                                      .isSymbolicLinkKey, .ubiquitousItemDownloadingStatusKey]
+                                      .isSymbolicLinkKey, .ubiquitousItemDownloadingStatusKey,
+                                      .ubiquitousItemIsDownloadingKey, .totalFileAllocatedSizeKey]
         let errors = WalkErrors()
+        // Hidden files are enumerated too: an iCloud placeholder is a hidden file (`.name.md.icloud`).
+        // The scanner decides what each one is.
         guard let enumerator = FileManager.default.enumerator(
-            at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles],
+            at: root, includingPropertiesForKeys: keys, options: [],
             errorHandler: { url, error in
                 if errors.first == nil {
                     errors.first = "cannot read \(url.lastPathComponent): \(error.localizedDescription)"
@@ -130,15 +163,27 @@ struct DiskNoteIndexFileSystem: NoteIndexFileSystem {
         var out: [NoteIndexEntry] = []
         for case let url as URL in enumerator {
             let values = try? url.resourceValues(forKeys: Set(keys))
-            let dataless = values?.ubiquitousItemDownloadingStatus == .notDownloaded
+            let isLink = values?.isSymbolicLink == true
+            var linkTargetIsDir = false
+            var linkTargetExists = true
+            if isLink {
+                var isDir: ObjCBool = false
+                linkTargetExists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir)
+                linkTargetIsDir = linkTargetExists && isDir.boolValue
+            }
+            let dataless = !isLink && NoteIndexFileSystemHeuristics.isDataless(
+                status: values?.ubiquitousItemDownloadingStatus,
+                downloading: values?.ubiquitousItemIsDownloading,
+                size: values?.fileSize,
+                allocated: values?.totalFileAllocatedSize)
             out.append(NoteIndexEntry(
                 url: url,
-                isDirectory: values?.isDirectory == true,
+                // A symlink to a folder is a folder: it is walked by nothing and indexed as nothing.
+                isDirectory: values?.isDirectory == true || linkTargetIsDir,
                 mtimeMs: values?.contentModificationDate.map { Int64($0.timeIntervalSince1970 * 1000) },
                 size: values?.fileSize.map { Int64($0) },
                 dataless: dataless,
-                // fileExists follows the link: a symlink whose target is gone is not a note.
-                danglingLink: values?.isSymbolicLink == true && !FileManager.default.fileExists(atPath: url.path)))
+                danglingLink: isLink && !linkTargetExists))
         }
         if let reason = errors.first {
             throw NoteIndexScanner.Failure(reason: reason)
@@ -151,24 +196,59 @@ struct DiskNoteIndexFileSystem: NoteIndexFileSystem {
     }
 }
 
+/// Metadata rules that decide a file's bytes are not on this Mac. The bytes are never read when true.
+enum NoteIndexFileSystemHeuristics {
+    static func isDataless(status: URLUbiquitousItemDownloadingStatus?, downloading: Bool?,
+                           size: Int?, allocated: Int?) -> Bool {
+        if status == .notDownloaded { return true }
+        if downloading == true { return true }
+        // File Provider and Dropbox placeholders report their size but allocate no blocks.
+        if let size, let allocated, size > 0, allocated == 0 { return true }
+        return false
+    }
+
+    /// `.name.md.icloud` (an iCloud Drive placeholder for `name.md`) -> `name.md`; anything else -> nil.
+    static func iCloudPlaceholderTarget(_ name: String) -> String? {
+        guard name.hasPrefix("."), name.hasSuffix(".icloud") else { return nil }
+        let inner = String(name.dropFirst().dropLast(".icloud".count))
+        guard inner.hasSuffix(".md"), !inner.hasSuffix(".partial.md") else { return nil }
+        return inner
+    }
+}
+
 enum NoteIndexScanner {
     struct Failure: Error, Equatable {
         let reason: String
     }
 
-    /// Walks `root` and returns the manifest material. Throws on ANY read or
-    /// enumeration error, so callers prune only after a complete scan.
+    /// Walks `root` and returns the manifest material. Throws on ANY read or enumeration error,
+    /// so callers prune only after a complete scan.
     static func scan(root: URL, hiddenKeys: Set<String>, previous: [String: NoteIndexCacheEntry],
                      fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem()) throws -> NoteIndexScan {
         var out = NoteIndexScan()
         for item in try fileSystem.entries(under: root) {
-            if item.isDirectory || item.danglingLink { continue }
             let url = item.url
             let name = url.lastPathComponent
-            guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
             let key = FolderIndexer.relativePath(of: url, under: root)
+
+            // An iCloud placeholder for a note: never read, and it holds its key (keep).
+            if let target = NoteIndexFileSystemHeuristics.iCloudPlaceholderTarget(name) {
+                let dir = key.hasSuffix(name) ? String(key.dropLast(name.count)) : ""
+                let noteKey = dir + target
+                out.unavailable.append(noteKey)
+                if hiddenKeys.contains(noteKey) {
+                    out.hidden.append(NoteIndexFile(key: noteKey, url: url,
+                                                    contentHash: previous[noteKey]?.contentHash ?? "unavailable",
+                                                    mtimeMs: item.mtimeMs ?? 0))
+                }
+                continue
+            }
+            // Other dotfiles are skipped, as FolderIndexer skips them.
+            if name.hasPrefix(".") { continue }
+            if item.isDirectory || item.danglingLink { continue }
+            guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
             if item.dataless {
-                // Never materialize a placeholder. Its key cannot be proven absent, so it blocks pruning.
+                // A placeholder: never materialized. Its key is held (keep), never pruned.
                 out.unavailable.append(key)
                 if hiddenKeys.contains(key) {
                     out.hidden.append(NoteIndexFile(key: key, url: url,
@@ -211,11 +291,11 @@ enum NoteIndexScanner {
         out.unparseable.sort()
         out.unavailable.sort()
         out.unsendable.sort()
+        out.oversize.sort()
         return out
     }
 
     /// The kind of a file, decided from its bytes the way FolderIndexer decides what to index.
-    /// A note whose upsert would not fit one request is `unsendable` (never silently dropped later).
     static func kind(of data: Data, key: String, mtimeMs: Int64) -> NoteIndexKind {
         let kind = classify(data)
         guard kind == .note else { return kind }
@@ -233,8 +313,7 @@ enum NoteIndexScanner {
         return (try? FrontmatterCoder.decode(split.yaml)) == nil ? .unparseable : .note
     }
 
-    /// The upsert body for one note, read from disk now. Nil when the file can no
-    /// longer be indexed (it changed to something else, or it is oversize).
+    /// The upsert body for one note, read from disk now. Nil when the file can no longer be indexed.
     static func upsertInput(for file: NoteIndexFile,
                             fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem()) throws -> LlmIdeAPIClient.IndexNoteInput? {
         let data = try fileSystem.read(file.url)
@@ -287,9 +366,8 @@ enum NoteIndexScanner {
     }
 }
 
-/// Splits upserts into batches the server accepts: at most `batchNotes` notes and
-/// `batchBytes` of encoded JSON per request. A note that alone exceeds the byte
-/// bound is dropped by the caller (it could never be sent).
+/// Splits upserts into batches the server accepts: at most `batchNotes` notes and `batchBytes` of
+/// encoded JSON per request. A note larger than one request is dropped and counted by the caller.
 enum NoteIndexBatching {
     static func encodedSize(_ n: LlmIdeAPIClient.IndexNoteInput) -> Int {
         (try? JSONEncoder().encode(n))?.count ?? Int.max
@@ -340,10 +418,18 @@ final class NoteIndexReconciler {
         var truncated = 0
         var skippedUnindexable = 0
         var rejectedBatches = 0
-        /// Placeholders not read this pass. Their keys block pruning.
+        /// Placeholders not read this pass (their keys are kept).
         var unavailable = 0
-        /// Notes too large to upsert in one request. Their keys block pruning.
+        /// Notes too large to upsert in one request (their keys are kept).
         var unsendable = 0
+        /// Keys sent as `keep` this pass: the server never prunes them.
+        var kept = 0
+        /// Kept keys by reason: unparseable, unavailable, unsendable, oversize (zero entries omitted).
+        var keptByReason: [String: Int] = [:]
+        /// An empty folder was seen once; it prunes only if it is still empty one interval later.
+        var emptyPending = false
+        /// Pruned keys that came back within the flap window (another device, or a restored file).
+        var flaps = 0
     }
 
     enum Outcome: Equatable {
@@ -374,14 +460,19 @@ final class NoteIndexReconciler {
     private let projectId: String
     private let remote: NoteIndexRemote
     private let fileSystem: NoteIndexFileSystem
-    /// The account this feed was started for, and how to read the account now. Every request
-    /// is preceded by a check, so a sign-out or a switch to another user stops the feed.
     private let boundUserId: String?
     private let currentUserId: (@MainActor () -> String?)?
+    private let emptyConfirmInterval: TimeInterval
+    private let defaults: UserDefaults
     private var cache: [String: NoteIndexCacheEntry] = [:]
-    /// Hidden notes already removed on the server: key -> the hash sent. Re-sent only when
-    /// the hidden set changes, or when the server reports one of them back (see runOnce).
+    /// Hidden notes already removed on the server: key -> the hash sent.
     private var sentHidden: [String: String] = [:]
+    /// Keys pruned recently, for flap detection: key -> when it was pruned.
+    private var recentlyPruned: [String: Date] = [:]
+    /// The volume that last held a non-empty manifest for this root (persisted).
+    private var lastNonEmptyVolume: String?
+    /// When the folder was first seen empty on that volume (the first of the two confirming passes).
+    private var pendingEmptySince: Date?
     private var running = false
     private(set) var consecutiveFailures = 0
 
@@ -392,7 +483,9 @@ final class NoteIndexReconciler {
 
     init(root: URL, index: MeetingIndex, projectId: String, remote: NoteIndexRemote,
          fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem(),
-         boundUserId: String? = nil, currentUserId: (@MainActor () -> String?)? = nil) {
+         boundUserId: String? = nil, currentUserId: (@MainActor () -> String?)? = nil,
+         emptyConfirmInterval: TimeInterval = 15 * 60,
+         defaults: UserDefaults = .standard) {
         self.root = root
         self.index = index
         self.projectId = projectId
@@ -400,6 +493,13 @@ final class NoteIndexReconciler {
         self.fileSystem = fileSystem
         self.boundUserId = boundUserId
         self.currentUserId = currentUserId
+        self.emptyConfirmInterval = emptyConfirmInterval
+        self.defaults = defaults
+        self.lastNonEmptyVolume = defaults.string(forKey: Self.volumeKey(root))
+    }
+
+    private static func volumeKey(_ root: URL) -> String {
+        "noteIndex.lastNonEmptyVolume:" + root.standardizedFileURL.path
     }
 
     /// Throws if the signed-in user is not the bound one (or nobody is signed in).
@@ -414,8 +514,8 @@ final class NoteIndexReconciler {
         return .seconds(min(300, 5 * (1 << exponent)))
     }
 
-    /// Starts the background loop: one pass now, then on every `requestRun()`
-    /// (debounced) and every `interval`. Failed passes retry with backoff.
+    /// Starts the background loop: one pass now, then on every `requestRun()` (debounced)
+    /// and every `interval`. Failed passes retry with backoff.
     func start() {
         guard loopTask == nil else { return }
         let (stream, continuation) = AsyncStream.makeStream(of: Void.self, bufferingPolicy: .bufferingNewest(1))
@@ -441,8 +541,7 @@ final class NoteIndexReconciler {
         continuation.yield(())
     }
 
-    /// Asks for a pass soon. Several requests within `debounce` become one pass
-    /// (a finalize writes a file, then the watcher reports it).
+    /// Asks for a pass soon. Several requests within `debounce` become one pass.
     func requestRun() {
         debounceTask?.cancel()
         debounceTask = Task { [weak self] in
@@ -452,8 +551,8 @@ final class NoteIndexReconciler {
         }
     }
 
-    /// Cancels the loop and any pending request. A pass already on the wire finishes
-    /// its current request; the next batch checks cancellation and stops.
+    /// Cancels the loop and any pending request. A pass already on the wire finishes its current
+    /// request; the next batch checks cancellation and stops.
     func stop() {
         loopTask?.cancel()
         periodicTask?.cancel()
@@ -463,6 +562,20 @@ final class NoteIndexReconciler {
         loopTask = nil
         periodicTask = nil
         debounceTask = nil
+    }
+
+    /// Whether the empty-folder rule allows pruning now. The first empty pass on the volume that
+    /// last held notes only starts the confirmation; a second, `emptyConfirmInterval` later, may prune.
+    private func emptyPassMayPrune(volume: String?, now: Date) -> Bool {
+        guard let volume, let last = lastNonEmptyVolume, last == volume else {
+            pendingEmptySince = nil
+            return false
+        }
+        guard let since = pendingEmptySince else {
+            pendingEmptySince = now
+            return false
+        }
+        return now.timeIntervalSince(since) >= emptyConfirmInterval
     }
 
     /// One full pass. Public to the module so tests drive it without the loop.
@@ -478,11 +591,13 @@ final class NoteIndexReconciler {
 
         let root = self.root, index = self.index, previous = self.cache, fileSystem = self.fileSystem
         let scan: NoteIndexScan
+        let volume: String?
         do {
-            scan = try await Task.detached(priority: .utility) { () throws -> NoteIndexScan in
+            (scan, volume) = try await Task.detached(priority: .utility) { () throws -> (NoteIndexScan, String?) in
+                try fileSystem.checkRoot(root)
                 let hidden = Set(try index.listAll().filter(\.hidden).map(\.path))
-                return try NoteIndexScanner.scan(root: root, hiddenKeys: hidden, previous: previous,
-                                                 fileSystem: fileSystem)
+                let scan = try NoteIndexScanner.scan(root: root, hiddenKeys: hidden, previous: previous, fileSystem: fileSystem)
+                return (scan, fileSystem.volumeIdentifier(of: root))
             }.value
         } catch let failure as NoteIndexScanner.Failure {
             Self.log.notice("note index scan skipped: \(failure.reason, privacy: .public)")
@@ -497,6 +612,13 @@ final class NoteIndexReconciler {
         stats.skippedUnindexable = scan.oversize.count + scan.unsendable.count
         stats.unavailable = scan.unavailable.count
         stats.unsendable = scan.unsendable.count
+        let kept = scan.kept
+        stats.kept = kept.count
+        stats.keptByReason = [
+            "unparseable": scan.unparseable.count, "unavailable": scan.unavailable.count,
+            "unsendable": scan.unsendable.count, "oversize": scan.oversize.count,
+        ].filter { $0.value > 0 }
+        let now = Date()
         do {
             // 1. Hidden notes leave the index first, so a later failure cannot keep them.
             let hiddenNow = Dictionary(uniqueKeysWithValues: scan.hidden.map { ($0.key, $0.contentHash) })
@@ -505,36 +627,54 @@ final class NoteIndexReconciler {
             stats.hiddenSent = needHidden.count
             try await sendHidden(needHidden, into: &stats)
 
-            // 2. Manifest and reconcile. Prune only after a complete scan with a
-            // non-empty manifest and no unindexable file (an unparseable note may
-            // still be a note the server must keep).
+            // 2. Manifest and reconcile. Pruning is per key: a kept key is never pruned; every other
+            // row the scan did not name is. An empty folder prunes only after the two-pass rule.
             let manifest = scan.notes.map { LlmIdeAPIClient.IndexManifestEntry(noteKey: $0.key, contentHash: $0.contentHash) }
             stats.manifestEntries = manifest.count
-            // Any file the index cannot prove absent blocks pruning: unparseable notes, placeholders
-            // whose bytes are not here, and notes too large to upload.
-            let prune = scan.unparseable.isEmpty && scan.unavailable.isEmpty
-                && scan.unsendable.isEmpty && !manifest.isEmpty
+            let prune: Bool
+            if manifest.isEmpty {
+                prune = emptyPassMayPrune(volume: volume, now: now)
+                stats.emptyPending = !prune && lastNonEmptyVolume == volume && volume != nil
+            } else {
+                prune = true
+                pendingEmptySince = nil
+            }
+            let allowEmpty = prune && manifest.isEmpty
             stats.pruneAllowed = prune
             try Task.checkCancellation()
             try verifyIdentity()
             let result: LlmIdeAPIClient.IndexReconcileResult
             if NoteIndexBatching.manifestFits(manifest) {
-                result = try await remote.indexReconcile(projectId: projectId, manifest: manifest, prune: prune)
+                result = try await remote.indexReconcile(projectId: projectId, manifest: manifest, keep: kept,
+                                                         prune: prune, allowEmpty: allowEmpty)
             } else {
-                // A library too large for one request is sent as chunks of one scan. An older
-                // server has no chunk route: then nothing is reconciled and nothing is pruned.
-                guard let chunked = try await chunkedReconcile(manifest, prune: prune) else {
+                // A library too large for one request is sent as chunks of one scan. An older server
+                // has no chunk route: then nothing is reconciled and nothing is pruned.
+                guard let chunked = try await chunkedReconcile(manifest, keep: kept, prune: prune) else {
                     Self.log.notice("note index manifest too large and the server has no chunked scan; skipped")
                     return .manifestTooLarge(stats)
                 }
                 result = chunked
             }
             stats.pruned = result.pruned
-            // A hidden note the server still holds (it reappeared) is removed again.
-            let reappeared = scan.hidden.filter { sentHidden[$0.key] != nil && result.extra.contains($0.key) }
-            if !reappeared.isEmpty { try await sendHidden(reappeared, into: &stats) }
             stats.missing = result.missing.count
             stats.stale = result.stale.count
+
+            // Flap detection: a key we pruned that the folder names again within the window.
+            recentlyPruned = recentlyPruned.filter { now.timeIntervalSince($0.value) < NoteIndexLimits.flapWindow }
+            stats.flaps = result.missing.filter { recentlyPruned[$0] != nil }.count
+            if stats.flaps > 0 {
+                Self.log.warning("note index: \(stats.flaps) pruned notes came back within an hour (another device or a restored file)")
+            }
+            if result.pruned > 0 {
+                for k in result.extra { recentlyPruned[k] = now }
+            }
+
+            // A reconciled non-empty pass is what makes a later empty folder prunable.
+            if !manifest.isEmpty, let volume {
+                lastNonEmptyVolume = volume
+                defaults.set(volume, forKey: Self.volumeKey(root))
+            }
 
             // 3. Upsert what the server lacks or holds with another hash.
             let wanted = Set(result.missing).union(result.stale)
@@ -556,6 +696,7 @@ final class NoteIndexReconciler {
                 }
             }
             consecutiveFailures = 0
+            NoteIndexStatusCenter.shared.record(stats, at: now)
             return .ok(stats)
         } catch is CancellationError {
             return .cancelled
@@ -571,9 +712,10 @@ final class NoteIndexReconciler {
     }
 
     /// The reconcile of a manifest too large for one request, as chunks of one scan. Returns nil
-    /// when the server has no chunk route (HTTP 404). A failed or incomplete scan throws: the
-    /// final chunk is then refused by the server, so nothing is pruned.
-    private func chunkedReconcile(_ manifest: [LlmIdeAPIClient.IndexManifestEntry],
+    /// when the server has no chunk route (HTTP 404). Keys in `keep` and the empty flag travel on the
+    /// final chunk. A failed or incomplete scan throws: the final chunk is then refused by the
+    /// server, so nothing is pruned.
+    private func chunkedReconcile(_ manifest: [LlmIdeAPIClient.IndexManifestEntry], keep: [String],
                                   prune: Bool) async throws -> LlmIdeAPIClient.IndexReconcileResult? {
         let parts = stride(from: 0, to: manifest.count, by: NoteIndexLimits.scanChunkEntries).map {
             Array(manifest[$0..<min($0 + NoteIndexLimits.scanChunkEntries, manifest.count)])
@@ -588,8 +730,12 @@ final class NoteIndexReconciler {
             try verifyIdentity()
             let last = i == parts.count - 1
             do {
-                let r = try await remote.indexScan(projectId: projectId, scanId: scanId, index: i, total: parts.count,
-                                                   complete: last, prune: last && prune, entries: part)
+                let r = try await remote.indexScan(
+                    projectId: projectId, scanId: scanId, index: i, total: parts.count,
+                    complete: last, prune: last && prune, entries: part,
+                    totalEntries: last ? manifest.count : nil,
+                    keep: last ? keep : nil,
+                    allowEmpty: last ? false : nil)
                 missing += r.missing
                 stale += r.stale
                 if last { final = r }
@@ -615,9 +761,9 @@ final class NoteIndexReconciler {
         }
     }
 
-    /// Sends one batch. A 4xx that is not an auth or rate-limit answer means the
-    /// server refused this content, so retrying it would fail the same way: the
-    /// batch is counted as rejected and the pass goes on. Anything else is transient.
+    /// Sends one batch. A 4xx that is not an auth or rate-limit answer means the server refused this
+    /// content, so retrying it would fail the same way: the batch is counted as rejected and the
+    /// pass goes on. Anything else is transient.
     private func send(_ batch: [LlmIdeAPIClient.IndexNoteInput]) async throws -> LlmIdeAPIClient.IndexUpsertResult? {
         try verifyIdentity()
         do {
@@ -630,9 +776,10 @@ final class NoteIndexReconciler {
     }
 }
 
-/// The one reconciler the app runs. Shell starts it when a project environment opens
-/// and `lta.mode` is not off. It stops on project close, on quit, and on sign-out
-/// (SessionScoped), and it never sends under a user other than the one it started for.
+/// The one reconciler the app runs. Shell starts it when a project environment opens and
+/// `lta.mode` is not off. It stops on project close, on quit and on sign-out (SessionScoped), starts
+/// again on the next sign-in with the same project (`sessionAuthenticationChanged`), and never sends
+/// under a user other than the one it started for.
 @MainActor
 final class NoteIndexHost: SessionScoped {
     static let shared = NoteIndexHost()
@@ -640,7 +787,17 @@ final class NoteIndexHost: SessionScoped {
     /// The signed-in user id, read live. The composition root sets it once.
     var sessionUserId: @MainActor () -> String? = { nil }
 
+    private struct Start {
+        let root: URL
+        let index: MeetingIndex
+        let projectId: String
+        let remote: NoteIndexRemote
+    }
+
     private var current: NoteIndexReconciler?
+    private var lastStart: Start?
+    /// Set by a sign-out while a feed was running: the next sign-in restarts it with `lastStart`.
+    private var suspendedByQuit = false
     private var sessionRegistered = false
     private var quitRegistered = false
 
@@ -649,16 +806,12 @@ final class NoteIndexHost: SessionScoped {
     /// Whether a feed is running (for tests and diagnostics).
     var isRunning: Bool { current != nil }
 
-    /// Starts (or replaces) the feed for `projectId`, bound to the user signed in now.
-    /// Signed out: nothing starts.
+    /// Starts (or replaces) the feed for `projectId`, bound to the user signed in now. Signed out: nothing starts.
     func start(root: URL, index: MeetingIndex, projectId: String, remote: NoteIndexRemote) {
         stop()
-        guard let user = sessionUserId() else { return }
-        let reconciler = NoteIndexReconciler(
-            root: root, index: index, projectId: projectId, remote: remote,
-            boundUserId: user, currentUserId: sessionUserId)
-        current = reconciler
-        reconciler.start()
+        lastStart = Start(root: root, index: index, projectId: projectId, remote: remote)
+        suspendedByQuit = false
+        launch()
         if !sessionRegistered {
             sessionRegistered = true
             SessionScopedRegistry.shared.register(self)
@@ -669,19 +822,40 @@ final class NoteIndexHost: SessionScoped {
         }
     }
 
+    private func launch() {
+        guard let s = lastStart, let user = sessionUserId() else { return }
+        let reconciler = NoteIndexReconciler(
+            root: s.root, index: s.index, projectId: s.projectId, remote: s.remote,
+            boundUserId: user, currentUserId: sessionUserId)
+        current = reconciler
+        reconciler.start()
+    }
+
     /// A notes folder changed (finalize, rename, hide): ask for a debounced pass.
     func folderChanged() {
         current?.requestRun()
     }
 
-    /// Stops the feed: project close, quit, sign-out.
+    /// Stops the feed: project close, quit. Forgets the project (a sign-out keeps it, see below).
     func stop() {
+        current?.stop()
+        current = nil
+        lastStart = nil
+    }
+
+    /// SessionScoped: a definitive sign-out or account switch. The feed stops; the project stays
+    /// remembered so the next sign-in restarts it without a project reopen.
+    func resetForSignOut() {
+        suspendedByQuit = lastStart != nil
         current?.stop()
         current = nil
     }
 
-    /// SessionScoped: a definitive sign-out or account switch.
-    func resetForSignOut() {
-        stop()
+    /// The session became authenticated or signed out (the app root observes it). A sign-in restarts a
+    /// feed that a sign-out stopped, for the same project, bound to the new user.
+    func sessionAuthenticationChanged(_ authenticated: Bool) {
+        guard authenticated, suspendedByQuit, lastStart != nil, current == nil else { return }
+        suspendedByQuit = false
+        launch()
     }
 }

@@ -36,7 +36,9 @@ extension LlmIdeAPIClient {
     struct IndexReconcileRequest: Encodable {
         let projectId: String
         let manifest: [IndexManifestEntry]
+        let keep: [String]
         let prune: Bool
+        let allowEmpty: Bool
     }
 
     public struct IndexUpsertResult: Codable, Equatable {
@@ -75,9 +77,11 @@ extension LlmIdeAPIClient {
     /// `POST /kb/index/reconcile`: compare a manifest with the index. `prune`
     /// deletes the indexed rows the manifest does not name; callers send
     /// `prune: true` only after a complete, successful scan.
-    func indexReconcile(projectId: String, manifest: [IndexManifestEntry], prune: Bool) async throws -> IndexReconcileResult {
+    func indexReconcile(projectId: String, manifest: [IndexManifestEntry], keep: [String],
+                        prune: Bool, allowEmpty: Bool) async throws -> IndexReconcileResult {
         try await post("/kb/index/reconcile",
-                       body: IndexReconcileRequest(projectId: projectId, manifest: manifest, prune: prune),
+                       body: IndexReconcileRequest(projectId: projectId, manifest: manifest, keep: keep,
+                                                   prune: prune, allowEmpty: allowEmpty),
                        authenticated: true)
     }
 
@@ -91,6 +95,12 @@ extension LlmIdeAPIClient {
         let complete: Bool
         let prune: Bool
         let entries: [IndexManifestEntry]
+        /// Final chunk only: the entries the whole scan carries (the server compares the sum).
+        let totalEntries: Int?
+        /// Final chunk only: keys never pruned.
+        let keep: [String]?
+        /// Final chunk only: an all-empty scan prunes only when true.
+        let allowEmpty: Bool?
     }
 
     public struct IndexScanResult: Codable, Equatable {
@@ -105,10 +115,12 @@ extension LlmIdeAPIClient {
 
     /// `POST /kb/index/scan`: one chunk of a library too large for one reconcile.
     func indexScan(projectId: String, scanId: String, index: Int, total: Int,
-                   complete: Bool, prune: Bool, entries: [IndexManifestEntry]) async throws -> IndexScanResult {
+                   complete: Bool, prune: Bool, entries: [IndexManifestEntry],
+                   totalEntries: Int?, keep: [String]?, allowEmpty: Bool?) async throws -> IndexScanResult {
         try await post("/kb/index/scan",
                        body: IndexScanRequest(projectId: projectId, scanId: scanId, index: index, total: total,
-                                              complete: complete, prune: prune, entries: entries),
+                                              complete: complete, prune: prune, entries: entries,
+                                              totalEntries: totalEntries, keep: keep, allowEmpty: allowEmpty),
                        authenticated: true)
     }
 
