@@ -162,6 +162,16 @@ struct ChatArchiveServiceTests {
         #expect(r.purged.isEmpty && r.skipped[id.uuidString] == "heldBeforePurge")
     }
 
+    @Test func an_unreadable_extension_list_means_no_orphan_is_ever_acted_on() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let extId = UUID()
+        rig.remote.addExtensionChat(extId, extChat())
+        rig.remote.addWorking(extId, updatedAt: rig.knobs.now.addingTimeInterval(-30 * 24 * 3600))
+        rig.remote.failures["extensionChats"] = 99
+        let r = await rig.service.archiveMacChats(inQuit: false)
+        #expect(!r.errors.isEmpty && rig.remote.tombstones.isEmpty && rig.remote.chats[extId.uuidString] != nil)
+    }
+
     // MARK: orphans (reverse sweep, 7-day grace)
 
     @Test func orphan_is_purged_only_after_the_grace() async {
@@ -196,6 +206,13 @@ struct ChatArchiveServiceTests {
         #expect(f.messages.map(\.content) == extChat(7).map(\.1))
         #expect(rig.remote.chats[id.uuidString] == nil, "server rows deleted only by the commit")
         #expect(rig.remote.callCount("beginArchive") == 4, "one first page + three continuation pages")
+    }
+
+    @Test func a_committed_extension_chat_also_loses_its_working_state() async {
+        let rig = await ArchiveRig.make(); defer { rig.close() }
+        let id = UUID(); rig.remote.addExtensionChat(id, extChat()); rig.remote.addWorking(id)
+        #expect(await rig.service.archiveExtensionChat(id.uuidString) == .committed)
+        #expect(rig.remote.workingIDs().isEmpty)
     }
 
     @Test func the_commit_carries_the_hash_of_the_FILE() async {

@@ -748,3 +748,19 @@ layout's — a real repo graph genuinely arrives fragmented.
 - Do not send an empty prune without `allowEmpty`, and do not treat a missing folder as an empty folder.
 - Do not send a feed under an account other than the one it started for.
 - Do not add a query that has no FTS term to the compare: it would scan the whole `search` table.
+
+### Live-then-archive Phase 4 (chat quit archive, `lta.mode`)
+
+#### ✅ MUST preserve
+
+- **`lta.mode = off` is today's behaviour exactly**: no async quit hook is registered, `deleteSession` keeps its best-effort server calls, sign-out wipes the store.
+- **Never delete before verify.** A Mac chat's working state is purged only after the file is verified and a receipt recorded; an extension chat's rows are deleted only against the hash the Mac recomputed from the file it wrote.
+- **A quit reply is always sent** after the async hooks (the 6 s cap); anything cut is finished by the next start's sweep. The backend is killed at `willTerminate`, after that reply.
+- **The user's delete intent is written (`pending-deletes.json`) before the file is removed**, and kept until the server says `done`.
+- **Never wipe the chat store on sign-out in `on`**; chats are tagged with `ownerUserId` and filtered per user.
+
+#### ❌ DO NOT
+
+- Call `ChatSessionStore.delete` for cleanup the user did not ask for (use `deleteQuietly`); it records a tombstone.
+- Put a non-chat JSON file in `sessions/` (every `*.json` there is read as a chat).
+- Treat a failed extension-chat list as empty in the sweep (an extension chat would look like an orphan).

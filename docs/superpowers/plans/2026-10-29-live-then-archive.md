@@ -700,3 +700,16 @@ Measured at 50 000 notes (opt-in bench `LLMIDE_NOTE_SHADOW_BENCH=1`, temp DB, th
 | Final-chunk prune of 50 000 rows | 2.9 s, batched 2 000 per transaction; the event loop turned 24 times during it |
 
 Known limit: the budget is soft. A slice runs whole units, so a slice can exceed the budget by one unit (up to about 90 ms at this size).
+
+## 13. Phase 4 as built (2026-10-29)
+
+Behind `lta.mode` (default `off`: the quit, delete and sign-out paths are the legacy ones). `shadow` writes files and receipts and never deletes; `on` is the full behaviour.
+
+- **T4.1.** `AppTerminationHooks.registerAsync` plus `AppTerminationDecision`. `applicationShouldTerminate` keeps the unsaved-drafts dialog first; with no async hook it answers `.terminateNow` as before; otherwise `.terminateLater`, the hooks run under a 6 s cap (each hook is abandoned at its own timeout), then the reply. `BackendManager` still kills the child at `willTerminate`, which AppKit posts after the reply.
+- **T4.2.** `ChatArchiveService` (actor, `Features/Chat/Services/Archive/`). Mac chats: verify (file decodes, owned by this user, not running, engine count agrees at quit, not older than the server's last use) then a receipt, then the batch purge. Extension chats: paged begin, file written with scope `.quick`, `origin: "extension"`, read back, hash recomputed from the FILE, commit. An incomplete archive, a conflicting Mac file, or a `system` role (the Mac model cannot hold it without changing the hash) keeps the rows. Single-flight per chat; every operation is bound to the user and a sign-out epoch.
+- **T4.3.** The user delete records `pending-deletes.json` before the file goes (`ChatSessionStore.onUserDelete`), then POSTs the tombstone; the entry is removed only on `purged: "done"`. The Mac re-sends at every start (the server has no replay timer, deviation: the re-POST resets the server tombstone). Orphans (working state with no Mac file) are purged after the 7-day grace.
+- **T4.4.** In `on` sign-out keeps every chat file; files carry `ownerUserId` and other users never see them; unowned files are claimed at sign-in and at sign-out.
+- **N-1 (F14).** The new `ChatSession` keys are optional; the three tags are mirrored in `chat-tags.json` in the support directory (not in `sessions/`, where an old build would quarantine it) and re-applied on load.
+- **T4.5.** Phone-held engines are counted by `ChatEngineRegistry.archiveFacts`; a chat with a phone turn in flight is skipped at quit and at the sweep; no phone protocol change.
+- **Archived chats are never capped on continue.** A file already over 500 messages is persisted whole.
+- **Not built.** UI for an incomplete archive (`ChatArchiveHost.chatsNeedingDecision`, `acceptIncomplete`) and the orphan report in the Storage hub.

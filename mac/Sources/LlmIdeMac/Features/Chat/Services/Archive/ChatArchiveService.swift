@@ -181,7 +181,12 @@ actor ChatArchiveService {
         catch { report.errors.append("working-state: \(error)"); return report }
 
         // Extension chats are archived, not receipt-verified against a Mac file.
-        let ext = Set(((try? await deps.remote.extensionChats()) ?? []).map(\.id))
+        // If the list cannot be read, stop: an extension chat (the ONLY copy of that conversation) must never be
+        // mistaken for a Mac chat whose file is missing, because an orphan is eventually purged server-side.
+        let extList: [LlmIdeAPIClient.ServerChatSummary]
+        do { extList = try await deps.remote.extensionChats() }
+        catch { report.errors.append("extension-chats: \(error)"); return report }
+        let ext = Set(extList.map(\.id))
         var candidates: [(UUID, LlmIdeAPIClient.WorkingChat)] = []
         var orphanIds = Set<String>()
         for ws in state.sessions {
@@ -403,6 +408,8 @@ actor ChatArchiveService {
                 needsDecision[serverId] = nil
                 // A delete that raced the commit: honour it (the rows are gone either way).
                 if deps.pending.containsDelete(uuid) { deps.storage.delete(uuid) }
+                // The commit left a receipt, so the chat's agent mapping / SDK transcript / facts (derivative state) can go.
+                if mode == .on, stillMine() { _ = try? await deps.remote.purgeWorkingState(chatSessionIds: [serverId]) }
                 return r.status == "deleted" ? .committed : .alreadyArchived
             } catch ChatArchiveRemoteError.stale {
                 continue                                            // an append raced in: begin again, same file name
