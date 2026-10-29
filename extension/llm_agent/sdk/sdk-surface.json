@@ -7,47 +7,47 @@
     },
     "functions.deleteSession": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+      "reason": "later: session lifecycle could replace our own transcript cleanup / fork-on-edit (pairs with A1 and A13); needs the sessionStore decision first"
     },
     "functions.filterEscalatingDefaultMode": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: permission-mode hygiene helper; revisit with the permission-mode review"
     },
     "functions.foldSessionSummary": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
     "functions.forkSession": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+      "reason": "later: session lifecycle could replace our own transcript cleanup / fork-on-edit (pairs with A1 and A13); needs the sessionStore decision first"
     },
     "functions.getSessionInfo": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
     "functions.getSessionMessages": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+      "reason": "later: session lifecycle could replace our own transcript cleanup / fork-on-edit (pairs with A1 and A13); needs the sessionStore decision first"
     },
     "functions.getSubagentMessages": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
     "functions.importSessionToStore": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
     "functions.listSessions": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2 (top-15 follow-up: session lifecycle replaces our own transcript cleanup)"
+      "reason": "later: session lifecycle could replace our own transcript cleanup / fork-on-edit (pairs with A1 and A13); needs the sessionStore decision first"
     },
     "functions.listSubagents": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
     "functions.prewarm": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: engine already prewarms lazily after listen; revisit if cold start matters"
     },
     "functions.query": {
       "status": "adopted",
@@ -55,19 +55,19 @@
     },
     "functions.renameSession": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
     "functions.resolveSettings": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: would let tests read the effective settings; no product caller"
     },
     "functions.startup": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: as functions.prewarm: cold-start lever, unmeasured"
     },
     "functions.tagSession": {
       "status": "needs-human",
-      "reason": "K1 T0.3: module-level function added to the ledger; triage is P2"
+      "reason": "later: no current caller; revisit with the session lifecycle (A1/A13) or the subagent adoption (A5)"
     },
     "functions.tool": {
       "status": "adopted",
@@ -75,7 +75,7 @@
     },
     "messages.SDKAPIRetryMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "messages.SDKAssistantMessage": {
       "status": "adopted",
@@ -83,59 +83,59 @@
     },
     "messages.SDKAuthStatusMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: auth-status stream; could replace guessing on the subscription path (Q-T1)"
     },
     "messages.SDKBackgroundTasksChangedMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: background/task lifecycle; revisit with A9 (Task* tools) and A5 (subagents)"
     },
     "messages.SDKCommandsChangedMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKCompactBoundaryMessage": {
       "status": "adopted",
       "where": "engine.mjs"
     },
     "messages.SDKControlRequestProgressMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKConversationResetMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: observable via the generic sdk event; no UI use yet"
     },
     "messages.SDKElicitationCompleteMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKFilesPersistedEvent": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKHookProgressMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKHookResponseMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKHookStartedMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKInformationalMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: observable via the generic sdk event; no UI use yet"
     },
     "messages.SDKLocalCommandOutputMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKMemoryRecallMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: CLI memory is off (settingSources: []); revisit if memory is enabled"
     },
     "messages.SDKMirrorErrorMessage": {
       "status": "ignored",
@@ -143,15 +143,15 @@
     },
     "messages.SDKModelRefusalFallbackMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "messages.SDKModelRefusalNoFallbackMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "messages.SDKNotificationMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKPartialAssistantMessage": {
       "status": "adopted",
@@ -159,31 +159,31 @@
     },
     "messages.SDKPermissionDeniedMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "messages.SDKPluginInstallMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKPromptSuggestionMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKRateLimitEvent": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "messages.SDKResultMessage": {
       "status": "adopted",
       "where": "events.mjs"
     },
     "messages.SDKSessionStateChangedMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKStatusMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: status text; revisit with a unified status line"
     },
     "messages.SDKSystemMessage": {
       "status": "adopted",
@@ -191,31 +191,31 @@
     },
     "messages.SDKTaskNotificationMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: background/task lifecycle; revisit with A9 (Task* tools) and A5 (subagents)"
     },
     "messages.SDKTaskProgressMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: background/task lifecycle; revisit with A9 (Task* tools) and A5 (subagents)"
     },
     "messages.SDKTaskStartedMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: background/task lifecycle; revisit with A9 (Task* tools) and A5 (subagents)"
     },
     "messages.SDKTaskUpdatedMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: background/task lifecycle; revisit with A9 (Task* tools) and A5 (subagents)"
     },
     "messages.SDKThinkingTokensMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "messages.SDKToolProgressMessage": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing message; LLM-IDE has its own event vocabulary and the generic sdk passthrough already carries it if ever needed"
     },
     "messages.SDKToolUseSummaryMessage": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: per-tool summaries; revisit for the activity feed"
     },
     "messages.SDKUserMessage": {
       "status": "adopted",
@@ -239,15 +239,15 @@
     },
     "options.agent": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A14), token-affecting: pending-bench, not adopted in this phase"
     },
     "options.agentProgressSummaries": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: subagent progress; revisit with A5"
     },
     "options.agents": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A5), token-affecting: pending-bench, not adopted in this phase - Haiku search subagent"
     },
     "options.allowDangerouslySkipPermissions": {
       "status": "ignored",
@@ -259,7 +259,7 @@
     },
     "options.betas": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: beta headers; revisit per feature, each needs a bench"
     },
     "options.canUseTool": {
       "status": "adopted",
@@ -267,7 +267,7 @@
     },
     "options.continue": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: we resume by explicit session id; revisit with A13"
     },
     "options.cwd": {
       "status": "adopted",
@@ -291,7 +291,7 @@
     },
     "options.enableFileCheckpointing": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: file rewind; pairs with edit-and-resend (A13)"
     },
     "options.env": {
       "status": "adopted",
@@ -307,27 +307,27 @@
     },
     "options.extraArgs": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: escape hatch for CLI flags; use only with a named need"
     },
     "options.fallbackModel": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "options.forkSession": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: branching; pairs with A13"
     },
     "options.forwardSubagentText": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: subagent progress; revisit with A5"
     },
     "options.hooks": {
       "status": "adopted",
       "where": "engine.mjs"
     },
     "options.includeHookEvents": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing option; no matching surface in LLM-IDE"
     },
     "options.includePartialMessages": {
       "status": "adopted",
@@ -335,11 +335,11 @@
     },
     "options.loadTimeoutMs": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A1), token-affecting: pending-bench, not adopted in this phase"
     },
     "options.managedSettings": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: operator-managed settings; revisit with the sandbox/org-settings review"
     },
     "options.maxBudgetUsd": {
       "status": "adopted",
@@ -347,7 +347,7 @@
     },
     "options.maxThinkingTokens": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: superseded by thinking/effort; revisit with the effort review"
     },
     "options.maxTurns": {
       "status": "adopted",
@@ -362,24 +362,24 @@
       "where": "engine.mjs"
     },
     "options.onElicitation": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing option; no matching surface in LLM-IDE"
     },
     "options.onUserDialog": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing option; no matching surface in LLM-IDE"
     },
     "options.outputFormat": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: structured output; revisit for the classifier (L12)"
     },
     "options.pathToClaudeCodeExecutable": {
       "status": "ignored",
       "reason": "SDK bundles its own binary; we never override it"
     },
     "options.perTaskStopAffordance": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing option; no matching surface in LLM-IDE"
     },
     "options.permissionMode": {
       "status": "adopted",
@@ -387,11 +387,11 @@
     },
     "options.permissionPromptToolName": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: we use canUseTool; no need for a prompt tool"
     },
     "options.permissionPrompts": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: 'host'|'none' lever; revisit with the permission review"
     },
     "options.persistSession": {
       "status": "adopted",
@@ -403,7 +403,7 @@
     },
     "options.pluginDelivery": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: native plugin delivery; Q4 plugin track owns this"
     },
     "options.plugins": {
       "status": "adopted",
@@ -411,11 +411,11 @@
     },
     "options.projectConfigRoot": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: project config root; revisit with workspace isolation"
     },
     "options.promptSuggestions": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: off unless set; no UI for suggestions"
     },
     "options.resume": {
       "status": "adopted",
@@ -423,27 +423,27 @@
     },
     "options.resumeDropsTurn": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A13), token-affecting: pending-bench, not adopted in this phase"
     },
     "options.resumeSessionAt": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A13), token-affecting: pending-bench, not adopted in this phase"
     },
     "options.sandbox": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "options.sessionId": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: explicit SDK session id; revisit with A1"
     },
     "options.sessionStore": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A1), token-affecting: pending-bench, not adopted in this phase - dual-write mirror, @alpha"
     },
     "options.sessionStoreFlush": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A1), token-affecting: pending-bench, not adopted in this phase"
     },
     "options.settingSources": {
       "status": "adopted",
@@ -455,7 +455,7 @@
     },
     "options.skills": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A10), token-affecting: pending-bench, not adopted in this phase"
     },
     "options.spawnClaudeCodeProcess": {
       "status": "ignored",
@@ -463,15 +463,15 @@
     },
     "options.stderr": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: subprocess stderr hook; revisit for diagnostics"
     },
     "options.strictMcpConfig": {
       "status": "adopted",
       "where": "loop-agent.mjs"
     },
     "options.supportedDialogKinds": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing option; no matching surface in LLM-IDE"
     },
     "options.systemPrompt": {
       "status": "adopted",
@@ -479,23 +479,23 @@
     },
     "options.taskBudget": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: per-task budget; revisit with token budgets"
     },
     "options.thinking": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: we pass effort; revisit with thinking-token metering results"
     },
     "options.title": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "terminal/IDE UI plumbing option; no matching surface in LLM-IDE"
     },
     "options.toolAliases": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: tool renaming; revisit with A9"
     },
     "options.toolConfig": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: per-tool config; revisit per tool"
     },
     "options.tools": {
       "status": "adopted",
@@ -503,19 +503,19 @@
     },
     "options.verbatimPrompts": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: skips the turn-start attachment pass; saving unmeasured (T0.3 12.1), token-affecting: pending-bench"
     },
     "query.accountInfo": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.applyFlagSettings": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.backgroundTasks": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.close": {
       "status": "adopted",
@@ -527,87 +527,87 @@
     },
     "query.initializationResult": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.interrupt": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.mcpServerStatus": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15, non-token-affecting: adopted by the next commits of this phase"
     },
     "query.readFile": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.readMcpResource": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.reconnectMcpServer": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.reinitialize": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.reloadOutputStyles": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "output styles are a terminal UI feature; we do not load them"
     },
     "query.reloadPlugins": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.reloadSkills": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.rewindFiles": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.seedReadState": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.setMaxThinkingTokens": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.setMcpPermissionModeOverride": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.setMcpServers": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.setModel": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.setPermissionMode": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.stopTask": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.streamInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.supportedAgents": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.supportedCommands": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.supportedModels": {
       "status": "adopted",
@@ -615,23 +615,23 @@
     },
     "query.toggleMcpServer": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.updateSettings": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: control-channel method; no current caller (we pass options at query start); revisit when a feature needs mid-turn control"
     },
     "query.usage_EXPERIMENTAL_MAY_CHANGE_DO_NOT_RELY_ON_THIS_API_YET": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: experimental by name; do not rely on it"
     },
     "tools.AgentInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A5), token-affecting: pending-bench, not adopted in this phase"
     },
     "tools.ArtifactInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.AskUserQuestionInput": {
       "status": "adopted",
@@ -642,36 +642,36 @@
       "where": "engine.mjs"
     },
     "tools.ClaudeDesignInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.CronCreateInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.CronDeleteInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.CronListInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.EnterPlanModeInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A15), token-affecting: pending-bench, not adopted in this phase - lowest priority"
     },
     "tools.EnterWorktreeInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.ExitPlanModeInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A15), token-affecting: pending-bench, not adopted in this phase - lowest priority"
     },
     "tools.ExitWorktreeInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.FileEditInput": {
       "status": "adopted",
@@ -694,100 +694,100 @@
       "where": "engine.mjs"
     },
     "tools.ListMcpResourcesInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "MCP resource/refresh tool; our MCP servers expose tools only and are mounted per turn"
     },
     "tools.McpInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: MCP passthrough tool; revisit with query.mcpServerStatus follow-ups"
     },
     "tools.MonitorInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: background monitor tool; revisit with background tasks"
     },
     "tools.NotebookEditInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.OfferChromeSetupInput": {
       "status": "ignored",
       "reason": "Claude Code's own offer to set up the user's Chrome; LLM-IDE drives its browser surface through the extension, nothing to adopt"
     },
     "tools.ProjectsInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.ProposeGoalInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.ProposeSkillsInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.PushNotificationInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.ReadMcpResourceDirInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "MCP resource/refresh tool; our MCP servers expose tools only and are mounted per turn"
     },
     "tools.ReadMcpResourceInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "MCP resource/refresh tool; our MCP servers expose tools only and are mounted per turn"
     },
     "tools.ReadNotificationsInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.RefreshMcpToolsInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "MCP resource/refresh tool; our MCP servers expose tools only and are mounted per turn"
     },
     "tools.RemoteTriggerInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.ReportFindingsInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.ScheduleWakeupInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.SendFeedbackInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.ShowOnboardingRolePickerInput": {
-      "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "status": "ignored",
+      "reason": "built-in tool for a product surface LLM-IDE does not offer (not in our tool roster, never mounted)"
     },
     "tools.TaskCreateInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A9), token-affecting: pending-bench, not adopted in this phase - compare schema with our task-create/task-update MCP tools first"
     },
     "tools.TaskGetInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A9), token-affecting: pending-bench, not adopted in this phase - compare schema with our task-create/task-update MCP tools first"
     },
     "tools.TaskListInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A9), token-affecting: pending-bench, not adopted in this phase - compare schema with our task-create/task-update MCP tools first"
     },
     "tools.TaskStopInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A9), token-affecting: pending-bench, not adopted in this phase - compare schema with our task-create/task-update MCP tools first"
     },
     "tools.TaskUpdateInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "approved top-15 (A9), token-affecting: pending-bench, not adopted in this phase - compare schema with our task-create/task-update MCP tools first"
     },
     "tools.TodoWriteInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: pairs with A9 (Task*); decide together"
     },
     "tools.WebFetchInput": {
       "status": "adopted",
@@ -799,7 +799,7 @@
     },
     "tools.WorkflowInput": {
       "status": "needs-human",
-      "reason": "seed: not yet reviewed"
+      "reason": "later: built-in workflow tool; revisit with the Workflow feature"
     }
   }
 }

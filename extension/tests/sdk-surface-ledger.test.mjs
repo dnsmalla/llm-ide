@@ -37,3 +37,30 @@ test('every adopted entry names the file that uses it', () => {
     if (e.status === 'adopted') assert.ok(e.where?.trim(), `${key}: adopted needs a where`);
   }
 });
+
+// K1 P2 triage convention: a needs-human row is never an unexplained pile. It
+// is either approved-but-waiting (token-affecting, pending the bench, or
+// adopted by a later commit of the phase) or explicitly deferred.
+test('every needs-human row is triaged: "later: ..." or "approved top-15 ..."', () => {
+  for (const [key, e] of Object.entries(ledger.items)) {
+    if (e.status !== 'needs-human') continue;
+    assert.match(e.reason, /^(later: |approved top-15)/, `${key}: needs-human reason must start with "later: " or "approved top-15"`);
+  }
+});
+
+test('the approved top-15 rows are never left untriaged or ignored', () => {
+  const top15 = [
+    'options.sessionStore', 'options.agents', 'tools.AgentInput', 'options.fallbackModel',
+    'messages.SDKAPIRetryMessage', 'messages.SDKRateLimitEvent', 'messages.SDKPermissionDeniedMessage',
+    'messages.SDKModelRefusalFallbackMessage', 'messages.SDKModelRefusalNoFallbackMessage',
+    'messages.SDKThinkingTokensMessage', 'tools.TaskCreateInput', 'tools.TaskUpdateInput', 'options.skills',
+    'options.sandbox', 'query.mcpServerStatus', 'options.resumeSessionAt', 'options.resumeDropsTurn',
+    'options.agent', 'tools.EnterPlanModeInput', 'tools.ExitPlanModeInput',
+  ];
+  for (const key of top15) {
+    const e = ledger.items[key];
+    assert.ok(e, `${key} missing`);
+    assert.notEqual(e.status, 'ignored', `${key} is in the user-approved top-15`);
+    if (e.status === 'needs-human') assert.match(e.reason, /^approved top-15/, key);
+  }
+});
