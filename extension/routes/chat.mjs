@@ -1,5 +1,6 @@
 // /kb/chat/* — unified chat sessions shared by macOS + extension.
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { archiveBegin, archiveCommit } from '../kb/chat-lifecycle.mjs';
 import {
   createChatSession,
   listChatSessions,
@@ -116,6 +117,35 @@ export async function handleChatRoutes(req, res, ctx) {
       const code = msg === 'session not found' ? 404 : 400;
       sendJSON(res, code, { error: { code: code === 404 ? 'NOT_FOUND' : 'VALIDATION_FAILED', message: msg } });
     }
+    return true;
+  }
+
+  // POST /kb/chat/sessions/:id/archive/begin — fenced snapshot for the Mac archive
+  // (plan 3.3). Marks the chat `archiving` and bumps its fence.
+  if (req.method === 'POST' && sub === 'archive/begin') {
+    const snap = archiveBegin(userId, sessionId);
+    if (!snap) {
+      sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'session not found' } });
+      return true;
+    }
+    sendJSON(res, 200, snap);
+    return true;
+  }
+
+  // POST /kb/chat/sessions/:id/archive/commit — delete the rows once the Mac has
+  // verified its file under the same fence and hash. 409 ARCHIVE_STALE otherwise.
+  if (req.method === 'POST' && sub === 'archive/commit') {
+    const body = parseJSON(await readBody(req, 16 * 1024)) || {};
+    if (!Number.isInteger(body.fence) || typeof body.hash !== 'string' || !/^[0-9a-f]{64}$/.test(body.hash)) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'fence (integer) and hash (64 hex) are required' } });
+      return true;
+    }
+    const result = archiveCommit(userId, sessionId, { fence: body.fence, hash: body.hash });
+    if (result.status === 'stale') {
+      sendJSON(res, 409, { error: { code: 'ARCHIVE_STALE', message: 'the archive fence or hash no longer matches; begin again' } });
+      return true;
+    }
+    sendJSON(res, 200, { deleted: result.status === 'deleted', status: result.status });
     return true;
   }
 

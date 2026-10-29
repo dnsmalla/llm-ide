@@ -24,6 +24,7 @@ import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
 import { handleChatRoutes } from './chat.mjs';
 import { handleIndexRoutes } from './index-routes.mjs';
+import { handleLifecycleRoutes } from './lifecycle-routes.mjs';
 import { handleOsRoutes } from './os.mjs';
 import { handleAgentHistoryRoutes } from './agent-history.mjs';
 // Feature-owned groups (loop-agent, issue-schedule, code-graph) are NOT
@@ -1263,6 +1264,10 @@ export async function handleKB(req, res) {
     // ── Derived note index (plan 3.8, live-then-archive Phase 1) ──
     // Always on: a data store, not an LLMIDE_FEATURES group. See routes/index-routes.mjs.
     if (await handleIndexRoutes(req, res, { userId, url })) return true;
+
+    // ── Chat lifecycle: working state, server purges, tombstones (plan 3.2-3.5) ──
+    // Always on; nothing in the chat flow calls these yet. See routes/lifecycle-routes.mjs.
+    if (await handleLifecycleRoutes(req, res, { userId, url })) return true;
 
     // ── Agent history: storage report, retention, clear, compact (Stage 1c) ──
     // Always on (plan Q5). See routes/agent-history.mjs.

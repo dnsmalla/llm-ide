@@ -14,6 +14,7 @@
 
 import {
   appendCaptions, getCaptionsSince, listActiveSessions, finalizeSession, liveEvents,
+  ackLiveSession, liveSessionStatus, listUnackedLiveSessions,
 } from '../agents/live-sessions.mjs';
 import { sendJSON, readBody, parseJSON, onClientDisconnect } from '../core/utils.mjs';
 import { tryConsume } from '../server/rate-limit.mjs';
@@ -29,6 +30,38 @@ const MAX_SSE_PER_USER = 4;
 export async function handleLiveRoutes(req, res, ctx) {
   const { userId, url } = ctx;
   if (!url.startsWith('/kb/live')) return false;
+  const path = url.split('?')[0];
+
+  // GET /kb/live/unacked — finalized captures the Mac has not acknowledged
+  // (in memory, and durable crash rows after a restart). Plan 3.6 B.
+  if (req.method === 'GET' && path === '/kb/live/unacked') {
+    sendJSON(res, 200, { sessions: listUnackedLiveSessions(userId) });
+    return true;
+  }
+
+  // POST /kb/live/:sessionId/ack — the Mac app has written and verified the file.
+  if (req.method === 'POST' && /^\/kb\/live\/[^/]+\/ack$/.test(path)) {
+    const sessionId = decodeURIComponent(path.slice('/kb/live/'.length, -'/ack'.length));
+    const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+    if (typeof body.noteKey !== 'string' || typeof body.hash !== 'string' || !Number.isInteger(body.lines)) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'noteKey, hash and lines (integer) are required' } });
+      return true;
+    }
+    const result = ackLiveSession(userId, sessionId, { noteKey: body.noteKey, hash: body.hash, lines: body.lines });
+    if (!result) {
+      sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'capture is not finalized or not known' } });
+      return true;
+    }
+    sendJSON(res, 200, result);
+    return true;
+  }
+
+  // GET /kb/live/:sessionId/status — the extension releases its draft on 'acked'.
+  if (req.method === 'GET' && /^\/kb\/live\/[^/]+\/status$/.test(path)) {
+    const sessionId = decodeURIComponent(path.slice('/kb/live/'.length, -'/status'.length));
+    sendJSON(res, 200, { sessionId, state: liveSessionStatus(userId, sessionId) });
+    return true;
+  }
 
   // POST /kb/live/:sessionId/append
   if (req.method === 'POST' && url.endsWith('/append')) {
