@@ -1,10 +1,11 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import type { AudioDevice } from '../hooks/useAudioDevices';
 import type { Diagnostics } from '../hooks/useTranscript';
+import LegacyTranscriptsPanel from './LegacyTranscriptsPanel';
 import ConnectorsSettings from './ConnectorsSettings';
 import AgentPersonaSettings from './AgentPersonaSettings';
 import UserAccountSettings from './UserAccountSettings';
-import { searchKB, getKBStats, type KBSearchHit, type KBSearchKind } from '../../lib/kb';
+import { searchKB, getKBStats, OfflineError, OFFLINE_MESSAGE, type KBSearchHit, type KBSearchKind } from '../../lib/kb';
 import type { GetKbStatsResponse200 } from '../../lib/api-types';
 
 interface Props {
@@ -112,7 +113,7 @@ export default function Settings({
           <br />
           4. Click Generate Notes when done
           <br />
-          5. Requires <code>node server.mjs</code> running locally
+          5. Requires the LLM-IDE Mac app to be running
         </p>
       </div>
 
@@ -126,6 +127,10 @@ export default function Settings({
 
       <div className="settings-section">
         <KBSearchPanel />
+      </div>
+
+      <div className="settings-section">
+        <LegacyTranscriptsPanel />
       </div>
 
       <div className="settings-section">
@@ -149,8 +154,13 @@ function KBSearchPanel() {
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
+  // Read live from the Mac-managed server; no copy is kept. null = unreachable.
+  const [offline, setOffline] = useState(false);
   useEffect(() => {
-    getKBStats().then(setStats);
+    getKBStats().then((st) => {
+      setStats(st);
+      setOffline(st === null);
+    });
   }, []);
 
   const run = useCallback(async () => {
@@ -165,6 +175,7 @@ function KBSearchPanel() {
       setResults(hits);
     } catch (e) {
       setErr(e instanceof Error ? e.message : 'KB unavailable');
+      setOffline(e instanceof OfflineError);
       setResults([]);
     } finally {
       setLoading(false);
@@ -174,6 +185,11 @@ function KBSearchPanel() {
   return (
     <section className="kb-search">
       <h3 className="settings-heading">Knowledge Base Search</h3>
+      {offline && (
+        <p className="error-message" role="alert">
+          {OFFLINE_MESSAGE}
+        </p>
+      )}
       {stats && (
         <p className="actions-hint">
           {stats.meetings} meeting{stats.meetings === 1 ? '' : 's'} · {stats.entities} item

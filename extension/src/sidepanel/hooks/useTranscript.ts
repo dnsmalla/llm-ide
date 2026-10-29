@@ -2,13 +2,8 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import { MsgType, isMessage } from '../../lib/messages';
 import { debug } from '../../lib/config';
 import { isValidCaption } from '../../content/caption-validation';
-import {
-  saveTranscript as persistTranscript,
-  saveTranscriptDraft,
-  clearTranscriptDraft,
-  recoverTranscriptDrafts,
-  StorageQuotaError,
-} from '../../lib/storage';
+import { saveTranscriptDraft, listDrafts, DRAFT_STALE_MS } from '../../lib/capture-store';
+import { chromeArea } from '../../lib/capture-live';
 import { isSupportedUrl, stripPlatformSuffix } from '../../lib/platforms';
 
 export interface TranscriptSegment {
@@ -44,6 +39,8 @@ export const LANGUAGES = [
 ] as const;
 
 export interface TranscriptOptions {
+  /** The live session id the server and the Mac key this capture by (the draft shares it). */
+  sessionId?: string;
   deviceId?: string;
   volume?: number;
 }
@@ -178,23 +175,17 @@ export function useTranscript() {
     };
   }, []);
 
-  // Persist the session in progress and drop its draft. Idempotent: the
-  // session id is cleared first, so a second call (local Stop followed by the
-  // CAPTION_STATUS echo, or vice versa) finds nothing to save. A failed save
-  // keeps the draft, so the next open recovers it.
+  // Stop: write the FINAL snapshot as the draft. The draft is NOT deleted here;
+  // it is released only when the server reports the capture acked by the Mac
+  // (useDraftRelease). There is no local history any more. Idempotent: the
+  // session id is cleared first, so a second call finds nothing to save.
   const persistSession = useCallback(() => {
     const snap = snapshot();
     sessionIdRef.current = null;
     if (!snap) return;
-    persistTranscript(snap)
-      .then(() => clearTranscriptDraft(snap.id).catch(() => {}))
-      .catch((err) => {
-        const msg =
-          err instanceof StorageQuotaError
-            ? 'Transcript too large to save — download it manually before closing.'
-            : 'Failed to save transcript to local storage.';
-        setSaveError(msg);
-      });
+    saveTranscriptDraft(chromeArea(), snap).catch(() => {
+      setSaveError('Local crash buffer is full or unavailable. Download the transcript before closing this panel.');
+    });
   }, [snapshot]);
 
   // The message listener is registered once; reach persistSession via a ref.
@@ -212,7 +203,11 @@ export function useTranscript() {
     if (!isRecording) return;
     const flush = () => {
       const snap = snapshot();
-      if (snap) saveTranscriptDraft(snap).catch(() => {});
+      if (snap) {
+        saveTranscriptDraft(chromeArea(), snap).catch(() => {
+          setSaveError('Local crash buffer is full or unavailable. Download the transcript before closing this panel.');
+        });
+      }
     };
     const timer = setInterval(flush, DRAFT_CHECKPOINT_MS);
     window.addEventListener('pagehide', flush);
@@ -222,16 +217,17 @@ export function useTranscript() {
     };
   }, [isRecording, snapshot]);
 
-  // Recover drafts left by a panel that never reached Stop. Nothing in the
-  // panel lists the saved archive, so the newest one is also restored into
-  // the live view (when idle and empty) — there it can be downloaded or
-  // turned into notes like any just-stopped recording.
+  // Restore the newest recording that was interrupted before Stop into the
+  // live view (read-only: nothing is moved or deleted; the draft stays until
+  // the Mac acks it, see useDraftRelease).
   useEffect(() => {
-    recoverTranscriptDrafts()
-      .then((recovered) => {
-        if (recovered.length === 0) return;
-        setRecoveredCount(recovered.length);
-        const newest = recovered[recovered.length - 1];
+    listDrafts(chromeArea())
+      .then((entries) => {
+        const now = Date.now();
+        const interrupted = entries.filter((e) => e.stage === 'recording' && now - e.draft.updatedAt >= DRAFT_STALE_MS);
+        if (interrupted.length === 0) return;
+        setRecoveredCount(interrupted.length);
+        const newest = interrupted[interrupted.length - 1].draft;
         if (isRecordingRef.current || segmentsRef.current.length > 0) return;
         setSegments(newest.segments);
         setSpeakerNames((prev) => ({ ...prev, ...newest.speakerNames }));
@@ -671,7 +667,7 @@ export function useTranscript() {
       setSegmentLimitReached(false);
       setSaveError(null);
       setRecoveredCount(0);
-      sessionIdRef.current = crypto.randomUUID();
+      sessionIdRef.current = options?.sessionId || crypto.randomUUID();
       currentSpeakerNumRef.current = 1;
       lastSpeechEndRef.current = 0;
       activeSpeakerRef.current = null;

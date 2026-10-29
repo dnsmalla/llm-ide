@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react';
 import { useTranscript } from './hooks/useTranscript';
 import { useLiveSync } from './hooks/useLiveSync';
+import { useDraftRelease } from './hooks/useDraftRelease';
 import { useNotes } from './hooks/useNotes';
 import { useAudioDevices } from './hooks/useAudioDevices';
 import { useChat } from './hooks/useChat';
@@ -72,6 +73,7 @@ const REQUIRED_ENDPOINTS = [
   '/kb/notify/slack',
   '/kb/outcomes/refresh',
   '/kb/chat/sessions',
+  '/kb/live/:id/status',
 ];
 
 // Minimum server API version this client requires. The server reports
@@ -81,7 +83,7 @@ const REQUIRED_ENDPOINTS = [
 // silently used here. Bump this in lockstep with SERVER_API_VERSION whenever a
 // contract change lands that this client depends on. A NEWER server is fine
 // (backward-compatible), so we only flag servers BELOW this floor.
-const MIN_SERVER_API_VERSION = 20;
+const MIN_SERVER_API_VERSION = 84;
 
 export default function App() {
   // Auth gate is the very first hook so login renders before any of the
@@ -109,7 +111,6 @@ export default function App() {
   }, []);
   const [serverStale, setServerStale] = useState<string[] | null>(null);
   const [saveFeedback, setSaveFeedback] = useState(false);
-  const [copyCmdFeedback, setCopyCmdFeedback] = useState(false);
   const [showHint, setShowHint] = useState(false);
   // Session-scoped meeting id — set on Start, reused for KB ingest so
   // re-extracting on the same recording updates the same KB row.
@@ -147,6 +148,7 @@ export default function App() {
     meetingTitle: transcript.meetingTitle,
     segments: transcript.segments,
   });
+  const draftRelease = useDraftRelease(sessionId, transcript.isRecording);
   const notes = useNotes();
   const audio = useAudioDevices();
   const chat = useChat();
@@ -253,6 +255,9 @@ export default function App() {
   // now — the extension just captures and supports the AI surfaces
   // (notes, agent questions, chat).
 
+  const unconfirmed = draftRelease.reports.filter((r) => r.outcome !== 'released' && r.outcome !== 'active' && r.outcome !== 'retained');
+  const retainedCount = draftRelease.reports.filter((r) => r.outcome === 'retained').length;
+
   const checkServer = useCallback(async () => {
     try {
       const url = await getServerUrl();
@@ -306,9 +311,13 @@ export default function App() {
     plan.clearPlan();
     const bytes = crypto.getRandomValues(new Uint8Array(8));
     const rand = Array.from(bytes, (b) => b.toString(16).padStart(2, '0')).join('');
-    setSessionId(`m-${Date.now().toString(36)}-${rand}`);
+    // One id for the live session AND the crash draft: the server and the Mac
+    // ack the capture by it, and the draft is released only on that ack.
+    const newSessionId = `m-${Date.now().toString(36)}-${rand}`;
+    setSessionId(newSessionId);
     setIsMirroring(false);
     transcript.startRecording({
+      sessionId: newSessionId,
       deviceId: audio.selectedDeviceId,
       volume: audio.volume,
     });
@@ -520,28 +529,46 @@ export default function App() {
       {!serverOnline && (
         <div className="error-message server-offline" role="alert">
           <span>
-            Can't reach the local server. Make sure <code>node server.mjs</code> is running.
+            Mac app not running. Open LLM-IDE to search, chat and sync captures. Nothing is stored in this browser while
+            it is closed except an unfinished capture, which is kept until the Mac app confirms it has a copy.
           </span>
           <div className="server-offline-actions">
-            <button
-              className="btn btn-sm"
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText('node server.mjs');
-                  setCopyCmdFeedback(true);
-                  setTimeout(() => setCopyCmdFeedback(false), 2000);
-                } catch {
-                  // Ignore — clipboard can fail in a non-secure context.
-                }
-              }}
-              aria-label="Copy the server start command to clipboard"
-            >
-              {copyCmdFeedback ? 'Copied!' : 'Copy cmd'}
-            </button>
-            <button className="btn btn-sm" onClick={checkServer} aria-label="Retry connecting to server">
+            <button className="btn btn-sm" onClick={checkServer} aria-label="Retry connecting to the Mac app">
               Retry
             </button>
           </div>
+        </div>
+      )}
+
+      {retainedCount > 0 && (
+        <div className="quota-warning" role="status">
+          {retainedCount} capture{retainedCount === 1 ? '' : 's'} kept in this browser: this server cannot confirm that
+          the Mac app has a copy, so they are not deleted.
+        </div>
+      )}
+
+      {unconfirmed.length > 0 && (
+        <div className="quota-warning" role="status">
+          <span>
+            {unconfirmed.length === 1
+              ? '1 capture is kept here until the Mac app confirms it has a copy.'
+              : `${unconfirmed.length} captures are kept here until the Mac app confirms they have a copy.`}
+            {unconfirmed.some((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed')
+              ? ' Some are not confirmed copied.'
+              : ''}
+          </span>
+          {unconfirmed
+            .filter((r) => r.outcome === 'not-confirmed' || r.outcome === 'resend-failed')
+            .map((r) => (
+              <button
+                key={r.id}
+                className="btn btn-sm"
+                onClick={() => void draftRelease.resend(r.id)}
+                aria-label={`Send ${r.title} to the Mac app again`}
+              >
+                Resend {r.title}
+              </button>
+            ))}
         </div>
       )}
 
@@ -676,7 +703,7 @@ export default function App() {
               messages={chat.messages}
               isLoading={chat.isLoading}
               error={chat.error}
-              quotaWarning={chat.quotaWarning}
+              offline={chat.offline}
               hasTranscript={transcript.fullTranscript.length > 0}
               onSend={(msg) => chat.sendMessage(msg, transcript.fullTranscript, transcript.primaryLang)}
               onClear={chat.clearChat}

@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { authFetch, getServerUrl } from '../../lib/config';
 import { isValidCaption } from '../../content/caption-validation';
+import { setDraftStage, recordFinalize } from '../../lib/capture-store';
+import { chromeArea, httpLiveApi } from '../../lib/capture-live';
 import type { TranscriptSegment } from './useTranscript';
 
 const PUSH_DEBOUNCE_MS = 800;
@@ -152,14 +154,16 @@ export function useLiveSync({ isRecording, sessionId, meetingTitle, segments }: 
       .catch(() => {})
       .finally(async () => {
         try {
-          const serverUrl = await getServerUrl();
-          await authFetch(`${serverUrl}/kb/live/${encodeURIComponent(sessionId)}/finalize`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: '{}',
-          });
+          // Mark the draft 'finalizing' BEFORE the request, so a crash between
+          // the request and the response still counts as "finalize was sent".
+          // The draft itself is deleted only when the server reports the
+          // capture acked (useDraftRelease); the stage records what the server
+          // said: ackRequired -> awaiting-ack, otherwise no-ack (kept).
+          await setDraftStage(chromeArea(), sessionId, 'finalizing');
+          const result = await httpLiveApi.finalize(sessionId);
+          await recordFinalize(chromeArea(), sessionId, result);
         } catch {
-          /* ignore */
+          /* the draft stays 'finalizing'; the release loop retries */
         }
         setSyncStatus('idle');
       });
