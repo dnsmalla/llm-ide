@@ -135,7 +135,7 @@ export default tseslint.config(
     files: ['**/*.mjs'],
     ignores: ['tests/**'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: [CLAUDE_SDK_IMPORT] }],
+      'no-restricted-imports': ['error', { patterns: [CLAUDE_SDK_IMPORT, AI_SDK_IMPORT] }],
     },
   },
   // Model-id literals: allowed only in the linker (which owns the vocabulary)
