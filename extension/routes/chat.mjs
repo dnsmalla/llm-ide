@@ -1,5 +1,5 @@
 // /kb/chat/* — unified chat sessions shared by macOS + extension.
-import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, readJsonBody } from '../core/utils.mjs';
 import { archiveBegin, archiveCommit } from '../kb/chat-lifecycle.mjs';
 import {
   createChatSession,
@@ -120,29 +120,63 @@ export async function handleChatRoutes(req, res, ctx) {
     return true;
   }
 
-  // POST /kb/chat/sessions/:id/archive/begin — fenced snapshot for the Mac archive
-  // (plan 3.3). Marks the chat `archiving` and bumps its fence.
+  // POST /kb/chat/sessions/:id/archive/begin — the fenced, paged archive snapshot
+  // (plan 3.3). Without ?after= it marks the chat `archiving`, bumps its fence and
+  // returns page 1 plus the digest of all messages. With ?after=<seq>&fence=<n> it
+  // returns the next page under the same fence (409 ARCHIVE_STALE otherwise).
   if (req.method === 'POST' && sub === 'archive/begin') {
-    const snap = archiveBegin(userId, sessionId);
-    if (!snap) {
+    const hasAfter = u.searchParams.has('after');
+    const opts = hasAfter
+      ? { after: Number(u.searchParams.get('after')), fence: Number(u.searchParams.get('fence')), limit: Number(u.searchParams.get('limit') || 0) || undefined }
+      : { limit: Number(u.searchParams.get('limit') || 0) || undefined };
+    if (hasAfter && (!Number.isInteger(opts.after) || opts.after < 0 || !Number.isInteger(opts.fence))) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'after and fence must be integers' } });
+      return true;
+    }
+    const snap = archiveBegin(userId, sessionId, opts);
+    if (snap === null) {
       sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'session not found' } });
+      return true;
+    }
+    if (snap.stale) {
+      sendJSON(res, 409, { error: { code: 'ARCHIVE_STALE', message: 'the archive fence no longer matches; begin again' } });
       return true;
     }
     sendJSON(res, 200, snap);
     return true;
   }
 
-  // POST /kb/chat/sessions/:id/archive/commit — delete the rows once the Mac has
-  // verified its file under the same fence and hash. 409 ARCHIVE_STALE otherwise.
+  // POST /kb/chat/sessions/:id/archive/commit — deletes the rows once the Mac has
+  // verified its file: the presented fence and the Mac's own hash must both match.
+  //   200 deleted | already_archived (a receipt with this hash exists)
+  //   404 NOT_FOUND (gone, and no receipt says it was archived)
+  //   409 ARCHIVE_STALE (fence or hash differ: begin again)
+  //   409 INCOMPLETE_ARCHIVE (the caps dropped messages; pass acceptIncomplete:true)
   if (req.method === 'POST' && sub === 'archive/commit') {
-    const body = parseJSON(await readBody(req, 16 * 1024)) || {};
+    const body = await readJsonBody(req, 16 * 1024);
     if (!Number.isInteger(body.fence) || typeof body.hash !== 'string' || !/^[0-9a-f]{64}$/.test(body.hash)) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'fence (integer) and hash (64 hex) are required' } });
       return true;
     }
-    const result = archiveCommit(userId, sessionId, { fence: body.fence, hash: body.hash });
+    const result = archiveCommit(userId, sessionId, {
+      fence: body.fence, hash: body.hash, acceptIncomplete: body.acceptIncomplete === true,
+    });
+    if (result.status === 'not_found') {
+      sendJSON(res, 404, { error: { code: 'NOT_FOUND', message: 'session not found and no archive receipt for it' } });
+      return true;
+    }
     if (result.status === 'stale') {
       sendJSON(res, 409, { error: { code: 'ARCHIVE_STALE', message: 'the archive fence or hash no longer matches; begin again' } });
+      return true;
+    }
+    if (result.status === 'incomplete') {
+      sendJSON(res, 409, {
+        error: {
+          code: 'INCOMPLETE_ARCHIVE',
+          message: 'this chat lost messages to the store caps; archive it with acceptIncomplete:true to accept that',
+          details: { prunedMessages: result.prunedMessages, truncatedMessages: result.truncatedMessages },
+        },
+      });
       return true;
     }
     sendJSON(res, 200, { deleted: result.status === 'deleted', status: result.status });

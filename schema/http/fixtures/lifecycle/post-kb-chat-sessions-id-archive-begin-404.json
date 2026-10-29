@@ -5,6 +5,9 @@
   "request": {
     "params": {
       "id": "no-such-chat"
+    },
+    "query": {
+      "limit": 200
     }
   },
   "response": {

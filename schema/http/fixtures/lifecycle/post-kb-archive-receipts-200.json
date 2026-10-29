@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/archive-receipts",
+  "status": 200,
+  "description": "The Mac verified its own file for this chat and records the hash it computed. Purging the chat's working state is allowed afterwards.",
+  "request": {
+    "body": {
+      "chatSessionId": "5f1c2a7e-3b9d-4e8a-9c21-0d7e6b5a4f30",
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "count": 42
+    }
+  },
+  "response": {
+    "recorded": true
+  }
+}

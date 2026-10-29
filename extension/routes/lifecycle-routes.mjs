@@ -4,6 +4,7 @@
 //   GET  /kb/agent/working-state                 -> { sessions: [{chatSessionId, sdkSession, factCount, updatedAt}] }
 //   POST /agent/v2/sessions/purge                { chatSessionIds[], verified: true } -> { purged }
 //   POST /kb/session-purges                      { chatSessionId, reason? } -> { queued, purged }
+//   POST /kb/archive-receipts                    { chatSessionId, hash, count } -> { recorded }
 //
 // The archive routes (/kb/chat/sessions/:id/archive/begin|commit) live in
 // routes/chat.mjs, next to the other session routes.
@@ -12,12 +13,13 @@
 // facts and the SDK transcript files. The Mac file (the transcript) is never
 // touched here, and `verified: true` is required so a caller cannot purge the
 // working state of a chat whose file it has not checked.
-import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { sendJSON, readBody, parseJSON, readJsonBody } from '../core/utils.mjs';
 import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
 import { deleteChatSession } from '../kb/chat-sessions.mjs';
 import {
   listWorkingState, purgeWorkingState, enqueueSessionPurge, listSessionPurges,
   completeSessionPurge, failSessionPurge, SESSION_PURGE_REASONS, MAX_PURGE_IDS,
+  hasArchiveReceipt, recordMacArchiveReceipt,
 } from '../kb/chat-lifecycle.mjs';
 
 /**
@@ -77,9 +79,32 @@ export async function handleLifecycleRoutes(req, res, { userId, url }) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: `chatSessionIds must be an array of up to ${MAX_PURGE_IDS}` } });
       return true;
     }
+    // A purge needs proof that each chat's transcript is in a file: an archive
+    // receipt (a server commit, or the Mac's own verified file, POST
+    // /kb/archive-receipts). All or nothing: any chat without one refuses the batch.
+    const missing = body.chatSessionIds.filter((id) => typeof id !== 'string' || !id || !hasArchiveReceipt(userId, id));
+    if (missing.length > 0) {
+      sendJSON(res, 409, {
+        error: {
+          code: 'NO_RECEIPT',
+          message: 'a chat has no archive receipt, so its working state was not purged',
+          details: { missing: missing.slice(0, 50) },
+        },
+      });
+      return true;
+    }
     const { purged, sdkSessionIds } = purgeWorkingState(userId, body.chatSessionIds);
     for (const sdk of sdkSessionIds) deleteSdkTranscripts(userId, sdk);
     sendJSON(res, 200, { purged });
+    return true;
+  }
+
+  // POST /kb/archive-receipts — the Mac app's own verification of the file it wrote
+  // for a chat (the hash and message count it computed from that file).
+  if (req.method === 'POST' && path === '/kb/archive-receipts') {
+    const body = await readJsonBody(req, 16 * 1024);
+    recordMacArchiveReceipt(userId, body.chatSessionId, { hash: body.hash, count: body.count });
+    sendJSON(res, 200, { recorded: true });
     return true;
   }
 

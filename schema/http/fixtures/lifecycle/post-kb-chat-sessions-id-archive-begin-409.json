@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/begin",
+  "status": 409,
+  "description": "A continuation page with a fence the chat no longer holds: a newer begin superseded it. Nothing is read.",
+  "request": {
+    "params": {
+      "id": "c0ffee00-1111-4222-8333-944455556666"
+    },
+    "query": {
+      "after": 1,
+      "fence": 2,
+      "limit": 200
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ARCHIVE_STALE",
+      "message": "the archive fence no longer matches; begin again"
+    }
+  }
+}

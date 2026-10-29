@@ -106,6 +106,7 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("GET /kb/live/:id/status", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("GET /kb/live/unacked", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /agent/v2/sessions/purge", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /kb/archive-receipts", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/chat/sessions/:id/archive/begin", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/chat/sessions/:id/archive/commit", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/index/notes", "no Mac caller yet (live-then-archive Phase 1, server-only)"),

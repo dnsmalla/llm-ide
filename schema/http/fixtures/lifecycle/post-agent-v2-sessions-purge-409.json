@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /agent/v2/sessions/purge",
+  "status": 409,
+  "description": "A chat has no archive receipt, so none of the batch is purged. The details list the chats without one.",
+  "request": {
+    "body": {
+      "chatSessionIds": [
+        "5f1c2a7e-3b9d-4e8a-9c21-0d7e6b5a4f30"
+      ],
+      "verified": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NO_RECEIPT",
+      "message": "a chat has no archive receipt, so its working state was not purged",
+      "details": {
+        "missing": [
+          "5f1c2a7e-3b9d-4e8a-9c21-0d7e6b5a4f30"
+        ]
+      }
+    }
+  }
+}

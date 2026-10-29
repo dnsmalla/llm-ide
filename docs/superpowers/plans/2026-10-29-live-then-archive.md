@@ -164,6 +164,9 @@ Cost, stated for the user: after quit the SDK session is gone. Continuing an end
 
 ### 3.3 Chat protocol, extension chat (option D): fenced archive
 
+> **Amended 2026-10-29 (Phase 1 review).** The protocol below is now: (1) **begin** is paged: without `?after=` it bumps the fence and returns page 1 plus `hash`, the digest of **all** messages streamed from the rows; with `?after=<seq>&fence=<n>` it returns the next page under the same fence (a stale fence is 409 `ARCHIVE_STALE`). Pages hold at most 500 messages and about 8 MB. The digest is the length-prefixed SHA-256 of (role, content) pairs in seq order, and the Mac must compute it over the messages in the file it wrote. (2) The live store **counts** what it drops (`pruned_messages` from the 2000-message prune, `truncated_messages` from the 64 KB content and meta caps); begin reports `incomplete`, and commit answers 409 `INCOMPLETE_ARCHIVE` unless the client sends `acceptIncomplete: true`. (3) **commit** deletes only when the fence and the Mac's own hash both match (409 `ARCHIVE_STALE` otherwise). It writes an `archive_receipts` row (source `commit`). A commit for a chat that is already gone answers `already_archived` only when a receipt with that hash exists; otherwise **404 `NOT_FOUND`**. (4) The Mac's own verification of its file is recorded as a receipt through `POST /kb/archive-receipts` (source `mac-file`). The server cannot read the Mac file, so this is the client's assertion. Purging working state requires a receipt for every chat in the batch (409 `NO_RECEIPT`, nothing purged). Live acks do not apply to chats: a chat is not a live capture.
+
+
 The live copy is `chat_sessions` + `chat_messages`. The Mac archives into `sessions/<uuid>.json` using the **server session UUID as the file name** (`crypto.randomUUID`, `kb/chat-sessions.mjs:37`), so the archive is idempotent by id.
 
 DDL, migration `0050` (additive; `ALTER TABLE` only, defaults keep old rows valid):
@@ -260,6 +263,9 @@ Account delete: `deleteUserCascade` (`kb/db.mjs:946-1044`) must delete the new t
 | Extension History / search | `chrome.storage.local transcripts`; `/kb/search` | live `GET /kb/search?kind=meeting` (index) and live Mac-written file list; no local store |
 
 ### 3.7 The extension read path: API list, auth, offline
+
+> **Amended 2026-10-29 (Phase 1 review).** `POST /agent/v2/sessions/purge` no longer accepts a bare `verified: true`: it requires an archive receipt for each chat (see 3.3 point 4) and answers 409 `NO_RECEIPT` otherwise. Commit for a missing chat is 404 unless a receipt says it was archived. The live ack flow (3.6 B) is also amended: the ack must echo the server's own line count and hash (409 `ACK_MISMATCH` otherwise, nothing deleted), and a finalized capture is a `live_crash_rows` row, not a `meetings` row.
+
 
 **Verified API (F1).** The extension's server is `serverUrl` (`getServerUrl`, `src/lib/config.ts`), default `127.0.0.1:3456`, auth by `authFetch` (JWT, token held by the extension's existing login), CORS strict allowlist `chrome-extension://<id>` plus localhost (invariants). Endpoints it calls today that read stored data:
 

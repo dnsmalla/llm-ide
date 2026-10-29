@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/commit",
+  "status": 404,
+  "description": "The chat is gone and no archive receipt says it was archived, so the commit is refused as not found.",
+  "request": {
+    "params": {
+      "id": "no-such-chat"
+    },
+    "body": {
+      "fence": 1,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "session not found and no archive receipt for it"
+    }
+  }
+}

@@ -3796,7 +3796,7 @@ export type GetKbAgentWorkingStateResponse200 = {
 /** Request parts for `POST /agent/v2/sessions/purge` (schema/http/lifecycle.schema.json). */
 export type PostAgentV2SessionsPurgeRequest = {
   body: {
-    /** Up to 500 non-empty chat ids. */
+    /** Up to 500 non-empty chat ids. Every chat needs an archive receipt (a server commit, or POST /kb/archive-receipts); otherwise 409 NO_RECEIPT and nothing is purged. */
     chatSessionIds: string[];
     /** Must be true: the caller has checked the Mac file. Any other value is a 400 VALIDATION_FAILED. */
     verified: boolean;
@@ -3809,6 +3809,8 @@ export type PostAgentV2SessionsPurgeResponse200 = {
 };
 
 export type PostAgentV2SessionsPurgeResponse400 = CommonError;
+
+export type PostAgentV2SessionsPurgeResponse409 = CommonError;
 
 /** Request parts for `POST /kb/session-purges` (schema/http/lifecycle.schema.json). */
 export type PostKbSessionPurgesRequest = {
@@ -3830,6 +3832,14 @@ export type PostKbSessionPurgesResponse400 = CommonError;
 
 /** Request parts for `POST /kb/chat/sessions/:id/archive/begin` (schema/http/lifecycle.schema.json). */
 export type PostKbChatSessionsIdArchiveBeginRequest = {
+  query: {
+    /** A continuation page: the seq of the last message on the previous page. Needs fence. */
+    after?: number;
+    /** The fence of the initial begin. Required with after; a mismatch is 409 ARCHIVE_STALE. */
+    fence?: number;
+    /** Messages per page: default 200, at most 500. A page is also cut at about 8 MB. */
+    limit?: number;
+  };
   params: {
     id: string;
   };
@@ -3839,7 +3849,7 @@ export type PostKbChatSessionsIdArchiveBeginResponse200 = {
   /** Bumped by every begin. The commit must present it. */
   fence: number;
   count: number;
-  /** 64 lower-case hex characters, the archive hash. */
+  /** 64 lower-case hex: the digest of ALL the chat's messages, streamed (not just this page). */
   hash: string;
   session: {
     id: string;
@@ -3852,9 +3862,19 @@ export type PostKbChatSessionsIdArchiveBeginResponse200 = {
   };
   /** Every message, in order. No cap (plan Q8). */
   messages: ArchiveMessage[];
+  incomplete: {
+    /** True when the live store dropped messages (the 2000-message prune or the 64 KB content cap). The commit refuses unless acceptIncomplete is sent. */
+    incomplete: boolean;
+    prunedMessages: number;
+    truncatedMessages: number;
+  };
+  /** The seq to pass as after for the next page, or null on the last page. */
+  nextAfter: number | null;
 };
 
 export type PostKbChatSessionsIdArchiveBeginResponse404 = CommonError;
+
+export type PostKbChatSessionsIdArchiveBeginResponse409 = CommonError;
 
 /** Request parts for `POST /kb/chat/sessions/:id/archive/commit` (schema/http/lifecycle.schema.json). */
 export type PostKbChatSessionsIdArchiveCommitRequest = {
@@ -3865,17 +3885,21 @@ export type PostKbChatSessionsIdArchiveCommitRequest = {
     fence: number;
     /** The 64-hex hash the begin returned, recomputed over the file the Mac wrote. */
     hash: string;
+    /** Archive a chat the caps made incomplete. Without it such a commit is 409 INCOMPLETE_ARCHIVE. */
+    acceptIncomplete?: boolean;
   };
 };
 
 export type PostKbChatSessionsIdArchiveCommitResponse200 = {
   /** True when this call removed the rows. */
   deleted: boolean;
-  /** already_archived: an earlier commit already removed the chat (idempotent). */
+  /** already_archived: the chat is gone and a receipt with this hash says it was archived (idempotent). A chat that is gone without such a receipt is 404. */
   status: "deleted" | "already_archived";
 };
 
 export type PostKbChatSessionsIdArchiveCommitResponse400 = CommonError;
+
+export type PostKbChatSessionsIdArchiveCommitResponse404 = CommonError;
 
 export type PostKbChatSessionsIdArchiveCommitResponse409 = CommonError;
 
@@ -3947,6 +3971,24 @@ export type GetKbLiveUnackedResponse200 = {
     expiresAt?: string;
   })[];
 };
+
+/** Request parts for `POST /kb/archive-receipts` (schema/http/lifecycle.schema.json). */
+export type PostKbArchiveReceiptsRequest = {
+  body: {
+    chatSessionId: string;
+    /** 64 lower-case hex: the archive hash the Mac computed over the file it wrote. */
+    hash: string;
+    /** Messages in that file. */
+    count: number;
+  };
+};
+
+export type PostKbArchiveReceiptsResponse200 = {
+  /** The receipt is stored; purging the chat's working state is now allowed. */
+  recorded: true;
+};
+
+export type PostKbArchiveReceiptsResponse400 = CommonError;
 
 /** Request parts for `POST /kb/loop/agent-run` (schema/http/live-loop-misc.schema.json). */
 export type PostKbLoopAgentRunRequest = {
@@ -6990,6 +7032,7 @@ export interface ApiEndpoints {
     responses: {
       200: PostAgentV2SessionsPurgeResponse200;
       400: PostAgentV2SessionsPurgeResponse400;
+      409: PostAgentV2SessionsPurgeResponse409;
     };
   };
   "POST /kb/session-purges": {
@@ -7004,6 +7047,7 @@ export interface ApiEndpoints {
     responses: {
       200: PostKbChatSessionsIdArchiveBeginResponse200;
       404: PostKbChatSessionsIdArchiveBeginResponse404;
+      409: PostKbChatSessionsIdArchiveBeginResponse409;
     };
   };
   "POST /kb/chat/sessions/:id/archive/commit": {
@@ -7011,6 +7055,7 @@ export interface ApiEndpoints {
     responses: {
       200: PostKbChatSessionsIdArchiveCommitResponse200;
       400: PostKbChatSessionsIdArchiveCommitResponse400;
+      404: PostKbChatSessionsIdArchiveCommitResponse404;
       409: PostKbChatSessionsIdArchiveCommitResponse409;
     };
   };
@@ -7033,6 +7078,13 @@ export interface ApiEndpoints {
     request: GetKbLiveUnackedRequest;
     responses: {
       200: GetKbLiveUnackedResponse200;
+    };
+  };
+  "POST /kb/archive-receipts": {
+    request: PostKbArchiveReceiptsRequest;
+    responses: {
+      200: PostKbArchiveReceiptsResponse200;
+      400: PostKbArchiveReceiptsResponse400;
     };
   };
   "POST /kb/loop/agent-run": {

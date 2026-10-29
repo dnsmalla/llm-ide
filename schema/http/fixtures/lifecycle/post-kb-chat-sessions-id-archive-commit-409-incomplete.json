@@ -1,0 +1,24 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/commit",
+  "status": 409,
+  "description": "The live store dropped two messages from this chat (the 2000-message prune). Refused until the client sends acceptIncomplete.",
+  "request": {
+    "params": {
+      "id": "c0ffee00-1111-4222-8333-944455556666"
+    },
+    "body": {
+      "fence": 3,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INCOMPLETE_ARCHIVE",
+      "message": "this chat lost messages to the store caps; archive it with acceptIncomplete:true to accept that",
+      "details": {
+        "prunedMessages": 2,
+        "truncatedMessages": 0
+      }
+    }
+  }
+}

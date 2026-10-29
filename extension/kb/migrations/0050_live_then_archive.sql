@@ -81,6 +81,27 @@ ALTER TABLE chat_sessions ADD COLUMN origin TEXT NOT NULL DEFAULT 'extension';
 ALTER TABLE chat_sessions ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'live';
 ALTER TABLE chat_sessions ADD COLUMN fence INTEGER NOT NULL DEFAULT 0;
 ALTER TABLE chat_sessions ADD COLUMN archive_since TEXT;
+-- pruned_messages / truncated_messages count what the live store could not keep
+-- (the 2000-message prune, the 64 KB content cap). An archive of a chat with
+-- either above zero is INCOMPLETE and needs the client's explicit consent.
+ALTER TABLE chat_sessions ADD COLUMN pruned_messages INTEGER NOT NULL DEFAULT 0;
+ALTER TABLE chat_sessions ADD COLUMN truncated_messages INTEGER NOT NULL DEFAULT 0;
+
+-- archive_receipts: the proof that a chat's transcript is in a file. A server
+-- commit writes one (source 'commit', with the hash the rows had); a Mac that
+-- verified its own file writes one through POST /kb/archive-receipts (source
+-- 'mac-file'; the server cannot read the Mac file, so this is the client's
+-- assertion). Purging working state requires a receipt; commit uses it to answer
+-- an idempotent already_archived (and 404 when there is none).
+CREATE TABLE archive_receipts (
+  owner_user_id   TEXT NOT NULL,
+  chat_session_id TEXT NOT NULL,
+  hash            TEXT NOT NULL,
+  message_count   INTEGER NOT NULL,
+  source          TEXT NOT NULL,
+  committed_at    TEXT NOT NULL,
+  PRIMARY KEY (owner_user_id, chat_session_id)
+);
 
 -- 3. pending_session_purges: delete-everywhere tombstones (plan 3.5). Mirrors
 --    pending_agent_purges (0049). The owner column is owner_user_id, not

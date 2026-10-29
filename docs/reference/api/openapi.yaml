@@ -225,7 +225,7 @@ paths:
                   type: "array"
                   items:
                     type: "string"
-                  description: "Up to 500 non-empty chat ids."
+                  description: "Up to 500 non-empty chat ids. Every chat needs an archive receipt (a server commit, or POST /kb/archive-receipts); otherwise 409 NO_RECEIPT and nothing is purged."
                 verified:
                   type: "boolean"
                   description: "Must be true: the caller has checked the Mac file. Any other value is a 400 VALIDATION_FAILED."
@@ -244,6 +244,12 @@ paths:
                     description: "Chats whose working state was removed. Unknown ids count as zero; the call is idempotent."
         "400":
           description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
           content:
             application/json:
               schema:
@@ -4743,6 +4749,48 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/archive-receipts:
+    post:
+      tags:
+        - "lifecycle"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "chatSessionId"
+                - "hash"
+                - "count"
+              properties:
+                chatSessionId:
+                  type: "string"
+                hash:
+                  type: "string"
+                  description: "64 lower-case hex: the archive hash the Mac computed over the file it wrote."
+                count:
+                  type: "integer"
+                  description: "Messages in that file."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "recorded"
+                properties:
+                  recorded:
+                    const: true
+                    description: "The receipt is stored; purging the chat's working state is now allowed."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/box/test:
     post:
       summary: "Verify Box credentials and folder access"
@@ -4995,6 +5043,24 @@ paths:
           required: true
           schema:
             type: "string"
+        - name: "after"
+          in: "query"
+          required: false
+          description: "A continuation page: the seq of the last message on the previous page. Needs fence."
+          schema:
+            type: "integer"
+        - name: "fence"
+          in: "query"
+          required: false
+          description: "The fence of the initial begin. Required with after; a mismatch is 409 ARCHIVE_STALE."
+          schema:
+            type: "integer"
+        - name: "limit"
+          in: "query"
+          required: false
+          description: "Messages per page: default 200, at most 500. A page is also cut at about 8 MB."
+          schema:
+            type: "integer"
       responses:
         "200":
           description: "OK"
@@ -5006,8 +5072,10 @@ paths:
                   - "fence"
                   - "count"
                   - "hash"
+                  - "incomplete"
                   - "session"
                   - "messages"
+                  - "nextAfter"
                 properties:
                   fence:
                     type: "integer"
@@ -5016,7 +5084,7 @@ paths:
                     type: "integer"
                   hash:
                     type: "string"
-                    description: "64 lower-case hex characters, the archive hash."
+                    description: "64 lower-case hex: the digest of ALL the chat's messages, streamed (not just this page)."
                   session:
                     type: "object"
                     required:
@@ -5049,8 +5117,33 @@ paths:
                     items:
                       "$ref": "#/components/schemas/ArchiveMessage"
                     description: "Every message, in order. No cap (plan Q8)."
+                  incomplete:
+                    type: "object"
+                    required:
+                      - "incomplete"
+                      - "prunedMessages"
+                      - "truncatedMessages"
+                    properties:
+                      incomplete:
+                        type: "boolean"
+                        description: "True when the live store dropped messages (the 2000-message prune or the 64 KB content cap). The commit refuses unless acceptIncomplete is sent."
+                      prunedMessages:
+                        type: "integer"
+                      truncatedMessages:
+                        type: "integer"
+                  nextAfter:
+                    type:
+                      - "integer"
+                      - "null"
+                    description: "The seq to pass as after for the next page, or null on the last page."
         "404":
           description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
           content:
             application/json:
               schema:
@@ -5080,6 +5173,9 @@ paths:
                 hash:
                   type: "string"
                   description: "The 64-hex hash the begin returned, recomputed over the file the Mac wrote."
+                acceptIncomplete:
+                  type: "boolean"
+                  description: "Archive a chat the caps made incomplete. Without it such a commit is 409 INCOMPLETE_ARCHIVE."
       responses:
         "200":
           description: "OK"
@@ -5099,9 +5195,15 @@ paths:
                     enum:
                       - "deleted"
                       - "already_archived"
-                    description: "already_archived: an earlier commit already removed the chat (idempotent)."
+                    description: "already_archived: the chat is gone and a receipt with this hash says it was archived (idempotent). A chat that is gone without such a receipt is 404."
         "400":
           description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
           content:
             application/json:
               schema:

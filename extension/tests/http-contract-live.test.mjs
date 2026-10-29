@@ -95,6 +95,10 @@ const SKIP_RULES = [
     when: (fx) => fx.status < 300 && /\/(google|slack|box|email|mcp-connector|connect-git|connect-github-issues|connect-qa|connect-tickets-json|ingest-scip|ingest-code-graph|install-skills|notify)\b|\/marketplace|\/updates|\/(import|refresh|update)$|\/auth\/me\/(connectors|llm-sources|mcp-plugins)\/(add|update|resync)|\/auth\/me\/plugins\/(install|reload)|\/auth\/me\/codex-plugins|\/auth\/me\/claude-plugins|\/kb\/ingest$/.test(fx.endpoint),
   },
   {
+    why: 'needs an archive receipt recorded through /kb/archive-receipts (or a commit) for the fixture user, so the purge can answer 200',
+    when: (fx) => fx.status < 300 && fx.endpoint === 'POST /agent/v2/sessions/purge',
+  },
+  {
     why: 'needs a finalized capture seeded through the live append and finalize routes, so the ack can answer 409',
     when: (fx) => fx.status === 409 && /^POST \/kb\/live\/:id\/ack$/.test(fx.endpoint),
   },
@@ -104,7 +108,7 @@ const SKIP_RULES = [
   },
   {
     why: 'needs an archiving chat row owned by the fixture user (begun through /archive/begin), so the fence check can answer 409',
-    when: (fx) => fx.status === 409 && /^POST \/kb\/chat\/sessions\/:id\/archive\/commit$/.test(fx.endpoint),
+    when: (fx) => fx.status === 409 && /^POST \/kb\/chat\/sessions\/:id\/archive\/(begin|commit)$/.test(fx.endpoint),
   },
   {
     why: 'needs state from a dry run of the same server (a previewId signed in this process) or a run in flight',

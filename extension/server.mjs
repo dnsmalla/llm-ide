@@ -418,6 +418,7 @@ const ALL_ENDPOINTS = [
   '/kb/agent/working-state',
   '/agent/v2/sessions/purge',
   '/kb/session-purges',
+  '/kb/archive-receipts',
   '/kb/index/notes',
   '/kb/index/notes/:key',
   '/kb/index/reconcile',
@@ -528,7 +529,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/project/install-skills') return 'kbWrite';
   // live-then-archive Phase 1 (plan section 4.1): cheap local writes, no model call.
   if (url === '/kb/index/notes' || url === '/kb/index/reconcile') return 'kbWrite';
-  if (url === '/kb/session-purges' || url === '/agent/v2/sessions/purge') return 'kbWrite';
+  if (url === '/kb/session-purges' || url === '/agent/v2/sessions/purge' || url === '/kb/archive-receipts') return 'kbWrite';
   if (/^\/kb\/chat\/sessions\/[^/]+\/archive\/(begin|commit)$/.test(url)) return 'kbWrite';
   if (/^\/kb\/live\/[^/]+\/ack$/.test(url)) return 'kbWrite';
   return null;

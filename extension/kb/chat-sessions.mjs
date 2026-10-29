@@ -163,11 +163,17 @@ export function appendChatMessage(userId, sessionId, { role, content, meta = nul
   // Redacted at the write, not the route, so every caller is covered. The
   // marker contains no quote characters, so redacting inside meta JSON keeps
   // it parseable.
-  const text = redactSecretsForStorage(String(content || '').slice(0, CONTENT_MAX));
+  const rawContent = String(content || '');
+  const text = redactSecretsForStorage(rawContent.slice(0, CONTENT_MAX));
   if (!text) throw new Error('content is required');
+  // Anything the store cannot keep is COUNTED, so an archive of this chat can say
+  // it is incomplete (plan 3.3, DL12) instead of silently losing the rest.
+  let truncated = rawContent.length > CONTENT_MAX ? 1 : 0;
   let metaJson = null;
   if (meta != null) {
-    metaJson = redactSecretsForStorage(JSON.stringify(meta).slice(0, META_MAX));
+    const fullMeta = JSON.stringify(meta);
+    if (fullMeta.length > META_MAX) truncated += 1;
+    metaJson = redactSecretsForStorage(fullMeta.slice(0, META_MAX));
   }
   const db = getDb();
   const tx = db.transaction((uid, sid, r, c, m) => {
@@ -184,8 +190,8 @@ export function appendChatMessage(userId, sessionId, { role, content, meta = nul
     `).run(sid, uid, nextSeq, r, c, m, ts);
     lazyPrepare(db, 'UPDATE chat_sessions SET updated_at = ? WHERE user_id = ? AND id = ?').run(ts, uid, sid);
 
-    // Prune oldest messages beyond HARD_MSGS_PER_SESSION
-    lazyPrepare(db, `
+    // Prune oldest messages beyond HARD_MSGS_PER_SESSION (counted, see above)
+    const pruned = lazyPrepare(db, `
       DELETE FROM chat_messages
        WHERE session_id = ?
          AND seq < (
@@ -194,7 +200,12 @@ export function appendChatMessage(userId, sessionId, { role, content, meta = nul
             ORDER BY seq DESC
             LIMIT 1 OFFSET ?
          )
-    `).run(sid, sid, HARD_MSGS_PER_SESSION - 1);
+    `).run(sid, sid, HARD_MSGS_PER_SESSION - 1).changes;
+    if (pruned > 0 || truncated > 0) {
+      lazyPrepare(db, `UPDATE chat_sessions SET pruned_messages = pruned_messages + ?,
+        truncated_messages = truncated_messages + ? WHERE user_id = ? AND id = ?`)
+        .run(pruned, truncated, uid, sid);
+    }
 
     return { seq: nextSeq, createdAt: ts };
   });

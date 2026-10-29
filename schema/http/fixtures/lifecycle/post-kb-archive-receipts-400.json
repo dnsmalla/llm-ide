@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/archive-receipts",
+  "status": 400,
+  "description": "The hash is not 64 lower-case hex, so no receipt is written.",
+  "request": {
+    "body": {
+      "chatSessionId": "5f1c2a7e-3b9d-4e8a-9c21-0d7e6b5a4f30",
+      "hash": "not-a-hash",
+      "count": 42
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "hash must be 64 lower-case hex characters"
+    }
+  }
+}

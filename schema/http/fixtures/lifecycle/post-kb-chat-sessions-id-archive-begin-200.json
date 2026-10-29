@@ -1,10 +1,13 @@
 {
   "endpoint": "POST /kb/chat/sessions/:id/archive/begin",
   "status": 200,
-  "description": "Example data. The snapshot carries every message, the fence (3) and the hash the Mac must reproduce.",
+  "description": "Example data. The snapshot carries the fence (3), the digest of every message and page one (here the whole chat). nextAfter is null on the last page.",
   "request": {
     "params": {
       "id": "c0ffee00-1111-4222-8333-944455556666"
+    },
+    "query": {
+      "limit": 200
     }
   },
   "response": {
@@ -37,6 +40,12 @@
         },
         "createdAt": 1798500110
       }
-    ]
+    ],
+    "incomplete": {
+      "incomplete": false,
+      "prunedMessages": 0,
+      "truncatedMessages": 0
+    },
+    "nextAfter": null
   }
 }
