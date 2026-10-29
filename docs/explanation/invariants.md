@@ -717,12 +717,13 @@ layout's — a real repo graph genuinely arrives fragmented.
 ## Derived note index (`extension/kb/note-index.mjs`, migration 0050)
 
 ### ✅ MUST preserve
+
 - Note FTS rows carry `kind = 'note'` and `meeting_id = char(1) || 'note:' || id`. Client meeting ids may not contain control characters or that prefix (`checkMeetingId`), so a meeting delete can never remove a note's FTS row.
 - Every query that does not ask for `kind 'note'` excludes it (`search()` adds `kind <> 'note'`).
 - A migration that rebuilds the `search` table MUST call `rebuildNoteIndexSearch(db)` afterwards. The `note_index_search` map stores rowids, which a rebuild renumbers; `indexStatus()` reports `consistent: false` until the map is rebuilt.
 - A hidden note is removed from the index, not only skipped (upsert deletes the existing row).
 
 ### ❌ DO NOT do these
+
 - Do not rely on the map's rowids after any change to `search`; rebuild from `note_index` instead.
 - Do not add a per-note kind other than `note` to `search` without updating the `kind <> 'note'` guard.
-
