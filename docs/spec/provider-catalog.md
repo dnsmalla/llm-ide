@@ -1,0 +1,150 @@
+---
+title: Provider catalog and multi-provider adapter — spec
+status: draft
+---
+
+This is the contract for connecting non-Anthropic model providers (agent-kit K1 Phase 6, first half): the built-in catalog, per-user connections and keys, model listing with capability flags, tool-capable chat through a maintained library adapter, and opt-in cross-provider fallback. Server API version 90.
+
+Not covered here: the Claude path (`llm_agent/sdk/`, see [claude-linker](../explanation/claude-linker.md)), and the classic loop, which keeps serving these providers until the second half of Phase 6 moves the Mac onto the adapter and deletes it.
+
+---
+
+## §1 Scope
+
+| File | Role |
+|---|---|
+| `extension/server/provider-catalog.json` | The catalog: 11 entries (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, generic OpenAI-compatible endpoint) |
+| `extension/server/provider-catalog.mjs` | Loads the catalog; chat-model filter; `modelCapability()`; `TOOL_MODES` |
+| `extension/server/base-url-guard.mjs` | SSRF guard for provider base URLs (two postures) |
+| `extension/server/provider-connections.mjs` | Per-user connections, settings, vault key placement |
+| `extension/server/custom-providers.mjs` | Falls back to a connection for `custom:cat-…` ids |
+| `extension/providers/provider-models.mjs` | Live model list (cached), static fallback, connection test |
+| `extension/providers/provider-fallback.mjs` | The start-of-turn provider pick |
+| `extension/providers/adapter/index.mjs` | The only module that imports the Vercel AI SDK |
+| `extension/llm_agent/adapter/tool-bridge.mjs` | Our tool registry as the adapter's tools, behind our permission gate |
+| `extension/llm_agent/adapter/provider-turn.mjs` | One provider-backed turn |
+| `extension/routes/provider-catalog.mjs` | The eight routes |
+| `mac/Sources/LlmIdeMac/Features/Settings/Views/ProviderCatalogSettingsCard.swift` | The Settings card (slot `providerCatalog`) |
+
+## §2 Adapter decision
+
+Evaluated 2026-10-29 against the registry and the installed tree (`npm view`, `npm ls --all`, `npm audit`, `npm audit signatures`).
+
+| Question | Answer |
+|---|---|
+| Version used | `ai@6.0.317` and `@ai-sdk/openai-compatible@2.0.87`, both pinned exactly (no caret). The newest line is `ai@7.0.156`, whose `engines` is `node >=22`; this project's floor is `node >=20` (`extension/package.json`), so the 6.x line (`engines node >=18`, still receiving patches) is used until the floor moves. `@ai-sdk/openai-compatible` must match the major of `ai` (its `latest` tag, 3.x, needs `ai@7`) |
+| Licence | Apache-2.0 for every package in the new tree |
+| New packages | 10: `ai`, `@ai-sdk/gateway`, `@ai-sdk/openai-compatible`, `@ai-sdk/provider`, `@ai-sdk/provider-utils`, `@opentelemetry/api`, `@standard-schema/spec`, `@vercel/oidc`, `json-schema`, `undici`. `zod` and `eventsource-parser` were already installed. Unpacked size about 12 MB |
+| Install scripts | None in any of them (`hasInstallScript` is absent); installed with `--ignore-scripts` regardless |
+| Provenance | `npm audit signatures`: all packages have verified registry signatures; 75 attestations verified (the `ai` package carries a SLSA v1 provenance statement) |
+| `npm audit` | No new advisory. The 15 existing advisories (including `zod` 4.4.3, GHSA-mrhx-c7xc-m3w5) are unchanged and are not caused by this change |
+| Tool calling | The library runs the model/tool loop (`streamText` with `stopWhen: stepCountIs(n)`), validates nothing itself unless told (our bridge checks arguments), and streams tool input deltas. Every catalog provider has a dedicated `@ai-sdk/*` package with tool support; this implementation uses the single OpenAI-compatible package for all of them, verified against a recorded `/chat/completions` stream (`extension/tests/fixtures/provider-adapter/`). Gemini is reached through its documented OpenAI-compatible endpoint, which accepts `tools` |
+| Streaming | Yes, SSE, mapped to the agent/v2 events (`delta`, `tool_use_start`, `tool_args_delta`, `tool_result`, `usage`, `result`) |
+| Versus keeping only our OpenAI-compatible path | Our `callOpenAI` is non-streaming and returns a tool call as a text fence for a loop we are deleting. Re-implementing streaming tool-call assembly, multi-step looping, per-provider quirks and abort handling is the part the library is maintained for. Cost: the dependency above and one thin module |
+| Seams | Imports are confined to `extension/providers/adapter/` by an ESLint rule (`AI_SDK_IMPORT` in `eslint.config.mjs`); the library's default `console.error` of failures is silenced because a provider's error body can echo a key; `maxRetries: 0` so retry and fallback stay ours; the fetch handed to it refuses redirects and any host other than the connection's |
+| Decision | **Adopt the Vercel AI SDK, behind `providers/adapter/`.** LiteLLM stays ruled out |
+
+If the adapter ever has to go, only `providers/adapter/index.mjs` changes: its public surface is `createChatModel`, `runToolTurn`, `mapStreamPart`, `toWireError`.
+
+## §3 Data
+
+All state is per user (`user_flags` flag `provider.catalog`, JSON), plus the vault:
+
+```json
+{ "connections": [{ "id": "cat-groq", "catalogId": "groq", "name": "Groq",
+                    "baseURL": "https://api.groq.com/openai/v1", "allowPrivate": false, "enabled": true }],
+  "settings": { "toolsEnabled": false, "fallbackEnabled": false,
+                "fallbackOrder": [{ "provider": "custom:cat-groq", "model": "llama-3.3-70b-versatile" }],
+                "toolOverrides": { "cat-groq/some-model": true } } }
+```
+
+- Connection id: `cat-<catalog id>`; the generic endpoint adds `-<slug>` (1 to 24 lowercase letters or digits, default `default`) so a user can hold several. At most 20 connections per user.
+- The API key is stored with `setSecret` under `custom.<id>.apiKey` (the existing custom-provider vault pattern, `CUSTOM_PROVIDER_KEY_RE`), encrypted per user. It is never in the flag JSON, never returned, never logged. A keyless entry (Ollama) stores the non-secret placeholder `not-required`, which is never sent as a credential.
+- The Mac's whole-list `POST /kb/custom-providers` sync cannot remove a connection: it writes a different flag. `getCustomProvider('custom:cat-…')` falls back to the connection, so the existing `resolveCustomProviderDispatch` serves it unchanged.
+- `fallbackOrder` accepts only the caller's own connections (anything else is dropped on write and on disconnect); at most 20 entries. `toolOverrides` holds at most 400 `'<connection id>/<model id>'` booleans.
+
+## §4 Base URL rules
+
+`assertProviderBaseUrl(url, { allowPrivate })`:
+
+| Rule | Strict (hosted entries) | `allowPrivate` (Ollama; generic endpoint with the user's opt-in) |
+|---|---|---|
+| Scheme | `https` only | `https`, or `http` for a private host |
+| `localhost`, `127/8`, `10/8`, `172.16/12`, `192.168/16`, `::1`, `fc00::/7`, `*.local` | refused | allowed |
+| `169.254/16`, `fe80::/10`, `0.0.0.0`, `::` (link-local, cloud metadata) | refused | **refused** |
+| Credentials in the URL | refused | refused |
+| DNS resolving to a private address | refused (`assertSafeBaseUrlResolved`) | not checked (the user said the host is theirs) |
+
+A hosted entry has a fixed base URL: a connect request naming another host is a 400, so a key cannot be pointed at a host the catalog never named. Only `openai-compatible` (and `ollama`, for a non-default host) takes one. Every outgoing request uses `redirect: 'error'`.
+
+## §5 Routes
+
+All token-protected, additive, in `ALL_ENDPOINTS`. Shapes: `schema/http/provider-catalog.schema.json`; error envelope `{ error: { code, message } }`.
+
+| Route | Purpose | Notes |
+|---|---|---|
+| `GET /kb/providers/catalog` | Entries, each with the caller's connections; plus settings | |
+| `POST /kb/providers/catalog/connect` | `{ catalogId, apiKey?, baseURL?, slug?, name?, allowPrivate? }` | 400 `VALIDATION_FAILED` (no key, bad URL, fixed-URL entry, key with whitespace or over 512 chars), 404 `NOT_FOUND`, 409 `LIMIT`. Omit `apiKey` on a reconnect to keep the stored key |
+| `POST /kb/providers/catalog/disconnect` | `{ id }` | Removes the key and the fallback slot; `removed:false` when the caller had no such connection |
+| `POST /kb/providers/catalog/test` | `{ id }` | One free `GET <base>/models`. Always 200 `{ ok, detail, modelCount? }`; `detail` is redacted |
+| `POST /kb/providers/catalog/models` | `{ id, refresh? }` | `{ models:[{ id, toolsSupported, toolsSource, streaming, contextWindow }], source, detail? }` |
+| `GET` and `PUT /kb/providers/settings` | The two switches, the order, the overrides | PUT is a patch; unknown fields ignored |
+| `POST /kb/providers/turn` | A tool-capable turn (SSE) | See §7 |
+
+Rate limits: `test` and `models` use `llmFast`; `connect`, `disconnect` and `PUT settings` use `kbWrite`; `turn` uses `agentTurn`. `test` and `models` have a 30 s route budget.
+
+## §6 Capability flags
+
+`modelCapability(entry, id, { live, override })` returns `{ id, toolsSupported, toolsSource, streaming, contextWindow }`. `toolsSource`, in precedence order:
+
+1. `override`: the user's own yes or no (`settings.toolOverrides`).
+2. `provider`: the provider's live list says so (OpenRouter `supported_parameters` contains `tools`).
+3. `catalog`: the entry's static table lists the model.
+4. `inferred`: the id matches one of the entry's `toolPatterns` (a family known to support tools).
+5. `unknown`: nothing says so. **Treated as not supported.**
+
+Model lists come from `GET <base>/models`, cached ten minutes per user and connection (a stale list answers when the provider is briefly down, marked `source:'cache'` with a `detail`), narrowed to chat models by the entry's patterns (embeddings, speech, moderation and guard models dropped), and fall back to the entry's static table (`source:'static'`) with no key, on an error, or when the list is empty. `streaming` is true for every entry. `contextWindow` comes from the live list when it has one (OpenRouter, Together), else the static table, else `null`.
+
+`TOOL_MODES` = `execute`, `plan`, `assist_plan`, `review`. A model without tools in one of these is refused (400 `MODEL_LACKS_TOOLS`); in `ask` and `document` the turn runs without tools and says so (`notice` kind `tools_unavailable`).
+
+## §7 The provider turn
+
+`POST /kb/providers/turn` body `{ provider: 'custom:cat-…', model, message, mode?, history?, agentContext? }` (`history`: the last 40 `user`/`assistant` messages; `agentContext.workspaceRoot` bounds the file tools; `agentContext.chatSessionId` keys the chat's task list).
+
+Order of checks, each refused with a plain JSON error before any event: the user's `toolsEnabled` switch (409 `PROVIDER_TOOLS_DISABLED`, default off), message and model present (400), the connection exists (404 `PROVIDER_NOT_CONNECTED`), the key is present (400 `PROVIDER_NO_KEY`), the fallback pick (§8), the capability check (400 `MODEL_LACKS_TOOLS`). Then it streams the agent/v2 vocabulary:
+
+- `notice` kind `provider_fallback` (only after a switch), then `init` (`sessionId` is the approval session id; `capabilities:['provider-adapter']`), then `delta`, `tool_use_start`, `tool_args_delta`, `tool_result`, `usage` and `approval_request` (`ToolApproval`), ending in `result` or one `error` (`code`, `message`, `retryable`; codes `PROVIDER_AUTH`, `PROVIDER_RATE_LIMITED`, `PROVIDER_UNAVAILABLE`, `PROVIDER_ERROR`, `ABORTED`).
+- Tools are the registry (`llm_agent/tools/registry.mjs`) minus `ask-internal` and `ask-subagent` (nested Claude loops). A restricted mode (`ask`, `plan`, `assist_plan`, `review`, `document`) mounts `allowedToolNames(mode)`; `execute` mounts the rest, including `run-bash`.
+- The permission gate is the registry's: `run-bash` gates itself (blocked patterns, auto-safe commands, saved project rules, else parks an approval); any other `act` entry with a `gate` is gated in the bridge the same way. A parked approval is answered with `POST /agent/v2/decision` using `init.sessionId`; the registry checks user and session. Arguments are checked against the skill schema before a handler runs.
+- Step cap 12 per turn, 8192 output tokens per call, no library retries. Usage is metered through `recordUsage` under the connection's provider id and endpoint `/kb/providers/turn`.
+- Client disconnect aborts the turn and unparks its approvals.
+
+Gaps against a Claude turn, for the second half: no memory or project-context injection, no session resume or compaction, budget is a step and token cap rather than USD, and the Mac chat does not use this route yet.
+
+## §8 Cross-provider fallback
+
+Off by default (`fallbackEnabled`). `pickTurnProvider(userId, { provider, model, needsTools })` runs once, at the start of a provider turn:
+
+1. Candidates: the requested provider, then `fallbackOrder` in the user's order.
+2. A candidate is skipped when it is not connected or disabled (`not_connected`), has no key (`no_key`), has no suitable model (`no_suitable_model`; an entry without a model gets the first catalog model that has tools when tools are needed), lacks tools in a tool mode (`no_tools`), is quota-flagged for the current daily or monthly window in `quota_state` (`quota`, set by `flagQuota` on a quota 429), or is rate limited (`rate_limited`: a header snapshot that shows zero remaining and a reset still ahead, ten minutes fresh at most; or an in-memory cooldown of 60 s, up to 15 min, set when a turn ended in a 429).
+3. The first eligible candidate runs. If it is not the requested one, the turn emits a `notice` (`provider_fallback`, with `from`, `to`, `model`, `skipped`) before `init`, and records a `model_fallback` activity row.
+4. If none is eligible the requested provider runs and its own error is the answer.
+
+A turn never changes provider or model while it streams. A 429 mid-turn ends that turn with a retryable `error`; the next turn's pick sees the cooldown. Same-provider limits (`model_limits`, the reactive step-down in `completeViaApi`) are unchanged and still apply to the classic path. Per-model limits are not yet configurable for catalog connections (`getLimits` knows only the built-in provider ids); the fallback reads quota flags and rate-limit state, which work for any provider id.
+
+## §9 Terms of use and quality risks
+
+- **Free tiers.** Stacking several providers' free tiers to get around a limit can violate their terms. The product offers an ordered list the user writes and nothing more: no rotation, no load spreading, no key pooling, fallback off by default, and the Settings text says to check each provider's terms. Whether to rely on it is the user's decision.
+- **Tool quality varies by model.** A weak tool model in `execute` or `plan` can loop or do damage. Mitigations: the capability flag (unknown means no tools), tool-heavy modes refuse a model without tools, the same permission gate for every provider, a step cap, and a per-model override the user owns. A bench scenario set for the adapter is part of the second half.
+- **Keys.** Accepted once, vault only; the library's default error logging is off; error text is redacted with the key; the adapter's fetch cannot leave the connection's host or follow a redirect.
+
+## §10 Tests
+
+`extension/tests/provider-*.test.mjs` (catalog, connections, models, adapter incl. recorded wire, fallback, turn, wire conformance, routes) and `mac/Tests/LlmIdeMacTests/ProviderCatalogModelTests.swift`. No test reaches a real provider.
+
+## Regeneration checklist
+
+- [ ] Every governed symbol/endpoint/table/prompt is present with its exact shape (no "etc.", no "see code").
+- [ ] Every magic number, timeout, cap, regex, and crypto parameter is stated.
+- [ ] Spot-check: one representative piece rebuilt from this page alone matches source.
+- [ ] Structured facts link to their extractor-generated reference page (no hand-copied drift).
