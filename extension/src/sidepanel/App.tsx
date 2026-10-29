@@ -58,7 +58,7 @@ const HINT_DISMISSED_KEY = 'firstRunHintDismissed';
 const REQUIRED_ENDPOINTS = [
   '/generate-notes',
   '/generate-docx',
-  '/chat',
+  '/agent/v2/stream',
   '/generate-questions',
   '/extract-entities',
   '/kb/ingest',
@@ -72,7 +72,6 @@ const REQUIRED_ENDPOINTS = [
   '/kb/review/approve',
   '/kb/notify/slack',
   '/kb/outcomes/refresh',
-  '/kb/chat/sessions',
   '/kb/live/:id/status',
 ];
 
@@ -83,7 +82,7 @@ const REQUIRED_ENDPOINTS = [
 // silently used here. Bump this in lockstep with SERVER_API_VERSION whenever a
 // contract change lands that this client depends on. A NEWER server is fine
 // (backward-compatible), so we only flag servers BELOW this floor.
-const MIN_SERVER_API_VERSION = 86;
+const MIN_SERVER_API_VERSION = 89;
 
 export default function App() {
   // Auth gate is the very first hook so login renders before any of the

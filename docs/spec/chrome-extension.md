@@ -300,7 +300,7 @@ The raw `segments` array is stored alongside the rendered `transcript` string so
 
 ### 4.5 Chat-history retention
 
-There is none. The chat is read from the server on mount and held in memory only; `chatMessages` is no longer written (Q18). When making an LLM request, only the trailing `MAX_HISTORY = 10` messages are sent as context to `/chat`.
+There is none. The chat is read from the server on mount and held in memory only; `chatMessages` is no longer written (Q18). The side-panel chat is a live client of the Mac-managed server's v2 engine (`POST /agent/v2/stream`, mode `ask`, `agentContext.surface: "extension"`): the engine keeps the conversation, the meeting transcript is sent once and then only its new lines, and the trailing `MAX_HISTORY = 10` messages are sent only to seed a fresh engine session after `SESSION_UNRESUMABLE`. The user and assistant text is mirrored to the server's chat session rows (`/kb/chat/sessions`) so the Mac app archives the chat at quit. `/chat` answers 410 `ENDPOINT_REMOVED` from API 89.
 
 ---
 
@@ -380,7 +380,7 @@ Each hook that calls an LLM endpoint follows a shared pattern:
 
 ```typescript
 const REQUIRED_ENDPOINTS = [
-  '/generate-notes', '/generate-docx', '/chat', '/generate-questions',
+  '/generate-notes', '/generate-docx', '/agent/v2/stream', '/generate-questions',
   '/extract-entities', '/kb/ingest', '/kb/search', '/kb/connect-git',
   '/kb/generate-plan', '/kb/dispatch', '/kb/generate-code',
   '/kb/review/submit', '/kb/review/list', '/kb/review/approve',
@@ -392,7 +392,7 @@ const REQUIRED_ENDPOINTS = [
 
 - the reported `endpoints` list is empty / absent (treated as stale);
 - any endpoint in `REQUIRED_ENDPOINTS` is absent from the reported list (`missing` array);
-- **the server is below the version floor** — `MIN_SERVER_API_VERSION = 86` (`App.tsx:86`) and `apiVersion < MIN_SERVER_API_VERSION` (a missing/non-numeric `apiVersion` is coerced to `0`, so an old server fails this even when all endpoint names line up). The stale reason becomes `` [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`] ``.
+- **the server is below the version floor** — `MIN_SERVER_API_VERSION = 89` (`App.tsx:86`) and `apiVersion < MIN_SERVER_API_VERSION` (a missing/non-numeric `apiVersion` is coerced to `0`, so an old server fails this even when all endpoint names line up). The stale reason becomes `` [`server API v${apiVersion} < required v${MIN_SERVER_API_VERSION}`] ``.
 
 This mirrors the Mac client's handshake (`BackendManager.minimumServerApiVersion = 43`). The UI renders a "Server needs to be restarted" banner when `serverOnline && serverStale` is truthy (`App.tsx:507–518`). The health check repeats every `TIMING.SERVER_HEALTH_CHECK_INTERVAL_MS = 30_000` ms (`lib/config.ts:467`, `App.tsx:308`).
 
