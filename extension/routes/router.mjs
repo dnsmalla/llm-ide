@@ -33,6 +33,7 @@ const CLIENT_REFUSAL_CODES = new Set([
 import { handleLifecycleRoutes } from './lifecycle-routes.mjs';
 import { handleOsRoutes } from './os.mjs';
 import { handleAgentHistoryRoutes } from './agent-history.mjs';
+import { handleCompleteRoutes } from './complete.mjs';
 // Feature-owned groups (loop-agent, issue-schedule, code-graph) are NOT
 // imported here: routes/feature-routes.mjs loads only the enabled ones.
 import { loadFeatureRoutes, featureDisabledFor, sendFeatureDisabled } from './feature-routes.mjs';
@@ -1291,6 +1292,10 @@ export async function handleKB(req, res) {
     // ── Agent history: storage report, retention, clear, compact (Stage 1c) ──
     // Always on (plan Q5). See routes/agent-history.mjs.
     if (await handleAgentHistoryRoutes(req, res, { userId, url })) return true;
+
+    // ── Plain one-shot completion (POST /kb/complete; agent-kit K1 P3) ──
+    // Always on. No tools, no history. See routes/complete.mjs.
+    if (await handleCompleteRoutes(req, res, { userId, url })) return true;
 
     // ── System view aggregate (GET /kb/os/state) ─────────────────
     // Read-only, no model call. See routes/os.mjs.

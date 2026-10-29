@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/complete",
+  "status": 502,
+  "description": "Transcribed from the handler (routes/complete.mjs) and tests/kb-complete.test.mjs; no model call.",
+  "request": {
+    "body": {
+      "prompt": "hi"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INTERNAL_ERROR",
+      "message": "The assistant is temporarily unavailable. Please try again."
+    }
+  }
+}

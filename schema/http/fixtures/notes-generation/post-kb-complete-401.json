@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/complete",
+  "status": 401,
+  "description": "Transcribed from the handler (routes/complete.mjs) and tests/kb-complete.test.mjs; no model call.",
+  "request": {
+    "body": {
+      "prompt": "hi"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Missing access token"
+    }
+  }
+}

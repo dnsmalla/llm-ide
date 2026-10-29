@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/complete",
+  "status": 429,
+  "description": "Transcribed from the handler (routes/complete.mjs) and tests/kb-complete.test.mjs; no model call.",
+  "request": {
+    "body": {
+      "prompt": "hi"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "RATE_LIMITED",
+      "message": "Too many requests",
+      "details": {
+        "retryAfterSec": 5
+      }
+    }
+  }
+}

@@ -289,7 +289,8 @@ const HOST = config.host;
 //   v82 — docs-kit K1 hardening: GET /kb/docs/templates and /kb/docs/commands add `truncated` and `scannedFolders` (a family is scanned to at most 2000 folders); DELETE /kb/docs/* adds `folderRemoved` (only the template/command file is removed, the folder is removed only when empty); PUT and DELETE refuse ingest layouts and the ingest folder names (meeting-note, email-note) with 400/409 RESERVED_FOLDER; POST /kb/projects/register answers every root refusal as one INVALID_ROOT and caps a user at 200 projects (409 TOO_MANY_PROJECTS). Additive except the register error collapse.
 //   v81 — docs-kit K1: GET/PUT/DELETE /kb/docs/templates[/:folder] and GET/PUT/DELETE /kb/docs/commands[/:folder] (Doc Gen project template and command files under the project's templates/ and commands/, addressed by ?project=<id>), POST /kb/docs/seed (kit defaults, write-if-absent), POST /kb/projects/register ({id, root}: the per-user project id -> folder map the docs routes resolve through, validated like the System bridge's roots). All in the doc_gen group: with doc_gen off they answer 404 feature_disabled. Additive; no existing shape changes.
 //   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
-const SERVER_API_VERSION = 87;
+//   v88 — POST /kb/complete { prompt, language?, model?, provider?, tier?, framing? } → { reply, usage? }: a plain one-shot completion (no tools, no history, no SSE; tier 'subagent' = LLMIDE_SUBAGENT_MODEL; framing 'code-assist' = the legacy /code-assist prompt wrapper). Same provider-config refusal envelope as /code-assist (400 PROVIDER_UNAVAILABLE). llmFast bucket; metered under endpoint '/kb/complete'; recorded in agent history (source loop, engine complete). The Mac's RegressionRunner moves onto it; /code-assist is unchanged. Additive.
+const SERVER_API_VERSION = 88;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -311,6 +312,7 @@ const ALL_ENDPOINTS = [
   '/agent/v2/session',
   '/agent/v2/cancel',
   '/kb/loop/agent-run',
+  '/kb/complete',
   '/generate-questions',
   '/extract-entities',
   '/kb/ingest',
@@ -469,6 +471,7 @@ function rateLimitProfile(url, method) {
   if (url === '/generate-notes')         return 'llmFast';
   if (url === '/chat')                   return 'llmFast';
   if (url === '/kb/agent/ask')           return 'llmFast';
+  if (url === '/kb/complete')            return 'llmFast';          // one plain model call, same cost class as /chat
   if (url === '/generate-questions')     return 'llmFast';
   if (url === '/extract-entities')       return 'llmFast';
   if (url === '/generate-docx')          return 'llmFast';

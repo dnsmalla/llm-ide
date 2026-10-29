@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 87
+  x-api-version: 88
 servers:
   - url: "https://{host}"
     variables:
@@ -5449,6 +5449,90 @@ paths:
         "500":
           description: "Code sync failed (CODE_SYNC_FAILED)"
           x-undeclared: true
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/complete:
+    post:
+      tags:
+        - "notes-generation"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              description: "prompt is required (400 when missing, non-string, empty after sanitization, or over 100 000 characters). One model call: no tools, no history, no mode, no SSE. tier 'subagent' selects LLMIDE_SUBAGENT_MODEL when model is absent. framing 'code-assist' wraps the prompt as /code-assist's legacy path does (the only framing; any other value is 400). 1 MB body limit."
+              properties:
+                prompt:
+                  type: "string"
+                  description: "The text sent to the model (sanitized; max 100 000 chars)."
+                language:
+                  type: "string"
+                  description: "Reply-language code; only used by framing 'code-assist'."
+                model:
+                  type: "string"
+                provider:
+                  type: "string"
+                  description: "A provider id, or custom:<uuid>. A provider without a configured key answers 400 PROVIDER_UNAVAILABLE."
+                tier:
+                  type: "string"
+                  description: "'subagent' or absent."
+                framing:
+                  type: "string"
+                  description: "'code-assist' or absent."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "reply"
+                properties:
+                  reply:
+                    type: "string"
+                    description: "The model's reply, trimmed."
+                  usage:
+                    type: "object"
+                    description: "Summed model tokens of the call; omitted when the provider reported none."
+                    required:
+                      - "inputTokens"
+                      - "outputTokens"
+                      - "modelCalls"
+                    properties:
+                      inputTokens:
+                        type: "integer"
+                      outputTokens:
+                        type: "integer"
+                      cacheReadTokens:
+                        type: "integer"
+                      cacheCreationTokens:
+                        type: "integer"
+                      modelCalls:
+                        type: "integer"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "429":
+          description: "Too Many Requests"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Bad Gateway"
           content:
             application/json:
               schema:

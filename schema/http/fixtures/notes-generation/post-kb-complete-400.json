@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/complete",
+  "status": 400,
+  "description": "Transcribed from the handler (routes/complete.mjs) and tests/kb-complete.test.mjs; no model call.",
+  "request": {
+    "body": {
+      "prompt": "   "
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "Prompt is empty after sanitization"
+    }
+  }
+}

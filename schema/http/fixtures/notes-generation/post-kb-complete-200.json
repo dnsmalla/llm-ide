@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /kb/complete",
+  "status": 200,
+  "description": "Transcribed from the handler (routes/complete.mjs) and tests/kb-complete.test.mjs; no model call.",
+  "request": {
+    "body": {
+      "prompt": "Reply with the word ready.",
+      "language": "en",
+      "model": "claude-haiku-5-5",
+      "provider": "anthropic",
+      "tier": "subagent",
+      "framing": "code-assist"
+    }
+  },
+  "response": {
+    "reply": "ready",
+    "usage": {
+      "inputTokens": 120,
+      "outputTokens": 4,
+      "cacheReadTokens": 0,
+      "cacheCreationTokens": 0,
+      "modelCalls": 1
+    }
+  }
+}

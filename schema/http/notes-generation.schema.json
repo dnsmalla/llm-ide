@@ -1,5 +1,5 @@
 {
-  "description": "Notes and generation routes: the single-shot model calls the side panel, the Mac app's Doc Gen and the Code Assistant make (/generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx, /chat), the legacy Code Assistant turn (/code-assist), its run-bash approval resolver (/code-assist/decision), and the temporary Agent SDK spike (/agent-sdk/spike). Roster: all are POST paths in ALL_ENDPOINTS (extension/server.mjs), handled by extension/server/ai-routes.mjs, extension/server/export-routes.mjs and (for /generate-doc) extension/routes/doc-gen.mjs; all are token-protected. /generate-doc is gated by the doc_gen feature (LLMIDE_FEATURES without doc_gen answers 404 feature_disabled and /health omits it); every other route in this group is on the core feature set (not feature-gated). Request parts list exactly the keys each handler reads from the parsed JSON body; unknown keys are ignored by the server and are not declared. No request part is required: the server answers a missing key with 400, and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md), including /code-assist/decision (an unparseable body is refused there too, not treated as {}). Not declared: 413 (the body limit: readBody answers 413 before the handler runs, and a fixture cannot carry an over-limit body). Rate limits: /generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx and /chat share the llmFast bucket (429 declared); /code-assist uses agentTurn (429 declared); /code-assist/decision and /agent-sdk/spike are not rate-limited. Provider failures: a model call that throws answers the generic 500 INTERNAL_ERROR on the routes that call runClaude directly (its message is not sent, sendError maps a non-AppError to INTERNAL_ERROR), and 502 INTERNAL_ERROR on /code-assist (codeAssistErrorResponse); a PROVIDER_UNAVAILABLE refusal answers 400 on /code-assist. The 200 bodies of the model routes are the parsed model output, so the fixtures for them are built from the handler's response construction and the existing tests, not captured from a model; those fixtures say so in their description. Streams: /generate-notes and /code-assist answer an SSE stream instead of the JSON 200 when the request sends Accept: text/event-stream. The JSON form is specified on the 200; a status key can hold only one form and no event schema exists for the stream, so the stream form is not specified here. /agent-sdk/spike always streams and is x-unspecified.",
+  "description": "Notes and generation routes: the single-shot model calls the side panel, the Mac app's Doc Gen and the Code Assistant make (/generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx, /chat), the legacy Code Assistant turn (/code-assist), its run-bash approval resolver (/code-assist/decision), and the temporary Agent SDK spike (/agent-sdk/spike). Roster: all are POST paths in ALL_ENDPOINTS (extension/server.mjs), handled by extension/server/ai-routes.mjs, extension/server/export-routes.mjs and (for /generate-doc) extension/routes/doc-gen.mjs; all are token-protected. /generate-doc is gated by the doc_gen feature (LLMIDE_FEATURES without doc_gen answers 404 feature_disabled and /health omits it); every other route in this group is on the core feature set (not feature-gated). Request parts list exactly the keys each handler reads from the parsed JSON body; unknown keys are ignored by the server and are not declared. No request part is required: the server answers a missing key with 400, and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md), including /code-assist/decision (an unparseable body is refused there too, not treated as {}). Not declared: 413 (the body limit: readBody answers 413 before the handler runs, and a fixture cannot carry an over-limit body). Rate limits: /generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx and /chat share the llmFast bucket (429 declared); /code-assist uses agentTurn (429 declared); /code-assist/decision and /agent-sdk/spike are not rate-limited. Provider failures: a model call that throws answers the generic 500 INTERNAL_ERROR on the routes that call runClaude directly (its message is not sent, sendError maps a non-AppError to INTERNAL_ERROR), and 502 INTERNAL_ERROR on /code-assist (codeAssistErrorResponse); a PROVIDER_UNAVAILABLE refusal answers 400 on /code-assist. The 200 bodies of the model routes are the parsed model output, so the fixtures for them are built from the handler's response construction and the existing tests, not captured from a model; those fixtures say so in their description. Streams: /generate-notes and /code-assist answer an SSE stream instead of the JSON 200 when the request sends Accept: text/event-stream. The JSON form is specified on the 200; a status key can hold only one form and no event schema exists for the stream, so the stream form is not specified here. /agent-sdk/spike always streams and is x-unspecified. POST /kb/complete is the plain one-shot completion (agent-kit K1 P3): one prompt, one reply, llmFast bucket (429 declared); its 200 is built from the handler and the tests, not captured from a model; provider failures follow /code-assist (400 PROVIDER_UNAVAILABLE, generic 502 INTERNAL_ERROR).",
   "$defs": {
     "Turn": {
       "type": "object",
@@ -894,6 +894,94 @@
           "$ref": "_common#/$defs/Error"
         },
         "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/complete": {
+      "request": {
+        "body": {
+          "type": "object",
+          "description": "prompt is required (400 when missing, non-string, empty after sanitization, or over 100 000 characters). One model call: no tools, no history, no mode, no SSE. tier 'subagent' selects LLMIDE_SUBAGENT_MODEL when model is absent. framing 'code-assist' wraps the prompt as /code-assist's legacy path does (the only framing; any other value is 400). 1 MB body limit.",
+          "properties": {
+            "prompt": {
+              "type": "string",
+              "description": "The text sent to the model (sanitized; max 100 000 chars)."
+            },
+            "language": {
+              "type": "string",
+              "description": "Reply-language code; only used by framing 'code-assist'."
+            },
+            "model": {
+              "type": "string"
+            },
+            "provider": {
+              "type": "string",
+              "description": "A provider id, or custom:<uuid>. A provider without a configured key answers 400 PROVIDER_UNAVAILABLE."
+            },
+            "tier": {
+              "type": "string",
+              "description": "'subagent' or absent."
+            },
+            "framing": {
+              "type": "string",
+              "description": "'code-assist' or absent."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "reply"
+          ],
+          "properties": {
+            "reply": {
+              "type": "string",
+              "description": "The model's reply, trimmed."
+            },
+            "usage": {
+              "type": "object",
+              "x-optional": true,
+              "description": "Summed model tokens of the call; omitted when the provider reported none.",
+              "required": [
+                "inputTokens",
+                "outputTokens",
+                "modelCalls"
+              ],
+              "properties": {
+                "inputTokens": {
+                  "type": "integer"
+                },
+                "outputTokens": {
+                  "type": "integer"
+                },
+                "cacheReadTokens": {
+                  "type": "integer",
+                  "x-optional": true
+                },
+                "cacheCreationTokens": {
+                  "type": "integer",
+                  "x-optional": true
+                },
+                "modelCalls": {
+                  "type": "integer"
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
           "$ref": "_common#/$defs/Error"
         }
       }

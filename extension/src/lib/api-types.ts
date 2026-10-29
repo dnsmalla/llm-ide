@@ -4749,6 +4749,44 @@ export type PostAgentSdkSpikeResponse400 = CommonError;
 
 export type PostAgentSdkSpikeResponse401 = CommonError;
 
+/** Request parts for `POST /kb/complete` (schema/http/notes-generation.schema.json). */
+export type PostKbCompleteRequest = {
+  body: {
+    /** The text sent to the model (sanitized; max 100 000 chars). */
+    prompt?: string;
+    /** Reply-language code; only used by framing 'code-assist'. */
+    language?: string;
+    model?: string;
+    /** A provider id, or custom:<uuid>. A provider without a configured key answers 400 PROVIDER_UNAVAILABLE. */
+    provider?: string;
+    /** 'subagent' or absent. */
+    tier?: string;
+    /** 'code-assist' or absent. */
+    framing?: string;
+  };
+};
+
+export type PostKbCompleteResponse200 = {
+  /** The model's reply, trimmed. */
+  reply: string;
+  /** Summed model tokens of the call; omitted when the provider reported none. */
+  usage?: {
+    inputTokens: number;
+    outputTokens: number;
+    cacheReadTokens?: number;
+    cacheCreationTokens?: number;
+    modelCalls: number;
+  };
+};
+
+export type PostKbCompleteResponse400 = CommonError;
+
+export type PostKbCompleteResponse401 = CommonError;
+
+export type PostKbCompleteResponse429 = CommonError;
+
+export type PostKbCompleteResponse502 = CommonError;
+
 /** Request parts for `GET /kb/os/state` (schema/http/os.schema.json). */
 export type GetKbOsStateRequest = {
   query: {
@@ -7468,6 +7506,16 @@ export interface ApiEndpoints {
       200: PostAgentSdkSpikeResponse200;
       400: PostAgentSdkSpikeResponse400;
       401: PostAgentSdkSpikeResponse401;
+    };
+  };
+  "POST /kb/complete": {
+    request: PostKbCompleteRequest;
+    responses: {
+      200: PostKbCompleteResponse200;
+      400: PostKbCompleteResponse400;
+      401: PostKbCompleteResponse401;
+      429: PostKbCompleteResponse429;
+      502: PostKbCompleteResponse502;
     };
   };
   "GET /kb/os/state": {
