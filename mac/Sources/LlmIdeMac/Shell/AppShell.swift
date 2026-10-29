@@ -850,6 +850,7 @@ struct AppShell: View {
             appEnv?.indexer.stopWatching()
             self.appEnv = env
             startWatching(env)
+            startNoteIndex(env)
             FeatureCatalog.setAutoCodeEnvironment(self.appEnv)
             FeatureCatalog.setAutoCodeProjectNotes(itemStore)
             // Populate the NOTES and MEETINGS sections from the bound project's
@@ -875,7 +876,21 @@ struct AppShell: View {
             DispatchQueue.main.async {
                 NotificationCenter.default.post(name: .meetingIndexChanged, object: nil)
             }
+            // Live-then-archive (lta.mode shadow/on): a finalize or folder change asks
+            // for a debounced server index pass. Off by default; no-op when not started.
+            Task { @MainActor in NoteIndexHost.folderChanged() }
         }
+    }
+
+    /// Starts the derived note-index feed for the open project when `lta.mode` is
+    /// not off (plan Phase 2). Read once per environment, so it applies on the next start.
+    private func startNoteIndex(_ env: AppEnvironment) {
+        guard LiveThenArchiveMode.current() != .off,
+              let projectId = projectStore.activeProject?.bundle.id else {
+            NoteIndexHost.stop()
+            return
+        }
+        NoteIndexHost.start(root: env.meetingsFolder, index: env.index, projectId: projectId, remote: api)
     }
 
     private func rebuildEnv() {
