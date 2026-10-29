@@ -986,6 +986,7 @@ export function deleteUserCascade(userId) {
     // (not user_id: see the header of 0049/0050). Removed here so an account
     // delete leaves no per-user row behind.
     counts.note_index = del('DELETE FROM note_index WHERE user_id = ?');
+    counts.note_index_pass = del('DELETE FROM note_index_pass WHERE user_id = ?');
     counts.pending_session_purges = del('DELETE FROM pending_session_purges WHERE owner_user_id = ?');
     counts.live_acks = del('DELETE FROM live_acks WHERE owner_user_id = ?');
     // The durable copies of unacked extension captures hold transcripts: they go too.
