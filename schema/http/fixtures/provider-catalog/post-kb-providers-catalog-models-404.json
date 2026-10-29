@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/providers/catalog/models",
+  "status": 404,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "id": "cat-nobody"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "That provider is not connected"
+    }
+  }
+}

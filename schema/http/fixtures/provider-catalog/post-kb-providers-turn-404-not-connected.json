@@ -1,0 +1,33 @@
+{
+  "endpoint": "POST /kb/providers/turn",
+  "status": 404,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "provider": "custom:cat-openai",
+      "model": "llama-3.3-70b-versatile",
+      "message": "add a task called write tests",
+      "mode": "execute",
+      "history": [
+        {
+          "role": "user",
+          "content": "hello"
+        },
+        {
+          "role": "assistant",
+          "content": "hi"
+        }
+      ],
+      "agentContext": {
+        "chatSessionId": "chat-1",
+        "workspaceRoot": "/tmp"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PROVIDER_NOT_CONNECTED",
+      "message": "That provider is not connected. Add it in Settings, Providers."
+    }
+  }
+}

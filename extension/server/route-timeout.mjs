@@ -32,6 +32,8 @@ const BUDGETS_POST = new Map([
   // Credential/model liveness probes — a slow answer IS the answer.
   ['/kb/providers/verify',    30_000],
   ['/kb/providers/models',    30_000],
+  ['/kb/providers/catalog/test',   30_000],
+  ['/kb/providers/catalog/models', 30_000],
   // A KB delete is a bounded set of indexed DELETEs, not a scaling workload.
   ['/kb/delete',              30_000],
   // Removed (were 60 s–240 s): /kb/ingest and /kb/connect-box scale with how

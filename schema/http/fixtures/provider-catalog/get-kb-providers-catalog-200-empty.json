@@ -1,0 +1,147 @@
+{
+  "endpoint": "GET /kb/providers/catalog",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "response": {
+    "providers": [
+      {
+        "id": "openai",
+        "name": "OpenAI",
+        "baseURL": "https://api.openai.com/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://platform.openai.com/docs",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "google",
+        "name": "Google Gemini",
+        "baseURL": "https://generativelanguage.googleapis.com/v1beta/openai",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://ai.google.dev/gemini-api/docs/openai",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "mistral",
+        "name": "Mistral",
+        "baseURL": "https://api.mistral.ai/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://docs.mistral.ai",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "groq",
+        "name": "Groq",
+        "baseURL": "https://api.groq.com/openai/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://console.groq.com/docs",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "deepseek",
+        "name": "DeepSeek",
+        "baseURL": "https://api.deepseek.com/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://api-docs.deepseek.com",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "openrouter",
+        "name": "OpenRouter",
+        "baseURL": "https://openrouter.ai/api/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://openrouter.ai/docs",
+        "notes": "The live list reports supported_parameters per model, so the tools flag is exact.",
+        "connections": []
+      },
+      {
+        "id": "xai",
+        "name": "xAI",
+        "baseURL": "https://api.x.ai/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://docs.x.ai",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "cerebras",
+        "name": "Cerebras",
+        "baseURL": "https://api.cerebras.ai/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://inference-docs.cerebras.ai",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "together",
+        "name": "Together AI",
+        "baseURL": "https://api.together.xyz/v1",
+        "keyRequired": true,
+        "local": false,
+        "customBaseURL": false,
+        "allowPrivate": false,
+        "docsUrl": "https://docs.together.ai",
+        "notes": "",
+        "connections": []
+      },
+      {
+        "id": "ollama",
+        "name": "Ollama (local)",
+        "baseURL": "http://localhost:11434/v1",
+        "keyRequired": false,
+        "local": true,
+        "customBaseURL": false,
+        "allowPrivate": true,
+        "docsUrl": "https://github.com/ollama/ollama/blob/main/docs/openai.md",
+        "notes": "Talks to the Ollama on this machine. Tool support depends on the model; the flag is inferred from the model family and can be overridden.",
+        "connections": []
+      },
+      {
+        "id": "openai-compatible",
+        "name": "OpenAI-compatible endpoint",
+        "baseURL": "",
+        "keyRequired": false,
+        "local": false,
+        "customBaseURL": true,
+        "allowPrivate": true,
+        "docsUrl": "",
+        "notes": "Any server that implements /v1/chat/completions and /v1/models: LM Studio, vLLM, a plain gateway, a self-hosted FreeLLMAPI proxy. A private-network address needs an explicit opt-in.",
+        "connections": []
+      }
+    ],
+    "settings": {
+      "toolsEnabled": false,
+      "fallbackEnabled": false,
+      "fallbackOrder": [],
+      "toolOverrides": {}
+    }
+  }
+}

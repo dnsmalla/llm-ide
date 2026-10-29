@@ -1,0 +1,511 @@
+{
+  "description": "Provider catalog (agent-kit K1 Phase 6, server API v90): the built-in catalog of model providers (OpenAI, Google, Mistral, Groq, DeepSeek, OpenRouter, xAI, Cerebras, Together, Ollama local, and any OpenAI-compatible endpoint), the caller's connections to them, per-model capability flags, the two opt-in switches (tool-capable chat, cross-provider fallback), and the tool-capable provider turn. Roster: all 8 method-paths below are in ALL_ENDPOINTS (extension/server.mjs), handled by extension/routes/provider-catalog.mjs, mounted by extension/routes/router.mjs, and all are token-protected and on the core feature set. A key is accepted in the connect body once, goes to the per-user vault (custom.<id>.apiKey) and is never returned. A connection dispatches as the provider id custom:<id> (id is cat-<catalog id>, plus -<slug> for the generic endpoint). Every JSON route also answers a malformed body 400 (not declared, per SCHEMA.md). Rate limits: /catalog/test and /catalog/models share llmFast, /catalog/connect, /catalog/disconnect and PUT /settings share kbWrite, /turn uses agentTurn (429 is not declared; the bucket answers it uniformly). The stream of POST /kb/providers/turn is the agent/v2 event vocabulary (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice); approvals are answered through POST /agent/v2/decision with init.sessionId. A refusal before the first event is a plain JSON error (409 PROVIDER_TOOLS_DISABLED, 404 PROVIDER_NOT_CONNECTED, 400 PROVIDER_NO_KEY | MODEL_LACKS_TOOLS | VALIDATION_FAILED). Not captured: a fallback switch (the notice event with kind provider_fallback) and a live provider list; both are exercised by extension/tests. Fixtures are produced by driving the real router in-process with a stand-in for fetch, because the routes reach third-party hosts.",
+  "$defs": {
+    "Connection": {
+      "type": "object",
+      "required": [
+        "id",
+        "provider",
+        "catalogId",
+        "name",
+        "baseURL",
+        "allowPrivate",
+        "enabled",
+        "hasKey"
+      ],
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "cat-<catalog id>[-<slug>]; also the vault key stem"
+        },
+        "provider": {
+          "type": "string",
+          "description": "The provider id dispatch uses: custom:<id>"
+        },
+        "catalogId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "baseURL": {
+          "type": "string"
+        },
+        "allowPrivate": {
+          "type": "boolean",
+          "description": "Loopback and private-network hosts are allowed (Ollama, a gateway on the user's own network); link-local never is"
+        },
+        "enabled": {
+          "type": "boolean"
+        },
+        "hasKey": {
+          "type": "boolean",
+          "description": "A key is stored. The key itself is never returned"
+        }
+      }
+    },
+    "CatalogProvider": {
+      "type": "object",
+      "required": [
+        "id",
+        "name",
+        "baseURL",
+        "keyRequired",
+        "local",
+        "customBaseURL",
+        "allowPrivate",
+        "docsUrl",
+        "notes",
+        "connections"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "baseURL": {
+          "type": "string",
+          "description": "Empty for the generic endpoint, which takes the user's own"
+        },
+        "keyRequired": {
+          "type": "boolean"
+        },
+        "local": {
+          "type": "boolean"
+        },
+        "customBaseURL": {
+          "type": "boolean"
+        },
+        "allowPrivate": {
+          "type": "boolean",
+          "description": "The entry may be connected to a private-network address (with the user's explicit opt-in unless local)"
+        },
+        "docsUrl": {
+          "type": "string"
+        },
+        "notes": {
+          "type": "string"
+        },
+        "connections": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Connection"
+          }
+        }
+      }
+    },
+    "FallbackEntry": {
+      "type": "object",
+      "required": [
+        "provider"
+      ],
+      "properties": {
+        "provider": {
+          "type": "string",
+          "description": "custom:cat-... of the caller's own connection"
+        },
+        "model": {
+          "type": "string",
+          "x-optional": true,
+          "description": "Absent: the first tool-capable catalog model"
+        }
+      }
+    },
+    "Settings": {
+      "type": "object",
+      "required": [
+        "toolsEnabled",
+        "fallbackEnabled",
+        "fallbackOrder",
+        "toolOverrides"
+      ],
+      "properties": {
+        "toolsEnabled": {
+          "type": "boolean",
+          "description": "Tool-capable chat on non-Anthropic models; default false"
+        },
+        "fallbackEnabled": {
+          "type": "boolean",
+          "description": "Cross-provider fallback at the start of a turn; default false"
+        },
+        "fallbackOrder": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FallbackEntry"
+          }
+        },
+        "toolOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          },
+          "description": "'<connection id>/<model id>' to the user's own tools yes/no"
+        }
+      }
+    },
+    "SettingsPatch": {
+      "type": "object",
+      "properties": {
+        "toolsEnabled": {
+          "type": "boolean"
+        },
+        "fallbackEnabled": {
+          "type": "boolean"
+        },
+        "fallbackOrder": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/FallbackEntry"
+          }
+        },
+        "toolOverrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
+    "ModelCapability": {
+      "type": "object",
+      "required": [
+        "id",
+        "toolsSupported",
+        "toolsSource",
+        "streaming",
+        "contextWindow"
+      ],
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "toolsSupported": {
+          "type": "boolean"
+        },
+        "toolsSource": {
+          "type": "string",
+          "enum": [
+            "catalog",
+            "provider",
+            "inferred",
+            "override",
+            "unknown"
+          ],
+          "description": "Where the flag came from; unknown counts as not supported"
+        },
+        "streaming": {
+          "type": "boolean"
+        },
+        "contextWindow": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        }
+      }
+    },
+    "ConnectionId": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "A connection id (cat-...) or its provider string (custom:cat-...)"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /kb/providers/catalog": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "providers",
+            "settings"
+          ],
+          "properties": {
+            "providers": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/CatalogProvider"
+              }
+            },
+            "settings": {
+              "$ref": "#/$defs/Settings"
+            }
+          }
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/providers/catalog/connect": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "catalogId": {
+              "type": "string"
+            },
+            "apiKey": {
+              "type": "string",
+              "description": "Stored in the per-user vault; omitted on a reconnect to keep the stored key"
+            },
+            "baseURL": {
+              "type": "string",
+              "description": "Only the generic endpoint (and Ollama on another host) takes one; a hosted entry keeps its own"
+            },
+            "slug": {
+              "type": "string",
+              "description": "1-24 lowercase letters or digits; names a second generic endpoint"
+            },
+            "name": {
+              "type": "string"
+            },
+            "allowPrivate": {
+              "type": "boolean",
+              "description": "Opt in to a loopback or private-network address"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "connection"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "connection": {
+              "$ref": "#/$defs/Connection"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/providers/catalog/disconnect": {
+      "request": {
+        "body": {
+          "$ref": "#/$defs/ConnectionId"
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "removed"
+          ],
+          "properties": {
+            "ok": {
+              "const": true
+            },
+            "removed": {
+              "type": "boolean",
+              "description": "false when the caller had no such connection"
+            }
+          }
+        }
+      }
+    },
+    "POST /kb/providers/catalog/test": {
+      "request": {
+        "body": {
+          "$ref": "#/$defs/ConnectionId"
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "ok",
+            "detail"
+          ],
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "detail": {
+              "type": "string",
+              "description": "Human-readable result; never contains the key"
+            },
+            "modelCount": {
+              "type": "integer",
+              "x-optional": true,
+              "description": "Chat models the provider lists; present when ok"
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/providers/catalog/models": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "refresh": {
+              "type": "boolean",
+              "description": "Bypass the ten-minute cache"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "models",
+            "source"
+          ],
+          "properties": {
+            "models": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ModelCapability"
+              }
+            },
+            "source": {
+              "type": "string",
+              "enum": [
+                "live",
+                "cache",
+                "static"
+              ],
+              "description": "static: the catalog's own table, because there was no key or the provider could not be reached"
+            },
+            "detail": {
+              "type": "string",
+              "x-optional": true,
+              "description": "Why the list is static or stale"
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/providers/settings": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Settings"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /kb/providers/settings": {
+      "request": {
+        "body": {
+          "$ref": "#/$defs/SettingsPatch"
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Settings"
+        }
+      }
+    },
+    "POST /kb/providers/turn": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "provider": {
+              "type": "string",
+              "description": "custom:cat-... of a connection of the caller"
+            },
+            "model": {
+              "type": "string"
+            },
+            "message": {
+              "type": "string"
+            },
+            "mode": {
+              "type": "string",
+              "description": "execute | plan | assist_plan | review need a model with tools; ask and document run without them"
+            },
+            "history": {
+              "type": "array",
+              "description": "Prior turns, most recent 40 are used",
+              "items": {
+                "type": "object",
+                "required": [
+                  "role",
+                  "content"
+                ],
+                "properties": {
+                  "role": {
+                    "type": "string",
+                    "enum": [
+                      "user",
+                      "assistant"
+                    ]
+                  },
+                  "content": {
+                    "type": "string"
+                  }
+                }
+              }
+            },
+            "agentContext": {
+              "type": "object",
+              "description": "workspaceRoot bounds what the file tools may read; chatSessionId keys the chat's task list",
+              "properties": {
+                "workspaceRoot": {
+                  "type": "string"
+                },
+                "chatSessionId": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "x-unspecified": "A server-sent stream in the agent/v2 event vocabulary (schema/agent-v2). This route emits a subset (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice), so the all-variants coverage that x-events demands would need fabricated events. Every emitted event is instead validated against the agent/v2 schema variants by extension/tests/provider-turn-wire.test.mjs."
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

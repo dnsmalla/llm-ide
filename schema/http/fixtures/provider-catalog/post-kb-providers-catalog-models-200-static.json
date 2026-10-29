@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /kb/providers/catalog/models",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network. The provider refused the key, so the catalog's static list answers with the reason in detail.",
+  "request": {
+    "body": {
+      "id": "cat-groq",
+      "refresh": true
+    }
+  },
+  "response": {
+    "models": [
+      {
+        "id": "llama-3.3-70b-versatile",
+        "toolsSupported": true,
+        "toolsSource": "catalog",
+        "streaming": true,
+        "contextWindow": 131072
+      },
+      {
+        "id": "llama-3.1-8b-instant",
+        "toolsSupported": true,
+        "toolsSource": "catalog",
+        "streaming": true,
+        "contextWindow": 131072
+      }
+    ],
+    "source": "static",
+    "detail": "Groq answered HTTP 401 (the key was refused): {\"error\":{\"message\":\"Invalid API key\"}}"
+  }
+}

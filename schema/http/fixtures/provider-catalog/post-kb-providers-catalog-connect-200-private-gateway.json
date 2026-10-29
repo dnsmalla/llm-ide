@@ -1,0 +1,28 @@
+{
+  "endpoint": "POST /kb/providers/catalog/connect",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "catalogId": "openai-compatible",
+      "apiKey": "sk-fixture-not-a-real-key-000000",
+      "baseURL": "http://192.168.1.20:3001/v1",
+      "slug": "home",
+      "name": "FreeLLMAPI at home",
+      "allowPrivate": true
+    }
+  },
+  "response": {
+    "ok": true,
+    "connection": {
+      "id": "cat-openai-compatible-home",
+      "provider": "custom:cat-openai-compatible-home",
+      "catalogId": "openai-compatible",
+      "name": "FreeLLMAPI at home",
+      "baseURL": "http://192.168.1.20:3001/v1",
+      "allowPrivate": true,
+      "enabled": true,
+      "hasKey": true
+    }
+  }
+}

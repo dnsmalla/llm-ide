@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/providers/catalog/connect",
+  "status": 409,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "catalogId": "openai-compatible",
+      "slug": "extra",
+      "baseURL": "https://gw.example.com/v1"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "LIMIT",
+      "message": "At most 20 provider connections"
+    }
+  }
+}

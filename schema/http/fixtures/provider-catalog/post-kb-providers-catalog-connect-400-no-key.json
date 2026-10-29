@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/providers/catalog/connect",
+  "status": 400,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "catalogId": "openai"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "OpenAI needs an API key"
+    }
+  }
+}

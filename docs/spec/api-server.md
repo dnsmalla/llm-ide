@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 89` (`server.mjs:289`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 90` (`server.mjs:289`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -65,7 +65,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### Per-route handler budgets (`server/route-timeout.mjs`)
 
-Opt-in only; a route absent from the map has no budget, and a budget returns a 504 JSON envelope. Only **short, externally-bounded** routes carry one: `/kb/dispatch` (60 s, outbound provider REST), `/kb/providers/verify` and `/kb/providers/models` (30 s, liveness probes), `/kb/delete` (30 s).
+Opt-in only; a route absent from the map has no budget, and a budget returns a 504 JSON envelope. Only **short, externally-bounded** routes carry one: `/kb/dispatch` (60 s, outbound provider REST), `/kb/providers/verify`, `/kb/providers/models`, `/kb/providers/catalog/test` and `/kb/providers/catalog/models` (30 s, liveness probes), `/kb/delete` (30 s).
 
 Budgets were **removed** from every LLM route (`/kb/generate-plan`, `/kb/analyze-risks`, `/kb/summarize`, `/kb/conflict-questions`, `/kb/generate-code` — previously 180–240 s) and from the routes that scale with the user's data (`/kb/ingest`, `/kb/connect-box`, `/kb/ingest-scip`). Once `requestTimeout` and the agent-loop deadline were gone these were the last clock over that work, and they cut it off in the cases needing time most: `/kb/summarize` 504'd at 240 s on a long transcript, so the Mac summarizer discarded the real AI summary and wrote its local fallback. Streaming routes (`/code-assist`, SSE, agent dispatch) must never be listed.
 
@@ -233,12 +233,12 @@ When a bucket is exhausted, `tryConsume()` returns `{ ok: false, retryAfterSec: 
 
 | Profile | Capacity | Refill rate | Applied to |
 |---|---|---|---|
-| `agentTurn` | 12 | 1/5 s | `/code-assist`, `/agent/v2/stream`, `/kb/loop/agent-run` (chat turns and the Loop's headless agent step — the Mac engine starts auto-continue and follow-up turns on its own; one in-flight turn per chat is enforced separately) |
+| `agentTurn` | 12 | 1/5 s | `/code-assist`, `/agent/v2/stream`, `/kb/providers/turn`, `/kb/loop/agent-run` (chat turns and the Loop's headless agent step — the Mac engine starts auto-continue and follow-up turns on its own; one in-flight turn per chat is enforced separately) |
 | `llm` | 3 | 1/30 s | `/kb/generate-plan`, `/kb/analyze-risks`, `/kb/generate-code`, `/kb/summarize`, `/kb/email/classify`, `/kb/mcp-connector/classify`, `/kb/conflict-questions` |
-| `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/kb/complete`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models` |
+| `llmFast` | 6 | 1/5 s | `/generate-notes`, `/chat`, `/kb/agent/ask`, `/kb/complete`, `/generate-questions`, `/extract-entities`, `/generate-docx`, `/generate-doc`, `/kb/providers/verify`, `/kb/providers/models`, `/kb/providers/catalog/test`, `/kb/providers/catalog/models` |
 | `dispatch` | 4 | 1/10 s | `/kb/dispatch`, `/kb/notify/slack`, `/kb/email/test`, `/kb/email/fetch`, `/kb/slack/test`, `/kb/slack/fetch`, `/kb/box/test`, `/kb/mcp-connector/test`, `/kb/mcp-connector/fetch`, `/kb/slack/conversations`, `/kb/connect-box` (full external crawl — special-cased before the generic connect prefix) |
 | `outcomePoll` | 6 | 1/30 s | `/kb/outcomes/refresh` |
-| `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack` |
+| `kbWrite` | 30 | 5/s | `/kb/ingest`, `/kb/connect-*`, `/kb/review/*`, `/kb/plan-task/*`, `/kb/issue-schedule*`, `/kb/usage/limits`, `/kb/agent-history/clear`, `/kb/agent-history/compact`, `PUT /kb/agent-history/settings`, `PUT /kb/providers/settings`, `/kb/providers/catalog/connect`, `/kb/providers/catalog/disconnect`, `/kb/usage/record`, `/kb/email/seen`, `/kb/slack/seen`, `/kb/mcp-connector/seen`, `POST /kb/activity`, `POST /kb/activity/seen`, `/kb/project/install-skills`, `/kb/docs/*` (PUT and DELETE; `POST /kb/docs/seed`), `POST /kb/projects/register`, `POST /kb/index/notes`, `POST /kb/index/reconcile`, `POST /kb/index/scan`, `DELETE /kb/index/notes/*`, `POST /kb/session-purges`, `POST /kb/archive-receipts`, `POST /agent/v2/sessions/purge`, `POST /kb/chat/sessions/*/archive/begin`, `POST /kb/chat/sessions/*/archive/commit`, `POST /kb/live/*/ack` |
 | `liveAppend` | 30 | 5/s | `/kb/live/:id/append` (applied inside `routes/live.mjs:62`) |
 | `kbExport` | 5 | 1/10 s | `GET /kb/export-all` |
 | `authPublic` | 10 | 1/s | `/auth/login`, `/auth/refresh`, password-reset confirm/request |

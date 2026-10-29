@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 89
+  x-api-version: 90
 servers:
   - url: "https://{host}"
     variables:
@@ -30,6 +30,7 @@ tags:
   - name: "notes-generation"
   - name: "os"
   - name: "planning"
+  - name: "provider-catalog"
   - name: "providers-usage"
   - name: "review"
 paths:
@@ -9784,6 +9785,207 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/providers/catalog:
+    get:
+      tags:
+        - "provider-catalog"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "providers"
+                  - "settings"
+                properties:
+                  providers:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/CatalogProvider"
+                  settings:
+                    "$ref": "#/components/schemas/Settings"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/providers/catalog/connect:
+    post:
+      tags:
+        - "provider-catalog"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                catalogId:
+                  type: "string"
+                apiKey:
+                  type: "string"
+                  description: "Stored in the per-user vault; omitted on a reconnect to keep the stored key"
+                baseURL:
+                  type: "string"
+                  description: "Only the generic endpoint (and Ollama on another host) takes one; a hosted entry keeps its own"
+                slug:
+                  type: "string"
+                  description: "1-24 lowercase letters or digits; names a second generic endpoint"
+                name:
+                  type: "string"
+                allowPrivate:
+                  type: "boolean"
+                  description: "Opt in to a loopback or private-network address"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "ok"
+                  - "connection"
+                properties:
+                  ok:
+                    const: true
+                  connection:
+                    "$ref": "#/components/schemas/Connection"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/providers/catalog/disconnect:
+    post:
+      tags:
+        - "provider-catalog"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ConnectionId"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "ok"
+                  - "removed"
+                properties:
+                  ok:
+                    const: true
+                  removed:
+                    type: "boolean"
+                    description: "false when the caller had no such connection"
+  /kb/providers/catalog/models:
+    post:
+      tags:
+        - "provider-catalog"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+                refresh:
+                  type: "boolean"
+                  description: "Bypass the ten-minute cache"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "models"
+                  - "source"
+                properties:
+                  models:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ModelCapability"
+                  source:
+                    type: "string"
+                    enum:
+                      - "live"
+                      - "cache"
+                      - "static"
+                    description: "static: the catalog's own table, because there was no key or the provider could not be reached"
+                  detail:
+                    type: "string"
+                    description: "Why the list is static or stale"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/providers/catalog/test:
+    post:
+      tags:
+        - "provider-catalog"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/ConnectionId"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "ok"
+                  - "detail"
+                properties:
+                  ok:
+                    type: "boolean"
+                  detail:
+                    type: "string"
+                    description: "Human-readable result; never contains the key"
+                  modelCount:
+                    type: "integer"
+                    description: "Chat models the provider lists; present when ok"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/providers/models:
     post:
       summary: "Fetch the current chat model list for a provider"
@@ -9850,6 +10052,111 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "429":
           description: "Rate limited"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/providers/settings:
+    get:
+      tags:
+        - "provider-catalog"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Settings"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    put:
+      tags:
+        - "provider-catalog"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              "$ref": "#/components/schemas/SettingsPatch"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Settings"
+  /kb/providers/turn:
+    post:
+      tags:
+        - "provider-catalog"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                provider:
+                  type: "string"
+                  description: "custom:cat-... of a connection of the caller"
+                model:
+                  type: "string"
+                message:
+                  type: "string"
+                mode:
+                  type: "string"
+                  description: "execute | plan | assist_plan | review need a model with tools; ask and document run without them"
+                history:
+                  type: "array"
+                  description: "Prior turns, most recent 40 are used"
+                  items:
+                    type: "object"
+                    required:
+                      - "role"
+                      - "content"
+                    properties:
+                      role:
+                        type: "string"
+                        enum:
+                          - "user"
+                          - "assistant"
+                      content:
+                        type: "string"
+                agentContext:
+                  type: "object"
+                  description: "workspaceRoot bounds what the file tools may read; chatSessionId keys the chat's task list"
+                  properties:
+                    workspaceRoot:
+                      type: "string"
+                    chatSessionId:
+                      type: "string"
+      responses:
+        "200":
+          description: "Not yet specified: A server-sent stream in the agent/v2 event vocabulary (schema/agent-v2). This route emits a subset (init, tool_use_start, tool_args_delta, tool_result, usage, delta, result, error, approval_request, approval_resolved, notice), so the all-variants coverage that x-events demands would need fabricated events. Every emitted event is instead validated against the agent/v2 schema variants by extension/tests/provider-turn-wire.test.mjs."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
           content:
             application/json:
               schema:
@@ -12586,6 +12893,44 @@ components:
         registered:
           type: "boolean"
           description: "already in this install's registry"
+    CatalogProvider:
+      type: "object"
+      required:
+        - "id"
+        - "name"
+        - "baseURL"
+        - "keyRequired"
+        - "local"
+        - "customBaseURL"
+        - "allowPrivate"
+        - "docsUrl"
+        - "notes"
+        - "connections"
+      properties:
+        id:
+          type: "string"
+        name:
+          type: "string"
+        baseURL:
+          type: "string"
+          description: "Empty for the generic endpoint, which takes the user's own"
+        keyRequired:
+          type: "boolean"
+        local:
+          type: "boolean"
+        customBaseURL:
+          type: "boolean"
+        allowPrivate:
+          type: "boolean"
+          description: "The entry may be connected to a private-network address (with the user's explicit opt-in unless local)"
+        docsUrl:
+          type: "string"
+        notes:
+          type: "string"
+        connections:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Connection"
     ChatMessage:
       type: "object"
       required:
@@ -12797,6 +13142,44 @@ components:
         rawContent:
           type: "string"
           description: "The whole file text. When present it is written as-is."
+    Connection:
+      type: "object"
+      required:
+        - "id"
+        - "provider"
+        - "catalogId"
+        - "name"
+        - "baseURL"
+        - "allowPrivate"
+        - "enabled"
+        - "hasKey"
+      properties:
+        id:
+          type: "string"
+          description: "cat-<catalog id>[-<slug>]; also the vault key stem"
+        provider:
+          type: "string"
+          description: "The provider id dispatch uses: custom:<id>"
+        catalogId:
+          type: "string"
+        name:
+          type: "string"
+        baseURL:
+          type: "string"
+        allowPrivate:
+          type: "boolean"
+          description: "Loopback and private-network hosts are allowed (Ollama, a gateway on the user's own network); link-local never is"
+        enabled:
+          type: "boolean"
+        hasKey:
+          type: "boolean"
+          description: "A key is stored. The key itself is never returned"
+    ConnectionId:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+          description: "A connection id (cat-...) or its provider string (custom:cat-...)"
     ConnectorEntry:
       type: "object"
       required:
@@ -13044,6 +13427,17 @@ components:
               type: "string"
         item:
           "$ref": "#/components/schemas/ReviewItem"
+    FallbackEntry:
+      type: "object"
+      required:
+        - "provider"
+      properties:
+        provider:
+          type: "string"
+          description: "custom:cat-... of the caller's own connection"
+        model:
+          type: "string"
+          description: "Absent: the first tool-capable catalog model"
     FeatureDisabled:
       type: "object"
       required:
@@ -13788,6 +14182,34 @@ components:
           type: "object"
           additionalProperties: true
           description: "kind-specific metadata; open set"
+    ModelCapability:
+      type: "object"
+      required:
+        - "id"
+        - "toolsSupported"
+        - "toolsSource"
+        - "streaming"
+        - "contextWindow"
+      properties:
+        id:
+          type: "string"
+        toolsSupported:
+          type: "boolean"
+        toolsSource:
+          type: "string"
+          enum:
+            - "catalog"
+            - "provider"
+            - "inferred"
+            - "override"
+            - "unknown"
+          description: "Where the flag came from; unknown counts as not supported"
+        streaming:
+          type: "boolean"
+        contextWindow:
+          type:
+            - "integer"
+            - "null"
     ModelLimit:
       type: "object"
       required:
@@ -15006,6 +15428,44 @@ components:
           description: "Opaque, hashed in DB; rotate via /auth/refresh"
         accessTokenTTLSec:
           type: "integer"
+    Settings:
+      type: "object"
+      required:
+        - "toolsEnabled"
+        - "fallbackEnabled"
+        - "fallbackOrder"
+        - "toolOverrides"
+      properties:
+        toolsEnabled:
+          type: "boolean"
+          description: "Tool-capable chat on non-Anthropic models; default false"
+        fallbackEnabled:
+          type: "boolean"
+          description: "Cross-provider fallback at the start of a turn; default false"
+        fallbackOrder:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/FallbackEntry"
+        toolOverrides:
+          type: "object"
+          additionalProperties:
+            type: "boolean"
+          description: "'<connection id>/<model id>' to the user's own tools yes/no"
+    SettingsPatch:
+      type: "object"
+      properties:
+        toolsEnabled:
+          type: "boolean"
+        fallbackEnabled:
+          type: "boolean"
+        fallbackOrder:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/FallbackEntry"
+        toolOverrides:
+          type: "object"
+          additionalProperties:
+            type: "boolean"
     SkillEntry:
       type: "object"
       required:

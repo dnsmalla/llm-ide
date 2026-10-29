@@ -45,6 +45,7 @@ import { runClaude } from '../providers/runtime.mjs';
 import { flushWarmCliPool } from '../providers/warm-cli-pool.mjs';
 import { verifyProvider, providerApiKey, PROVIDER_IDS, listProviderModels, chatModels, customBaseUrl } from '../providers/providers.mjs';
 import { handleCustomProvidersSync } from '../server/custom-providers.mjs';
+import { handleProviderCatalog } from './provider-catalog.mjs';
 import { handleTierRoutingSync } from '../server/tier-routing.mjs';
 import { tierRoutingStatusFresh } from '../providers/tier-routing.mjs';
 import { listSdkModels } from '../llm_agent/sdk/models.mjs';
@@ -142,6 +143,10 @@ export async function handleKB(req, res) {
     const { handlers: featureHandlers } = await (featureRoutes ?? initFeatureRoutes(activeFeatures));
     // docs-kit K1 (doc_gen group): /kb/docs/* and /kb/projects/register.
     if (await featureHandlers.doc_gen?.(req, res, { userId, url })) return true;
+
+    // Provider catalog (connections, model capability flags, settings, the
+    // tool-capable provider turn). Answers only its own /kb/providers/* paths.
+    if (await handleProviderCatalog(req, res, { userId, url })) return true;
 
     if (req.method === 'POST' && url === '/kb/ingest') {
       const body = parseJSON(await readBody(req));

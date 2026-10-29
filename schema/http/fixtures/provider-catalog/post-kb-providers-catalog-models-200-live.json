@@ -1,0 +1,30 @@
+{
+  "endpoint": "POST /kb/providers/catalog/models",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "id": "cat-groq",
+      "refresh": true
+    }
+  },
+  "response": {
+    "models": [
+      {
+        "id": "brand-new-model",
+        "toolsSupported": true,
+        "toolsSource": "override",
+        "streaming": true,
+        "contextWindow": null
+      },
+      {
+        "id": "llama-3.3-70b-versatile",
+        "toolsSupported": true,
+        "toolsSource": "catalog",
+        "streaming": true,
+        "contextWindow": 131072
+      }
+    ],
+    "source": "live"
+  }
+}

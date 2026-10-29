@@ -1,0 +1,14 @@
+{
+  "endpoint": "POST /kb/providers/catalog/test",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "id": "cat-groq"
+    }
+  },
+  "response": {
+    "ok": false,
+    "detail": "Groq answered HTTP 401 (the key was refused): {\"error\":{\"message\":\"Invalid API key\"}}"
+  }
+}

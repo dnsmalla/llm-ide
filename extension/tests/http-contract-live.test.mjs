@@ -111,6 +111,12 @@ const SKIP_RULES = [
     when: (fx) => fx.status === 409 && /^POST \/kb\/chat\/sessions\/:id\/archive\/(begin|commit)$/.test(fx.endpoint),
   },
   {
+    why: 'provider catalog: needs a connection seeded through POST /kb/providers/catalog/connect (and, for models and test, a reachable provider; for the turn, the tools switch on); the replay user starts with none. Covered with a stand-in for fetch by tests/provider-catalog-route.test.mjs',
+    when: (fx) => (/^POST \/kb\/providers\/catalog\/(models|test)$/.test(fx.endpoint) && fx.status < 300)
+      || (fx.endpoint === 'POST /kb/providers/turn' && (fx.status === 400 || fx.status === 404))
+      || (fx.endpoint === 'POST /kb/providers/catalog/connect' && fx.status === 409),
+  },
+  {
     why: 'needs state from a dry run of the same server (a previewId signed in this process) or a run in flight',
     when: (fx) => /^POST \/kb\/agent-history\/(clear|compact)$/.test(fx.endpoint) && (fx.status < 300 || fx.status === 409),
   },

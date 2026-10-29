@@ -1,0 +1,21 @@
+{
+  "endpoint": "GET /kb/providers/settings",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "response": {
+    "toolsEnabled": true,
+    "fallbackEnabled": true,
+    "fallbackOrder": [
+      {
+        "provider": "custom:cat-groq",
+        "model": "llama-3.3-70b-versatile"
+      },
+      {
+        "provider": "custom:cat-openai-compatible-home"
+      }
+    ],
+    "toolOverrides": {
+      "cat-groq/brand-new-model": true
+    }
+  }
+}

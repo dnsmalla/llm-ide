@@ -282,6 +282,7 @@ const HOST = config.host;
 //   v78 — GET /kb/meeting/:id?include=transcript adds `transcript` (the stored transcript text) to the record; the default response is unchanged (no transcript). Used by the Mac's Doc Gen.
 //   v79 — GET /kb/os/state: the read-only System view aggregate (feature set + kit table, health checks, this user's running chat turns / meeting-agent runs / live sessions with their cancel routes, activity, token usage by window, turn composition, knowledge counts). No model call, no write. Additive. Also GET /kb/os/stream: a per-user SSE change channel (hello, then activity / usage / turn-start / turn-end / agent-run / live-session events carrying only {type, at}; the client re-fetches /kb/os/state).
 //   v86 — live capture verification (additive): POST /kb/live/:id/append and /finalize accept optional startedAt (ms), language and durationSec (400 when implausible); POST /kb/live/:id/finalize accepts an optional body with the complete `captions` (held as the authoritative copy, 413 CAPTURE_TOO_LARGE over 2000 lines) and answers captionHash; GET /kb/live/:id/status answers lines, hash, captionHash, language, startedAt for finalized and acked captures. Migration 0051.
+//   v90 — provider catalog (agent-kit K1 Phase 6, additive): GET /kb/providers/catalog (catalog entries with the caller's connections and settings), POST /kb/providers/catalog/connect (key goes to the per-user vault as custom.<id>.apiKey, never returned) | /disconnect | /test (free GET /models) | /models (live list or static, each model with toolsSupported, toolsSource, streaming, contextWindow), GET and PUT /kb/providers/settings (toolsEnabled and fallbackEnabled, both default off; fallbackOrder; toolOverrides), POST /kb/providers/turn (SSE, agent/v2 events, 409 PROVIDER_TOOLS_DISABLED unless toolsEnabled; 400 MODEL_LACKS_TOOLS in a tool mode for a model without tools). Catalog connections dispatch as custom:cat-<id>. No existing shape changes.
 //   v87 — GET /kb/storage gains an additive `shadow` block: counts from the last usage-ledger and note-index shadow compares (state, windows/pairs, scored queries, mean overlap, at). No query text.
 //   v85 — live-then-archive Phase 2: chunked note-index scan (POST /kb/index/scan; the final chunk with complete:true may prune).
 //   v84 — live-then-archive Phase 1 (additive, nothing calls them yet): the derived note index (POST /kb/index/notes, POST /kb/index/reconcile, DELETE /kb/index/notes/:key, GET /kb/index/status); chat lifecycle (GET /kb/agent/working-state, POST /agent/v2/sessions/purge with verified:true, POST /kb/chat/sessions/:id/archive/begin and /commit (409 ARCHIVE_STALE), POST /kb/session-purges); live-capture acks (POST /kb/live/:id/ack, GET /kb/live/:id/status, GET /kb/live/unacked). Finalize keeps an unacked capture only when LLMIDE_LIVE_ACK=1; otherwise unchanged.
@@ -291,7 +292,7 @@ const HOST = config.host;
 //   v80 — POST /generate-doc is gated by the doc_gen feature (routes/doc-gen.mjs): with doc_gen off it answers 404 { error: 'feature_disabled', feature: 'doc_gen' } and /health endpoints omit it. /generate-docx is unchanged (always on). Otherwise identical.
 //   v88 — POST /kb/complete { prompt, language?, model?, provider?, tier?, framing? } → { reply, usage? }: a plain one-shot completion (no tools, no history, no SSE; tier 'subagent' = LLMIDE_SUBAGENT_MODEL; framing 'code-assist' = the legacy /code-assist prompt wrapper). Same provider-config refusal envelope as /code-assist (400 PROVIDER_UNAVAILABLE). llmFast bucket; metered under endpoint '/kb/complete'; recorded in agent history (source loop, engine complete). The Mac's RegressionRunner moves onto it; /code-assist is unchanged. Additive.
 //   v89 — POST /chat answers 410 { error: { code: 'ENDPOINT_REMOVED', message, details: { use: '/agent/v2/stream', removedInApiVersion: 89 } } } (body not read; deleted with the classic runtime, API 92). The extension side-panel chat is a live client of POST /agent/v2/stream: a turn with `agentContext.surface: 'extension'` and no workspaceRoot runs in a server-owned scratch folder. /kb/chat/sessions* are unchanged (the live-then-archive protocol still uses them). The extension's MIN_SERVER_API_VERSION is 89.
-const SERVER_API_VERSION = 89;
+const SERVER_API_VERSION = 90;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -365,6 +366,13 @@ const ALL_ENDPOINTS = [
   '/kb/conflict-questions',
   '/kb/providers/verify',
   '/kb/providers/models',
+  '/kb/providers/catalog',
+  '/kb/providers/catalog/connect',
+  '/kb/providers/catalog/disconnect',
+  '/kb/providers/catalog/test',
+  '/kb/providers/catalog/models',
+  '/kb/providers/settings',
+  '/kb/providers/turn',
   '/kb/agent-sdk',
   '/kb/agent-sdk/update',
   '/kb/custom-providers',
@@ -463,6 +471,7 @@ function rateLimitProfile(url, method) {
     const path = url.split('?')[0];
     if (path === '/kb/usage/limits')           return 'kbWrite';
     if (path === '/kb/agent-history/settings') return 'kbWrite';
+    if (path === '/kb/providers/settings')     return 'kbWrite';
     if (path.startsWith('/kb/issue-schedule')) return 'kbWrite';
     if (path.startsWith('/kb/docs/')) return 'kbWrite';
     if (path.startsWith('/kb/index/notes/')) return 'kbWrite';
@@ -494,6 +503,9 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/conflict-questions')  return 'llm';            // runClaude
   if (url === '/kb/providers/verify')    return 'llmFast';        // tiny live probe / CLI check
   if (url === '/kb/providers/models')    return 'llmFast';        // provider model-list fetch
+  if (url === '/kb/providers/catalog/test' || url === '/kb/providers/catalog/models') return 'llmFast';   // one free GET /models
+  if (url === '/kb/providers/catalog/connect' || url === '/kb/providers/catalog/disconnect') return 'kbWrite';
+  if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
   if (url === '/kb/notify/slack')        return 'dispatch';
   if (url === '/kb/outcomes/refresh')    return 'outcomePoll';

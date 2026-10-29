@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/providers/catalog/test",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "id": "cat-groq"
+    }
+  },
+  "response": {
+    "ok": true,
+    "detail": "connected, 2 chat models available",
+    "modelCount": 2
+  }
+}

@@ -1384,6 +1384,74 @@ export type PlanTask = {
   meta?: Record<string, unknown> | null;
 };
 
+export type Connection = {
+  /** cat-<catalog id>[-<slug>]; also the vault key stem */
+  id: string;
+  /** The provider id dispatch uses: custom:<id> */
+  provider: string;
+  catalogId: string;
+  name: string;
+  baseURL: string;
+  /** Loopback and private-network hosts are allowed (Ollama, a gateway on the user's own network); link-local never is */
+  allowPrivate: boolean;
+  enabled: boolean;
+  /** A key is stored. The key itself is never returned */
+  hasKey: boolean;
+};
+
+export type CatalogProvider = {
+  id: string;
+  name: string;
+  /** Empty for the generic endpoint, which takes the user's own */
+  baseURL: string;
+  keyRequired: boolean;
+  local: boolean;
+  customBaseURL: boolean;
+  /** The entry may be connected to a private-network address (with the user's explicit opt-in unless local) */
+  allowPrivate: boolean;
+  docsUrl: string;
+  notes: string;
+  connections: Connection[];
+};
+
+export type FallbackEntry = {
+  /** custom:cat-... of the caller's own connection */
+  provider: string;
+  /** Absent: the first tool-capable catalog model */
+  model?: string;
+};
+
+export type Settings = {
+  /** Tool-capable chat on non-Anthropic models; default false */
+  toolsEnabled: boolean;
+  /** Cross-provider fallback at the start of a turn; default false */
+  fallbackEnabled: boolean;
+  fallbackOrder: FallbackEntry[];
+  /** '<connection id>/<model id>' to the user's own tools yes/no */
+  toolOverrides: Record<string, boolean>;
+};
+
+export type SettingsPatch = {
+  toolsEnabled?: boolean;
+  fallbackEnabled?: boolean;
+  fallbackOrder?: FallbackEntry[];
+  toolOverrides?: Record<string, boolean>;
+};
+
+export type ModelCapability = {
+  id: string;
+  toolsSupported: boolean;
+  /** Where the flag came from; unknown counts as not supported */
+  toolsSource: "catalog" | "provider" | "inferred" | "override" | "unknown";
+  streaming: boolean;
+  contextWindow: number | null;
+};
+
+export type ConnectionId = {
+  /** A connection id (cat-...) or its provider string (custom:cat-...) */
+  id?: string;
+};
+
 export type ModelLimit = {
   provider: string;
   model: string;
@@ -5532,6 +5600,136 @@ export type GetKbOutcomesStatsResponse200 = {
 
 export type GetKbOutcomesStatsResponse401 = CommonError;
 
+/** Request parts for `GET /kb/providers/catalog` (schema/http/provider-catalog.schema.json). */
+export type GetKbProvidersCatalogRequest = Record<string, never>;
+
+export type GetKbProvidersCatalogResponse200 = {
+  providers: CatalogProvider[];
+  settings: Settings;
+};
+
+export type GetKbProvidersCatalogResponse401 = CommonError;
+
+/** Request parts for `POST /kb/providers/catalog/connect` (schema/http/provider-catalog.schema.json). */
+export type PostKbProvidersCatalogConnectRequest = {
+  body: {
+    catalogId?: string;
+    /** Stored in the per-user vault; omitted on a reconnect to keep the stored key */
+    apiKey?: string;
+    /** Only the generic endpoint (and Ollama on another host) takes one; a hosted entry keeps its own */
+    baseURL?: string;
+    /** 1-24 lowercase letters or digits; names a second generic endpoint */
+    slug?: string;
+    name?: string;
+    /** Opt in to a loopback or private-network address */
+    allowPrivate?: boolean;
+  };
+};
+
+export type PostKbProvidersCatalogConnectResponse200 = {
+  ok: true;
+  connection: Connection;
+};
+
+export type PostKbProvidersCatalogConnectResponse400 = CommonError;
+
+export type PostKbProvidersCatalogConnectResponse401 = CommonError;
+
+export type PostKbProvidersCatalogConnectResponse404 = CommonError;
+
+export type PostKbProvidersCatalogConnectResponse409 = CommonError;
+
+/** Request parts for `POST /kb/providers/catalog/disconnect` (schema/http/provider-catalog.schema.json). */
+export type PostKbProvidersCatalogDisconnectRequest = {
+  body: ConnectionId;
+};
+
+export type PostKbProvidersCatalogDisconnectResponse200 = {
+  ok: true;
+  /** false when the caller had no such connection */
+  removed: boolean;
+};
+
+/** Request parts for `POST /kb/providers/catalog/test` (schema/http/provider-catalog.schema.json). */
+export type PostKbProvidersCatalogTestRequest = {
+  body: ConnectionId;
+};
+
+export type PostKbProvidersCatalogTestResponse200 = {
+  ok: boolean;
+  /** Human-readable result; never contains the key */
+  detail: string;
+  /** Chat models the provider lists; present when ok */
+  modelCount?: number;
+};
+
+export type PostKbProvidersCatalogTestResponse404 = CommonError;
+
+/** Request parts for `POST /kb/providers/catalog/models` (schema/http/provider-catalog.schema.json). */
+export type PostKbProvidersCatalogModelsRequest = {
+  body: {
+    id?: string;
+    /** Bypass the ten-minute cache */
+    refresh?: boolean;
+  };
+};
+
+export type PostKbProvidersCatalogModelsResponse200 = {
+  models: ModelCapability[];
+  /** static: the catalog's own table, because there was no key or the provider could not be reached */
+  source: "live" | "cache" | "static";
+  /** Why the list is static or stale */
+  detail?: string;
+};
+
+export type PostKbProvidersCatalogModelsResponse404 = CommonError;
+
+/** Request parts for `GET /kb/providers/settings` (schema/http/provider-catalog.schema.json). */
+export type GetKbProvidersSettingsRequest = Record<string, never>;
+
+export type GetKbProvidersSettingsResponse200 = Settings;
+
+export type GetKbProvidersSettingsResponse401 = CommonError;
+
+/** Request parts for `PUT /kb/providers/settings` (schema/http/provider-catalog.schema.json). */
+export type PutKbProvidersSettingsRequest = {
+  body: SettingsPatch;
+};
+
+export type PutKbProvidersSettingsResponse200 = Settings;
+
+/** Request parts for `POST /kb/providers/turn` (schema/http/provider-catalog.schema.json). */
+export type PostKbProvidersTurnRequest = {
+  body: {
+    /** custom:cat-... of a connection of the caller */
+    provider?: string;
+    model?: string;
+    message?: string;
+    /** execute | plan | assist_plan | review need a model with tools; ask and document run without them */
+    mode?: string;
+    /** Prior turns, most recent 40 are used */
+    history?: ({
+      role: "user" | "assistant";
+      content: string;
+    })[];
+    /** workspaceRoot bounds what the file tools may read; chatSessionId keys the chat's task list */
+    agentContext?: {
+      workspaceRoot?: string;
+      chatSessionId?: string;
+    };
+  };
+};
+
+export type PostKbProvidersTurnResponse200 = unknown;
+
+export type PostKbProvidersTurnResponse400 = CommonError;
+
+export type PostKbProvidersTurnResponse401 = CommonError;
+
+export type PostKbProvidersTurnResponse404 = CommonError;
+
+export type PostKbProvidersTurnResponse409 = CommonError;
+
 /** Request parts for `POST /kb/providers/verify` (schema/http/providers-usage.schema.json). */
 export type PostKbProvidersVerifyRequest = {
   body: {
@@ -7697,6 +7895,66 @@ export interface ApiEndpoints {
     responses: {
       200: GetKbOutcomesStatsResponse200;
       401: GetKbOutcomesStatsResponse401;
+    };
+  };
+  "GET /kb/providers/catalog": {
+    request: GetKbProvidersCatalogRequest;
+    responses: {
+      200: GetKbProvidersCatalogResponse200;
+      401: GetKbProvidersCatalogResponse401;
+    };
+  };
+  "POST /kb/providers/catalog/connect": {
+    request: PostKbProvidersCatalogConnectRequest;
+    responses: {
+      200: PostKbProvidersCatalogConnectResponse200;
+      400: PostKbProvidersCatalogConnectResponse400;
+      401: PostKbProvidersCatalogConnectResponse401;
+      404: PostKbProvidersCatalogConnectResponse404;
+      409: PostKbProvidersCatalogConnectResponse409;
+    };
+  };
+  "POST /kb/providers/catalog/disconnect": {
+    request: PostKbProvidersCatalogDisconnectRequest;
+    responses: {
+      200: PostKbProvidersCatalogDisconnectResponse200;
+    };
+  };
+  "POST /kb/providers/catalog/test": {
+    request: PostKbProvidersCatalogTestRequest;
+    responses: {
+      200: PostKbProvidersCatalogTestResponse200;
+      404: PostKbProvidersCatalogTestResponse404;
+    };
+  };
+  "POST /kb/providers/catalog/models": {
+    request: PostKbProvidersCatalogModelsRequest;
+    responses: {
+      200: PostKbProvidersCatalogModelsResponse200;
+      404: PostKbProvidersCatalogModelsResponse404;
+    };
+  };
+  "GET /kb/providers/settings": {
+    request: GetKbProvidersSettingsRequest;
+    responses: {
+      200: GetKbProvidersSettingsResponse200;
+      401: GetKbProvidersSettingsResponse401;
+    };
+  };
+  "PUT /kb/providers/settings": {
+    request: PutKbProvidersSettingsRequest;
+    responses: {
+      200: PutKbProvidersSettingsResponse200;
+    };
+  };
+  "POST /kb/providers/turn": {
+    request: PostKbProvidersTurnRequest;
+    responses: {
+      200: PostKbProvidersTurnResponse200;
+      400: PostKbProvidersTurnResponse400;
+      401: PostKbProvidersTurnResponse401;
+      404: PostKbProvidersTurnResponse404;
+      409: PostKbProvidersTurnResponse409;
     };
   };
   "POST /kb/providers/verify": {

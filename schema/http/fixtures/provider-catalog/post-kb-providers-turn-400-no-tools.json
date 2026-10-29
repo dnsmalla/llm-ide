@@ -1,0 +1,33 @@
+{
+  "endpoint": "POST /kb/providers/turn",
+  "status": 400,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network.",
+  "request": {
+    "body": {
+      "provider": "custom:cat-groq",
+      "model": "unknown-model",
+      "message": "add a task called write tests",
+      "mode": "execute",
+      "history": [
+        {
+          "role": "user",
+          "content": "hello"
+        },
+        {
+          "role": "assistant",
+          "content": "hi"
+        }
+      ],
+      "agentContext": {
+        "chatSessionId": "chat-1",
+        "workspaceRoot": "/tmp"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "MODEL_LACKS_TOOLS",
+      "message": "unknown-model is not known to support tools, and execute mode needs them. Pick a model with the tools badge, or mark this one as tool-capable in Settings, Providers."
+    }
+  }
+}
