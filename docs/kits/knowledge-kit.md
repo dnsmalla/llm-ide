@@ -39,7 +39,7 @@ The plan row (`docs/superpowers/plans/2026-10-27-kit-by-kit-migration.md`, kit 4
 | Layer | Piece | Path | Lines |
 |---|---|---|---|
 | Features | Library, 64 files (Models 9, Services 24, Views 31) | `Features/Library/` | 12 108 |
-| Features | of which plugin, MCP and LLM-source UI (28 files by name: `Plugin*`, `Mcp*`, `LlmSource*`, `ClaudePluginImport`, `CodexPluginImport`) | `Features/Library/` | 5 457 (45%), agent-kit territory (D6) |
+| Features | of which plugin, MCP and LLM-source UI (28 files by name: `Plugin*`, `Mcp*`, `LlmSource*`, `ClaudePluginImport`, `CodexPluginImport`); 27 of them (5 355 lines) have since moved to `Features/Extensions/` (Track Q), `McpConnectorAdapter` stays in Library | `Features/Library/` (K0), now `Features/Extensions/` | 5 457 (45%), agent-kit territory (D6) |
 | Features | Knowledge UI and logic left after that: `LibraryView` 1 843, `MeetingDetailView` 305, `EmailSourceSheet` 488, `SlackSourceSheet` 390, `BoxSourceSheet` 215, `ConnectionsSettingsSection` 533, source services (`SourceConnector` 222, `SourceConnectorManifest` 192, `EmailSource` 156, `SlackSource` 140, `EmailNoteWriter` 159, `InboxStore` 86, `SourceIngestService` 122, `SourceRegistry` 80, `LegacyExporter` 75) | `Features/Library/` | about 6 650 |
 | Features | ReviewConflicts: one file | `Features/ReviewConflicts/Views/ReviewView.swift` | 284 |
 | Resources | Declarative connector manifests | `Resources/source_connectors/{miro,gcal,gdrive}.json` | 3 files |

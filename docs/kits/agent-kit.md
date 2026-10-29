@@ -69,7 +69,7 @@ Core backing code (line counts by `wc -l`):
 
 `Core/Platform/SessionStore.swift` is **auth** (access and refresh token), not chat: the name in the plan row is a trap. Chat persistence is `Features/Chat/Session/ChatSessionStore.swift`.
 
-Plugin, MCP and LLM-source UI lives in `Features/Library/`, not in Chat: 28 files, 5 457 of 12 108 lines (45%), reproduced by file-name pattern (`Plugin*`, `Mcp*`, `LlmSource*`, `ClaudePluginImport`, `CodexPluginImport`). One of the 28, `Services/McpConnectorAdapter.swift` (102 lines), is the MCP-backed **ingest** adapter and belongs to knowledge-kit regardless; the rest is 5 355 lines (44%). See Q4.
+Plugin, MCP and LLM-source UI lived in `Features/Library/` (K0 count); Track Q moved 27 of those files (5 355 lines) to the sealed, always-compiled `Features/Extensions/`, and Library reaches them through `ExtensionsLibraryRegistry` in `Core/Contracts/`. K0 count before the move, not in Chat: 28 files, 5 457 of 12 108 lines (45%), reproduced by file-name pattern (`Plugin*`, `Mcp*`, `LlmSource*`, `ClaudePluginImport`, `CodexPluginImport`). One of the 28, `Services/McpConnectorAdapter.swift` (102 lines), is the MCP-backed **ingest** adapter and belongs to knowledge-kit regardless; the rest is 5 355 lines (44%). See Q4.
 
 ### 2c. Extension (Chrome side panel)
 
