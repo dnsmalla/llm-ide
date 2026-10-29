@@ -1,23 +1,31 @@
-// Note-index shadow compare (live-then-archive Phase 2, plan T2.2).
+// Note-index shadow compare (live-then-archive Phase 2, plan T2.2, redesigned for
+// the Phase 2 review).
 //
-// Compares the legacy meeting search (`meetings` + FTS, the path users see today)
-// with the derived note index (`note_index` + FTS rows of kind 'note') over a
-// fixed query set, and reports the index's own consistency and drift. Read-only
-// for both stores: it writes only its result into agent.db's store_meta, so it
-// can never change what the legacy path returns. Same shape as compareLedgerShadow
-// (kb/agent-usage.mjs): one compare per call, stored, and a warning on mismatch.
+// Compares the legacy meeting search with the derived note index, one (user,
+// project) pair at a time, over a fixed daily query set. Only meetings that have a
+// note in the index are compared (the scope). Per query, the two top-10 lists are
+// compared by overlap; a query fails below NOTE_SHADOW_MIN_MEAN_OVERLAP only when
+// the MEAN over the run falls below it, so one reordered hit cannot fail the run.
 //
-// Query text is never stored or logged (it can be a meeting title); the stored
-// sample holds only counts and overlap numbers.
-import { getDb, search, lazyPrepare } from './db.mjs';
+// Read-only for both stores. It writes only its result into agent.db store_meta.
+// It runs in time slices (one pair at a time, NOTE_SHADOW_SLICE_MS per slice) so it
+// never holds the event loop for long, and it skips a pair whose index has had no
+// upsert in NOTE_SHADOW_STALE_MS. Query text is never stored or logged.
+import { getDb, lazyPrepare, buildSearchFilter, searchFilterSql } from './db.mjs';
 import { getAgentDb, readMeta, writeMeta } from './agent-db.mjs';
-import { searchNoteIndex, indexStatus } from './note-index.mjs';
+import { noteIndexHits, indexStatus } from './note-index.mjs';
 
 export const NOTE_SHADOW_META_KEY = 'last_note_index_compare';
-/** Top-K used for the overlap metric (plan: topKOverlap(10)). */
+/** Top-K used for the overlap metric. */
 export const NOTE_SHADOW_K = 10;
+/** A run is a mismatch when the mean per-query overlap of a pair is below this. */
+export const NOTE_SHADOW_MIN_MEAN_OVERLAP = 0.8;
+/** A pair whose index has had no upsert this long is skipped, not compared. */
+export const NOTE_SHADOW_STALE_MS = 7 * 86400000;
+/** Time budget per slice (the run yields to the event loop between slices). */
+export const NOTE_SHADOW_SLICE_MS = 200;
+export const NOTE_SHADOW_MAX_QUERIES = 20;
 const SAMPLE_CAP = 10;
-const CJK = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}]/u;
 
 /** Deterministic PRNG (mulberry32) so one day's query set is reproducible. */
 export function seededRandom(seed) {
@@ -41,134 +49,229 @@ function shuffled(items, rand) {
 }
 
 /**
- * The fixed query set for one user: sampled meeting titles, random words from
- * those titles (FTS path, length >= 3), and CJK 2-character terms (LIKE path).
- * `seed` changes daily, so the set rotates instead of always comparing the same rows.
+ * The query set for one (user, project): sampled note titles and words of three or
+ * more characters. Only queries with an FTS MATCH term are kept: a LIKE-only query
+ * (two characters, for example CJK) would scan the whole search table, so it is
+ * never run here. `seed` changes daily, so the set rotates.
  */
-export function buildNoteShadowQueries(mainDb, userId, seed, { sample = 10, terms = 5, cjk = 5 } = {}) {
-  const titles = lazyPrepare(mainDb,
-    'SELECT title FROM meetings WHERE user_id = ? ORDER BY date DESC LIMIT 500',
-  ).all(userId).map((r) => String(r.title || '')).filter(Boolean);
+export function buildNoteShadowQueries(db, userId, projectId, seed, { max = NOTE_SHADOW_MAX_QUERIES } = {}) {
+  const titles = lazyPrepare(db,
+    'SELECT title FROM note_index WHERE user_id = ? AND project_id = ? ORDER BY date DESC LIMIT 200',
+  ).all(userId, projectId).map((r) => String(r.title || '')).filter(Boolean);
   const rand = seededRandom(seed);
   const words = [...new Set(titles.flatMap((t) => t.split(/[^\p{L}\p{N}_]+/u)).filter((w) => [...w].length >= 3))];
-  const bigrams = new Set();
-  for (const t of titles) {
-    const chars = [...t];
-    for (let i = 0; i + 1 < chars.length; i += 1) {
-      if (CJK.test(chars[i]) && CJK.test(chars[i + 1])) bigrams.add(chars[i] + chars[i + 1]);
-    }
-  }
-  const out = [];
-  for (const q of shuffled(titles, rand).slice(0, sample)) out.push({ kind: 'title', q });
-  for (const q of shuffled(words, rand).slice(0, terms)) out.push({ kind: 'term', q });
-  for (const q of shuffled([...bigrams], rand).slice(0, cjk)) out.push({ kind: 'cjk', q });
-  return out;
+  const candidates = [
+    ...shuffled(titles, rand).slice(0, Math.ceil(max * 0.6)).map((q) => ({ kind: 'title', q })),
+    ...shuffled(words, rand).slice(0, Math.floor(max * 0.4)).map((q) => ({ kind: 'term', q })),
+  ];
+  return candidates.filter((c) => buildSearchFilter(c.q)?.match).slice(0, max);
 }
 
-/** Top-K overlap: shared ids over the longer list. Two empty lists agree (1). */
+/**
+ * Top-K overlap: shared ids over the longer top-K list. Two empty lists agree (1).
+ * Below K hits on both sides the lists are compared as sets (shared over union).
+ */
 export function topKOverlap(a, b, k = NOTE_SHADOW_K) {
   const left = a.slice(0, k);
   const right = b.slice(0, k);
   if (left.length === 0 && right.length === 0) return 1;
   const set = new Set(left);
   const shared = right.filter((id) => set.has(id)).length;
-  return shared / Math.max(left.length, right.length);
+  if (Math.max(left.length, right.length) < k) return shared / new Set([...left, ...right]).size;
+  return shared / k;
 }
 
-function countOf(db, sql, ...args) {
-  return Number(lazyPrepare(db, sql).get(...args).n) || 0;
+/** Legacy meeting hits for one (user, project): the same FTS query, restricted to the owner in SQL. */
+export function legacyMeetingHits(db, userId, projectId, q, limit = NOTE_SHADOW_K) {
+  const filter = buildSearchFilter(q);
+  if (!filter?.match) return [];
+  const where = searchFilterSql(filter);
+  return lazyPrepare(db, `
+    SELECT meeting_id FROM search
+     WHERE ${where.where} AND kind = 'meeting'
+       AND meeting_id IN (SELECT id FROM meetings
+                           WHERE user_id = ? AND COALESCE(json_extract(meta, '$.projectId'), '') = ?)
+     ORDER BY ${where.rank} LIMIT ?`).all(...where.params, userId, projectId, limit).map((r) => r.meeting_id);
 }
 
-/** The compare for one user. Never throws: an error is reported in `error`. */
-export function compareUserNoteIndex(userId, { mainDb, seed }) {
-  try {
-    const queries = buildNoteShadowQueries(mainDb, userId, seed);
-    const overlaps = [];
-    const sample = [];
-    for (const { kind, q } of queries) {
-      const legacy = search(userId, { q, kind: 'meeting', limit: NOTE_SHADOW_K })
-        .map((h) => h.meetingId).filter(Boolean);
-      const index = searchNoteIndex(userId, { q, limit: NOTE_SHADOW_K })
-        .map((h) => h.meetingId).filter(Boolean);
+/**
+ * One (user, project) pair as a generator: it yields after building the scope and after each
+ * query, so the caller can spend a slice budget on it. Returns the pair's result.
+ */
+export function* comparePairSteps(db, userId, projectId, seed) {
+  const indexMeetings = lazyPrepare(db,
+    "SELECT json_extract(meta, '$.meetingId') AS mid FROM note_index WHERE user_id = ? AND project_id = ? AND kind = 'meeting'",
+  ).all(userId, projectId).map((r) => r.mid).filter((m) => typeof m === 'string' && m !== '');
+  const legacyIds = new Set(lazyPrepare(db,
+    "SELECT id FROM meetings WHERE user_id = ? AND COALESCE(json_extract(meta, '$.projectId'), '') = ?",
+  ).all(userId, projectId).map((r) => r.id));
+  const scope = new Set(indexMeetings.filter((m) => legacyIds.has(m)));
+  const matchedRows = indexMeetings.filter((m) => legacyIds.has(m)).length;
+  yield 'scope';
+
+  const queries = buildNoteShadowQueries(db, userId, projectId, seed);
+  const overlaps = [];
+  const sample = [];
+  for (const { kind, q } of queries) {
+    const legacy = legacyMeetingHits(db, userId, projectId, q, 2 * NOTE_SHADOW_K)
+      .filter((id) => scope.has(id)).slice(0, NOTE_SHADOW_K);
+    const index = noteIndexHits(userId, { q, limit: 2 * NOTE_SHADOW_K, projectId, db })
+      .map((h) => h.meetingId).filter((id) => id && scope.has(id)).slice(0, NOTE_SHADOW_K);
+    if (legacy.length !== 0 || index.length !== 0) {   // no hits on either side: not a comparison
       const overlap = topKOverlap(legacy, index);
       overlaps.push(overlap);
       if (overlap < 1 && sample.length < SAMPLE_CAP) {
         sample.push({ kind, overlap, legacyHits: legacy.length, indexHits: index.length });
       }
     }
-    const legacyRows = countOf(mainDb, "SELECT COUNT(*) AS n FROM meetings WHERE user_id = ?", userId);
-    const indexRows = countOf(mainDb,
-      "SELECT COUNT(*) AS n FROM note_index WHERE user_id = ? AND kind = 'meeting'", userId);
-    const status = indexStatus(userId);
-    const mismatchedQueries = overlaps.filter((o) => o < 1).length;
-    return {
-      queries: queries.length,
-      meanOverlap: overlaps.length ? overlaps.reduce((s, o) => s + o, 0) / overlaps.length : 1,
-      minOverlap: overlaps.length ? Math.min(...overlaps) : 1,
-      mismatchedQueries,
-      legacyRows,
-      indexRows,
-      countDelta: legacyRows - indexRows,
-      indexNotes: status.notes,
-      indexFtsRows: status.ftsRows,
-      indexConsistent: status.consistent,
-      drift: Math.abs(status.notes - status.ftsRows),
-      sample,
-    };
-  } catch (err) {
-    return { error: String(err?.message || err).slice(0, 200) };
+    yield 'query';
   }
+  const status = indexStatus(userId, { projectId });
+  const mean = overlaps.length ? overlaps.reduce((s2, o) => s2 + o, 0) / overlaps.length : 1;
+  return {
+    queries: queries.length,
+    scoredQueries: overlaps.length,
+    meanOverlap: mean,
+    minOverlap: overlaps.length ? Math.min(...overlaps) : 1,
+    mismatchedQueries: overlaps.filter((o) => o < NOTE_SHADOW_MIN_MEAN_OVERLAP).length,
+    matched: scope.size,
+    // Index rows naming a matched meeting, minus the distinct meetings: duplicates show here.
+    countDelta: matchedRows - scope.size,
+    orphanNotes: indexMeetings.length - matchedRows,             // a note with no legacy meeting (reported)
+    unindexedMeetings: legacyIds.size - scope.size,              // a meeting with no note (out of scope)
+    indexNotes: status.notes,
+    indexConsistent: status.consistent,
+    drift: Math.abs(status.notes - status.ftsRows),
+    sample,
+  };
 }
 
 /**
- * Compare the legacy search with the note index. Pass `userId` for one user,
- * or leave it null to compare every user that has note rows (a user with no rows
- * is not compared, so with lta.mode off nothing is written at all).
+ * The time-sliced run over every (user, project) pair with note rows (or one user's).
+ * `step()` compares pairs until a slice's budget is spent (at least one pair per slice)
+ * and returns { done }. When the last pair is done the result is stored and returned.
  */
-export function compareNoteIndexShadow(userId = null, {
-  mainDb = getDb(), agentDb = getAgentDb(), now = new Date(), logger = null,
+export function createNoteShadowRun({
+  db = getDb(), agentDb = getAgentDb(), userId = null, now = new Date(), logger = null,
+  sliceMs = NOTE_SHADOW_SLICE_MS, clock = () => performance.now(),
 } = {}) {
-  if (!agentDb) return { ok: false, reason: 'unavailable' };
-  const users = userId
-    ? [userId]
-    : lazyPrepare(mainDb, 'SELECT DISTINCT user_id FROM note_index').all().map((r) => r.user_id);
-  if (users.length === 0) return { ok: true, scope: 'none', users: 0 };
+  const pairs = userId
+    ? lazyPrepare(db, 'SELECT DISTINCT user_id, project_id FROM note_index WHERE user_id = ? ORDER BY project_id').all(userId)
+    : lazyPrepare(db, 'SELECT DISTINCT user_id, project_id FROM note_index ORDER BY user_id, project_id').all();
   const seed = Math.floor(now.getTime() / 86400000);
-  const per = users.map((uid) => compareUserNoteIndex(uid, { mainDb, seed }));
-  const sum = (key) => per.reduce((s, p) => s + (Number(p[key]) || 0), 0);
-  const errors = per.filter((p) => p.error).length;
-  const mismatchedUsers = per.filter((p) => !p.error && (p.mismatchedQueries > 0 || p.countDelta !== 0 || !p.indexConsistent)).length;
-  const scored = per.filter((p) => !p.error);
-  const result = {
-    ok: mismatchedUsers === 0 && errors === 0,
-    at: now.toISOString(),
-    scope: userId ? 'user' : 'all',
-    users: users.length,
-    errors,
-    queries: sum('queries'),
-    meanOverlap: scored.length ? scored.reduce((s, p) => s + p.meanOverlap, 0) / scored.length : 1,
-    minOverlap: scored.length ? Math.min(...scored.map((p) => p.minOverlap)) : 1,
-    mismatchedQueries: sum('mismatchedQueries'),
-    mismatchedUsers,
-    legacyRows: sum('legacyRows'),
-    indexRows: sum('indexRows'),
-    countDelta: sum('countDelta'),
-    drift: sum('drift'),
-    inconsistentIndexes: scored.filter((p) => !p.indexConsistent).length,
-    sample: per.flatMap((p) => p.sample || []).slice(0, SAMPLE_CAP),
-  };
-  try {
-    writeMeta(agentDb, NOTE_SHADOW_META_KEY, JSON.stringify(result));
-  } catch { /* best effort: the compare result is still returned and logged */ }
-  if (!result.ok) {
-    try {
-      logger?.warn?.('note_index_shadow_mismatch', {
-        users: result.users, mismatchedUsers: result.mismatchedUsers, mismatchedQueries: result.mismatchedQueries,
-        countDelta: result.countDelta, drift: result.drift, errors: result.errors,
-      });
-    } catch { /* logging is best effort */ }
+  const cutoff = new Date(now.getTime() - NOTE_SHADOW_STALE_MS).toISOString();
+  const results = [];
+  const slices = [];
+  let next = 0;
+  let current = null;
+  let result = null;
+
+  function staleAt(p) {
+    const last = lazyPrepare(db, 'SELECT MAX(indexed_at) AS last FROM note_index WHERE user_id = ? AND project_id = ?')
+      .get(p.user_id, p.project_id).last;
+    return !last || String(last) < cutoff;
   }
-  return result;
+
+  function finish() {
+    const scored = results.filter((r) => !r.error && !r.stale);
+    const sumQueries = scored.reduce((s, r) => s + r.scoredQueries, 0);
+    const weighted = scored.reduce((s, r) => s + r.meanOverlap * r.scoredQueries, 0);
+    const mismatchedPairs = results.filter((r) => r.error || (!r.stale && (
+      r.countDelta !== 0 || !r.indexConsistent
+      || (r.scoredQueries > 0 && r.meanOverlap < NOTE_SHADOW_MIN_MEAN_OVERLAP)))).length;
+    const sorted = [...slices].sort((a, b) => a - b);
+    const pct = (p) => (sorted.length ? sorted[Math.min(sorted.length - 1, Math.floor(p * sorted.length))] : 0);
+    result = {
+      ok: mismatchedPairs === 0,
+      at: now.toISOString(),
+      scope: userId ? 'user' : 'all',
+      pairs: results.length,
+      stalePairs: results.filter((r) => r.stale).length,
+      errors: results.filter((r) => r.error).length,
+      scoredQueries: sumQueries,
+      meanOverlap: sumQueries ? weighted / sumQueries : 1,
+      minOverlap: scored.length ? Math.min(...scored.map((r) => r.minOverlap)) : 1,
+      mismatchedQueries: results.reduce((s, r) => s + (r.mismatchedQueries || 0), 0),
+      mismatchedPairs,
+      matched: results.reduce((s, r) => s + (r.matched || 0), 0),
+      countDelta: results.reduce((s, r) => s + (r.countDelta || 0), 0),
+      orphanNotes: results.reduce((s, r) => s + (r.orphanNotes || 0), 0),
+      unindexedMeetings: results.reduce((s, r) => s + (r.unindexedMeetings || 0), 0),
+      drift: results.reduce((s, r) => s + (r.drift || 0), 0),
+      inconsistentIndexes: results.filter((r) => r.indexConsistent === false).length,
+      slices: { count: slices.length, p50Ms: round(pct(0.5)), p95Ms: round(pct(0.95)), maxMs: round(sorted[sorted.length - 1] ?? 0) },
+      sample: results.flatMap((r) => r.sample || []).slice(0, SAMPLE_CAP),
+    };
+    if (agentDb) {
+      try { writeMeta(agentDb, NOTE_SHADOW_META_KEY, JSON.stringify(result)); } catch { /* best effort */ }
+    }
+    if (!result.ok) {
+      try {
+        logger?.warn?.('note_index_shadow_mismatch', {
+          mismatchedPairs, mismatchedQueries: result.mismatchedQueries, countDelta: result.countDelta,
+          drift: result.drift, errors: result.errors, pairs: result.pairs,
+        });
+      } catch { /* logging is best effort */ }
+    }
+    return result;
+  }
+
+  return {
+    /** No note rows at all: nothing to compare, nothing to store. */
+    get empty() { return pairs.length === 0; },
+    get done() { return !current && next >= pairs.length; },
+    get result() { return result; },
+    slices,
+    /**
+     * Spends one slice: units (a pair's scope, one query, or a stale check) until the budget
+     * is spent. At least one unit runs per slice, so the run always progresses.
+     */
+    step() {
+      const t0 = clock();
+      do {
+        if (!current) {
+          if (next >= pairs.length) break;
+          const p = pairs[next];
+          next += 1;
+          current = { p, it: null };
+          if (staleAt(p)) {
+            results.push({ stale: true });
+            current = null;
+          } else {
+            current.it = comparePairSteps(db, p.user_id, p.project_id, seed);
+          }
+        } else {
+          try {
+            const r = current.it.next();
+            if (r.done) {
+              results.push(r.value);
+              current = null;
+            }
+          } catch (err) {
+            results.push({ error: String(err?.message || err).slice(0, 200) });
+            current = null;
+          }
+        }
+      } while ((current || next < pairs.length) && clock() - t0 < sliceMs);
+      slices.push(clock() - t0);
+      const done = !current && next >= pairs.length;
+      if (done && !result) finish();
+      return { done };
+    },
+  };
+}
+
+function round(ms) {
+  return Math.round(ms * 10) / 10;
+}
+
+/** Runs the whole compare now (tests, and one-off callers). Returns the stored result, or a none-result. */
+export function compareNoteIndexShadow(userId = null, { mainDb = getDb(), agentDb = getAgentDb(), now = new Date(), logger = null, sliceMs } = {}) {
+  if (!agentDb) return { ok: false, reason: 'unavailable' };
+  const run = createNoteShadowRun({ db: mainDb, agentDb, userId, now, logger, sliceMs });
+  if (run.empty) return { ok: true, scope: 'none', pairs: 0 };
+  while (!run.step().done) { /* synchronous: the caller accepts the full cost */ }
+  return run.result;
 }
 
 /** The last stored note-index compare, or null. Safe on any handle. */
@@ -181,3 +284,4 @@ export function lastNoteIndexCompare(agentDb = getAgentDb()) {
     return null;
   }
 }
+

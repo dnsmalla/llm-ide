@@ -16,7 +16,7 @@ import { agentStoreStatus, getAgentDb, onFreshStore, openAgentDb, takeRollupRequ
 import { prepareHistoryCopy, copyHistoryStep, historyCopyDone, usageCopyDone } from './agent-history-copy.mjs';
 import { abortStaleRuns, purgeUserHistory, rollupAll } from './agent-store.mjs';
 import { compareLedgerShadow, pruneUsageCalls } from './agent-usage.mjs';
-import { compareNoteIndexShadow } from './note-index-shadow.mjs';
+import { createNoteShadowRun } from './note-index-shadow.mjs';
 import { getDb } from './db.mjs';
 
 export const TICK_MS = 60 * 1000;
@@ -102,18 +102,47 @@ export function runDailyUsageShadow(db, now, logger) {
   try { writeMeta(db, LAST_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
 }
 
+// The run that is in progress, if any: one compare at a time.
+let activeNoteRun = null;
+
 /**
- * The daily note-index compare (legacy search vs the derived note index). It
- * writes only its own result; errors are logged and never reach the rollup.
- * Exported for tests.
+ * The daily note-index compare, in time slices: one (user, project) pair per slice
+ * budget, yielding to the event loop between slices (plan Phase 2 review item 6).
+ * Nothing is written when there is no note index (lta.mode off); the day key is
+ * written only when a run finishes. Errors are logged, never thrown into the tick.
+ * Returns the run, or null when there was nothing to start.
  */
 export function runDailyNoteIndexShadow(db, now, logger) {
+  if (activeNoteRun) return activeNoteRun;
+  let run;
   try {
-    compareNoteIndexShadow(null, { agentDb: db, now, logger });
+    run = createNoteShadowRun({ db: getDb(), agentDb: db, now, logger });
   } catch (err) {
     log(logger, 'error', 'note_index_compare_failed', { error: err?.message });
+    return null;
   }
+  if (run.empty) return null;
+  activeNoteRun = run;
+  const slice = () => {
+    try {
+      if (!run.step().done) { setImmediate(slice); return; }
+    } catch (err) {
+      log(logger, 'error', 'note_index_compare_failed', { error: err?.message });
+    }
+    activeNoteRun = null;
+    try { writeMeta(db, LAST_NOTE_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
+  };
+  setImmediate(slice);
+  return run;
+}
+
+/** The same compare run to completion now (tests and one-off tooling). Returns its result or null. */
+export function runDailyNoteIndexShadowNow(db, now, logger) {
+  const run = createNoteShadowRun({ db: getDb(), agentDb: db, now, logger });
+  if (run.empty) return null;
+  while (!run.step().done) { /* run to completion */ }
   try { writeMeta(db, LAST_NOTE_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
+  return run.result;
 }
 
 /** One tick: a requested or due rollup and the daily usage shadow, and the size watchdog. Exported for tests. */

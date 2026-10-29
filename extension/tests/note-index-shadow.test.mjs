@@ -1,7 +1,8 @@
-// Note-index shadow compare (live-then-archive Phase 2, T2.2): the legacy meeting
-// search and the derived note index agree on a synthetic corpus, an injected
-// mismatch is reported (and logged, without query text), an empty index writes
-// nothing, and the daily job runs its own day key. Temp DBs only.
+// Note-index shadow compare (live-then-archive Phase 2, T2.2, redesigned after the
+// Phase 2 review): the legacy meeting search and the note index agree on a synthetic
+// corpus; a real mismatch fails; a different bm25 ordering still passes; a stale
+// index is skipped; an empty index writes nothing; the run is sliced; and the owner
+// filter applies before LIMIT. Temp DBs only.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import path from 'node:path';
@@ -32,7 +33,9 @@ const conn = db.getDb();
 const agentDb = agent.getAgentDb();
 
 const pass = 'CorrectHorseBattery';
-const U = users.registerUser(conn, { email: `shadow-${Date.now()}@example.test`, password: pass, displayName: 'u' }).id;
+let seq = 0;
+const newUser = () => users.registerUser(conn, { email: `shadow-${seq += 1}-${Date.now()}@example.test`, password: pass, displayName: 'u' }).id;
+const NOW = new Date('2026-10-29T12:00:00.000Z');
 
 test.after(() => {
   db.closeDb();
@@ -42,8 +45,8 @@ test.after(() => {
   }
 });
 
-// Synthetic corpus: the same titles and bodies go to the legacy meetings table
-// and to the note index, so a correct index must agree with the legacy search.
+// Synthetic corpus: the same titles and transcripts go to the legacy meetings table and
+// to the note index, so a correct index agrees with the legacy search.
 const CORPUS = [
   ['m-budget', 'Budget review with Acme', '2026-01-05T10:00:00.000Z'],
   ['m-rollback', 'Rollback plan for the release', '2026-01-06T10:00:00.000Z'],
@@ -54,22 +57,24 @@ const CORPUS = [
   ['m-hiring', 'Hiring panel debrief', '2026-01-11T10:00:00.000Z'],
   ['m-retro', 'Sprint retro and actions', '2026-01-12T10:00:00.000Z'],
 ];
-const NOW = new Date('2026-10-29T12:00:00.000Z');
 
-function seed() {
-  for (const [id, title, date] of CORPUS) {
-    meetings.ingestMeeting(U, {
+// Meeting ids are unique across users, so each user's corpus gets its own prefix.
+function seed(user, corpus = CORPUS, { pad = '' } = {}) {
+  const prefix = user.replace(/[^a-z0-9]/gi, '').slice(-10);
+  corpus = corpus.map(([id, title, date]) => [`${prefix}-${id}`, title, date]);
+  for (const [id, title, date] of corpus) {
+    meetings.ingestMeeting(user, {
       id, title, date, duration: 60, language: 'en', participants: ['Ana'],
       transcript: `${title} transcript`, entities: [],
     });
   }
-  ni.upsertNotes(U, CORPUS.map(([id, title, date]) => ({
+  ni.upsertNotes(user, corpus.map(([id, title, date]) => ({
     noteKey: `meetings/${id}.md`, title, date, durationSec: 60, participants: ['Ana'],
-    body: `${title} transcript`, contentHash: `h-${id}`, mtimeMs: 1, meta: { meetingId: id },
+    body: `${title} transcript${pad}`, contentHash: `h-${id}${pad ? '-pad' : ''}`, mtimeMs: 1, meta: { meetingId: id },
   })), { projectId: '' });
 }
 
-test('topKOverlap: shared ids over the longer list, two empty lists agree', () => {
+test('topKOverlap: shared ids over the longer list, below K as sets, two empty lists agree', () => {
   assert.equal(shadow.topKOverlap(['a', 'b', 'c'], ['c', 'b', 'a']), 1);
   assert.equal(shadow.topKOverlap(['a', 'b'], ['c', 'd']), 0);
   assert.equal(shadow.topKOverlap([], []), 1);
@@ -77,83 +82,116 @@ test('topKOverlap: shared ids over the longer list, two empty lists agree', () =
   assert.equal(shadow.topKOverlap(['a'], []), 0);
 });
 
-test('the query set is deterministic per seed and mixes title, term and CJK queries', () => {
-  seed();
-  const a = shadow.buildNoteShadowQueries(conn, U, 20000);
-  const b = shadow.buildNoteShadowQueries(conn, U, 20000);
+test('the query set is deterministic per seed, has FTS terms only, and never a LIKE-only query', () => {
+  const u = newUser();
+  seed(u);
+  const a = shadow.buildNoteShadowQueries(conn, u, '', 20000);
+  const b = shadow.buildNoteShadowQueries(conn, u, '', 20000);
   assert.deepEqual(a, b);
-  const kinds = new Set(a.map((x) => x.kind));
-  assert.ok(kinds.has('title') && kinds.has('term') && kinds.has('cjk'));
+  assert.ok(a.length > 0);
+  for (const { q } of a) assert.ok(db.buildSearchFilter(q)?.match, `"${q}" must have an FTS term`);
+  assert.ok(!a.some((x) => x.kind === 'cjk'));
 });
 
-test('a synthetic corpus agrees: overlap 1, no count delta, consistent index', () => {
-  seed();
-  const r = shadow.compareNoteIndexShadow(null, { agentDb, mainDb: conn, now: NOW });
+test('a synthetic corpus agrees: the run passes with overlap 1 and no count delta', () => {
+  const u = newUser();
+  seed(u);
+  const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: NOW });
   assert.equal(r.ok, true, JSON.stringify(r.sample));
-  assert.equal(r.scope, 'all');
-  assert.equal(r.users, 1);
-  assert.ok(r.queries > 0);
-  assert.equal(r.mismatchedQueries, 0);
+  assert.equal(r.scope, 'user');
+  assert.equal(r.pairs, 1);
+  assert.ok(r.scoredQueries > 0);
   assert.equal(r.meanOverlap, 1);
   assert.equal(r.countDelta, 0);
-  assert.equal(r.drift, 0);
+  assert.equal(r.orphanNotes, 0);
   assert.equal(r.inconsistentIndexes, 0);
-  const stored = shadow.lastNoteIndexCompare(agentDb);
-  assert.equal(stored.ok, true);
-  assert.equal(stored.queries, r.queries);
+  assert.equal(shadow.lastNoteIndexCompare(agentDb).ok, true);
 });
 
-test('the stored and logged result never carries query text', () => {
-  seed();
-  const logged = [];
-  const logger = { warn: (event, fields) => logged.push({ event, fields }) };
-  ni.deleteNote(U, { projectId: '', noteKey: 'meetings/m-rollback.md' });
-  const r = shadow.compareNoteIndexShadow(null, { agentDb, mainDb: conn, now: NOW, logger });
-  const stored = agentDb.prepare("SELECT value FROM store_meta WHERE key = ?").get(shadow.NOTE_SHADOW_META_KEY).value;
-  for (const title of CORPUS.map((c) => c[1])) {
-    assert.ok(!stored.includes(title), `stored result must not contain "${title}"`);
-    assert.ok(!JSON.stringify(logged).includes(title), `log must not contain "${title}"`);
-  }
-  assert.ok(!JSON.stringify(r.sample).includes('Rollback'));
+test('a different bm25 ordering still passes: the same hits in another rank order are the same set', () => {
+  const u = newUser();
+  seed(u);
+  // Longer indexed bodies change the bm25 length normalisation, so the ranks move; the hits do not.
+  seed(u, CORPUS, { pad: ' '.repeat(3) + 'filler words '.repeat(40) });
+  const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: NOW });
+  assert.equal(r.ok, true, JSON.stringify(r.sample));
+  assert.equal(r.meanOverlap, 1);
 });
 
-test('an injected mismatch is reported, counted, sampled and logged as a warning', () => {
-  seed();
+test('a real mismatch fails the run and is logged as a warning without query text', () => {
+  const u = newUser();
+  seed(u);
   const logged = [];
   const logger = { warn: (event, fields) => logged.push({ event, fields }) };
-  // A note the legacy table still has and the index lost: count delta 1, the
-  // rollback queries disagree.
-  ni.deleteNote(U, { projectId: '', noteKey: 'meetings/m-rollback.md' });
-  const r = shadow.compareNoteIndexShadow(null, { agentDb, mainDb: conn, now: NOW, logger });
+  // The index lost its full-text rows for every note: searches disagree on every query.
+  conn.prepare("DELETE FROM search WHERE kind = 'note'").run();
+  const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: NOW, logger });
+  ni.rebuildNoteIndexSearch(conn);
   assert.equal(r.ok, false);
-  assert.equal(r.countDelta, 1);
+  assert.equal(r.mismatchedPairs, 1);
   assert.ok(r.mismatchedQueries > 0);
-  assert.equal(r.mismatchedUsers, 1);
   assert.ok(r.sample.length > 0 && r.sample.every((s) => s.overlap < 1));
   assert.equal(logged.length, 1);
   assert.equal(logged[0].event, 'note_index_shadow_mismatch');
-  assert.equal(logged[0].fields.countDelta, 1);
-  // Restore so later tests start from the synthetic corpus.
-  ni.upsertNotes(U, [{ noteKey: 'meetings/m-rollback.md', title: 'Rollback plan for the release',
-    date: '2026-01-06T10:00:00.000Z', body: 'Rollback plan for the release transcript',
-    contentHash: 'h-m-rollback', mtimeMs: 1, meta: { meetingId: 'm-rollback' } }], { projectId: '' });
+  for (const [, title] of CORPUS) {
+    assert.ok(!JSON.stringify(logged).includes(title), 'the log holds counts only');
+    assert.ok(!JSON.stringify(r).includes(title), 'the stored result holds no query text');
+  }
 });
 
-test('an empty note index writes nothing (lta.mode off leaves the store untouched)', () => {
-  seed();
-  shadow.compareNoteIndexShadow(null, { agentDb, mainDb: conn, now: NOW });
-  const before = agentDb.prepare("SELECT value FROM store_meta WHERE key = ?").get(shadow.NOTE_SHADOW_META_KEY).value;
-  conn.prepare('DELETE FROM note_index WHERE user_id = ?').run(U);
-  const r = shadow.compareNoteIndexShadow(null, { agentDb, mainDb: conn, now: new Date('2026-10-30T12:00:00.000Z') });
-  assert.deepEqual(r, { ok: true, scope: 'none', users: 0 });
-  const after = agentDb.prepare("SELECT value FROM store_meta WHERE key = ?").get(shadow.NOTE_SHADOW_META_KEY).value;
-  assert.equal(after, before);
+test('a stale index (no upsert in seven days) is skipped, not compared', () => {
+  const u = newUser();
+  seed(u);
+  conn.prepare('UPDATE note_index SET indexed_at = ? WHERE user_id = ?').run('2020-01-01T00:00:00.000Z', u);
+  const r = shadow.compareNoteIndexShadow(u, { agentDb, mainDb: conn, now: NOW });
+  assert.equal(r.stalePairs, 1);
+  assert.equal(r.scoredQueries, 0);
+  assert.equal(r.ok, true);
 });
 
-test('the daily job runs the compare once per local day on its own key', () => {
-  seed();
-  jobs.runDailyNoteIndexShadow(agentDb, NOW, null);
-  const day = agent.readMeta(agentDb, 'last_daily_note_index_shadow_day');
-  assert.equal(day, agent.localDay(NOW));
+test('an empty note index writes nothing: no store key, no day key (lta.mode off)', () => {
+  const before = agentDb.prepare('SELECT COUNT(*) AS n FROM store_meta').get().n;
+  conn.prepare('DELETE FROM note_index').run();
+  const r = shadow.compareNoteIndexShadow(null, { agentDb, mainDb: conn, now: NOW });
+  assert.deepEqual(r, { ok: true, scope: 'none', pairs: 0 });
+  assert.equal(jobs.runDailyNoteIndexShadowNow(agentDb, NOW, null), null);
+  assert.equal(agent.readMeta(agentDb, 'last_daily_note_index_shadow_day'), null);
+  assert.equal(agentDb.prepare('SELECT COUNT(*) AS n FROM store_meta').get().n, before);
+});
+
+test('the run is sliced: a zero budget spends one unit per slice, and every slice is timed', () => {
+  const a = newUser();
+  const b = newUser();
+  const c = newUser();
+  seed(a); seed(b); seed(c);
+  const run = shadow.createNoteShadowRun({ db: conn, agentDb, now: NOW, sliceMs: 0 });
+  let steps = 0;
+  while (!run.step().done) steps += 1;
+  steps += 1;
+  assert.equal(run.result.pairs, 3);
+  assert.equal(run.slices.length, steps);
+  assert.ok(steps > 3, 'a pair takes several units (scope, then one per query)');
+  assert.equal(run.result.slices.count, run.slices.length);
+});
+
+test('the daily job writes its own day key only when a run finishes', () => {
+  const u = newUser();
+  seed(u);
+  jobs.runDailyNoteIndexShadowNow(agentDb, NOW, null);
+  assert.equal(agent.readMeta(agentDb, 'last_daily_note_index_shadow_day'), agent.localDay(NOW));
   assert.ok(shadow.lastNoteIndexCompare(agentDb));
+});
+
+test('the owner filter applies before LIMIT: a user with few matches is not starved by another', () => {
+  const quiet = newUser();
+  const busy = newUser();
+  ni.upsertNotes(quiet, [0, 1, 2].map((i) => ({ noteKey: `q/${i}.md`, title: `Budget plan ${i}`,
+    date: '2026-01-05T10:00:00.000Z', body: 'budget', contentHash: `q${i}`, mtimeMs: 1, meta: { meetingId: `q${i}` } })), { projectId: '' });
+  const many = Array.from({ length: 60 }, (_, i) => ({ noteKey: `b/${i}.md`, title: `Budget review ${i}`,
+    date: '2026-02-05T10:00:00.000Z', body: 'budget budget', contentHash: `b${i}`, mtimeMs: 1, meta: { meetingId: `b${i}` } }));
+  ni.upsertNotes(busy, many.slice(0, 50), { projectId: '' });
+  ni.upsertNotes(busy, many.slice(50), { projectId: '' });
+  const hits = ni.noteIndexHits(quiet, { q: 'budget', limit: 3 });
+  assert.equal(hits.length, 3, 'all three of the quiet user\'s notes are returned');
+  assert.ok(hits.every((h) => h.meetingId.startsWith('q')));
 });
