@@ -13,12 +13,8 @@
   },
   "response": {
     "error": {
-      "code": "SESSION_TOKEN_LIMIT",
-      "message": "This chat reached its session token limit. Raise the limit to continue.",
-      "details": {
-        "used": 50120,
-        "limit": 50000
-      }
+      "code": "TURN_IN_PROGRESS",
+      "message": "A turn is already in progress for this chat session"
     }
   }
 }

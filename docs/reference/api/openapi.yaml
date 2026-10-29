@@ -583,6 +583,12 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+        "402":
+          description: "HTTP 402"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
         "409":
           description: "Conflict"
           content:

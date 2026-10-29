@@ -1790,6 +1790,8 @@ export type PostAgentV2StreamResponse200 = ReadonlyArray<AgentV2Event>;
 
 export type PostAgentV2StreamResponse400 = CommonError;
 
+export type PostAgentV2StreamResponse402 = CommonError;
+
 export type PostAgentV2StreamResponse409 = CommonError;
 
 export type PostAgentV2StreamResponse503 = CommonError;
@@ -6490,6 +6492,7 @@ export interface ApiEndpoints {
     responses: {
       200: PostAgentV2StreamResponse200;
       400: PostAgentV2StreamResponse400;
+      402: PostAgentV2StreamResponse402;
       409: PostAgentV2StreamResponse409;
       503: PostAgentV2StreamResponse503;
     };

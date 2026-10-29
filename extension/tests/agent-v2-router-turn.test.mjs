@@ -101,13 +101,13 @@ test('router ON: a pinned route overrides the request, counters commit from the 
   assert.ok(res.sseEvents().some((e) => e.type === 'mode_set'));
 });
 
-test('cap: a chat at its limit is refused 409 BEFORE any model call and the rate-limit token is refunded; raising the cap works', async () => {
+test('cap: a chat at its limit is refused 402 BEFORE any model call and the rate-limit token is refunded; raising the cap works', async () => {
   ON();
   const chat = chatId();
   await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, tokenLimit: 100, tokensUsed: 100 });
   let called = 0;
   const { req, res } = await turn(chat, { runTurn: async () => { called += 1; return { usageTotals: {} }; } });
-  assert.equal(res.statusCode, 409);
+  assert.equal(res.statusCode, 402);
   const err = res.json().error;
   assert.deepEqual([err.code, err.details.used, err.details.limit], ['SESSION_TOKEN_LIMIT', 100, 100]);
   assert.equal(called, 0);
@@ -128,7 +128,7 @@ test('cap trip mid-turn: the engine gets the remaining ceiling, the notice says 
   assert.equal(notice.data.level, 'reached');
   assert.equal(used(chat), 270, 'overshoot is recorded, never hidden');
   const next = await turn(chat, { runTurn: okTurn(usageEv(1, 1)) });
-  assert.equal(next.res.statusCode, 409);
+  assert.equal(next.res.statusCode, 402);
   assert.equal(used(chat), 270);
   const hist = (await call('GET', `/agent/v2/session/route/history?chatSessionId=${chat}`)).res.json();
   assert.ok(hist.events.some((e) => e.kind === 'cap_reached'));
@@ -267,7 +267,7 @@ test('tenancy: another user\'s chat id reads empty, cannot hit or change the own
   const t = await turn(chat, { runTurn: okTurn(usageEv(1, 1)) }, {}, B);
   assert.equal(t.res.statusCode, 200, 'B is not blocked by A\'s cap');
   assert.equal(route.getRoute(db, A.id, chat).used.billable, 10, 'A\'s counter is untouched');
-  assert.equal((await turn(chat, { runTurn: okTurn(usageEv(1, 1)) })).res.statusCode, 409, 'A is still capped');
+  assert.equal((await turn(chat, { runTurn: okTurn(usageEv(1, 1)) })).res.statusCode, 402, 'A is still capped');
   const h = (await call('GET', `/agent/v2/session/route/history?chatSessionId=${chat}`, undefined, B)).res.json();
   assert.deepEqual(h.events.filter((e) => e.kind === 'cap_reached'), []);
 });

@@ -507,7 +507,7 @@ const PROVIDER_ERROR_CODES = new Set(['PROVIDER_NOT_AGENT_CAPABLE', 'PROVIDER_UN
 async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, requestedModel, requestedProvider, message, body, deps, turnStartedAt = Date.now()) {
   const db = getDb();
   // Session router (K1 P6b), authoritative pass with the chat's lock held and BEFORE the SSE headers:
-  // fail closed (503 ROUTE_UNAVAILABLE), the cap (409 SESSION_TOKEN_LIMIT), a pending switch, the pick.
+  // fail closed (503 ROUTE_UNAVAILABLE), the cap (402 SESSION_TOKEN_LIMIT), a pending switch, the pick.
   // Off (the default) this is `{ enabled: false }` and nothing below differs from before.
   let begin;
   try {

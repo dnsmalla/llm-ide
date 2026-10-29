@@ -60,7 +60,7 @@ Removed with the chat: quit-archive (`purgeWorkingState`), delete-everywhere tom
 
 ## §5 Turn behaviour
 
-1. **Early probe** (before the mode classifier's model call): with the router on, read the route. A store error is `503 ROUTE_UNAVAILABLE`; a chat at its cap is `409 SESSION_TOKEN_LIMIT`. Both are plain JSON before any model call, and the request's rate-limit token is refunded.
+1. **Early probe** (before the mode classifier's model call): with the router on, read the route. A store error is `503 ROUTE_UNAVAILABLE`; a chat at its cap is `402 SESSION_TOKEN_LIMIT` (402, not the plan's 409: 409 is the turn lock, which every client retries and reports as "still working"). Both are plain JSON before any model call, and the request's rate-limit token is refunded.
 2. **Authoritative pass** (the chat's turn lock held, before the SSE headers): apply a pending change, check the cap again, and pick. A pinned chat runs on its pin whatever the request says. An adapter provider (`custom:cat-*`) goes through the adapter, never the Claude engine, and its session key is never bound as an SDK session.
 3. **A change of provider since the last turn** does not resume a Claude SDK session. The turn is seeded with the handoff.
 4. **Never mid-stream.** The pick is made once. A change made during a turn is stored as pending and answers `appliesAt: "next_turn"`; the running turn finishes on its model.

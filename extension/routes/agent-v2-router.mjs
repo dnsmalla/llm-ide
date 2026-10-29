@@ -47,7 +47,7 @@ const unavailable = (err) => {
  * applies a pending switch and returns the pick.
  *
  * Fails CLOSED: with the router on, a route row that cannot be read refuses the turn (503
- * ROUTE_UNAVAILABLE) before any model call. A chat at its cap is refused with 409 SESSION_TOKEN_LIMIT.
+ * ROUTE_UNAVAILABLE) before any model call. A chat at its cap is refused with 402 SESSION_TOKEN_LIMIT.
  *
  * @returns {{ enabled: false } | { enabled: true, route: object|null, pick: object, switched: object|null,
  *            capOn: boolean, cap: object, refusal: object|null }}
@@ -71,7 +71,7 @@ export function beginRouteTurn({ db, userId, chatSessionId, requested, apply = f
   const cap = capState(route);
   const pick = pickRoute({ route, requested, now });
   const refusal = capOn && cap.blocked
-    ? { status: 409, code: 'SESSION_TOKEN_LIMIT', message: 'This chat reached its session token limit. Raise the limit to continue.', used: cap.used, limit: cap.limit }
+    ? { status: 402, code: 'SESSION_TOKEN_LIMIT', message: 'This chat reached its session token limit. Raise the limit to continue.', used: cap.used, limit: cap.limit }
     : null;
   return { enabled: true, route, pick, switched, capOn, cap, refusal };
 }
