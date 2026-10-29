@@ -76,16 +76,17 @@ struct LtaOldFormatFixtureTests {
         #expect(s.messages.count == 2)
     }
 
-    /// N-1 risk recorded in the plan (3.10): keys a newer build adds (here
-    /// `meetingId`, `ownerUserId`) are ignored on decode and DROPPED when this
-    /// build re-saves the file, so an old Mac that saves a session strips them.
-    @Test func unknownKeysAreDroppedOnResave() throws {
+    /// N-1 risk recorded in the plan (3.10): an OLD build drops the new keys on
+    /// re-save. Phase 4 made `ChatSession` model them, so a current build keeps
+    /// them (and `chat-tags.json` restores them after an old build stripped them:
+    /// ChatArchiveOwnershipTests).
+    @Test func newKeysSurviveAResaveOnThisBuild() throws {
         let raw = try String(contentsOf: fixture("session-v2-engine-project.json"), encoding: .utf8)
         let withExtra = raw.replacingOccurrences(of: "{", with: "{\"meetingId\":\"m-1\",\"ownerUserId\":\"u-1\",", options: [], range: raw.range(of: "{"))
         let decoded = try AppJSON.decoder.decode(ChatSession.self, from: Data(withExtra.utf8))
         let reencoded = try String(data: AppJSON.encoder.encode(decoded), encoding: .utf8) ?? ""
-        #expect(!reencoded.contains("meetingId"))
-        #expect(!reencoded.contains("ownerUserId"))
+        #expect(reencoded.contains("meetingId"))
+        #expect(reencoded.contains("ownerUserId"))
     }
 
     // MARK: meeting notes
