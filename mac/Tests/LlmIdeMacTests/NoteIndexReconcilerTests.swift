@@ -239,6 +239,40 @@ struct NoteIndexReconcilerTests {
         #expect(await h.server.rows.keys.sorted() == ["folder.md/inner.md"])
     }
 
+    @Test func hiddenNoteIsSentOnceAndAgainOnlyWhenTheServerReportsItBack() async throws {
+        let h = try Harness()
+        try h.write("a.md", Self.note(id: "a", title: "Alpha"))
+        try h.write("b.md", Self.note(id: "b", title: "Beta"))
+        try h.index.upsert(Self.row(id: "a", path: "a.md"))
+        try h.index.hide(id: "a")
+        let r = h.reconciler()
+        guard case .ok(let first) = await r.runOnce() else { Issue.record("pass 1"); return }
+        #expect(first.hiddenSent == 1)
+        guard case .ok(let second) = await r.runOnce() else { Issue.record("pass 2"); return }
+        #expect(second.hiddenSent == 0)
+        // The server gets the row back (a restore, or an old client): the next pass removes it again.
+        await h.server.seed("a.md", "back")
+        guard case .ok = await r.runOnce() else { Issue.record("pass 3"); return }
+        #expect(await h.server.rows["a.md"] == nil)
+        #expect(await h.server.rows["b.md"] != nil)
+    }
+
+    @Test func noteTooLargeOnceEscapedIsUnsendableAndBlocksPrune() async throws {
+        let h = try Harness()
+        // 400 KiB of control characters: under the raw 512 KiB bound, but each one is
+        // six bytes of JSON escape, so the encoded upsert is over one 900 KB request.
+        try h.write("escaped.md", Self.note(id: "e", title: "Escaped", body: String(repeating: "\u{1}", count: 400 * 1024)))
+        try h.write("ok.md", Self.note(id: "o", title: "Ok"))
+        await h.server.seed("gone.md", "held")
+        let outcome = await h.reconciler().runOnce()
+        guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
+        #expect(stats.unsendable == 1)
+        #expect(!stats.pruneAllowed)
+        #expect(await h.server.rows["escaped.md"] == nil)
+        #expect(await h.server.rows["ok.md"] != nil)
+        #expect(await h.server.rows["gone.md"] == "held")
+    }
+
     @Test func platformLessNoteBlocksPruneButOthersStillSync() async throws {
         let h = try Harness()
         try h.write("good.md", Self.note(id: "g", title: "Good"))

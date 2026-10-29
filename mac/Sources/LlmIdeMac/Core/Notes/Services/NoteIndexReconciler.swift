@@ -290,13 +290,15 @@ enum NoteIndexBatching {
         (try? JSONEncoder().encode(n))?.count ?? Int.max
     }
 
-    static func batches(_ inputs: [LlmIdeAPIClient.IndexNoteInput]) -> [[LlmIdeAPIClient.IndexNoteInput]] {
+    /// The batches, and how many inputs could not be sent at all (larger than one request).
+    static func batches(_ inputs: [LlmIdeAPIClient.IndexNoteInput]) -> (batches: [[LlmIdeAPIClient.IndexNoteInput]], dropped: Int) {
         var out: [[LlmIdeAPIClient.IndexNoteInput]] = []
         var current: [LlmIdeAPIClient.IndexNoteInput] = []
         var bytes = 0
+        var dropped = 0
         for n in inputs {
             let size = encodedSize(n)
-            guard size <= NoteIndexLimits.batchBytes else { continue }
+            guard size <= NoteIndexLimits.batchBytes else { dropped += 1; continue }
             if !current.isEmpty, current.count >= NoteIndexLimits.batchNotes || bytes + size > NoteIndexLimits.batchBytes {
                 out.append(current)
                 current = []
@@ -306,7 +308,7 @@ enum NoteIndexBatching {
             bytes += size
         }
         if !current.isEmpty { out.append(current) }
-        return out
+        return (out, dropped)
     }
 
     /// Manifest size on the wire, estimated from the key and hash lengths.
@@ -362,6 +364,9 @@ final class NoteIndexReconciler {
     private let remote: NoteIndexRemote
     private let fileSystem: NoteIndexFileSystem
     private var cache: [String: NoteIndexCacheEntry] = [:]
+    /// Hidden notes already removed on the server: key -> the hash sent. Re-sent only when
+    /// the hidden set changes, or when the server reports one of them back (see runOnce).
+    private var sentHidden: [String: String] = [:]
     private var running = false
     private(set) var consecutiveFailures = 0
 
@@ -465,12 +470,11 @@ final class NoteIndexReconciler {
         stats.unsendable = scan.unsendable.count
         do {
             // 1. Hidden notes leave the index first, so a later failure cannot keep them.
-            stats.hiddenSent = scan.hidden.count
-            for batch in NoteIndexBatching.batches(scan.hidden.map(NoteIndexScanner.hiddenInput)) {
-                try Task.checkCancellation()
-                if let r = try await send(batch) { stats.removedHidden += r.removed }
-                else { stats.rejectedBatches += 1 }
-            }
+            let hiddenNow = Dictionary(uniqueKeysWithValues: scan.hidden.map { ($0.key, $0.contentHash) })
+            sentHidden = sentHidden.filter { hiddenNow[$0.key] == $0.value }      // unhidden notes are forgotten
+            let needHidden = scan.hidden.filter { sentHidden[$0.key] != $0.contentHash }
+            stats.hiddenSent = needHidden.count
+            try await sendHidden(needHidden, into: &stats)
 
             // 2. Manifest and reconcile. Prune only after a complete scan with a
             // non-empty manifest and no unindexable file (an unparseable note may
@@ -489,6 +493,9 @@ final class NoteIndexReconciler {
             try Task.checkCancellation()
             let result = try await remote.indexReconcile(projectId: projectId, manifest: manifest, prune: prune)
             stats.pruned = result.pruned
+            // A hidden note the server still holds (it reappeared) is removed again.
+            let reappeared = scan.hidden.filter { sentHidden[$0.key] != nil && result.extra.contains($0.key) }
+            if !reappeared.isEmpty { try await sendHidden(reappeared, into: &stats) }
             stats.missing = result.missing.count
             stats.stale = result.stale.count
 
@@ -499,7 +506,9 @@ final class NoteIndexReconciler {
                 files.compactMap { try? NoteIndexScanner.upsertInput(for: $0, fileSystem: fileSystem) }
             }.value
             stats.skippedUnindexable += files.count - inputs.count
-            for batch in NoteIndexBatching.batches(inputs) {
+            let uploads = NoteIndexBatching.batches(inputs)
+            stats.skippedUnindexable += uploads.dropped
+            for batch in uploads.batches {
                 try Task.checkCancellation()
                 if let r = try await send(batch) {
                     stats.upserted += r.upserted
@@ -517,6 +526,20 @@ final class NoteIndexReconciler {
             consecutiveFailures += 1
             Self.log.notice("note index pass failed (\(self.consecutiveFailures)): \(error.localizedDescription, privacy: .public)")
             return .failed(error.localizedDescription)
+        }
+    }
+
+    /// Removes hidden notes on the server and remembers what was sent.
+    private func sendHidden(_ files: [NoteIndexFile], into stats: inout Stats) async throws {
+        let inputs = files.map(NoteIndexScanner.hiddenInput)
+        for batch in NoteIndexBatching.batches(inputs).batches {
+            try Task.checkCancellation()
+            if let r = try await send(batch) {
+                stats.removedHidden += r.removed
+                for n in batch { sentHidden[n.noteKey] = n.contentHash }
+            } else {
+                stats.rejectedBatches += 1
+            }
         }
     }
 
