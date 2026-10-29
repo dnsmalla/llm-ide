@@ -514,15 +514,12 @@ struct NoteIndexReconcilerTests {
         #expect(LiveThenArchiveMode.current(defaults) == .off)
     }
 
-    /// Writes extension/tests/fixtures/lta/note-index-feed.json: the upsert payload the
-    /// reconciler builds from a small Mac notes folder (Swift-fed, plan T2.3). Regenerate with
-    /// `LLMIDE_REGEN_LTA_FIXTURES=1 swift test --filter NoteIndexReconciler`.
-    @Test func regenerateNoteIndexFeedWhenAsked() throws {
-        guard ProcessInfo.processInfo.environment["LLMIDE_REGEN_LTA_FIXTURES"] == "1" else { return }
+    /// The feed payload built from a small Mac notes folder through the real scanner and encoder.
+    /// Deterministic: fixed mtimes, fixed names, fixed bodies.
+    static func buildFeedPayload(root: URL, base: URL) throws -> Data {
         let h = try Harness()
         let fixedMtime = Date(timeIntervalSince1970: 1_785_578_400)     // 2026-08-01T10:00:00Z
         let here = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        let repo = here.deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
         let withPlatform = try String(contentsOf: here.appendingPathComponent("Fixtures/lta/meeting-with-platform.md"),
                                       encoding: .utf8)
         try h.write("2026/08/budget-review.md", withPlatform)
@@ -543,12 +540,33 @@ struct NoteIndexReconcilerTests {
         }
         let scan = try NoteIndexScanner.scan(root: h.root, hiddenKeys: [], previous: [:])
         let notes = try scan.notes.compactMap { try NoteIndexScanner.upsertInput(for: $0) }
-        #expect(notes.count == synthetic.count + 1)
-        let payload = LlmIdeAPIClient.IndexUpsertRequest(projectId: "lta-proof", notes: notes)
+        precondition(notes.count == synthetic.count + 1)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        let out = repo.appendingPathComponent("extension/tests/fixtures/lta/note-index-feed.json")
-        try encoder.encode(payload).write(to: out)
+        return try encoder.encode(LlmIdeAPIClient.IndexUpsertRequest(projectId: "lta-proof", notes: notes))
+    }
+
+    static var committedFeedURL: URL {
+        URL(fileURLWithPath: #filePath).deletingLastPathComponent()
+            .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()
+            .appendingPathComponent("extension/tests/fixtures/lta/note-index-feed.json")
+    }
+
+    /// Regenerates the committed feed when asked (`LLMIDE_REGEN_LTA_FIXTURES=1`).
+    @Test func regenerateNoteIndexFeedWhenAsked() throws {
+        guard ProcessInfo.processInfo.environment["LLMIDE_REGEN_LTA_FIXTURES"] == "1" else { return }
+        let data = try Self.buildFeedPayload(root: URL(fileURLWithPath: NSTemporaryDirectory()),
+                                             base: URL(fileURLWithPath: NSTemporaryDirectory()))
+        try data.write(to: Self.committedFeedURL)
+    }
+
+    /// Staleness guard: the committed feed must be exactly what the real scanner and encoder
+    /// produce today. If a change alters the payload, regenerate and review the diff.
+    @Test func committedFeedIsWhatTheScannerProduces() throws {
+        let built = try Self.buildFeedPayload(root: URL(fileURLWithPath: NSTemporaryDirectory()),
+                                              base: URL(fileURLWithPath: NSTemporaryDirectory()))
+        let committed = try Data(contentsOf: Self.committedFeedURL)
+        #expect(built == committed, "note-index-feed.json is stale: regenerate it with LLMIDE_REGEN_LTA_FIXTURES=1")
     }
 
     // MARK: - Helpers
