@@ -1,13 +1,13 @@
 {
   "endpoint": "POST /kb/index/scan",
   "status": 200,
-  "description": "Example data. The final chunk of two: every chunk arrived, so the scan prunes the one row no chunk named.",
+  "description": "Example data. A single-chunk final scan of its own project: the chunk is complete, it classifies its one key as missing and prunes nothing.",
   "request": {
     "body": {
-      "projectId": "alpha",
-      "scanId": "scan-0001-abcd",
-      "index": 1,
-      "total": 2,
+      "projectId": "scan-fixture",
+      "scanId": "scan-0004-abcd",
+      "index": 0,
+      "total": 1,
       "complete": true,
       "prune": true,
       "entries": [
@@ -19,16 +19,14 @@
     }
   },
   "response": {
-    "missing": [],
-    "stale": [
+    "missing": [
       "meetings/2026/10/review.md"
     ],
-    "extra": [
-      "meetings/2026/09/old.md"
-    ],
-    "pruned": 1,
-    "received": 2,
-    "total": 2,
+    "stale": [],
+    "extra": [],
+    "pruned": 0,
+    "received": 1,
+    "total": 1,
     "complete": true
   }
 }
