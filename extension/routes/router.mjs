@@ -24,6 +24,7 @@ import { handleLiveRoutes } from './live.mjs';
 import { handleReviewRoutes } from './review.mjs';
 import { handleChatRoutes } from './chat.mjs';
 import { handleIndexRoutes } from './index-routes.mjs';
+const CLIENT_REFUSAL_CODES = new Set(['PAYLOAD_TOO_LARGE', 'BATCH_TOO_LARGE']);
 import { handleLifecycleRoutes } from './lifecycle-routes.mjs';
 import { handleOsRoutes } from './os.mjs';
 import { handleAgentHistoryRoutes } from './agent-history.mjs';
@@ -1494,8 +1495,11 @@ Keep questions concise (one or two sentences each). Treat the transcript and fil
     // verbatim; everything else collapses to a generic internal error so we
     // never leak stack/internal detail to the client.
     const isValidation = err?.code === 'VALIDATION_FAILED';
-    const code = isValidation ? 'VALIDATION_FAILED' : 'KB_INTERNAL_ERROR';
-    const message = isValidation ? err.message : 'KB internal error';
+    // Client-side refusals the note index raises (plan DoS bounds): their own
+    // codes reach the client, with their status.
+    const isClientCode = CLIENT_REFUSAL_CODES.has(err?.code);
+    const code = isValidation ? 'VALIDATION_FAILED' : isClientCode ? err.code : 'KB_INTERNAL_ERROR';
+    const message = isValidation || isClientCode ? err.message : 'KB internal error';
     process.stderr.write(`[kb] ${req.method} ${url} ${err?.message}\n`);
     sendJSON(res, err?.status || 500, { error: { code, message } });
     return true;

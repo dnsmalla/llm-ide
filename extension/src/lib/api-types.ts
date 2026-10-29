@@ -3130,7 +3130,7 @@ export type DeleteAuthMeConnectorsIdResponse401 = CommonError;
 export type PostKbIndexNotesRequest = {
   body: {
     projectId?: string;
-    /** At most 100 per batch; a body over 4 MB is refused. */
+    /** At most 50 per batch (BATCH_TOO_LARGE, 400); a body over 1 MB is 413 PAYLOAD_TOO_LARGE; a note body over 512 KiB is a 400. */
     notes: Note[];
   };
 };
@@ -3187,6 +3187,8 @@ export type DeleteKbIndexNotesKeyRequest = {
 export type DeleteKbIndexNotesKeyResponse200 = {
   deleted: boolean;
 };
+
+export type DeleteKbIndexNotesKeyResponse400 = CommonError;
 
 /** Request parts for `GET /kb/index/status` (schema/http/index.schema.json). */
 export type GetKbIndexStatusRequest = {
@@ -6679,6 +6681,7 @@ export interface ApiEndpoints {
     request: DeleteKbIndexNotesKeyRequest;
     responses: {
       200: DeleteKbIndexNotesKeyResponse200;
+      400: DeleteKbIndexNotesKeyResponse400;
     };
   };
   "GET /kb/index/status": {

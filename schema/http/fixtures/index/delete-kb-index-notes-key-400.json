@@ -1,0 +1,19 @@
+{
+  "endpoint": "DELETE /kb/index/notes/:key",
+  "status": 400,
+  "description": "A key with a malformed percent-escape is refused with 400, never a 500.",
+  "request": {
+    "params": {
+      "key": "%E0%A4%A"
+    },
+    "query": {
+      "projectId": "alpha"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "malformed percent-encoding in the path"
+    }
+  }
+}

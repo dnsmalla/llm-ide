@@ -8,10 +8,12 @@
 //
 // Nothing calls these yet (T2.1 wires the Mac). Every route is scoped to the
 // authenticated user; the router passes userId.
-import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
+import { sendJSON, readJsonBody, decodeParam } from '../core/utils.mjs';
 import { upsertNotes, reconcileNotes, deleteNote, indexStatus } from '../kb/note-index.mjs';
 
-const BATCH_BYTES = 4 * 1024 * 1024;
+// Upserts carry bodies, so they get the tightest limit: 1 MB (50 notes of at
+// most 512 KiB each is 25 MB, so the byte cap is the real bound on a batch).
+const BATCH_BYTES = 1024 * 1024;
 
 export async function handleIndexRoutes(req, res, { userId, url }) {
   const path = url.split('?')[0];
@@ -19,14 +21,14 @@ export async function handleIndexRoutes(req, res, { userId, url }) {
   const u = new URL(url, 'http://127.0.0.1');
 
   if (req.method === 'POST' && path === '/kb/index/notes') {
-    const body = parseJSON(await readBody(req, BATCH_BYTES)) || {};
+    const body = await readJsonBody(req, BATCH_BYTES);
     const result = upsertNotes(userId, body.notes, { projectId: body.projectId ?? '' });
     sendJSON(res, 200, result);
     return true;
   }
 
   if (req.method === 'POST' && path === '/kb/index/reconcile') {
-    const body = parseJSON(await readBody(req, BATCH_BYTES)) || {};
+    const body = await readJsonBody(req, BATCH_BYTES);
     const result = reconcileNotes(userId, {
       projectId: body.projectId ?? '',
       manifest: body.manifest,
@@ -37,7 +39,7 @@ export async function handleIndexRoutes(req, res, { userId, url }) {
   }
 
   if (req.method === 'DELETE' && path.startsWith('/kb/index/notes/')) {
-    const noteKey = decodeURIComponent(path.slice('/kb/index/notes/'.length));
+    const noteKey = decodeParam(path.slice('/kb/index/notes/'.length));
     const deleted = deleteNote(userId, { projectId: u.searchParams.get('projectId') ?? '', noteKey });
     sendJSON(res, 200, { deleted });
     return true;

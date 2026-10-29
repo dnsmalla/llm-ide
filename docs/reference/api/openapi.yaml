@@ -6540,7 +6540,7 @@ paths:
                   type: "array"
                   items:
                     "$ref": "#/components/schemas/Note"
-                  description: "At most 100 per batch; a body over 4 MB is refused."
+                  description: "At most 50 per batch (BATCH_TOO_LARGE, 400); a body over 1 MB is 413 PAYLOAD_TOO_LARGE; a note body over 512 KiB is a 400."
       responses:
         "200":
           description: "OK"
@@ -6603,6 +6603,12 @@ paths:
                 properties:
                   deleted:
                     type: "boolean"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/index/reconcile:
     post:
       tags:

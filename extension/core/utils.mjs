@@ -52,6 +52,35 @@ export function readBody(req, limit = DEFAULT_BODY_LIMIT) {
   });
 }
 
+/**
+ * Decode one percent-encoded path segment. A malformed escape ('%E0%A4%A') is
+ * the client's error, so it answers 400, never a 500.
+ */
+export function decodeParam(raw) {
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    throw new AppError('VALIDATION_FAILED', 'malformed percent-encoding in the path', { status: 400 });
+  }
+}
+
+/**
+ * readBody + JSON for the new routes: an oversized body answers 413
+ * PAYLOAD_TOO_LARGE (readBody's own error is a generic VALIDATION_FAILED).
+ */
+export async function readJsonBody(req, limit) {
+  let raw;
+  try {
+    raw = await readBody(req, limit);
+  } catch (err) {
+    if (err?.status === 413) {
+      throw new AppError('PAYLOAD_TOO_LARGE', `request body is larger than ${Math.round(limit / 1024)} KiB`, { status: 413 });
+    }
+    throw err;
+  }
+  return parseJSON(raw) || {};
+}
+
 export function parseJSON(body) {
   try {
     return JSON.parse(body);

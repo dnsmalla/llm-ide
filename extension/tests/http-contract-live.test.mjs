@@ -95,6 +95,10 @@ const SKIP_RULES = [
     when: (fx) => fx.status < 300 && /\/(google|slack|box|email|mcp-connector|connect-git|connect-github-issues|connect-qa|connect-tickets-json|ingest-scip|ingest-code-graph|install-skills|notify)\b|\/marketplace|\/updates|\/(import|refresh|update)$|\/auth\/me\/(connectors|llm-sources|mcp-plugins)\/(add|update|resync)|\/auth\/me\/plugins\/(install|reload)|\/auth\/me\/codex-plugins|\/auth\/me\/claude-plugins|\/kb\/ingest$/.test(fx.endpoint),
   },
   {
+    why: 'the live replay percent-encodes the path parameter, so a malformed escape cannot reach the server; the 400 is covered by tests/index-routes.http.test.mjs',
+    when: (fx) => fx.status === 400 && fx.endpoint === 'DELETE /kb/index/notes/:key',
+  },
+  {
     why: 'needs an archiving chat row owned by the fixture user (begun through /archive/begin), so the fence check can answer 409',
     when: (fx) => fx.status === 409 && /^POST \/kb\/chat\/sessions\/:id\/archive\/commit$/.test(fx.endpoint),
   },

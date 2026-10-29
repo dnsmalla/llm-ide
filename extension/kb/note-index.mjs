@@ -10,13 +10,14 @@
 // files stay raw, the index copy is what the models may replay.
 import { getDb, requireUser, lazyPrepare } from './db.mjs';
 import { redactSecretsForStorage } from '../core/redact-secrets.mjs';
-import { errValidation } from '../core/errors.mjs';
+import { AppError, errValidation } from '../core/errors.mjs';
 
 export const BODY_CAP_BYTES = 200 * 1024;   // Q12 default: full redacted text, capped
 export const TITLE_MAX = 500;
 export const NOTE_KEY_MAX = 512;
 export const PROJECT_ID_MAX = 200;
-export const MAX_BATCH = 100;               // plan 3.8: POST /kb/index/notes batch size
+export const MAX_BATCH = 50;                // notes per POST /kb/index/notes (DoS bound)
+export const MAX_NOTE_BODY_BYTES = 512 * 1024; // raw body per note, before redaction
 export const MAX_MANIFEST = 20000;
 const PARTICIPANTS_MAX = 200;
 const META_MAX_CHARS = 4096;
@@ -82,7 +83,8 @@ export function normaliseNote(input, defaultProjectId = '') {
   if (!meta || typeof meta !== 'object' || Array.isArray(meta)) throw errValidation('meta must be an object');
   const metaJson = redactSecretsForStorage(JSON.stringify(meta));
   if (metaJson.length > META_MAX_CHARS) throw errValidation('meta is too large');
-  const body = input.body === undefined ? '' : str(input.body, 'body', 16 * 1024 * 1024);
+  const body = input.body === undefined ? '' : str(input.body, 'body', MAX_NOTE_BODY_BYTES);
+  if (Buffer.byteLength(body, 'utf8') > MAX_NOTE_BODY_BYTES) throw errValidation('body is larger than 512 KiB');
   const redacted = redactSecretsForStorage(body);
   const capped = capUtf8(redacted, BODY_CAP_BYTES);
   return {
@@ -135,7 +137,9 @@ const UPSERT_SQL = `
 export function upsertNotes(userId, notes, { projectId = '' } = {}) {
   requireUser(userId);
   if (!Array.isArray(notes)) throw errValidation('notes must be an array');
-  if (notes.length > MAX_BATCH) throw errValidation(`at most ${MAX_BATCH} notes per batch`);
+  if (notes.length > MAX_BATCH) {
+    throw new AppError('BATCH_TOO_LARGE', `at most ${MAX_BATCH} notes per batch`, { status: 400 });
+  }
   const db = getDb();
   const stmt = lazyPrepare(db, UPSERT_SQL);
   const counts = { upserted: 0, unchanged: 0, skippedHidden: 0, truncated: 0, removed: 0 };

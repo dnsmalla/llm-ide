@@ -97,7 +97,7 @@ test('redaction at build: a pasted key is removed from body_text and title, the 
 });
 
 test('the body is capped at 200 KiB on a UTF-8 boundary and reported as truncated', () => {
-  const big = '会議'.repeat(100 * 1024); // 3 bytes per char, ~600 KiB
+  const big = '会議'.repeat(60 * 1024); // 6 bytes per pair, ~360 KiB: over the 200 KiB cap, under the 512 KiB note limit
   const r = ni.upsertNotes(U, [note('big/long.md', { body: big })]);
   assert.equal(r.truncated, 1);
   const stored = conn.prepare("SELECT body_text FROM note_index WHERE user_id = ? AND note_key = 'big/long.md'").get(U).body_text;
