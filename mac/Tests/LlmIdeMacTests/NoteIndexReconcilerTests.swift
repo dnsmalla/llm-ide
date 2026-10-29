@@ -176,6 +176,69 @@ struct NoteIndexReconcilerTests {
         #expect(await h.server.rows["gone.md"] == nil)
     }
 
+    /// A file system with metadata only for placeholders, so a test can prove they are never read.
+    final class FakeFileSystem: NoteIndexFileSystem, @unchecked Sendable {
+        var items: [NoteIndexEntry] = []
+        var files: [URL: Data] = [:]
+        var reads: [URL] = []
+        func entries(under root: URL) throws -> [NoteIndexEntry] { items }
+        func read(_ url: URL) throws -> Data {
+            reads.append(url)
+            guard let data = files[url] else { throw CocoaError(.fileNoSuchFile) }
+            return data
+        }
+    }
+
+    @Test func dataAtPlaceholderIsNeverReadAndBlocksPrune() async throws {
+        let h = try Harness()
+        let root = h.root
+        let good = root.appendingPathComponent("good.md")
+        let cloud = root.appendingPathComponent("cloud.md")
+        let fake = FakeFileSystem()
+        let text = Data(Self.note(id: "g", title: "Good").utf8)
+        fake.files[good] = text
+        fake.items = [
+            NoteIndexEntry(url: good, isDirectory: false, mtimeMs: 1, size: Int64(text.count),
+                           dataless: false, danglingLink: false),
+            NoteIndexEntry(url: cloud, isDirectory: false, mtimeMs: 1, size: 100,
+                           dataless: true, danglingLink: false),
+        ]
+        await h.server.seed("gone.md", "held")
+        let r = NoteIndexReconciler(root: root, index: h.index, projectId: "p1", remote: h.server, fileSystem: fake)
+        let outcome = await r.runOnce()
+        guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
+        #expect(stats.unavailable == 1)
+        #expect(!stats.pruneAllowed)
+        #expect(fake.reads.allSatisfy { $0.lastPathComponent != "cloud.md" })
+        #expect(await h.server.rows["good.md"] != nil)
+        #expect(await h.server.rows["gone.md"] == "held")
+    }
+
+    @Test func unreadableSubdirectoryFailsTheScanInsteadOfPruning() async throws {
+        let h = try Harness()
+        try h.write("a.md", Self.note(id: "a", title: "Alpha"))
+        try h.write("locked/inner.md", Self.note(id: "in", title: "Inner"))
+        let locked = h.root.appendingPathComponent("locked", isDirectory: true)
+        try FileManager.default.setAttributes([.posixPermissions: 0o000], ofItemAtPath: locked.path)
+        defer { try? FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: locked.path) }
+        await h.server.seed("kept.md", "held")
+        let outcome = await h.reconciler().runOnce()
+        guard case .scanFailed = outcome else { Issue.record("expected scanFailed, got \(outcome)"); return }
+        #expect(await h.server.calls == 0)
+        #expect(await h.server.rows["kept.md"] == "held")
+    }
+
+    @Test func directoryNamedLikeANoteIsSkipped() async throws {
+        let h = try Harness()
+        try h.write("folder.md/inner.md", Self.note(id: "in", title: "Inner"))
+        try FileManager.default.createDirectory(
+            at: h.root.appendingPathComponent("empty.md", isDirectory: true), withIntermediateDirectories: true)
+        let outcome = await h.reconciler().runOnce()
+        guard case .ok(let stats) = outcome else { Issue.record("expected ok, got \(outcome)"); return }
+        #expect(stats.manifestEntries == 1)
+        #expect(await h.server.rows.keys.sorted() == ["folder.md/inner.md"])
+    }
+
     @Test func platformLessNoteBlocksPruneButOthersStillSync() async throws {
         let h = try Harness()
         try h.write("good.md", Self.note(id: "g", title: "Good"))

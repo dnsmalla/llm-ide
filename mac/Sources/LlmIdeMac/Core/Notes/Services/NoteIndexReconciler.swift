@@ -49,6 +49,8 @@ enum NoteIndexKind: String, Sendable, Equatable {
     case unparseable
     /// Larger than the server accepts for one body. Never sent.
     case oversize
+    /// Indexable, but its encoded upsert exceeds one request (JSON escaping). Never sent.
+    case unsendable
 }
 
 struct NoteIndexCacheEntry: Sendable, Equatable {
@@ -71,7 +73,77 @@ struct NoteIndexScan: Sendable {
     var hidden: [NoteIndexFile] = []
     var unparseable: [String] = []
     var oversize: [String] = []
+    /// Notes that are indexable but whose upsert would exceed one request (JSON escaping).
+    var unsendable: [String] = []
+    /// Placeholders (iCloud, Dropbox) whose bytes are not on disk. Never read; blocks pruning.
+    var unavailable: [String] = []
     var cache: [String: NoteIndexCacheEntry] = [:]
+}
+
+/// One item a walk found. Metadata only: the scanner decides whether to read it.
+struct NoteIndexEntry: Sendable, Equatable {
+    let url: URL
+    let isDirectory: Bool
+    let mtimeMs: Int64?
+    let size: Int64?
+    /// An iCloud/Dropbox placeholder: the metadata is there, the bytes are not.
+    let dataless: Bool
+    /// A symlink whose target is gone. Not a note; skipped as FolderIndexer skips it.
+    let danglingLink: Bool
+}
+
+/// The file-system seam the scanner uses. Disk in the app; a fake in tests.
+protocol NoteIndexFileSystem: Sendable {
+    /// Every item under `root`. Throws if any part of the walk failed: a partial
+    /// listing must never look like a complete one.
+    func entries(under root: URL) throws -> [NoteIndexEntry]
+    func read(_ url: URL) throws -> Data
+}
+
+/// The real file system. The walk records every enumerator error (an unreadable
+/// subdirectory, a TCC denial, an unmounted volume) instead of skipping it.
+struct DiskNoteIndexFileSystem: NoteIndexFileSystem {
+    /// Collects the first walk error from the enumerator's error handler.
+    private final class WalkErrors {
+        var first: String?
+    }
+
+    func entries(under root: URL) throws -> [NoteIndexEntry] {
+        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isDirectoryKey,
+                                      .isSymbolicLinkKey, .ubiquitousItemDownloadingStatusKey]
+        let errors = WalkErrors()
+        guard let enumerator = FileManager.default.enumerator(
+            at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles],
+            errorHandler: { url, error in
+                if errors.first == nil {
+                    errors.first = "cannot read \(url.lastPathComponent): \(error.localizedDescription)"
+                }
+                return true
+            }) else {
+            throw NoteIndexScanner.Failure(reason: "cannot enumerate the notes folder")
+        }
+        var out: [NoteIndexEntry] = []
+        for case let url as URL in enumerator {
+            let values = try? url.resourceValues(forKeys: Set(keys))
+            let dataless = values?.ubiquitousItemDownloadingStatus == .notDownloaded
+            out.append(NoteIndexEntry(
+                url: url,
+                isDirectory: values?.isDirectory == true,
+                mtimeMs: values?.contentModificationDate.map { Int64($0.timeIntervalSince1970 * 1000) },
+                size: values?.fileSize.map { Int64($0) },
+                dataless: dataless,
+                // fileExists follows the link: a symlink whose target is gone is not a note.
+                danglingLink: values?.isSymbolicLink == true && !FileManager.default.fileExists(atPath: url.path)))
+        }
+        if let reason = errors.first {
+            throw NoteIndexScanner.Failure(reason: reason)
+        }
+        return out
+    }
+
+    func read(_ url: URL) throws -> Data {
+        try Data(contentsOf: url)
+    }
 }
 
 enum NoteIndexScanner {
@@ -80,40 +152,40 @@ enum NoteIndexScanner {
     }
 
     /// Walks `root` and returns the manifest material. Throws on ANY read or
-    /// enumeration error: a partial scan must never look like a complete one,
-    /// because callers prune only after a complete scan.
-    static func scan(root: URL, hiddenKeys: Set<String>, previous: [String: NoteIndexCacheEntry]) throws -> NoteIndexScan {
+    /// enumeration error, so callers prune only after a complete scan.
+    static func scan(root: URL, hiddenKeys: Set<String>, previous: [String: NoteIndexCacheEntry],
+                     fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem()) throws -> NoteIndexScan {
         var out = NoteIndexScan()
-        let keys: [URLResourceKey] = [.contentModificationDateKey, .fileSizeKey, .isRegularFileKey]
-        guard let enumerator = FileManager.default.enumerator(
-            at: root, includingPropertiesForKeys: keys, options: [.skipsHiddenFiles]) else {
-            throw Failure(reason: "cannot enumerate the notes folder")
-        }
-        for case let url as URL in enumerator {
+        for item in try fileSystem.entries(under: root) {
+            if item.isDirectory || item.danglingLink { continue }
+            let url = item.url
             let name = url.lastPathComponent
             guard name.hasSuffix(".md"), !name.hasSuffix(".partial.md") else { continue }
-            let values = try? url.resourceValues(forKeys: Set(keys))
-            if values?.isDirectory == true { continue }
-            guard let mdate = values?.contentModificationDate, let fsize = values?.fileSize else {
-                // A dangling symlink is not a note (FolderIndexer skips it too) and must not
-                // stop every scan. Anything else that cannot be stat'ed is a real scan failure.
-                if !FileManager.default.fileExists(atPath: url.path) { continue }
-                throw Failure(reason: "cannot stat \(name)")
-            }
             let key = FolderIndexer.relativePath(of: url, under: root)
-            let mtimeMs = Int64(mdate.timeIntervalSince1970 * 1000)
-            let size = Int64(fsize)
+            if item.dataless {
+                // Never materialize a placeholder. Its key cannot be proven absent, so it blocks pruning.
+                out.unavailable.append(key)
+                if hiddenKeys.contains(key) {
+                    out.hidden.append(NoteIndexFile(key: key, url: url,
+                                                    contentHash: previous[key]?.contentHash ?? "unavailable",
+                                                    mtimeMs: item.mtimeMs ?? 0))
+                }
+                continue
+            }
+            guard let mtimeMs = item.mtimeMs, let size = item.size else {
+                throw NoteIndexScanner.Failure(reason: "no modification date or size for \(name)")
+            }
             let entry: NoteIndexCacheEntry
             if let hit = previous[key], hit.mtimeMs == mtimeMs, hit.size == size {
                 entry = hit
             } else {
                 let data: Data
-                do { data = try Data(contentsOf: url) } catch {
-                    if !FileManager.default.fileExists(atPath: url.path) { continue }   // dangling symlink
-                    throw Failure(reason: "cannot read \(name): \(error.localizedDescription)")
+                do { data = try fileSystem.read(url) } catch {
+                    throw NoteIndexScanner.Failure(reason: "cannot read \(name): \(error.localizedDescription)")
                 }
                 entry = NoteIndexCacheEntry(mtimeMs: mtimeMs, size: size,
-                                            contentHash: sha256Hex(data), kind: classify(data))
+                                            contentHash: sha256Hex(data),
+                                            kind: kind(of: data, key: key, mtimeMs: mtimeMs))
             }
             out.cache[key] = entry
             let file = NoteIndexFile(key: key, url: url, contentHash: entry.contentHash, mtimeMs: mtimeMs)
@@ -125,12 +197,26 @@ enum NoteIndexScanner {
             case .note: out.notes.append(file)
             case .unparseable: out.unparseable.append(key)
             case .oversize: out.oversize.append(key)
+            case .unsendable: out.unsendable.append(key)
             case .notNote: break
             }
         }
         out.notes.sort { $0.key < $1.key }
         out.hidden.sort { $0.key < $1.key }
+        out.unparseable.sort()
+        out.unavailable.sort()
+        out.unsendable.sort()
         return out
+    }
+
+    /// The kind of a file, decided from its bytes the way FolderIndexer decides what to index.
+    /// A note whose upsert would not fit one request is `unsendable` (never silently dropped later).
+    static func kind(of data: Data, key: String, mtimeMs: Int64) -> NoteIndexKind {
+        let kind = classify(data)
+        guard kind == .note else { return kind }
+        guard let input = makeInput(data: data, key: key, mtimeMs: mtimeMs),
+              NoteIndexBatching.encodedSize(input) <= NoteIndexLimits.batchBytes else { return .unsendable }
+        return .note
     }
 
     /// Classifies bytes the same way FolderIndexer decides what to index.
@@ -144,15 +230,21 @@ enum NoteIndexScanner {
 
     /// The upsert body for one note, read from disk now. Nil when the file can no
     /// longer be indexed (it changed to something else, or it is oversize).
-    static func upsertInput(for file: NoteIndexFile) throws -> LlmIdeAPIClient.IndexNoteInput? {
-        let data = try Data(contentsOf: file.url)
+    static func upsertInput(for file: NoteIndexFile,
+                            fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem()) throws -> LlmIdeAPIClient.IndexNoteInput? {
+        let data = try fileSystem.read(file.url)
+        return makeInput(data: data, key: file.key, mtimeMs: file.mtimeMs)
+    }
+
+    /// The upsert body built from bytes already in hand.
+    static func makeInput(data: Data, key: String, mtimeMs: Int64) -> LlmIdeAPIClient.IndexNoteInput? {
         guard data.count <= NoteIndexLimits.bodyBytes,
               let text = String(data: data, encoding: .utf8),
               let split = FrontmatterCoder.split(file: text),
               let fm = try? FrontmatterCoder.decode(split.yaml) else { return nil }
         let body = String(text[split.bodyStart...])
         return LlmIdeAPIClient.IndexNoteInput(
-            noteKey: file.key,
+            noteKey: key,
             kind: "meeting",
             title: clip(fm.title, NoteIndexLimits.titleChars),
             date: clip(AppDateFormatter.isoString(fm.startedAt), NoteIndexLimits.dateChars),
@@ -161,7 +253,7 @@ enum NoteIndexScanner {
                 .map { clip($0, NoteIndexLimits.participantChars) },
             body: body,
             contentHash: sha256Hex(data),
-            mtimeMs: file.mtimeMs,
+            mtimeMs: mtimeMs,
             hidden: nil,
             meta: [
                 "meetingId": clip(fm.id, NoteIndexLimits.metaChars),
@@ -241,6 +333,10 @@ final class NoteIndexReconciler {
         var truncated = 0
         var skippedUnindexable = 0
         var rejectedBatches = 0
+        /// Placeholders not read this pass. Their keys block pruning.
+        var unavailable = 0
+        /// Notes too large to upsert in one request. Their keys block pruning.
+        var unsendable = 0
     }
 
     enum Outcome: Equatable {
@@ -264,6 +360,7 @@ final class NoteIndexReconciler {
     private let index: MeetingIndex
     private let projectId: String
     private let remote: NoteIndexRemote
+    private let fileSystem: NoteIndexFileSystem
     private var cache: [String: NoteIndexCacheEntry] = [:]
     private var running = false
     private(set) var consecutiveFailures = 0
@@ -273,11 +370,13 @@ final class NoteIndexReconciler {
     private var debounceTask: Task<Void, Never>?
     private var wake: AsyncStream<Void>.Continuation?
 
-    init(root: URL, index: MeetingIndex, projectId: String, remote: NoteIndexRemote) {
+    init(root: URL, index: MeetingIndex, projectId: String, remote: NoteIndexRemote,
+         fileSystem: NoteIndexFileSystem = DiskNoteIndexFileSystem()) {
         self.root = root
         self.index = index
         self.projectId = projectId
         self.remote = remote
+        self.fileSystem = fileSystem
     }
 
     /// Backoff after `n` consecutive failures: 5 s, 10 s, 20 s ... capped at 5 min.
@@ -343,12 +442,13 @@ final class NoteIndexReconciler {
         running = true
         defer { running = false }
 
-        let root = self.root, index = self.index, previous = self.cache
+        let root = self.root, index = self.index, previous = self.cache, fileSystem = self.fileSystem
         let scan: NoteIndexScan
         do {
             scan = try await Task.detached(priority: .utility) { () throws -> NoteIndexScan in
                 let hidden = Set(try index.listAll().filter(\.hidden).map(\.path))
-                return try NoteIndexScanner.scan(root: root, hiddenKeys: hidden, previous: previous)
+                return try NoteIndexScanner.scan(root: root, hiddenKeys: hidden, previous: previous,
+                                                 fileSystem: fileSystem)
             }.value
         } catch let failure as NoteIndexScanner.Failure {
             Self.log.notice("note index scan skipped: \(failure.reason, privacy: .public)")
@@ -360,7 +460,9 @@ final class NoteIndexReconciler {
         cache = scan.cache
 
         var stats = Stats()
-        stats.skippedUnindexable = scan.oversize.count
+        stats.skippedUnindexable = scan.oversize.count + scan.unsendable.count
+        stats.unavailable = scan.unavailable.count
+        stats.unsendable = scan.unsendable.count
         do {
             // 1. Hidden notes leave the index first, so a later failure cannot keep them.
             stats.hiddenSent = scan.hidden.count
@@ -375,7 +477,10 @@ final class NoteIndexReconciler {
             // still be a note the server must keep).
             let manifest = scan.notes.map { LlmIdeAPIClient.IndexManifestEntry(noteKey: $0.key, contentHash: $0.contentHash) }
             stats.manifestEntries = manifest.count
-            let prune = scan.unparseable.isEmpty && !manifest.isEmpty
+            // Any file the index cannot prove absent blocks pruning: unparseable notes, placeholders
+            // whose bytes are not here, and notes too large to upload.
+            let prune = scan.unparseable.isEmpty && scan.unavailable.isEmpty
+                && scan.unsendable.isEmpty && !manifest.isEmpty
             stats.pruneAllowed = prune
             guard NoteIndexBatching.manifestFits(manifest) else {
                 Self.log.notice("note index manifest too large for one reconcile; skipped")
@@ -391,7 +496,7 @@ final class NoteIndexReconciler {
             let wanted = Set(result.missing).union(result.stale)
             let files = scan.notes.filter { wanted.contains($0.key) }
             let inputs: [LlmIdeAPIClient.IndexNoteInput] = try await Task.detached(priority: .utility) {
-                files.compactMap { try? NoteIndexScanner.upsertInput(for: $0) }
+                files.compactMap { try? NoteIndexScanner.upsertInput(for: $0, fileSystem: fileSystem) }
             }.value
             stats.skippedUnindexable += files.count - inputs.count
             for batch in NoteIndexBatching.batches(inputs) {
