@@ -67,7 +67,7 @@ export interface AppendResult {
   /** The server already finalized this id; late writes are dropped. */
   finalized: boolean;
 }
-export interface LiveCaption {
+export interface CaptionInput {
   speaker: string;
   text: string;
   ts: number;
@@ -75,7 +75,7 @@ export interface LiveCaption {
 }
 export interface LiveApi {
   status(id: string): Promise<StatusResult>;
-  append(id: string, meetingTitle: string, captions: LiveCaption[]): Promise<AppendResult>;
+  append(id: string, meetingTitle: string, captions: CaptionInput[]): Promise<AppendResult>;
   finalize(id: string): Promise<FinalizeResult>;
 }
 
@@ -180,8 +180,8 @@ export interface DraftReport {
   outcome: DraftOutcome;
 }
 
-export function toCaptions(segments: TranscriptSegment[]): LiveCaption[] {
-  const out: LiveCaption[] = [];
+export function toCaptions(segments: TranscriptSegment[]): CaptionInput[] {
+  const out: CaptionInput[] = [];
   for (const s of segments) {
     if (!s?.speaker || !s?.text) continue;
     out.push({ speaker: s.speaker, text: s.text, ts: s.timestamp, source: 'extension-cc' });
@@ -384,7 +384,7 @@ export interface ExpectedCapture {
   merged: number;
 }
 
-export function expectedCapture(captions: LiveCaption[]): ExpectedCapture {
+export function expectedCapture(captions: CaptionInput[]): ExpectedCapture {
   const seen = new Set<string>();
   let valid = 0;
   for (const c of captions) {
