@@ -68,3 +68,12 @@ test('a note whose body is over 512 KiB is refused with 400', async () => {
   assert.equal(r.status, 400);
   assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM note_index WHERE project_id = 'p-fat'").get().n, 0);
 });
+
+test('HTTP: /kb/ingest refuses a meeting id with the reserved note prefix or a control character (400, nothing stored)', async () => {
+  const reserved = await srv.call('POST', '/kb/ingest', { id: '\u0001note:1', title: 'x', transcript: 'y', date: '2026-10-29', duration: 1 });
+  assert.equal(reserved.status, 400);
+  assert.equal(reserved.body.error.code, 'VALIDATION_FAILED');
+  const control = await srv.call('POST', '/kb/ingest', { id: 'bad\u0007id', title: 'x', transcript: 'y', date: '2026-10-29', duration: 1 });
+  assert.equal(control.status, 400);
+  assert.equal(conn.prepare("SELECT COUNT(*) AS n FROM meetings WHERE user_id = ? AND id LIKE '%bad%'").get(U).n, 0);
+});
