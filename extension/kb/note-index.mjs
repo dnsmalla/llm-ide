@@ -8,7 +8,7 @@
 // Every helper takes userId first and scopes every statement by user_id.
 // Redaction happens here, when body_text is built (plan 3.9, Q4): the Mac
 // files stay raw, the index copy is what the models may replay.
-import { getDb, requireUser, lazyPrepare } from './db.mjs';
+import { getDb, requireUser, lazyPrepare, buildSearchFilter, searchFilterSql } from './db.mjs';
 import { redactSecretsForStorage } from '../core/redact-secrets.mjs';
 import { AppError, errValidation } from '../core/errors.mjs';
 
@@ -266,4 +266,67 @@ export function indexStatus(userId, { projectId } = {}) {
     consistent: notes.n === mapped && mapped === verified,
     lastIndexedAt: notes.last ?? null,
   };
+}
+
+/**
+ * Internal FTS search over the derived note rows (kind 'note'), for the Phase 2
+ * shadow compare only. The public search() never returns these rows until the
+ * Phase 3 read switch. Hits are hydrated through note_index_search and filtered
+ * to the caller's rows, so FTS (which is shared by all users) never leaks a row.
+ * Returns [{ noteId, meetingId, title, date, projectId, rank }], best first.
+ */
+export function searchNoteIndex(userId, { q, limit = 10, projectId } = {}) {
+  requireUser(userId);
+  const filter = buildSearchFilter(q);
+  const db = getDb();
+  const cap = Math.max(1, Math.min(Number(limit) || 10, 100));
+  // A query with no searchable token (for example a single CJK character pair that
+  // splits into one-character runs) lists the newest rows, as search() does for
+  // meetings. Mirroring that keeps the shadow compare an honest comparison.
+  if (!filter) {
+    const pid = projectId === undefined ? null : projectIdOf(projectId);
+    return lazyPrepare(db, `
+      SELECT id, title, date, project_id, meta FROM note_index
+       WHERE user_id = ? AND (? IS NULL OR project_id = ?)
+       ORDER BY date DESC LIMIT ?`).all(userId, pid, pid, cap).map((n) => {
+      let meta = {};
+      try { meta = JSON.parse(n.meta) || {}; } catch { meta = {}; }
+      return {
+        noteId: n.id,
+        meetingId: typeof meta.meetingId === 'string' ? meta.meetingId : null,
+        title: n.title,
+        date: n.date,
+        projectId: n.project_id,
+        rank: null,
+      };
+    });
+  }
+  const where = searchFilterSql(filter);
+  const sql = `SELECT rowid AS rowid, ${where.rank} AS rank
+    FROM search
+    WHERE ${where.where} AND kind = 'note'
+    ORDER BY rank LIMIT ?`;
+  const hits = lazyPrepare(db, sql).all(...where.params, cap * 4);
+  const hydrate = lazyPrepare(db, `
+    SELECT n.id, n.title, n.date, n.project_id, n.meta
+      FROM note_index_search m JOIN note_index n ON n.id = m.note_id
+     WHERE m.search_rowid = ? AND n.user_id = ?`);
+  const out = [];
+  for (const h of hits) {
+    const n = hydrate.get(h.rowid, userId);
+    if (!n) continue;
+    if (projectId !== undefined && n.project_id !== projectIdOf(projectId)) continue;
+    let meta = {};
+    try { meta = JSON.parse(n.meta) || {}; } catch { meta = {}; }
+    out.push({
+      noteId: n.id,
+      meetingId: typeof meta.meetingId === 'string' ? meta.meetingId : null,
+      title: n.title,
+      date: n.date,
+      projectId: n.project_id,
+      rank: h.rank,
+    });
+    if (out.length >= cap) break;
+  }
+  return out;
 }

@@ -16,6 +16,7 @@ import { agentStoreStatus, getAgentDb, onFreshStore, openAgentDb, takeRollupRequ
 import { prepareHistoryCopy, copyHistoryStep, historyCopyDone, usageCopyDone } from './agent-history-copy.mjs';
 import { abortStaleRuns, purgeUserHistory, rollupAll } from './agent-store.mjs';
 import { compareLedgerShadow, pruneUsageCalls } from './agent-usage.mjs';
+import { compareNoteIndexShadow } from './note-index-shadow.mjs';
 import { getDb } from './db.mjs';
 
 export const TICK_MS = 60 * 1000;
@@ -25,6 +26,9 @@ const LAST_DAILY_KEY = 'last_daily_rollup_day';
 // The daily usage shadow (prune + compare) has its own day key, so a failing
 // rollup neither skips it nor makes it repeat every tick.
 const LAST_SHADOW_KEY = 'last_daily_usage_shadow_day';
+// The daily note-index compare (plan T2.2) has its own key and runs before the
+// rollup decision, so it never adds a rollup run to the days it is due.
+const LAST_NOTE_SHADOW_KEY = 'last_daily_note_index_shadow_day';
 
 let timer = null;
 
@@ -98,6 +102,20 @@ export function runDailyUsageShadow(db, now, logger) {
   try { writeMeta(db, LAST_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
 }
 
+/**
+ * The daily note-index compare (legacy search vs the derived note index). It
+ * writes only its own result; errors are logged and never reach the rollup.
+ * Exported for tests.
+ */
+export function runDailyNoteIndexShadow(db, now, logger) {
+  try {
+    compareNoteIndexShadow(null, { agentDb: db, now, logger });
+  } catch (err) {
+    log(logger, 'error', 'note_index_compare_failed', { error: err?.message });
+  }
+  try { writeMeta(db, LAST_NOTE_SHADOW_KEY, localDay(now)); } catch { /* best effort */ }
+}
+
 /** One tick: a requested or due rollup and the daily usage shadow, and the size watchdog. Exported for tests. */
 export function agentStoreTick(now = new Date(), { logger } = {}) {
   try {
@@ -114,6 +132,7 @@ export function agentStoreTick(now = new Date(), { logger } = {}) {
     const requested = takeRollupRequest() || transitioned;
     const rollupDue = dailyRollupDue(readMeta(db, LAST_DAILY_KEY), now);
     const shadowDue = dailyRollupDue(readMeta(db, LAST_SHADOW_KEY), now);
+    if (dailyRollupDue(readMeta(db, LAST_NOTE_SHADOW_KEY), now)) runDailyNoteIndexShadow(db, now, logger);
     if (!requested && !rollupDue && !shadowDue) return { ran: false };
     if (shadowDue) runDailyUsageShadow(db, now, logger);
     let users = 0;

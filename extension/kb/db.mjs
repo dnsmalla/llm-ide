@@ -134,7 +134,7 @@ function splitJapaneseRuns(token) {
   return token.match(JAPANESE_RUN_RE) || [];
 }
 
-function buildSearchFilter(raw, mode = 'and') {
+export function buildSearchFilter(raw, mode = 'and') {
   if (typeof raw !== 'string') return null;
   const tokens = raw
     .toLowerCase()
@@ -155,7 +155,7 @@ function buildSearchFilter(raw, mode = 'and') {
 // SQL for a buildSearchFilter() result: the WHERE fragment, its bind
 // params (in order), and the rank expression. bm25() is only valid with a
 // MATCH, so a LIKE-only query ranks newest-first instead.
-function searchFilterSql(f) {
+export function searchFilterSql(f) {
   const parts = [];
   const params = [];
   if (f.match) { parts.push('search MATCH ?'); params.push(f.match); }
