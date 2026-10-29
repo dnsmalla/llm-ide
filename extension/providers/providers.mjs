@@ -15,6 +15,7 @@ import path from 'node:path';
 import { createInterface } from 'node:readline';
 import { lookup } from 'node:dns/promises';
 import { getSecret } from '../server/vault.mjs';
+import { ipRefusal } from '../server/ip-classifier.mjs';
 import { getCustomProvider } from '../server/custom-providers.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
@@ -108,25 +109,11 @@ export const DEFAULT_GEMINI_OPENAI_BASE = 'https://generativelanguage.googleapis
 //   • link-local:  169.254.0.0/16, fe80::/10
 //   • RFC-1918:    10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16
 
-// Matches private/loopback IPv4 addresses that must never be reachable via a custom base URL.
-const PRIVATE_IPv4_RE = /^(127(\.\d{1,3}){3}|10(\.\d{1,3}){3}|169\.254(\.\d{1,3}){2}|172\.(1[6-9]|2\d|3[01])(\.\d{1,3}){2}|192\.168(\.\d{1,3}){2})$/;
-
-// Normalise an IPv6 address for comparison (strip brackets, lowercase).
-function normaliseIPv6(host) {
-  return host.startsWith('[') && host.endsWith(']') ? host.slice(1, -1).toLowerCase() : host.toLowerCase();
-}
-
-function isPrivateIPv6(host) {
-  const h = normaliseIPv6(host);
-  if (h === '::1') return true;                       // loopback
-  if (/^fe[89ab][0-9a-f]:/i.test(h)) return true;    // fe80::/10 link-local
-  return false;
-}
-
 /**
- * Throw a clear Error if `url` is not safe to use as a provider base URL.
- * Rules: must be https:, hostname must not be localhost, a loopback address,
- * an RFC-1918 address, or a link-local address.
+ * Throw a clear Error if `url` is not safe to use as a custom base URL.
+ * Rules: https only, no query or fragment, hostname not localhost, and an IP
+ * literal in ANY spelling (IPv4-mapped IPv6, hex, decimal, ULA, link-local, …)
+ * must be a public address: the one classifier in server/ip-classifier.mjs.
  */
 export function assertSafeBaseUrl(url) {
   let parsed;
@@ -136,16 +123,13 @@ export function assertSafeBaseUrl(url) {
   if (parsed.protocol !== 'https:') {
     throw new Error(`SSRF guard: base URL must use https: (got ${parsed.protocol})`);
   }
+  if (/[?#]/.test(String(url))) throw new Error('SSRF guard: base URL must not contain a query string or fragment');
   const hostname = parsed.hostname.toLowerCase();
-  if (hostname === 'localhost') {
+  if (hostname === 'localhost' || hostname.endsWith('.localhost')) {
     throw new Error('SSRF guard: base URL hostname must not be localhost');
   }
-  if (PRIVATE_IPv4_RE.test(hostname)) {
-    throw new Error(`SSRF guard: base URL resolves to a private/loopback IPv4 address (${hostname})`);
-  }
-  if (isPrivateIPv6(hostname)) {
-    throw new Error(`SSRF guard: base URL resolves to a private/loopback IPv6 address (${hostname})`);
-  }
+  const why = ipRefusal(hostname, { allowPrivate: false });
+  if (why) throw new Error(`SSRF guard: base URL resolves to a private/loopback address: ${why}`);
 }
 
 /**
@@ -168,11 +152,8 @@ export async function assertSafeBaseUrlResolved(url) {
   try { addrs = await lookup(hostname, { all: true }); }
   catch { return; }                                // unresolvable → fetch will error; not an SSRF path
   for (const { address } of addrs) {
-    const addr = String(address).toLowerCase();
-    if (addr === '127.0.0.1' || addr === '::1'
-        || PRIVATE_IPv4_RE.test(addr) || isPrivateIPv6(addr)) {
-      throw new Error(`SSRF guard: base URL host ${hostname} resolves to a private/loopback address (${address})`);
-    }
+    const why = ipRefusal(String(address), { allowPrivate: false });
+    if (why) throw new Error(`SSRF guard: base URL host ${hostname} resolves to a private/loopback address: ${why}`);
   }
 }
 

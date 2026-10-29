@@ -12,8 +12,8 @@ import { getSecret } from '../server/vault.mjs';
 import { getDb } from '../kb/db.mjs';
 import { catalogEntry, isChatModel, modelCapability } from '../server/provider-catalog.mjs';
 import { vaultKeyFor, getSettings } from '../server/provider-connections.mjs';
-import { assertProviderBaseUrl } from '../server/base-url-guard.mjs';
-import { assertSafeBaseUrlResolved } from './providers.mjs';
+import { assertProviderBaseUrl, privateProvidersAllowed, joinBaseUrl } from '../server/base-url-guard.mjs';
+import { makePinnedFetch, SsrfBlockedError } from '../server/pinned-fetch.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
 const TTL_MS = 10 * 60_000;
@@ -44,9 +44,11 @@ function authHeaders(apiKey) {
   return apiKey && apiKey !== 'not-required' ? { Authorization: `Bearer ${apiKey}` } : {};
 }
 
-async function guarded(conn) {
-  assertProviderBaseUrl(conn.baseURL, { allowPrivate: conn.allowPrivate });
-  if (!conn.allowPrivate) await assertSafeBaseUrlResolved(conn.baseURL);
+// The base URL again, under the posture that is in force NOW (a connection made
+// while the operator gate was open does not outlive it). Throws SSRF_BLOCKED.
+function vetBase(conn) {
+  try { assertProviderBaseUrl(conn.baseURL, { allowPrivate: conn.allowPrivate && privateProvidersAllowed() }); }
+  catch (e) { throw new SsrfBlockedError(e.message); }
 }
 
 /**
@@ -55,19 +57,22 @@ async function guarded(conn) {
  * @param {string} apiKey
  * @param {{ fetchImpl?: typeof fetch, signal?: AbortSignal }} [opts]
  */
-export async function fetchLiveModels(conn, apiKey, { fetchImpl = globalThis.fetch, signal } = {}) {
+export async function fetchLiveModels(conn, apiKey, { fetchImpl, signal } = {}) {
   const entry = catalogEntry(conn.catalogId);
   if (!entry) throw new Error('unknown catalog provider');
-  await guarded(conn);
+  vetBase(conn);
+  // Default: the pinned fetch (every resolved address classified, the checked one dialled).
+  const doFetch = fetchImpl || makePinnedFetch({ allowPrivate: conn.allowPrivate });
   let res;
   try {
-    res = await fetchImpl(`${conn.baseURL.replace(/\/+$/, '')}/models`, {
+    res = await doFetch(joinBaseUrl(conn.baseURL, 'models'), {
       method: 'GET',
       headers: { ...authHeaders(apiKey), accept: 'application/json' },
       redirect: 'error',
       signal: signal || AbortSignal.timeout(15_000),
     });
   } catch (err) {
+    if (err?.code === 'SSRF_BLOCKED') throw err;
     throw new Error(redactWithKey(`could not reach ${conn.name}: ${err?.cause?.code || err?.message || err}`, apiKey).slice(0, 200));
   }
   if (!res.ok) {
@@ -88,6 +93,7 @@ export async function fetchLiveModels(conn, apiKey, { fetchImpl = globalThis.fet
 export async function listConnectionModels(userId, conn, { refresh = false, fetchImpl, db = getDb() } = {}) {
   const entry = catalogEntry(conn.catalogId);
   if (!entry) return { models: [], source: 'static', detail: 'unknown catalog provider' };
+  vetBase(conn);   // a refused target aborts, even when a cached list exists
   const overrides = getSettings(userId, db).toolOverrides;
   const shape = (list) => list
     .filter((m) => isChatModel(entry, m.id))
@@ -110,6 +116,8 @@ export async function listConnectionModels(userId, conn, { refresh = false, fetc
     const models = shape(raw);
     return models.length ? { models, source: 'live' } : fallback('the provider listed no chat models');
   } catch (err) {
+    // A guard refusal is never papered over with a static list: the caller aborts.
+    if (err?.code === 'SSRF_BLOCKED') throw err;
     // A stale list beats a static one when the provider is briefly down.
     if (hit) return { models: shape(hit.raw), source: 'cache', detail: String(err?.message || err).slice(0, 200) };
     return fallback(String(err?.message || err).slice(0, 200));

@@ -15,22 +15,31 @@
 import { streamText, tool, jsonSchema, stepCountIs } from 'ai';
 import { createOpenAICompatible } from '@ai-sdk/openai-compatible';
 import { redactWithKey } from '../../core/redact-secrets.mjs';
+import { assertProviderBaseUrl, privateProvidersAllowed } from '../../server/base-url-guard.mjs';
+import { makePinnedFetch, SsrfBlockedError } from '../../server/pinned-fetch.mjs';
 
 const MAX_TOOL_RESULT_CHARS = 20_000;
 export const DEFAULT_MAX_STEPS = 12;
 
 /**
  * A chat model for an OpenAI-compatible endpoint.
- * @param {{ name: string, baseURL: string, apiKey?: string, modelId: string, fetchImpl?: typeof fetch }} o
+ * The default fetch is the pinned one (server/pinned-fetch.mjs): every resolved
+ * address is classified and only a checked address is dialled. A refused
+ * target throws SSRF_BLOCKED here or on the first request; the turn aborts.
+ * @param {{ name: string, baseURL: string, apiKey?: string, modelId: string,
+ *           allowPrivate?: boolean, fetchImpl?: typeof fetch }} o
  */
-export function createChatModel({ name, baseURL, apiKey, modelId, fetchImpl = globalThis.fetch }) {
+export function createChatModel({ name, baseURL, apiKey, modelId, allowPrivate = false, fetchImpl }) {
   if (typeof modelId !== 'string' || !modelId.trim()) throw new Error('No model id provided for this provider.');
+  try { assertProviderBaseUrl(baseURL, { allowPrivate: allowPrivate && privateProvidersAllowed() }); }
+  catch (e) { throw new SsrfBlockedError(e.message); }
+  const doFetch = fetchImpl || makePinnedFetch({ allowPrivate });
   const origin = new URL(baseURL).origin;
   const guardedFetch = (url, init = {}) => {
     // The library only ever calls <baseURL>/chat/completions; anything else
     // would carry the key to another host.
     if (new URL(String(url)).origin !== origin) throw new Error('adapter refused a request to a different host');
-    return fetchImpl(url, { ...init, redirect: 'error' });
+    return doFetch(url, { ...init, redirect: 'error' });
   };
   const provider = createOpenAICompatible({
     name: String(name || 'provider').replace(/[^a-z0-9-]/gi, '-').toLowerCase().slice(0, 40) || 'provider',
@@ -49,6 +58,11 @@ export function toLibraryTools(tools = []) {
       description: t.description,
       inputSchema: jsonSchema(t.parameters || { type: 'object', properties: {} }),
       execute: async (input, { abortSignal, toolCallId } = {}) => t.execute(input, { signal: abortSignal, toolCallId }),
+      // What the MODEL sees of a result (the UI event keeps the raw output): the
+      // caller's framing, e.g. a data fence. Without one the library's default applies.
+      ...(typeof t.toModelOutput === 'function'
+        ? { toModelOutput: ({ output }) => ({ type: 'text', value: String(t.toModelOutput(output)) }) }
+        : {}),
     });
   }
   return out;
@@ -118,6 +132,9 @@ export function toWireError(err, { apiKey } = {}) {
   const status = Number(err?.statusCode ?? err?.status ?? err?.cause?.statusCode) || null;
   const raw = String(err?.message || err || 'provider error');
   const message = redactWithKey(raw, apiKey).slice(0, 400);
+  if ([err, err?.cause, err?.lastError].some((e) => e?.code === 'SSRF_BLOCKED')) {
+    return { code: 'PROVIDER_BLOCKED', message: 'The provider address was refused by the network guard.', retryable: false, status: null };
+  }
   // A 429 that is about money or plan, not speed: retrying will not help today.
   const quota = status === 429 && /insufficient_quota|exceeded your current quota|billing|payment/i.test(raw);
   if (status === 401 || status === 403) return { code: 'PROVIDER_AUTH', message: 'The provider refused the API key.', retryable: false, status };

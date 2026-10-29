@@ -20,7 +20,7 @@
 import { getDb } from '../kb/db.mjs';
 import { getSecret, setSecret } from './vault.mjs';
 import { catalogEntry } from './provider-catalog.mjs';
-import { assertProviderBaseUrl } from './base-url-guard.mjs';
+import { assertProviderBaseUrl, privateProvidersAllowed, isLoopbackHost } from './base-url-guard.mjs';
 
 const FLAG = 'provider.catalog';
 const MAX_CONNECTIONS = 20;
@@ -35,6 +35,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   fallbackEnabled: false,
   fallbackOrder: [],
   toolOverrides: {},
+  // false: fetch-url and web-search ask first in a provider turn (a hostile page
+  // can steer a model into leaking through them); true restores Claude parity.
+  egressAutoApprove: false,
 });
 
 /** Vault key for a connection id. */
@@ -63,6 +66,7 @@ function normalizeSettings(s) {
   if (!s || typeof s !== 'object') return out;
   out.toolsEnabled = s.toolsEnabled === true;
   out.fallbackEnabled = s.fallbackEnabled === true;
+  out.egressAutoApprove = s.egressAutoApprove === true;
   if (Array.isArray(s.fallbackOrder)) {
     out.fallbackOrder = s.fallbackOrder
       .filter((e) => e && typeof e.provider === 'string' && e.provider.startsWith(`custom:${ID_PREFIX}`))
@@ -107,6 +111,7 @@ export function updateSettings(userId, patch, db = getDb()) {
   const merged = { ...state.settings };
   if (typeof patch?.toolsEnabled === 'boolean') merged.toolsEnabled = patch.toolsEnabled;
   if (typeof patch?.fallbackEnabled === 'boolean') merged.fallbackEnabled = patch.fallbackEnabled;
+  if (typeof patch?.egressAutoApprove === 'boolean') merged.egressAutoApprove = patch.egressAutoApprove;
   if (Array.isArray(patch?.fallbackOrder)) {
     // Only the user's own connections can be ordered; a stranger's id is dropped.
     const own = new Set(state.connections.map((c) => `custom:${c.id}`));
@@ -154,6 +159,18 @@ export function connectProvider(userId, { catalogId, apiKey, baseURL, slug, name
     throw Object.assign(new Error(`${entry.name} uses a fixed base URL; use the OpenAI-compatible entry for another host`), { code: 'VALIDATION_FAILED' });
   }
   const priv = entry.local ? true : (entry.allowPrivate === true && allowPrivate === true);
+  // The operator gate: a server bound beyond this machine refuses private
+  // targets unless LLMIDE_ALLOW_PRIVATE_PROVIDERS is set.
+  if (priv && !privateProvidersAllowed()) {
+    throw Object.assign(new Error('Private-network providers are disabled on this server (operator setting LLMIDE_ALLOW_PRIVATE_PROVIDERS)'), { code: 'VALIDATION_FAILED' });
+  }
+  // Ollama's own address is this machine; another host there is the same
+  // private-network step as the generic endpoint and needs the same opt-in.
+  if (entry.local && url !== entry.baseURL && allowPrivate !== true) {
+    let loop = false;
+    try { loop = isLoopbackHost(new URL(url).hostname); } catch { loop = false; }
+    if (!loop) throw Object.assign(new Error(`${entry.name} on another host needs the private-network opt-in`), { code: 'VALIDATION_FAILED' });
+  }
   let cleanUrl;
   try { cleanUrl = assertProviderBaseUrl(url, { allowPrivate: priv }); }
   catch (err) { throw Object.assign(new Error(err.message), { code: 'VALIDATION_FAILED' }); }

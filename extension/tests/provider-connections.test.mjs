@@ -131,3 +131,42 @@ test('at most 20 connections per user', () => {
   for (let i = 0; i < 20; i += 1) conns.connectProvider(a, { catalogId: 'openai-compatible', slug: `s${i}`, baseURL: 'https://x.example.com/v1' }, db);
   assert.throws(() => conns.connectProvider(a, { catalogId: 'openai-compatible', slug: 'extra', baseURL: 'https://x.example.com/v1' }, db), /At most 20/);
 });
+
+test('operator gate: a server that refuses private providers refuses to connect one (Ollama and a LAN gateway), hosted still works', () => {
+  const { db, users: [a] } = freshDb();
+  const prev = process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS;
+  process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS = '0';
+  try {
+    const code = (fn) => { try { fn(); } catch (e) { return e.code; } return null; };
+    assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama' }, db)), 'VALIDATION_FAILED');
+    assert.equal(code(() => conns.connectProvider(a, { catalogId: 'openai-compatible', baseURL: 'http://192.168.1.9:3001/v1', allowPrivate: true }, db)), 'VALIDATION_FAILED');
+    assert.equal(code(() => conns.connectProvider(a, { catalogId: 'groq', apiKey: KEY }, db)), null);
+    assert.equal(code(() => conns.connectProvider(a, { catalogId: 'openai-compatible', slug: 'pub', baseURL: 'https://gw.example.com/v1' }, db)), null);
+    process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS = '1';
+    assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama' }, db)), null);
+  } finally {
+    if (prev === undefined) delete process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS; else process.env.LLMIDE_ALLOW_PRIVATE_PROVIDERS = prev;
+  }
+});
+
+test('Ollama on another host needs the explicit private-network opt-in; loopback spellings do not', () => {
+  const { db, users: [a] } = freshDb();
+  const code = (fn) => { try { fn(); } catch (e) { return e.code; } return null; };
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama', baseURL: 'http://192.168.1.50:11434/v1' }, db)), 'VALIDATION_FAILED');
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama', baseURL: 'https://ollama.example.com/v1' }, db)), 'VALIDATION_FAILED');
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama', baseURL: 'http://127.0.0.1:11434/v1' }, db)), null);
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama', baseURL: 'http://[::1]:11434/v1' }, db)), null);
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama', baseURL: 'http://192.168.1.50:11434/v1', allowPrivate: true }, db)), null);
+  // link-local never, even with the opt-in
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'ollama', baseURL: 'http://169.254.169.254/v1', allowPrivate: true }, db)), 'VALIDATION_FAILED');
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'openai-compatible', slug: 'm', baseURL: 'http://[::ffff:169.254.169.254]/v1', allowPrivate: true }, db)), 'VALIDATION_FAILED');
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'openai-compatible', slug: 'f', baseURL: 'https://api.example.com/v1#' }, db)), 'VALIDATION_FAILED');
+  assert.equal(code(() => conns.connectProvider(a, { catalogId: 'openai-compatible', slug: 'q', baseURL: 'https://api.example.com/v1?x=1' }, db)), 'VALIDATION_FAILED');
+});
+
+test('the egress switch defaults off and round-trips', () => {
+  const { db, users: [a] } = freshDb();
+  assert.equal(conns.getSettings(a, db).egressAutoApprove, false);
+  assert.equal(conns.updateSettings(a, { egressAutoApprove: true }, db).egressAutoApprove, true);
+  assert.equal(conns.updateSettings(a, { egressAutoApprove: 'yes' }, db).egressAutoApprove, true, 'a non-boolean patch is ignored');
+});

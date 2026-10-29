@@ -142,7 +142,7 @@ test('RECORDED wire: an OpenAI-compatible tool call round trip through createCha
 test('createChatModel never sends the key to another host and sends none for the keyless placeholder', async () => {
   const sent = [];
   const fetchImpl = async (url, init) => { sent.push({ url: String(url), init }); return sse(rec('openai-compatible-final.sse')); };
-  const m = createChatModel({ name: 'ollama', baseURL: 'http://localhost:11434/v1', apiKey: 'not-required', modelId: 'qwen2.5:7b', fetchImpl });
+  const m = createChatModel({ name: 'ollama', baseURL: 'http://localhost:11434/v1', apiKey: 'not-required', modelId: 'qwen2.5:7b', allowPrivate: true, fetchImpl });
   await runToolTurn({ model: m, messages: [{ role: 'user', content: 'x' }], onEvent: () => {} });
   assert.equal(new Headers(sent[0].init.headers).get('authorization'), null);
   // a url on another origin (a redirect target a library might follow) is refused outright
