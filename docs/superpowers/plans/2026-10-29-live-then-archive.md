@@ -14,6 +14,14 @@ Research basis: read-only pass at `cbd562a0`. Inputs: [data-lifecycle](../../kit
 5. **Extension:** stores nothing. It captures, copies into the Mac app, and calls the Mac app **live** for every read (search, conflict questions, stats, its own chat). Verifying that the API exists is an explicit early task (section 3.7, T0.1).
 6. **Metadata** (`agent.db`, `usage_ledger`, personas, tool permissions, connector seen-sets) is **assumed** to stay on the server (lifecycle R7, not yet confirmed).
 
+### 0.1a Answered by the user (2026-10-29, after the plan was written)
+
+- **Q1 = option B (+D):** the Mac JSON file stays the live and final transcript for a Mac chat; at quit the app verifies it and clears the server working state (SDK transcript, `agent_sessions` mapping, `session_memory`); extension chats are live in server rows and archived to the Mac with the fenced protocol.
+- **Q3:** a meeting-attached chat has a new `meetingId` field and is deleted when the meeting file is verified, **no undo, no grace period**.
+- **Q4:** redact **when building the index**; Mac files stay raw; chats are redacted only while live in the DB.
+- **Q5:** **never wipe** the Mac chat store on sign-out; files are tagged with their owner (`ownerUserId`) so another user never sees them (this also answers the multi-user part of Q6).
+- Still open: Q2 (continue an ended chat, default replay), Q6 beyond the owner filter, Q7-Q15 (defaults in section 8 apply until answered).
+
 ### 0.2 Defaults pending user confirmation (NOT decided, marked DEFAULT-ASSUMPTION everywhere they bite)
 
 - **R2b, DEFAULT-ASSUMPTION:** an ended normal chat can be **continued** by replaying archived history into a fresh SDK session. Read-only is the alternative and the cheaper build.
