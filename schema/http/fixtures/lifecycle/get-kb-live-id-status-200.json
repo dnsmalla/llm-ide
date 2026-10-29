@@ -1,0 +1,14 @@
+{
+  "endpoint": "GET /kb/live/:id/status",
+  "status": 200,
+  "description": "Example data. A finalized capture the Mac has not acked yet.",
+  "request": {
+    "params": {
+      "id": "live-session-7"
+    }
+  },
+  "response": {
+    "sessionId": "live-session-7",
+    "state": "finalized"
+  }
+}

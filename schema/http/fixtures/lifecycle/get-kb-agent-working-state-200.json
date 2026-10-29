@@ -1,0 +1,21 @@
+{
+  "endpoint": "GET /kb/agent/working-state",
+  "status": 200,
+  "description": "Example data. Two chats hold server working state: one with a mapped SDK session and facts, one with facts only.",
+  "response": {
+    "sessions": [
+      {
+        "chatSessionId": "5f1c2a7e-3b9d-4e8a-9c21-0d7e6b5a4f30",
+        "sdkSession": "11111111-2222-3333-4444-555555555555",
+        "factCount": 2,
+        "updatedAt": "2026-10-29T09:12:00.000Z"
+      },
+      {
+        "chatSessionId": "9a8b7c6d-1e2f-4a3b-8c9d-0e1f2a3b4c5d",
+        "sdkSession": null,
+        "factCount": 1,
+        "updatedAt": null
+      }
+    ]
+  }
+}

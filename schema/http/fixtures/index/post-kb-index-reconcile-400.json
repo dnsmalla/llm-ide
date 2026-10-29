@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/index/reconcile",
+  "status": 400,
+  "description": "A manifest entry whose note key escapes the project root is refused before the comparison runs.",
+  "request": {
+    "body": {
+      "manifest": [
+        {
+          "noteKey": "../escape.md",
+          "contentHash": "c"
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "noteKey must be a relative path under the project root"
+    }
+  }
+}

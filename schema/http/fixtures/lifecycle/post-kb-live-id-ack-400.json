@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/live/:id/ack",
+  "status": 400,
+  "description": "An empty note key is refused, so the capture is not released.",
+  "request": {
+    "params": {
+      "id": "live-session-7"
+    },
+    "body": {
+      "noteKey": "",
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "lines": 42
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "noteKey is required (max 512)"
+    }
+  }
+}

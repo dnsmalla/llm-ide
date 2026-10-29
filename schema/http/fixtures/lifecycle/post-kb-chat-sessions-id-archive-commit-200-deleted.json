@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/commit",
+  "status": 200,
+  "description": "The Mac verified its file under fence 3 and the matching hash, so the rows are deleted.",
+  "request": {
+    "params": {
+      "id": "c0ffee00-1111-4222-8333-944455556666"
+    },
+    "body": {
+      "fence": 3,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "response": {
+    "deleted": true,
+    "status": "deleted"
+  }
+}

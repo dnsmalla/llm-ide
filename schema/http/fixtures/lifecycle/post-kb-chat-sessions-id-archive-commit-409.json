@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/commit",
+  "status": 409,
+  "description": "A message arrived after the begin, so the hash no longer matches. Nothing is deleted; the Mac begins again.",
+  "request": {
+    "params": {
+      "id": "c0ffee00-1111-4222-8333-944455556666"
+    },
+    "body": {
+      "fence": 3,
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ARCHIVE_STALE",
+      "message": "the archive fence or hash no longer matches; begin again"
+    }
+  }
+}

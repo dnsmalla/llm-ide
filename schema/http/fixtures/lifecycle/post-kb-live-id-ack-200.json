@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /kb/live/:id/ack",
+  "status": 200,
+  "description": "The Mac verified the note file and acked the capture. The extension may now drop its draft.",
+  "request": {
+    "params": {
+      "id": "live-session-7"
+    },
+    "body": {
+      "noteKey": "meetings/2026/10/standup.md",
+      "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "lines": 42
+    }
+  },
+  "response": {
+    "sessionId": "live-session-7",
+    "state": "acked",
+    "ackedAt": "2026-10-29T10:05:00.000Z",
+    "idempotent": false
+  }
+}

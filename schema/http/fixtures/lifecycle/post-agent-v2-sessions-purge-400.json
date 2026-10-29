@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /agent/v2/sessions/purge",
+  "status": 400,
+  "description": "The caller did not confirm the Mac file (verified is false). Nothing is purged.",
+  "request": {
+    "body": {
+      "chatSessionIds": [
+        "5f1c2a7e-3b9d-4e8a-9c21-0d7e6b5a4f30"
+      ],
+      "verified": false
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "verified must be true: check the Mac file before purging"
+    }
+  }
+}

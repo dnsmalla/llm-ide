@@ -1,0 +1,23 @@
+{
+  "endpoint": "POST /kb/index/notes",
+  "status": 400,
+  "description": "A note key that escapes the project root is refused, so the batch writes nothing.",
+  "request": {
+    "body": {
+      "notes": [
+        {
+          "noteKey": "../escape.md",
+          "title": "x",
+          "date": "2026-10-29",
+          "contentHash": "c"
+        }
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "noteKey must be a relative path under the project root"
+    }
+  }
+}

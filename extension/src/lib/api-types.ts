@@ -706,6 +706,33 @@ export type PluginRows = {
   plugins: Record<string, unknown>[];
 };
 
+export type Note = {
+  /** Relative path under the project root, forward slashes. No leading slash, no .. segments. */
+  noteKey: string;
+  /** Optional; defaults to the batch projectId. */
+  projectId?: string;
+  /** Only meeting is indexed today. */
+  kind?: "meeting";
+  title: string;
+  /** Note start, ISO. */
+  date: string;
+  durationSec?: number;
+  participants?: string[];
+  /** The note body. Redacted and capped on write. */
+  body?: string;
+  /** SHA-256 of the Mac file bytes. */
+  contentHash: string;
+  mtimeMs?: number;
+  /** true: counted in skippedHidden and not stored. */
+  hidden?: boolean;
+  meta?: Record<string, unknown>;
+};
+
+export type ManifestEntry = {
+  noteKey: string;
+  contentHash: string;
+};
+
 export type KbSourcesOk = {
   ok: true;
 };
@@ -890,6 +917,27 @@ export type Outcomes = {
   total: number;
   /** outcome count per state; open set, empty when no outcomes exist */
   byState: Record<string, unknown>;
+};
+
+export type WorkingChat = {
+  /** The Mac chat UUID. */
+  chatSessionId: string;
+  /** The Agent SDK session the chat resumes, when one is mapped. */
+  sdkSession: string | null;
+  /** Session-memory facts kept for the chat. */
+  factCount: number;
+  /** ISO time the chat's SDK mapping was last used; null when only facts remain. */
+  updatedAt: string | null;
+};
+
+export type ArchiveMessage = {
+  seq: number;
+  role: "user" | "assistant" | "system";
+  content: string;
+  /** The message metadata the chat store kept, or null. */
+  meta: Record<string, unknown> | null;
+  /** Seconds since the epoch, as the chat store records it. */
+  createdAt: number;
 };
 
 export type LiveCaption = {
@@ -3078,6 +3126,83 @@ export type DeleteAuthMeConnectorsIdResponse200 = {
 
 export type DeleteAuthMeConnectorsIdResponse401 = CommonError;
 
+/** Request parts for `POST /kb/index/notes` (schema/http/index.schema.json). */
+export type PostKbIndexNotesRequest = {
+  body: {
+    projectId?: string;
+    /** At most 100 per batch; a body over 4 MB is refused. */
+    notes: Note[];
+  };
+};
+
+export type PostKbIndexNotesResponse200 = {
+  /** Rows written (new or changed). */
+  upserted: number;
+  /** Rows whose content already matched; nothing was written. */
+  unchanged: number;
+  skippedHidden: number;
+  /** Rows whose body was capped at 200 KiB. */
+  truncated: number;
+};
+
+export type PostKbIndexNotesResponse400 = CommonError;
+
+/** Request parts for `POST /kb/index/reconcile` (schema/http/index.schema.json). */
+export type PostKbIndexReconcileRequest = {
+  body: {
+    projectId?: string;
+    /** At most 20 000 entries. */
+    manifest: ManifestEntry[];
+    /** true deletes the extra rows. Default false: report only. */
+    prune?: boolean;
+  };
+};
+
+export type PostKbIndexReconcileResponse200 = {
+  /** In the manifest, not indexed. */
+  missing: string[];
+  /** Indexed with a different content hash. */
+  stale: string[];
+  /** Indexed, not in the manifest. */
+  extra: string[];
+  /** Rows deleted (only with prune true). */
+  pruned: number;
+};
+
+export type PostKbIndexReconcileResponse400 = CommonError;
+
+/** Request parts for `DELETE /kb/index/notes/:key` (schema/http/index.schema.json). */
+export type DeleteKbIndexNotesKeyRequest = {
+  query: {
+    projectId?: string;
+  };
+  params: {
+    /** The note key, percent-encoded. */
+    key: string;
+  };
+};
+
+export type DeleteKbIndexNotesKeyResponse200 = {
+  deleted: boolean;
+};
+
+/** Request parts for `GET /kb/index/status` (schema/http/index.schema.json). */
+export type GetKbIndexStatusRequest = {
+  query: {
+    /** Omit for every project of the user. */
+    projectId?: string;
+  };
+};
+
+export type GetKbIndexStatusResponse200 = {
+  notes: number;
+  /** Search rows written by those notes. */
+  ftsRows: number;
+  /** true when notes equals ftsRows. */
+  consistent: boolean;
+  lastIndexedAt: string | null;
+};
+
 /** Request parts for `GET /kb/search` (schema/http/kb-sources.schema.json). */
 export type GetKbSearchRequest = {
   query: {
@@ -3656,6 +3781,155 @@ export type PostKbActivitySeenResponse200 = {
 };
 
 export type PostKbActivitySeenResponse401 = CommonError;
+
+/** Request parts for `GET /kb/agent/working-state` (schema/http/lifecycle.schema.json). */
+export type GetKbAgentWorkingStateRequest = Record<string, never>;
+
+export type GetKbAgentWorkingStateResponse200 = {
+  sessions: WorkingChat[];
+};
+
+/** Request parts for `POST /agent/v2/sessions/purge` (schema/http/lifecycle.schema.json). */
+export type PostAgentV2SessionsPurgeRequest = {
+  body: {
+    /** Up to 500 non-empty chat ids. */
+    chatSessionIds: string[];
+    /** Must be true: the caller has checked the Mac file. Any other value is a 400 VALIDATION_FAILED. */
+    verified: boolean;
+  };
+};
+
+export type PostAgentV2SessionsPurgeResponse200 = {
+  /** Chats whose working state was removed. Unknown ids count as zero; the call is idempotent. */
+  purged: number;
+};
+
+export type PostAgentV2SessionsPurgeResponse400 = CommonError;
+
+/** Request parts for `POST /kb/session-purges` (schema/http/lifecycle.schema.json). */
+export type PostKbSessionPurgesRequest = {
+  body: {
+    chatSessionId: string;
+    /** user_delete (default) or meeting_end. Any other value is a 400 VALIDATION_FAILED. */
+    reason?: string;
+  };
+};
+
+export type PostKbSessionPurgesResponse202 = {
+  /** The tombstone is durable before the purge is attempted. */
+  queued: true;
+  /** done: working state and server chat rows are gone. pending: the tombstone stays and is replayed later. */
+  purged: "done" | "pending";
+};
+
+export type PostKbSessionPurgesResponse400 = CommonError;
+
+/** Request parts for `POST /kb/chat/sessions/:id/archive/begin` (schema/http/lifecycle.schema.json). */
+export type PostKbChatSessionsIdArchiveBeginRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type PostKbChatSessionsIdArchiveBeginResponse200 = {
+  /** Bumped by every begin. The commit must present it. */
+  fence: number;
+  count: number;
+  /** 64 lower-case hex characters, the archive hash. */
+  hash: string;
+  session: {
+    id: string;
+    title: string;
+    surface: string;
+    mode: string;
+    projectId: string | null;
+    createdAt: number;
+    updatedAt: number;
+  };
+  /** Every message, in order. No cap (plan Q8). */
+  messages: ArchiveMessage[];
+};
+
+export type PostKbChatSessionsIdArchiveBeginResponse404 = CommonError;
+
+/** Request parts for `POST /kb/chat/sessions/:id/archive/commit` (schema/http/lifecycle.schema.json). */
+export type PostKbChatSessionsIdArchiveCommitRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    fence: number;
+    /** The 64-hex hash the begin returned, recomputed over the file the Mac wrote. */
+    hash: string;
+  };
+};
+
+export type PostKbChatSessionsIdArchiveCommitResponse200 = {
+  /** True when this call removed the rows. */
+  deleted: boolean;
+  /** already_archived: an earlier commit already removed the chat (idempotent). */
+  status: "deleted" | "already_archived";
+};
+
+export type PostKbChatSessionsIdArchiveCommitResponse400 = CommonError;
+
+export type PostKbChatSessionsIdArchiveCommitResponse409 = CommonError;
+
+/** Request parts for `POST /kb/live/:id/ack` (schema/http/lifecycle.schema.json). */
+export type PostKbLiveIdAckRequest = {
+  params: {
+    id: string;
+  };
+  body: {
+    /** The relative path of the Mac note that holds the capture. */
+    noteKey: string;
+    /** SHA-256 of the verified file. */
+    hash: string;
+    /** Transcript lines in the verified file. */
+    lines: number;
+  };
+};
+
+export type PostKbLiveIdAckResponse200 = {
+  sessionId: string;
+  state: "acked";
+  ackedAt: string;
+  /** True when this capture was already acked. */
+  idempotent: boolean;
+};
+
+export type PostKbLiveIdAckResponse400 = CommonError;
+
+export type PostKbLiveIdAckResponse404 = CommonError;
+
+/** Request parts for `GET /kb/live/:id/status` (schema/http/lifecycle.schema.json). */
+export type GetKbLiveIdStatusRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type GetKbLiveIdStatusResponse200 = {
+  sessionId: string;
+  /** unknown: the server has no record (never seen, or lost before a finalize). The extension keeps its draft. */
+  state: "live" | "finalized" | "acked" | "unknown";
+};
+
+/** Request parts for `GET /kb/live/unacked` (schema/http/lifecycle.schema.json). */
+export type GetKbLiveUnackedRequest = Record<string, never>;
+
+export type GetKbLiveUnackedResponse200 = {
+  sessions: ({
+    sessionId: string;
+    meetingTitle: string;
+    startedAt: number | string;
+    /** Null for a database-only capture (after a restart); read its transcript from the meeting. */
+    captionCount: number | null;
+    source: "memory" | "database";
+    /** Only for database-source rows. */
+    durationSec?: number;
+  })[];
+};
 
 /** Request parts for `POST /kb/loop/agent-run` (schema/http/live-loop-misc.schema.json). */
 export type PostKbLoopAgentRunRequest = {
@@ -6385,6 +6659,32 @@ export interface ApiEndpoints {
       401: DeleteAuthMeConnectorsIdResponse401;
     };
   };
+  "POST /kb/index/notes": {
+    request: PostKbIndexNotesRequest;
+    responses: {
+      200: PostKbIndexNotesResponse200;
+      400: PostKbIndexNotesResponse400;
+    };
+  };
+  "POST /kb/index/reconcile": {
+    request: PostKbIndexReconcileRequest;
+    responses: {
+      200: PostKbIndexReconcileResponse200;
+      400: PostKbIndexReconcileResponse400;
+    };
+  };
+  "DELETE /kb/index/notes/:key": {
+    request: DeleteKbIndexNotesKeyRequest;
+    responses: {
+      200: DeleteKbIndexNotesKeyResponse200;
+    };
+  };
+  "GET /kb/index/status": {
+    request: GetKbIndexStatusRequest;
+    responses: {
+      200: GetKbIndexStatusResponse200;
+    };
+  };
   "GET /kb/search": {
     request: GetKbSearchRequest;
     responses: {
@@ -6659,6 +6959,61 @@ export interface ApiEndpoints {
     responses: {
       200: PostKbActivitySeenResponse200;
       401: PostKbActivitySeenResponse401;
+    };
+  };
+  "GET /kb/agent/working-state": {
+    request: GetKbAgentWorkingStateRequest;
+    responses: {
+      200: GetKbAgentWorkingStateResponse200;
+    };
+  };
+  "POST /agent/v2/sessions/purge": {
+    request: PostAgentV2SessionsPurgeRequest;
+    responses: {
+      200: PostAgentV2SessionsPurgeResponse200;
+      400: PostAgentV2SessionsPurgeResponse400;
+    };
+  };
+  "POST /kb/session-purges": {
+    request: PostKbSessionPurgesRequest;
+    responses: {
+      202: PostKbSessionPurgesResponse202;
+      400: PostKbSessionPurgesResponse400;
+    };
+  };
+  "POST /kb/chat/sessions/:id/archive/begin": {
+    request: PostKbChatSessionsIdArchiveBeginRequest;
+    responses: {
+      200: PostKbChatSessionsIdArchiveBeginResponse200;
+      404: PostKbChatSessionsIdArchiveBeginResponse404;
+    };
+  };
+  "POST /kb/chat/sessions/:id/archive/commit": {
+    request: PostKbChatSessionsIdArchiveCommitRequest;
+    responses: {
+      200: PostKbChatSessionsIdArchiveCommitResponse200;
+      400: PostKbChatSessionsIdArchiveCommitResponse400;
+      409: PostKbChatSessionsIdArchiveCommitResponse409;
+    };
+  };
+  "POST /kb/live/:id/ack": {
+    request: PostKbLiveIdAckRequest;
+    responses: {
+      200: PostKbLiveIdAckResponse200;
+      400: PostKbLiveIdAckResponse400;
+      404: PostKbLiveIdAckResponse404;
+    };
+  };
+  "GET /kb/live/:id/status": {
+    request: GetKbLiveIdStatusRequest;
+    responses: {
+      200: GetKbLiveIdStatusResponse200;
+    };
+  };
+  "GET /kb/live/unacked": {
+    request: GetKbLiveUnackedRequest;
+    responses: {
+      200: GetKbLiveUnackedResponse200;
     };
   };
   "POST /kb/loop/agent-run": {

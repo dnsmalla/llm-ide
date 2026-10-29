@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/commit",
+  "status": 400,
+  "description": "The hash is not a 64-character hex value, so the commit is refused before any read.",
+  "request": {
+    "params": {
+      "id": "c0ffee00-1111-4222-8333-944455556666"
+    },
+    "body": {
+      "fence": 3,
+      "hash": "not-a-hash"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "fence (integer) and hash (64 hex) are required"
+    }
+  }
+}

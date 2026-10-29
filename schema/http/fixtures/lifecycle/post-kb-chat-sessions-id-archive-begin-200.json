@@ -1,0 +1,42 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/begin",
+  "status": 200,
+  "description": "Example data. The snapshot carries every message, the fence (3) and the hash the Mac must reproduce.",
+  "request": {
+    "params": {
+      "id": "c0ffee00-1111-4222-8333-944455556666"
+    }
+  },
+  "response": {
+    "fence": 3,
+    "count": 2,
+    "hash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+    "session": {
+      "id": "c0ffee00-1111-4222-8333-944455556666",
+      "title": "Extension chat",
+      "surface": "extension",
+      "mode": "transcript",
+      "projectId": null,
+      "createdAt": 1798500000,
+      "updatedAt": 1798500900
+    },
+    "messages": [
+      {
+        "seq": 1,
+        "role": "user",
+        "content": "What did we decide?",
+        "meta": null,
+        "createdAt": 1798500100
+      },
+      {
+        "seq": 2,
+        "role": "assistant",
+        "content": "Ship on Friday.",
+        "meta": {
+          "model": "example"
+        },
+        "createdAt": 1798500110
+      }
+    ]
+  }
+}

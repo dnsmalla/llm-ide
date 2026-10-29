@@ -1,0 +1,283 @@
+{
+  "description": "The derived note index (live-then-archive Phase 1, plan 3.8). Always on, per user and per project. The index is rebuildable from the Mac note files and holds no unique data: body_text is a redacted, capped copy (200 KiB, UTF-8) built when the row is written. Hidden notes are never stored (skippedHidden counts them). Nothing calls these routes yet.",
+  "$defs": {
+    "Note": {
+      "type": "object",
+      "required": [
+        "noteKey",
+        "title",
+        "date",
+        "contentHash"
+      ],
+      "properties": {
+        "noteKey": {
+          "type": "string",
+          "description": "Relative path under the project root, forward slashes. No leading slash, no .. segments."
+        },
+        "projectId": {
+          "type": "string",
+          "description": "Optional; defaults to the batch projectId."
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "meeting"
+          ],
+          "description": "Only meeting is indexed today."
+        },
+        "title": {
+          "type": "string"
+        },
+        "date": {
+          "type": "string",
+          "description": "Note start, ISO."
+        },
+        "durationSec": {
+          "type": "integer"
+        },
+        "participants": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "body": {
+          "type": "string",
+          "description": "The note body. Redacted and capped on write."
+        },
+        "contentHash": {
+          "type": "string",
+          "description": "SHA-256 of the Mac file bytes."
+        },
+        "mtimeMs": {
+          "type": "integer"
+        },
+        "hidden": {
+          "type": "boolean",
+          "description": "true: counted in skippedHidden and not stored."
+        },
+        "meta": {
+          "type": "object",
+          "additionalProperties": true
+        }
+      }
+    },
+    "ManifestEntry": {
+      "type": "object",
+      "required": [
+        "noteKey",
+        "contentHash"
+      ],
+      "properties": {
+        "noteKey": {
+          "type": "string"
+        },
+        "contentHash": {
+          "type": "string"
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /kb/index/notes": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "notes"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string"
+            },
+            "notes": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Note"
+              },
+              "description": "At most 100 per batch; a body over 4 MB is refused."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "upserted",
+            "unchanged",
+            "skippedHidden",
+            "truncated"
+          ],
+          "properties": {
+            "upserted": {
+              "type": "integer",
+              "description": "Rows written (new or changed)."
+            },
+            "unchanged": {
+              "type": "integer",
+              "description": "Rows whose content already matched; nothing was written."
+            },
+            "skippedHidden": {
+              "type": "integer"
+            },
+            "truncated": {
+              "type": "integer",
+              "description": "Rows whose body was capped at 200 KiB."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/index/reconcile": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "manifest"
+          ],
+          "properties": {
+            "projectId": {
+              "type": "string"
+            },
+            "manifest": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ManifestEntry"
+              },
+              "description": "At most 20 000 entries."
+            },
+            "prune": {
+              "type": "boolean",
+              "description": "true deletes the extra rows. Default false: report only."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "missing",
+            "stale",
+            "extra",
+            "pruned"
+          ],
+          "properties": {
+            "missing": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "In the manifest, not indexed."
+            },
+            "stale": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Indexed with a different content hash."
+            },
+            "extra": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Indexed, not in the manifest."
+            },
+            "pruned": {
+              "type": "integer",
+              "description": "Rows deleted (only with prune true)."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "DELETE /kb/index/notes/:key": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "key"
+          ],
+          "properties": {
+            "key": {
+              "type": "string",
+              "description": "The note key, percent-encoded."
+            }
+          }
+        },
+        "query": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "deleted"
+          ],
+          "properties": {
+            "deleted": {
+              "type": "boolean"
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/index/status": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "projectId": {
+              "type": "string",
+              "description": "Omit for every project of the user."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "notes",
+            "ftsRows",
+            "consistent",
+            "lastIndexedAt"
+          ],
+          "properties": {
+            "notes": {
+              "type": "integer"
+            },
+            "ftsRows": {
+              "type": "integer",
+              "description": "Search rows written by those notes."
+            },
+            "consistent": {
+              "type": "boolean",
+              "description": "true when notes equals ftsRows."
+            },
+            "lastIndexedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        }
+      }
+    }
+  }
+}

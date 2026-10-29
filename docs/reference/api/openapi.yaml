@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 83
+  x-api-version: 84
 servers:
   - url: "https://{host}"
     variables:
@@ -23,7 +23,9 @@ tags:
   - name: "agent-history"
   - name: "docs"
   - name: "health-auth"
+  - name: "index"
   - name: "kb-sources"
+  - name: "lifecycle"
   - name: "live-loop-misc"
   - name: "notes-generation"
   - name: "os"
@@ -201,6 +203,47 @@ paths:
                     description: "the SDK session the chat was bound to, or null when it had none"
         "400":
           description: "chatSessionId missing"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /agent/v2/sessions/purge:
+    post:
+      tags:
+        - "lifecycle"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "chatSessionIds"
+                - "verified"
+              properties:
+                chatSessionIds:
+                  type: "array"
+                  items:
+                    type: "string"
+                  description: "Up to 500 non-empty chat ids."
+                verified:
+                  type: "boolean"
+                  description: "Must be true: the caller has checked the Mac file. Any other value is a 400 VALIDATION_FAILED."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "purged"
+                properties:
+                  purged:
+                    type: "integer"
+                    description: "Chats whose working state was removed. Unknown ids count as zero; the call is idempotent."
+        "400":
+          description: "Bad Request"
           content:
             application/json:
               schema:
@@ -4564,6 +4607,24 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/agent/working-state:
+    get:
+      tags:
+        - "lifecycle"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "sessions"
+                properties:
+                  sessions:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/WorkingChat"
   /kb/analyze-risks:
     post:
       summary: "Re-compute LLM risk assessment for a plan"
@@ -4920,6 +4981,133 @@ paths:
                 "$ref": "#/components/schemas/AgentOk"
         "404":
           description: "Session not found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/chat/sessions/{id}/archive/begin:
+    post:
+      tags:
+        - "lifecycle"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "fence"
+                  - "count"
+                  - "hash"
+                  - "session"
+                  - "messages"
+                properties:
+                  fence:
+                    type: "integer"
+                    description: "Bumped by every begin. The commit must present it."
+                  count:
+                    type: "integer"
+                  hash:
+                    type: "string"
+                    description: "64 lower-case hex characters, the archive hash."
+                  session:
+                    type: "object"
+                    required:
+                      - "id"
+                      - "title"
+                      - "surface"
+                      - "mode"
+                      - "projectId"
+                      - "createdAt"
+                      - "updatedAt"
+                    properties:
+                      id:
+                        type: "string"
+                      title:
+                        type: "string"
+                      surface:
+                        type: "string"
+                      mode:
+                        type: "string"
+                      projectId:
+                        type:
+                          - "string"
+                          - "null"
+                      createdAt:
+                        type: "number"
+                      updatedAt:
+                        type: "number"
+                  messages:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ArchiveMessage"
+                    description: "Every message, in order. No cap (plan Q8)."
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/chat/sessions/{id}/archive/commit:
+    post:
+      tags:
+        - "lifecycle"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "fence"
+                - "hash"
+              properties:
+                fence:
+                  type: "integer"
+                hash:
+                  type: "string"
+                  description: "The 64-hex hash the begin returned, recomputed over the file the Mac wrote."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "deleted"
+                  - "status"
+                properties:
+                  deleted:
+                    type: "boolean"
+                    description: "True when this call removed the rows."
+                  status:
+                    type: "string"
+                    enum:
+                      - "deleted"
+                      - "already_archived"
+                    description: "already_archived: an earlier commit already removed the chat (idempotent)."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
           content:
             application/json:
               schema:
@@ -6333,6 +6521,180 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/index/notes:
+    post:
+      tags:
+        - "index"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "notes"
+              properties:
+                projectId:
+                  type: "string"
+                notes:
+                  type: "array"
+                  items:
+                    "$ref": "#/components/schemas/Note"
+                  description: "At most 100 per batch; a body over 4 MB is refused."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "upserted"
+                  - "unchanged"
+                  - "skippedHidden"
+                  - "truncated"
+                properties:
+                  upserted:
+                    type: "integer"
+                    description: "Rows written (new or changed)."
+                  unchanged:
+                    type: "integer"
+                    description: "Rows whose content already matched; nothing was written."
+                  skippedHidden:
+                    type: "integer"
+                  truncated:
+                    type: "integer"
+                    description: "Rows whose body was capped at 200 KiB."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/index/notes/{key}:
+    delete:
+      tags:
+        - "index"
+      parameters:
+        - name: "key"
+          in: "path"
+          required: true
+          description: "The note key, percent-encoded."
+          schema:
+            type: "string"
+        - name: "projectId"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "deleted"
+                properties:
+                  deleted:
+                    type: "boolean"
+  /kb/index/reconcile:
+    post:
+      tags:
+        - "index"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "manifest"
+              properties:
+                projectId:
+                  type: "string"
+                manifest:
+                  type: "array"
+                  items:
+                    "$ref": "#/components/schemas/ManifestEntry"
+                  description: "At most 20 000 entries."
+                prune:
+                  type: "boolean"
+                  description: "true deletes the extra rows. Default false: report only."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "missing"
+                  - "stale"
+                  - "extra"
+                  - "pruned"
+                properties:
+                  missing:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "In the manifest, not indexed."
+                  stale:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "Indexed with a different content hash."
+                  extra:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "Indexed, not in the manifest."
+                  pruned:
+                    type: "integer"
+                    description: "Rows deleted (only with prune true)."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/index/status:
+    get:
+      tags:
+        - "index"
+      parameters:
+        - name: "projectId"
+          in: "query"
+          required: false
+          description: "Omit for every project of the user."
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "notes"
+                  - "ftsRows"
+                  - "consistent"
+                  - "lastIndexedAt"
+                properties:
+                  notes:
+                    type: "integer"
+                  ftsRows:
+                    type: "integer"
+                    description: "Search rows written by those notes."
+                  consistent:
+                    type: "boolean"
+                    description: "true when notes equals ftsRows."
+                  lastIndexedAt:
+                    type:
+                      - "string"
+                      - "null"
   /kb/ingest:
     post:
       summary: "Upsert a meeting and replace its entities"
@@ -6785,6 +7147,52 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/live/unacked:
+    get:
+      tags:
+        - "lifecycle"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "sessions"
+                properties:
+                  sessions:
+                    type: "array"
+                    items:
+                      type: "object"
+                      required:
+                        - "sessionId"
+                        - "meetingTitle"
+                        - "startedAt"
+                        - "captionCount"
+                        - "source"
+                      properties:
+                        sessionId:
+                          type: "string"
+                        meetingTitle:
+                          type: "string"
+                        startedAt:
+                          type:
+                            - "number"
+                            - "string"
+                        captionCount:
+                          type:
+                            - "integer"
+                            - "null"
+                          description: "Null for a database-only capture (after a restart); read its transcript from the meeting."
+                        source:
+                          type: "string"
+                          enum:
+                            - "memory"
+                            - "database"
+                        durationSec:
+                          type: "integer"
+                          description: "Only for database-source rows."
   /kb/live/{id}:
     get:
       summary: "Poll for new captions since a sequence number"
@@ -6835,6 +7243,70 @@ paths:
                     description: "Unix ms timestamp when session was created"
         "401":
           description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/live/{id}/ack:
+    post:
+      tags:
+        - "lifecycle"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "noteKey"
+                - "hash"
+                - "lines"
+              properties:
+                noteKey:
+                  type: "string"
+                  description: "The relative path of the Mac note that holds the capture."
+                hash:
+                  type: "string"
+                  description: "SHA-256 of the verified file."
+                lines:
+                  type: "integer"
+                  description: "Transcript lines in the verified file."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "sessionId"
+                  - "state"
+                  - "ackedAt"
+                  - "idempotent"
+                properties:
+                  sessionId:
+                    type: "string"
+                  state:
+                    const: "acked"
+                  ackedAt:
+                    type: "string"
+                  idempotent:
+                    type: "boolean"
+                    description: "True when this capture was already acked."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
           content:
             application/json:
               schema:
@@ -6980,6 +7452,37 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/live/{id}/status:
+    get:
+      tags:
+        - "lifecycle"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "sessionId"
+                  - "state"
+                properties:
+                  sessionId:
+                    type: "string"
+                  state:
+                    type: "string"
+                    enum:
+                      - "live"
+                      - "finalized"
+                      - "acked"
+                      - "unknown"
+                    description: "unknown: the server has no record (never seen, or lost before a finalize). The extension keeps its draft."
   /kb/live/{id}/stream:
     get:
       summary: "Server-sent events stream of a live capture session's captions"
@@ -9505,6 +10008,50 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
+  /kb/session-purges:
+    post:
+      tags:
+        - "lifecycle"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              required:
+                - "chatSessionId"
+              properties:
+                chatSessionId:
+                  type: "string"
+                reason:
+                  type: "string"
+                  description: "user_delete (default) or meeting_end. Any other value is a 400 VALIDATION_FAILED."
+      responses:
+        "202":
+          description: "Accepted"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                required:
+                  - "queued"
+                  - "purged"
+                properties:
+                  queued:
+                    const: true
+                    description: "The tombstone is durable before the purge is attempted."
+                  purged:
+                    type: "string"
+                    enum:
+                      - "done"
+                      - "pending"
+                    description: "done: working state and server chat rows are gone. pending: the tombstone stays and is replayed later."
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
   /kb/slack/conversations:
     get:
       summary: "List Slack conversations visible to the saved token"
@@ -11294,6 +11841,34 @@ components:
           type: "string"
         grantedAt:
           type: "string"
+    ArchiveMessage:
+      type: "object"
+      required:
+        - "seq"
+        - "role"
+        - "content"
+        - "meta"
+        - "createdAt"
+      properties:
+        seq:
+          type: "integer"
+        role:
+          type: "string"
+          enum:
+            - "user"
+            - "assistant"
+            - "system"
+        content:
+          type: "string"
+        meta:
+          type:
+            - "object"
+            - "null"
+          additionalProperties: true
+          description: "The message metadata the chat store kept, or null."
+        createdAt:
+          type: "number"
+          description: "Seconds since the epoch, as the chat store records it."
     AskMessage:
       type: "object"
       required:
@@ -12439,6 +13014,16 @@ components:
           type: "integer"
         durationMs:
           type: "number"
+    ManifestEntry:
+      type: "object"
+      required:
+        - "noteKey"
+        - "contentHash"
+      properties:
+        noteKey:
+          type: "string"
+        contentHash:
+          type: "string"
     McpAdded:
       type: "object"
       required:
@@ -12748,6 +13333,50 @@ components:
               type: "integer"
         resetAt:
           type: "string"
+    Note:
+      type: "object"
+      required:
+        - "noteKey"
+        - "title"
+        - "date"
+        - "contentHash"
+      properties:
+        noteKey:
+          type: "string"
+          description: "Relative path under the project root, forward slashes. No leading slash, no .. segments."
+        projectId:
+          type: "string"
+          description: "Optional; defaults to the batch projectId."
+        kind:
+          type: "string"
+          enum:
+            - "meeting"
+          description: "Only meeting is indexed today."
+        title:
+          type: "string"
+        date:
+          type: "string"
+          description: "Note start, ISO."
+        durationSec:
+          type: "integer"
+        participants:
+          type: "array"
+          items:
+            type: "string"
+        body:
+          type: "string"
+          description: "The note body. Redacted and capped on write."
+        contentHash:
+          type: "string"
+          description: "SHA-256 of the Mac file bytes."
+        mtimeMs:
+          type: "integer"
+        hidden:
+          type: "boolean"
+          description: "true: counted in skippedHidden and not stored."
+        meta:
+          type: "object"
+          additionalProperties: true
     NotesGenerationOk:
       type: "object"
       required:
@@ -14149,6 +14778,30 @@ components:
           description: "names of the secrets a user may store"
         accessTokenTTLSec:
           type: "integer"
+    WorkingChat:
+      type: "object"
+      required:
+        - "chatSessionId"
+        - "sdkSession"
+        - "factCount"
+        - "updatedAt"
+      properties:
+        chatSessionId:
+          type: "string"
+          description: "The Mac chat UUID."
+        sdkSession:
+          type:
+            - "string"
+            - "null"
+          description: "The Agent SDK session the chat resumes, when one is mapped."
+        factCount:
+          type: "integer"
+          description: "Session-memory facts kept for the chat."
+        updatedAt:
+          type:
+            - "string"
+            - "null"
+          description: "ISO time the chat's SDK mapping was last used; null when only facts remain."
     task:
       type: "object"
       additionalProperties: false

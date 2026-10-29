@@ -43,8 +43,14 @@ export async function handleLiveRoutes(req, res, ctx) {
   if (req.method === 'POST' && /^\/kb\/live\/[^/]+\/ack$/.test(path)) {
     const sessionId = decodeURIComponent(path.slice('/kb/live/'.length, -'/ack'.length));
     const body = parseJSON(await readBody(req, 64 * 1024)) || {};
+    // Shape is checked before the capture is looked up, so a bad body is a 400
+    // whatever state the capture is in.
     if (typeof body.noteKey !== 'string' || typeof body.hash !== 'string' || !Number.isInteger(body.lines)) {
       sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'noteKey, hash and lines (integer) are required' } });
+      return true;
+    }
+    if (!body.noteKey || body.noteKey.length > 512 || !body.hash || body.hash.length > 128 || body.lines < 0) {
+      sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'noteKey (1-512 chars), hash (1-128 chars) and lines (>= 0) are required' } });
       return true;
     }
     const result = ackLiveSession(userId, sessionId, { noteKey: body.noteKey, hash: body.hash, lines: body.lines });

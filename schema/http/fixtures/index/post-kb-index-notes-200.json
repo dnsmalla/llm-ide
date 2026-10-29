@@ -1,0 +1,43 @@
+{
+  "endpoint": "POST /kb/index/notes",
+  "status": 200,
+  "description": "Example data. One note written, one hidden note skipped, one body capped.",
+  "request": {
+    "body": {
+      "projectId": "alpha",
+      "notes": [
+        {
+          "noteKey": "meetings/2026/10/standup.md",
+          "projectId": "alpha",
+          "kind": "meeting",
+          "title": "Standup",
+          "date": "2026-10-29T09:00:00.000Z",
+          "durationSec": 900,
+          "participants": [
+            "Ana",
+            "Ben"
+          ],
+          "body": "We agreed to ship on Friday.",
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "mtimeMs": 1798500000000,
+          "meta": {
+            "platform": "meet"
+          }
+        },
+        {
+          "noteKey": "meetings/2026/10/private.md",
+          "title": "Private",
+          "date": "2026-10-29T10:00:00.000Z",
+          "contentHash": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "hidden": true
+        }
+      ]
+    }
+  },
+  "response": {
+    "upserted": 1,
+    "unchanged": 0,
+    "skippedHidden": 1,
+    "truncated": 0
+  }
+}

@@ -1,0 +1,495 @@
+{
+  "description": "Chat lifecycle and live-capture acks (live-then-archive Phase 1, plan sections 3.2-3.6). Always on; nothing in the chat or meeting flow calls them yet. Working-state purges delete server rows and SDK transcripts only; the Mac chat file is the transcript and is never touched here. Archive begin and commit are the fenced protocol of plan 3.3: the archive hash is SHA-256 over the messages in order, each as the UTF-8 byte length of its role, a colon, the role, the byte length of its content, a colon, the content (no separators, so no two message lists collide). An empty list hashes to the SHA-256 of the empty string.",
+  "$defs": {
+    "WorkingChat": {
+      "type": "object",
+      "required": [
+        "chatSessionId",
+        "sdkSession",
+        "factCount",
+        "updatedAt"
+      ],
+      "properties": {
+        "chatSessionId": {
+          "type": "string",
+          "description": "The Mac chat UUID."
+        },
+        "sdkSession": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "The Agent SDK session the chat resumes, when one is mapped."
+        },
+        "factCount": {
+          "type": "integer",
+          "description": "Session-memory facts kept for the chat."
+        },
+        "updatedAt": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "ISO time the chat's SDK mapping was last used; null when only facts remain."
+        }
+      }
+    },
+    "ArchiveMessage": {
+      "type": "object",
+      "required": [
+        "seq",
+        "role",
+        "content",
+        "meta",
+        "createdAt"
+      ],
+      "properties": {
+        "seq": {
+          "type": "integer"
+        },
+        "role": {
+          "type": "string",
+          "enum": [
+            "user",
+            "assistant",
+            "system"
+          ]
+        },
+        "content": {
+          "type": "string"
+        },
+        "meta": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true,
+          "description": "The message metadata the chat store kept, or null."
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Seconds since the epoch, as the chat store records it."
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "GET /kb/agent/working-state": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessions"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/WorkingChat"
+              }
+            }
+          }
+        }
+      }
+    },
+    "POST /agent/v2/sessions/purge": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "chatSessionIds",
+            "verified"
+          ],
+          "properties": {
+            "chatSessionIds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "Up to 500 non-empty chat ids."
+            },
+            "verified": {
+              "type": "boolean",
+              "description": "Must be true: the caller has checked the Mac file. Any other value is a 400 VALIDATION_FAILED."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "purged"
+          ],
+          "properties": {
+            "purged": {
+              "type": "integer",
+              "description": "Chats whose working state was removed. Unknown ids count as zero; the call is idempotent."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/session-purges": {
+      "request": {
+        "body": {
+          "type": "object",
+          "required": [
+            "chatSessionId"
+          ],
+          "properties": {
+            "chatSessionId": {
+              "type": "string"
+            },
+            "reason": {
+              "type": "string",
+              "description": "user_delete (default) or meeting_end. Any other value is a 400 VALIDATION_FAILED."
+            }
+          }
+        }
+      },
+      "responses": {
+        "202": {
+          "type": "object",
+          "required": [
+            "queued",
+            "purged"
+          ],
+          "properties": {
+            "queued": {
+              "const": true,
+              "description": "The tombstone is durable before the purge is attempted."
+            },
+            "purged": {
+              "type": "string",
+              "enum": [
+                "done",
+                "pending"
+              ],
+              "description": "done: working state and server chat rows are gone. pending: the tombstone stays and is replayed later."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/chat/sessions/:id/archive/begin": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "fence",
+            "count",
+            "hash",
+            "session",
+            "messages"
+          ],
+          "properties": {
+            "fence": {
+              "type": "integer",
+              "description": "Bumped by every begin. The commit must present it."
+            },
+            "count": {
+              "type": "integer"
+            },
+            "hash": {
+              "type": "string",
+              "description": "64 lower-case hex characters, the archive hash."
+            },
+            "session": {
+              "type": "object",
+              "required": [
+                "id",
+                "title",
+                "surface",
+                "mode",
+                "projectId",
+                "createdAt",
+                "updatedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "surface": {
+                  "type": "string"
+                },
+                "mode": {
+                  "type": "string"
+                },
+                "projectId": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "createdAt": {
+                  "type": "number"
+                },
+                "updatedAt": {
+                  "type": "number"
+                }
+              }
+            },
+            "messages": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/ArchiveMessage"
+              },
+              "description": "Every message, in order. No cap (plan Q8)."
+            }
+          }
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/chat/sessions/:id/archive/commit": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "required": [
+            "fence",
+            "hash"
+          ],
+          "properties": {
+            "fence": {
+              "type": "integer"
+            },
+            "hash": {
+              "type": "string",
+              "description": "The 64-hex hash the begin returned, recomputed over the file the Mac wrote."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "deleted",
+            "status"
+          ],
+          "properties": {
+            "deleted": {
+              "type": "boolean",
+              "description": "True when this call removed the rows."
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "deleted",
+                "already_archived"
+              ],
+              "description": "already_archived: an earlier commit already removed the chat (idempotent)."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/live/:id/ack": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        },
+        "body": {
+          "type": "object",
+          "required": [
+            "noteKey",
+            "hash",
+            "lines"
+          ],
+          "properties": {
+            "noteKey": {
+              "type": "string",
+              "description": "The relative path of the Mac note that holds the capture."
+            },
+            "hash": {
+              "type": "string",
+              "description": "SHA-256 of the verified file."
+            },
+            "lines": {
+              "type": "integer",
+              "description": "Transcript lines in the verified file."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "state",
+            "ackedAt",
+            "idempotent"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "state": {
+              "const": "acked"
+            },
+            "ackedAt": {
+              "type": "string"
+            },
+            "idempotent": {
+              "type": "boolean",
+              "description": "True when this capture was already acked."
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/live/:id/status": {
+      "request": {
+        "params": {
+          "type": "object",
+          "required": [
+            "id"
+          ],
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessionId",
+            "state"
+          ],
+          "properties": {
+            "sessionId": {
+              "type": "string"
+            },
+            "state": {
+              "type": "string",
+              "enum": [
+                "live",
+                "finalized",
+                "acked",
+                "unknown"
+              ],
+              "description": "unknown: the server has no record (never seen, or lost before a finalize). The extension keeps its draft."
+            }
+          }
+        }
+      }
+    },
+    "GET /kb/live/unacked": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "required": [
+            "sessions"
+          ],
+          "properties": {
+            "sessions": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "sessionId",
+                  "meetingTitle",
+                  "startedAt",
+                  "captionCount",
+                  "source"
+                ],
+                "properties": {
+                  "sessionId": {
+                    "type": "string"
+                  },
+                  "meetingTitle": {
+                    "type": "string"
+                  },
+                  "startedAt": {
+                    "type": [
+                      "number",
+                      "string"
+                    ]
+                  },
+                  "captionCount": {
+                    "type": [
+                      "integer",
+                      "null"
+                    ],
+                    "description": "Null for a database-only capture (after a restart); read its transcript from the meeting."
+                  },
+                  "source": {
+                    "type": "string",
+                    "enum": [
+                      "memory",
+                      "database"
+                    ]
+                  },
+                  "durationSec": {
+                    "type": "integer",
+                    "description": "Only for database-source rows."
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}

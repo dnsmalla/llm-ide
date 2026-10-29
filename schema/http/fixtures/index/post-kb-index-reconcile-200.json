@@ -1,0 +1,33 @@
+{
+  "endpoint": "POST /kb/index/reconcile",
+  "status": 200,
+  "description": "Example data. Report only: one missing, one stale and one extra note; nothing deleted.",
+  "request": {
+    "body": {
+      "projectId": "alpha",
+      "manifest": [
+        {
+          "noteKey": "meetings/2026/10/standup.md",
+          "contentHash": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "noteKey": "meetings/2026/10/new.md",
+          "contentHash": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        }
+      ],
+      "prune": false
+    }
+  },
+  "response": {
+    "missing": [
+      "meetings/2026/10/new.md"
+    ],
+    "stale": [
+      "meetings/2026/10/standup.md"
+    ],
+    "extra": [
+      "meetings/2026/09/old.md"
+    ],
+    "pruned": 0
+  }
+}

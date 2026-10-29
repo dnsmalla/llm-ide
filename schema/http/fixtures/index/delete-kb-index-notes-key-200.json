@@ -1,0 +1,16 @@
+{
+  "endpoint": "DELETE /kb/index/notes/:key",
+  "status": 200,
+  "description": "Example data. The row and its search row are removed.",
+  "request": {
+    "params": {
+      "key": "meetings%2F2026%2F10%2Fstandup.md"
+    },
+    "query": {
+      "projectId": "alpha"
+    }
+  },
+  "response": {
+    "deleted": true
+  }
+}

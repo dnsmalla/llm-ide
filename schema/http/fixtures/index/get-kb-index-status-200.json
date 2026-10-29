@@ -1,0 +1,16 @@
+{
+  "endpoint": "GET /kb/index/status",
+  "status": 200,
+  "description": "Example data. The index agrees with its search rows.",
+  "request": {
+    "query": {
+      "projectId": "alpha"
+    }
+  },
+  "response": {
+    "notes": 12,
+    "ftsRows": 12,
+    "consistent": true,
+    "lastIndexedAt": "2026-10-29T09:30:00.000Z"
+  }
+}

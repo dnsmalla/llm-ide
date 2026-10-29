@@ -100,6 +100,18 @@ let apiRoutes: [Route] = [
 
 /// 2xx fixture endpoints this table does not decode, with the reason.
 let apiSkipped: [(endpoint: String, reason: String)] = [
+    ("DELETE /kb/index/notes/:key", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("GET /kb/agent/working-state", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("GET /kb/index/status", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("GET /kb/live/:id/status", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("GET /kb/live/unacked", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /agent/v2/sessions/purge", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /kb/chat/sessions/:id/archive/begin", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /kb/chat/sessions/:id/archive/commit", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /kb/index/notes", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /kb/index/reconcile", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /kb/live/:id/ack", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
+    ("POST /kb/session-purges", "no Mac caller yet (live-then-archive Phase 1, server-only)"),
     ("POST /kb/summarize", "Mac decodes a private SummarizeResp, then builds MeetingSummary itself; not in this table yet"),
     ("DELETE /agent/v2/session", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("DELETE /auth/me/connectors/:id", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),

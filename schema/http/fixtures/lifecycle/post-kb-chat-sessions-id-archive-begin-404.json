@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/chat/sessions/:id/archive/begin",
+  "status": 404,
+  "description": "No such chat for this user, so there is nothing to archive.",
+  "request": {
+    "params": {
+      "id": "no-such-chat"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "session not found"
+    }
+  }
+}

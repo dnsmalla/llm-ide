@@ -1,0 +1,24 @@
+{
+  "endpoint": "GET /kb/live/unacked",
+  "status": 200,
+  "description": "Example data. One finalized capture still in memory and one durable row left after a restart.",
+  "response": {
+    "sessions": [
+      {
+        "sessionId": "live-session-7",
+        "meetingTitle": "Standup",
+        "startedAt": 1798500000000,
+        "captionCount": 42,
+        "source": "memory"
+      },
+      {
+        "sessionId": "live-session-3",
+        "meetingTitle": "Design review",
+        "startedAt": "2026-10-29T08:00:00.000Z",
+        "captionCount": null,
+        "source": "database",
+        "durationSec": 1800
+      }
+    ]
+  }
+}
