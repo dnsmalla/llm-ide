@@ -40,7 +40,7 @@ test('agent-only tables exist with user_id and the expected keys', () => {
   const names = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'")
     .all().map((r) => r.name).sort();
   assert.deepEqual(names, [
-    'activity', 'activity_seen', 'agent_daily', 'agent_daily_tools', 'agent_runs',
+    'activity', 'activity_seen', 'agent_daily', 'agent_daily_tools', 'agent_route_events', 'agent_runs',
     'agent_schema_migrations', 'agent_tool_events', 'agent_user_settings', 'store_meta', 'turn_composition',
     'usage_calls',
   ]);
@@ -55,7 +55,7 @@ test('re-running the migrations is a no-op', () => {
   const db = new Database(path.join(tmp, 'agent-rerun.db'));
   const first = applyMigrations(db, { dir: AGENT_MIGRATIONS_DIR, table: agent.AGENT_MIGRATIONS_TABLE });
   const second = applyMigrations(db, { dir: AGENT_MIGRATIONS_DIR, table: agent.AGENT_MIGRATIONS_TABLE });
-  assert.equal(first.applied, 3);
+  assert.equal(first.applied, 4);
   assert.equal(second.applied, 0);
   db.close();
 });
