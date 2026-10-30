@@ -1,0 +1,116 @@
+name: desktop-ci
+
+# Checks for the Tauri desktop app (desktop/): node tests, the capability and
+# DOMPurify security gates, the generated-token drift check, then cargo check +
+# cargo test --lib on macOS, Windows (MSVC) and Linux. Never builds a release
+# bundle and never signs; see desktop-release.yml for the manual unsigned draft.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'desktop/**'
+      - 'mac/Sources/LlmIdeMac/Core/Platform/Theme.swift'
+      - 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift'
+      - 'schema/design/**'
+      - '.github/workflows/desktop-ci.yml'
+  pull_request:
+    paths:
+      - 'desktop/**'
+      - 'mac/Sources/LlmIdeMac/Core/Platform/Theme.swift'
+      - 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift'
+      - 'schema/design/**'
+      - '.github/workflows/desktop-ci.yml'
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+          - name: Windows (MSVC)
+            os: windows-latest
+          - name: Linux
+            os: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Linux system dependencies (WebKitGTK 4.1 for Tauri 2)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config file \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+
+      - name: Install Rust (stable, MSVC on Windows)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+          cargo --version
+
+      - uses: actions/cache@v6
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            desktop/src-tauri/target
+          key: desktop-cargo-${{ runner.os }}-${{ hashFiles('desktop/src-tauri/Cargo.lock') }}
+          restore-keys: desktop-cargo-${{ runner.os }}-
+
+      - name: Install npm dependencies
+        working-directory: desktop
+        run: npm ci
+
+      - name: Node tests
+        working-directory: desktop
+        run: npm test
+
+      - name: Capability and DOMPurify security gates
+        working-directory: desktop
+        run: npm run check:security
+
+      - name: Generated tokens are up to date
+        working-directory: desktop
+        run: node scripts/gen-tokens.mjs --check
+
+      - name: Build the frontend (tauri-build embeds desktop/dist)
+        working-directory: desktop
+        run: npm run build
+
+      # tauri.conf.json maps ../resources/core into the bundle and tauri-build
+      # requires the path to exist. It is gitignored (produced by stage-core.mjs
+      # for releases), so CI checks create it empty.
+      - name: Create the empty bundled-core resource dir
+        run: mkdir -p desktop/resources/core
+
+      - name: cargo check
+        working-directory: desktop/src-tauri
+        run: cargo check --locked --all-targets
+
+      - name: cargo test (lib)
+        working-directory: desktop/src-tauri
+        run: cargo test --locked --lib
