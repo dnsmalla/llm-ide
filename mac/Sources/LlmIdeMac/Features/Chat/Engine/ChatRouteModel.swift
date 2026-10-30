@@ -26,6 +26,7 @@ final class ChatRouteModel {
         self.api = api
         guard routerPref, !chatSessionId.isEmpty, server == nil else { return }
         let mine = epoch
+        reconciling = true
         Task { await reconcileOnOpen(epoch: mine) }
     }
     /// Fired when `settings` changed, so the engine persists the chat file (and the tags sidecar).
@@ -51,6 +52,21 @@ final class ChatRouteModel {
 
     /// Epoch guards a late network answer against a chat switch.
     private var epoch = 0
+    /// True while the open-time reconcile (and so a possible restore PUT) is in flight.
+    private(set) var reconciling = false
+
+    /// The chat file's copy of its route, for the next turn's `routeSeed`: nil with the router pref off or nothing to say.
+    var seedForTurn: ChatRouteSettings? {
+        guard routerPref, let settings, !settings.isEmpty else { return nil }
+        return settings
+    }
+
+    /// Hold the first send of a reopened chat until the restore resolves, but never longer than `timeout`
+    /// (the turn then goes out carrying `seedForTurn`, so the server still caps it).
+    func awaitReady(timeout: TimeInterval = 3) async {
+        let deadline = Date().addingTimeInterval(timeout)
+        while reconciling, Date() < deadline { try? await Task.sleep(nanoseconds: 40_000_000) }
+    }
 
     var routerPref: Bool { ChatRoutePreference.routerEnabled() }
     var serverEnabled: Bool { server?.enabled == true }
@@ -90,13 +106,16 @@ final class ChatRouteModel {
         errorText = nil
         changedSinceLastTurn = false
         refusedAtCap = false
+        reconciling = false
         guard routerPref, !id.isEmpty, api != nil else { return }
         let mine = epoch
+        reconciling = true
         Task { await reconcileOnOpen(epoch: mine) }
     }
 
     private func reconcileOnOpen(epoch mine: Int) async {
-        guard let api else { return }
+        guard let api else { if mine == epoch { reconciling = false }; return }
+        defer { if mine == epoch { reconciling = false } }
         do {
             let fetched = try await api.fetch(chatSessionId)
             guard mine == epoch else { return }

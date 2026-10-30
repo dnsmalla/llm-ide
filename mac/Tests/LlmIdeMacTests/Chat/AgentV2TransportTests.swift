@@ -652,4 +652,27 @@ struct AgentV2TransportTests {
         #expect(sw?.to.model == "m" && sw?.cold == true)
         #expect(bud?.level == "reached")
     }
+
+    @Test("the turn body carries the chat file's route seed, only the fields that exist")
+    func bodyCarriesRouteSeed() async throws {
+        let stream = ScriptedAgentV2Stream()
+        stream.events = [
+            .init_(AgentV2Init(sessionId: "sdk-s", claudeCodeVersion: nil, model: nil, tools: [], capabilities: [], mcpServers: [])),
+            .result(AgentV2Result(subtype: nil, costUsd: nil, numTurns: nil, durationMs: nil, sessionId: nil, stopReason: nil)),
+        ]
+        let transport = AgentV2Transport(streamer: stream)
+        var input = makeInput()
+        input.routeSeed = ChatRouteSettings(provider: "anthropic", model: "m", tokenLimit: 5_000, tokensUsed: 1_234)
+        _ = try await transport.roundTrip(input, onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        let seed = try #require(stream.bodies.last?["routeSeed"] as? [String: Any])
+        #expect(seed["tokenLimit"] as? Int == 5_000 && seed["tokensUsed"] as? Int == 1_234)
+        #expect(seed["provider"] as? String == "anthropic" && seed["model"] as? String == "m")
+        input.routeSeed = ChatRouteSettings(tokensUsed: 9)
+        _ = try await transport.roundTrip(input, onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        let bare = try #require(stream.bodies.last?["routeSeed"] as? [String: Any])
+        #expect(bare["tokenLimit"] == nil && bare["provider"] == nil && bare["tokensUsed"] as? Int == 9)
+        input.routeSeed = nil
+        _ = try await transport.roundTrip(input, onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        #expect(stream.bodies.last?["routeSeed"] == nil)
+    }
 }

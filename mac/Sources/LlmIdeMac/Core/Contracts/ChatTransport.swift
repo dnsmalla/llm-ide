@@ -169,6 +169,10 @@ struct ChatTransportInput: Sendable {
     /// a default so existing call sites are unchanged.
     var routeSendsHistory: Bool = false
 
+    /// The chat file's own copy of its route (limit, tokens used, pin), sent with the turn so the server can
+    /// re-create a purged route row BEFORE its cap check. Nil when the router pref is off or the chat has none.
+    var routeSeed: ChatRouteSettings? = nil
+
     /// Determine the provider string to send: `custom:<uuid>` verbatim for a
     /// custom provider, or the built-in tool's `provider` for everything else.
     /// Moved verbatim from `CodeAssistantPanel+Session.swift`'s

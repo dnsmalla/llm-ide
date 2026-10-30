@@ -280,6 +280,13 @@ final class AgentV2Transport: ChatTransport, @unchecked Sendable {
         }
         // A routed chat (pinned provider, or just switched) has no server session to lean on: send the
         // history the engine packed so the server can seed the turn (handoff note + last turns).
+        // The chat's own copy of its route: the server re-creates a purged row from it before the cap check.
+        if let seed = input.routeSeed, !seed.isEmpty {
+            var dict: [String: Any] = ["tokensUsed": seed.tokensUsed]
+            if let limit = seed.tokenLimit { dict["tokenLimit"] = limit }
+            if seed.isPinned, let provider = seed.provider, let model = seed.model { dict["provider"] = provider; dict["model"] = model }
+            body["routeSeed"] = dict
+        }
         if input.routeSendsHistory, !fresh {
             let history = Self.freshHistoryField(input.history)
             if !history.isEmpty { body["history"] = history }

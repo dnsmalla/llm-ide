@@ -268,4 +268,58 @@ struct ChatRouteTests {
         let on = BackendManager.childEnvironment(base: base, featureKeys: nil, routerEnv: ["LLMIDE_ROUTER": "on", "EVIL": "x"])
         #expect(on["LLMIDE_ROUTER"] == "on" && on["LLMIDE_ROUTER_CAP"] == nil && on["EVIL"] == nil)
     }
+
+    @Test func theTurnCarriesTheFilesRouteWhenThePrefIsOnAndNothingOtherwise() async {
+        await withRouterPref(true) {
+            let model = ChatRouteModel()
+            model.sessionChanged(id: "c", file: ChatRouteSettings(tokenLimit: 100, tokensUsed: 40))
+            #expect(model.seedForTurn == ChatRouteSettings(tokenLimit: 100, tokensUsed: 40))
+            model.sessionChanged(id: "d", file: nil)
+            #expect(model.seedForTurn == nil)
+        }
+        await withRouterPref(false) {
+            let model = ChatRouteModel()
+            model.sessionChanged(id: "c", file: ChatRouteSettings(tokenLimit: 100))
+            #expect(model.seedForTurn == nil)
+        }
+    }
+
+    @Test func theFirstSendWaitsForARestoreButNeverLongerThanTheTimeout() async throws {
+        try await withRouterPref(true) {
+            let script = Script()
+            script.fetchAnswer = { _ in try await Task.sleep(nanoseconds: 200_000_000); return try Self.state(seq: 0) }
+            script.putAnswer = { _ in try Self.state(seq: 1, provider: "anthropic", model: "m", limit: 100, billable: 40) }
+            let model = ChatRouteModel()
+            model.wire(script.api)
+            model.sessionChanged(id: "c", file: ChatRouteSettings(provider: "anthropic", model: "m", tokenLimit: 100, tokensUsed: 40))
+            #expect(model.reconciling)
+            await model.awaitReady(timeout: 3)
+            #expect(model.reconciling == false)
+            #expect(script.puts.count == 1, "the restore landed before the send")
+
+            // A restore that hangs: the send goes after the timeout, still carrying the seed.
+            let slow = Script()
+            slow.fetchAnswer = { _ in try await Task.sleep(nanoseconds: 2_000_000_000); return try Self.state() }
+            let m2 = ChatRouteModel()
+            m2.wire(slow.api)
+            m2.sessionChanged(id: "c", file: ChatRouteSettings(tokenLimit: 100, tokensUsed: 40))
+            let started = Date()
+            await m2.awaitReady(timeout: 0.15)
+            #expect(Date().timeIntervalSince(started) < 1.0)
+            #expect(m2.seedForTurn?.tokensUsed == 40)
+        }
+    }
+
+    @Test func aFailedRestoreStillLeavesTheSeedForTheTurn() async {
+        await withRouterPref(true) {
+            let script = Script()
+            script.fetchAnswer = { _ in throw APIError.http(status: 503, code: "ROUTE_UNAVAILABLE", message: "down", details: nil) }
+            let model = ChatRouteModel()
+            model.wire(script.api)
+            model.sessionChanged(id: "c", file: ChatRouteSettings(tokenLimit: 100, tokensUsed: 100))
+            await model.awaitReady(timeout: 2)
+            #expect(model.reconciling == false)
+            #expect(model.seedForTurn?.tokenLimit == 100 && model.seedForTurn?.tokensUsed == 100)
+        }
+    }
 }

@@ -813,6 +813,10 @@ final class ChatEngine {
             // auto-continue chain — can see what this turn was actually sent.
             currentTurnAttachments = turnAttachments
             currentTurnTruncatedPaths = []
+            // A reopened chat's route may still be re-creating itself on the server (the quit purged it): wait a
+            // moment for that, then send anyway; the turn carries the chat file's own copy (`routeSeed`) so it is capped
+            // either way.
+            await route.awaitReady()
             var input = await hooks.resolveTransportInput(
                 message,
                 recent,
@@ -1531,6 +1535,7 @@ final class ChatEngine {
         input.agentContext = ctx
         // A pinned or just-switched chat carries its packed history (server seeds the turn from it).
         input.routeSendsHistory = route.sendsHistory
+        input.routeSeed = route.seedForTurn
     }
 
     /// Mid-turn task list from the v2 stream. Display only: it moves the
