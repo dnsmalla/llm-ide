@@ -16,6 +16,9 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | Loose ends closed | `lta.mode` Settings control, incomplete-archive list, Clear older-than-N-days, run recording for dispatch/review/auto-task, shadow numbers in `/kb/storage`, `.env.example`. |
 | Provider settings | 2026-10-30: four overlapping sections (Model Providers, Custom Providers, Provider catalog, Tiers & Roles) became two: **Providers** (one list, every connection once, type label, key, Test, models and tools, enable, remove, Add, Move to catalog) and **Model routing** (tiers, roles, fallback, router/cap/tools switches). No store or vault migration; server connect gained `enabled` and `copyKeyFrom`. |
 | Extensions catalog P0 to P3 | 2026-10-30, local commits (no push yet): baseline golden file of what every extension consumer loads; catalog item model, restrict-only switch overlay, importer over the three state files, `computeActiveSet` with a fingerprint and a daily counts-only shadow compare; consumers honour the switches behind `LLMIDE_EXT_ACTIVE_SET` (off); provider-adapter turns mount the user's active MCP servers (on by default per the user's decision, `LLMIDE_EXT_ADAPTER=off` kills it). Spec: `docs/spec/extensions-catalog.md`. P4 onward (sources, install, scan, updates, Mac screen) not started. |
+| Provider fixes | DeepSeek: a tool mode with tools off degrades to plain chat with a notice and current model ids count as tool-capable (`27a641a6`); Mac hides unconnected groups, shows "Plain chat (no tools)" with one-click Allow tools and a "tools (assumed)" badge (`400110ed`). |
+| Test hang fix | Per-test timeout and suite watchdog for `npm test`, perl-alarm cap on `swift test` (`83be5934`, `d51e4a61`); token-bench fake runs 120 s to 8 s (`4ece15b3`). |
+| Master plan | `docs/superpowers/MASTER-PLAN.md` with `scripts/plan-status.mjs` (`93ccd529`); web answers recorded (Q-WEB-1 relay-served phone web view, last, in sync-kit; Q-WEB-3 phone through the Mac for now; Q-WEB-2 relay host decided later). |
 | Docs/maps | K0 maps for docs-, graph-, knowledge-, agent-kit; data-lifecycle doc; plans for live-then-archive and agent-kit K1. |
 
 ## In progress [me]
@@ -23,6 +26,10 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | # | Task | State |
 |---|---|---|
 | P7 | Retire `llm_agent/runtime/`: relocate survivors by owner (memory, modes, tools, plan), delete dead code, zero behaviour change. | 2 commits local (`844b1213`, `ece843c6`); agent finishing gates; then short review, gate, push, rebuild. |
+| E4 | Extensions catalog P4 to P9 (sources, install, scan, updates, Mac screen, rollout); plan `plans/2026-10-31-extensions-catalog.md`. | Not started. |
+| V1 | Provider settings live-app verification (DeepSeek connection, router and tools switches) [me]. | Pending. |
+| B1 | Bench runs once Y1 is given [me, with you]. | Pending Y1. |
+| N1 | Night-push job: nightly push of local `main` commits [me]. | Next. |
 
 ## Waiting on you [you]
 

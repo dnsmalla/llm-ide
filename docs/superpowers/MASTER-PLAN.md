@@ -10,17 +10,17 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
-| Desktop Mac (Swift) | 7 | 2 | 7 | 16 | Shipping product; feature-complete for today's scope, manual checks pending |
+| Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 5 | 2 | 19 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 2 | 7 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 3 | 0 | 9 | 12 | No web app plan and no relay code; scope is an open question |
+| Web app and relay | 4 | 0 | 8 | 12 | No web app plan and no relay code; scope is an open question |
 | Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 8 | 2 | 5 | 15 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Shared server and core | 10 | 2 | 5 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
-| Agents, providers, extensions | 5 | 2 | 7 | 14 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
+| Agents, providers, extensions | 7 | 1 | 9 | 17 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 5 | 1 | 7 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
-| Release and CI | 4 | 1 | 7 | 12 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 54 | 15 | 81 | 150 |  |
+| Release and CI | 4 | 1 | 8 | 13 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
+| Total | 60 | 13 | 84 | 157 |  |
 
 ## How the surfaces connect
 
@@ -41,12 +41,18 @@ Parents: [kit-by-kit migration](plans/2026-10-27-kit-by-kit-migration.md), [Taur
 1. **Bench go-ahead (you)** unblocks every token-affecting change (lean SDK config X1, SDK adoption X2, router defaults, ended-chat continuation X3). Until then those ship OFF.
 2. **Manual app checks Y2 (you)** unblock turning live-then-archive `lta.mode` on by default and closing the Mac K1 work.
 3. **Phase 0 closing items (you)**: user-run bench, one Windows run, then ADR 0018 can move to Accepted. **Nothing in Tauri K3 or the relay starts before that.**
-4. **Decide the web app (you, open question below)** gates the whole "Web app and relay" surface, and with it the phone PWA, push and phone-without-Mac.
+4. **Web app decided (Q-WEB-1 = A, relay-served phone web view, last, in sync-kit).** The relay, PWA, push and phone-without-Mac stay behind sync-kit; only relay hosting (Q-WEB-2) is still open.
 5. **Kit order** (kit-by-kit plan): ui-kit, os-kit, docs-kit, graph-kit, knowledge-kit, agent-kit, work/workspace/capture, core job runner, automation-kit, sync-kit. Tauri K3 screens follow each kit's K1/K2; **sync-kit (relay + PWA) comes last** because it mirrors every other kit.
 6. **Knowledge-kit K1 needs Q1-Q14, Q16, Q19 answered (you)**; meeting work (live-then-archive Phase 5 Mac side, 3, 6) waits for you to record meetings (wait).
 7. **Swift retirement (K4 / Phase 6)** only after one release with both desktop apps and a parity checklist.
 
-## Open questions for the user (web app)
+## Web app: the user's answers (2026-10-30)
+
+- **Q-WEB-1 answered: option A.** The web app is the relay-served phone web view (PWA), built **last as part of sync-kit**.
+- **Q-WEB-3 answered:** the phone through the Mac is enough for now; phone-without-Mac (relay) comes later.
+- **Q-WEB-2 open by decision:** relay hosting (VPS or Cloudflare) is decided later, with the relay work.
+
+The original analysis is kept below for the record.
 
 **The repo has no web app plan.** Searched: `docs/superpowers/plans/*`, `docs/decisions/*`, `docs/kits/*`, ROADMAP, `desktop/`, `extension/`. The nearest existing things are:
 
@@ -63,7 +69,7 @@ Q-WEB-1. **What is "the web app"?** Options:
 | B. Connector-only web | "Web" means external sources (Slack, Box, Email, MCP) only; no hosted UI | Already built; nothing to plan beyond the connector items |
 | C. Full hosted web client | A server-side app with its own login and data | Breaks one-copy, loopback-only and "no data access" rules; needs a new ADR |
 
-Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared React UI. Q-WEB-2: relay hosting, VPS or Cloudflare (ADR 0018 decision 2, still open). Q-WEB-3: must the phone work with the Mac **off** (needs the relay) or is "through the Mac" enough for now (works today)? Until answered, the Web section below holds only decision items.
+Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the shared React UI; the user chose it. Q-WEB-2: relay hosting, VPS or Cloudflare (ADR 0018 decision 2), is decided later. Q-WEB-3 was answered: "through the Mac" is enough for now.
 
 ## S1. Desktop Mac (Swift)
 
@@ -77,7 +83,8 @@ Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared
 - [x] System (OS) view in a web view (`641fa2fd`, `f44e52e0`, `104f85d9`) (me)
 - [x] Quit archive with crash recovery, delete-everywhere, sign-out safety (ROADMAP Done, live-then-archive Phases 0-4) (me)
 - [x] Apply & Rebuild card for source checkouts (CLAUDE.md; `FeatureRebuildService`; unverified in a run) (me)
-- [~] Provider catalog Settings UI: server and client landed (`d7ce5367`); Providers section files are uncommitted work in progress in the tree (me)
+- [x] Provider settings consolidation: one Providers list and one Model routing section replace four sections (`d7ce5367`, `b56d80c3`, `c586f506`, `2a0501db`); DeepSeek plain-chat and "tools (assumed)" UI fixes (`400110ed`) (me)
+- [ ] Provider settings live-app verification: DeepSeek connection, router switch, tools switch in the running app (me)
 - [~] Plugin / MCP / LLM-source screens in sealed `Features/Extensions` (ROADMAP Track Q Mac half); real-app check pending (you)
 - [ ] Y2 manual checks: 12-step quit/relaunch with `lta.mode=on`, provider card, chat cap chip, moved screens ([USER-CHECKLIST](USER-CHECKLIST.md) B) (you)
 - [ ] Decisions Q19 (notes without `platform` invisible), Q16 (search latency at 50k notes) (you)
@@ -138,7 +145,7 @@ Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared
 - [ ] Phone works with the Mac off (needs relay, S4) (wait)
 - [ ] Retire cleartext `:3006` + PIN link once the relay reaches parity (ADR 0018 "Supersedes") (wait)
 - [ ] sync-kit K0 map (`docs/kits/` has no sync-kit page yet) and K1-K4 (me)
-- [ ] Phone PWA served by the relay (blocked on Q-WEB-1) (wait)
+- [ ] Phone PWA served by the relay (decided: Q-WEB-1 = A; built last in sync-kit) (wait)
 
 ## S4. Web app and relay
 
@@ -148,8 +155,8 @@ Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared
 - [x] Rule recorded: the web and external services are connectors / ingest only (`docs/kits/data-lifecycle.md` rule 3) (me)
 - [x] Connector adapters for Box, git, issues, QA, SCIP, email, Slack with OAuth (`extension/connectors/`, CLAUDE.md) (me)
 - [x] Reusable React web bundles run inside the Mac app (`mac/LocalPackages/graph-kit/web/`, OS view `b31133e0`); not a hosted web app (me)
-- [ ] **Decide what the web app is (Q-WEB-1)** (you)
-- [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2 (ADR 0018, Tauri plan §10) (you)
+- [x] Decided what the web app is: relay-served phone web view, built last in sync-kit (Q-WEB-1 = A; Q-WEB-3: phone through the Mac is enough for now) (you)
+- [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2; decided later with the relay work (Q-WEB-2) (you)
 - [ ] Relay service: snapshot store, inbox, per-device tokens (no code exists; no `relay/` folder) (me)
 - [ ] End-to-end crypto design: team key, QR enrollment, rotate on revoke; independent security review (me)
 - [ ] Snapshot producer on the desktop and request consumer with permission re-check (me)
@@ -189,7 +196,9 @@ Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared
 - [x] Plugin/MCP/LLM-source routes moved to `routes/extension-routes.mjs` (`58ac81b8`) (me)
 - [x] `POST /kb/complete` one-shot completion, API 88 (`ba65026b`) (me)
 - [x] docs-kit routes `/kb/docs/*` with contract (`b8b52af8`) (me)
-- [x] Test-hang protection: per-test timeout and suite watchdog (`83be5934`, `d51e4a61`) (me)
+- [x] Test-hang protection: per-test timeout and suite watchdog; token-bench fake runs 120 s to 8 s (`83be5934`, `d51e4a61`, `4ece15b3`) (me)
+- [x] This master plan and its status script (`93ccd529`) (me)
+- [x] Contract gates cover catalog connect `enabled` and `copyKeyFrom` (fixtures, regenerated types, OpenAPI, inventory) (me)
 - [~] Phase 1 P12 Swift decode check: `mac/Sources/APIContractLab` exists, docs-kit K1 routes skipped until the Mac switches (`6aa1468d`) (me)
 - [~] P17 token baseline: `schema/bench/token-baseline.json` committed; both real baselines not run per the agent-kit plan T0.2 (you)
 - [ ] K1 per kit, in order: ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
@@ -227,14 +236,17 @@ Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared
 - [x] Session router: per-chat provider/model, billable token cap, handoff, learned limits (ROADMAP P6b) (me)
 - [x] Non-token SDK adoption: retry, rate-limit, permission, refusal, thinking notices, MCP status, sandbox (ROADMAP P2) (me)
 - [x] Token bench harness and fake-run plumbing (`scripts/token-bench.mjs`, `make token-bench-fake`; `c528c9cf`) (me)
-- [x] Provider pinning for tracker-host connectors (ROADMAP X7) (me)
+- [x] Provider pinning for tracker-host connectors (`ff0960e9`, ROADMAP X7) (me)
+- [x] DeepSeek: a tool mode with tools off degrades to plain chat with a notice; current model ids tool-capable (`27a641a6`) (me)
+- [x] Extensions catalog P0-P3: baseline `a3897732`, item model + importer + shadow active set `c25e1c46`, consumers behind `LLMIDE_EXT_ACTIVE_SET` `ebf20127`, MCP on provider-adapter turns behind `LLMIDE_EXT_ADAPTER` `c0b3067c`, spec `4045f2af` (me)
 - [~] Retire `llm_agent/runtime/` (P7): 2 commits local, finishing gates (`844b1213`, `ece843c6`) (me)
-- [~] Extensions catalog plan (2026-10-31): baseline test of extension consumers `a3897732`; plan marked not started otherwise (me)
+- [ ] Extensions catalog P4-P9: sources, install, scan, updates, Mac screen, rollout (plan 2026-10-31) (me)
 - [ ] Y1 bench go-ahead and runs: baselines, noise check, A/B per switch (USER-CHECKLIST A) (you)
 - [ ] Lean SDK configuration L1-L12 (compact prompt, drop Bash in execute, cache TTL, compaction, tool search); each bench-gated (X1) (me)
 - [ ] Token-affecting SDK adoption: `sessionStore`, Haiku search sub-agent, `Task*`, `skills`, `options.agent`, `resumeSessionAt` (X2) (me)
 - [ ] Plugin sub-agent tools unavailable until X2 (ROADMAP Loose ends) (me)
 - [ ] Router polish: switch history in Agents hub, shadow metrics on Storage page (X6; graph-kit pin bump) (me)
+- [ ] Bench: run Y1 baselines and A/B pairs once the user gives the go-ahead (me, with you)
 - [ ] Second-model bench so a model upgrade is a measured setting change (kit plan principle) (you)
 - [ ] SDK upgrade-and-tune loop on each release via `extension/scripts/sdk-surface.mjs` (ongoing) (me)
 
@@ -267,7 +279,8 @@ Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared
 - [x] Pre-push gate runs the same lint CI does (`a0dd8473`) (me)
 - [x] `make regression` aggregates graph-kit pin, feature, contract, Mac, chat/loop/api gates (`Makefile`) (me)
 - [~] Mac Sparkle `CFBundleVersion` limitation (project notes 2026-10; fix state unverified) (me)
-- [ ] CI result checked after every push (`gh run list`); nightly job pushes local commits (you)
+- [ ] Night-push job: set up the nightly job that pushes local `main` commits (me, next)
+- [ ] CI result checked after every push (`gh run list`) (you)
 - [ ] Tauri release workflow: macOS, Windows, Linux bundles (me)
 - [ ] Windows code signing and Linux packaging (deb/AppImage) decision (you)
 - [ ] Auto-update for Tauri, signed (me)
