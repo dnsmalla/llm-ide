@@ -14,6 +14,7 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | Live-then-archive | Phases 0-4 + extension part of 5: note index (rebuildable), chunked reconcile, shadow compare, quit archive with crash recovery, delete-everywhere, sign-out safety, extension draft release. |
 | Agent-kit K1 | P0 bench readiness; P2 non-token SDK adoption (retry/rate-limit/permission/refusal/thinking notices, MCP status, sandbox, fallback model opt-in) + SDK ledger triage; P3 `POST /kb/complete`; P4 extension chat = live v2 client, `/chat` 410; Track Q Mac half (plugin/MCP/LLM-source UI in sealed `Features/Extensions`); P6 provider catalog (Vercel AI SDK adapter, pinned fetch, per-user keys, security-reviewed); P6b session router (per-chat provider/model, billable token cap, handoff, learned limits, compression off); P6 second half (DeepSeek/catalog models in chat, classic engine deleted, `/code-assist` 410, legacy key migration, tools opt-in). |
 | Loose ends closed | `lta.mode` Settings control, incomplete-archive list, Clear older-than-N-days, run recording for dispatch/review/auto-task, shadow numbers in `/kb/storage`, `.env.example`. |
+| Provider settings | 2026-10-30: four overlapping sections (Model Providers, Custom Providers, Provider catalog, Tiers & Roles) became two: **Providers** (one list, every connection once, type label, key, Test, models and tools, enable, remove, Add, Move to catalog) and **Model routing** (tiers, roles, fallback, router/cap/tools switches). No store or vault migration; server connect gained `enabled` and `copyKeyFrom`. |
 | Docs/maps | K0 maps for docs-, graph-, knowledge-, agent-kit; data-lifecycle doc; plans for live-then-archive and agent-kit K1. |
 
 ## In progress [me]
@@ -27,7 +28,7 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | # | Item | Why it matters |
 |---|---|---|
 | Y1 | **Bench go-ahead.** Run on your `claude` CLI login (no per-token billing, counts against plan limits). I will hand you a combined bench plan with exact commands: Haiku v4 baseline, Sonnet-class baseline, noise check, then A/B pairs for each lean change. | Unblocks all token savings (below). |
-| Y2 | **Manual app checks:** 12-step quit-and-relaunch run with `lta.mode=on`; moved plugin/MCP screens; Provider catalog card (DeepSeek connection, "Turn on the session router", "Allow tools on provider models"); chat header cap control. | Real-app verification nothing else can give. |
+| Y2 | **Manual app checks:** 12-step quit-and-relaunch run with `lta.mode=on`; moved plugin/MCP screens; Settings → Providers and Model routing (DeepSeek connection, "Turn on the session router", "Allow tools on provider models"); chat header cap control. | Real-app verification nothing else can give. |
 | Y3 | Decisions: **Q19** (notes without `platform` are invisible in Library), **Q16** (search latency at 50k notes), knowledge-kit Q1-Q14 (unanswered ones, esp. Q6 ReviewConflicts, Q9 plan-table boundaries, Q12-Q13), ledger **step B** go/no-go. | Block knowledge-kit K1 and the ledger cutover. |
 | Y4 | Meetings are not in use: all meeting work waits until you record meetings (see Later M1-M3). | Time-gated by your usage. |
 

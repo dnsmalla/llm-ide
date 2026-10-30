@@ -35,7 +35,7 @@ Cost note: the repo has no measured dollar cost. The how-to's estimate is 1.2 to
 Before you start: quit any server on port 3456 (`lsof -nP -iTCP:3456 -sTCP:LISTEN`, then `kill <pid>`), then `open /Users/dinsmallade/llm-ide/mac/LlmIdeMac.app`. Your data is already in `~/Library/Application Support/llm-ide/system/`. Safe mode: `defaults write com.llmide.macapp lta.mode shadow` (or the Settings → Agent history control).
 
 1. **Basics:** meetings list, chats, settings, the OS page, the Storage hub, Settings → Agent history all load.
-2. **Provider catalog (Settings):** your DeepSeek key appears as a connection (migrated from the built-in key; the old key is kept). Press Test; the model list loads.
+2. **Providers (Settings):** your DeepSeek key appears as a connection (migrated from the built-in key; the old key is kept). Press Test; the model list loads.
 3. **DeepSeek chat:** in a chat, open the model picker; DeepSeek models show a "tools" badge or not. If the router is off you see "Turn on the session router (applies at next backend start)": press it, restart the app, pick a DeepSeek model, send a plain message in Ask mode. Tools stay off until you press "Allow tools on provider models".
 4. **Chat cap control:** the header chip opens a popover: set a small limit, send messages until it stops with "limit reached" and a one-click raise; raise and continue. Quit and reopen the chat: the cap and used count are kept.
 5. **Plugin / MCP / LLM-source screens:** the Library sidebar sections (plugins, LLM sources, MCP) open as before; add/remove dialogs work; the refresh button reloads everything.
