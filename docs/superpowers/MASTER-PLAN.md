@@ -14,13 +14,13 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop multi-OS (Tauri) | 7 | 2 | 17 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 4 | 1 | 7 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
-| Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 11 | 3 | 3 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
+| Shared server and core | 12 | 3 | 2 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 10 | 1 | 9 | 20 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 6 | 2 | 5 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 5 | 1 | 8 | 14 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 68 | 17 | 76 | 161 |  |
+| Total | 70 | 17 | 74 | 161 |  |
 
 ## How the surfaces connect
 
@@ -175,13 +175,13 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Side-panel chat is a live Agent v2 client; `/chat` answers 410 (ROADMAP agent-kit P4; `extension/src/lib/agent-v2-client.ts`) (me)
 - [x] Draft release hook so a capture draft is dropped once copied (`useDraftRelease.ts`, ROADMAP live-then-archive) (me)
 - [x] CI workflow `extension-ci.yml`; 2611 files under `extension/tests` (me)
-- [~] "Extension stores nothing": chat and drafts done; `chrome.storage` is still used in `App.tsx`, `useTranscript.ts`, `capture-store.ts`, `config.ts` and others, audit against the rule pending (me)
+- [~] "Extension stores nothing": audited ([audit](plans/2026-10-31-extension-storage-audit.md)); speaker names and pinned participants no longer persisted (`755fd3df`); remaining: flag-off `no-ack` capture retention (up to 50) until the ack protocol is on by default (you)
 - [~] "Mac app not running" state for the side panel: described in USER-CHECKLIST B7; not verified in a run (you)
 - [ ] Pin the extension origin: CORS accepts every `chrome-extension://*` (ROADMAP Q22) (you)
 - [ ] Manual real-meeting checklist (`extension/CLAUDE.md` Testing Checklist) before any caption/LLM merge (you)
 - [ ] Chrome Web Store listing and review: no evidence in the repo (unverified) (you)
 - [ ] `llmide://` launch from Chrome (Q11) (me)
-- [ ] Verify the Mac/server API the extension calls for reads is sufficient (data-lifecycle section 8 open item) (me)
+- [x] Verify the Mac/server API the extension calls for reads is sufficient: every called path is served; capture hand-off is `/kb/live/*` append, finalize, status, ack ([audit](plans/2026-10-31-extension-storage-audit.md)) (me)
 - [ ] Phase 7 browser-control tools with grants and audit (Tauri plan) (wait)
 
 ## S6. Shared server and core
@@ -205,7 +205,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Core job runner: library done (`extension/kb/job-queue.mjs`, `job-runner.mjs`, `core/process-group.mjs`, migration 0055, spec `docs/spec/job-runner.md`, 10 tests in `extension/tests/job-runner.test.mjs`); not wired into boot or HTTP, no flake gate yet (me)
 - [ ] automation-kit (Loop + Auto Tasks) logic into Node, the largest kit (me)
 - [x] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/*.md`, `845aa869`; each lists numbered decisions for the user) (me)
-- [ ] Flaky tests under full-gate load hardened (`index-routes.http` 1 MB body, `loop-contract-lab` probes) (me)
+- [x] Flaky tests under full-gate load hardened: `index-routes.http` 1 MB body (`e8f11cad`), `loop-contract-lab` probe timeout and Explorer watch tests (`87764821`); 10/10 under artificial load (me)
 
 ## S7. Data and storage
 
