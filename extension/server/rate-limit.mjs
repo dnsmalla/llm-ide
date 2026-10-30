@@ -124,6 +124,14 @@ export function tryConsume(profileName, scope = 'global', tokens = 1) {
     }
     profile = PROFILES.unknownFallback;
   }
+  // The token bench's fake server (same triple guard as benchFakeEngineEnabled:
+  // env var + --bench-fake argv + not production) fires dozens of canned turns
+  // per run; the real 1-per-5s refill made each run sit ~100 s waiting out
+  // 429s, which stretched `npm test` and invited stalls. No model is called.
+  if (profileName === 'agentTurn' && process.env.LLMIDE_BENCH_FAKE === '1'
+      && process.argv.includes('--bench-fake') && process.env.NODE_ENV !== 'production') {
+    return { ok: true, remaining: 1_000_000, refund: () => {} };
+  }
   const key = `${profileName}::${scope}`;
   const b = getBucket(key, profile.capacity, profile.refillRate);
   if (b.tokens >= tokens) {

@@ -467,7 +467,7 @@ test('the stub MCP server speaks enough stdio MCP: initialize, tools/list, tools
   assert.equal(mcpHandle({ jsonrpc: '2.0', id: 4, method: 'nope' }, 's1').error.code, -32601);
   // And as a real child process over stdio.
   const r = spawnSync(process.execPath, [path.join(ROOT, 'scripts', 'bench-fixtures', 'fake-mcp-server.mjs'), 's9'], {
-    input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', encoding: 'utf8',
+    input: '{"jsonrpc":"2.0","id":1,"method":"tools/list"}\n', encoding: 'utf8', timeout: 30_000, killSignal: 'SIGKILL',
   });
   assert.match(r.stdout, /"s9_lookup"/);
 });
@@ -478,7 +478,7 @@ test('CLI: --compare reads two files, runs nothing, exits 0 / 1 / 2', () => {
     const w = (name, obj) => { const f = path.join(dir, name); fs.writeFileSync(f, JSON.stringify(obj)); return f; };
     const base = run([sc('x')], { repeat: 3 });
     const worse = run([sc('x', { billableTokens: 14000, billableSamples: [13900, 14000, 14100] })], { repeat: 3 });
-    const cli = (...files) => spawnSync(process.execPath, [BENCH, '--compare', ...files], { encoding: 'utf8' });
+    const cli = (...files) => spawnSync(process.execPath, [BENCH, '--compare', ...files], { encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL' });
     const a = w('a.json', base);
     const same = cli(a, w('same.json', base));
     assert.equal(same.status, 0, same.stdout + same.stderr);
@@ -538,7 +538,7 @@ test('runBench --fake end to end: every turn metered, cache reused on the second
 });
 
 test('CLI: --baseline --fake is refused (synthetic numbers are never a baseline)', () => {
-  const r = spawnSync(process.execPath, [BENCH, '--baseline', '--fake'], { encoding: 'utf8' });
+  const r = spawnSync(process.execPath, [BENCH, '--baseline', '--fake'], { encoding: 'utf8', timeout: 60_000, killSignal: 'SIGKILL' });
   assert.equal(r.status, 2);
   assert.match(r.stderr, /refusing to write a baseline from --fake/);
 });
@@ -552,7 +552,7 @@ test('CLI: --fake compares medians with a baseline; 0 when unchanged, 1 on a >15
     });
     const cli = (extra) => spawnSync(process.execPath, [
       BENCH, '--fake', '--model', FAKE_MODEL, '--repeat', '1', '--out', path.join(dir, 'r.json'), ...extra,
-    ], { encoding: 'utf8' });
+    ], { encoding: 'utf8', timeout: 120_000, killSignal: 'SIGKILL' });
 
     const ok = path.join(dir, 'ok-baseline.json');
     fs.writeFileSync(ok, JSON.stringify(current));
