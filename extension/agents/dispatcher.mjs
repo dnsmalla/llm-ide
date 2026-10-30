@@ -18,6 +18,7 @@ import { logger } from '../core/logger.mjs';
 import { recordActivity } from '../kb/activity.mjs';
 import { withAgentRun } from '../kb/agent-runs.mjs';
 import { randomUUID } from 'node:crypto';
+import { makeTrackerFetch } from '../server/tracker-fetch.mjs';
 
 const log = logger.child({ component: 'dispatcher' });
 
@@ -108,7 +109,7 @@ async function dispatchGithub(userId, { plan, tasks, repo, token, labels = [] })
         body: buildBody(plan, task),
         labels: [...labels, ...(task.risk ? [`risk:${task.risk}`] : [])].slice(0, 10),
       });
-      const r = await fetch(url, { method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      const r = await makeTrackerFetch({ secret: token })(url, { method: 'POST', headers, body, redirect: 'error', signal: AbortSignal.timeout(15_000) });
       if (!r.ok) {
         const err = redactErrorBody(await r.text());
         releaseTaskDispatchClaim(userId, task.id, DISPATCH_SENTINEL);
@@ -184,7 +185,7 @@ async function dispatchBacklog(userId, { plan, tasks, space, projectId, apiKey, 
       if (task.due && /^\d{4}-\d{2}-\d{2}$/.test(task.due)) params.set('dueDate', task.due);
       // redirect:'error' — the Backlog apiKey is in the form body; never let a
       // 3xx replay this credentialed POST to another host.
-      const r = await fetch(url, { method: 'POST', headers, body: params.toString(), redirect: 'error', signal: AbortSignal.timeout(15_000) });
+      const r = await makeTrackerFetch({ secret: apiKey })(url, { method: 'POST', headers, body: params.toString(), redirect: 'error', signal: AbortSignal.timeout(15_000) });
       if (!r.ok) {
         const err = redactErrorBody(await r.text());
         releaseTaskDispatchClaim(userId, task.id, DISPATCH_SENTINEL);
@@ -259,7 +260,7 @@ async function dispatchLinear(userId, { plan, tasks, teamId, apiKey, projectId }
       if (task.due && /^\d{4}-\d{2}-\d{2}$/.test(task.due)) input.dueDate = task.due;
       if (task.estimateDays != null) input.estimate = Math.round(task.estimateDays);
 
-      const r = await fetch(endpoint, {
+      const r = await makeTrackerFetch({ secret: apiKey })(endpoint, {
         method: 'POST', headers,
         body: JSON.stringify({ query: mutation, variables: { input } }),
         redirect: 'error',

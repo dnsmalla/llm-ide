@@ -9,6 +9,7 @@
 // whole batch.  Instead, errors come back as state='unknown' with the
 // reason in meta.error so the user sees what went wrong per task.
 
+import { makeTrackerFetch } from '../server/tracker-fetch.mjs';
 import { redactSecrets } from '../core/redact-secrets.mjs';
 
 // Redact secrets before returning a poll error. Runs the shared token-shape
@@ -53,7 +54,7 @@ async function pollGithub(dispatched, { token } = {}) {
     const path = u.kind === 'pr'
       ? `/repos/${u.owner}/${u.repo}/pulls/${u.number}`
       : `/repos/${u.owner}/${u.repo}/issues/${u.number}`;
-    const r = await fetch(`https://api.github.com${path}`, { headers, signal: AbortSignal.timeout(15_000) });
+    const r = await makeTrackerFetch({ secret: token, followSameHost: true })(`https://api.github.com${path}`, { headers, signal: AbortSignal.timeout(15_000) });
     if (!r.ok) {
       return { state: 'unknown', meta: { error: `GitHub ${r.status}` } };
     }
@@ -122,7 +123,7 @@ async function pollBacklog(dispatched, { apiKey } = {}) {
     // redirect:'error' — the apiKey rides in the query string, so a 3xx from the
     // (validated) Backlog host to anywhere else must NOT be followed, or the
     // credential would be re-sent off-Backlog. Fail closed instead.
-    const r = await fetch(url, { headers: { 'User-Agent': 'llm-ide-extension' }, redirect: 'error', signal: AbortSignal.timeout(15_000) });
+    const r = await makeTrackerFetch({ secret: apiKey })(url, { headers: { 'User-Agent': 'llm-ide-extension' }, redirect: 'error', signal: AbortSignal.timeout(15_000) });
     // Intentionally omit the URL from the error — it contains the apiKey.
     if (!r.ok) return { state: 'unknown', meta: { error: `Backlog HTTP ${r.status}` } };
     const data = await r.json();
@@ -158,7 +159,7 @@ async function pollLinear(dispatched, { apiKey } = {}) {
         issue(id: $id) { id identifier url state { name type } completedAt cancelledAt }
       }
     `;
-    const r = await fetch('https://api.linear.app/graphql', {
+    const r = await makeTrackerFetch({ secret: apiKey })('https://api.linear.app/graphql', {
       method: 'POST',
       headers: {
         'Authorization': apiKey,

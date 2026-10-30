@@ -37,11 +37,8 @@ const ALLOWED = {
   'connectors/slack-oauth.mjs': { bareFetch: { n: 1, why: 'Slack OAuth token endpoint (fixed host)' } },
   'connectors/slack-source.mjs': { bareFetch: { n: 1, why: 'slack.com Web API (fixed host)' } },
   'connectors/box.mjs': { bareFetch: { n: 2, why: 'api.box.com and its OAuth token endpoint (fixed hosts)' } },
-  'connectors/issues.mjs': { bareFetch: { n: 1, why: 'the user\'s issue tracker (GitHub/GitLab API host the user configured); not a model-provider path, pinning it is a separate task' } },
   'agents/slack.mjs': { bareFetch: { n: 1, why: 'Slack incoming webhook the user configured; not a model-provider path' } },
   'agents/github-pr.mjs': { bareFetch: { n: 1, why: 'api.github.com (fixed host)' } },
-  'agents/outcome-providers.mjs': { bareFetch: { n: 3, why: 'api.github.com and api.linear.app (fixed), plus the user\'s GitLab/Backlog URL (redirect:error); not a model-provider path' } },
-  'agents/dispatcher.mjs': { bareFetch: { n: 3, why: 'the user\'s issue-tracker endpoints (GitHub, GitLab, Backlog; redirect:error); not a model-provider path' } },
   // Self-tests embedded in the handlers (run via `node <file>`), which replace globalThis.fetch on purpose.
   'llm_agent/tools/handlers/fetch-url.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
   'llm_agent/tools/handlers/web-search.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
@@ -83,6 +80,14 @@ test('the OpenAI-compatible, Google and model-list calls in providers.mjs use th
   const src = fs.readFileSync(path.join(root, 'providers/providers.mjs'), 'utf8');
   assert.ok(!/(^|[^.\w])fetch\s*\(/m.test(strip(src)), 'providers.mjs has a bare fetch(');
   assert.ok((src.match(/makePinnedFetch\(\)\(/g) || []).length >= 4, 'callOpenAI, callGoogle, listProviderModels and the chat-route probe');
+});
+
+test('the three tracker-host callers use the pinned tracker fetch (their allowlist entries are gone)', () => {
+  for (const f of ['connectors/issues.mjs', 'agents/dispatcher.mjs', 'agents/outcome-providers.mjs']) {
+    const src = fs.readFileSync(path.join(root, f), 'utf8');
+    assert.match(src, /makeTrackerFetch\(/, f);
+    assert.equal(ALLOWED[f], undefined, `${f} must not be allowlisted`);
+  }
 });
 
 test('the web-fetch tool fetches pages through the pinned fetch, hop by hop', () => {

@@ -5,6 +5,7 @@
 // Tokens flow client → 127.0.0.1 server only on the indexing call; they
 // are never persisted server-side and never leave localhost.
 
+import { makeTrackerFetch } from '../server/tracker-fetch.mjs';
 import { ingestSources, deleteSourcesByPrefix } from '../kb/db.mjs';
 
 const GITHUB_API = 'https://api.github.com';
@@ -27,7 +28,7 @@ async function fetchPage(repo, state, page, token) {
   // request socket up to the server's 5min requestTimeout and burn
   // rate-limit slots. Per-page timeout is bounded; the outer
   // pagination loop covers the multi-page case.
-  const r = await fetch(url, { headers: authHeaders(token), signal: AbortSignal.timeout(15_000) });
+  const r = await makeTrackerFetch({ secret: token, followSameHost: true })(url, { headers: authHeaders(token), signal: AbortSignal.timeout(15_000) });
   if (r.status === 403) {
     // GitHub returns 403 for both auth failures AND rate-limit exceeded.
     // Distinguish them so the caller gets an actionable message instead
