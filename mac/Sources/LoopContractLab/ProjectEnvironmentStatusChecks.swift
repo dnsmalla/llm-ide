@@ -285,17 +285,19 @@ func runProjectEnvironmentInspectorChecks() async {
     """)
     defer { try? FileManager.default.removeItem(at: slow) }
     let started = Date()
-    let late = await ProjectEnvironmentInspector.inspect(repoRoot: slow, inherited: inherited, timeout: 1,
+    let late = await ProjectEnvironmentInspector.inspect(repoRoot: slow, inherited: inherited, timeout: 6,
                                                       runInterpreterProbes: true)
     expect(late.pipCheck == .timedOut, "a probe that exceeds the time limit is timedOut")
     expect(late.pythonVersion == .ok("Python 9.9.9 dwb=1"), "the other probes still answer when one times out")
-    // The slow probe sleeps 30 s; anything well under that proves the 1 s timeout cut it off. 25 s leaves
-    // headroom for a loaded machine (the pre-push gate runs this beside three swift builds).
+    // The slow probe sleeps 30 s; anything well under that proves the timeout cut it off. The timeout is per
+    // probe and applies to the fast probes too (version, find_spec, pytest start), so it must be long enough
+    // for a shell to spawn on a starved machine (the pre-push gate runs this beside three swift builds):
+    // 6 s timeout, 25 s ceiling for the whole inspection (6 s for the one slow probe plus the fast ones).
     expect(Date().timeIntervalSince(started) < 25, "a timed-out probe does not hold up the inspection")
     let pidText = (try? String(contentsOf: slow.appendingPathComponent(".venv/bin/pid"), encoding: .utf8)) ?? ""
     let probePid = pid_t(pidText.trimmingCharacters(in: .whitespacesAndNewlines)) ?? 0
     var isGone = false
-    for _ in 0..<30 where probePid > 0 {
+    for _ in 0..<100 where probePid > 0 {   // up to 10 s for the tree to die on a loaded machine
         if kill(probePid, 0) != 0 { isGone = true; break }
         try? await Task.sleep(nanoseconds: 100_000_000)
     }

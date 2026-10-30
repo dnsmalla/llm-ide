@@ -157,6 +157,7 @@ final class ExplorerTreeStoreWatchTests: XCTestCase {
 
         store.startWatching(root)
         defer { store.stopWatching() }
+        try await waitUntilWatcherIsLive(in: root, store: store)
 
         makeFile("appeared.txt")
         try await waitForNames(["appeared.txt"], in: root, store: store)
@@ -200,6 +201,7 @@ final class ExplorerTreeStoreWatchTests: XCTestCase {
         store.startWatching(root)
         store.startWatching(root)
         defer { store.stopWatching() }
+        try await waitUntilWatcherIsLive(in: root, store: store)
 
         makeFile("appeared.txt")
         try await waitForNames(["appeared.txt"], in: root, store: store)
@@ -222,6 +224,7 @@ final class ExplorerTreeStoreWatchTests: XCTestCase {
         await store.loadChildren(of: root)
         store.startWatching(root)
         defer { store.stopWatching() }
+        try await waitUntilWatcherIsLive(in: root, store: store)
 
         let churnRoot = root!
         let churn = Task.detached {
