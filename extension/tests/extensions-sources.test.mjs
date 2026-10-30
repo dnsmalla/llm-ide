@@ -92,7 +92,13 @@ test('github: the archive comes from codeload at the commit; redirects and overs
 });
 
 test('github: the operator allowlist is a glob list of owner/repo', () => {
-  assert.equal(sourceAllowed('a', 'b', ''), true);
+  // unset or blank: the short default list; `*/*` opens it to any repository
+  assert.equal(sourceAllowed('a', 'b', ''), false);
+  assert.equal(sourceAllowed('a', 'b', undefined), false);
+  assert.equal(sourceAllowed('anthropics', 'skills', ''), true);
+  assert.equal(sourceAllowed('modelcontextprotocol', 'servers', ' '), true);
+  assert.equal(sourceAllowed('modelcontextprotocolX', 'servers', ''), false);
+  assert.equal(sourceAllowed('a', 'b', '*/*'), true);
   assert.equal(sourceAllowed('anthropics', 'skills', 'github.com/anthropics/*, obra/superpowers'), true);
   assert.equal(sourceAllowed('obra', 'superpowers', 'anthropics/*,obra/superpowers'), true);
   assert.equal(sourceAllowed('obra', 'other', 'anthropics/*,obra/superpowers'), false);

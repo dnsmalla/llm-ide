@@ -19,8 +19,8 @@
 //                           already installed stay as they are.
 //   LLMIDE_EXT_SCAN         default advisory: findings are recorded and shown, never
 //                           blocking. `off` skips the scan.
-//   LLMIDE_EXT_ALLOWED_SOURCES  comma list of `owner/repo` globs; unset = any GitHub repo
-//                           the user pastes.
+//   LLMIDE_EXT_ALLOWED_SOURCES  comma list of `owner/repo` globs; unset or blank =
+//                           `anthropics/*,modelcontextprotocol/*`; `*/*` = any repo.
 
 const ON = new Set(['1', 'on', 'true', 'yes']);
 const OFF = new Set(['0', 'off', 'false', 'no']);

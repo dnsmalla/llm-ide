@@ -11,7 +11,7 @@ const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-install-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(root, 'plugins');
 delete process.env.LLMIDE_EXT_CATALOG;
 delete process.env.LLMIDE_EXT_SCAN;
-delete process.env.LLMIDE_EXT_ALLOWED_SOURCES;
+process.env.LLMIDE_EXT_ALLOWED_SOURCES = '*/*'; // fixtures install from made-up owners
 const inst = await import('../llm_agent/extensions/install.mjs');
 const store = await import('../llm_agent/extensions/store.mjs');
 const installedMod = await import('../llm_agent/extensions/installed.mjs');
@@ -128,7 +128,7 @@ test('install: kill switch and operator allowlist', async () => {
   delete process.env.LLMIDE_EXT_CATALOG;
   process.env.LLMIDE_EXT_ALLOWED_SOURCES = 'anthropics/*';
   await rejects(inst.installFromGithub({ userId: 'u5', url: 'https://github.com/acme/skills2', commit: SHA }, { fetch: f }), 'source_not_allowed');
-  delete process.env.LLMIDE_EXT_ALLOWED_SOURCES;
+  process.env.LLMIDE_EXT_ALLOWED_SOURCES = '*/*'; // fixtures install from made-up owners
   assert.equal(f.calls.length, 0);
 });
 

@@ -14,6 +14,7 @@ process.env.LLMIDE_JWT_SECRET = 'a'.repeat(48);
 process.env.LLMIDE_VAULT_KEY = 'b'.repeat(48);
 const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ext-routes-'));
 process.env.LLMIDE_PLUGIN_DIR = path.join(root, 'plugins');
+process.env.LLMIDE_EXT_ALLOWED_SOURCES = '*/*'; // fixtures install from made-up owners
 const { isExtensionRoute, handleExtensionRoute } = await import('../routes/extension-routes.mjs');
 const { isAuthRoute } = await import('../server/auth-routes.mjs');
 const { _setPinnedFetchForTests } = await import('../server/pinned-fetch.mjs');

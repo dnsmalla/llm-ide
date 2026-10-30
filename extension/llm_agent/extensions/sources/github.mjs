@@ -106,10 +106,13 @@ export async function downloadArchive({ owner, repo, commit }, { fetch: fetchImp
   return readCapped(res, maxBytes);
 }
 
-/** Operator allowlist (`LLMIDE_EXT_ALLOWED_SOURCES`, comma list of `owner/repo` globs). Unset: any GitHub repo the user pastes. */
+/** What an install may come from when the operator has not set `LLMIDE_EXT_ALLOWED_SOURCES`. a `star/star` pattern in the variable opens it to any repository. */
+export const DEFAULT_ALLOWED_SOURCES = 'anthropics/*,modelcontextprotocol/*';
+
+/** Operator allowlist (`LLMIDE_EXT_ALLOWED_SOURCES`, comma list of `owner/repo` globs). Unset or blank: {@link DEFAULT_ALLOWED_SOURCES}. */
 export function sourceAllowed(owner, repo, spec = process.env.LLMIDE_EXT_ALLOWED_SOURCES) {
-  const list = String(spec ?? '').split(',').map((s) => s.trim().replace(/^github\.com\//, '')).filter(Boolean);
-  if (!list.length) return true;
+  let list = String(spec ?? '').split(',').map((s) => s.trim().replace(/^github\.com\//, '')).filter(Boolean);
+  if (!list.length) list = DEFAULT_ALLOWED_SOURCES.split(',');
   const name = `${owner}/${repo}`.toLowerCase();
   return list.some((pat) => {
     const re = new RegExp(`^${pat.toLowerCase().replace(/[.+?^${}()|[\]\\]/g, '\\$&').replace(/\*/g, '[^/]*')}$`);
