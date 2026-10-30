@@ -165,6 +165,7 @@ const NON_WIRE_TYPE_LITERALS = new Set([
   'user',                     // sdk/engine.mjs buildPromptInput — SDKUserMessage envelope
   'noul', 'choice', 'score',  // tools/decide.mjs — Jev answer shapes inside the `decide` tool result, never stream events
   'hello',                    // routes/os.mjs — first event of GET /kb/os/stream (the System view change feed), a separate wire
+  'skill', 'command', 'agent', 'mcp', 'hook', 'lsp', 'bin', // llm_agent/extensions/importer.mjs — extension catalog member kinds, not stream events
   // JSON-Schema fragments inside tool definitions.
   'text', 'object', 'string', 'boolean', 'number', 'integer', 'array',
 ]);
