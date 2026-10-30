@@ -73,27 +73,57 @@ export function compressHistory(messages, { keepTurns = STALE_KEEP_TURNS, maxCha
 }
 
 /**
- * Wrap adapter tools so each execute() result is redacted, capped and deduped within ONE turn.
- * The wrapper keeps names, descriptions and parameters, so the library and the gate see the same tools.
+ * Tools whose output may be capped or stubbed. A tool that returns FILE CONTENT (read-file) or something the model
+ * must hold exactly (a loaded skill, citation checks, the task list, decisions) is never head/tailed or stubbed:
+ * cutting the middle of a file the model is editing against is worse than the tokens saved. Those outputs are
+ * still redacted. Everything not listed here is treated that way (the safe default for a new tool).
+ */
+export const COMPRESSIBLE_TOOLS = Object.freeze(new Set([
+  'web-search', 'fetch-url', 'run-bash', 'search-kb', 'find-code', 'code-relations', 'list-files', 'ask-subagent', 'ask-internal',
+]));
+/** A repeated identical call is stubbed only while its first full result is still this recent (chars of other tool output since). */
+export const DEDUPE_WINDOW_CHARS = 24_000;
+
+/** Redact a tool result of any shape. Unchanged results are returned as they came; a changed object stays an object. */
+function redactResult(out) {
+  if (typeof out === 'string') return redactSecrets(out);
+  let text;
+  try { text = JSON.stringify(out ?? null); } catch { return out; }
+  const safe = redactSecrets(text);
+  if (safe === text) return out;
+  try { return JSON.parse(safe); } catch { return safe; }
+}
+
+/**
+ * Wrap adapter tools so each execute() result is ALWAYS redacted, and, for COMPRESSIBLE_TOOLS only, capped and
+ * deduped within ONE turn. The wrapper keeps names, descriptions and parameters, so the library and the gate see
+ * the same tools.
  * @param {Array<{name: string, execute: Function}>} tools
  * @returns {Array} new tool objects; the originals are not touched
  */
-export function wrapToolsForCompression(tools, { maxChars = MAX_TOOL_CHARS } = {}) {
-  const seen = new Map();   // per call of this function = per turn
+export function wrapToolsForCompression(tools, { maxChars = MAX_TOOL_CHARS, window = DEDUPE_WINDOW_CHARS } = {}) {
+  const seen = new Map();   // call key -> { hash, since }: per call of this function = per turn
   return (Array.isArray(tools) ? tools : []).map((t) => ({
     ...t,
     execute: async (input, ctx) => {
-      const key = `${t.name}:${digest(JSON.stringify(input ?? null))}`;
       const out = await t.execute(input, ctx);
-      // An error result is never replaced by a stub: the model must see that the call failed.
-      if (out && typeof out === 'object' && out.error) return out;
-      const text = typeof out === 'string' ? out : JSON.stringify(out ?? null);
-      const safe = redactSecrets(text);
-      const h = digest(safe);
+      // An error result is never replaced by a stub or cut: the model must see that the call failed (redacted only).
+      if (out && typeof out === 'object' && out.error) return redactResult(out);
+      const safeOut = redactResult(out);
+      if (!COMPRESSIBLE_TOOLS.has(t.name)) return safeOut;
+      const text = typeof safeOut === 'string' ? safeOut : JSON.stringify(safeOut ?? null);
+      const key = `${t.name}:${digest(JSON.stringify(input ?? null))}`;
+      const h = digest(text);
       const prior = seen.get(key);
-      if (prior === h && safe.length >= DEDUPE_MIN_CHARS) return `(same output as your earlier ${t.name} call with these arguments)`;
-      seen.set(key, h);
-      return safe.length > maxChars ? headTail(safe, maxChars) : (typeof out === 'string' ? safe : out);
+      // Same tool, same arguments AND same content, and the earlier full result is still in recent context.
+      if (prior && prior.hash === h && prior.since < window && text.length >= DEDUPE_MIN_CHARS) {
+        return `(same output as your earlier ${t.name} call with these arguments)`;
+      }
+      const result = text.length > maxChars ? headTail(text, maxChars) : safeOut;
+      const shown = typeof result === 'string' ? result.length : text.length;
+      for (const v of seen.values()) v.since += shown;
+      seen.set(key, { hash: h, since: 0 });
+      return result;
     },
   }));
 }
