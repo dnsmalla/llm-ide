@@ -27,16 +27,17 @@ import { publisherFromSource, parseItemId, parseMemberId } from './model.mjs';
 import { catalogEnabled, scanEnabled } from './flags.mjs';
 import { removeViewsFor, removeAllViewsFor } from './view.mjs';
 import { readOverlay, setItemEnabled, setMembersEnabled, clearItem, forgetUser } from './store.mjs';
+import { treeHash } from './integrity.mjs';
 import { readInstalled, putInstalled, removeInstalled, forgetInstalledUser, itemStoreDir, userStoreDir, baseDir } from './installed.mjs';
 
 export class InstallError extends Error {
   constructor(code, message, extra = {}) { super(message); this.name = 'InstallError'; this.code = code; this.extra = extra; }
 }
 
-const MAX_FINDINGS_KEPT = 50;
-const busy = new Set();
+export const MAX_FINDINGS_KEPT = 50;
+export const busy = new Set();
 
-function validSubpath(p) {
+export function validSubpath(p) {
   if (p === undefined || p === null || p === '') return '';
   if (typeof p !== 'string' || p.length > 200 || /[\u0000-\u001f\u007f\\]/.test(p) || p.startsWith('/')) throw new InstallError('invalid_path', 'invalid path');
   const segs = p.replace(/\/+$/, '').split('/');
@@ -44,7 +45,7 @@ function validSubpath(p) {
   return segs.join('/');
 }
 
-function writeTree(files, dest) {
+export function writeTree(files, dest) {
   mkdirSync(dest, { recursive: true, mode: 0o700 });
   const root = resolve(dest);
   for (const [rel, buf] of files) {
@@ -56,7 +57,7 @@ function writeTree(files, dest) {
   }
 }
 
-const mapFetchError = (err) => {
+export const mapFetchError = (err) => {
   if (err instanceof InstallError) return err;
   if (err instanceof SourceError || err instanceof ArchiveError) return new InstallError(err.code, err.message);
   if (err?.code === 'SSRF_BLOCKED') return new InstallError('blocked', 'that address is not allowed');
@@ -108,7 +109,7 @@ export async function installFromGithub({ userId, url, ref, commit, path: subpat
   const prior = readInstalled(userId).items.get(info.id);
   if (prior) {
     if (prior.pinnedCommit === sha) return { ok: true, alreadyInstalled: true, item: view(userId, info.id) };
-    throw new InstallError('already_installed', 'this item is installed at another commit; updating is a separate step', { id: info.id, installed: prior.pinnedCommit });
+    throw new InstallError('already_installed', 'this item is installed at another commit; use update', { id: info.id, installed: prior.pinnedCommit, requested: sha, use: '/auth/me/extensions/update' });
   }
 
   const lock = `${userId}\u0000${info.id}`;
@@ -130,6 +131,7 @@ export async function installFromGithub({ userId, url, ref, commit, path: subpat
       members: info.members, declared: { executableKinds: info.executableKinds }, permissions: info.permissions,
       scan: { ...summarizeFindings(findings), findings: findings.slice(0, MAX_FINDINGS_KEPT) },
       consents: {},
+      integrity: treeHash(files),
       storeDir: relative(baseDir(), finalDir),
     };
     if (!putInstalled(userId, info.id, record) || !setItemEnabled(userId, info.id, false)) {
@@ -145,11 +147,14 @@ export async function installFromGithub({ userId, url, ref, commit, path: subpat
 }
 
 /** A record merged with this user's switches. `enabled` is true only after an explicit enable. */
-function view(userId, id, installed = readInstalled(userId), overlay = readOverlay(userId)) {
-  const rec = installed.items.get(id);
-  if (!rec) return null;
+export function view(userId, id, installed = readInstalled(userId), overlay = readOverlay(userId)) {
+  const full = installed.items.get(id);
+  if (!full) return null;
+  // The previous version's snapshot stays server side; the client sees what it needs to offer a rollback.
+  const { previous, ...rec } = full;
   const o = overlay.items.get(id);
-  return { ...rec, state: { enabled: !overlay.corrupt && o?.enabled === true, disabledMembers: [...(o?.disabledMembers ?? [])].sort() } };
+  return { ...rec,
+    ...(previous && typeof previous === 'object' ? { previous: { pinnedCommit: previous.pinnedCommit, version: previous.version ?? null, installedAt: previous.installedAt ?? null } } : {}), state: { enabled: !overlay.corrupt && o?.enabled === true, disabledMembers: [...(o?.disabledMembers ?? [])].sort() } };
 }
 
 export function listInstalled(userId) {
@@ -193,7 +198,7 @@ export function setInstalledMembers(userId, id, memberIds, enabled) {
   return view(userId, id);
 }
 
-function removeStore(dir, userId) {
+export function removeStore(dir, userId) {
   // Defence in depth: only ever delete inside this user's own store directory.
   const root = resolve(userStoreDir(userId));
   const target = resolve(dir);

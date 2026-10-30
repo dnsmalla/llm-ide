@@ -55,6 +55,8 @@ const EMPTY = Object.freeze({ plugins: [], skills: [], mcp: [], items: [], warni
 
 const pluginCache = new Map();
 export function _resetInstalledRuntimeForTests() { pluginCache.clear(); }
+/** Drop parsed plugins: call after bytes under a store directory were replaced. */
+export function clearInstalledRuntimeCache() { pluginCache.clear(); }
 
 const mcpId = (...parts) => {
   const raw = parts.join('-').toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');

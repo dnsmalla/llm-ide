@@ -46,7 +46,7 @@ export function validRef(ref) {
     && !ref.split('/').some((s) => s === '' || s === '.' || s === '..');
 }
 
-async function readCapped(res, max) {
+export async function readCapped(res, max) {
   const declared = Number(res.headers?.get?.('content-length'));
   if (Number.isFinite(declared) && declared > max) { try { await res.body?.cancel?.(); } catch { /* ignore */ } throw new ArchiveError('too_large', 'the download is too large'); }
   if (res.body && typeof res.body.getReader === 'function') {
