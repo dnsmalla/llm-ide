@@ -84,6 +84,11 @@ function providersFor(userId, db) {
   return m;
 }
 
+/** Every provider `userId` registered (the Mac's synced list), as a fresh array. */
+export function listCustomProviders(userId, db = getDb()) {
+  return [...providersFor(userId, db).values()];
+}
+
 /** The provider `providerId` (`custom:<uuid>`) registered by `userId`, or undefined. */
 export function getCustomProvider(providerId, userId, db = getDb()) {
   // A provider-catalog connection (`custom:cat-…`) lives in its own flag, so the

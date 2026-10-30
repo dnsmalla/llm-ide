@@ -214,3 +214,19 @@ test('a submitted key is redacted even if an error message were to carry it', as
   assert.equal(res.statusCode, 400);
   assert.ok(!res._body.includes(key));
 });
+
+test('first GET of the catalog carries a DeepSeek-only user over once: a connection, provider chat on, the migration block', async () => {
+  const { db, users: [a] } = freshDb();
+  const { setSecret } = await import('../server/vault.mjs');
+  setSecret(db, a, 'deepseek.apiKey', 'sk-legacy-0123456789abcdefgh');
+  const first = (await call(a, 'GET', '/kb/providers/catalog')).json();
+  const ds = first.providers.find((p) => p.id === 'deepseek');
+  assert.equal(ds.connections.length, 1);
+  assert.equal(ds.connections[0].provider, 'custom:cat-deepseek');
+  assert.equal(first.settings.toolsEnabled, true);
+  assert.deepEqual(first.migration, { created: [{ provider: 'deepseek', name: 'DeepSeek' }], needsReview: [], toolsEnabled: true });
+  assert.ok(!JSON.stringify(first).includes('sk-legacy'), 'no key in the response');
+  const second = (await call(a, 'GET', '/kb/providers/catalog')).json();
+  assert.equal(second.providers.find((p) => p.id === 'deepseek').connections.length, 1);
+  assert.deepEqual(second.migration, first.migration);
+});

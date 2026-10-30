@@ -21,6 +21,7 @@ import {
 } from '../server/provider-connections.mjs';
 import { listConnectionModels, testConnection } from '../providers/provider-models.mjs';
 import { runProviderTurn, ProviderTurnError } from '../llm_agent/adapter/provider-turn.mjs';
+import { migrateLegacyProviderKeys, migrationView } from '../providers/legacy-key-migration.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
@@ -61,7 +62,9 @@ export async function handleProviderCatalog(req, res, { userId, url }) {
   const m = req.method;
 
   if (m === 'GET' && path === '/kb/providers/catalog') {
-    sendJSON(res, 200, { providers: catalogView(userId, db), settings: getSettings(userId, db) });
+    // First use after the upgrade: carry the user's existing provider keys over (once, non-destructive).
+    const migration = migrationView(migrateLegacyProviderKeys(userId, { db }));
+    sendJSON(res, 200, { providers: catalogView(userId, db), settings: getSettings(userId, db), ...(migration ? { migration } : {}) });
     return true;
   }
   if (m === 'GET' && path === '/kb/providers/settings') {

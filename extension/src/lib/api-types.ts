@@ -5723,6 +5723,21 @@ export type GetKbProvidersCatalogRequest = Record<string, never>;
 export type GetKbProvidersCatalogResponse200 = {
   providers: CatalogProvider[];
   settings: Settings;
+  /** Present once the one-time carry-over of the user's existing provider keys into the catalog has run (API 92). created: connections made from a key already in the vault (the old key is kept); needsReview: keys not carried over (a base URL the guard refuses, or a failed connect) with the reason; toolsEnabled: provider chat was switched on because a connection was created. */
+  migration?: {
+    created: {
+      /** The legacy provider: openai, google, deepseek, custom or custom:<id>. */
+      provider: string;
+      name: string;
+    }[];
+    needsReview: {
+      provider: string;
+      name: string;
+      /** Redacted, at most 200 characters. */
+      reason: string;
+    }[];
+    toolsEnabled: boolean;
+  };
 };
 
 export type GetKbProvidersCatalogResponse401 = CommonError;

@@ -175,6 +175,22 @@
         "cat-groq/brand-new-model": true
       },
       "egressAutoApprove": false
+    },
+    "migration": {
+      "created": [
+        {
+          "provider": "deepseek",
+          "name": "DeepSeek"
+        }
+      ],
+      "needsReview": [
+        {
+          "provider": "custom:lan1",
+          "name": "Lab box",
+          "reason": "SSRF guard: Base URL must use https unless the provider is local or private-network opted in"
+        }
+      ],
+      "toolsEnabled": true
     }
   }
 }
