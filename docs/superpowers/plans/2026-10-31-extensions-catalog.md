@@ -313,6 +313,14 @@ Sizing: about **P0 M, P1 L, P2 L, P3 M, P4 L, P5 L, P6 L, P7 M, P8 S+S, P9 M**; 
 
 ## 14. Questions for the user (options and recommendation)
 
+**Answered by the user, 2026-10-30:**
+
+- **Q-E1, E2, E4, E5, E6, E7:** accept the recommendations (off after install; default sources Anthropic official + community + MCP registry + our kit with `obra/superpowers` and `mattpocock/skills` pre-listed; shared read-only store with per-user state; the 15 GRID skills become an off-by-default pack, not removed; evaluate the 3 candidates on one real task each; phone may toggle non-executable items after P8).
+- **Q-E3 (downloads):** "user download as he like" — **every download is user-initiated** (explicit Install/Update click or pasted URL); nothing downloads automatically in the background. The user chooses the path: the Mac clone (as today, also for private repos) or the server fetch (public GitHub through `pinned-fetch` + host allowlist). Both stay supported; neither runs unprompted.
+- **Q-E8 (scan findings):** **always just warn.** Findings are shown with the item and the per-item permission summary; the user decides. No blocking by trust level (unknown-publisher items still arrive off).
+- **Q-E10 (hooks) and the general rule:** the user wants **one global extension format**; **each provider/engine uses only what it supports, and what it cannot support is skipped (not emulated, not an error)**. Plugin hooks run only where the engine has hook support (Claude Agent SDK turns, behind the existing consent gate); provider-adapter turns do not run hooks and silently skip them (the Providers list shows a capability note).
+- **Q-E9 (MCP/plugin tools on provider turns):** **if the model can use tools, it uses the user's ACTIVE MCP servers and plugin tools** ("they are tools which make it fast"). So the adapter mounts the active MCP/plugin tools automatically whenever provider tools are allowed and the model is tool-capable; no extra per-feature switch is required. Safety is unchanged: the same approvals/consent gates, untrusted-data marking, egress approval, and only ACTIVE items; the kill switch `LLMIDE_EXT_ADAPTER=off` remains as an operator control.
+
 | # | Question | Options | Recommendation |
 |---|---|---|---|
 | Q-E1 | Default state after install | (a) off until enabled, (b) on like Claude Code | **(a)**; matches "select/deselect"; costs one click |
