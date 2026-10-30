@@ -11,16 +11,16 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 5 | 2 | 19 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 7 | 2 | 17 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 2 | 7 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 4 | 0 | 8 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 10 | 3 | 4 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 10 | 1 | 9 | 20 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 5 | 1 | 7 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
+| Security | 6 | 1 | 6 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 5 | 1 | 8 | 14 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 64 | 14 | 83 | 161 |  |
+| Total | 67 | 14 | 80 | 161 |  |
 
 ## How the surfaces connect
 
@@ -111,8 +111,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Phase 0 open: Accessibility grant to measure caption read cadence; optional Swift cold-start comparison (you)
 - [ ] ADR 0018 moved to Accepted after the gate (you)
 - [ ] Graph layout in Rust or WASM (condition 1; ForceAtlas2 in WKWebView is 4-7x slower than Node) (me)
-- [ ] Monaco's vendored DOMPurify patched or Monaco upgraded before untrusted markdown is shown (condition 4) (me)
-- [ ] Tauri capabilities scoped; `read_graph_file` restricted to the project root; terminal flow control (report "Security notes") (me)
+- [x] Monaco's vendored DOMPurify patched: vite redirects its import to pinned `dompurify` 3.4.17 (b1b3d17f); `npm run check:security` + `vite build` show no 3.4.15 in dist (me)
+- [x] Tauri capabilities scoped (AppManifest + explicit allow-*, no core:default/wildcards, `check-capabilities`), `read_graph_file` limited to the project root (8 cargo tests), terminal credit-based flow control (5 cargo tests); cargo check/test and 14 node tests pass, GUI launch and a real `yes` flood not run here (me)
 - [ ] ui-kit extraction and K3 screens per kit: Chat, Library, Explorer, Settings, Issues/Gantt, Doc Gen, Graph, Loop/Auto Tasks, Live (kit plan K3) (me)
 - [ ] Tauri feature-off mechanism decided: build-time tree-shake plus runtime `/health features` (kit plan "Gates added") (you)
 - [ ] Packaged Node sidecar for all three OSes, finds the user's `claude` CLI, survives quit/restart (Tauri plan T6) (me)
@@ -265,7 +265,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Phase 0 staging script excludes secrets, keys, DBs (report "Packaging") (me)
 - [~] Provider and connector fetch pinning: done for provider catalog and trackers; independent review welcome (ROADMAP X7) (me)
 - [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
-- [ ] Tauri capability manifest and path scoping (see S2) (me)
+- [x] Tauri capability manifest and path scoping (see S2; `desktop/src-tauri/capabilities/`, `graph_file.rs`) (me)
 - [ ] Relay: E2E design review, key rotation on revoke, no plaintext (see S4) (me)
 - [ ] Workspace Trust: untrusted folders run no hooks, install scripts or MCP stdio servers (Tauri plan §8) (me)
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
