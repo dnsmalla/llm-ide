@@ -81,15 +81,29 @@ test('recordRateLimits feeds it (flag on) and leaves it alone (flag off)', () =>
   assert.equal(L.getLearned(db, U, 'custom:cat-fed', 'm', new Date()).rpm, 100);
 });
 
-test('a 429 learns the ceiling it hit and only ever lowers a learned figure', () => {
+test('a 429 is not turned into a number; only headers teach, and a refreshed row drops dimensions it no longer carries', () => {
+  ON();
+  assert.equal(typeof L.learnFrom429, 'undefined', 'no function turns a bare 429 into an rpm');
+  const now = new Date();
+  L.learnFromSnapshot(db, U, 'p6', 'm', { requests: { limit: 60, reset: '30s' }, tokens: { limit: 90000, reset: '1h' } }, now);
+  let r = L.getLearned(db, U, 'p6', 'm', now);
+  assert.deepEqual([r.rpm, r.tpd], [60, 90000]);
+  // The next observation carries only requests: the old daily token figure must not survive under the new timestamp.
+  L.learnFromSnapshot(db, U, 'p6', 'm', { requests: { limit: 80, reset: '20s' } }, new Date(now.getTime() + 1000));
+  r = L.getLearned(db, U, 'p6', 'm', new Date(now.getTime() + 1000));
+  assert.deepEqual([r.rpm, r.tpd], [80, null]);
+});
+
+test('user wins end to end: a stated limit survives every later header, is the one limitNear uses, and drives the pick', () => {
   ON();
   const now = new Date();
-  for (let i = 0; i < 4; i += 1) recordUsage(db, { userId: U, provider: 'custom:cat-hit', model: 'm', source: 'api', endpoint: '/kb/providers/turn', inputTokens: 10, outputTokens: 5 });
-  L.upsertLearned(db, U, { provider: 'custom:cat-hit', model: 'm', rpm: 100, now });
-  assert.equal(L.learnFrom429(db, U, 'custom:cat-hit', 'm', now), true);
-  assert.equal(L.getLearned(db, U, 'custom:cat-hit', 'm', now).rpm, 4);
-  L.learnFrom429(db, U, 'custom:cat-hit', 'm', now);
-  assert.equal(L.getLearned(db, U, 'custom:cat-hit', 'm', now).rpm, 4);
+  assert.equal(L.setUserLimit(db, U, { provider: 'custom:cat-user', model: 'm', rpm: 4, now }), true);
+  // Headers (what a 429 response also carries) cannot replace it.
+  assert.equal(L.learnFromSnapshot(db, U, 'custom:cat-user', 'm', { requests: { limit: 1000, reset: '30s' } }, now), false);
+  assert.equal(L.getLearned(db, U, 'custom:cat-user', 'm', new Date(now.getTime() + 400 * 3600_000)).rpm, 4, 'never expires');
+  for (let i = 0; i < 4; i += 1) recordUsage(db, { userId: U, provider: 'custom:cat-user', model: 'm', source: 'api', endpoint: '/x', inputTokens: 1, outputTokens: 1 });
+  const n = L.limitNear(db, U, 'custom:cat-user', 'm', now);
+  assert.deepEqual([n.near, n.which, n.limit], [true, 'rpm', 4]);
 });
 
 test('limitNear: at 90 percent of requests or tokens per minute, from this user\'s ledger only', () => {

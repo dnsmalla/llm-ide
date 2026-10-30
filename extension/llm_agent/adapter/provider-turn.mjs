@@ -21,7 +21,6 @@ import { createChatModel, runToolTurn } from '../../providers/adapter/index.mjs'
 import { pickTurnProvider, noteProviderRateLimited } from '../../providers/provider-fallback.mjs';
 import { routerCompressEnabled } from '../../core/router-flags.mjs';
 import { compressHistory, wrapToolsForCompression } from '../../providers/compress.mjs';
-import { learnFrom429 } from '../../kb/learned-limits.mjs';
 import { listConnectionModels } from '../../providers/provider-models.mjs';
 import { getConnection, getSettings } from '../../server/provider-connections.mjs';
 import { TOOL_MODES, catalogEntry } from '../../server/provider-catalog.mjs';
@@ -183,7 +182,6 @@ export async function runProviderTurn({ userId, provider, model, message, histor
         recordUsage(db, { userId, provider: active.provider, model: active.model, source: 'api', endpoint: '/kb/providers/turn', requestId, ...totals });
       }
       if (summary?.failure?.quota) flagQuota(db, userId, active.provider, active.model);
-      if (summary?.failure?.status === 429 && !summary.failure.quota) learnFrom429(db, userId, active.provider, active.model);
     } catch (err) { log.warn('provider_turn_meter_failed', { message: redactWithKey(String(err?.message || err), null).slice(0, 120) }); }
   }
   return { ...summary, usageTotals: totals, metered: true, provider: active.provider, model: active.model, switched: pick.switched, tools: tools.map((t) => t.name), entry: catalogEntry(conn.catalogId)?.id };

@@ -7,6 +7,11 @@
 //   - A learned value expires 24 h after its last observation.
 //   - Nothing here is read unless LLMIDE_ROUTER_LEARN=on (core/router-flags.mjs); the writers are no-ops
 //     with it off, so a default install stores nothing.
+//   - A 429 alone teaches nothing about WHICH limit was hit (requests, tokens, per minute, per day), so it is not
+//     turned into a number. The rate-limit headers of that same response (they ride every adapter response, 429
+//     included) are what teach; the 429 itself only parks the key for a short cooldown (provider-fallback.mjs).
+//   - 'user' rows are written only through `setUserLimit` (no route or UI writes them in v1; the limits a user sets
+//     for the built-in providers live in model_limits and are consulted first by getLimits). Such a row always wins.
 //   - It only ever marks a key as "near its limit" so the NEXT turn can pick another entry of the user's own
 //     ordered fallback list. No rotation across accounts, nothing mid-stream.
 
@@ -37,12 +42,9 @@ export function upsertLearned(db, userId, { provider, model = '', rpm, rpd, tpm,
   return db.transaction(() => {
     const cur = lazyPrepare(db, 'SELECT * FROM provider_learned_limits WHERE user_id = ? AND provider = ? AND model = ?').get(userId, provider, m);
     if (cur?.source === 'user' && source !== 'user') return false;
-    // A 429 observed a ceiling: keep the lower of what we believed and what we hit.
-    const pick = (f) => {
-      if (incoming[f] === null) return source === 'user' ? null : (cur?.[f] ?? null);
-      if (source === '429' && cur?.[f]) return Math.min(cur[f], incoming[f]);
-      return incoming[f];
-    };
+    // The row is replaced as a whole: a dimension the new observation does not carry is dropped, never kept
+    // past its own expiry (a stale tpd must not outlive the fresh rpm that replaced its row's timestamp).
+    const pick = (f) => incoming[f];
     lazyPrepare(db, `
       INSERT INTO provider_learned_limits (user_id, provider, model, rpm, rpd, tpm, tpd, source, observed_at)
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
@@ -136,13 +138,10 @@ export function learnFromSnapshot(db, userId, provider, model, snapshot, now = n
   }
 }
 
-/** A 429 is a hit ceiling: this minute's request count is a per-minute limit for the key. */
-export function learnFrom429(db, userId, provider, model, now = new Date()) {
-  if (!routerLearnEnabled()) return false;
-  try {
-    const { requests } = usageSince(db, userId, provider, model, new Date(now.getTime() - 60_000));
-    return upsertLearned(db, userId, { provider, model: model ?? '', rpm: Math.max(1, requests), source: '429', now });
-  } catch {
-    return false;
-  }
+/**
+ * Store a limit the USER stated for a key. Always wins over what headers say and never expires. Not reachable
+ * from any route in v1 (see the header); it exists so the rule is real and tested end to end.
+ */
+export function setUserLimit(db, userId, { provider, model = '', rpm, rpd, tpm, tpd, now = new Date() } = {}) {
+  return upsertLearned(db, userId, { provider, model, rpm, rpd, tpm, tpd, source: 'user', now, force: true });
 }
