@@ -43,11 +43,14 @@ function pluginGate(pluginEnabled) {
     : typeof pluginEnabled === 'function' && !!pluginEnabled(p.pluginName));
 }
 
-export function effectiveMcpServers(userId, { readSecret, pluginEnabled } = {}) {
+// `serverActive(record)` is an optional extra gate (the extensions catalog's
+// per-item switch, supplied by llm_agent). It can only remove a server.
+export function effectiveMcpServers(userId, { readSecret, pluginEnabled, serverActive } = {}) {
   const allowedByPlugin = pluginGate(pluginEnabled);
   const active = listMcpPluginsWithState(userId).plugins
     .filter((p) => p.enabled && p.consented)
-    .filter(allowedByPlugin);
+    .filter(allowedByPlugin)
+    .filter((p) => (typeof serverActive === 'function' ? serverActive(p) === true : true));
   const mcpServers = {};
   for (const p of active) {
     const transport = transportOf(p);

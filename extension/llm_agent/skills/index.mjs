@@ -14,6 +14,7 @@ export {
   listInstalledPlugins,
   buildPerUserSkillSet,
   pluginEnabledFor,
+  loadedPlugins,
   buildUserPluginHooks,
   buildUserPluginDelivery,
   assertReadSkillsWired,

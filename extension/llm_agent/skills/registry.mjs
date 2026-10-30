@@ -23,6 +23,8 @@ import { buildPluginHooks } from '../sdk/hooks.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { INTERNAL_HANDLERS } from '../tools/handlers/ask-internal.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../tools/global-handlers.mjs';
+import { gateFor } from '../extensions/gate.mjs';
+import { materializePluginView } from '../extensions/view.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GLOBAL_DIR = join(__dirname, '..', 'global');
@@ -210,7 +212,11 @@ export function currentTrustKinds(p) {
  * `.codex-plugin` manifest, and an own-format plugin has no vendor manifest at
  * all, so both keep the translated path.
  */
-export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env, onNote } = {}) {
+export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env, onNote, gate, onExcluded } = {}) {
+  // `gate` is the catalog's switch view (extensions/gate.mjs). Left undefined it
+  // resolves from LLMIDE_EXT_ACTIVE_SET (null when off = exactly the legacy
+  // behaviour); a caller can force one (the active set) or force none (null).
+  const g = gate === undefined ? gateFor(userId) : gate;
   const enabled = listEnabledPlugins(userId);
   const grantedNames = listHooksTrustedPlugins(userId);
   const grantedKinds = listHooksTrustedKindsOf(userId);
@@ -226,17 +232,37 @@ export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env
 
   for (const p of pluginRegistry.plugins.values()) {
     if (!enabled.has(p.name)) continue;
-    const hooks = Array.isArray(p.hooks) ? p.hooks : [];
-    // Any declaration counts, not just the ones llm-ide can translate: the SDK
-    // runs what it understands from the whole package (see loader.mjs).
-    const hasHooks = hooks.length > 0 || p.declaresHooks === true;
-    const hookTrusted = trusted.has(p.name);
+    if (g && !g.pluginActive(p.name)) continue;
+    // Catalog member switches (flag on only): the hooks component off means the
+    // plugin's hooks run through NEITHER mechanism; any other unchecked member
+    // means the SDK is handed a generated view without it (extensions/view.mjs).
+    const unchecked = g ? g.pluginDisabledMembers(p.name) : [];
+    const hooksOff = unchecked.includes('hook:hooks');
+    const hooks = hooksOff ? [] : (Array.isArray(p.hooks) ? p.hooks : []);
     const sdkReadable = p.format === 'claude'
       && typeof p.manifestRel === 'string'
       && p.manifestRel.startsWith('.claude-plugin');
+    let deliverPath = p.dir;
+    let remainingExecutable = null;
+    if (unchecked.length && nativeEnabled && sdkReadable) {
+      const view = materializePluginView(p, unchecked, { userId });
+      if (view.error) {
+        // Cannot honour the unchecked members exactly: not loading is the safe answer.
+        try { onExcluded?.({ plugin: p.name, reason: view.error }); } catch { /* observation only */ }
+        continue;
+      }
+      deliverPath = view.path;
+      remainingExecutable = view.remainingExecutable;
+    }
+    // Any declaration counts, not just the ones llm-ide can translate: the SDK
+    // runs what it understands from the whole package (see loader.mjs).
+    const hasHooks = remainingExecutable
+      ? remainingExecutable.length > 0
+      : (hooks.length > 0 || (!hooksOff && p.declaresHooks === true));
+    const hookTrusted = trusted.has(p.name);
 
     if (nativeEnabled && sdkReadable && (!hasHooks || hookTrusted)) {
-      sdkPlugins.push({ type: 'local', path: p.dir, skipMcpDiscovery: true });
+      sdkPlugins.push({ type: 'local', path: deliverPath, skipMcpDiscovery: true });
       native.push(p.name);
       continue;
     }
@@ -283,11 +309,18 @@ function mcpDeclarationGroups() {
  * one. An unknown name answers false — a server whose plugin is no longer
  * installed is never effective.
  */
-export function pluginEnabledFor(userId) {
+export function pluginEnabledFor(userId, { gate } = {}) {
   const enabled = listEnabledPlugins(userId);
+  const g = gate === undefined ? gateFor(userId) : gate;
   return (pluginName) => typeof pluginName === 'string'
     && enabled.has(pluginName)
-    && pluginRegistry.plugins.has(pluginName);
+    && pluginRegistry.plugins.has(pluginName)
+    && (!g || g.pluginActive(pluginName));
+}
+
+/** The loaded plugin objects (read-only view for the catalog's importer and active set). */
+export function loadedPlugins() {
+  return [...pluginRegistry.plugins.values()];
 }
 
 // Cache for listAllSkills() — populated on first call, invalidated by
@@ -449,7 +482,8 @@ function loadPluginSkillsCached(dir) {
  * lose — core always wins, so a malicious plugin can't shadow
  * ask-internal etc.
  */
-export function buildPerUserSkillSet(userId) {
+export function buildPerUserSkillSet(userId, { gate } = {}) {
+  const g = gate === undefined ? gateFor(userId) : gate;
   const enabled = listEnabledPlugins(userId);
   // Start with a copy of the internal skill set so mutations here
   // don't bleed across users.
@@ -458,6 +492,7 @@ export function buildPerUserSkillSet(userId) {
   const subagents = new Map();
   for (const p of pluginRegistry.plugins.values()) {
     if (!enabled.has(p.name)) continue;
+    if (g && !g.pluginActive(p.name)) continue;
     // Skill files: re-run the strict skill-loader on the plugin's
     // skills/ directory so we get the same validation guarantees the
     // core skills get. Bad plugin skills are dropped with a warning
@@ -468,6 +503,7 @@ export function buildPerUserSkillSet(userId) {
         console.warn(`[plugin:${p.name}] skill warnings:`, pluginSkills.warnings);
       }
       for (const [name, skill] of pluginSkills.skills) {
+        if (g && !g.pluginMemberActive(p.name, 'skill', name)) continue;
         if (skills.has(name)) {
           // Core wins by design (a plugin must not shadow ask-internal
           // etc.) — but say so, or the plugin author has no way to know
@@ -482,12 +518,14 @@ export function buildPerUserSkillSet(userId) {
     // wins on collision (deterministic since plugins are loaded in
     // directory order).
     for (const [trigger, cmd] of Object.entries(p.commands)) {
+      if (g && !g.pluginMemberActive(p.name, 'command', trigger)) continue;
       commands.set(trigger, { ...cmd, pluginName: p.name });
     }
     // Subagents — single global namespace across plugins. First
     // plugin to declare a name wins (deterministic order), so a
     // malicious second plugin can't hijack a known name.
     for (const [name, sub] of Object.entries(p.subagents || {})) {
+      if (g && !g.pluginMemberActive(p.name, 'agent', name)) continue;
       if (subagents.has(name)) continue;
       subagents.set(name, { ...sub, pluginName: p.name });
     }

@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createWorld, mcpRows } from './helpers/extensions-world.mjs';
+import { createWorld } from './helpers/extensions-world.mjs';
 
 const world = createWorld({ tag: 'ext-baseline' });
 const { freshDb } = await import('./provider-test-env.mjs');
@@ -19,31 +19,11 @@ const { snapshotConsumers } = await import('./helpers/extensions-snapshot.mjs');
 const GOLDEN = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'extensions-baseline', 'baseline.json');
 
 const { users: [u1, u2, u3] } = freshDb(3);
-const registry = await import('../llm_agent/skills/registry.mjs');
+const { populateWorld } = await import('./helpers/extensions-populate.mjs');
 const pluginState = await import('../plugins/state.mjs');
-const sources = await import('../llm-sources/registry.mjs');
-const sourceState = await import('../llm-sources/state.mjs');
 const mcp = await import('../mcp/state.mjs');
-const { setPluginHookTrust } = await import('../plugins/hook-trust.mjs');
 
-registry.reloadPlugins();
-sources.seedBuiltinOnce();
-sources.writeRegistry([...sources.readRegistry(), { id: 'extra', name: 'Extra', origin: 'local', location: world.extra }]);
-mcp.writeMcpRegistry([...mcp.readMcpRegistry(), ...mcpRows()]);
-registry.reloadPlugins(); // registers alpha's declared server as the plugin-sourced row `alpha-srv`
-
-// u1: everything on, one library skill unchecked, a consented MCP trio.
-for (const n of ['alpha', 'hooky', 'owned', 'codexy']) pluginState.setEnabled(u1, n, true);
-const trust = setPluginHookTrust(u1, 'hooky', true, { listPlugins: (uid) => registry.listInstalledPlugins(uid).plugins });
-assert.equal(trust.ok, true, JSON.stringify(trust));
-sourceState.setEnabled(u1, 'extra', true);
-sourceState.setItemsEnabled(u1, 'builtin', 'skill', ['beta'], false);
-for (const id of ['linear', 'sentry', 'alpha-srv']) { mcp.setConsented(u1, id, true); mcp.setEnabledMcp(u1, id, true); }
-// consented but never enabled: must stay out
-mcp.setConsented(u1, 'unused', true);
-// u2: one own-format plugin, no MCP, builtin only.
-pluginState.setEnabled(u2, 'owned', true);
-// u3: nothing touched (first-time user).
+await populateWorld(world, [u1, u2, u3]);
 
 const WHO = { u1, u2, u3 };
 

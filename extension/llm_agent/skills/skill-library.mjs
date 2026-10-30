@@ -19,6 +19,7 @@ import * as yaml from 'js-yaml';
 // from here made registry.mjs ↔ skill-library.mjs a real import cycle.
 import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
 import { listEnabled, listDisabledItems, itemKey } from '../../llm-sources/state.mjs';
+import { gateFor } from '../extensions/gate.mjs';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".
@@ -60,8 +61,14 @@ function readNameDesc(file) {
 // `repo` is the builtin source's resolved path (null if absent); skills gain
 // sourceId/sourceName. Cached per process; call _resetSkillLibraryCache() after
 // any add/update/remove/toggle.
-export function listSkillLibrary(userId) {
-  const cacheKey = userId || '';
+export function listSkillLibrary(userId, { gate } = {}) {
+  // The catalog's switches (LLMIDE_EXT_ACTIVE_SET; explicit null forces none).
+  // The gate is applied INSIDE the build, before the first-wins dedupe, exactly
+  // where the legacy per-source unchecked set is, so a same-id skill in a later
+  // source can stand in for one the catalog switched off. A gated result is
+  // cached under the gate's own signature, never in the legacy slot.
+  const g = gate === undefined ? gateFor(userId) : gate;
+  const cacheKey = g ? `${userId || ''}\u0000${g.signature}` : (userId || '');
   if (_cache.has(cacheKey)) return _cache.get(cacheKey);
   seedBuiltinOnce();
   const enabled = userId
@@ -76,6 +83,7 @@ export function listSkillLibrary(userId) {
     const snap = snapshotSource(src);
     if (src.id === BUILTIN_ID) builtinRepo = src.location || null;
     if (!snap.installed) continue;
+    if (g && !g.llmSourceActive(src.id)) continue;
     // Items this user unchecked inside the source (Library → LLM Sources).
     // Skipped BEFORE the first-wins dedupe, so a same-id skill in a later
     // enabled source can stand in for the one the user turned off.
@@ -92,6 +100,7 @@ export function listSkillLibrary(userId) {
         const fm = readNameDesc(skillMd);
         if (!fm) continue;
         if (disabled.has(itemKey('skill', fm.name))) continue;
+        if (g && !g.librarySkillActive(src.id, fm.name)) continue;
         seenIds.add(id);
         skills.push({
           id,
@@ -135,9 +144,9 @@ const MAX_PIPELINE_SKILL_CHARS = 48_000;
 // the caller frame the content as TRUSTED, followable instructions: it comes
 // from the user's own on-disk skills repo, not the wire, so a client can't
 // smuggle arbitrary "follow me" text through this channel.
-export function readSkillInstructions(id, userId, { maxChars = MAX_SKILL_CHARS } = {}) {
+export function readSkillInstructions(id, userId, { maxChars = MAX_SKILL_CHARS, gate } = {}) {
   if (typeof id !== 'string' || !id) return null;
-  const { skills } = listSkillLibrary(userId);
+  const { skills } = listSkillLibrary(userId, { gate });
   const entry = skills.find((s) => s.id === id);
   if (!entry) return null;
   try {

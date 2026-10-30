@@ -41,9 +41,11 @@ import {
 } from '../modes/mode-personas.mjs';
 import { pipelineSkillIdFor, buildExecuteBinding } from '../plan/plan-pipeline.mjs';
 import {
-  readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
+  readSkillInstructions, buildPerUserSkillSet, internalSkills,
   buildUserPluginDelivery,
 } from '../skills/index.mjs';
+import { buildUserMcpServers } from '../extensions/mcp-servers.mjs';
+import { runTurnShadow } from '../extensions/shadow.mjs';
 import { composeSystemContext, composeRecentContext, composeGitContext, gitStateKey } from '../internal/context/compose.mjs';
 import { sdkSubprocessEnv } from './subprocess-env.mjs';
 import { withToolOutputCap } from './tool-output-cap.mjs';
@@ -66,7 +68,6 @@ import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory
 import { selectSessionMemory } from '../memory/session-memory-select.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
-import { makeSecretReader } from '../../server/vault.mjs';
 import { runClaude as runClaudeImpl } from '../../providers/runtime.mjs';
 import { resolveCustomProviderDispatch, isDecisionOnlyProvider, DECISION_ONLY_MESSAGE } from '../../providers/providers.mjs';
 import { sanitizePersonaSuffix } from '../../providers/prompt-utils.mjs';
@@ -82,7 +83,6 @@ import {
   NETWORK_TOOL, networkHost,
 } from '../../kb/tool-permissions.mjs';
 import { runBashGate, writePathGate, bashNeedsPerCallApproval } from '../tools/gates.mjs';
-import { effectiveMcpServers } from '../../mcp/mcp-config.mjs';
 import { AGENT_SDK_PROVIDER, RESERVED_MCP_NAME } from './constants.mjs';
 import { resolveAnthropicKey, agentSdkHomeFor } from './auth.mjs';
 
@@ -416,56 +416,22 @@ export function v2ToolPolicyForMode(mode) {
   };
 }
 
-// The in-process llmide server owns RESERVED_MCP_NAME (./constants.mjs); a
-// user server answering to it would REPLACE llm-ide's own tool surface for
-// the turn.
-
-/**
- * The user's own MCP servers for one turn, in SDK `mcpServers` shape, plus the
- * tool specs that pre-approve them.
- *
- * Until now the v2 engine mounted only the in-process `llmide` server, so a
- * user who had consented to (say) Linear got its tools on the legacy CLI path
- * and silently nothing here. Policy is deliberately identical to
- * buildMcpConfigForUser: enabled AND consented, and NOTHING in a restricted
- * mode (plan/review/document) — a mode that narrows llm-ide's own tools must
- * not hand over an unbounded third-party surface instead.
- *
- * Pre-approval uses the SDK's server-level spec (`mcp__<server>`) because the
- * tool names of a server are unknowable before connecting — and without it
- * every call would land in canUseTool, which denies anything it doesn't
- * recognize (DENY_UNKNOWN_TOOL).
- */
-export function buildUserMcpServers(userId, mode, {
-  restrictsToolsFn = restrictsTools,
-  readSecret,
-  pluginEnabled,
-} = {}) {
-  const empty = { servers: {}, allowedTools: [] };
-  const requestedMode = typeof mode === 'string' && mode ? mode : 'execute';
-  if (typeof restrictsToolsFn === 'function' && restrictsToolsFn(requestedMode)) return empty;
-  let effective;
-  try {
-    effective = effectiveMcpServers(userId, {
-      readSecret: readSecret || makeSecretReader(getDb(), userId),
-      pluginEnabled: pluginEnabled || pluginEnabledFor(userId),
-    });
-  } catch (err) {
-    // A turn must not die because the MCP registry is unreadable — the user
-    // loses their MCP tools for this turn, not the reply.
-    console.warn('[agent-v2] user MCP unavailable:', err?.message || err);
-    return empty;
-  }
-  const servers = {};
-  for (const [id, cfg] of Object.entries(effective)) {
-    if (id === RESERVED_MCP_NAME) {
-      console.warn(`[agent-v2] MCP server '${id}' shadows llm-ide's own tool server — not mounted`);
-      continue;
-    }
-    servers[id] = cfg;
-  }
-  return { servers, allowedTools: Object.keys(servers).map((id) => `mcp__${id}`) };
+// What a turn loaded, as plain identities for the shadow compare. Tolerant of
+// the injected fakes engine tests pass for the per-user set.
+function loadedExtensionIdentities(userSet, delivery, userMcp) {
+  const entries = (m) => (m && typeof m[Symbol.iterator] === 'function' ? [...m] : []);
+  return {
+    nativePlugins: Array.isArray(delivery?.native) ? delivery.native : [],
+    pluginSkills: entries(userSet?.skills).filter(([, s]) => s?.pluginName).map(([n, s]) => `${s.pluginName}/${n}`),
+    commands: entries(userSet?.commands).map(([t, c]) => `${c?.pluginName}/${t}`),
+    subagents: entries(userSet?.subagents).map(([n, s]) => `${s?.pluginName}/${n}`),
+    mcpServers: Object.keys(userMcp?.servers ?? {}),
+  };
 }
+
+// buildUserMcpServers lives in ../extensions/mcp-servers.mjs (no SDK import, so a
+// provider-adapter turn can use it); re-exported here for the engine's callers.
+export { buildUserMcpServers };
 
 // Was a private, unexplained 20k — ~5k tokens — so any pasted stack trace or
 // log silently lost its tail with nothing on the wire to say so. There was
@@ -1694,7 +1660,8 @@ export async function runAgentV2Turn(
   // fence-contract markdown both handlers prepend — same shape route.mjs
   // passes into buildDispatch (`{ base: internalSkills.base }`), not the raw
   // module export.
-  const { skills: userSkills, subagents: userSubagents } = perUserSkillSet(userId);
+  const userSet = perUserSkillSet(userId);
+  const { skills: userSkills, subagents: userSubagents } = userSet;
 
   // The user's consented MCP servers ride alongside the in-process llmide
   // server, with their server-level specs appended to the allowlist composed
@@ -1722,6 +1689,11 @@ export async function runAgentV2Turn(
     nativeEnabled: nativePluginsEnabled(userId),
     cwd: queryOptions.cwd,
     onNote: (note) => console.warn(note),
+  });
+  // Shadow compare of the catalog's active set against what this turn loaded
+  // (extensions/shadow.mjs): once per user per day, counts only, never blocks.
+  runTurnShadow(userId, mode, loadedExtensionIdentities(userSet, pluginDelivery, userMcp), {
+    computeOpts: { nativeEnabled: nativePluginsEnabled(userId), cwd: queryOptions.cwd },
   });
   const q = queryFactory(buildPromptInput(prompt, images), {
     ...queryOptions,
