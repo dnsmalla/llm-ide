@@ -1,6 +1,6 @@
 //
 // Single source of truth for every "special function" the /code-assist
-// agent loop can dispatch, engine-agnostic. Legacy (runtime/route.mjs) and
+// agent loop can dispatch, engine-agnostic. The v2 engine (sdk/tools.mjs) and the provider adapter (adapter/tool-bridge.mjs) mount it; the classic
 // v2 (sdk/tools.mjs) both derive their dispatch/mount tables from
 // entries()/names() instead of hand-maintaining their own copy.
 //

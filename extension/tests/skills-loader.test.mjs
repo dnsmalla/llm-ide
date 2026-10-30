@@ -117,7 +117,7 @@ test('symlinked nested SKILL.md is rejected with a warning', () => {
 //
 // A tool's `description` is model-facing: it is the MCP tool description on the
 // v2 path (llm_agent/sdk/tools.mjs) and the OpenAI function description on the
-// other (llm_agent/runtime/openai-tools.mjs), so it is what the model selects
+// other (llm_agent/adapter/tool-bridge.mjs), so it is what the model selects
 // tools by. It used to be the first non-heading LINE of the body, and the tool
 // docs are hard-wrapped at ~76 columns, so 13 of 14 shipped as sentence
 // fragments — "Delegate to the LLM-IDE internal agent — the only authority on",

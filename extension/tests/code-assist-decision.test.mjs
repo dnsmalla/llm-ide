@@ -125,7 +125,7 @@ test('a prompt-tier command covered by a project rule runs immediately with no a
 // above cannot catch) --------------------------------------------------
 //
 // route.mjs builds `handlers` via buildDispatch(baseCtx) once per request,
-// then runReadHandler/runNativeAgentLoop (llm_agent/runtime/loop.mjs) call
+// then the removed classic loop's runReadHandler/runNativeAgentLoop called
 // `handlers[name](args, loopCtx)` — buildDispatch's dispatch function is
 // `(args, loopCtx) => entry.execute(args, { ...baseCtx, loopCtx })`, so
 // `emit` (which loop.mjs threads into its own per-call ctx) only ever

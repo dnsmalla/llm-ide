@@ -60,7 +60,7 @@ export const PROVIDERS = {
   // `decide` path (providers/jev.mjs ← llm_agent/runtime/decide.mjs); every
   // chat/completion dispatch that names it is refused with
   // DECISION_ONLY_MESSAGE (assertChatProvider) — see the guards in
-  // runtime.mjs resolveClaudeCall, completeViaApi, llm_agent/runtime/route.mjs
+  // runtime.mjs resolveClaudeCall, completeViaApi
   // and llm_agent/sdk/engine.mjs, plus the tier resolver's `decision_only`.
   jev:       { vaultKey: 'jev.apiKey',       env: 'JEV_AI_API_KEY',      cli: null,  decisionOnly: true },
 };
@@ -91,7 +91,7 @@ export function assertChatProvider(provider) {
 const DEFAULT_OPENAI_BASE = 'https://api.openai.com/v1';
 // DeepSeek's API root. Exported because the same literal was otherwise
 // re-typed at every call site (runtime.mjs's completeViaApi call,
-// llm_agent/runtime/route.mjs's native-loop base) — one of which is how this
+// the removed classic native loop's base) — one of which is how this
 // constant ended up declared-but-unused in the first place.
 export const DEFAULT_DEEPSEEK_BASE = 'https://api.deepseek.com';
 // Gemini's OpenAI-compatible surface. Google exposes /chat/completions with
@@ -213,7 +213,7 @@ export function providerApiKey(userId, provider) {
 // Resolve a user-registered `custom:<uuid>` provider for dispatch: look it up
 // in the in-memory registry, then read its API key from the vault. This is the
 // SINGLE source of truth used by both dispatch paths — the Code Assistant
-// native tool-loop (llm_agent/runtime/route.mjs) and the legacy single-shot
+// provider-adapter turn (llm_agent/adapter) and the single-shot
 // `runClaude` path (providers/runtime.mjs) — so they can't drift.
 //
 // Returns `{ apiKey, baseUrl, name, anthropicBaseUrl }` on success (the last is

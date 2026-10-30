@@ -2,7 +2,7 @@
 // Claude Code's own /clear works, NOT sent to the model as a prompt. This is
 // deliberately separate from llm-ide's own plugin slash-command system
 // (extension/plugins/loader.mjs's expandSlashCommand, wired in
-// llm_agent/runtime/route.mjs): that system expands a command into a PROMPT
+// the removed classic route): that system expands a command into a PROMPT
 // for the LLM to see; these intercept the message before it ever reaches
 // sendMessage, the same way Claude Code's REPL never forwards /clear to the
 // model. Aliases match commands.json's documented aliases for /clear.

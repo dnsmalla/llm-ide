@@ -88,7 +88,7 @@ export function executeSkillId({ hasSubagents } = {}) {
  * The ONE skill id to inject for this turn, or null to inject nothing.
  *
  * Kept as a pure resolver (no I/O, no skill reading) so both engines —
- * runtime/route.mjs and sdk/engine.mjs — share one rule about which stage a
+ * sdk/engine.mjs and the provider adapter — share one rule about which stage a
  * turn is in, and so the rule is testable without a skills repo on disk.
  * The engines supply `hasSubagents` because only they know this user's
  * plugin/subagent view.

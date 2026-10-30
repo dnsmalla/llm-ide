@@ -260,7 +260,7 @@ export function loadSkills(dir, { requireBase = true, ignore = [] } = {}) {
 /// Used as a fallback description when the frontmatter has no `description`.
 // A derived description is MODEL-FACING: it becomes the MCP tool description
 // on the v2 path (sdk/tools.mjs) and the OpenAI function description on the
-// other (runtime/openai-tools.mjs), so it is what the model picks tools by.
+// other (adapter/tool-bridge.mjs skillSchemaToJsonSchema), so it is what the model picks tools by.
 //
 // This used to return the first non-heading LINE, capped at 140 chars. The
 // tool docs are hard-wrapped at ~76 columns, so 13 of the 14 registered tools

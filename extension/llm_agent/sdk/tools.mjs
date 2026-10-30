@@ -218,7 +218,7 @@ export function buildLlmIdeServer(userId, agentContext, currentMessage, {
           throw err;
         } finally {
           // Telemetry parity with the legacy loop's dispatch point
-          // (runtime/loop.mjs, same `skill_invoked` event, tagged by engine so
+          // (the removed classic loop emitted the same `skill_invoked` event, tagged by engine so
           // one grep of kb/server.log covers both). v2 emitted nothing, so on
           // the DEFAULT engine there was no way to answer "is the model
           // actually calling this tool" — which is the only honest way to

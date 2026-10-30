@@ -357,7 +357,7 @@ export const config = Object.freeze({
   // accepted chrome-extension://* / localhost / 127.0.0.1 set.
   extraCorsOrigins: envStr('LLMIDE_CORS_ORIGINS', '').split(',').map((s) => s.trim()).filter(Boolean),
 
-  // Replayed conversation history (llm_agent/runtime/loop.mjs). Sized in CHARS,
+  // Replayed conversation history (the removed classic loop; now the Mac's history packer). Sized in CHARS,
   // not turns: the old fixed "last 8 turns" window was blown by tool-call
   // round-trips (each one appends a synthetic result turn plus a reply), so a
   // multi-step task lost the user's original request after ~4 steps and the

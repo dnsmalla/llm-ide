@@ -492,11 +492,11 @@ function rateLimitProfile(url, method) {
   if (url === '/generate-docx')          return 'llmFast';
   if (url === '/generate-doc')           return 'llmFast';          // LLM export twin of /generate-docx
   if (url === '/kb/docs/seed' || url === '/kb/projects/register') return 'kbWrite';
+  // The removed classic /code-assist answers 410: a cheap llmFast request, never an agent turn.
+  if (url === '/code-assist')            return 'llmFast';
   // Chat agent turns get their own bucket — see `agentTurn` in
   // server/rate-limit.mjs for why `llm`'s burst of 3 was too small.
-  if (url === '/code-assist')            return 'llmFast';          // removed (410): never an agent turn
-  // The v2 engine's chat turn stream — the Agent-SDK successor of
-  // /code-assist, same cost class (a multi-minute agent turn).
+  // The v2 engine's chat turn stream (multi-minute agent turns).
   if (url === '/agent/v2/stream')        return 'agentTurn';
   // The Loop's headless agent step — the same multi-minute agent-turn cost.
   if (url === '/kb/loop/agent-run')      return 'agentTurn';

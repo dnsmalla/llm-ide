@@ -192,7 +192,9 @@ export async function handleAIRoutes(req, res) {
   // /agent/v2/stream). Answers 410 for one release so an extension that was not
   // updated shows a clear message instead of a blank failure; deleted with the
   // classic runtime (API 92). The body is not read.
-  if (req.method === 'POST' && req.url === '/chat') {
+  // Removed routes match on the path alone, so `/code-assist?x=1` answers 410 like `/code-assist`.
+  const pathOnly = String(req.url || '').split('?')[0];
+  if (req.method === 'POST' && pathOnly === '/chat') {
     sendJSON(res, 410, chatRemovedBody());
     return true;
   }
@@ -248,8 +250,8 @@ export async function handleAIRoutes(req, res) {
 
   // POST /code-assist and /code-assist/decision were the classic engine's routes (the fence loop). They
   // answer 410 for one release; the chat runs on POST /agent/v2/stream (K1 P6 T6.9).
-  if (req.method === 'POST' && (req.url === '/code-assist' || req.url === '/code-assist/decision')) {
-    sendJSON(res, 410, codeAssistRemovedBody(req.url));
+  if (req.method === 'POST' && (pathOnly === '/code-assist' || pathOnly === '/code-assist/decision')) {
+    sendJSON(res, 410, codeAssistRemovedBody(pathOnly));
     return true;
   }
 

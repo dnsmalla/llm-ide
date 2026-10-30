@@ -582,7 +582,7 @@ export function buildEngineOptions(
   const planLike = PLAN_LIKE_MODES.has(resolvedMode);
 
   // The planning pipeline's stage skill for this turn — the same resolution
-  // the legacy engine runs (runtime/route.mjs), so a plan started on one
+  // the classic engine (removed) ran, so a plan started on one
   // engine reads identically on the other. See runtime/plan-pipeline.mjs.
   let hasSubagents = false;
   try { hasSubagents = (getSubagents(userId)?.size ?? 0) > 0; }
@@ -658,7 +658,7 @@ export function buildEngineOptions(
   if (!planLike) appendParts.push(V2_QUESTION_GUIDANCE);
   // User's own custom persona (kb/personas.mjs) — distinct from the MODE
   // persona above. Mirrors the legacy loop's exact framing/sanitization
-  // (llm_agent/runtime/route.mjs) so a persona reads identically across
+  // (the removed classic route) so a persona reads identically across
   // engines. Best-effort: a stray DB error here shouldn't break a v2 turn,
   // and users with no persona set pay zero extra token cost.
   try {
@@ -2069,7 +2069,7 @@ export async function runAgentV2Turn(
     }
   }
   // Auto project/session-memory capture — the v2 parity for the legacy
-  // loop's persistTurnMemory call (llm_agent/runtime/route.mjs): distills
+  // loop's persistTurnMemory call (the removed classic route): distills
   // durable facts from this turn and writes them to BOTH the project's
   // chat-memory.md (read back next turn via the project_memory tool) and
   // the DB-backed per-session copy (kb/session-memory.mjs, read back above)

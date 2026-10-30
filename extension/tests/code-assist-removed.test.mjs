@@ -41,3 +41,15 @@ test('the 410 is cheap: /code-assist is no longer in the agent-turn rate bucket'
   const src = (await import('node:fs')).readFileSync(new URL('../server.mjs', import.meta.url), 'utf8');
   assert.match(src, /if \(url === '\/code-assist'\)\s+return 'llmFast'/);
 });
+
+test('a query string does not turn the 410 into a 404: /code-assist?x=1 and /chat?x=1 answer 410', async () => {
+  for (const [url, use] of [['/code-assist?x=1', '/agent/v2/stream'], ['/code-assist/decision?x=1', '/agent/v2/decision']]) {
+    const out = res();
+    assert.equal(await handleAIRoutes(req(url, { message: 'hi' }), out), true, url);
+    assert.equal(out.statusCode, 410, url);
+    assert.equal(JSON.parse(out._b).error.details.use, use);
+  }
+  const chat = res();
+  assert.equal(await handleAIRoutes(req('/chat?x=1', {}), chat), true);
+  assert.equal(chat.statusCode, 410);
+});

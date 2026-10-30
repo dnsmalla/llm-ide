@@ -693,7 +693,7 @@ test('stream: validation — missing message/chatSessionId/workspaceRoot → 400
 //
 // The legacy /code-assist loop resolves mode BEFORE the turn: "auto"
 // classifies the message, an explicit mode must be a known MODES member,
-// anything else runs execute (llm_agent/runtime/route.mjs). The v2 route
+// anything else runs execute (the removed classic route). The v2 route
 // originally passed body.mode through verbatim — "auto" (the Mac client's
 // default) ran as a mode personaForMode doesn't know, so assist_plan/plan/
 // review/document never activated on v2. Same story for leading-slash

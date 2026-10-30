@@ -141,7 +141,7 @@ const DEFAULT_MODE = 'execute';
 const PERMISSION_MODES = new Set(['ask', 'accept-edits', 'bypass', 'manual']);
 
 // Leading-slash plugin commands expand exactly like the legacy loop
-// (llm_agent/runtime/route.mjs): the enabled command set for THIS user,
+// (the removed classic route): the enabled command set for THIS user,
 // then template expansion before the turn runs. Default seam so tests can
 // pin the route contract without plugin state on disk.
 function expandUserSlashCommand(message, userId) {

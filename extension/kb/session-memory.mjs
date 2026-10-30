@@ -15,7 +15,7 @@ import { getDb, requireUser, lazyPrepare } from './db.mjs';
 /**
  * The stable per-conversation id to key session memory on — shared by the
  * write path (llm_agent/runtime/memory-persist.mjs) and the read path
- * (llm_agent/runtime/route.mjs), so they can never drift onto different keys.
+ * (llm_agent/sdk/engine.mjs and the provider adapter), so they can never drift onto different keys.
  * `chatSessionId` is the client's own stable session-store UUID; plain
  * `sessionId` is re-minted on every session switch and is only a fallback for
  * a client that doesn't send the stable one.
@@ -36,7 +36,7 @@ const MAX_FACTS_PER_SESSION = 200; // matches config.memory-ish order of magnitu
 // extract.mjs), so the full stored list (200 × 500 chars above) grows into a
 // ~100k-char fixed cost per turn on a long chat — for the one-word follow-ups
 // as much as for the real work. Both engines (sdk/engine.mjs and
-// runtime/route.mjs) build the block from `capSessionMemory`, so they inject
+// the v2 engine) build the block from `capSessionMemory`, so they inject
 // the same memory for the same chat.
 const PROMPT_MAX_FACTS = 40;
 const PROMPT_MAX_CHARS = 8_000;

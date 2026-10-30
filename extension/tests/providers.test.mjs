@@ -98,7 +98,7 @@ test('cliInvocation: codex is rooted with -C and pinned read-only; --yolo is nev
 
 test('providerHasCli: only providers with a real CLI binary can run keyless', () => {
   // The predicate that decides "delegate to a logged-in CLI" vs "ask for a
-  // key" for a non-Anthropic turn (llm_agent/runtime/route.mjs).
+  // key" for a non-Anthropic turn (the removed classic route).
   assert.equal(providerHasCli('anthropic'), true);   // claude
   assert.equal(providerHasCli('openai'), true);      // codex
   assert.equal(providerHasCli('google'), true);      // gemini
