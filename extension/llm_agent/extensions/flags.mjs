@@ -14,6 +14,14 @@
 //                           the legacy consumers loaded, counts only, once a day
 //                           per user. `off` stops the compare.
 
+//   LLMIDE_EXT_CATALOG      default ON: a user may install items from GitHub into
+//                           the catalog. `off` refuses install; items
+//                           already installed stay as they are.
+//   LLMIDE_EXT_SCAN         default advisory: findings are recorded and shown, never
+//                           blocking. `off` skips the scan.
+//   LLMIDE_EXT_ALLOWED_SOURCES  comma list of `owner/repo` globs; unset = any GitHub repo
+//                           the user pastes.
+
 const ON = new Set(['1', 'on', 'true', 'yes']);
 const OFF = new Set(['0', 'off', 'false', 'no']);
 const read = (name) => String(process.env[name] ?? '').trim().toLowerCase();
@@ -27,3 +35,5 @@ export function shadowEnabled() {
   if (v === '') return process.env.NODE_ENV !== 'test';
   return !OFF.has(v);
 }
+export function catalogEnabled() { return !OFF.has(read('LLMIDE_EXT_CATALOG')); }
+export function scanEnabled() { return read('LLMIDE_EXT_SCAN') !== 'off'; }

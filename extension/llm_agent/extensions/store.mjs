@@ -123,6 +123,11 @@ export function setMembersEnabled(userId, id, memberIds, enabled) {
   });
 }
 
+/** Drop one item's overlay entry (uninstall). */
+export function clearItem(userId, id) {
+  return mutate(userId, id, () => null);
+}
+
 /** Forget everything for one user (account deletion). */
 export function forgetUser(userId) {
   if (!safeUser(userId)) return false;
