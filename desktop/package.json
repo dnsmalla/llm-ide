@@ -8,7 +8,7 @@
     "build": "node scripts/gen-tokens.mjs --check && tsc --noEmit && vite build",
     "tauri": "tauri",
     "tokens": "node scripts/gen-tokens.mjs",
-    "test": "node --test scripts/",
+    "test": "node --test scripts/*.test.mjs",
     "check:security": "node scripts/check-capabilities.mjs && node scripts/check-dompurify.mjs"
   },
   "dependencies": {
