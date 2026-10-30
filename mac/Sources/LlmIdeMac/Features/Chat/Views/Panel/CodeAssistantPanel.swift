@@ -432,6 +432,7 @@ struct CodeAssistantPanel: View {
                 planSwitchBanner()
             }
             if agentV2ProviderBlocked { agentV2ProviderHintBar }
+            plainChatBar
             if let prompt = engine.agent.nudgePrompt, activeRepoRoot != nil {
                 nudgeBanner(prompt: prompt)
             }

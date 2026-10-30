@@ -63,19 +63,23 @@ extension CodeAssistantModelState {
             } else {
                 listed = tool == .claudeCode || hasKey
             }
-            guard listed || isCurrent else { continue }
+            let runs = capableProviders.contains(tool.provider)
+            // A provider that cannot run a chat any more is noise unless it is the one selected AND the user has
+            // a key for it (then its reason is shown); an unconnected one is not listed at all.
+            guard Self.shouldList(runs: runs, listed: listed, isCurrent: isCurrent, hasKey: hasKey || tool == .claudeCode) else { continue }
             var models = models(for: tool, includingSelected: isCurrent)
             if isCurrent { models = Self.listing(selectedModel, in: models) }
-            let runs = capableProviders.contains(tool.provider)
             sections.append(ComposerProviderSection(
                 id: tool.rawValue, title: tool.displayName, models: models,
                 runsOnAgentEngine: runs, unavailableNote: runs ? nil : ComposerCatalog.unsupportedNote))
         }
-        for provider in customProviders where (provider.isEnabled && ProviderAvailability.isListed(provider.wireId, available: available))
-            || provider.wireId == selectedProvider {
-            var models = provider.models
-            if provider.wireId == selectedProvider { models = Self.listing(selectedModel, in: models) }
+        for provider in customProviders {
             let runs = capableProviders.contains(provider.wireId)
+            let isCurrent = provider.wireId == selectedProvider
+            let listed = provider.isEnabled && ProviderAvailability.isListed(provider.wireId, available: available)
+            guard Self.shouldList(runs: runs, listed: listed, isCurrent: isCurrent, hasKey: true) else { continue }
+            var models = provider.models
+            if isCurrent { models = Self.listing(selectedModel, in: models) }
             sections.append(ComposerProviderSection(
                 id: provider.wireId, title: provider.name, models: models,
                 runsOnAgentEngine: runs, unavailableNote: runs ? nil : ComposerCatalog.unsupportedNote))
@@ -83,6 +87,14 @@ extension CodeAssistantModelState {
         sections += ComposerCatalog.sections(catalogConnections, routerOn: routerOn, providerChatEnabled: catalogProviderChatEnabled,
                                           routerPrefOn: routerPrefOn)
         return sections.filter { !$0.models.isEmpty }
+    }
+
+    /// Whether a built-in or custom provider's group is in the menu. One that can run a chat follows the usual
+    /// rule (set up, or selected). One that cannot (no Anthropic-compatible endpoint, built-in key only) is
+    /// hidden unless it is selected and the user has a key for it, so an unconnected "OpenAI: unavailable"
+    /// never shows.
+    static func shouldList(runs: Bool, listed: Bool, isCurrent: Bool, hasKey: Bool) -> Bool {
+        runs ? (listed || isCurrent) : (isCurrent && hasKey)
     }
 
     /// `models` with `id` appended when it is missing — the chip names the

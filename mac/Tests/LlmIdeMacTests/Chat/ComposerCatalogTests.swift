@@ -246,3 +246,46 @@ struct CatalogUpgradePathTests {
         #expect(ProviderMigrationText.routerNeeded.contains("next time the backend starts"))
     }
 }
+
+/// The visible degrade: "Plain chat (no tools)" and its one-click switch.
+@MainActor
+@Suite("Plain chat note", .serialized)
+struct PlainChatNoteTests {
+    private func conn(tools: Bool) -> [CatalogConnectionSummary] {
+        [CatalogConnectionSummary(wireId: "custom:cat-deepseek", name: "DeepSeek", models: [
+            .init(id: "deepseek-chat", toolsSupported: tools, toolsSource: "catalog", streaming: true, contextWindow: nil)])]
+    }
+    private func reason(provider: String = "custom:cat-deepseek", model: String = "deepseek-chat", mode: String = "execute",
+                        tools: Bool = true, toolsEnabled: Bool = true) -> ComposerCatalog.PlainChatReason? {
+        ComposerCatalog.plainChatReason(provider: provider, model: model, mode: mode, connections: conn(tools: tools), toolsEnabled: toolsEnabled)
+    }
+
+    @Test("tools off in a tool mode: plain chat because the switch is off (one-click Allow tools)")
+    func toolsOff() {
+        for mode in ["auto", "execute", "plan", "assist_plan", "review"] {
+            #expect(reason(mode: mode, toolsEnabled: false) == .toolsOff, Comment(rawValue: mode))
+        }
+    }
+
+    @Test("a model without tools (or not in the list) is plain chat even with the switch on, with no Allow tools action")
+    func modelLacksTools() {
+        #expect(reason(tools: false) == .modelLacksTools)
+        #expect(reason(model: "deepseek-new") == .modelLacksTools)
+    }
+
+    @Test("no note for a tool-capable model with tools on, for ask and document modes, or for Claude")
+    func noNote() {
+        #expect(reason() == nil)
+        #expect(reason(mode: "ask", toolsEnabled: false) == nil)
+        #expect(reason(mode: "document", tools: false) == nil)
+        #expect(reason(provider: "anthropic", toolsEnabled: false) == nil)
+    }
+
+    @Test("the words")
+    func words() {
+        #expect(ComposerCatalog.plainChatTitle == "Plain chat (no tools)")
+        #expect(ComposerCatalog.allowToolsLabel == "Allow tools")
+        #expect(ComposerCatalog.plainChatDetail(.toolsOff).contains("Tools are off"))
+        #expect(ComposerCatalog.plainChatDetail(.modelLacksTools).contains("tools badge"))
+    }
+}

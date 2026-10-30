@@ -35,6 +35,34 @@ enum ComposerCatalog {
         return "\(model.displayName)  (\(badge(toolsSupported: tools)))"
     }
 
+    /// Why a turn on the selected model will run as plain chat (no tools), or nil when it will not.
+    enum PlainChatReason: Equatable { case toolsOff, modelLacksTools }
+
+    /// Modes that ask for tools (`auto` may resolve to one of them).
+    static let toolModes: Set<String> = ["auto", "execute", "plan", "assist_plan", "review"]
+
+    /// The inline "Plain chat (no tools)" note: a catalog model in a tool mode with tools switched off, or on a
+    /// model the catalog does not list as tool-capable. Claude and non-catalog providers never show it.
+    static func plainChatReason(provider: String, model: String, mode: String,
+                                connections: [CatalogConnectionSummary], toolsEnabled: Bool) -> PlainChatReason? {
+        guard provider.hasPrefix("custom:cat-"), toolModes.contains(mode) else { return nil }
+        if !toolsEnabled { return .toolsOff }
+        let listed = connections.first { $0.wireId == provider }?.models.first { $0.id == model }
+        return listed?.toolsSupported == true ? nil : .modelLacksTools
+    }
+
+    static let plainChatTitle = "Plain chat (no tools)"
+    static func plainChatDetail(_ reason: PlainChatReason) -> String {
+        switch reason {
+        case .toolsOff: return "Tools are off for provider models, so this model answers without reading files or running commands."
+        case .modelLacksTools: return "This model is not known to support tools. Pick one with the tools badge for edits and commands."
+        }
+    }
+    static let allowToolsLabel = "Allow tools"
+
+    /// The one compact row at the bottom of the menu while no catalog provider is connected.
+    static let moreProvidersHint = "More providers: Settings → Providers"
+
     /// What a model with no tools can do: plan, execute and review need tools, so the server refuses them.
     static let noToolsHelp = "No tools: ask and document modes only. Plan, execute and review need a model with tools."
 

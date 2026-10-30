@@ -24,23 +24,47 @@ struct ComposerProviderMenuTests {
         return s
     }
 
-    @Test("Claude, keyed built-ins and enabled custom providers are listed; unkeyed built-ins are not")
+    @Test("Only providers that can run a chat are listed; an unconnected or unusable one is hidden, a selected+keyed one shows its reason")
     func listsSetUpProviders() {
-        let s = state(selected: AICliTool.deepseek.rawValue, model: "deepseek-flash", keys: ["deepseek.apiKey"])
+        let s = state(selected: AICliTool.deepseek.rawValue, model: "deepseek-flash", keys: ["deepseek.apiKey", "openai.apiKey"])
         var custom = CustomProvider(name: "Relay", baseURL: "https://relay.example/v1", apiKey: "k",
-                                    models: [AIModel(id: "relay-1", displayName: "relay-1")])
+                                    models: [AIModel(id: "relay-1", displayName: "relay-1")],
+                                    anthropicBaseURL: "https://relay.example/anthropic")
         var off = CustomProvider(name: "Off", baseURL: "https://off.example/v1", apiKey: "k",
                                  models: [AIModel(id: "off-1", displayName: "off-1")])
         off.isEnabled = false
         custom.isEnabled = true
         s.customProviders = [custom, off]
 
-        let ids = s.composerProviderSections(capableProviders: [AgentV2Selection.anthropicProvider]).map(\.id)
+        let capable = AgentV2Selection.agentCapableProviders(customProviders: [custom, off])
+        let sections = s.composerProviderSections(capableProviders: capable)
+        let ids = sections.map(\.id)
         #expect(ids.contains(AICliTool.claudeCode.rawValue))
-        #expect(ids.contains(AICliTool.deepseek.rawValue))
-        #expect(ids.contains(custom.wireId))
+        #expect(ids.contains(custom.wireId), "a capable custom provider is listed")
         #expect(!ids.contains(off.wireId))
-        #expect(!ids.contains(AICliTool.openai.rawValue), "no key stored")
+        #expect(!ids.contains(AICliTool.openai.rawValue), "keyed but unusable and not selected: hidden, no 'unavailable' noise")
+        let ds = sections.first { $0.id == AICliTool.deepseek.rawValue }
+        #expect(ds?.unavailableNote == ComposerCatalog.unsupportedNote, "selected + keyed: shown with its reason")
+    }
+
+    @Test("an unconnected provider that is selected (a default with no key) is not listed")
+    func unconnectedSelectedHidden() {
+        let s = state(selected: AICliTool.openai.rawValue, model: "gpt-x", keys: [])
+        let ids = s.composerProviderSections(capableProviders: [AgentV2Selection.anthropicProvider]).map(\.id)
+        #expect(!ids.contains(AICliTool.openai.rawValue))
+        #expect(!ids.contains(AICliTool.deepseek.rawValue))
+        #expect(ids.contains(AICliTool.claudeCode.rawValue))
+    }
+
+    @Test("the unavailable-provider rule in one table")
+    func shouldListTable() {
+        #expect(CodeAssistantModelState.shouldList(runs: true, listed: true, isCurrent: false, hasKey: false))
+        #expect(CodeAssistantModelState.shouldList(runs: true, listed: false, isCurrent: true, hasKey: false))
+        #expect(!CodeAssistantModelState.shouldList(runs: true, listed: false, isCurrent: false, hasKey: true))
+        #expect(!CodeAssistantModelState.shouldList(runs: false, listed: true, isCurrent: false, hasKey: true))
+        #expect(!CodeAssistantModelState.shouldList(runs: false, listed: true, isCurrent: true, hasKey: false))
+        #expect(CodeAssistantModelState.shouldList(runs: false, listed: true, isCurrent: true, hasKey: true))
+        #expect(ComposerCatalog.moreProvidersHint == "More providers: Settings → Providers")
     }
 
     @Test("the selected model is listed under its provider even when the live list dropped it")
@@ -49,7 +73,7 @@ struct ComposerProviderMenuTests {
         let deepseek = s.composerProviderSections(capableProviders: [])
             .first { $0.id == AICliTool.deepseek.rawValue }
         #expect(deepseek?.models.map(\.id).contains("deepseek-chat") == true)
-        let claude = s.composerProviderSections(capableProviders: [])
+        let claude = s.composerProviderSections(capableProviders: [AgentV2Selection.anthropicProvider])
             .first { $0.id == AICliTool.claudeCode.rawValue }
         #expect(claude?.models.map(\.id).contains("deepseek-chat") == false, "never under another provider")
     }

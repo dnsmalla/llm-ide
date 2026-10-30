@@ -102,6 +102,39 @@ extension CodeAssistantPanel {
     /// remedy (switch provider) are on screen together. Clears itself the
     /// moment the conflict does (unlike `attachNoticeBar`, there is no
     /// "later" to keep it for — the state is live).
+    /// The visible degrade: a tool-mode turn on a model with no tools runs as plain chat. A switch that is off gets
+    /// a one-click "Allow tools" (the same switch as Settings, Providers); nothing is enabled silently.
+    @ViewBuilder var plainChatBar: some View {
+        if let reason = ComposerCatalog.plainChatReason(
+            provider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider),
+            model: modelState.selectedModel, mode: modelState.selectedMode.rawValue,
+            connections: modelState.catalogConnections, toolsEnabled: modelState.catalogProviderChatEnabled) {
+            HStack(spacing: 6) {
+                Image(systemName: "text.bubble").font(.system(size: 11)).foregroundStyle(theme.current.textMuted)
+                Text(ComposerCatalog.plainChatTitle).font(.system(size: 11, weight: .semibold)).foregroundStyle(theme.current.text)
+                Text(ComposerCatalog.plainChatDetail(reason)).font(.system(size: 11)).foregroundStyle(theme.current.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                if reason == .toolsOff {
+                    Button(ComposerCatalog.allowToolsLabel) {
+                        Task {
+                            if var settings = try? await api.fetchProviderCatalogSettings() {
+                                settings.toolsEnabled = true
+                                _ = try? await api.saveProviderCatalogSettings(settings)
+                            }
+                            await modelState.loadCatalogConnections(api: api)
+                        }
+                    }
+                    .buttonStyle(.bordered).controlSize(.small)
+                    .help(ProviderMigrationText.toolsExplanation)
+                }
+            }
+            .padding(.horizontal, Spacing.md)
+            .padding(.vertical, 6)
+            .background(theme.current.textMuted.opacity(0.08))
+        }
+    }
+
     var agentV2ProviderHintBar: some View {
         HStack(spacing: 6) {
             Image(systemName: "info.circle")
@@ -612,6 +645,10 @@ extension CodeAssistantPanel {
                             .help(section.catalog && section.toolsByModel[model.id] == false ? ComposerCatalog.noToolsHelp : "")
                         }
                     }
+                }
+                if modelState.catalogConnections.isEmpty {
+                    Divider()
+                    Text(ComposerCatalog.moreProvidersHint)
                 }
                 if !effortLevels.isEmpty {
                     Divider()

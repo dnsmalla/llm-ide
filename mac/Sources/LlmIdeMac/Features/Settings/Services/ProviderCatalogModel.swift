@@ -22,6 +22,7 @@ enum ProviderCatalogRules {
         guard model.toolsSupported else { return nil }
         switch model.toolsSource {
         case "inferred": return "tools (guessed)"
+        case "pattern": return "tools (assumed)"
         case "override": return "tools (yours)"
         default: return "tools"
         }
