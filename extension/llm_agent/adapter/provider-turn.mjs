@@ -27,6 +27,7 @@ import { TOOL_MODES, catalogEntry } from '../../server/provider-catalog.mjs';
 import { personaForMode } from '../modes/mode-personas.mjs';
 import { abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { buildProviderTools, normalizeWorkspaceRoot } from './tool-bridge.mjs';
+import { mountMcpTools } from './mcp-mount.mjs';
 
 const log = logger.child({ component: 'provider-turn' });
 const MAX_HISTORY = 40;
@@ -133,7 +134,16 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     ? buildProviderTools({ userId, agentContext, mode, sessionKey, emit: send, signal, currentMessage: message,
       egressNeedsApproval: !getSettings(userId, db).egressAutoApprove })
     : [];
-  const tools = compress ? wrapToolsForCompression(built) : built;
+  // The user's ACTIVE MCP servers, mounted like any other provider tool (mcp-mount.mjs): only when tools are
+  // allowed and the model can call them; LLMIDE_EXT_ADAPTER=off is the operator's kill switch. Plugin hooks are
+  // not part of this path and are skipped without a word.
+  const mcp = cap.toolsSupported && toolsAllowed
+    ? await mountMcpTools({ userId, mode, emit: send, signal, sessionKey,
+      egressNeedsApproval: !getSettings(userId, db).egressAutoApprove, deps: deps.mcp })
+    : { tools: [], statuses: [], close: async () => {} };
+  const closeMcp = () => Promise.resolve(mcp.close()).catch(() => {});
+  const all = [...built, ...mcp.tools];
+  const tools = compress ? wrapToolsForCompression(all) : all;
   const degraded = !cap.toolsSupported || !toolsAllowed;
   if (degraded) {
     const reason = !toolsAllowed ? 'tools_off' : 'model_lacks_tools';
@@ -144,7 +154,8 @@ export async function runProviderTurn({ userId, provider, model, message, histor
       data: { model: active.model, mode, reason, toolsAllowed, toolsSupported: cap.toolsSupported } });
   }
   send({ type: 'init', sessionId: sessionKey, claudeCodeVersion: null, model: active.model,
-    tools: tools.map((t) => t.name), capabilities: ['provider-adapter'], mcpServers: [] });
+    tools: tools.map((t) => t.name), capabilities: ['provider-adapter'],
+    mcpServers: mcp.statuses.map((s) => ({ name: s.name, status: s.status })) });
 
   let chatModel;
   try {
@@ -154,6 +165,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
         allowPrivate: conn.allowPrivate, fetchImpl: deps.chatFetch,
         onHeaders: (headers) => recordRateLimits(userId, { provider: active.provider, model: active.model, headers }) });
   } catch (e) {
+    await closeMcp();
     if (e?.code === 'SSRF_BLOCKED') throw new ProviderTurnError('PROVIDER_BLOCKED', redactWithKey(e.message, dispatch.apiKey).slice(0, 300), 403);
     throw e;
   }
@@ -168,7 +180,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     if (ev.type === 'error' && ev.code === 'PROVIDER_RATE_LIMITED') noteProviderRateLimited(userId, active.provider);
     send(ev);
   };
-  const onAbort = () => abortDecisionsForSession(sessionKey);
+  const onAbort = () => { abortDecisionsForSession(sessionKey); closeMcp(); };
   signal?.addEventListener?.('abort', onAbort, { once: true });
   let summary;
   try {
@@ -181,6 +193,7 @@ export async function runProviderTurn({ userId, provider, model, message, histor
   } finally {
     signal?.removeEventListener?.('abort', onAbort);
     abortDecisionsForSession(sessionKey);
+    await closeMcp();
     // Metered like any other call, under the connection's own provider id; best effort.
     try {
       if (totals.inputTokens || totals.outputTokens) {

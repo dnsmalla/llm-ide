@@ -28,7 +28,7 @@ import { logger } from '../../core/logger.mjs';
 // ask-internal / ask-subagent run a nested loop on Claude (runClaude); a turn
 // on another provider must not quietly spend the user's Anthropic quota.
 const NOT_MOUNTED = new Set(['ask-internal', 'ask-subagent']);
-const MAX_TOOL_RESULT_CHARS = 30_000;
+export const MAX_TOOL_RESULT_CHARS = 30_000;
 
 // Tools that send the model's chosen text or URL to the network. A hostile page
 // or file can steer the model into using them to leak what it has read, so a
@@ -125,7 +125,7 @@ export function providerMountedEntries(mode) {
   return entries().filter((e) => !NOT_MOUNTED.has(e.name) && (!allow || allow.has(e.name)));
 }
 
-async function parkApproval({ entry, args, ctx, emit, sessionKey }) {
+export async function parkApproval({ entry, args, ctx, emit, sessionKey }) {
   const { requestId, promise } = registerDecision({ sdkSessionId: sessionKey, userId: ctx.userId, kind: 'ToolApproval' });
   try {
     emit({ type: 'approval_request', requestId, kind: 'ToolApproval', toolName: entry.name, argsSummary: JSON.stringify(args).slice(0, 300) });

@@ -59,8 +59,10 @@ test('baseline shape sanity (guards the golden file against being regenerated em
   assert.ok(!snap.u3.library.includes('skills/delta'));
 });
 
-// Adapter turns today: no extensions of any kind reach a provider-backed turn.
-test('baseline: a provider-adapter turn reports no MCP servers and mounts no mcp__ tool', async () => {
+// Adapter turns before P3: no extensions of any kind reach a provider-backed turn. P3 mounts the user's active
+// MCP servers automatically (the user's decision), so this baseline is what LLMIDE_EXT_ADAPTER=off preserves.
+test('baseline (LLMIDE_EXT_ADAPTER=off): a provider-adapter turn reports no MCP servers and mounts no mcp__ tool', async () => {
+  process.env.LLMIDE_EXT_ADAPTER = 'off';
   const conns = await import('../server/provider-connections.mjs');
   const { runProviderTurn } = await import('../llm_agent/adapter/provider-turn.mjs');
   const { MockLanguageModelV3, simulateReadableStream } = await import('ai/test');
@@ -89,4 +91,5 @@ test('baseline: a provider-adapter turn reports no MCP servers and mounts no mcp
     assert.deepEqual(init.mcpServers, [], mode);
     assert.ok(init.tools.length > 0 && !init.tools.some((t) => t.startsWith('mcp__')), mode);
   }
+  delete process.env.LLMIDE_EXT_ADAPTER;
 });

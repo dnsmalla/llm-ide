@@ -43,6 +43,16 @@ const AI_SDK_IMPORT = {
   message: 'The Vercel AI SDK may only be imported inside providers/adapter/ — call its exports instead. See docs/spec/provider-catalog.md.',
 };
 
+// MCP client boundary: the official MCP SDK (`@modelcontextprotocol/sdk`) is
+// imported ONLY by the two MCP clients we own: connectors/mcp-client.mjs (the
+// ingestion connectors' OAuth session) and providers/adapter/ (the provider-
+// adapter turn's tool client). Everything else asks those for what it needs, so
+// an SDK upgrade touches two places and no policy code reaches the transport.
+const MCP_SDK_IMPORT = {
+  regex: '^@modelcontextprotocol/sdk(/|$)',
+  message: 'The MCP SDK may only be imported by connectors/mcp-client.mjs and providers/adapter/ (the two MCP clients). See docs/spec/extensions-catalog.md.',
+};
+
 // Claude model ids belong to ONE file: schema/models/anthropic-models.json.
 // Three hand-kept lists previously disagreed badly enough that the server's own
 // DEFAULT_MODEL was an id the Mac coerces away as retired. Literals are allowed
@@ -62,7 +72,7 @@ const CLAUDE_MODEL_LITERAL = {
   message: 'Claude model ids live in schema/models/anthropic-models.json — read them from there instead of restating one. See docs/explanation/claude-linker.md.',
 };
 
-const forbidLayers = (layers, { allowClaudeSdk = false, allowAiSdk = false } = {}) => ({
+const forbidLayers = (layers, { allowClaudeSdk = false, allowAiSdk = false, allowMcpSdk = false } = {}) => ({
   'no-restricted-imports': ['error', {
     patterns: [
       {
@@ -72,6 +82,7 @@ const forbidLayers = (layers, { allowClaudeSdk = false, allowAiSdk = false } = {
       ROUTE_MODULES,
       ...(allowClaudeSdk ? [] : [CLAUDE_SDK_IMPORT]),
       ...(allowAiSdk ? [] : [AI_SDK_IMPORT]),
+      ...(allowMcpSdk ? [] : [MCP_SDK_IMPORT]),
     ],
   }],
 });
@@ -81,6 +92,7 @@ const forbidLayers = (layers, { allowClaudeSdk = false, allowAiSdk = false } = {
 // newly added layer directory is forbidden everywhere until explicitly
 // allowed — additions to LAYERS ratchet automatically.
 const allowOnly = (...allowed) => forbidLayers(LAYERS.filter((l) => !allowed.includes(l)));
+const allowOnlyWith = (opts, ...allowed) => forbidLayers(LAYERS.filter((l) => !allowed.includes(l)), opts);
 
 // llm_agent's allow-list, shared by the llm_agent block and its llm_agent/sdk
 // override so the two can never drift apart.
@@ -135,7 +147,7 @@ export default tseslint.config(
     files: ['**/*.mjs'],
     ignores: ['tests/**'],
     rules: {
-      'no-restricted-imports': ['error', { patterns: [CLAUDE_SDK_IMPORT, AI_SDK_IMPORT] }],
+      'no-restricted-imports': ['error', { patterns: [CLAUDE_SDK_IMPORT, AI_SDK_IMPORT, MCP_SDK_IMPORT] }],
     },
   },
   // Model-id literals: allowed only in the linker (which owns the vocabulary)
@@ -156,7 +168,7 @@ export default tseslint.config(
   // providers/adapter/ is the ONE place allowed to import the Vercel AI SDK.
   {
     files: ['providers/adapter/**/*.mjs'],
-    rules: forbidLayers(LAYERS.filter((l) => !['core', 'kb', 'server', 'providers'].includes(l)), { allowAiSdk: true }),
+    rules: forbidLayers(LAYERS.filter((l) => !['core', 'kb', 'server', 'providers'].includes(l)), { allowAiSdk: true, allowMcpSdk: true }),
   },
   // L3 — leaf libraries reach only downward…
   {
@@ -165,6 +177,8 @@ export default tseslint.config(
   },
   // …connectors additionally read credentials via server/vault (L2 — legal)…
   { files: ['connectors/**/*.mjs'], rules: allowOnly('core', 'kb', 'server', 'providers') },
+  // …and its one MCP client file may import the MCP SDK.
+  { files: ['connectors/mcp-client.mjs'], rules: allowOnlyWith({ allowMcpSdk: true }, 'core', 'kb', 'server', 'providers') },
   // …and the two agent systems orchestrate designated L3 peers.
   { files: ['agents/**/*.mjs'],    rules: allowOnly('core', 'kb', 'server', 'providers', 'connectors', 'graphkit', 'guardrails') },
   { files: ['llm_agent/**/*.mjs'], rules: allowOnly(...LLM_AGENT_ALLOWED) },
@@ -190,7 +204,7 @@ export default tseslint.config(
         patterns: [{
           regex: `${REL}(.*/)?src/`,
           message: 'Server-side code must not import browser code (src/).',
-        }, CLAUDE_SDK_IMPORT, AI_SDK_IMPORT],
+        }, CLAUDE_SDK_IMPORT, AI_SDK_IMPORT, MCP_SDK_IMPORT],
       }],
     },
   },

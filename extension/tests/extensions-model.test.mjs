@@ -20,17 +20,20 @@ test('item ids are <kind>:<publisher>/<name>, lowercase, and round-trip', () => 
 });
 
 test('lookalike and control characters cannot form an id', () => {
+  const cyrillicO = String.fromCharCode(0x043e);
+  const bidiOverride = String.fromCharCode(0x202e);
   // A non-ASCII lookalike of "anthropics" is slugged away, never preserved.
-  assert.equal(itemId('plugin', 'anthrоpics', 'x'), 'plugin:anthr-pics/x');
-  assert.equal(parseItemId('plugin:anthrоpics/x'), null);
-  assert.equal(parseItemId('plugin:a‮b/x'), null);
+  assert.equal(itemId('plugin', `anthr${cyrillicO}pics`, 'x'), 'plugin:anthr-pics/x');
+  assert.equal(parseItemId(`plugin:anthr${cyrillicO}pics/x`), null);
+  assert.equal(parseItemId(`plugin:a${bidiOverride}b/x`), null);
   assert.equal(itemId('mcp', '\u0000', 'ok'), 'mcp:local/ok');
 });
 
 test('member ids are <type>:<name>; a third-party name may be any printable text', () => {
   assert.equal(memberId('skill', 'Code Reviewer'), 'skill:Code Reviewer');
   assert.deepEqual(parseMemberId('skill:Code Reviewer'), { type: 'skill', name: 'Code Reviewer' });
-  assert.deepEqual(parseMemberId('skill:日本語'), { type: 'skill', name: '日本語' });
+  const jp = String.fromCharCode(0x65e5, 0x672c);
+  assert.deepEqual(parseMemberId(`skill:${jp}`), { type: 'skill', name: jp });
   assert.equal(parseMemberId('skill:'), null);
   assert.equal(parseMemberId('widget:x'), null);
   assert.equal(parseMemberId('skill:a\u0007b'), null);
