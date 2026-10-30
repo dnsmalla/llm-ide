@@ -26,10 +26,10 @@ const {
 } = await import('../providers/providers.mjs');
 const { runClaude } = await import('../providers/runtime.mjs');
 const { resolveAgentEngineAuth } = await import('../llm_agent/sdk/engine.mjs');
-const { decide, normalizeAnswer } = await import('../llm_agent/runtime/decide.mjs');
-const { handleDecide } = await import('../llm_agent/runtime/handlers/decide.mjs');
+const { decide, normalizeAnswer } = await import('../llm_agent/tools/decide.mjs');
+const { handleDecide } = await import('../llm_agent/tools/handlers/decide.mjs');
 const { names, get } = await import('../llm_agent/tools/registry.mjs');
-const { allowedToolNames } = await import('../llm_agent/runtime/mode-personas.mjs');
+const { allowedToolNames } = await import('../llm_agent/modes/mode-personas.mjs');
 const { globalSkills } = await import('../llm_agent/skills/index.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { syncTierRouting } = await import('../server/tier-routing.mjs');

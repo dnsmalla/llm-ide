@@ -2,7 +2,7 @@
 // (persisted alongside — but independent of — the file-based project memory
 // in graphkit/memory-writer.mjs). `session_id` is an opaque client-owned
 // string (the Mac app's local ChatSessionStore UUID today; see
-// llm_agent/runtime/memory-persist.mjs for how it's resolved) — this module
+// llm_agent/memory/memory-persist.mjs for how it's resolved) — this module
 // does no session-existence validation, since there is no session_sessions
 // table to validate against (see kb/chat-sessions.mjs's header comment).
 //
@@ -14,7 +14,7 @@ import { getDb, requireUser, lazyPrepare } from './db.mjs';
 
 /**
  * The stable per-conversation id to key session memory on — shared by the
- * write path (llm_agent/runtime/memory-persist.mjs) and the read path
+ * write path (llm_agent/memory/memory-persist.mjs) and the read path
  * (llm_agent/sdk/engine.mjs and the provider adapter), so they can never drift onto different keys.
  * `chatSessionId` is the client's own stable session-store UUID; plain
  * `sessionId` is re-minted on every session switch and is only a fallback for
@@ -32,8 +32,8 @@ const MAX_FACTS_PER_SESSION = 200; // matches config.memory-ish order of magnitu
 
 // What rides the PROMPT is a separate, tighter ceiling from what is stored.
 // The "This session's memory" block is re-sent on EVERY turn of a chat, and
-// the extractor adds up to 6 facts per turn (llm_agent/runtime/memory-
-// extract.mjs), so the full stored list (200 × 500 chars above) grows into a
+// the extractor adds up to 6 facts per turn (llm_agent/memory/
+// memory-extract.mjs), so the full stored list (200 × 500 chars above) grows into a
 // ~100k-char fixed cost per turn on a long chat — for the one-word follow-ups
 // as much as for the real work. Both engines (sdk/engine.mjs and
 // the v2 engine) build the block from `capSessionMemory`, so they inject

@@ -1,7 +1,7 @@
 // extension/tests/session-tasks.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { sessionTaskStore, taskStatusIcon } from '../llm_agent/runtime/handlers/session-tasks.mjs';
+import { sessionTaskStore, taskStatusIcon } from '../llm_agent/tools/handlers/session-tasks.mjs';
 
 test('hasPendingWork is true while a task is pending', () => {
   const store = sessionTaskStore();

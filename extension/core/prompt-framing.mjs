@@ -187,7 +187,7 @@ export function skillPointer({ id, name, description, chars }) {
 /**
  * The skills block for a skill the MODE injected, not one the user picked
  * from the "/" menu — the planning pipeline's stage skill
- * (llm_agent/runtime/plan-pipeline.mjs).
+ * (llm_agent/plan/plan-pipeline.mjs).
  *
  * Same trusted-instructions framing and same catalog-gated `readSkill`, but
  * the header tells the truth about where it came from: `buildSkillsText`'s

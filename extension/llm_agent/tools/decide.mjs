@@ -1,4 +1,4 @@
-// extension/llm_agent/runtime/decide.mjs
+// extension/llm_agent/tools/decide.mjs
 // Calibrated decisions about given material — the core behind the agent's
 // `decide` tool (handlers/decide.mjs).
 //

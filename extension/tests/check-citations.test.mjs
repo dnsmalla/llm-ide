@@ -17,7 +17,7 @@ for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: t
 
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
-const { handleCheckCitations, extractCitations } = await import('../llm_agent/runtime/handlers/check-citations.mjs');
+const { handleCheckCitations, extractCitations } = await import('../llm_agent/tools/handlers/check-citations.mjs');
 
 const U = users.registerUser(db.getDb(), {
   email: `cc-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'c',

@@ -56,7 +56,7 @@ with a grep before deleting anything.
 
 ```json
 {
-  "symbol": [{ "name": "handleFindCode", "kind": "function", "path": "extension/llm_agent/runtime/handlers/find-code.mjs", "line": 182 }],
+  "symbol": [{ "name": "handleFindCode", "kind": "function", "path": "extension/llm_agent/tools/handlers/find-code.mjs", "line": 182 }],
   "relation": "impact",
   "depth": 2,
   "results": [

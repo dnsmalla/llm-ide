@@ -16,7 +16,7 @@ process.env.NODE_ENV = 'test';
 
 const {
   buildReadableRoots, resolveReadablePath, handleListFiles, handleReadFile,
-} = await import('../llm_agent/runtime/handlers/repo-files.mjs');
+} = await import('../llm_agent/tools/handlers/repo-files.mjs');
 
 // Lay out a fake workspace + an "outside" tree a symlink will try to escape to.
 const base = fs.mkdtempSync(path.join(os.tmpdir(), 'repo-files-test-'));

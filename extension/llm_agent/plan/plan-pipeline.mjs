@@ -1,4 +1,4 @@
-// extension/llm_agent/runtime/plan-pipeline.mjs
+// extension/llm_agent/plan/plan-pipeline.mjs
 // The planning pipeline: which upstream skill drives each stage of a
 // plan-like turn, and the LLM-IDE bindings that make those skills
 // followable inside this app.

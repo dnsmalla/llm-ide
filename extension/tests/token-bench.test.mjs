@@ -21,8 +21,8 @@ import {
   parseArgs, parseEnvAssignment, runBench, toolExpectationFailures,
 } from '../../scripts/token-bench.mjs';
 import { handleMessage as mcpHandle, toolsFor as mcpTools } from '../../scripts/bench-fixtures/fake-mcp-server.mjs';
-import { quickMode } from '../llm_agent/runtime/mode-classify.mjs';
-import { restrictsTools } from '../llm_agent/runtime/mode-personas.mjs';
+import { quickMode } from '../llm_agent/modes/mode-classify.mjs';
+import { restrictsTools } from '../llm_agent/modes/mode-personas.mjs';
 import { benchFakeEngineEnabled } from '../routes/agent-v2.mjs';
 
 const EXT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');

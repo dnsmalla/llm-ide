@@ -3,7 +3,7 @@
 // A plugin is a directory containing:
 //   plugin.json        — manifest with name, version, displayName, …
 //   skills/*.md        — agent-runtime skills (same format as
-//                        llm_agent/runtime/skill-loader.mjs expects).
+//                        llm_agent/skills/loader.mjs expects).
 //                        Each gets merged into the system prompt when
 //                        the plugin is enabled for the active user.
 //   commands/*.md      — slash commands. Markdown with optional

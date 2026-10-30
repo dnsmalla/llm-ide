@@ -4,8 +4,8 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'fs';
 import { join } from 'path';
 import { fileURLToPath } from 'url';
-import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from '../llm_agent/runtime/mode-personas.mjs';
-import { MODES } from '../llm_agent/runtime/mode-classify.mjs';
+import { personaForMode, restrictsTools, allowedToolNames, PLAN_LIKE_MODES } from '../llm_agent/modes/mode-personas.mjs';
+import { MODES } from '../llm_agent/modes/mode-classify.mjs';
 import { v2ToolPolicyForMode } from '../llm_agent/sdk/engine.mjs';
 
 test('personaForMode returns mode-specific text for plan/assist_plan/review/document', () => {
@@ -146,7 +146,7 @@ test('PLAN_LIKE_MODES is exactly {plan, assist_plan}', () => {
 
 test('READ_ONLY_TOOL_NAMES is derived from the registry, not hand-maintained', async () => {
   const __dirname = fileURLToPath(new URL('.', import.meta.url));
-  const src = readFileSync(join(__dirname, '..', 'llm_agent', 'runtime', 'mode-personas.mjs'), 'utf8');
+  const src = readFileSync(join(__dirname, '..', 'llm_agent', 'modes', 'mode-personas.mjs'), 'utf8');
   assert.ok(src.includes("kind === 'read'"), 'expected the read-only set to be derived from registry entry.kind');
   assert.ok(!/const READ_ONLY_TOOL_NAMES = new Set\(\[\s*\n\s*'ask-internal',/.test(src), 'the old hand-maintained literal should be gone');
 });

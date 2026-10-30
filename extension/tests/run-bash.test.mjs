@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { resolveBashCwd, handleRunBash, buildChildEnv } from '../llm_agent/runtime/handlers/run-bash.mjs';
+import { resolveBashCwd, handleRunBash, buildChildEnv } from '../llm_agent/tools/handlers/run-bash.mjs';
 
 // A model-supplied `cwd` relocates the command. Before containment existed,
 // `{ cwd: "/Users/me/.aws", command: "cat credentials" }` ran a gate-approved

@@ -54,7 +54,7 @@ export async function handleFetchUrl(args, { userId } = {}) {
   }
 }
 
-// ──── Tests (run via: node llm_agent/runtime/handlers/fetch-url.mjs)
+// ──── Tests (run via: node llm_agent/tools/handlers/fetch-url.mjs)
 
 export async function runTests() {
   const assert = (cond, msg) => { if (!cond) throw new Error(msg); };

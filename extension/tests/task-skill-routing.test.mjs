@@ -1,7 +1,7 @@
 // extension/tests/task-skill-routing.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyTaskType } from '../llm_agent/runtime/task-skill-routing.mjs';
+import { classifyTaskType } from '../llm_agent/tasks/task-skill-routing.mjs';
 
 test('classifyTaskType maps bug/fix/debug keywords to systematic-debugging', () => {
   assert.equal(classifyTaskType('Fix the null-pointer bug in AuthMiddleware'), 'skills/systematic-debugging');

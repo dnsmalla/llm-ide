@@ -19,7 +19,7 @@ for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: t
 
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
-const { handleCodeRelations } = await import('../llm_agent/runtime/handlers/code-relations.mjs');
+const { handleCodeRelations } = await import('../llm_agent/tools/handlers/code-relations.mjs');
 
 const U = users.registerUser(db.getDb(), {
   email: `cr-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'c',

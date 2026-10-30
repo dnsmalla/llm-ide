@@ -10,7 +10,7 @@
 // `POST /agent/v2/decision` answers); any other `act` entry with a `gate` is
 // gated here the same way. Nothing here adds a way around the gate.
 //
-// Folds in what runtime/openai-tools.mjs did (skill schema → JSON Schema) so
+// Folds in what the former runtime/openai-tools.mjs did (skill schema → JSON Schema) so
 // the classic loop's copy can go in the second half of Phase 6.
 
 import path from 'node:path';
@@ -18,8 +18,8 @@ import * as kb from '../../kb/db.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
 import { entries, abortedResult, signalFor } from '../tools/registry.mjs';
 import { globalSkills } from '../skills/index.mjs';
-import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
-import { allowedToolNames, restrictsTools } from '../runtime/mode-personas.mjs';
+import { buildReadableRoots } from '../tools/handlers/repo-files.mjs';
+import { allowedToolNames, restrictsTools } from '../modes/mode-personas.mjs';
 import { resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';

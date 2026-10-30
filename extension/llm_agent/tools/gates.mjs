@@ -1,7 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { homedir } from 'node:os';
-import { isDeniedPath, isTooBroadRoot, isWithinRoots } from '../runtime/handlers/repo-files.mjs';
+import { isDeniedPath, isTooBroadRoot, isWithinRoots } from './handlers/repo-files.mjs';
 
 //
 // Safety classification for 'act'-kind registry entries (tools/registry.mjs),

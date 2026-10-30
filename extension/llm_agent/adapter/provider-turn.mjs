@@ -24,7 +24,7 @@ import { compressHistory, wrapToolsForCompression } from '../../providers/compre
 import { listConnectionModels } from '../../providers/provider-models.mjs';
 import { getConnection, getSettings } from '../../server/provider-connections.mjs';
 import { TOOL_MODES, catalogEntry } from '../../server/provider-catalog.mjs';
-import { personaForMode } from '../runtime/mode-personas.mjs';
+import { personaForMode } from '../modes/mode-personas.mjs';
 import { abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { buildProviderTools, normalizeWorkspaceRoot } from './tool-bridge.mjs';
 

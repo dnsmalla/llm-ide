@@ -61,7 +61,7 @@ export function factKey(s) {
 // carry an explicit subject id in its tag — `[category|subject-id] text` — and
 // when it does, THAT is the index: same subject id ⇒ same fact ⇒ update in
 // place. The extractor is asked to reuse a known fact's id when it revises it
-// (see llm_agent/runtime/memory-extract.mjs).
+// (see llm_agent/memory/memory-extract.mjs).
 export function factIndex(s) {
   const tag = /^\s*\[([^\]]+)\]/.exec(String(s));
   if (tag) {

@@ -22,7 +22,7 @@ import { randomUUID } from 'node:crypto';
 import { runClaude, resolveLanguage } from '../providers/runtime.mjs';
 import { readBody, parseJSON, sanitizeForPrompt, sendJSON, onClientDisconnect } from '../core/utils.mjs';
 import { legacyBareCodeAssistPrompt } from '../core/prompt-framing.mjs';
-import { resolveTierModel } from '../llm_agent/runtime/model-tier.mjs';
+import { resolveTierModel } from '../llm_agent/modes/model-tier.mjs';
 import { newTurnTokenTotals, countTurnTokens, turnTokenUsageFields } from '../kb/usage.mjs';
 import { beginAgentRun, runTotals } from '../kb/agent-runs.mjs';
 import { codeAssistErrorResponse } from '../server/code-assist-errors.mjs';

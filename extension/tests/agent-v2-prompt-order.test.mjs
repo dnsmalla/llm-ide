@@ -30,7 +30,7 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 const { buildEngineOptions } = await import('../llm_agent/sdk/engine.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
-const { tasks } = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
+const { tasks } = await import('../llm_agent/tools/handlers/session-tasks.mjs');
 
 const SKILL_CHARS = 3_900;
 const deps = {

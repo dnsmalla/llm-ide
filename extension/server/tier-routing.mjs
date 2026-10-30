@@ -23,7 +23,7 @@ const MAX_BODY_BYTES = 20_000;
 
 export const ROUTING_TIERS = Object.freeze(['strong', 'standard', 'cheap']);
 // `decisions` (API v73) — the `decide` tool and other calibrated
-// yes/no / pick-one / score calls (llm_agent/runtime/decide.mjs). The only
+// yes/no / pick-one / score calls (llm_agent/tools/decide.mjs). The only
 // feature a decision-only (jev) tier may serve; see providers/tier-routing.mjs.
 export const ROUTED_FEATURES = Object.freeze(['subagents', 'loop', 'autoTasks', 'quickChat', 'pipeline', 'internal', 'decisions']);
 

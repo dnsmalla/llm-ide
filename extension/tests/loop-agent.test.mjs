@@ -988,7 +988,7 @@ test('loopFindCode: an ungraphed repo gets "no match", never another repo\'s hit
 // --- too-broad roots are never registered / trusted --------------------------------
 
 test('addUserRepo refuses too-broad roots; buildTrustedRoots drops stored ones', async () => {
-  const { buildTrustedRoots } = await import('../llm_agent/runtime/handlers/repo-files.mjs');
+  const { buildTrustedRoots } = await import('../llm_agent/tools/handlers/repo-files.mjs');
   const uid = newUser().id;
   for (const p of [os.homedir(), '/Users', '/']) {
     assert.throws(() => addUserRepo(uid, p), /too-broad|allow-list root/);

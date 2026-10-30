@@ -1,5 +1,5 @@
 // extension/tests/load-skill.test.mjs
-// The load-skill tool (llm_agent/runtime/handlers/load-skill.mjs) — how a
+// The load-skill tool (llm_agent/tools/handlers/load-skill.mjs) — how a
 // skill that ends by naming another skill hands over to it. Stage 2 of the
 // planning pipeline depends on this: brainstorming's terminal step is
 // "invoke the writing-plans skill", and before this tool that line was a
@@ -7,7 +7,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { handleLoadSkill } from '../llm_agent/runtime/handlers/load-skill.mjs';
+import { handleLoadSkill } from '../llm_agent/tools/handlers/load-skill.mjs';
 import { entries, names } from '../llm_agent/tools/registry.mjs';
 
 const CATALOG = [

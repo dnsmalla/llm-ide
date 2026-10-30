@@ -21,20 +21,20 @@
 // flow in loop.mjs). Only 'act' entries carry a `gate(args) ->
 // 'blocked'|'auto'|'prompt'`; entries with no meaningful safety tiering
 // (task-create/task-update) get the constant `autoGate`.
-import { askInternal } from '../runtime/handlers/ask-internal.mjs';
-import { askSubagent } from '../runtime/handlers/ask-subagent.mjs';
-import { handleWebSearch } from '../runtime/handlers/web-search.mjs';
-import { handleFetchUrl } from '../runtime/handlers/fetch-url.mjs';
-import { handleListFiles, handleReadFile, buildTrustedRoots } from '../runtime/handlers/repo-files.mjs';
-import { handleFindCode } from '../runtime/handlers/find-code.mjs';
-import { handleCheckCitations } from '../runtime/handlers/check-citations.mjs';
-import { searchKb } from '../runtime/handlers/search-kb.mjs';
-import { handleCodeRelations } from '../runtime/handlers/code-relations.mjs';
-import { tasks } from '../runtime/handlers/session-tasks.mjs';
-import { handleRunBash, resolveBashCwd } from '../runtime/handlers/run-bash.mjs';
-import { handleProjectMemory } from '../runtime/handlers/project-memory.mjs';
-import { handleLoadSkill } from '../runtime/handlers/load-skill.mjs';
-import { handleDecide } from '../runtime/handlers/decide.mjs';
+import { askInternal } from './handlers/ask-internal.mjs';
+import { askSubagent } from './handlers/ask-subagent.mjs';
+import { handleWebSearch } from './handlers/web-search.mjs';
+import { handleFetchUrl } from './handlers/fetch-url.mjs';
+import { handleListFiles, handleReadFile, buildTrustedRoots } from './handlers/repo-files.mjs';
+import { handleFindCode } from './handlers/find-code.mjs';
+import { handleCheckCitations } from './handlers/check-citations.mjs';
+import { searchKb } from './handlers/search-kb.mjs';
+import { handleCodeRelations } from './handlers/code-relations.mjs';
+import { tasks } from './handlers/session-tasks.mjs';
+import { handleRunBash, resolveBashCwd } from './handlers/run-bash.mjs';
+import { handleProjectMemory } from './handlers/project-memory.mjs';
+import { handleLoadSkill } from './handlers/load-skill.mjs';
+import { handleDecide } from './handlers/decide.mjs';
 import { runBashGate, autoGate, bashNeedsPerCallApproval } from './gates.mjs';
 import { registerDecision, abortDecisionsForSession } from '../sdk/decisions.mjs';
 import { isAllowedByRule, suggestRule, addRule } from '../../kb/tool-permissions.mjs';
@@ -111,7 +111,7 @@ const ENTRIES = [
   { name: 'web-search', kind: 'read', execute: (args, ctx) => handleWebSearch(args, { userId: ctx.userId }) },
   // Calibrated yes/no / pick-one / score decisions about given material —
   // Jev when the user's `decisions` role routes to it, else one LLM call in
-  // Jev's answer shape (runtime/decide.mjs). Read-only: it judges, never acts,
+  // Jev's answer shape (tools/decide.mjs). Read-only: it judges, never acts,
   // so every mode (and a subagent that opts in) may use it.
   { name: 'decide', kind: 'read', execute: (args, ctx) => handleDecide(args, { userId: ctx.userId, signal: signalFor(ctx) }) },
   { name: 'fetch-url', kind: 'read', execute: (args, ctx) => handleFetchUrl(args, { userId: ctx.userId }) },
@@ -153,7 +153,7 @@ const ENTRIES = [
   // execute, one name, per the spec's §4 finding.
   { name: 'search-kb', kind: 'read', execute: (args, ctx) => searchKb(args, { kb: ctx.kb, userId: ctx.userId, workspaceRoot: ctx.agentContext?.workspaceRoot }) },
   // Reads one SKILL.md out of the user's own library so a skill that ends by
-  // naming another skill can hand over to it (runtime/plan-pipeline.mjs's
+  // naming another skill can hand over to it (plan/plan-pipeline.mjs's
   // stage 2 is the motivating case). kind:'read' by construction — it
   // resolves the id through the catalog-gated reader and returns text —
   // which also makes it available in every restricted mode, where the

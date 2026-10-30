@@ -1,10 +1,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { tasks } from '../llm_agent/runtime/handlers/session-tasks.mjs';
+import { tasks } from '../llm_agent/tools/handlers/session-tasks.mjs';
 import {
   buildSessionTaskPromptBlock,
   taskTurnResponse,
-} from '../llm_agent/runtime/task-session-context.mjs';
+} from '../llm_agent/tasks/task-session-context.mjs';
 
 test('taskTurnResponse: execute mode reports pending work', () => {
   const userId = 'u-task-ctx';

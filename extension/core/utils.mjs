@@ -137,7 +137,7 @@ const FENCE_ZWJ = '‍';
  *
  * Neutralising instead of deleting is immune by construction: nothing is
  * removed, so no two fragments can ever be spliced together. This is the same
- * strategy llm_agent/runtime/redaction.mjs has always used for tool-result
+ * strategy llm_agent/tools/redaction.mjs has always used for tool-result
  * fences — that module's own header says a change to the redaction strategy
  * "must apply everywhere at once", and this is now the one implementation
  * both share.

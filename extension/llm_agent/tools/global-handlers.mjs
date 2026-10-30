@@ -21,6 +21,6 @@
 // To add a new global handler: add its entry to
 // llm_agent/tools/registry.mjs's ENTRIES — this file and route.mjs's
 // dispatch table both pick it up automatically.
-import { names } from '../tools/registry.mjs';
+import { names } from './registry.mjs';
 
 export const GLOBAL_HANDLER_NAMES = Object.freeze(names());

@@ -19,7 +19,7 @@
 //     own stages afterwards.
 //
 // Engine choice — the Agent SDK, not the legacy CLI agent loop. The legacy
-// loop (llm_agent/runtime) has no file-edit tool at all (writes go through the
+// loop (the deleted llm_agent/runtime) has no file-edit tool at all (writes go through the
 // attach+confirm flow; its only mutating tool is run-bash), so it could only
 // ever "edit" through a shell, which the ruling forbids. The SDK has exactly
 // the needed surface: a `tools` allowlist that removes everything else from
@@ -36,7 +36,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { query, tool, createSdkMcpServer, SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import { z } from 'zod';
-import { handleFindCode, STALE_HINT } from '../runtime/handlers/find-code.mjs';
+import { handleFindCode, STALE_HINT } from '../tools/handlers/find-code.mjs';
 import { resolveRepoScope } from '../../kb/db.mjs';
 import {
   AGENT_SDK_PROVIDER, resolveAgentEngineAuth, agentEngineHomeFor, agentEngineEnv, normalizeModelUsage,
@@ -44,7 +44,7 @@ import {
 import { writePathGate } from '../tools/gates.mjs';
 import {
   buildTrustedRoots, isDeniedPath, isTooBroadRoot, isWithinRoots,
-} from '../runtime/handlers/repo-files.mjs';
+} from '../tools/handlers/repo-files.mjs';
 import { readSkillInstructions } from '../skills/index.mjs';
 import { buildLoopSkillsText } from '../../core/prompt-framing.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';

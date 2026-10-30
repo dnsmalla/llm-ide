@@ -258,7 +258,7 @@ function seedRank(row) {
  * costs nothing.
  *
  * Returns plain data; path resolution against the agent's readable roots is the
- * caller's job (see llm_agent/runtime/handlers/find-code.mjs).
+ * caller's job (see llm_agent/tools/handlers/find-code.mjs).
  */
 export function searchCodeIndex(userId, query, { limit = 8, hops = 1, repoIds = null } = {}) {
   const q = typeof query === 'string' ? query.trim() : '';

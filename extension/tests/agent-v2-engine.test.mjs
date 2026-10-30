@@ -47,7 +47,7 @@ const {
 const { answerDecision, abortDecisionsForSession } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
-const { persistTurnMemory } = await import('../llm_agent/runtime/memory-persist.mjs');
+const { persistTurnMemory } = await import('../llm_agent/memory/memory-persist.mjs');
 const { listSessionMemory } = await import('../kb/session-memory.mjs');
 const { hasAlwaysAllow, setAlwaysAllow } = await import('../kb/tool-approvals.mjs');
 const { addRule, listRules } = await import('../kb/tool-permissions.mjs');
@@ -1887,7 +1887,7 @@ test('session memory end-to-end: a fact captured from turn 1 is recalled by turn
     });
     const agentContext = { workspaceRoot, chatSessionId: 'chat-roundtrip-1' };
     // extractMemories expects {"facts":[{category,key,fact}],"superseded":[]}
-    // JSON text back from runClaude (llm_agent/runtime/memory-extract.mjs).
+    // JSON text back from runClaude (llm_agent/memory/memory-extract.mjs).
     const fakeRunClaude = async () => JSON.stringify({
       facts: [{ category: 'tooling', key: 'test-runner', fact: 'This repo runs tests with node --test.' }],
       superseded: [],

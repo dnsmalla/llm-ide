@@ -57,7 +57,7 @@ export const PROVIDERS = {
   // Jev (jev-ai.pro) is a hosted DECISION API, not a chat model: it answers
   // structured yes/no / pick-one / score questions about given material and
   // returns calibrated probabilities. It is reachable ONLY through the
-  // `decide` path (providers/jev.mjs ← llm_agent/runtime/decide.mjs); every
+  // `decide` path (providers/jev.mjs ← llm_agent/tools/decide.mjs); every
   // chat/completion dispatch that names it is refused with
   // DECISION_ONLY_MESSAGE (assertChatProvider) — see the guards in
   // runtime.mjs resolveClaudeCall, completeViaApi

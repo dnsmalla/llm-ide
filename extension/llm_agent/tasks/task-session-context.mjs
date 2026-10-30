@@ -4,9 +4,9 @@
 // restrictsTools gate — otherwise tasks written by tools would not match
 // what the prompt shows or what continueNeeded reports.
 
-import { tasks, taskStatusIcon } from './handlers/session-tasks.mjs';
+import { tasks, taskStatusIcon } from '../tools/handlers/session-tasks.mjs';
 import { resolveChatSessionId } from '../../kb/session-memory.mjs';
-import { restrictsTools } from './mode-personas.mjs';
+import { restrictsTools } from '../modes/mode-personas.mjs';
 import { classifyTaskType } from './task-skill-routing.mjs';
 import { readSkillInstructions } from '../skills/skill-library.mjs';
 import { SKILL_INLINE_MAX_CHARS, skillPointer } from '../../core/prompt-framing.mjs';

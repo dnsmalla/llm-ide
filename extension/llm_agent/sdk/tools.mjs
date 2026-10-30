@@ -2,7 +2,7 @@
 // (llm_agent/tools/registry.mjs) as an SDK tool. This file is the ONLY
 // module that converts the registry's plain-JSON schema (shared with the
 // legacy .md frontmatter) into zod — see zodSchemaFor. Per-entry logic lives
-// in runtime/handlers/*.mjs via the registry; this file adds no domain logic.
+// in tools/handlers/*.mjs via the registry; this file adds no domain logic.
 //
 // buildLlmIdeServer(userId, agentContext, currentMessage, { renderMemory, ... })
 // returns the McpSdkServerConfigWithInstance the SDK query() `mcpServers`
@@ -16,7 +16,7 @@ import { z } from 'zod';
 import * as kb from '../../kb/db.mjs';
 import { entries, abortedResult, signalFor } from '../tools/registry.mjs';
 import { globalSkills } from '../skills/index.mjs';
-import { buildReadableRoots } from '../runtime/handlers/repo-files.mjs';
+import { buildReadableRoots } from '../tools/handlers/repo-files.mjs';
 import { resolveChatSessionId } from '../../kb/session-memory.mjs';
 import { logger } from '../../core/logger.mjs';
 

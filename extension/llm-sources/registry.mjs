@@ -38,7 +38,7 @@ import { listEnabled, pruneOrphans, migrateLegacyDefaultSources, listDisabledIte
 // server is single-threaded Node, so a *Sync spawn here would freeze every
 // other request (captions, chat, everything) for however long the network
 // op takes, up to each call's own timeout below. Mirrors the async pattern
-// `llm_agent/runtime/handlers/run-bash.mjs` already uses.
+// `llm_agent/tools/handlers/run-bash.mjs` already uses.
 const execFileAsync = promisify(execFile);
 // Mutable so tests can simulate a slow/failing clone deterministically
 // without touching the network (see __setGitRunner). Every git op below goes

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { V2_EXECUTE_GUIDANCE, V2_LOCATE_CODE_GUIDANCE } from '../llm_agent/runtime/execute-guidance.mjs';
+import { V2_EXECUTE_GUIDANCE, V2_LOCATE_CODE_GUIDANCE } from '../llm_agent/plan/execute-guidance.mjs';
 
 // Plan modes and the legacy engine already say this; execute mode listed
 // find-code as one option among Read/Grep/Glob, so the model read whole files.
@@ -21,7 +21,7 @@ test('execute guidance does not repeat the locate rule', () => {
 // for independent tool calls in ONE response and for ranged reads — and stays
 // short, because it rides in every execute turn's system prompt.
 test('execute guidance asks for batched tool calls and ranged reads, briefly', async () => {
-  const mod = await import('../llm_agent/runtime/execute-guidance.mjs');
+  const mod = await import('../llm_agent/plan/execute-guidance.mjs');
   const text = Object.values(mod).filter((v) => typeof v === 'string').join('\n');
   assert.match(text, /# Context budget/);
   assert.match(text, /in ONE response/);
@@ -33,7 +33,7 @@ test('execute guidance asks for batched tool calls and ranged reads, briefly', a
 // ask-subagent is not mounted without plugin subagents (sdk/tools.mjs), so the
 // guidance must not send the model looking for it.
 test('v2ExecuteGuidance: names ask-subagent only when subagents exist', async () => {
-  const { v2ExecuteGuidance } = await import('../llm_agent/runtime/execute-guidance.mjs');
+  const { v2ExecuteGuidance } = await import('../llm_agent/plan/execute-guidance.mjs');
   assert.equal(v2ExecuteGuidance({ hasSubagents: true }), V2_EXECUTE_GUIDANCE);
   const none = v2ExecuteGuidance({ hasSubagents: false });
   assert.doesNotMatch(none, /ask-subagent/);

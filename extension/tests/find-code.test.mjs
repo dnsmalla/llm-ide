@@ -32,7 +32,7 @@ for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) {
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { searchCodeIndex, relationLabel, seedCandidates } = await import('../graphkit/index.mjs');
-const { handleFindCode, resolveAgentPath, orderRoots } = await import('../llm_agent/runtime/handlers/find-code.mjs');
+const { handleFindCode, resolveAgentPath, orderRoots } = await import('../llm_agent/tools/handlers/find-code.mjs');
 
 const U = users.registerUser(db.getDb(), {
   email: `fc-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'f',

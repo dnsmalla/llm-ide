@@ -5,7 +5,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
 import { sanitizeForPrompt, sanitizeLine, neutralizePromptFences } from '../core/utils.mjs';
-import { redactFence } from '../llm_agent/runtime/redaction.mjs';
+import { redactFence } from '../llm_agent/tools/redaction.mjs';
 
 // ── sanitizeLine ─────────────────────────────────────────────────────────────
 

@@ -18,9 +18,9 @@
 
 import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/constants.mjs';
 import { deleteSdkTranscripts } from '../llm_agent/sdk/transcripts.mjs';
-import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/runtime/task-session-context.mjs';
+import { taskTurnResponse, makeTaskProgressEmitter } from '../llm_agent/tasks/task-session-context.mjs';
 import { answerDecision, abortDecisionsForSession } from '../llm_agent/sdk/decisions.mjs';
-import { classifyCodeAssistMode, quickMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from '../llm_agent/runtime/mode-classify.mjs';
+import { classifyCodeAssistMode, quickMode, MODES, AUTO_READ_ONLY, clampToReadOnly, isAutoContinueTurn } from '../llm_agent/modes/mode-classify.mjs';
 import { buildPerUserSkillSet } from '../llm_agent/skills/registry.mjs';
 import { expandSlashCommand } from '../plugins/loader.mjs';
 import { getDb } from '../kb/db.mjs';
@@ -429,8 +429,8 @@ async function handleV2Stream(req, res, userId, deps) {
     }
   }
 
-  // Mode resolution — parity with the legacy loop (llm_agent/runtime/
-  // route.mjs): "auto" (the Mac client's default) classifies the message
+  // Mode resolution — parity with the legacy loop (the deleted
+  // llm_agent/runtime/route.mjs): "auto" (the Mac client's default) classifies the message
   // into a concrete mode, an explicit mode must be a known MODES member,
   // and anything else (missing / typo / stale client) runs execute rather
   // than a mode string the engine's personas don't recognize. Resolved
@@ -693,7 +693,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
         // Set by the saved-plan card's "Execute plan" action — the one
         // signal the server can trust that this Execute turn is working an
         // already-approved plan, so the pipeline injects the execution
-        // skill (llm_agent/runtime/plan-pipeline.mjs).
+        // skill (llm_agent/plan/plan-pipeline.mjs).
         planExecute: body.planExecute === true,
         // Stage 2 of the plan pipeline: the saved-plan card's "Write full plan"
         // action. Like planExecute, it is a client signal the server cannot

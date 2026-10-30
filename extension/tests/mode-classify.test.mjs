@@ -1,7 +1,7 @@
 // extension/tests/mode-classify.test.mjs
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyCodeAssistMode, buildPrompt } from '../llm_agent/runtime/mode-classify.mjs';
+import { classifyCodeAssistMode, buildPrompt } from '../llm_agent/modes/mode-classify.mjs';
 
 test('classifyCodeAssistMode returns the model-chosen mode when valid JSON comes back', async () => {
   const result = await classifyCodeAssistMode('how would you approach fixing this?', {
@@ -73,7 +73,7 @@ test('buildPrompt splits plan from assist_plan on WHO brings the direction', () 
   const prompt = buildPrompt('anything');
   assert.match(prompt, /"plan\|assist_plan\|review\|document\|execute"/);
   // Both modes are collaborative now (they run brainstorming and grilling
-  // respectively — see runtime/plan-pipeline.mjs), so "one-shot vs
+  // respectively — see plan/plan-pipeline.mjs), so "one-shot vs
   // multi-turn" is no longer the distinction and must not be reintroduced:
   // it would send every "plan this with me" to assist_plan regardless of
   // whether the user actually has a direction to test.
@@ -90,7 +90,7 @@ test('buildPrompt splits plan from assist_plan on WHO brings the direction', () 
 // its OWN provider's fast tier instead of forcing an Anthropic call.
 test('classify model: chain-derived default; opts.model overrides per turn', async () => {
   const { fastModelFor } = await import('../kb/usage.mjs');
-  const { MODEL } = await import('../llm_agent/runtime/mode-classify.mjs');
+  const { MODEL } = await import('../llm_agent/modes/mode-classify.mjs');
   assert.equal(MODEL, process.env.LLMIDE_MODE_CLASSIFY_MODEL || process.env.LLMIDE_MODEL || fastModelFor('anthropic'));
 
   const seen = [];
@@ -113,8 +113,8 @@ test('classify model: chain-derived default; opts.model overrides per turn', asy
 // which the server takes at face value — only `auto` is ever classified — so a
 // plan request from the phone never reached plan mode at all.
 test('clampToReadOnly lets every tool-restricted mode through and refuses execute', async () => {
-  const { clampToReadOnly, AUTO_READ_ONLY } = await import('../llm_agent/runtime/mode-classify.mjs');
-  const { restrictsTools } = await import('../llm_agent/runtime/mode-personas.mjs');
+  const { clampToReadOnly, AUTO_READ_ONLY } = await import('../llm_agent/modes/mode-classify.mjs');
+  const { restrictsTools } = await import('../llm_agent/modes/mode-personas.mjs');
 
   // The whole point: a plan request from a phone must still plan.
   for (const mode of ['plan', 'assist_plan', 'review', 'document', 'ask']) {
@@ -132,7 +132,7 @@ test('clampToReadOnly lets every tool-restricted mode through and refuses execut
   // It must NOT be a real mode: it is a REQUEST, resolved before anything
   // downstream sees a mode, and a persona/tool-roster lookup for it would
   // find nothing.
-  const { MODES } = await import('../llm_agent/runtime/mode-classify.mjs');
+  const { MODES } = await import('../llm_agent/modes/mode-classify.mjs');
   assert.ok(!MODES.has(AUTO_READ_ONLY), 'auto_read_only is a request, never a resolved mode');
 });
 
@@ -140,7 +140,7 @@ test('clampToReadOnly lets every tool-restricted mode through and refuses execut
 // the message before the turn even started. The ask is in the opening lines
 // (and sometimes a closing instruction), so head + tail is what it gets.
 test('buildPrompt clips a long message to its head and tail', async () => {
-  const { clipForClassifier } = await import('../llm_agent/runtime/mode-classify.mjs');
+  const { clipForClassifier } = await import('../llm_agent/modes/mode-classify.mjs');
   assert.equal(clipForClassifier('review this diff'), 'review this diff');
   const long = `PLEASE REVIEW ${'x'.repeat(100_000)} FINAL ASK`;
   const clipped = clipForClassifier(long);

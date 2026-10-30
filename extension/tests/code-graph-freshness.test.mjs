@@ -17,7 +17,7 @@ for (const f of [tmpDb, `${tmpDb}-wal`, `${tmpDb}-shm`]) fs.rmSync(f, { force: t
 const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { ingestStructureGraph } = await import('../connectors/structure-graph.mjs');
-const { handleFindCode } = await import('../llm_agent/runtime/handlers/find-code.mjs');
+const { handleFindCode } = await import('../llm_agent/tools/handlers/find-code.mjs');
 
 const REPO = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-fr-'));
 // Registered BEFORE any setup that can throw, so a failed git/DB setup still

@@ -21,8 +21,8 @@ import {
 import { syncPluginMcpServers } from '../../mcp/state.mjs';
 import { buildPluginHooks } from '../sdk/hooks.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
-import { INTERNAL_HANDLERS } from '../runtime/handlers/ask-internal.mjs';
-import { GLOBAL_HANDLER_NAMES } from '../runtime/global-handlers.mjs';
+import { INTERNAL_HANDLERS } from '../tools/handlers/ask-internal.mjs';
+import { GLOBAL_HANDLER_NAMES } from '../tools/global-handlers.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GLOBAL_DIR = join(__dirname, '..', 'global');

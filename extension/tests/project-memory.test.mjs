@@ -24,9 +24,9 @@ const tmpDb = path.join(__dirname, '_project-memory-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 
 const writer  = await import('../graphkit/memory-writer.mjs');
-const extract = await import('../llm_agent/runtime/memory-extract.mjs');
+const extract = await import('../llm_agent/memory/memory-extract.mjs');
 const memory  = await import('../graphkit/memory.mjs');
-const persist = await import('../llm_agent/runtime/memory-persist.mjs');
+const persist = await import('../llm_agent/memory/memory-persist.mjs');
 const db      = await import('../kb/db.mjs');
 const users   = await import('../server/users.mjs');
 
@@ -149,7 +149,7 @@ test('distinct subject ids stay distinct rows', () => {
 });
 
 test('sanitizeFacts renders the subject id into the stored tag', async () => {
-  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { sanitizeFacts } = await import('../llm_agent/memory/memory-extract.mjs');
   assert.deepEqual(
     sanitizeFacts([{ category: 'tooling', key: 'Server Port', fact: 'binds to 3456' }]),
     ['[tooling|server-port] binds to 3456'],
@@ -167,7 +167,7 @@ test('sanitizeFacts renders the subject id into the stored tag', async () => {
 });
 
 test('sanitizeFacts collapses two facts sharing one subject id, last wins', async () => {
-  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { sanitizeFacts } = await import('../llm_agent/memory/memory-extract.mjs');
   const out = sanitizeFacts([
     { category: 'tooling', key: 'port', fact: 'binds to 3456' },
     { category: 'tooling', key: 'port', fact: 'binds to 4000' },
@@ -459,7 +459,7 @@ test('config.memory clamps out-of-range env values instead of silently disabling
 });
 
 test('extractMemories reports approx extraction token cost via meta', async () => {
-  const { extractMemories } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { extractMemories } = await import('../llm_agent/memory/memory-extract.mjs');
   const fakeRun = async () => JSON.stringify(['the build runs offline via build.sh']);
   const meta = {};
   const { facts } = await extractMemories({
@@ -476,7 +476,7 @@ test('extractMemories reports approx extraction token cost via meta', async () =
 });
 
 test('isWorthExtracting skips pure acknowledgments / contentless turns', async () => {
-  const { isWorthExtracting } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { isWorthExtracting } = await import('../llm_agent/memory/memory-extract.mjs');
   // Pure acks / pleasantries — no durable fact possible, must skip.
   assert.equal(isWorthExtracting({ userMessage: 'thanks', reply: "You're welcome!" }), false);
   assert.equal(isWorthExtracting({ userMessage: 'ok great, that works!', reply: 'Glad it works.' }), false);
@@ -487,7 +487,7 @@ test('isWorthExtracting skips pure acknowledgments / contentless turns', async (
 });
 
 test('isWorthExtracting skips bare greetings, typos included', async () => {
-  const { isWorthExtracting } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { isWorthExtracting } = await import('../llm_agent/memory/memory-extract.mjs');
   const reply = 'Hello! What would you like to work on?';
   for (const greeting of ['hello', 'hllow', 'Helo!', 'hi', 'hii', 'hey there', 'Hiya', 'good morning', 'hello, thanks',
     'こんにちは', 'おはようございます。']) {
@@ -502,7 +502,7 @@ test('isWorthExtracting skips bare greetings, typos included', async () => {
 });
 
 test('isWorthExtracting keeps substantive turns (low false-negative)', async () => {
-  const { isWorthExtracting } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { isWorthExtracting } = await import('../llm_agent/memory/memory-extract.mjs');
   // A short but substantive user statement carrying a durable fact must NOT be skipped.
   assert.equal(isWorthExtracting({ userMessage: 'we deploy via GitHub Actions to Fly.io', reply: 'Got it.' }), true);
   // Normal Q&A.
@@ -510,7 +510,7 @@ test('isWorthExtracting keeps substantive turns (low false-negative)', async () 
 });
 
 test('extractMemories short-circuits (no model call) on a contentless turn', async () => {
-  const { extractMemories } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { extractMemories } = await import('../llm_agent/memory/memory-extract.mjs');
   let called = false;
   const spyRun = async () => { called = true; return '[]'; };
   const { facts } = await extractMemories({
@@ -525,7 +525,7 @@ test('extractMemories short-circuits (no model call) on a contentless turn', asy
 });
 
 test('sanitizeFacts tags {category, fact} objects and keeps legacy strings', async () => {
-  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { sanitizeFacts } = await import('../llm_agent/memory/memory-extract.mjs');
   const out = sanitizeFacts([
     { category: 'tooling', fact: 'The build runs offline via build.sh' },
     'a legacy plain string fact',                                   // back-compat
@@ -539,7 +539,7 @@ test('sanitizeFacts tags {category, fact} objects and keeps legacy strings', asy
 });
 
 test('sanitizeFacts dedups by fact text, ignoring category and case', async () => {
-  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { sanitizeFacts } = await import('../llm_agent/memory/memory-extract.mjs');
   const out = sanitizeFacts([
     { category: 'tooling', fact: 'deploy via release.sh' },
     { category: 'command', fact: 'Deploy via release.sh' },
@@ -983,7 +983,7 @@ test('DELETE /kb/agent/session-memory deletes a session\'s facts, no repo/allow-
 });
 
 test('sanitizeFacts keeps the tag inside MAX_FACT_CHARS so the writer never clips it', async () => {
-  const { sanitizeFacts } = await import('../llm_agent/runtime/memory-extract.mjs');
+  const { sanitizeFacts } = await import('../llm_agent/memory/memory-extract.mjs');
   const long = 'w'.repeat(400);
   const [rendered] = sanitizeFacts([{ category: 'tooling', key: 'a-long-subject-id', fact: long }]);
   // The writer caps a stored line at 280 chars. If the tag were added on top of
@@ -1169,7 +1169,7 @@ test('renderChatMemoryFile evicts the OLDEST fact by stamp, not the one at index
 // ── stamp corruption on truncation (renderChatMemoryFile / withStamp) ──────────
 //
 // withStamp appends a 15-char " (t:YYYY-MM-DD)" suffix AFTER sanitizeFacts
-// (llm_agent/runtime/memory-extract.mjs) already budgeted the fact to exactly
+// (llm_agent/memory/memory-extract.mjs) already budgeted the fact to exactly
 // MAX_FACT_CHARS (280). renderChatMemoryFile then re-slices to 280. Any fact
 // whose combined length landed in [266, 279] had its stamp cut mid-string —
 // e.g. "...(t:2026-09-0" with no closing paren — which stripFactStamp's regex

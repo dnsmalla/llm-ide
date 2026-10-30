@@ -129,7 +129,7 @@ test('project_memory tool: asks the renderer for a tool-sized budget and returns
   const { getDb } = await import('../kb/db.mjs');
   const u = registerUser(getDb(), { email: 'v2tools-mem-budget@example.com', password: 'CorrectHorseBattery', displayName: 't' });
   const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
-  const { PROJECT_MEMORY_TOOL_CHARS } = await import('../llm_agent/runtime/handlers/project-memory.mjs');
+  const { PROJECT_MEMORY_TOOL_CHARS } = await import('../llm_agent/tools/handlers/project-memory.mjs');
   let opts = null;
   const server = buildLlmIdeServer(u.id, { workspaceRoot: WS }, 'q', {
     renderMemory: (ctx, userId, stats, focus, o) => { opts = o; return 'line one\nline "two"'; },

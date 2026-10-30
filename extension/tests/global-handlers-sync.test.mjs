@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
 import { dirname } from 'node:path';
 
-import { GLOBAL_HANDLER_NAMES } from '../llm_agent/runtime/global-handlers.mjs';
+import { GLOBAL_HANDLER_NAMES } from '../llm_agent/tools/global-handlers.mjs';
 import { globalSkills, assertReadSkillsWired } from '../llm_agent/skills/index.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -19,7 +19,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 //
 // Fix: route.mjs now builds its `handlers` object via
 // llm_agent/tools/registry.mjs's buildDispatch(), and GLOBAL_HANDLER_NAMES
-// (runtime/global-handlers.mjs) is just Object.freeze(registry.names()) —
+// (tools/global-handlers.mjs) is just Object.freeze(registry.names()) —
 // both derive from the same ENTRIES list, so there is nothing left to
 // drift-check: the dispatch table's keys are registry.names() by
 // construction.

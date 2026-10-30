@@ -43,7 +43,7 @@ _setCliProbeForTests((provider) => cliInstalled.has(provider));
 const { runClaude } = await import('../providers/runtime.mjs');
 const { markRouteFailed, _resetRouteHealthForTests } = await import('../providers/route-health.mjs');
 const { loadPlugins } = await import('../plugins/loader.mjs');
-const { askSubagent } = await import('../llm_agent/runtime/handlers/ask-subagent.mjs');
+const { askSubagent } = await import('../llm_agent/tools/handlers/ask-subagent.mjs');
 
 let reset = false;
 function freshUser() {

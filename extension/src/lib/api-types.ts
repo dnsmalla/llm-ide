@@ -1158,7 +1158,7 @@ export type AgentContext = {
   } | null;
 };
 
-/** A session task (llm_agent/runtime/handlers/session-tasks.mjs). status is one of pending, in_progress, completed, skipped, failed; a model-written status is stored as given, so it is typed as a string. */
+/** A session task (llm_agent/tools/handlers/session-tasks.mjs). status is one of pending, in_progress, completed, skipped, failed; a model-written status is stored as given, so it is typed as a string. */
 export type NotesGenerationTask = {
   id?: string;
   title?: string;

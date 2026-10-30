@@ -39,7 +39,7 @@ const db = await import('../kb/db.mjs');
 const users = await import('../server/users.mjs');
 const { ingestStructureGraph } = await import('../connectors/structure-graph.mjs');
 const { indexLocalRepo } = await import('../connectors/git.mjs');
-const { handleFindCode } = await import('../llm_agent/runtime/handlers/find-code.mjs');
+const { handleFindCode } = await import('../llm_agent/tools/handlers/find-code.mjs');
 
 try {
   const U = users.registerUser(db.getDb(), { email: `bench-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: 'bench' }).id;

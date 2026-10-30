@@ -1,7 +1,7 @@
 // Read handler: resolve a skill id from the user's library to its
 // followable SKILL.md text, so a skill that ends by naming another skill
 // can actually hand over to it (see llm_agent/global/load-skill.md, and
-// runtime/plan-pipeline.mjs for the planning pipeline that depends on it).
+// plan/plan-pipeline.mjs for the planning pipeline that depends on it).
 //
 // SECURITY: `readSkill` is the catalog-gated reader (skills/skill-library.mjs
 // readSkillInstructions) — it looks the id up in the user's ENABLED sources
@@ -24,7 +24,7 @@ const MAX_SUGGESTIONS = 40;
 
 // The skills module is loaded LAZILY, not with a static import. A static one
 // would close a real cycle — tools/registry.mjs imports this handler,
-// skills/registry.mjs imports runtime/global-handlers.mjs, and that derives
+// skills/registry.mjs imports tools/global-handlers.mjs, and that derives
 // its name list from tools/registry.mjs's ENTRIES at module scope. Under
 // that cycle ENTRIES is still undefined when global-handlers runs, so the
 // whole agent surface breaks at boot rather than here. Resolving at CALL

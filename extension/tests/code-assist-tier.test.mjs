@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveTierModel } from '../llm_agent/runtime/model-tier.mjs';
+import { resolveTierModel } from '../llm_agent/modes/model-tier.mjs';
 
 test('explicit model always wins over tier', () => {
   assert.equal(

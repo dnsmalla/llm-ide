@@ -92,7 +92,7 @@ const { runAgentV2Turn } = await import('../llm_agent/sdk/engine.mjs');
 const { setUserPrefs } = await import('../kb/user.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
-const { buildReadableRoots } = await import('../llm_agent/runtime/handlers/repo-files.mjs');
+const { buildReadableRoots } = await import('../llm_agent/tools/handlers/repo-files.mjs');
 
 const { TOOL_OUTPUT_CAP_HOOK } = await import('../llm_agent/sdk/tool-output-cap.mjs');
 // The turn's hooks minus llm-ide's own tool-output cap (present on every turn):

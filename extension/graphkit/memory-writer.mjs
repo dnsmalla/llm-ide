@@ -8,7 +8,7 @@
 // lifecycle — only the viewer's explicit per-fact edit/delete touches it.
 // Session-scoped memory that IS deleted when its session ends lives in a
 // separate store (kb/session-memory.mjs, a real DB table) — see
-// llm_agent/runtime/memory-persist.mjs, which populates both from the same
+// llm_agent/memory/memory-persist.mjs, which populates both from the same
 // extraction pass. (Before this, project memory carried a session-attribution
 // sidecar used to prune it on session delete — removed: that contradicted
 // project memory being edit-only, and duplicated what the DB table now does.)
@@ -274,7 +274,7 @@ export function writeChatMemoryFacts(root, facts) {
 // session's lifecycle — it's durable, edit-only (see the viewer's per-fact
 // delete). Session-scoped, session-deletable memory is a separate store —
 // see kb/session-memory.mjs — populated from the SAME extracted facts by
-// llm_agent/runtime/memory-persist.mjs.
+// llm_agent/memory/memory-persist.mjs.
 export function appendChatMemory({ root, facts, remove, meta }) {
   const incoming = (Array.isArray(facts) ? facts : [])
     .map((f) => String(f).trim())

@@ -33,7 +33,7 @@ process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
 const { registerUser } = await import('../server/users.mjs');
-const { tasks: sessionTasks } = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
+const { tasks: sessionTasks } = await import('../llm_agent/tools/handlers/session-tasks.mjs');
 const { getDb } = await import('../kb/db.mjs');
 const agentStoreRead = await import('../kb/agent-db.mjs');
 // Tool events and composition live in agent.db (Stage 1b): flush the queue, then read.

@@ -1,4 +1,4 @@
-// extension/llm_agent/runtime/mode-personas.mjs
+// extension/llm_agent/modes/mode-personas.mjs
 // Per-mode system-prompt additions + tool allowlist for /code-assist.
 // Plan/Review/Document are all "no write tools" variants of the SAME agent
 // loop and endpoint. This deliberately replaced an earlier "route to a
@@ -17,7 +17,7 @@
 // have a tracked plan.
 
 import { entries } from '../tools/registry.mjs';
-import { buildPlanBinding } from './plan-pipeline.mjs';
+import { buildPlanBinding } from '../plan/plan-pipeline.mjs';
 
 const READ_ONLY_TOOL_NAMES = new Set(entries().filter((e) => e.kind === 'read' && e.name !== 'task-list').map((e) => e.name));
 
@@ -41,7 +41,7 @@ export const QUESTION_TOOL_NAME = 'ask-user';
 // `plan`, grilling for `assist_plan`), injected into the turn as trusted
 // instructions; the persona is only the LLM-IDE bindings that frame it. That
 // is why these two entries carry no `persona` of their own — see
-// runtime/plan-pipeline.mjs for the full rationale, and `personaForMode`
+// plan/plan-pipeline.mjs for the full rationale, and `personaForMode`
 // below for how the binding is composed. An earlier version of this file
 // paraphrased those skills into two long persona strings, which is exactly
 // the second copy that had already started drifting from the skill files.

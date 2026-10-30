@@ -1,11 +1,11 @@
-// Tests for extension/llm_agent/runtime/handlers/ask-subagent.mjs.
+// Tests for extension/llm_agent/tools/handlers/ask-subagent.mjs.
 // Covers: routing, error envelopes for malformed args, tool-restriction
 // behavior driven by allowed_tools, and the basic happy-path loop.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 
-import { askSubagent } from '../llm_agent/runtime/handlers/ask-subagent.mjs';
+import { askSubagent } from '../llm_agent/tools/handlers/ask-subagent.mjs';
 
 // A stub `runClaude` that captures the prompts it was asked to run and
 // returns a scripted sequence of responses. Lets us assert what the

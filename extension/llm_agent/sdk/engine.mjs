@@ -38,8 +38,8 @@ import path from 'node:path';
 import { query, SYSTEM_PROMPT_DYNAMIC_BOUNDARY } from '@anthropic-ai/claude-agent-sdk';
 import {
   personaForMode, PLAN_LIKE_MODES, restrictsTools, allowedToolNames,
-} from '../runtime/mode-personas.mjs';
-import { pipelineSkillIdFor, buildExecuteBinding } from '../runtime/plan-pipeline.mjs';
+} from '../modes/mode-personas.mjs';
+import { pipelineSkillIdFor, buildExecuteBinding } from '../plan/plan-pipeline.mjs';
 import {
   readSkillInstructions, buildPerUserSkillSet, internalSkills, pluginEnabledFor,
   buildUserPluginDelivery,
@@ -50,20 +50,20 @@ import { withToolOutputCap } from './tool-output-cap.mjs';
 import { COMPACT_BASE_PROMPT, compactEnvironmentBlock, compactPromptEnabled } from './compact-system-prompt.mjs';
 import { contentHash, emptyDelivered, deliveredFor, commitDelivered, forgetDelivered } from './turn-context.mjs';
 import { usageBaselineFor, recordUsageBaseline, usageDelta } from './usage-baseline.mjs';
-import { buildSessionTaskPromptBlock } from '../runtime/task-session-context.mjs';
-import { v2ExecuteGuidance, V2_LOCATE_CODE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../runtime/execute-guidance.mjs';
-import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../runtime/handlers/repo-files.mjs';
+import { buildSessionTaskPromptBlock } from '../tasks/task-session-context.mjs';
+import { v2ExecuteGuidance, V2_LOCATE_CODE_GUIDANCE, V2_QUESTION_GUIDANCE } from '../plan/execute-guidance.mjs';
+import { buildReadableRoots, buildTrustedRoots, isTooBroadRoot } from '../tools/handlers/repo-files.mjs';
 import { expandTilde } from '../../graphkit/memory.mjs';
-import { redactFence } from '../runtime/redaction.mjs';
-import { persistTurnMemory } from '../runtime/memory-persist.mjs';
-import { isBareGreeting } from '../runtime/memory-extract.mjs';
+import { redactFence } from '../tools/redaction.mjs';
+import { persistTurnMemory } from '../memory/memory-persist.mjs';
+import { isBareGreeting } from '../memory/memory-extract.mjs';
 import { neutralizePromptFences } from '../../core/utils.mjs';
 import { selectAttachments, splitImageAttachments, buildSkillsText, buildModeSkillsText } from '../../core/prompt-framing.mjs';
 import { getDb } from '../../kb/db.mjs';
 import { usdCapForModel, getLimits } from '../../kb/usage.mjs';
 import { nativePluginsEnabled } from '../../kb/user.mjs';
 import { listSessionMemory, resolveChatSessionId } from '../../kb/session-memory.mjs';
-import { selectSessionMemory } from '../runtime/session-memory-select.mjs';
+import { selectSessionMemory } from '../memory/session-memory-select.mjs';
 import { renderGraphifyMemory } from '../../graphkit/index.mjs';
 import { getAgentPersona } from '../../kb/personas.mjs';
 import { makeSecretReader } from '../../server/vault.mjs';
@@ -583,7 +583,7 @@ export function buildEngineOptions(
 
   // The planning pipeline's stage skill for this turn — the same resolution
   // the classic engine (removed) ran, so a plan started on one
-  // engine reads identically on the other. See runtime/plan-pipeline.mjs.
+  // engine reads identically on the other. See plan/plan-pipeline.mjs.
   let hasSubagents = false;
   try { hasSubagents = (getSubagents(userId)?.size ?? 0) > 0; }
   catch { /* no plugin view (tests, fresh install) — inline execution */ }
@@ -1277,7 +1277,7 @@ export async function runAgentV2Turn(
     history,
     planExecute,
     // Stage-2 marker — the saved-plan card's "Write full plan" action. See
-    // runtime/plan-pipeline.mjs's pipelineSkillIdFor.
+    // plan/plan-pipeline.mjs's pipelineSkillIdFor.
     planWrite,
     // Provider id the client resolved for this turn: absent/`anthropic` for
     // first-party Claude, or an Anthropic-compatible `custom:<uuid>`. Anything

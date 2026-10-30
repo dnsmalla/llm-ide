@@ -511,7 +511,7 @@ test('cleanup: leave no idle child behind', () => {
 });
 
 test('classifyCodeAssistMode asks runClaude for a warm call', async () => {
-  const { classifyCodeAssistMode } = await import('../llm_agent/runtime/mode-classify.mjs');
+  const { classifyCodeAssistMode } = await import('../llm_agent/modes/mode-classify.mjs');
   const seen = [];
   const _runClaude = async (_prompt, opts) => { seen.push(opts); return '{"mode":"review"}'; };
   const out = await classifyCodeAssistMode('please review the diff in PR 42 carefully', { _runClaude, userId: 'u1' });

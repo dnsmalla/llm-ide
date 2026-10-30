@@ -34,7 +34,7 @@ reason, or the gate fails.
 | `approval_request` (both kinds), `approval_resolved` | `llm_agent/sdk/engine.mjs` (`awaitToolApproval`, `canUseTool`'s AskUserQuestion branch) | yes |
 | `mode_set` `tasks` `error` | `routes/agent-v2.mjs` (`send(...)` in the stream handler) | **no** |
 | `context_usage` | `llm_agent/sdk/events.mjs` (`mapContextUsage`), emitted by `llm_agent/sdk/engine.mjs` after `result` | yes |
-| `tasks_progress` | `llm_agent/runtime/task-session-context.mjs` (`emitTaskProgress`) | **no** |
+| `tasks_progress` | `llm_agent/tasks/task-session-context.mjs` (`emitTaskProgress`) | **no** |
 
 The four out-of-linker emissions are the drift risk this contract exists to
 bound. Moving them inside is tracked separately. **They are not carried by an

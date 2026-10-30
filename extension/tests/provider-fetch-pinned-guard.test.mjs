@@ -43,8 +43,8 @@ const ALLOWED = {
   'agents/outcome-providers.mjs': { bareFetch: { n: 3, why: 'api.github.com and api.linear.app (fixed), plus the user\'s GitLab/Backlog URL (redirect:error); not a model-provider path' } },
   'agents/dispatcher.mjs': { bareFetch: { n: 3, why: 'the user\'s issue-tracker endpoints (GitHub, GitLab, Backlog; redirect:error); not a model-provider path' } },
   // Self-tests embedded in the handlers (run via `node <file>`), which replace globalThis.fetch on purpose.
-  'llm_agent/runtime/handlers/fetch-url.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
-  'llm_agent/runtime/handlers/web-search.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
+  'llm_agent/tools/handlers/fetch-url.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
+  'llm_agent/tools/handlers/web-search.mjs': { globalFetch: { n: 3, why: 'embedded self-test stands in for the network' } },
 };
 
 function walk(dir, out = []) {

@@ -26,7 +26,7 @@ const users = await import('../server/users.mjs');
 const { recordMemoryLedger, memoryLedgerFor, ledgerKey, pruneMemoryLedger } = await import('../kb/memory-ledger.mjs');
 const { rankFactsByRelevance } = await import('../graphkit/memory.mjs');
 const writer = await import('../graphkit/memory-writer.mjs');
-const persist = await import('../llm_agent/runtime/memory-persist.mjs');
+const persist = await import('../llm_agent/memory/memory-persist.mjs');
 
 const newUser = (tag) => users.registerUser(db.getDb(), {
   email: `ml-${tag}-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: tag,

@@ -1,4 +1,4 @@
-// makeTaskProgressEmitter (llm_agent/runtime/task-session-context.mjs) — the
+// makeTaskProgressEmitter (llm_agent/tasks/task-session-context.mjs) — the
 // shared mid-turn task-progress emitter behind BOTH engines' SSE streams
 // (routes/agent-v2.mjs on tool_result, server/ai-routes.mjs's legacy
 // /code-assist stream on phase:'tool' progress). The v2 route test covers it
@@ -19,8 +19,8 @@ const tmpDb = path.join(__dirname, '_task-progress-emitter-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-const { makeTaskProgressEmitter } = await import('../llm_agent/runtime/task-session-context.mjs');
-const { tasks } = await import('../llm_agent/runtime/handlers/session-tasks.mjs');
+const { makeTaskProgressEmitter } = await import('../llm_agent/tasks/task-session-context.mjs');
+const { tasks } = await import('../llm_agent/tools/handlers/session-tasks.mjs');
 
 const ctxFor = (sessionId) => ({ chatSessionId: sessionId });
 

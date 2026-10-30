@@ -124,7 +124,7 @@ const HOST = config.host;
 //     subagent-driven-development, picked from the user's subagents). Purely
 //     additive: an older client omits it and behaves exactly as before. The
 //     plan-like modes also gained the `load-skill` read tool, which is how a
-//     skill hands over to the next one (llm_agent/runtime/plan-pipeline.mjs).
+//     skill hands over to the next one (llm_agent/plan/plan-pipeline.mjs).
 //   v41 — /agent/v2/stream emits `tasks_progress` events mid-turn (the
 //     session task list, re-checked after every tool_result that changed
 //     it). The terminal `tasks` event is unchanged and still carries

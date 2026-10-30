@@ -1,6 +1,6 @@
 // extension/tests/plan-pipeline.test.mjs
 // The planning pipeline's stage resolution and bindings
-// (llm_agent/runtime/plan-pipeline.mjs), plus the mode-skills block that
+// (llm_agent/plan/plan-pipeline.mjs), plus the mode-skills block that
 // carries a stage skill into the prompt (core/prompt-framing.mjs).
 //
 // The point of these tests is the CONTRACT between the two halves of the
@@ -17,9 +17,9 @@ import {
   DISCOVER_SKILL_IDS, WRITE_SKILL_ID, EXECUTE_SKILL_IDS,
   discoverSkillIdForMode, executeSkillId, pipelineSkillIdFor,
   buildPlanBinding, buildExecuteBinding,
-} from '../llm_agent/runtime/plan-pipeline.mjs';
+} from '../llm_agent/plan/plan-pipeline.mjs';
 import { buildModeSkillsText } from '../core/prompt-framing.mjs';
-import { V2_EXECUTE_GUIDANCE } from '../llm_agent/runtime/execute-guidance.mjs';
+import { V2_EXECUTE_GUIDANCE } from '../llm_agent/plan/execute-guidance.mjs';
 
 // --- stage resolution -------------------------------------------------------
 
@@ -341,7 +341,7 @@ test('every pipeline skill id resolves through load-skill', async (t) => {
   // way when the private .skills submodule is not checked out (CI).
   const { resolveCentralSkillsRepo } = await import('../core/skills-repo.mjs');
   if (!resolveCentralSkillsRepo()) { t.skip('.skills is not initialized locally — run `git submodule update --init .skills`'); return; }
-  const { handleLoadSkill } = await import('../llm_agent/runtime/handlers/load-skill.mjs');
+  const { handleLoadSkill } = await import('../llm_agent/tools/handlers/load-skill.mjs');
   const ids = [
     ...Object.values(DISCOVER_SKILL_IDS),
     WRITE_SKILL_ID,

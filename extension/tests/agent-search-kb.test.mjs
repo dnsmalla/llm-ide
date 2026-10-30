@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { searchKb, redactFence } from '../llm_agent/runtime/handlers/search-kb.mjs';
+import { searchKb, redactFence } from '../llm_agent/tools/handlers/search-kb.mjs';
 
 test('searchKb escapes fence sentinels in hit fields (prompt-injection defence)', async () => {
   const ctx = {

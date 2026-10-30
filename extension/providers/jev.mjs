@@ -4,7 +4,7 @@
 // (`state`) and 1–64 typed questions, it answers each with a calibrated
 // probability — `noul` (yes/no), `choice` (pick one of named options) or
 // `score` (a level on an ordered scale). This module is the only place that
-// speaks its wire format; llm_agent/runtime/decide.mjs decides WHEN to call it
+// speaks its wire format; llm_agent/tools/decide.mjs decides WHEN to call it
 // (the `decisions` tier role) and owns the LLM fallback.
 //
 //   POST <base>/v1/systemone   Authorization: Bearer <key>

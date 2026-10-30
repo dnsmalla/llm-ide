@@ -397,7 +397,7 @@ export async function handleRunBash(args, ctx = {}) {
   };
 }
 
-// ──── Tests (run via: node llm_agent/runtime/handlers/run-bash.mjs)
+// ──── Tests (run via: node llm_agent/tools/handlers/run-bash.mjs)
 
 export async function runTests() {
   const assert = (cond, msg) => { if (!cond) throw new Error(msg); };
