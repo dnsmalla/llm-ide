@@ -1,5 +1,5 @@
 ---
-title: Extensions catalog (phases P0 to P4) — spec
+title: Extensions catalog (phases P0 to P4 and installed-item loading) — spec
 status: draft
 ---
 
@@ -95,7 +95,7 @@ For a Claude-format plugin with unchecked members, `materializePluginView` build
 
 ## §9 Sources and install (P4)
 
-A user's request is the only trigger: nothing is fetched in the background, and the server never reads a catalog or index in this phase. Flags: `LLMIDE_EXT_CATALOG` (default on; `off` refuses install with 404 `CATALOG_DISABLED`), `LLMIDE_EXT_SCAN` (default on; `off` skips the scan), `LLMIDE_EXT_ALLOWED_SOURCES` (comma list of `owner/repo` globs; unset means any GitHub repository the user names).
+A user's request is the only trigger: nothing is fetched in the background, and the server never reads a catalog or index in this phase. Flags: `LLMIDE_EXT_CATALOG` (default on; `off` refuses install with 404 `CATALOG_DISABLED`), `LLMIDE_EXT_SCAN` (default on; `off` skips the scan), `LLMIDE_EXT_ALLOWED_SOURCES` (comma list of `owner/repo` globs; unset or blank means `anthropics/*,modelcontextprotocol/*`; a `*/*` entry allows any GitHub repository; the operator adds repositories through this variable, `extension/.env.example` documents it; a Settings screen for it is pending).
 
 | Path | Role |
 |---|---|
@@ -104,6 +104,7 @@ A user's request is the only trigger: nothing is fetched in the background, and 
 | `extension/llm_agent/extensions/inspect.mjs` | `inspectTree`: kind, name, members, declared executable kinds, permission summary |
 | `extension/llm_agent/extensions/scan.mjs` | `scanTree`: the warn-only instruction scan |
 | `extension/llm_agent/extensions/installed.mjs` | The installed registry file and store paths |
+| `extension/llm_agent/extensions/installed-runtime.mjs` | Installed items as plugin objects, library skills and MCP configs (§9a) |
 | `extension/llm_agent/extensions/install.mjs` | `installFromGithub`, `listInstalled`, `setInstalledEnabled`, `setInstalledMembers`, `uninstall`, `forgetUserExtensions` |
 | `extension/routes/extensions-catalog.mjs` | The four routes below |
 
@@ -112,10 +113,10 @@ A user's request is the only trigger: nothing is fetched in the background, and 
 - **Caps:** download 10 MB, unpacked 40 MB, kept files 25 MB in total, one file 2 MB (a larger file is skipped and reported), 3000 files, a path of 240 characters and 20 levels. A path that is absolute, has `..`, a backslash or a control character, or is a file and a directory at once, rejects the whole archive (`UNSAFE_PATH`). Symbolic and hard links and special files are skipped, never created.
 - **What is read:** `inspectTree` recognises a plugin (`.claude-plugin/plugin.json`, `plugin.json`, `.codex-plugin/plugin.json`: skills, commands, agents, hooks, `.mcp.json`, `bin/`, LSP), a single skill (root `SKILL.md`), a skill bundle (`skills/*/SKILL.md`, kind `llm-source`) and an MCP registry `server.json`. A marketplace repository is refused with 422 `MARKETPLACE` and the entry names. Item id is `<kind>:<owner lowercased>/<name>`; trust is `official` for `github.com/anthropics/*`, else `unknown`.
 - **Nothing executes at install:** files are written with mode 0644 to `<plugin dir>/../extensions/store/<sha256(userId)[0:24]>/<kind>__<publisher>__<name>/<commit>/` through a staging directory and a rename; no manifest, hook, script or server is run, and no dependency is installed.
-- **Default off, per user:** the record goes to `extensions-installed.json` (per user, atomic, mode 0600, unreadable means refuse to write) and the switch overlay gets `enabled: false`. A second user installing the same repository gets an independent copy and independent switches. Installing the same commit again is a no-op (`alreadyInstalled`); another commit of an installed item is 409 `ALREADY_INSTALLED` (updating is P5).
+- **Default off, per user:** the record goes to `extensions-installed.json` (per user, atomic, mode 0600, unreadable means refuse to write) and the switch overlay gets `enabled: false`. A second user installing the same repository gets an independent copy and independent switches. Installing the same commit again is a no-op (`alreadyInstalled`); another commit of an installed item is 409 `ALREADY_INSTALLED` (updating and rollback are P5; the bytes stay per user until then).
 - **Consent:** enabling an item whose `declared.executableKinds` is not empty (`hook`, `mcp`, `lsp`, `bin`) needs every such kind named in `consents`; otherwise 409 `CONSENT_REQUIRED` with `details.kinds`. Grants are stored with the commit.
 - **Scan:** advisory only. Rules: `hidden_characters`, `injection_phrase`, `pipe_to_shell`, `network_command`, `secret_path`, `destructive_command`, `base64_blob`, `external_host`, `long_line`, `binary_file`, `link_skipped`, `large_file_skipped`; at most 200 findings per scan, 50 kept in the record, every one `severity: 'warn'`, excerpts at most 80 characters. A finding never blocks an install or an enable. It is a heuristic, not a safety verdict.
-- **Not wired yet:** an installed item that is switched on is recorded but no consumer loads it into a turn; the active set reads the three legacy files plus the restrict-only overlay. Wiring installed bytes into the SDK plugin delivery, the skill set and the MCP builder is the next phase.
+- **Loading:** an installed item that is switched on and consented reaches the turn builders as described in §9a.
 - **Account deletion:** `forgetUserExtensions` removes a user's records, switches and bytes; it is called after `deleteUserCascade` in `DELETE /auth/me` and the admin delete.
 
 Routes (module `routes/extensions-catalog.mjs`, dispatched by `routes/extension-routes.mjs`; all need a signed-in user and act on that user only):
@@ -129,13 +130,38 @@ Routes (module `routes/extensions-catalog.mjs`, dispatched by `routes/extension-
 
 Audit actions: `extension.install`, `extension.enable`, `extension.disable`, `extension.members`, `extension.uninstall` (with the commit, trust and finding count, never file content).
 
+## §9a Installed items in turns
+
+Module `extension/llm_agent/extensions/installed-runtime.mjs` (`activeInstalled(userId, gate, { legacyPluginNames })`, `missingConsents`) turns a user's installed items into what the builders already consume. The builders call it only with a gate: `LLMIDE_EXT_ACTIVE_SET` on, or a caller that forces one (the active set and the provider adapter, as in §8). With no gate, with `LLMIDE_EXT_CATALOG=off`, with nothing installed, or with an unreadable overlay or installed record, it returns nothing, so the output is byte-identical to the baseline golden file (`extensions-baseline`, `extensions-installed-runtime`).
+
+An item loads only when all of these hold, re-read on every turn (a switched-off or uninstalled item is absent from the next turn):
+
+- the overlay has an explicit `enabled: true` for it and no entry for the same kind and name switches it off (`gate.installedActive`, `gate.installedMemberActive`; a corrupt overlay answers off);
+- every executable kind it declares (`hook`, `mcp`, `lsp`, `bin`) has a consent recorded with this pinned commit;
+- the store directory `<store>/<user>/<item>/<commit>/` exists, is not a symbolic link and resolves inside that user's own store;
+- a plugin's manifest name equals its item name and no legacy plugin has that name (the legacy plugin wins, a warning says so).
+
+| Kind | Where it lands |
+|---|---|
+| `plugin` | `buildUserPluginDelivery` (after the legacy plugins; SDK `plugins` path with `skipMcpDiscovery`, a generated view when members are unchecked, §6) and `buildPerUserSkillSet` (skills, commands, agents; a legacy command keeps its trigger). Hooks run only when every executable kind the loader sees is consented (`hooks`→`hook`, `lsp`, `bin`; `monitors` can never be, so such a plugin is not delivered). |
+| `skill`, `llm-source` | `listSkillLibrary` entries `catalog/<publisher>__<item>/<dir>` (family `skills`, `sourceId` the item id), after every legacy source; member `skill:<name>` applies. They feed the `/` menu and `load-skill`. |
+| plugin `.mcp.json` servers, `mcp` (registry `server.json`) | `buildUserMcpServers`, so Claude turns and provider-adapter turns both mount them. Server id is the slug of `<plugin>-<server>` (at most 40 characters; taken or reserved ids, including `llmide`, are skipped). A `server.json` item mounts its first `streamable-http`/`sse` remote only; a package that would need `npx`/`uvx` at turn time is not launched (a warning says so). Member `mcp:<server>` applies. Restricted modes mount nothing. |
+
+Server configs from a third party are built conservatively: `${CLAUDE_PLUGIN_ROOT}` in the command and arguments becomes the item's directory; any other `${...}` in the command or arguments drops the server, and an env or header value still holding one is dropped (the host environment is never expanded into it); a http(s) server must be `https`, without credentials, on a dotted host that is not `localhost`, an address literal or a `.local`/`.internal`/`.lan`/`.home` name (the adapter path additionally refuses private addresses at connect time, §8). Nothing runs at install or at load; a stdio server starts only when a turn mounts it.
+
+**Approvals.** The result of `buildUserMcpServers` carries `askServers` (the ids of installed servers; the key is absent when there are none) and leaves them out of `allowedTools`. On the Claude engine `canUseTool` parks a `ToolApproval` for every call of such a server (also in Bypass, with no "always allow" suggestion, nothing saved); an unlisted `mcp__` tool is still denied. The adapter already asks on every call. A third-party server does not get the server-level pre-approval a legacy registry server has.
+
+**Limits stated plainly.** On the Claude engine the CLI spawns a stdio server, so its environment is whatever the SDK passes it (the configured `env` plus the CLI's own rules: unverified), unlike the adapter path, which gives it only the SDK's safe defaults plus the record's `env`. The consent covers the pinned commit; a reinstall at another commit is refused (409) until P5, so a consent never silently carries to new bytes. Account deletion also removes generated views (`removeAllViewsFor`), and uninstall removes the plugin's views.
+
+`computeActiveSet` includes installed items in `items` and the fingerprint (id, commit, unchecked members) and their warnings in `warnings`.
+
 ## §10 Not in these phases
 
-Catalog sources other than a GitHub repository the user names (marketplace and MCP-registry indexes, search, `GET /auth/me/extensions/catalog|active|updates`), loading installed items into turns, unified update with diff, rollback, the Mac Extensions screen, an `extensionsFingerprint` column in `turn_composition`, the adapter's skills catalog block (it would add tokens to every provider turn), per-tool MCP deny lists, and write-through to the legacy files.
+Catalog sources other than a GitHub repository the user names (marketplace and MCP-registry indexes, search, `GET /auth/me/extensions/catalog|active|updates`), unified update with diff, rollback, the Mac Extensions screen, an `extensionsFingerprint` column in `turn_composition`, the adapter's skills catalog block (it would add tokens to every provider turn), per-tool MCP deny lists, and write-through to the legacy files.
 
 ## §11 Tests
 
-`extensions-baseline`, `extensions-model`, `extensions-store`, `extensions-importer`, `extensions-active-set`, `extensions-consumers`, `extensions-adapter`, `extensions-sources`, `extensions-install`, `extensions-catalog-routes` and `eslint-mcp-sdk-fence` under `extension/tests/`, with the synthetic world in `extension/tests/helpers/extensions-world.mjs`, in-memory archives in `extension/tests/helpers/tar-fixture.mjs` and a real local stdio MCP server in `extension/tests/fixtures/fake-mcp-stdio-server.mjs`. No test reaches the network or a paid model.
+`extensions-baseline`, `extensions-model`, `extensions-store`, `extensions-importer`, `extensions-active-set`, `extensions-consumers`, `extensions-adapter`, `extensions-sources`, `extensions-install`, `extensions-catalog-routes`, `extensions-installed-runtime` and `eslint-mcp-sdk-fence` under `extension/tests/`, with the synthetic world in `extension/tests/helpers/extensions-world.mjs`, in-memory archives in `extension/tests/helpers/tar-fixture.mjs` and a real local stdio MCP server in `extension/tests/fixtures/fake-mcp-stdio-server.mjs`. No test reaches the network or a paid model.
 
 ## Regeneration checklist
 
