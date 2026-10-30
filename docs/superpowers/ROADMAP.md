@@ -1,59 +1,73 @@
-# Roadmap: now, next, later
+# Roadmap: done, waiting on you, now, next, later
 
-Updated 2026-10-29. Principle (user, 2026-10-29): **professional quality over speed.** No safety gate is compressed to hit a date. A phase ships only when its exit gate, its independent review and the full pre-push gate are green.
+Updated 2026-10-30. Principle (user, 2026-10-29): **professional quality over speed.** No safety gate is compressed to hit a date. A phase ships only when its exit gate, its independent review and the full pre-push gate are green. User decision (2026-10-30): **paid / subscription bench runs happen after the end-to-end build; every token-affecting change ships OFF by default until then.**
 
 Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-gated (real data must accumulate).
 
-## Now (recent to do)
+## Done and pushed (main, `01952e9f` plus Phase 7 local)
 
-| # | Task | Who | State |
-|---|---|---|---|
-| N1 | First-launch check: data moved to Application Support (verified 2026-10-29: live server on the new `data.db`/`agent.db`, `.pre-move` copies removed); shadow mode on. Remaining: confirm chats, settings, OS page, Storage hub look right. | you | data move done |
-| N6 | Fixed (3a110360): the moved-kb guard now runs before any secrets or files are created; tests use in-memory secrets. Stray `kb/.dev-secrets.json` from 19:28 awaits your delete. | you | open |
-| N2 | Live-then-archive Phase 2 review fixes (reconciler safety: partial scans, sign-out, manifest chunking, compare noise, event-loop bounds). | me | agent running |
-| N3 | Live-then-archive Phase 5, extension part (T5.2): draft kept until acked, legacy "copy to Mac", no local chat buffer, "Mac app not running" state. | me | agent running |
-| N4 | One independent review of N2 and N3, then the full gate and one push, then rebuild the app. | me | after N2, N3 |
-| N5 | Decide the three questions that block code: **Q19** (notes without `platform` frontmatter are invisible), **Q2** (continue an ended normal chat: replay or read-only), **Q16** (search latency at 50k notes). | you | open |
+| Area | What shipped |
+|---|---|
+| Agent store | `agent.db` (runs, tool events, composition, activity, rollups), Storage hub, Settings "Agent history" card, Clear/Compact, retention; usage-ledger shadow (`usage_calls`) with daily compare. |
+| Data placement | Rule: DB data in `<project>/system/`, notes in `llm-doc/`; Loop JSON + notes index moved; graph/memory/faults under the project `system/`; Doc Gen default `llm-doc/generated/`. |
+| Server data move | `data.db`/`agent.db`/secrets moved to Application Support (verified on the live machine), keep-2 backups, moved-kb tripwire (guard runs before any file is created). |
+| Live-then-archive | Phases 0-4 + extension part of 5: note index (rebuildable), chunked reconcile, shadow compare, quit archive with crash recovery, delete-everywhere, sign-out safety, extension draft release. |
+| Agent-kit K1 | P0 bench readiness; P2 non-token SDK adoption (retry/rate-limit/permission/refusal/thinking notices, MCP status, sandbox, fallback model opt-in) + SDK ledger triage; P3 `POST /kb/complete`; P4 extension chat = live v2 client, `/chat` 410; Track Q Mac half (plugin/MCP/LLM-source UI in sealed `Features/Extensions`); P6 provider catalog (Vercel AI SDK adapter, pinned fetch, per-user keys, security-reviewed); P6b session router (per-chat provider/model, billable token cap, handoff, learned limits, compression off); P6 second half (DeepSeek/catalog models in chat, classic engine deleted, `/code-assist` 410, legacy key migration, tools opt-in). |
+| Loose ends closed | `lta.mode` Settings control, incomplete-archive list, Clear older-than-N-days, run recording for dispatch/review/auto-task, shadow numbers in `/kb/storage`, `.env.example`. |
+| Docs/maps | K0 maps for docs-, graph-, knowledge-, agent-kit; data-lifecycle doc; plans for live-then-archive and agent-kit K1. |
 
-## Next (after the Now list, in order)
+## In progress [me]
 
-| # | Task | Who | Gate |
-|---|---|---|---|
-| X1 | Phase 4: async quit archive, crash-recovery sweep, delete-everywhere, sign-out/multi-user, phone path. **Built, reviewed twice, pushed (a7a73f05); app rebuilt.** Remaining: the manual quit/relaunch run with `lta.mode=on`. | you + me | manual run |
-| X5 | Ledger step B (agent store Stage 2): move budget readers to `usage_calls` only after 7 days of zero mismatches; **fail closed** to the ledger. | me/you | go/no-go by you |
-| X6 | Verify and remove leftovers after the first launch: `.pre-move` files are auto-removed on the second healthy boot; confirm they are gone. | me | after N1 |
+| # | Task | State |
+|---|---|---|
+| P7 | Retire `llm_agent/runtime/`: relocate survivors by owner (memory, modes, tools, plan), delete dead code, zero behaviour change. | 2 commits local (`844b1213`, `ece843c6`); agent finishing gates; then short review, gate, push, rebuild. |
+
+## Waiting on you [you]
+
+| # | Item | Why it matters |
+|---|---|---|
+| Y1 | **Bench go-ahead.** Run on your `claude` CLI login (no per-token billing, counts against plan limits). I will hand you a combined bench plan with exact commands: Haiku v4 baseline, Sonnet-class baseline, noise check, then A/B pairs for each lean change. | Unblocks all token savings (below). |
+| Y2 | **Manual app checks:** 12-step quit-and-relaunch run with `lta.mode=on`; moved plugin/MCP screens; Provider catalog card (DeepSeek connection, "Turn on the session router", "Allow tools on provider models"); chat header cap control. | Real-app verification nothing else can give. |
+| Y3 | Decisions: **Q19** (notes without `platform` are invisible in Library), **Q16** (search latency at 50k notes), knowledge-kit Q1-Q14 (unanswered ones, esp. Q6 ReviewConflicts, Q9 plan-table boundaries, Q12-Q13), ledger **step B** go/no-go. | Block knowledge-kit K1 and the ledger cutover. |
+| Y4 | Meetings are not in use: all meeting work waits until you record meetings (see Later M1-M3). | Time-gated by your usage. |
+
+## Next (build, all token-affecting parts OFF until Y1)
+
+| # | Task | Gate |
+|---|---|---|
+| X1 | **Lean SDK configuration (P1, L1-L12):** compact prompt with an exploration cap, drop Bash from modes that do not need it (execute mode; `ask` is already read-only on v2), settings audit (git instructions, attachments), cache-TTL experiment, compaction window, our own per-turn calls (memory-extract, mode classifier), tool-search re-measure. | Bench A/B per item (15% tokens / 30% time). |
+| X2 | **Token-affecting SDK adoption (P2 top-15 remainder):** `sessionStore`, Haiku search sub-agent via `options.agents` (also restores plugin sub-agent tools), `Task*` tools, `skills`, `options.agent` (enables `snapshot:true`), `resumeSessionAt`, plan-mode tools. | Bench each. |
+| X3 | **Ended-chat continuation (live-then-archive Phase 5 / agent-kit P5):** per-chat summary on a cheap model + last 4-6 turns, fresh SDK session, warm-chat resume only; improves the P6b handoff (today a simple extract). | Bench + review. |
+| X4 | Track Q server half: move the 37 plugin/MCP/LLM-source routes out of `server/auth-routes.mjs` into their own route module (pure move, contract-proved). | contract-gates. |
+| X5 | Ledger step B (agent store Stage 2): budget readers to `usage_calls` after 7 days of zero mismatches; **fail closed** to the ledger. | Your go/no-go (Y3). |
+| X6 | Router polish: switch history in the Agents hub (graph-kit page), shadow metrics on the Storage page (graph-kit), per-chat cheaper fallback at the cap. | graph-kit repo + pin bump. |
+| X7 | Provider pinning for tracker-host connectors (`connectors/issues.mjs`, `agents/dispatcher.mjs`, `agents/outcome-providers.mjs`) — currently allowlisted, not pinned. | Security review. |
 
 ## Later
 
-**Meetings are not in use yet (user, 2026-10-29).** Everything that needs real meeting notes waits until meetings are recorded in the active project. Shadow mode is on (`lta.mode=shadow`) and costs nothing while there are no meeting notes; the daily compare reports `not-evaluated`.
+**Meetings (user, 2026-10-29): not in use.** Shadow mode costs nothing without meeting notes.
 
 | # | Task | Notes |
 |---|---|---|
-| M1 | Phase 5, Mac side: T5.1 ack after verify with the server's `lines`/`hash` + unacked adoption at start + dedupe a re-sent capture by session id; T5.3 meeting-attached chat (`meetingId`, no undo). | when meetings are used |
-| M2 | Shadow soak on real meeting notes: 7 days, topK(10) overlap, countDelta 0, drift clean. | needs meeting notes |
-| M3 | Phase 3: read-path switch (server reads from `note_index`, extension reads live, token bench guard). | after M2 |
-| L1 | Phase 6: delete-path switch and legacy migration (destructive; own gate, export-before-delete, 30-day `VACUUM INTO` backup, rollback drill). | after M2 and M3 are clean |
-| L2 | Knowledge-kit K1: files stay the truth, server keeps a rebuildable index. Needs the remaining knowledge questions (Q6, Q7, Q9, Q12, Q13) and the plugin/MCP UI owner (Q4). | after the lifecycle build |
-| L3 | Agent-kit K1: chat state per the lifecycle decision; classic engine fate (Q3); SDK surface triage (129 unreviewed items); dead routes (Q7) with API version bump. | after L2 starts |
-| L4 | Docs-kit K2-K4 (remove proof, Tauri screens, retire Swift path after one release default-on). | gated by release cadence |
-| L5 | Other kits in plan order: work, workspace, capture, automation (job runner first), sync. | plan: kit-by-kit migration |
-| L6 | Graph layout in Rust/WASM (spike done: 16% faster, shared kernel). Revisit when the Tauri work starts. | spikes/layout-t0.md |
-| L7 | Tauri desktop + relay (ADR 0018). | Phase 0 PoC gate |
+| M1 | Live-then-archive Phase 5 Mac side: ack with server `lines`/`hash`, dedupe a re-sent capture by session id; meeting-attached chat (`meetingId`, no undo). | When meetings are used. |
+| M2 | 7-day shadow soak on real meeting notes (topK overlap, countDelta 0). | Needs meeting notes. |
+| M3 | Live-then-archive Phase 3: read-path switch to `note_index`. | After M2. |
+| L1 | Live-then-archive Phase 6: delete legacy duplicate rows (destructive; export-before-delete, backup, rollback drill). | After M2 + M3. |
+| L2 | Knowledge-kit K1 (files stay the truth, server keeps a rebuildable index). | After Y3 answers. |
+| L3 | Docs-kit K2-K4. | Release cadence. |
+| L4 | Other kits in plan order: work, workspace, capture, automation (job runner first), sync. | Kit-by-kit plan. |
+| L5 | Graph layout in Rust/WASM (spike: 16% faster, shared kernel). | Revisit with the Tauri work. |
+| L6 | Tauri desktop + relay (ADR 0018). | PoC gate. |
 
-## Loose ends (small, schedule with the phase that touches the file)
+## Loose ends
 
-- Storage hub (graph-kit web page) does not yet render `GET /kb/storage` `shadow` (server side shipped, API 87).
-- Settings screen for `lta.mode` (today: `defaults write`).
-- Sign-out seam for the note-index reconciler (fixed in N2).
-- Clear sheet: add the "older than N days" option (server supports it).
-- `LLMIDE_DATA_DIR` line in `.env.example`; decide the `/health` addition's `SERVER_API_VERSION` bump.
-- Pin the extension origin (CORS currently allows every `chrome-extension://*`; Q22).
-- Quit-time delay verification on macOS logout (Q21); `llmide://` launch from Chrome (Q11).
-- Real-corpus checks that fixtures cannot give: platform-less note count, hidden-note semantics, iCloud placeholders.
-- Flaky under full-gate load (pass alone): `loop-contract-lab` "project environment inspector" fake-Python probes (7 asserts, 2026-10-29 push), `ExplorerTreeStoreWatchTests.testStartWatchingSeesDeletesAndRenames`. Harden their timeouts instead of re-running.
-- Live capture: the Mac must ack with the server's authoritative `lines`/`hash` (`GET /kb/live/unacked`), and dedupe a re-sent capture by session id so it does not write a second note (T5.1).
-- Two Macs on one account can flap note-index keys (detected and logged, not prevented; device scoping deferred).
+- Pin the extension origin (CORS accepts every `chrome-extension://*`; Q22). Quit-time delay on macOS logout (Q21); `llmide://` launch from Chrome (Q11).
+- Real-corpus checks fixtures cannot give: platform-less note count, hidden-note semantics, iCloud placeholders.
+- Flaky under full-gate load (pass alone): `index-routes.http` 1 MB body test (EPIPE), `loop-contract-lab` environment-inspector probes, `ExplorerTreeStoreWatchTests` (hardened). Harden, don't re-run.
+- Two Macs on one account can flap note-index keys (detected, not prevented).
+- Plugin sub-agent tools are unavailable until X2 (`ask-subagent` answers once, marked `tools_unavailable`; `ask-internal` stub).
+- The `/health` storage field and API-version decisions for additive changes follow the API 92 line.
 
 ## Quality gates that never get skipped
 
-Independent Sonnet review for data-touching code; `make regression`; contract gates; feature-boundary gate; markdownlint before every push; old-format fixtures for every migration (N-1 readable, rollback tested); real-data checks before any destructive switch; nothing deleted without a verified copy.
+Independent Sonnet review for data-, money- and security-touching code; `make regression`; contract gates; feature-boundary gate; markdownlint before every push; old-format fixtures for every migration (N-1 readable, rollback tested); real-data checks before any destructive switch; nothing deleted without a verified copy; token-affecting changes only after a bench A/B.
