@@ -1,8 +1,8 @@
 {
   "_comment": [
-    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17). Version 3.",
-    "Version 3 = the seven version-2 scenarios, UNCHANGED, plus six added ones (agent-kit K1 T0.2).",
-    "`compatibleWith: [2]`: a version-2 baseline still covers its own seven scenarios; the new",
+    "Fixed scenario set for scripts/token-bench.mjs (Phase 1 P17). Version 4.",
+    "Version 4 = the thirteen version-3 scenarios, UNCHANGED, plus three added ones for the session router (agent-kit K1 Phase 6b T6b.9).",
+    "`compatibleWith: [2, 3]`: a version-2 or version-3 baseline still covers its own scenarios; the new",
     "ones show as \"new\" until a version-3 baseline is committed.",
     "Every sample opens a NEW v2 chat (one chat per scenario sample; every turn of",
     "a multi-turn scenario reuses that chat). The bench reseeds its temp workspace",
@@ -20,9 +20,12 @@
     "`expectTools`: the scenario should make at least one tool round trip (hops > 1).",
     "A real run fails when it does not; a --fake run only warns.",
     "Change a prompt, a seed file or this file's version only together with a new",
-    "token-baseline.json. Bump `version` on any such change."
+    "token-baseline.json. Bump `version` on any such change.",
+    "`route`: { tokenLimit?, expectRefusal?, steps: [{ before, provider, model }] }: the runner PUTs /agent/v2/session/route before the first turn (the cap) and before each step's turn (a pin change).",
+    "`requiresEnv`: server switches the scenario needs (--env LLMIDE_ROUTER=on ...); a run without them fails up front. These three scenarios are for the user's paid run after the build; the committed baseline does not include them.",
+    "`switch-handoff` pins one chat to a second model between turns (cold switch cost); `capped-session` sets a small token limit and expects the chat to be refused at it; `compress-long-tools` re-reads a large file with compression on (adapter turns only: on the Claude path it measures nothing, so run it on a catalog provider)."
   ],
-  "version": 3,
+  "version": 4,
   "scenarios": [
     {
       "id": "greeting",
@@ -148,9 +151,64 @@
         "Reply with the word 'ready' only.",
         "What code word did I ask you to remember? Reply with the word only."
       ]
+    },
+    {
+      "id": "switch-handoff",
+      "mode": "ask",
+      "requiresEnv": [
+        "LLMIDE_ROUTER"
+      ],
+      "route": {
+        "steps": [
+          {
+            "before": 2,
+            "provider": "anthropic",
+            "model": "claude-sonnet-5-5"
+          }
+        ]
+      },
+      "turns": [
+        "Remember the code word is 'maple'. Reply with OK only.",
+        "Reply with the word 'ready' only.",
+        "What code word did I ask you to remember? Reply with the word only.",
+        "Reply with the word 'done' only."
+      ]
+    },
+    {
+      "id": "capped-session",
+      "mode": "ask",
+      "requiresEnv": [
+        "LLMIDE_ROUTER",
+        "LLMIDE_ROUTER_CAP"
+      ],
+      "route": {
+        "tokenLimit": 1500,
+        "expectRefusal": true
+      },
+      "turns": [
+        "Reply with the word 'one' only.",
+        "Reply with the word 'two' only.",
+        "Reply with the word 'three' only.",
+        "Reply with the word 'four' only.",
+        "Reply with the word 'five' only."
+      ]
+    },
+    {
+      "id": "compress-long-tools",
+      "mode": "execute",
+      "expectTools": true,
+      "requiresEnv": [
+        "LLMIDE_ROUTER",
+        "LLMIDE_ROUTER_COMPRESS"
+      ],
+      "turns": [
+        "Read notes.txt in the workspace and reply with its first line only.",
+        "Read notes.txt again and reply with its last line only."
+      ]
     }
   ],
   "compatibleWith": [
-    2
+    2,
+    3
   ]
 }

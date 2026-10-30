@@ -57,17 +57,20 @@ test('defaultBenchModel is the cheapest (fast) picker model from anthropic-model
 
 const V2_IDS = ['greeting', 'explain-file', 'small-edit', 'plan-step', 'two-turn-reuse', 'long-tool-results', 'cache-slope'];
 const V3_IDS = ['repo-search', 'auto-mode', 'mode-switch', 'cache-slope-12', 'mcp-two-servers', 'ended-chat-continue'];
+const V4_IDS = ['switch-handoff', 'capped-session', 'compress-long-tools'];
+// The router scenarios need server switches (--env); the default fake runs below use the other thirteen.
+const withoutRouter = (list) => list.filter((s) => !s.requiresEnv);
 
-test('loadScenarios reads the committed set (version 3 = the v2 seven unchanged + six) with tool scenarios marked', () => {
+test('loadScenarios reads the committed set (version 4 = the v3 thirteen unchanged + three router scenarios) with tool scenarios marked', () => {
   const { version, scenarios, compatibleWith } = loadScenarios(SCENARIOS);
-  assert.equal(version, 3);
-  assert.deepEqual(compatibleWith, [2]);
-  assert.deepEqual(scenarios.map((s) => s.id), [...V2_IDS, ...V3_IDS]);
+  assert.equal(version, 4);
+  assert.deepEqual(compatibleWith, [2, 3]);
+  assert.deepEqual(scenarios.map((s) => s.id), [...V2_IDS, ...V3_IDS, ...V4_IDS]);
   assert.equal(scenarios.find((s) => s.id === 'two-turn-reuse').turns.length, 2);
   assert.equal(scenarios.find((s) => s.id === 'cache-slope').turns.length, 5);
   assert.deepEqual(
     scenarios.filter((s) => s.expectTools).map((s) => s.id),
-    ['explain-file', 'small-edit', 'long-tool-results', 'repo-search', 'mode-switch'],
+    ['explain-file', 'small-edit', 'long-tool-results', 'repo-search', 'mode-switch', 'compress-long-tools'],
   );
 });
 
@@ -81,7 +84,7 @@ test('the v2 scenarios are byte-for-byte what the committed v2 baseline measured
     assert.equal(s.mode, b.mode, `${s.id} mode`);
     assert.equal(s.turns.length, b.turns, `${s.id} turn count`);
     assert.equal(Boolean(s.expectTools), b.expectTools, `${s.id} expectTools`);
-    for (const key of ['classifier', 'turnModes', 'dropSessionBefore', 'fakeMcp']) assert.equal(s[key], undefined, `${s.id} ${key}`);
+    for (const key of ['classifier', 'turnModes', 'dropSessionBefore', 'fakeMcp', 'route', 'requiresEnv']) assert.equal(s[key], undefined, `${s.id} ${key}`);
   }
 });
 
@@ -98,6 +101,64 @@ test('v3 scenarios: auto-mode really reaches the classifier; the others use the 
   assert.equal(restrictsTools(by('mcp-two-servers').mode), false, 'ask/plan/review/document load no user MCP servers');
   assert.deepEqual(by('ended-chat-continue').dropSessionBefore, [2]);
   assert.ok(by('repo-search').expectTools);
+});
+
+test('v4 router scenarios: structure, required switches, and that the v3 scenarios are unchanged', () => {
+  const { scenarios } = loadScenarios(SCENARIOS);
+  const by = (id) => scenarios.find((s) => s.id === id);
+  const sw = by('switch-handoff');
+  assert.deepEqual(sw.requiresEnv, ['LLMIDE_ROUTER']);
+  assert.ok(sw.route.steps.every((st) => st.before >= 1 && st.before < sw.turns.length), 'a switch lands mid-chat');
+  const cap = by('capped-session');
+  assert.deepEqual(cap.requiresEnv, ['LLMIDE_ROUTER', 'LLMIDE_ROUTER_CAP']);
+  assert.equal(cap.route.expectRefusal, true);
+  assert.ok(cap.route.tokenLimit > 0 && cap.turns.length >= 4);
+  assert.deepEqual(by('compress-long-tools').requiresEnv, ['LLMIDE_ROUTER', 'LLMIDE_ROUTER_COMPRESS']);
+  // The thirteen v3 scenarios carry none of the new fields.
+  for (const s of scenarios.filter((x) => [...V2_IDS, ...V3_IDS].includes(x.id))) {
+    assert.equal(s.route, undefined, s.id);
+    assert.equal(s.requiresEnv, undefined, s.id);
+  }
+});
+
+test('loadScenarios validates the route fields; a run without the required switches fails up front', async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-bench-scen-v4-'));
+  try {
+    const file = path.join(dir, 's.json');
+    const bad = (sc, re) => {
+      fs.writeFileSync(file, JSON.stringify({ version: 4, scenarios: [{ id: 'x', mode: 'ask', turns: ['a', 'b'], ...sc }] }));
+      assert.throws(() => loadScenarios(file), re);
+    };
+    bad({ route: 'x' }, /route must be an object/);
+    bad({ route: { tokenLimit: 0 } }, /tokenLimit/);
+    bad({ route: { tokenLimit: 1.5 } }, /tokenLimit/);
+    bad({ route: { expectRefusal: 'yes' } }, /expectRefusal/);
+    bad({ route: { steps: [{ before: 2, provider: 'anthropic', model: 'm' }] } }, /before/);
+    bad({ route: { steps: [{ before: 1, provider: 'openai', model: 'm' }] } }, /provider/);
+    bad({ route: { steps: [{ before: 1, provider: 'anthropic', model: '' }] } }, /provider/);
+    bad({ requiresEnv: ['not_upper'] }, /requiresEnv/);
+    bad({ requiresEnv: 'LLMIDE_ROUTER' }, /requiresEnv/);
+    const { scenarios } = loadScenarios(SCENARIOS);
+    await assert.rejects(
+      runBench({ fake: true, model: FAKE_MODEL, scenarios: scenarios.filter((s) => s.id === 'capped-session'), scenariosVersion: 4, repeat: 1 }),
+      /needs --env LLMIDE_ROUTER=on --env LLMIDE_ROUTER_CAP=on/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('runBench --fake with the router on: the switch scenario pins mid-chat and the capped one is refused at its limit', async () => {
+  const { scenarios } = loadScenarios(SCENARIOS);
+  const pick = scenarios.filter((s) => ['switch-handoff', 'capped-session'].includes(s.id));
+  const results = await runBench({
+    fake: true, model: FAKE_MODEL, scenarios: pick, scenariosVersion: 4, repeat: 1,
+    extraEnv: { LLMIDE_ROUTER: 'on', LLMIDE_ROUTER_CAP: 'on' },
+  });
+  const sw = results.scenarios.find((s) => s.id === 'switch-handoff');
+  assert.equal(sw.turns, 4);
+  assert.equal(sw.route, true);
+  const cap = results.scenarios.find((s) => s.id === 'capped-session');
+  assert.ok(cap.perTurn.length >= 1 && cap.perTurn.length < 5, `the chat was refused before the fifth turn (ran ${cap.perTurn.length})`);
 });
 
 test('loadScenarios validates the v3 fields', () => {
@@ -447,11 +508,11 @@ test('the fake engine seam needs LLMIDE_BENCH_FAKE=1, the --bench-fake flag, and
 test('runBench --fake end to end: every turn metered, cache reused on the second turn', async () => {
   const { scenarios, version, compatibleWith } = loadScenarios(SCENARIOS);
   const results = await runBench({
-    fake: true, model: FAKE_MODEL, scenarios, scenariosVersion: version, compatibleWith, repeat: 1,
+    fake: true, model: FAKE_MODEL, scenarios: withoutRouter(scenarios), scenariosVersion: version, compatibleWith, repeat: 1,
   });
   assert.equal(results.fake, true);
-  assert.equal(results.scenariosVersion, 3);
-  assert.deepEqual(results.scenariosCompatibleWith, [2]);
+  assert.equal(results.scenariosVersion, 4);
+  assert.deepEqual(results.scenariosCompatibleWith, [2, 3]);
   assert.equal(results.scenarios.length, 13);
   for (const s of results.scenarios) {
     assert.ok(s.billableTokens > 0, `${s.id} billable`);
@@ -487,7 +548,7 @@ test('CLI: --fake compares medians with a baseline; 0 when unchanged, 1 on a >15
   try {
     const { scenarios, version } = loadScenarios(SCENARIOS);
     const current = await runBench({
-      fake: true, model: FAKE_MODEL, scenarios, scenariosVersion: version, repeat: 1,
+      fake: true, model: FAKE_MODEL, scenarios: withoutRouter(scenarios), scenariosVersion: version, repeat: 1,
     });
     const cli = (extra) => spawnSync(process.execPath, [
       BENCH, '--fake', '--model', FAKE_MODEL, '--repeat', '1', '--out', path.join(dir, 'r.json'), ...extra,

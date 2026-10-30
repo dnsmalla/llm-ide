@@ -319,6 +319,22 @@ export function formatTable(current, comparison = null) {
   return lines.join('\n');
 }
 
+/** Session-router scenario fields (K1 Phase 6b): `route: { tokenLimit?, expectRefusal?, steps: [{ before, provider, model }] }`. */
+function validateRoute(file, s) {
+  const r = s.route;
+  const bad = (why) => { throw new Error(`${file}: scenario ${s.id}: route ${why}`); };
+  if (!r || typeof r !== 'object' || Array.isArray(r)) bad('must be an object');
+  if (r.tokenLimit !== undefined && (!Number.isSafeInteger(r.tokenLimit) || r.tokenLimit < 1)) bad('tokenLimit must be a positive integer');
+  if (r.expectRefusal !== undefined && typeof r.expectRefusal !== 'boolean') bad('expectRefusal must be a boolean');
+  if (r.steps !== undefined) {
+    if (!Array.isArray(r.steps)) bad('steps must be an array');
+    for (const st of r.steps) {
+      if (!Number.isInteger(st?.before) || st.before < 0 || st.before >= s.turns.length) bad(`step "before" must be a turn index in 0..${s.turns.length - 1}`);
+      if (!(st.provider === 'anthropic' || /^custom:/.test(st.provider ?? '')) || typeof st.model !== 'string' || !st.model) bad('step needs provider (anthropic or custom:*) and model');
+    }
+  }
+}
+
 export function loadScenarios(file = DEFAULT_SCENARIOS) {
   const cfg = JSON.parse(fs.readFileSync(file, 'utf8'));
   if (!Array.isArray(cfg.scenarios) || cfg.scenarios.length === 0) throw new Error(`${file}: no scenarios`);
@@ -342,6 +358,11 @@ export function loadScenarios(file = DEFAULT_SCENARIOS) {
         || s.dropSessionBefore.some((i) => !Number.isInteger(i) || i < 1 || i >= s.turns.length)) {
         throw new Error(`${file}: scenario ${s.id}: dropSessionBefore must be turn indexes in 1..${s.turns.length - 1}`);
       }
+    }
+    if (s.route !== undefined) validateRoute(file, s);
+    if (s.requiresEnv !== undefined
+      && (!Array.isArray(s.requiresEnv) || s.requiresEnv.some((n) => typeof n !== 'string' || !ENV_NAME_RE.test(n)))) {
+      throw new Error(`${file}: scenario ${s.id}: requiresEnv must list LLMIDE_* names`);
     }
     if (s.fakeMcp !== undefined && (!Number.isInteger(s.fakeMcp) || s.fakeMcp < 1 || s.fakeMcp > 4)) {
       throw new Error(`${file}: scenario ${s.id}: fakeMcp must be an integer 1..4`);
@@ -710,6 +731,18 @@ async function removeFakeMcpServers(ctx, ids) {
   }
 }
 
+/** PUT /agent/v2/session/route. A 409 ROUTER_DISABLED means the run forgot --env LLMIDE_ROUTER=on. */
+async function putRoute(ctx, chatSessionId, patch) {
+  try {
+    return await authedJson(ctx, 'PUT', '/agent/v2/session/route', { chatSessionId, ...patch });
+  } catch (err) {
+    if (/ROUTER_DISABLED/.test(String(err?.message))) {
+      throw new Error('this scenario needs the session router: run with --env LLMIDE_ROUTER=on (and --env LLMIDE_ROUTER_CAP=on for a token limit)');
+    }
+    throw err;
+  }
+}
+
 /** One sample of one scenario: a fresh workspace and a fresh chat, every turn metered. */
 async function runSample({ scenario, ctx }) {
   seedWorkspace(ctx.workspaceRoot);
@@ -718,7 +751,14 @@ async function runSample({ scenario, ctx }) {
   const ledgerMark = maxLedgerId(ctx.ledger, ctx.userId);
   const dropBefore = new Set(scenario.dropSessionBefore || []);
   const history = [];
+  const route = scenario.route;
+  // Session router (K1 P6b): the cap goes on before the first turn; pin changes go on before their turn.
+  if (route?.tokenLimit) await putRoute(ctx, chatSessionId, { tokenLimit: route.tokenLimit });
+  let refused = false;
   for (const [index, message] of scenario.turns.entries()) {
+    for (const st of route?.steps || []) {
+      if (st.before === index) await putRoute(ctx, chatSessionId, { provider: st.provider, model: st.model });
+    }
     let extraBody = {};
     if (dropBefore.has(index)) {
       // An ended chat: the SDK session and its transcript are gone, and the
@@ -731,10 +771,18 @@ async function runSample({ scenario, ctx }) {
     // real classifier (a paid model call), so a fake run sends `ask` instead.
     let mode = scenario.turnModes?.[index] ?? scenario.mode;
     if (ctx.fake && FORBIDDEN_MODES.has(mode)) mode = 'ask';
-    const t = await streamTurn({
-      base: ctx.base, token: ctx.token, chatSessionId, workspaceRoot: ctx.workspaceRoot,
-      mode, model: ctx.model, message, extraBody,
-    });
+    let t;
+    try {
+      t = await streamTurn({
+        base: ctx.base, token: ctx.token, chatSessionId, workspaceRoot: ctx.workspaceRoot,
+        mode, model: ctx.model, message, extraBody,
+      });
+    } catch (err) {
+      // A chat at its session cap is refused with 402 before any model call: for a capped scenario that
+      // IS the measurement, so it ends the sample instead of failing it.
+      if (route?.expectRefusal && /stream HTTP 402/.test(String(err?.message))) { refused = true; break; }
+      throw err;
+    }
     history.push({ role: 'user', content: message }, { role: 'assistant', content: t.reply || '(no text)' });
     if (t.error) throw new Error(`scenario ${scenario.id}: ${t.error}`);
     const { comp, raw } = await meterTurn(ctx, ctx.seenTurnIds);
@@ -763,6 +811,9 @@ async function runSample({ scenario, ctx }) {
     cacheRead: turns.reduce((n, t) => n + t.raw.cacheRead, 0),
     cacheWrite: turns.reduce((n, t) => n + t.raw.cacheWrite, 0),
   };
+  if (route?.expectRefusal && !refused) {
+    throw new Error(`scenario ${scenario.id}: expected the chat to be refused at its token limit, but every turn ran`);
+  }
   const ttfts = turns.map((t) => t.ttftMs).filter((v) => v != null);
   if (!ctx.fake) await new Promise((r) => setTimeout(r, HELPER_SETTLE_MS));
   const helper = helperUsageSince(ctx.ledger, ctx.userId, ledgerMark);
@@ -810,6 +861,7 @@ function aggregate(scenario, samples) {
     helperCalls: median3((s) => s.helperCalls),
     ...(scenario.classifier ? { classifier: true } : {}),
     ...(scenario.fakeMcp ? { fakeMcp: scenario.fakeMcp } : {}),
+    ...(scenario.route ? { route: true } : {}),
     perTurn: medianSample.turns.map((t) => ({
       hops: t.hops, billable: t.billable, input: t.raw.input, output: t.raw.output,
       cacheRead: t.raw.cacheRead, cacheWrite: t.raw.cacheWrite,
@@ -826,6 +878,10 @@ export async function runBench({
   fake = false, model, scenarios, scenariosVersion = 1, compatibleWith = [], repeat = DEFAULT_REPEAT,
   extraEnv = {}, log = () => {},
 }) {
+  for (const sc of scenarios) {
+    const missing = (sc.requiresEnv || []).filter((n) => extraEnv[n] !== 'on');
+    if (missing.length) throw new Error(`scenario ${sc.id} needs --env ${missing.map((n) => `${n}=on`).join(' --env ')}`);
+  }
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'llmide-token-bench-'));
   liveDirs.add(dir);
   const workspaceRoot = path.join(dir, 'workspace');
@@ -970,6 +1026,15 @@ async function main(argv) {
     if (unknown.length) throw new Error(`--only: unknown scenario id(s): ${unknown.join(', ')}`);
     scenarios = scenarios.filter((s) => opts.only.includes(s.id));
     if (opts.baseline) throw new Error('--only cannot write a baseline: a baseline must hold the whole scenario set');
+  }
+  if (!opts.only) {
+    // Router scenarios (K1 P6b) need server switches. A default run leaves them out and says so; naming one
+    // with --only (and the --env it lists) runs it.
+    const skipped = scenarios.filter((s) => (s.requiresEnv || []).some((n) => opts.env[n] !== 'on'));
+    if (skipped.length) {
+      console.error(`token bench: skipping ${skipped.map((s) => s.id).join(', ')} (they need --env ${[...new Set(skipped.flatMap((s) => s.requiresEnv))].map((n) => `${n}=on`).join(' --env ')} and --only)`);
+      scenarios = scenarios.filter((s) => !skipped.includes(s));
+    }
   }
   if (Object.keys(opts.env).length) {
     console.error(`token bench: child server env overrides: ${Object.entries(opts.env).map(([k, v]) => `${k}=${v}`).join(' ')}`);

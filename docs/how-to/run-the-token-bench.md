@@ -147,3 +147,14 @@ the machine and account you want to track, check the table, then run
 `node scripts/token-bench.mjs --baseline` and commit `schema/bench/token-baseline.json`.
 After any deliberate prompt, seed or scenario change, bump the scenario `version`
 and re-baseline in the same commit.
+
+## Session router scenarios (scenario set version 4)
+
+Three scenarios measure the session router (`docs/spec/session-router.md`): `switch-handoff` (a chat pinned to another model between turns), `capped-session` (a small token limit; the chat is expected to be refused at it) and `compress-long-tools` (adapter prompt compression; run it on a catalog provider, because compression never touches the Claude path). They declare `requiresEnv`, so a default run leaves them out and prints why. Run them by name, with the switches they list:
+
+```bash
+node scripts/token-bench.mjs --only switch-handoff --env LLMIDE_ROUTER=on
+node scripts/token-bench.mjs --only capped-session --env LLMIDE_ROUTER=on --env LLMIDE_ROUTER_CAP=on
+```
+
+They are not in the committed baseline; the version 2 and 3 baselines stay comparable. Fake-mode tests pin only their structure.

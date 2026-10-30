@@ -101,4 +101,5 @@ A small control in the chat header (Chat feature): provider and model, the cap w
 - The cap is approximate to one reply on both engines. A crash under-counts by at most one turn.
 - The cache TTL table (`providers/route-policy.mjs`) carries `source`: Anthropic and OpenRouter are the user's figures, every other provider is `assumed` at ten minutes until a bench run measures it. A wrong TTL changes only when a switch is priced cheap, never whether it is allowed.
 - Not built, by decision: automatic switching on warm expiry (Q-R3), extension-side chats (Q-R4), a per-chat cheaper fallback model at the cap.
+- Bench scenarios `switch-handoff`, `capped-session` and `compress-long-tools` (scenario set version 4) exist and are structure-tested in fake mode; their paid runs are not done. See [run the token bench](../how-to/run-the-token-bench.md).
 - Paid bench runs (compression on or off, handoff size, TTL probes, switch cost) are the user's; every default stays as in §2 until they are run.
