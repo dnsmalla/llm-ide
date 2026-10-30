@@ -17,6 +17,7 @@ import { handleExportRoutes } from './server/export-routes.mjs';
 import { logger, newRequestId } from './core/logger.mjs';
 import { authenticate, requireAdmin } from './server/auth.mjs';
 import { handleAuth, isAuthRoute } from './server/auth-routes.mjs';
+import { handleExtensionRoute, isExtensionRoute } from './routes/extension-routes.mjs';
 import { purgeExpiredRefreshTokens, purgeExpiredResetTokens } from './server/users.mjs';
 import { purgeOldAuditRows } from './server/audit.mjs';
 import { AppError, sendError, errInternal, errNotFound, errValidation, errRateLimit } from './core/errors.mjs';
@@ -652,6 +653,18 @@ const server = http.createServer(async (req, res) => {
   if (isAuthRoute(req.url || '')) {
     try {
       await handleAuth(req, res, { db: getDb({ logger }), logger: reqLog, requestId });
+    } catch (err) {
+      sendError(res, err, { logger: reqLog });
+    }
+    return;
+  }
+
+  // Plugin / LLM-source / MCP-plugin routes (still under /auth/me/*): moved
+  // out of auth-routes.mjs, dispatched at the same point — after authenticate,
+  // before rate limiting — so ordering and rate-limit behaviour are unchanged.
+  if (isExtensionRoute(req.url || '')) {
+    try {
+      await handleExtensionRoute(req, res, { db: getDb({ logger }), logger: reqLog, requestId });
     } catch (err) {
       sendError(res, err, { logger: reqLog });
     }

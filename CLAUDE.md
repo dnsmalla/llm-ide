@@ -82,7 +82,7 @@ llm-ide/
 │   ├── core/            # Framework-free primitives (config, utils, errors, logger)
 │   ├── server/          # HTTP server (no framework), routing, middleware
 │   ├── kb/              # SQLite knowledge base, migrations, FTS5; sources.mjs = source hub
-│   ├── routes/          # HTTP route modules (router.mjs + agent/chat/live/planning/review/…)
+│   ├── routes/          # HTTP route modules (router.mjs + agent/chat/live/planning/review/…; extension-routes.mjs = plugin/MCP/LLM-source)
 │   ├── providers/       # Model-provider layer: dispatch, CLI spawn, retry/backoff, web client
 │   ├── agents/          # Server pipeline agents (planner, risk, codegen, dispatcher, …) — not skills
 │   ├── llm_agent/       # Agent engine glue: sdk/ adapter/ tools/ modes/ memory/ plan/ tasks/ skills/ + synced agent-tool defs

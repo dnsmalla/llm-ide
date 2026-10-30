@@ -34,7 +34,8 @@ export function parseRoster(src, sourceRel = 'extension/server.mjs') {
 // /health: the routes served before the KB router (`/`, `/health`, `/launch-app`,
 // the auth namespace). It is read from the definitions that route them:
 //   - PUBLIC_PATHS / PUBLIC_PREFIXES in extension/server/auth.mjs (no token needed)
-//   - every literal dispatch in extension/server/auth-routes.mjs handleAuth():
+//   - every literal dispatch in extension/server/auth-routes.mjs handleAuth() and
+//     extension/routes/extension-routes.mjs handleExtensionRoute() (plugins, LLM sources, MCP plugins):
 //     `url === '…'`, `url.split('?')[0] === '…'`, `path === '…'`, `url.startsWith('…')`
 // Prefix dispatch names no parameter, so each prefix maps to its real routes in
 // AUTH_PREFIX_TEMPLATES. The parser checks that table against the source in both
@@ -51,14 +52,20 @@ export const AUTH_PREFIX_TEMPLATES = Object.freeze({
 /**
  * The public + auth roster.
  *
- * @param {{ publicSrc: string, authSrc: string, publicRel?: string, authRel?: string }} src
+ * The /auth/* namespace is dispatched from more than one module (server/auth-routes.mjs
+ * and, since Track Q, routes/extension-routes.mjs); `authSources` lists them in
+ * dispatch order, each as `{ src, rel }`. The single-source form (`authSrc`/`authRel`)
+ * still works.
+ *
+ * @param {{ publicSrc: string, authSrc?: string, authSources?: {src: string, rel: string}[], publicRel?: string, authRel?: string }} src
  * @returns {{ path: string, line: number, file: string }[]} deduplicated, in source order
  */
 export function parsePublicAuthRoster({
-  publicSrc, authSrc,
+  publicSrc, authSrc, authSources,
   publicRel = 'extension/server/auth.mjs',
   authRel = 'extension/server/auth-routes.mjs',
 }) {
+  const sources = authSources ?? [{ src: authSrc, rel: authRel }];
   const out = new Map();
   const add = (path, line, file) => { if (!out.has(path)) out.set(path, { path, line, file }); };
 
@@ -67,18 +74,21 @@ export function parsePublicAuthRoster({
   const base = set.index + set[0].indexOf('[') + 1;
   for (const m of set[1].matchAll(/'(\/[^']*)'/g)) add(m[1], lineOf(publicSrc, base + m.index), publicRel);
 
-  const exact = [...authSrc.matchAll(/\b(?:url(?:\.split\('\?'\)\[0\])?|path)\s*===\s*'(\/[^']*)'/g)];
-  for (const m of exact) add(m[1], lineOf(authSrc, m.index), authRel);
-
-  const prefixes = [...authSrc.matchAll(/\b(?:url(?:\.split\('\?'\)\[0\])?|path)\.startsWith\('(\/[^']*)'\)/g)];
-  const seen = new Set(prefixes.map((m) => m[1]));
-  for (const p of Object.keys(AUTH_PREFIX_TEMPLATES)) {
-    if (!seen.has(p)) throw new Error(`AUTH_PREFIX_TEMPLATES has ${p} but ${authRel} no longer dispatches on it`);
+  const seen = new Set();
+  for (const { src, rel } of sources) {
+    const exact = [...src.matchAll(/\b(?:url(?:\.split\('\?'\)\[0\])?|path)\s*===\s*'(\/[^']*)'/g)];
+    for (const m of exact) add(m[1], lineOf(src, m.index), rel);
+    for (const m of src.matchAll(/\b(?:url(?:\.split\('\?'\)\[0\])?|path)\.startsWith\('(\/[^']*)'\)/g)) seen.add(m[1]);
   }
-  for (const m of prefixes) {
-    const templates = AUTH_PREFIX_TEMPLATES[m[1]];
-    if (!templates) throw new Error(`${authRel}:${lineOf(authSrc, m.index)} dispatches on prefix ${m[1]} with no entry in AUTH_PREFIX_TEMPLATES`);
-    for (const t of templates) add(t, lineOf(authSrc, m.index), authRel);
+  for (const p of Object.keys(AUTH_PREFIX_TEMPLATES)) {
+    if (!seen.has(p)) throw new Error(`AUTH_PREFIX_TEMPLATES has ${p} but ${sources.map((x) => x.rel).join(' / ')} no longer dispatches on it`);
+  }
+  for (const { src, rel } of sources) {
+    for (const m of src.matchAll(/\b(?:url(?:\.split\('\?'\)\[0\])?|path)\.startsWith\('(\/[^']*)'\)/g)) {
+      const templates = AUTH_PREFIX_TEMPLATES[m[1]];
+      if (!templates) throw new Error(`${rel}:${lineOf(src, m.index)} dispatches on prefix ${m[1]} with no entry in AUTH_PREFIX_TEMPLATES`);
+      for (const t of templates) add(t, lineOf(src, m.index), rel);
+    }
   }
   return [...out.values()];
 }
@@ -95,7 +105,10 @@ export function loadRosters(readText) {
     endpoints: parseRoster(readText(serverRel), serverRel),
     publicAuth: parsePublicAuthRoster({
       publicSrc: readText('extension/server/auth.mjs'),
-      authSrc: readText('extension/server/auth-routes.mjs'),
+      authSources: [
+        { src: readText('extension/server/auth-routes.mjs'), rel: 'extension/server/auth-routes.mjs' },
+        { src: readText('extension/routes/extension-routes.mjs'), rel: 'extension/routes/extension-routes.mjs' },
+      ],
     }),
   };
 }
