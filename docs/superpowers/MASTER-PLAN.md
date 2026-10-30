@@ -13,7 +13,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 5 | 2 | 19 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 2 | 7 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 4 | 0 | 8 | 12 | No web app plan and no relay code; scope is an open question |
+| Web app and relay | 4 | 0 | 8 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 10 | 2 | 5 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
