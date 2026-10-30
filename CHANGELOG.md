@@ -5,6 +5,53 @@ All notable changes to LLM-IDE are tracked here. Format loosely follows
 
 ## [Unreleased]
 
+### Shipped in October 2026, by surface
+
+Summary of this month's `feat` and `fix` commits (`git log --since=2026-10-01`), grouped by the surface a
+user touches. Detail for individual changes is in the Security, Added, Fixed and Changed sections below.
+Maintenance rules: [docs/how-to/maintain-the-changelog.md](docs/how-to/maintain-the-changelog.md).
+
+#### Mac
+
+- Provider catalog in Settings: one Providers list and one Model routing section replace four older sections;
+  carried-over keys, needs-review entries, a one-click session router switch and an egress switch.
+- Per-chat model routing: route control, chat file mirror, route notices, catalog models in the model picker
+  with a tools badge (K1 P6, P6b).
+- Live-then-archive: note index reconciler, chat archive with verify-then-purge, delete-everywhere tombstones,
+  clear agent history by age, and async quit hooks with a 6 s cap.
+
+#### Server
+
+- Provider catalog, per-user connections, base-URL guard, tool-capable turns on non-Anthropic models through the
+  adapter, session token cap and learned per-key limits (API 87 to 93).
+- Extensions catalog: install at a pinned commit (per user, default off, consent for executable kinds), GitHub
+  source, allowlist `anthropics/*` and `modelcontextprotocol/*`, catalog routes (API 93).
+- Core job runner (persisted queue, lane lock, cancel, process-group kill; migration 0055) and chunked note-index
+  scan (`POST /kb/index/scan`, migration 0050).
+- Agent SDK signals surfaced (retry, rate-limit, permission, refusal, thinking), `fallbackModel`, sandbox options.
+- `/code-assist` and `POST /chat` answer 410; `POST /kb/complete` added.
+
+#### Extension
+
+- The side-panel chat is a live client of the v2 engine; no workspace path needed.
+- A capture draft is kept only until the Mac acknowledges it; verified legacy copy to the Mac.
+
+#### Desktop (Tauri, Phase 0 spike, not a product build)
+
+- Spike app with Mac-matching shell and generated design tokens, WebGL graph, Monaco editor, xterm over a Rust PTY
+  with credit-based flow control, chat stream replay, packaged Node core, and bench runner.
+- Security: least-privilege capabilities with a gate, `read_graph_file` limited to the project root, pinned
+  DOMPurify 3.4.17, no bundled SDK `claude` binary at staging.
+- CI: `make test-desktop`, `desktop-ci.yml` (macOS, Windows, Linux) and an unsigned manual `desktop-release.yml`
+  draft. No signed or distributable desktop build exists yet.
+
+#### Mobile (iOS)
+
+- Tab shell with Chat first and a Project tab (Files, Issues, Source Control, Self-Heal sections), project
+  switcher, Activity tab with unread badge, usage and limits screen, Doc Gen / Visual and a Docs browser.
+- Permission card for tool and edit requests; only the features the paired Mac serves are shown; reconnects back
+  off while the Mac throttles auth.
+
 ### Security
 
 - **Review items keep only the fields their kind uses, and no credentials at any depth.** `POST /kb/review/submit`
