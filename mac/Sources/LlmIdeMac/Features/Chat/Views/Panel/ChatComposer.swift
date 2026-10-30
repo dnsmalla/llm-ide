@@ -366,7 +366,20 @@ extension CodeAssistantPanel {
                         sessionID: engine.currentSessionIDString, settingsProvider: settingsProvider)
         modelState.persistModelChoice(modelId, config: config)
         restampEngineIfEmpty()
+        // A catalog model pins the chat's route to it (the session router answers the turn); any other
+        // pick releases a pin that points at a catalog provider, so the old pin cannot override it.
+        if let action = ComposerCatalog.pinAction(
+            pickedProvider: ChatTransportInput.makeProvider(selectedProvider: provider), pickedModel: modelId,
+            currentPinnedProvider: engine.route.settings?.provider) {
+            Task {
+                switch action {
+                case .pin(let p, let m): await engine.route.pin(provider: p, model: m)
+                case .unpin: await engine.route.pin(provider: nil, model: nil)
+                }
+            }
+        }
     }
+
 
     /// An empty chat takes the engine of the provider it will now run on.
     func restampEngineIfEmpty() {
@@ -560,25 +573,34 @@ extension CodeAssistantPanel {
             Menu {
                 let settingsProvider = modelState.settingsProvider(overrideId: composerProviderId,
                                                                    activeCLI: config.activeCLI)
-                let capable = AgentV2Selection.agentCapableProviders(customProviders: modelState.customProviders)
+                let capable = AgentV2Selection.agentCapableProviders(
+                    customProviders: modelState.customProviders,
+                    catalogWireIds: CatalogConnectionIndex.shared.capableWireIds())
+                let routerOn = engine.route.routerPref && engine.route.server?.enabled != false
                 let chatIsEmpty = engine.messages.isEmpty
                 let tagEngines = AgentV2Selection.toggleEnabled()
                 ForEach(modelState.composerProviderSections(capableProviders: capable,
                                                                     available: ProviderAvailabilityStore.shared.available,
                                                                     serverUsableProvider: TierRoutingServerCache.shared.state
                                                                         .status?[RoutingTier.standard.rawValue]?.usable == true
-                                                                        ? TierRoutingConfig.load().tier(.standard)?.provider : nil)) { section in
+                                                                        ? TierRoutingConfig.load().tier(.standard)?.provider : nil,
+                                                                    routerOn: routerOn)) { section in
                     let pickable = CodeAssistantModelState.canPick(
                         section, chatIsEmpty: chatIsEmpty, chatRunsOnAgentEngine: engine.usesAgentV2Engine)
                     Section(Self.sectionTitle(section, tagEngines: tagEngines, pickable: pickable)) {
+                        if section.catalog, let note = section.unavailableNote ?? (pickable ? nil : ComposerCatalog.classicChatNote) {
+                            Text(note)
+                        }
                         ForEach(section.models) { model in
                             let isCurrent = section.id == modelState.selectedProvider && model.id == modelState.selectedModel
+                            let title = ComposerCatalog.modelMenuTitle(model, in: section)
                             Button {
                                 pickModel(model.id, on: section.id, settingsProvider: settingsProvider)
                             } label: {
-                                if isCurrent { Label(model.displayName, systemImage: "checkmark") } else { Text(model.displayName) }
+                                if isCurrent { Label(title, systemImage: "checkmark") } else { Text(title) }
                             }
                             .disabled(!pickable)
+                            .help(section.catalog && section.toolsByModel[model.id] == false ? ComposerCatalog.noToolsHelp : "")
                         }
                     }
                 }

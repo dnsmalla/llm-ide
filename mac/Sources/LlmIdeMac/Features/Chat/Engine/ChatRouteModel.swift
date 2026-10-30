@@ -54,6 +54,9 @@ final class ChatRouteModel {
     private var epoch = 0
     /// True while the open-time reconcile (and so a possible restore PUT) is in flight.
     private(set) var reconciling = false
+    /// Pins (composer picks) not yet answered: the next turn waits for them, so a release of a catalog pin
+    /// cannot lose a race with the turn that follows it.
+    private(set) var pinsInFlight = 0
 
     /// The chat file's copy of its route, for the next turn's `routeSeed`: nil with the router pref off or nothing to say.
     var seedForTurn: ChatRouteSettings? {
@@ -65,7 +68,7 @@ final class ChatRouteModel {
     /// (the turn then goes out carrying `seedForTurn`, so the server still caps it).
     func awaitReady(timeout: TimeInterval = 3) async {
         let deadline = Date().addingTimeInterval(timeout)
-        while reconciling, Date() < deadline { try? await Task.sleep(nanoseconds: 40_000_000) }
+        while reconciling || pinsInFlight > 0, Date() < deadline { try? await Task.sleep(nanoseconds: 40_000_000) }
     }
 
     var routerPref: Bool { ChatRoutePreference.routerEnabled() }
@@ -185,6 +188,8 @@ final class ChatRouteModel {
     /// Pin the chat to a provider and model, or unpin with nil. Applies at the next turn start when a
     /// turn is running (the server says so in `appliesAt`).
     func pin(provider: String?, model: String?) async {
+        pinsInFlight += 1
+        defer { pinsInFlight -= 1 }
         let pinned = (provider ?? "").isEmpty ? nil : provider
         await put(LlmIdeAPIClient.ChatRoutePatch(
             chatSessionId: chatSessionId, provider: pinned ?? "", model: pinned == nil ? "" : (model ?? ""),

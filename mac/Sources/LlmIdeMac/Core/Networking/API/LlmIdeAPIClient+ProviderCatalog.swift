@@ -145,6 +145,27 @@ extension LlmIdeAPIClient {
         return try await post("/kb/providers/catalog/models", body: Req(id: id, refresh: refresh), authenticated: true)
     }
 
+    /// Load every enabled connection with its models and the user's provider-chat switch, and publish them to
+    /// `CatalogConnectionIndex` (the composer menu, the tier pickers and the engine-selection rule read it).
+    /// Best-effort: a server older than API 90, or an unreachable one, publishes an empty index.
+    @discardableResult
+    func refreshCatalogConnectionIndex() async -> [CatalogConnectionSummary] {
+        guard let catalog = try? await fetchProviderCatalog() else {
+            CatalogConnectionIndex.shared.update(connections: [], providerChatEnabled: false)
+            return []
+        }
+        var out: [CatalogConnectionSummary] = []
+        for provider in catalog.providers {
+            for connection in provider.connections where connection.enabled {
+                guard let list = try? await fetchCatalogModels(id: connection.id) else { continue }
+                out.append(CatalogConnectionSummary(wireId: connection.provider, name: connection.name,
+                                                   models: Array(list.models.prefix(80))))
+            }
+        }
+        CatalogConnectionIndex.shared.update(connections: out, providerChatEnabled: catalog.settings.toolsEnabled)
+        return out
+    }
+
     /// GET /kb/providers/settings.
     func fetchProviderCatalogSettings() async throws -> CatalogSettings {
         try await get("/kb/providers/settings", authenticated: true)

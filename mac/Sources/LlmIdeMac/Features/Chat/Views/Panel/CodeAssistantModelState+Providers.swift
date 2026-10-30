@@ -25,6 +25,12 @@ struct ComposerProviderSection: Identifiable, Equatable {
     /// Whether the Agent engine can run this provider. A chat already running
     /// on the Agent engine cannot move to a provider that cannot.
     let runsOnAgentEngine: Bool
+    /// A provider-catalog connection (reached through the session router and the adapter).
+    var catalog: Bool = false
+    /// Catalog only: model id to its "tools supported" flag (the menu's badge).
+    var toolsByModel: [String: Bool] = [:]
+    /// Catalog only: why the section cannot be picked right now (router off, provider chat off).
+    var unavailableNote: String? = nil
 }
 
 /// The composer's grouped model menu: every provider that is set up, not only
@@ -42,7 +48,8 @@ extension CodeAssistantModelState {
     /// providers via env keys the Mac cannot see): listed regardless.
     func composerProviderSections(capableProviders: Set<String>,
                                   available: Set<String>? = nil,
-                                  serverUsableProvider: String? = nil) -> [ComposerProviderSection] {
+                                  serverUsableProvider: String? = nil,
+                                  routerOn: Bool = false) -> [ComposerProviderSection] {
         var sections: [ComposerProviderSection] = []
         for tool in AICliTool.selectable {
             let isCurrent = tool.rawValue == selectedProvider
@@ -68,6 +75,7 @@ extension CodeAssistantModelState {
                 id: provider.wireId, title: provider.name, models: models,
                 runsOnAgentEngine: capableProviders.contains(provider.wireId)))
         }
+        sections += ComposerCatalog.sections(catalogConnections, routerOn: routerOn, providerChatEnabled: catalogProviderChatEnabled)
         return sections.filter { !$0.models.isEmpty }
     }
 
@@ -84,7 +92,10 @@ extension CodeAssistantModelState {
     /// engine without the Agent session's context). A classic chat can take any
     /// provider, and an empty chat is re-stamped for the provider picked.
     static func canPick(_ section: ComposerProviderSection, chatIsEmpty: Bool, chatRunsOnAgentEngine: Bool) -> Bool {
-        chatIsEmpty || !chatRunsOnAgentEngine || section.runsOnAgentEngine
+        // A catalog model is answered by the adapter behind the session router: it needs the router on and
+        // a chat that runs on the Agent engine (an empty chat is re-stamped for it).
+        if section.catalog { return section.unavailableNote == nil && (chatIsEmpty || chatRunsOnAgentEngine) }
+        return chatIsEmpty || !chatRunsOnAgentEngine || section.runsOnAgentEngine
     }
 
     /// The provider Settings gives the composer: the "Code Assistant provider"
@@ -159,6 +170,7 @@ extension CodeAssistantModelState {
     }
 
     private func providerExists(_ provider: String) -> Bool {
+        if provider.hasPrefix("custom:cat-") { return CatalogConnectionIndex.shared.knows(provider) }
         if provider.hasPrefix("custom:") {
             return customProviders.contains { $0.wireId == provider && $0.isEnabled }
         }
@@ -174,5 +186,12 @@ extension CodeAssistantModelState {
             guard tool == .claudeCode || hasKey, liveModels[tool.provider]?.isEmpty != false else { continue }
             await loadModels(for: tool, api: api)
         }
+        await loadCatalogConnections(api: api)
+    }
+
+    /// The provider-catalog connections and their models with the tools flag (`refreshCatalogConnectionIndex`).
+    @MainActor func loadCatalogConnections(api: LlmIdeAPIClient) async {
+        catalogConnections = await api.refreshCatalogConnectionIndex()
+        catalogProviderChatEnabled = CatalogConnectionIndex.shared.providerChatEnabled
     }
 }

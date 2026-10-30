@@ -115,6 +115,9 @@ struct TierRoutingSection: View {
             routing = TierRoutingConfig.load()
             sync()   // the server's copy is per user; re-push like custom providers
             await loadLiveModels(for: ClaudeCLI.provider)
+            // Catalog connections for the Strong / Cheap pickers.
+            await api.refreshCatalogConnectionIndex()
+            modelsRevision += 1
             // Jev's pinned versions; without a key (or below v73) the
             // fallback aliases stay.
             if TierRouting.serverSupportsDecisions(backend.serverApiVersion) {
@@ -164,6 +167,13 @@ struct TierRoutingSection: View {
                         }
                         ForEach(customProviders.filter { $0.isEnabled && isAvailable($0.wireId) }) { provider in
                             Text(provider.name).tag(provider.wireId)
+                        }
+                        // Catalog connections (Settings, Providers): for background roles on Strong / Cheap, never
+                        // Standard, which drives the chat composer's default.
+                        if tier != .standard {
+                            ForEach(CatalogConnectionIndex.shared.connections, id: \.wireId) { c in
+                                Text("\(c.name) (catalog)").tag(c.wireId)
+                            }
                         }
                     }
                     // A deleted/disabled provider still stored here keeps a tag,
@@ -316,6 +326,7 @@ struct TierRoutingSection: View {
         // The menu offers Jev on Strong / Cheap only (never Standard).
         if TierRouting.isDecisionOnlyProvider(provider) { return tier != .standard }
         guard isAvailable(provider) else { return false }
+        if provider.hasPrefix("custom:cat-") { return tier != .standard && CatalogConnectionIndex.shared.knows(provider) }
         return TierRouting.builtInProviders.contains { $0.wireId == provider }
             || customProviders.contains { $0.isEnabled && $0.wireId == provider }
     }
@@ -331,6 +342,7 @@ struct TierRoutingSection: View {
         // The Image tier's list is static (TierRouting+Images.swift): the live
         // lists filter image models out.
         if tier == .image { return ImageTierRouting.models(forProvider: provider) }
+        if provider.hasPrefix("custom:cat-") { return CatalogConnectionIndex.shared.models(for: provider) }
         if let customId = TierRouting.customProviderId(provider) {
             return customProviders.first { $0.id == customId }?.models ?? []
         }

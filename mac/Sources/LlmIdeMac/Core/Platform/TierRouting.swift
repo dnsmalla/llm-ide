@@ -249,6 +249,18 @@ enum TierRouting {
             // no chat — the one thing to say is which role it is for.
             return forDecisions ? nil : decisionOnlyNote
         }
+        if route.provider.hasPrefix("custom:cat-") {
+            // A provider-catalog connection (completion and background roles; chat only through the router).
+            let index = CatalogConnectionIndex.shared
+            // Not loaded yet (a launch before Settings or the composer fetched it): the server decides.
+            guard index.isLoaded else { return localCLIOnly ? "a catalog provider has no local CLI" : nil }
+            guard index.knows(route.provider) else { return "its catalog connection was removed or disabled" }
+            if localCLIOnly { return "a catalog provider has no local CLI" }
+            if requiresAgentEngine && !index.capableWireIds().contains(route.provider) {
+                return "chat on a catalog model needs the session router and tool-capable chat turned on in Settings, Providers"
+            }
+            return nil
+        }
         if let customId = customProviderId(route.provider) {
             guard let custom = customProviders.first(where: { $0.id == customId }) else {
                 return "its provider was deleted"

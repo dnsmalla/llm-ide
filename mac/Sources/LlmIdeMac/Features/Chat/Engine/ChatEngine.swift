@@ -1534,7 +1534,8 @@ final class ChatEngine {
         ctx.chatSessionId = currentSessionIDString.isEmpty ? nil : currentSessionIDString
         input.agentContext = ctx
         // A pinned or just-switched chat carries its packed history (server seeds the turn from it).
-        input.routeSendsHistory = route.sendsHistory
+        // A catalog provider has no server session to resume: the adapter is handed the history every turn.
+        input.routeSendsHistory = route.sendsHistory || (input.provider ?? "").hasPrefix("custom:cat-")
         input.routeSeed = route.seedForTurn
     }
 

@@ -42,8 +42,11 @@ public enum AgentV2Selection {
     /// `resolveAgentEngineAuth`, which refuses anything outside this set
     /// before the SDK spawns. Pure over the list so tests pin it without
     /// touching UserDefaults.
-    static func agentCapableProviders(customProviders: [CustomProvider]) -> Set<String> {
-        var capable: Set<String> = [anthropicProvider]
+    static func agentCapableProviders(customProviders: [CustomProvider],
+                                      catalogWireIds: Set<String> = []) -> Set<String> {
+        // Catalog connections run through the session router and the adapter, not the SDK; they are
+        // capable only while the router is on (CatalogConnectionIndex.capableWireIds).
+        var capable: Set<String> = Set([anthropicProvider]).union(catalogWireIds)
         for provider in customProviders where provider.isEnabled && provider.canRunAgentEngine {
             capable.insert(provider.wireId)
         }
@@ -53,7 +56,8 @@ public enum AgentV2Selection {
     /// `agentCapableProviders` over the persisted custom providers — the set
     /// production callers consult (per turn, per mint, per hint).
     static func liveAgentCapableProviders() -> Set<String> {
-        agentCapableProviders(customProviders: CustomProvider.loadAll())
+        agentCapableProviders(customProviders: CustomProvider.loadAll(),
+                              catalogWireIds: CatalogConnectionIndex.shared.capableWireIds())
     }
 
     /// True when `resolvedProvider` (the RESOLVED wire string, as for

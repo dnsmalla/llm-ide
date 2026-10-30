@@ -179,7 +179,9 @@ struct CodeAssistantPanel: View {
         AgentV2Selection.providerHintNeeded(
             usesAgentEngine: engine.usesAgentV2Engine,
             resolvedProvider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider),
-            capableProviders: AgentV2Selection.agentCapableProviders(customProviders: modelState.customProviders))
+            capableProviders: AgentV2Selection.agentCapableProviders(
+                customProviders: modelState.customProviders,
+                catalogWireIds: CatalogConnectionIndex.shared.capableWireIds()))
     }
     @StateObject var session = CodeAssistantSession()
     /// Cursor-style "/" (command/skill) + "@" (file) autocomplete for the input.

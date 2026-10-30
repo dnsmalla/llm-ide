@@ -105,6 +105,10 @@ final class CodeAssistantModelState {
     /// Vault keys the account has stored (`/auth/me/secrets`): which built-in
     /// providers the grouped model menu lists. nil until loaded.
     var configuredSecretKeys: Set<String>?
+    /// Provider-catalog connections with their models (`loadCatalogConnections`); [] until loaded.
+    var catalogConnections: [CatalogConnectionSummary] = []
+    /// The user's switch for tool-capable chat on other providers (catalog settings).
+    var catalogProviderChatEnabled = false
     /// True while `selectedProvider` is a provider the user picked in the
     /// composer for the displayed chat, not Settings' default. Settings'
     /// re-apply (`applyComposerProvider`) leaves such a pick alone.
