@@ -636,6 +636,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       if (!valid) throw errAuth('Password confirmation failed');
       const { deleteUserCascade } = await import('../kb/db.mjs');
       const counts = deleteUserCascade(req.user.id);
+      try { (await import('../llm_agent/extensions/install.mjs')).forgetUserExtensions(req.user.id); } catch { /* best effort */ }
       dropAllHeldSecretsForUser(req.user.id);
       safeAudit(db, {
         userId: null,           // user is gone

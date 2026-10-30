@@ -21,6 +21,7 @@ import { RESERVED_MCP_NAME } from '../llm_agent/sdk/constants.mjs';
 import {
   send, readJson, readRawBody, clientIp, safeAudit, publicMessageFor,
 } from '../server/route-http.mjs';
+import { isCatalogRoute, handleCatalogRoute } from './extensions-catalog.mjs';
 
 // Redact an MCP plugin's env VALUES for a client response — key names are
 // harmless (they're identifiers like "SLACK_TOKEN", not secrets) and the
@@ -105,7 +106,7 @@ const PREFIXES = [
 /** True when the request URL belongs to this module (see EXACT_PATHS / PREFIXES). */
 export function isExtensionRoute(url) {
   const path = String(url || '').split('?')[0];
-  return EXACT_PATHS.has(path) || PREFIXES.some((p) => path.startsWith(p));
+  return EXACT_PATHS.has(path) || isCatalogRoute(path) || PREFIXES.some((p) => path.startsWith(p));
 }
 
 /**
@@ -126,6 +127,8 @@ export async function handleExtensionRoute(req, res, { db, logger, requestId }) 
     send(res, 401, { error: { code: 'AUTH_REQUIRED', message: 'Authentication required' } });
     return;
   }
+
+  if (isCatalogRoute(url)) { await handleCatalogRoute(req, res, { db, requestId }); return; }
 
   // ── Plugin management ───────────────────────────────────────────────
   // GET  /auth/me/plugins         → list installed + per-user enable state

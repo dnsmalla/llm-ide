@@ -240,7 +240,7 @@ Endpoints with no client caller (40):
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:717` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:719` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:112` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:137` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -250,59 +250,59 @@ Endpoints with no client caller (40):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:286` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:336` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:381` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:741` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:743` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:428` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:610` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:625` | - | - | tests only |
-| `/auth/me/password` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:661` | - | `UserAccountSettings.tsx` | - |
-| `/auth/me/secrets` | public+auth | GET, POST | token | core | `extension/server/auth-routes.mjs:676` | `LlmIdeAPIClient+Email.swift`, `LlmIdeAPIClient+Providers.swift` | - | - |
-| `/auth/me/audit` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:785` | - | - | tests only |
+| `/auth/me/password` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:662` | - | `UserAccountSettings.tsx` | - |
+| `/auth/me/secrets` | public+auth | GET, POST | token | core | `extension/server/auth-routes.mjs:677` | `LlmIdeAPIClient+Email.swift`, `LlmIdeAPIClient+Providers.swift` | - | - |
+| `/auth/me/audit` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:786` | - | - | tests only |
 | `/auth/me/repos` | public+auth | ANY | token | core | `extension/server/auth-routes.mjs:74` | `LlmIdeAPIClient+Auth.swift` | - | - |
 | `/auth/me/prefs` | public+auth | ANY | token | core | `extension/server/auth-routes.mjs:75` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/connectors` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:814` | `LlmIdeAPIClient+Connectors.swift` | - | - |
-| `/auth/me/connectors/catalog` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:827` | `LlmIdeAPIClient+Connectors.swift` | - | - |
-| `/auth/me/connectors/add` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:837` | `LlmIdeAPIClient+Connectors.swift` | - | - |
+| `/auth/me/connectors` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:815` | `LlmIdeAPIClient+Connectors.swift` | - | - |
+| `/auth/me/connectors/catalog` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:828` | `LlmIdeAPIClient+Connectors.swift` | - | - |
+| `/auth/me/connectors/add` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:838` | `LlmIdeAPIClient+Connectors.swift` | - | - |
 | `/auth/mcp-connector/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:561` | - | - | tests only |
 | `/auth/mcp-connector/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:593` | - | - | tests only |
 | `/auth/google/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:469` | `LlmIdeAPIClient+Email.swift` | - | - |
 | `/auth/google/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:517` | `LlmIdeAPIClient+Email.swift` | - | - |
 | `/auth/slack/start` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:530` | `LlmIdeAPIClient+Slack.swift` | - | - |
 | `/auth/slack/status` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:545` | `LlmIdeAPIClient+Slack.swift` | - | - |
-| `/auth/me/plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:134` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:140` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/plugins/hook-trust` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:177` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/plugins/reload` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:202` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/plugins/install` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:222` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/claude-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:340` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/claude-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:353` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/claude-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:369` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/claude-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:430` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/claude-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:438` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/claude-plugins/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:452` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/codex-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:495` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/codex-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:508` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/codex-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:524` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/codex-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:575` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/codex-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:583` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/llm-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:614` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/llm-sources/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:624` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/llm-sources/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:632` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/llm-sources/items` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:662` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/llm-sources/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:695` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/llm-sources/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:716` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/mcp-plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:791` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/mcp-plugins/catalog` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:851` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/mcp-plugins/claude-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:861` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/mcp-plugins/codex-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:868` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/mcp-plugins/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:875` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/mcp-plugins/consent` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:942` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/mcp-plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:958` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/mcp-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:984` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
-| `/auth/me/connectors/:id` | public+auth | DELETE | token | core | `extension/server/auth-routes.mjs:856` | `LlmIdeAPIClient+Connectors.swift` | - | - |
-| `/auth/me/plugins/uninstall/:name` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:299` | `LlmIdeAPIClient+Auth.swift` | - | - |
-| `/auth/me/llm-sources/:id` | public+auth | DELETE, GET | token | core | `extension/routes/extension-routes.mjs:737` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/llm-sources/:id/discovery` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:756` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
-| `/auth/me/mcp-plugins/:id` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:1072` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:137` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:143` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/plugins/hook-trust` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:180` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/plugins/reload` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:205` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/plugins/install` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:225` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/claude-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:343` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/claude-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:356` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/claude-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:372` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/claude-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:433` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/claude-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:441` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/claude-plugins/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:455` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/codex-plugins/installed` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:498` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/codex-plugins/marketplace` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:511` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/codex-plugins/import` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:527` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/codex-plugins/refresh` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:578` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/codex-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:586` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/llm-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:617` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/llm-sources/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:627` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/llm-sources/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:635` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/llm-sources/items` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:665` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/llm-sources/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:698` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/llm-sources/update` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:719` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/mcp-plugins` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:794` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/mcp-plugins/catalog` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:854` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/mcp-plugins/claude-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:864` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/mcp-plugins/codex-sources` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:871` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/mcp-plugins/add` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:878` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/mcp-plugins/consent` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:945` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/mcp-plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:961` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/mcp-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:987` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/connectors/:id` | public+auth | DELETE | token | core | `extension/server/auth-routes.mjs:857` | `LlmIdeAPIClient+Connectors.swift` | - | - |
+| `/auth/me/plugins/uninstall/:name` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:302` | `LlmIdeAPIClient+Auth.swift` | - | - |
+| `/auth/me/llm-sources/:id` | public+auth | DELETE, GET | token | core | `extension/routes/extension-routes.mjs:740` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/llm-sources/:id/discovery` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:759` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
+| `/auth/me/mcp-plugins/:id` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:1075` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
 | `/auth/me/mcp-plugins/:id/update` | public+auth | ANY | token | core | - | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
 | `/auth/me/mcp-plugins/:id/resync` | public+auth | ANY | token | core | - | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
 

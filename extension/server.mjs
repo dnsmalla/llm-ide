@@ -295,7 +295,8 @@ const HOST = config.host;
 //   v89 — POST /chat answers 410 { error: { code: 'ENDPOINT_REMOVED', message, details: { use: '/agent/v2/stream', removedInApiVersion: 89 } } } (body not read; deleted with the classic runtime, API 92). The extension side-panel chat is a live client of POST /agent/v2/stream: a turn with `agentContext.surface: 'extension'` and no workspaceRoot runs in a server-owned scratch folder. /kb/chat/sessions* are unchanged (the live-then-archive protocol still uses them). The extension's MIN_SERVER_API_VERSION is 89.
 //   v91 — session router (agent-kit K1 Phase 6b, additive; every part off unless LLMIDE_ROUTER=on): GET /agent/v2/session/route?chatSessionId= (the chat's route: provider, model, pin, billable-token cap and counters, warm map, switchSeq, pending change), PUT /agent/v2/session/route { chatSessionId, provider?, model?, tokenLimit? (null/0 clears), tokensUsed?, ifSeq? } (409 ROUTE_CONFLICT with details.current for a stale ifSeq, 409 ROUTER_DISABLED, 503 ROUTE_UNAVAILABLE; a change during a turn answers appliesAt 'next_turn'), GET /agent/v2/session/route/history?chatSessionId= (switch history from agent.db; { events, degraded }). /agent/v2/stream answers 402 SESSION_TOKEN_LIMIT { details: { used, limit } } (402, not 409: 409 is the turn lock, which clients retry) and 503 ROUTE_UNAVAILABLE before any model call, and emits notice kinds `route_switch` and `session_budget` (additive; old clients ignore them). Migration 0053, agent.db migration 0004.
 //   v92 — the classic chat engine is deleted (agent-kit K1 P6 T6.8/T6.9): POST /code-assist and POST /code-assist/decision answer 410 { error: { code: 'ENDPOINT_REMOVED', message, details: { use: '/agent/v2/stream' | '/agent/v2/decision', removedInApiVersion: 92 } } } (body not read; the Mac app of API 91 and older gets a clear "update the app" error). A provider-catalog connection (custom:cat-*) completes through the multi-provider adapter (no tools) wherever runClaude takes a provider: POST /kb/complete, the tier-routed background roles, /generate-notes JSON, /generate-questions and /extract-entities (internal role). The ask-subagent tool answers with one completion and no longer runs its subagent's allowed_tools. GET /kb/providers/catalog runs a one-time, idempotent, non-destructive carry-over of the user's existing openai / google / deepseek / OpenAI-compatible custom keys into catalog connections (old keys kept; tools stay off, reported as toolsSuggested) and answers an optional `migration: { created, needsReview, toolsSuggested }` block. Every request to a model-provider host goes through the pinned fetch. MIN_SERVER_API_VERSION of the clients is unchanged (the Mac app never needed /code-assist from this version on).
-const SERVER_API_VERSION = 92;
+//   v93 — extensions catalog (additive; LLMIDE_EXT_CATALOG=off refuses install): GET /auth/me/extensions/installed → { corrupt, items:[{ id, kind, name, description, version, publisher:{id,trust}, source:{kind:'git',url,ref?,commit}, subpath?, pinnedCommit, installedAt, members[], declared:{executableKinds}, permissions[], scan:{count,byRule,findings[]}, consents, state:{enabled,disabledMembers} }] }; POST /auth/me/extensions/install { url:'https://github.com/<owner>/<repo>', ref?, commit?, path? } → 200 { ok, alreadyInstalled?, item } (installed at a 40-hex commit, switched OFF, nothing executed; scan findings only warn) | 400 INVALID_URL|INVALID_REF|INVALID_COMMIT|INVALID_PATH | 403 SOURCE_NOT_ALLOWED|BLOCKED | 404 NOT_FOUND|CATALOG_DISABLED | 409 ALREADY_INSTALLED|BUSY | 422 MARKETPLACE (details.entries)|NOTHING_INSTALLABLE|UNSAFE_PATH|TOO_LARGE|BAD_ARCHIVE | 502 UPSTREAM; POST …/toggle { id, enabled, consents?, members? } → 200 { ok, item } | 409 CONSENT_REQUIRED (details.kinds); POST …/uninstall { id } → 200 { ok }. The install route is on the 'dispatch' rate bucket.
+const SERVER_API_VERSION = 93;
 // Every endpoint this server can serve. ENDPOINTS (below) is what /health
 // advertises: this list minus the paths of features LLMIDE_FEATURES disabled.
 const ALL_ENDPOINTS = [
@@ -513,6 +514,7 @@ function rateLimitProfile(url, method) {
   if (url === '/kb/providers/catalog/connect' || url === '/kb/providers/catalog/disconnect') return 'kbWrite';
   if (url === '/kb/providers/turn')      return 'agentTurn';      // a multi-minute tool-capable chat turn
   if (url === '/kb/dispatch')            return 'dispatch';
+  if (url === '/auth/me/extensions/install') return 'dispatch';   // downloads an archive from GitHub
   if (url === '/kb/notify/slack')        return 'dispatch';
   if (url === '/kb/outcomes/refresh')    return 'outcomePoll';
   // /kb/connect-box triggers a full external Box crawl (up to ~2000 sequential
@@ -893,6 +895,7 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const counts = deleteUserCascade(targetId);
+      try { (await import('./llm_agent/extensions/install.mjs')).forgetUserExtensions(targetId); } catch { /* best effort */ }
       // Re-import the audit helper inline to keep server.mjs lean.
       const { recordAudit } = await import('./server/audit.mjs');
       try {
