@@ -17,5 +17,10 @@ a design: it changes no code, and it is revised as each later step lands.
 | graph-kit (Code Graph, OS view, graph engine plugin) | `code_graph_3d` | K0 map | [graph-kit.md](graph-kit.md) |
 | knowledge-kit (Library, KB sources and search, connectors, ReviewConflicts) | none (always on) | K0 map | [knowledge-kit.md](knowledge-kit.md) |
 | agent-kit (Chat, ClaudeLink, llm_agent, providers, plugins, MCP, LLM sources, agent history) | `agent_chat` (never off) | K0 map | [agent-kit.md](agent-kit.md) |
+| work-kit (plans, review queue, dispatch, guardrails, outcomes, Issues and Gantt) | `gantt_issues` (Issues part; schedule route only) | K0 map | [work-kit.md](work-kit.md) |
+| workspace-kit (Explorer, Search, Source Control, Terminal) | `file_explorer`, `terminal` | K0 map | [workspace-kit.md](workspace-kit.md) |
+| capture-kit (live capture, live stream, summaries, notes, questions) | none (always on) | K0 map | [capture-kit.md](capture-kit.md) |
+| automation-kit (Loop, Auto Tasks, verify and repair) | `auto_tasks` | K0 map | [automation-kit.md](automation-kit.md) |
+| sync-kit (Mobile Control today; relay and phone web view later) | `mobile_sync` | K0 map | [sync-kit.md](sync-kit.md) |
 
 Cross-kit principle (user decision 2026-10-29): [data-lifecycle.md](data-lifecycle.md) - one stored copy of each kind of data, live in the server DB while a session runs; a normal chat is archived into the Mac app at app quit and kept until the user deletes it, a meeting-attached chat is deleted at meeting end, and a rebuildable index with no unique data may stay on the server. The web and the extension are connectors with no data access of their own (the extension reads by calling the Mac app live). It applies to knowledge-kit and agent-kit (K1a) and is the reference for every kit's data plan.
