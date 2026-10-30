@@ -1,0 +1,80 @@
+name: desktop-release (UNSIGNED DRAFT)
+
+# DRAFT. Manual dispatch only. Builds UNSIGNED, un-notarised Tauri bundles on
+# macOS, Windows and Linux and uploads them as workflow artifacts. It does not
+# create a GitHub release, does not publish, and references no signing secrets:
+# signing, notarisation and the update channel are pending user decisions, see
+# docs/how-to/desktop-signing-decisions.md. Do not distribute these artifacts.
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  bundle:
+    name: UNSIGNED bundle (${{ matrix.name }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS
+            os: macos-latest
+            bundles: app,dmg
+          - name: Windows
+            os: windows-latest
+            bundles: nsis
+          - name: Linux
+            os: ubuntu-latest
+            bundles: deb,appimage
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: desktop/package-lock.json
+
+      - name: Install Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config file \
+            libwebkit2gtk-4.1-dev libgtk-3-dev libsoup-3.0-dev \
+            libayatana-appindicator3-dev librsvg2-dev libssl-dev libxdo-dev
+
+      - name: Install Rust (stable)
+        run: |
+          rustup toolchain install stable --profile minimal
+          rustup default stable
+
+      - name: Install npm dependencies (desktop and extension)
+        run: |
+          npm ci --prefix desktop
+          npm ci --prefix extension
+
+      # The official node binary that ships inside the bundle. The Node
+      # version is pinned; the setup-node binary is a self-contained build.
+      - name: Stage the Node core
+        run: |
+          export LLMIDE_NODE_BIN="$(node -p 'process.execPath')"
+          node desktop/scripts/stage-core.mjs
+
+      - name: Build UNSIGNED bundles
+        working-directory: desktop
+        run: npm run tauri build -- --bundles ${{ matrix.bundles }}
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: llmide-desktop-UNSIGNED-${{ matrix.name }}
+          path: desktop/src-tauri/target/release/bundle/**
+          if-no-files-found: error
+          retention-days: 7
