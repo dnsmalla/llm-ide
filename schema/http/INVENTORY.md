@@ -102,10 +102,10 @@ Endpoints with no client caller (40):
 | `/kb/docs/commands/:folder` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Docs.swift` | - | - |
 | `/kb/docs/seed` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/docs-routes.mjs:138` | `LlmIdeAPIClient+Docs.swift` | - | - |
 | `/kb/projects/register` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Docs.swift` | - | - |
-| `/chat` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:195` | - | - | tests only |
-| `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:251` | - | - | tests only |
-| `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:251` | - | - | tests only |
-| `/agent-sdk/spike` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:208` | - | - | tests only |
+| `/chat` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:197` | - | - | tests only |
+| `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
+| `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:253` | - | - | tests only |
+| `/agent-sdk/spike` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:210` | - | - | tests only |
 | `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:301` | `LlmIdeAPIClient+CodeAssist.swift` | `App.tsx`, `agent-v2-client.ts` | - |
 | `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:304` | `LlmIdeAPIClient+CodeAssist.swift` | `agent-v2-client.ts` | - |
 | `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:307` | `LlmIdeAPIClient+CodeAssist.swift` | `agent-v2-client.ts` | - |
@@ -114,8 +114,8 @@ Endpoints with no client caller (40):
 | `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:321` | `LlmIdeAPIClient+ChatRoute.swift` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:106` | `LlmIdeAPIClient+LoopAgent.swift` | - | - |
 | `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `LlmIdeAPIClient+Complete.swift` | - | - |
-| `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:257` | - | `App.tsx`, `useQuestions.ts` | - |
-| `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:328` | - | `App.tsx` | - |
+| `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:259` | - | `App.tsx`, `useQuestions.ts` | - |
+| `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:330` | - | `App.tsx` | - |
 | `/kb/ingest` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:151` | `LlmIdeAPIClient+KB.swift` | `App.tsx` | - |
 | `/kb/search` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:288` | `LlmIdeAPIClient+KB.swift` | `App.tsx`, `kb.ts` | - |
 | `/kb/issues` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:320` | - | `kb.ts` | - |
