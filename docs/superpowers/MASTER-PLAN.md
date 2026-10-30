@@ -17,10 +17,10 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 12 | 3 | 2 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
-| Agents, providers, extensions | 10 | 1 | 9 | 20 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
+| Agents, providers, extensions | 11 | 1 | 9 | 21 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 6 | 2 | 5 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 73 | 19 | 71 | 163 |  |
+| Total | 74 | 19 | 71 | 164 |  |
 
 ## How the surfaces connect
 
@@ -244,7 +244,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Retire `llm_agent/runtime/` (P7): 2 commits local, finishing gates (`844b1213`, `ece843c6`) (me)
 - [x] Extensions catalog P4: GitHub install at a pinned commit, per-user, default off, warn-only scan, routes (API 93) (me)
 - [x] Extensions catalog P4b: installed items load into turns (skills, plugins, MCP; consent, ask-first), default install allowlist (me)
-- [ ] Extensions catalog P5-P9: indexes and search, updates and rollback, Mac screen, allowlist Settings UI, rollout (plan 2026-10-31) (me)
+- [x] Extensions catalog P5 server half: updates with diff, per-commit re-consent, one-version rollback and repair `f45111d6`; index adapters, cache and search, active and updates views (API 94) `464c94be` (me)
+- [ ] Extensions catalog P6-P9: Mac Extensions screen, allowlist Settings UI, Workspace Trust, rollout (plan 2026-10-31) (me)
 - [ ] Y1 bench go-ahead and runs: baselines, noise check, A/B per switch (USER-CHECKLIST A) (you)
 - [ ] Lean SDK configuration L1-L12 (compact prompt, drop Bash in execute, cache TTL, compaction, tool search); each bench-gated (X1) (me)
 - [ ] Token-affecting SDK adoption: `sessionStore`, Haiku search sub-agent, `Task*`, `skills`, `options.agent`, `resumeSessionAt` (X2) (me)

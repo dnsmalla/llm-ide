@@ -1,9 +1,9 @@
 ---
-title: Extensions catalog (phases P0 to P4 and installed-item loading) — spec
+title: Extensions catalog (phases P0 to P5 server half and installed-item loading) — spec
 status: draft
 ---
 
-This is the contract for the first five phases of the extensions catalog ([plan](../superpowers/plans/2026-10-31-extensions-catalog.md)): one item model over plugins, MCP servers and LLM sources, a computed active set, consumers that honour it behind a flag, and extensions on provider-adapter turns. P4 adds four HTTP routes (API version 93, §9); there is no new SSE event and no Mac UI yet. Updates, rollback, the index/search of catalogs and the Mac screen are P5 and later and are not specified here.
+This is the contract for the first five phases of the extensions catalog ([plan](../superpowers/plans/2026-10-31-extensions-catalog.md)): one item model over plugins, MCP servers and LLM sources, a computed active set, consumers that honour it behind a flag, and extensions on provider-adapter turns. P4 adds four HTTP routes (API version 93, §9); the server half of P5 adds updates, rollback, repair, catalog indexes with search and the active view (API version 94, §9b). There is no new SSE event and no Mac UI yet: the Mac Extensions screen and the allowlist setting are the next step.
 
 Governing decisions (user, 2026-10-30): every download is user-initiated; scan findings only warn; one global extension format where each engine uses what it supports and silently skips the rest; plugin hooks run only on Claude SDK turns; on a provider-adapter turn the user's active MCP servers and plugin tools are mounted automatically when provider tools are allowed and the model can call tools.
 
@@ -106,14 +106,14 @@ A user's request is the only trigger: nothing is fetched in the background, and 
 | `extension/llm_agent/extensions/installed.mjs` | The installed registry file and store paths |
 | `extension/llm_agent/extensions/installed-runtime.mjs` | Installed items as plugin objects, library skills and MCP configs (§9a) |
 | `extension/llm_agent/extensions/install.mjs` | `installFromGithub`, `listInstalled`, `setInstalledEnabled`, `setInstalledMembers`, `uninstall`, `forgetUserExtensions` |
-| `extension/routes/extensions-catalog.mjs` | The four routes below |
+| `extension/routes/extensions-catalog.mjs` | The four routes below, and the P5 routes of §9b |
 
 - **Source:** only `https://github.com/<owner>/<repo>` (optionally `.git`; no other host, port, credentials, query or fragment). Two hosts are contacted, over https, through the SSRF-pinned fetch (`makePinnedFetch`, no private addresses), without credentials and without following redirects (a 3xx is refused): `api.github.com` to resolve a ref, `codeload.github.com` for the archive at `/<owner>/<repo>/tar.gz/<commit>`.
 - **Pin:** a supplied 40-hex `commit` is used as given; a `ref` (or none: `HEAD`) is resolved once and the 40-hex result is what is recorded (`source = { kind: 'git', url, ref?, commit }`, validated by `plugins/source-store.mjs`). A path inside the repository (`path`, a marketplace entry's folder) is installed alone.
 - **Caps:** download 10 MB, unpacked 40 MB, kept files 25 MB in total, one file 2 MB (a larger file is skipped and reported), 3000 files, a path of 240 characters and 20 levels. A path that is absolute, has `..`, a backslash or a control character, or is a file and a directory at once, rejects the whole archive (`UNSAFE_PATH`). Symbolic and hard links and special files are skipped, never created.
 - **What is read:** `inspectTree` recognises a plugin (`.claude-plugin/plugin.json`, `plugin.json`, `.codex-plugin/plugin.json`: skills, commands, agents, hooks, `.mcp.json`, `bin/`, LSP), a single skill (root `SKILL.md`), a skill bundle (`skills/*/SKILL.md`, kind `llm-source`) and an MCP registry `server.json`. A marketplace repository is refused with 422 `MARKETPLACE` and the entry names. Item id is `<kind>:<owner lowercased>/<name>`; trust is `official` for `github.com/anthropics/*`, else `unknown`.
 - **Nothing executes at install:** files are written with mode 0644 to `<plugin dir>/../extensions/store/<sha256(userId)[0:24]>/<kind>__<publisher>__<name>/<commit>/` through a staging directory and a rename; no manifest, hook, script or server is run, and no dependency is installed.
-- **Default off, per user:** the record goes to `extensions-installed.json` (per user, atomic, mode 0600, unreadable means refuse to write) and the switch overlay gets `enabled: false`. A second user installing the same repository gets an independent copy and independent switches. Installing the same commit again is a no-op (`alreadyInstalled`); another commit of an installed item is 409 `ALREADY_INSTALLED` (updating and rollback are P5; the bytes stay per user until then).
+- **Default off, per user:** the record goes to `extensions-installed.json` (per user, atomic, mode 0600, unreadable means refuse to write) and the switch overlay gets `enabled: false`. A second user installing the same repository gets an independent copy and independent switches. Installing the same commit again is a no-op (`alreadyInstalled`); another commit of an installed item is 409 `ALREADY_INSTALLED` with `details.use = '/auth/me/extensions/update'` (§9b); the bytes stay per user.
 - **Consent:** enabling an item whose `declared.executableKinds` is not empty (`hook`, `mcp`, `lsp`, `bin`) needs every such kind named in `consents`; otherwise 409 `CONSENT_REQUIRED` with `details.kinds`. Grants are stored with the commit.
 - **Scan:** advisory only. Rules: `hidden_characters`, `injection_phrase`, `pipe_to_shell`, `network_command`, `secret_path`, `destructive_command`, `base64_blob`, `external_host`, `long_line`, `binary_file`, `link_skipped`, `large_file_skipped`; at most 200 findings per scan, 50 kept in the record, every one `severity: 'warn'`, excerpts at most 80 characters. A finding never blocks an install or an enable. It is a heuristic, not a safety verdict.
 - **Loading:** an installed item that is switched on and consented reaches the turn builders as described in §9a.
@@ -128,7 +128,7 @@ Routes (module `routes/extensions-catalog.mjs`, dispatched by `routes/extension-
 | `POST /auth/me/extensions/toggle` | `{ id, enabled, consents?, members? }` | `{ ok, item }`. With `members` (member ids of the item) it checks or unchecks those members instead of the item |
 | `POST /auth/me/extensions/uninstall` | `{ id }` | `{ ok }`; removes the record, the switches and every stored commit of that item for that user |
 
-Audit actions: `extension.install`, `extension.enable`, `extension.disable`, `extension.members`, `extension.uninstall` (with the commit, trust and finding count, never file content).
+Audit actions: `extension.install`, `extension.enable`, `extension.disable`, `extension.members`, `extension.uninstall` (with the commit, trust and finding count, never file content); P5 adds `extension.updates_check`, `extension.update`, `extension.rollback`, `extension.repair`.
 
 ## §9a Installed items in turns
 
@@ -151,17 +151,64 @@ Server configs from a third party are built conservatively: `${CLAUDE_PLUGIN_ROO
 
 **Approvals.** The result of `buildUserMcpServers` carries `askServers` (the ids of installed servers; the key is absent when there are none) and leaves them out of `allowedTools`. On the Claude engine `canUseTool` parks a `ToolApproval` for every call of such a server (also in Bypass, with no "always allow" suggestion, nothing saved); an unlisted `mcp__` tool is still denied. The adapter already asks on every call. A third-party server does not get the server-level pre-approval a legacy registry server has.
 
-**Limits stated plainly.** On the Claude engine the CLI spawns a stdio server, so its environment is whatever the SDK passes it (the configured `env` plus the CLI's own rules: unverified), unlike the adapter path, which gives it only the SDK's safe defaults plus the record's `env`. The consent covers the pinned commit; a reinstall at another commit is refused (409) until P5, so a consent never silently carries to new bytes. Account deletion also removes generated views (`removeAllViewsFor`), and uninstall removes the plugin's views.
+**Limits stated plainly.** On the Claude engine the CLI spawns a stdio server, so its environment is whatever the SDK passes it (the configured `env` plus the CLI's own rules: unverified), unlike the adapter path, which gives it only the SDK's safe defaults plus the record's `env`. The consent covers the pinned commit; a reinstall at another commit is refused (409) and an update re-asks (§9b), so a consent never silently carries to new bytes. Account deletion also removes generated views (`removeAllViewsFor`), and uninstall removes the plugin's views.
 
 `computeActiveSet` includes installed items in `items` and the fingerprint (id, commit, unchecked members) and their warnings in `warnings`.
 
+## §9b Updates, rollback, repair, indexes and search (P5, API 94)
+
+Every step is the user's: nothing runs on a timer, no GET reaches the network, and nothing installs by itself. Every route below acts on the signed-in user only. A route that reaches GitHub or the MCP registry is a POST on the `dispatch` rate bucket (`install`, `catalog/refresh`, `updates/check`, `update/preview`, `update`, `repair`); `rollback` and `toggle` are offline. `LLMIDE_EXT_CATALOG=off` refuses every network step with 404 `CATALOG_DISABLED`. Every download uses the pinned fetch, the §9 caps and tar rules, never follows a redirect and executes nothing. Scan findings stay warn-only.
+
+| Path | Role |
+|---|---|
+| `extension/llm_agent/extensions/update.mjs` | `checkUpdates`, `listUpdates`, `previewUpdate`, `applyUpdate`, `rollback`, `repair` |
+| `extension/llm_agent/extensions/integrity.mjs` | `treeHash` (sha256 over sorted `path NUL sha256(file)`), `readTreeFromDisk` (no links, same caps), `verifyDir`, `diffTrees` |
+| `extension/llm_agent/extensions/indexes.mjs` | The four index adapters, the shared cache, `refreshIndexes`, `searchCatalog`, `sourceStatuses` |
+
+**Updates.** A check resolves each installed item's `source.ref` (or `HEAD`) to a commit with one `api.github.com` call per item (at most 100 items, one item failing never stops the others) and remembers `update: { latest, checkedAt }` on the record; it downloads nothing. A preview downloads the candidate commit into memory (an explicit 40-hex `commit`, else the one the check found, else it resolves the ref now), reads the installed bytes from disk and returns: the file diff (added, removed, changed with sizes, at most 200 listed per list), the scan before and after with the new findings and the number resolved, the executable kinds and members that are new, the consent the commit needs (every executable kind it declares: a consent belongs to one commit), whether the item was on, and `flags` (`new_executable_kind`, `new_executable_member`, `new_findings`, `consent_required`). It writes nothing. A candidate that inspects as a different item id is refused (422 `IDENTITY_CHANGED`); the source allowlist is checked again (403); bytes already on disk that are missing or damaged refuse the preview (409 `BYTES_MISSING`, repair first); the same commit is 409 `ALREADY_CURRENT`.
+
+**Apply.** `POST update { id, commit?, consents? }` writes the candidate to `<item>/<commit>/` (staging directory and rename), then moves the record: new members, declared kinds, permissions, scan, `integrity`, `source.commit`, `updatedAt`, `consents` limited to the kinds named in the request (stamped with the new commit), and `previous` set to a snapshot of the old record. The item stays in its prior state only while the new commit's consents are covered: if it was on and every declared executable kind is consented in the request (or it declares none) it stays on, otherwise the overlay is switched off and the answer says `update: { from, to, enabled: false, wasEnabled: true, reason: 'consent_required', kinds }`. An item that was off stays off. Unchecked members stay unchecked. Exactly one older version is kept: the one before the previous one is removed when a newer update lands, and the plugin's generated views and the parsed-plugin cache are dropped. A failed download or write leaves the record as it was. If the later overlay write failed the item would still not load, because the runtime requires a consent for the pinned commit (§9a).
+
+**Rollback.** `POST rollback { id }` is offline: it verifies the previous version's directory against its recorded fingerprint (missing or damaged: 409 `PREVIOUS_UNAVAILABLE`; none: 404 `NO_PREVIOUS`; a record with no fingerprint is accepted when readable), then restores the previous snapshot with the consents it had (they are valid for that commit), swaps the two (the version rolled away from becomes `previous`, so a rollback is itself reversible) and applies the same enabled rule as an update (`rollback: { from, to, enabled, wasEnabled, reason?, kinds }`).
+
+**Repair.** `POST repair { id }` recomputes the fingerprint of the pinned commit's directory. `ok` answers `{ repaired: false, status: 'ok' }` with no network. Missing, damaged or never-fingerprinted bytes are re-fetched at the PINNED commit (never a newer one), inspected, and compared with the recorded fingerprint: a difference is refused (409 `INTEGRITY_MISMATCH`, nothing is overwritten), because a commit's bytes do not change upstream. A record from before fingerprints is verified by comparing the disk to the archive and gets a fingerprint (`status: 'verified'` when the disk was already right, `'restored'` otherwise).
+
+**Indexes.** A fixed seed list (code, not user input), each parsed in memory and never executed; every string is stripped of control and bidi characters and capped (name 120, description 300), at most 1500 entries per source:
+
+| Source id | Adapter | Reads | Installable from here |
+|---|---|---|---|
+| `anthropics/skills` | skills repo | `[skills/]<dir>/SKILL.md` front matter | yes, by `path` |
+| `anthropics/claude-plugins-official` | marketplace | `.claude-plugin/marketplace.json`; a relative `source` becomes a `path`, a `github` source its repository | yes when the source is `owner/repo` or a relative path (a traversal path, a URL source: no, `unsupported_source`) |
+| `modelcontextprotocol/servers` | directory list | `src/<dir>/package.json` | no (`package_launcher`: no launcher is run, §9a) |
+| `mcp-registry` | MCP registry | `https://registry.modelcontextprotocol.io/v0.1/servers?limit=100`, up to 3 pages, 2 MB per page, `servers[].server` (`name`, `description`, `version`, `repository.url`, `remotes`) | no (`registry_install_not_supported`; the repository link is shown) |
+
+The GitHub adapters resolve `HEAD`, skip the download when the commit equals the cached one, else download the archive at that commit. The shared cache `<plugin dir>/../extensions/index-cache.json` (mode 0600, atomic) holds public metadata only and is shared between users; installed bytes stay per user. TTL 6 hours; `POST catalog/refresh { source?, force? }` refreshes one or all sources, skips a fresh one, and never retries a source within 60 seconds of its last attempt (`throttled`). A failing source reports `error` (`upstream`, `blocked`, `too_large`, `redirect_refused`, `aborted`, `state_unreadable`) and keeps its last entries; the others are unaffected. An unreadable cache file is reported and never overwritten. The registry URL layout (`/v0.1/servers`) and the codeload URL are unverified against the live services; every test uses fixtures.
+
+**Search.** `GET catalog?q=&kind=&limit=&offset=` reads the cache only: every query token must appear in the name, publisher or description (name match first, then publisher, then description; ties by name), `limit` defaults to 25 and is capped at 100, and `kind` is `skill|plugin|mcp|llm-source` (else 400). Each result carries `installable` (the entry's own flag AND the operator allowlist; `reason` says why not) and `installed` (this user's item id). Choosing a result to install is a separate, user-initiated `POST install { url, path }`. `sources` lists every source's `status` (`fresh|stale|empty|error`), `count` and `fetchedAt`.
+
+**Active view.** `GET active` runs `computeActiveSet` for the user and returns names and counts only: `fingerprint`, `failClosed`, `items`, `skills` (id, name, description, sourceId), `pluginSkills`, `commands`, `subagents`, `sdkPlugins` (a count), `mcpServers` (server ids, never configs: they can hold credentials), `excluded` and `warnings`; no file path is returned. `GET updates` returns `{ corrupt, items: [{ id, name, kind, current, latest, checkedAt, ref?, hasPrevious }] }` from the records (no network). The installed item gains `integrity`, `updatedAt?`, `update?: { latest, checkedAt }` and `previous?: { pinnedCommit, version, installedAt }`; the previous snapshot itself stays server side.
+
+| Route | Body or query | Result |
+|---|---|---|
+| `GET /auth/me/extensions/catalog` | `q, kind, limit, offset` | `{ query, total, offset, results[], sources[] }`; 400 `VALIDATION_FAILED` |
+| `POST /auth/me/extensions/catalog/refresh` | `{ source?, force? }` | `{ results: [{ id, status, count?, error? }] }`; 400, 404 `NOT_FOUND` (unknown source) / `CATALOG_DISABLED` |
+| `GET /auth/me/extensions/active` | | the view above |
+| `GET /auth/me/extensions/updates` | | `{ corrupt, items[] }` |
+| `POST /auth/me/extensions/updates/check` | `{ id? }` | `{ checkedAt, results: [{ id, current, latest?, updateAvailable, error? }] }`; 404 for an unknown id |
+| `POST /auth/me/extensions/update/preview` | `{ id, commit? }` | the diff above; 400 `INVALID_COMMIT`, 404, 409 `ALREADY_CURRENT/BYTES_MISSING`, 422 `IDENTITY_CHANGED/…` |
+| `POST /auth/me/extensions/update` | `{ id, commit?, consents? }` | `{ ok, item, update }`; same errors, 403 `SOURCE_NOT_ALLOWED`, 409 `BUSY` |
+| `POST /auth/me/extensions/rollback` | `{ id }` | `{ ok, item, rollback }`; 404 `NO_PREVIOUS`, 409 `PREVIOUS_UNAVAILABLE` |
+| `POST /auth/me/extensions/repair` | `{ id }` | `{ ok, repaired, status, was?, item }`; 409 `INTEGRITY_MISMATCH` |
+
+The contract is `schema/http/extensions.schema.json` (fixtures captured from the real handlers under `schema/http/fixtures/extensions/`); `scripts/lib/roster.mjs` reads `routes/extensions-catalog.mjs` for the roster.
+
 ## §10 Not in these phases
 
-Catalog sources other than a GitHub repository the user names (marketplace and MCP-registry indexes, search, `GET /auth/me/extensions/catalog|active|updates`), unified update with diff, rollback, the Mac Extensions screen, an `extensionsFingerprint` column in `turn_composition`, the adapter's skills catalog block (it would add tokens to every provider turn), per-tool MCP deny lists, and write-through to the legacy files.
+User-added index sources (the seed list is code), installing a registry `server.json` item or a package-launcher server, the Mac Extensions screen and the allowlist setting, an `extensionsFingerprint` column in `turn_composition`, the adapter's skills catalog block (it would add tokens to every provider turn), per-tool MCP deny lists, and write-through to the legacy files.
 
 ## §11 Tests
 
-`extensions-baseline`, `extensions-model`, `extensions-store`, `extensions-importer`, `extensions-active-set`, `extensions-consumers`, `extensions-adapter`, `extensions-sources`, `extensions-install`, `extensions-catalog-routes`, `extensions-installed-runtime` and `eslint-mcp-sdk-fence` under `extension/tests/`, with the synthetic world in `extension/tests/helpers/extensions-world.mjs`, in-memory archives in `extension/tests/helpers/tar-fixture.mjs` and a real local stdio MCP server in `extension/tests/fixtures/fake-mcp-stdio-server.mjs`. No test reaches the network or a paid model.
+`extensions-baseline`, `extensions-model`, `extensions-store`, `extensions-importer`, `extensions-active-set`, `extensions-consumers`, `extensions-adapter`, `extensions-sources`, `extensions-install`, `extensions-update`, `extensions-index`, `extensions-catalog-routes`, `extensions-installed-runtime` and `eslint-mcp-sdk-fence` under `extension/tests/`, with the synthetic world in `extension/tests/helpers/extensions-world.mjs`, in-memory archives in `extension/tests/helpers/tar-fixture.mjs` and a real local stdio MCP server in `extension/tests/fixtures/fake-mcp-stdio-server.mjs`. No test reaches the network or a paid model.
 
 ## Regeneration checklist
 
