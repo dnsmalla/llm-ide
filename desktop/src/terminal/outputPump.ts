@@ -12,6 +12,9 @@ export class OutputPump {
   private tail = "";
   private onMarker: ((at: number) => void) | null = null;
 
+  /** Called with the byte count of each batch once xterm has parsed it (flow-control credit). */
+  onProcessed: ((bytes: number) => void) | null = null;
+
   constructor(private readonly term: Terminal) {}
 
   /** Arms the marker: `cb` runs once the batch containing it is written into xterm. */
@@ -30,13 +33,17 @@ export class OutputPump {
       hit = joined.includes(this.marker);
       this.tail = joined.slice(-this.marker.length);
     }
+    const n = data.length;
     if (!hit) {
-      this.term.write(data);
+      this.term.write(data, () => this.onProcessed?.(n));
       return;
     }
     const cb = this.onMarker;
     this.marker = null;
     this.onMarker = null;
-    this.term.write(data, () => cb?.(performance.now()));
+    this.term.write(data, () => {
+      this.onProcessed?.(n);
+      cb?.(performance.now());
+    });
   }
 }

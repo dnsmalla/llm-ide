@@ -12,6 +12,9 @@ import { terminalFont, xtermTheme } from "../terminal/xtermTheme";
 import { runTerminalBench, type TerminalReady } from "../terminal/termBench";
 import { claimStep, finishStep } from "../bench/runner";
 
+/** Must stay well below the Rust HIGH_WATER (1 MiB) in pty.rs. */
+const ACK_CHUNK_BYTES = 128 * 1024;
+
 /** Autobench hard limit: if the bench has not finished by then, report and exit. */
 const WATCHDOG_MS = 120_000;
 
@@ -57,6 +60,16 @@ export function TerminalView() {
       const pump = new OutputPump(t);
       const h = await spawnShell(t.cols, t.rows, (bytes) => pump.push(bytes));
       handle = h;
+      // Flow control: report parsed bytes in chunks so Rust can pause a flooding shell.
+      let unacked = 0;
+      pump.onProcessed = (n) => {
+        unacked += n;
+        if (unacked >= ACK_CHUNK_BYTES) {
+          const credit = unacked;
+          unacked = 0;
+          void h.ack(credit);
+        }
+      };
       if (cancelled) {
         await h.kill();
         return;

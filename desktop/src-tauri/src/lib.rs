@@ -105,6 +105,12 @@ async fn pty_write(id: u32, data: String) -> Result<(), String> {
     pty_blocking(move || pty::write(id, &data)).await
 }
 
+/// Flow control: the webview reports output bytes xterm has finished parsing.
+#[tauri::command]
+fn pty_ack(id: u32, bytes: u64) {
+    pty::ack(id, bytes);
+}
+
 #[tauri::command]
 async fn pty_resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
     pty_blocking(move || pty::resize(id, cols, rows)).await
@@ -189,6 +195,7 @@ pub fn run() {
             pty_spawn,
             pty_write,
             pty_resize,
+            pty_ack,
             pty_kill,
             sse_replay::sse_replay_start,
             sse_replay::sse_replay_stop,

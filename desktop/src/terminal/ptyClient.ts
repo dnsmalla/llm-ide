@@ -9,6 +9,8 @@ export interface PtyHandle {
   shell: string;
   write(data: string): Promise<void>;
   resize(cols: number, rows: number): Promise<void>;
+  /** Flow control: credit `bytes` of output that xterm has finished parsing. */
+  ack(bytes: number): Promise<void>;
   kill(): Promise<void>;
 }
 
@@ -21,6 +23,7 @@ export async function spawnShell(cols: number, rows: number, onBytes: (bytes: Ui
     id,
     shell,
     write: (data) => invoke<void>("pty_write", { id, data }),
+    ack: (bytes) => invoke<void>("pty_ack", { id, bytes }).catch(() => undefined),
     resize: (c, r) => invoke<void>("pty_resize", { id, cols: c, rows: r }),
     kill: () => invoke<void>("pty_kill", { id }).catch(() => undefined),
   };

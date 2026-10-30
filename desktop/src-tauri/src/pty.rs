@@ -2,12 +2,13 @@
 //! in batches over a Tauri `Channel`, and kills every shell (and its foreground job)
 //! on app exit, page reload and window destruction.
 //!
-//! Known PoC limits (Phase 1 must address these):
-//! - No end-to-end flow control: a flood (e.g. `yes`) is sent as fast as the shell
-//!   writes; xterm discards input past its write-buffer watermark, so the terminal
-//!   can drop bytes instead of pausing the shell.
-//! - The pty_* commands are not yet declared in an AppManifest or capability file;
-//!   Phase 1 must add the allow-pty-* permissions.
+//! Flow control (credit based): every batch sent adds to the session's `outstanding`
+//! byte count; the webview reports bytes xterm has finished parsing via `pty_ack`.
+//! Above `HIGH_WATER` the flusher stops sending, the bounded queue fills, the
+//! reader blocks and the shell stalls on a full pty buffer, so a flood (`yes`) pauses
+//! instead of overrunning xterm's write buffer and dropping bytes.
+//!
+//! Known limits:
 //! - Background `&` jobs run in their own process groups and may be orphaned when a
 //!   shell is killed; only the foreground job and the shell's own group are signalled.
 
@@ -16,7 +17,7 @@ use std::io::{ErrorKind, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::mpsc::{self, RecvTimeoutError, SyncSender};
-use std::sync::{Arc, Mutex, MutexGuard, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -35,6 +36,11 @@ const READ_CHUNK: usize = 16 * 1024;
 /// Read chunks queued between the reader and the flusher. A full queue blocks the
 /// reader, which applies backpressure to the shell instead of growing memory.
 const QUEUE_DEPTH: usize = 256;
+/// Unacknowledged output bytes at which the flusher pauses.
+const HIGH_WATER: u64 = 1024 * 1024;
+/// Give up on a session whose webview acknowledges nothing for this long (it is
+/// gone or hung); the flusher thread then exits instead of leaking.
+const ACK_STALL_LIMIT: Duration = Duration::from_secs(60);
 /// Concurrent shells allowed; spawning beyond this is an error.
 const MAX_SESSIONS: usize = 8;
 
@@ -45,11 +51,67 @@ pub struct Spawned {
     pub shell: String,
 }
 
+/// Credit counter shared by a session's flusher (adds) and `pty_ack` (subtracts).
+struct Flow {
+    state: Mutex<FlowState>,
+    cv: Condvar,
+}
+
+struct FlowState {
+    outstanding: u64,
+    closed: bool,
+}
+
+impl Flow {
+    fn new() -> Self {
+        Flow {
+            state: Mutex::new(FlowState { outstanding: 0, closed: false }),
+            cv: Condvar::new(),
+        }
+    }
+
+    /// Blocks while `outstanding > high`. False when the flow was closed or no ack
+    /// arrived for `stall` (the caller stops sending).
+    fn wait_below(&self, high: u64, stall: Duration) -> bool {
+        let mut st = lock(&self.state);
+        let mut last_progress = Instant::now();
+        let mut seen = st.outstanding;
+        while st.outstanding > high && !st.closed {
+            if st.outstanding < seen {
+                seen = st.outstanding;
+                last_progress = Instant::now();
+            }
+            let left = stall.saturating_sub(last_progress.elapsed());
+            if left.is_zero() {
+                return false;
+            }
+            st = self.cv.wait_timeout(st, left).unwrap_or_else(|e| e.into_inner()).0;
+        }
+        !st.closed
+    }
+
+    fn add(&self, n: u64) {
+        lock(&self.state).outstanding += n;
+    }
+
+    fn ack(&self, n: u64) {
+        let mut st = lock(&self.state);
+        st.outstanding = st.outstanding.saturating_sub(n);
+        self.cv.notify_all();
+    }
+
+    fn close(&self) {
+        lock(&self.state).closed = true;
+        self.cv.notify_all();
+    }
+}
+
 /// One shell. Each field has its own lock so I/O never runs under the table lock.
 struct Session {
     master: Mutex<Box<dyn MasterPty + Send>>,
     writer: Mutex<Box<dyn Write + Send>>,
     child: Mutex<Box<dyn Child + Send + Sync>>,
+    flow: Arc<Flow>,
 }
 
 type Shared = Arc<Session>;
@@ -144,7 +206,9 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned
         master: Mutex::new(pair.master),
         writer: Mutex::new(writer),
         child: Mutex::new(child),
+        flow: Arc::new(Flow::new()),
     });
+    let flow = Arc::clone(&session.flow);
 
     // Insert before any thread starts, so a shell that exits at once always finds
     // its own table entry to retire. The cap is re-checked under the same lock.
@@ -152,7 +216,7 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned
         let mut table = lock_table();
         if table.len() >= MAX_SESSIONS {
             drop(table);
-            terminate(&session);
+            dispose(&session);
             return Err(format!("too many terminals (max {MAX_SESSIONS})"));
         }
         table.insert(id, Arc::clone(&session));
@@ -165,11 +229,11 @@ pub fn spawn(cols: u16, rows: u16, on_data: Channel<Response>) -> Result<Spawned
         .and_then(|_| {
             thread::Builder::new()
                 .name(format!("pty-flush-{id}"))
-                .spawn(move || flush_loop(rx, on_data))
+                .spawn(move || flush_loop(rx, on_data, flow))
         });
     if let Err(e) = started {
         if let Some(s) = lock_table().remove(&id) {
-            terminate(&s);
+            dispose(&s);
         }
         return Err(format!("cannot start pty threads: {e}"));
     }
@@ -204,7 +268,7 @@ fn read_loop(id: u32, mut reader: Box<dyn Read + Send>, tx: SyncSender<Vec<u8>>)
 
 /// Collects chunks into batches and sends each batch as one raw `Response`
 /// (an ArrayBuffer on the JS side). Raw bytes avoid JSON number arrays and base64.
-fn flush_loop(rx: mpsc::Receiver<Vec<u8>>, out: Channel<Response>) {
+fn flush_loop(rx: mpsc::Receiver<Vec<u8>>, out: Channel<Response>, flow: Arc<Flow>) {
     let mut batch: Vec<u8> = Vec::with_capacity(FLUSH_BYTES);
     let mut due = Instant::now();
     loop {
@@ -219,17 +283,17 @@ fn flush_loop(rx: mpsc::Receiver<Vec<u8>>, out: Channel<Response>) {
                     due = Instant::now() + FLUSH_INTERVAL;
                 }
                 batch.extend_from_slice(&chunk);
-                if batch.len() >= FLUSH_BYTES && !send_batch(&out, &mut batch) {
+                if batch.len() >= FLUSH_BYTES && !send_batch(&out, &mut batch, &flow) {
                     return;
                 }
             }
             Err(RecvTimeoutError::Timeout) => {
-                if !send_batch(&out, &mut batch) {
+                if !send_batch(&out, &mut batch, &flow) {
                     return;
                 }
             }
             Err(RecvTimeoutError::Disconnected) => {
-                send_batch(&out, &mut batch);
+                send_batch(&out, &mut batch, &flow);
                 return;
             }
         }
@@ -237,11 +301,17 @@ fn flush_loop(rx: mpsc::Receiver<Vec<u8>>, out: Channel<Response>) {
 }
 
 /// Sends the pending batch. False when the channel is closed (the webview is gone).
-fn send_batch(out: &Channel<Response>, batch: &mut Vec<u8>) -> bool {
+fn send_batch(out: &Channel<Response>, batch: &mut Vec<u8>, flow: &Flow) -> bool {
     if batch.is_empty() {
         return true;
     }
+    // Flow control: wait for the webview to catch up before adding more.
+    if !flow.wait_below(HIGH_WATER, ACK_STALL_LIMIT) {
+        return false;
+    }
     let body = std::mem::replace(batch, Vec::with_capacity(FLUSH_BYTES));
+    let n = body.len() as u64;
+    flow.add(n);
     out.send(Response::new(body)).is_ok()
 }
 
@@ -280,6 +350,22 @@ fn terminate(session: &Shared) {
     });
 }
 
+/// `terminate` plus closing the flow so a flusher blocked on acks wakes and exits.
+/// Used for explicit kills; a shell that exits by itself is only `terminate`d, so its
+/// last output can still drain under flow control.
+fn dispose(session: &Shared) {
+    session.flow.close();
+    terminate(session);
+}
+
+/// Credits `bytes` the webview has finished parsing; unknown ids are ignored (the
+/// shell may already be gone).
+pub fn ack(id: u32, bytes: u64) {
+    if let Ok(session) = get(id) {
+        session.flow.ack(bytes);
+    }
+}
+
 /// Writes input bytes to the shell. Runs off the main thread (async command).
 pub fn write(id: u32, data: &str) -> Result<(), String> {
     let session = get(id)?;
@@ -307,7 +393,7 @@ pub fn resize(id: u32, cols: u16, rows: u16) -> Result<(), String> {
 /// Ends one shell. Unknown ids are an error; a shell that already exited is not.
 pub fn kill(id: u32) -> Result<(), String> {
     let session = lock_table().remove(&id).ok_or("no such terminal")?;
-    terminate(&session);
+    dispose(&session);
     Ok(())
 }
 
@@ -316,7 +402,7 @@ pub fn kill(id: u32) -> Result<(), String> {
 pub fn kill_all() {
     let sessions: Vec<Shared> = lock_table().drain().map(|(_, s)| s).collect();
     for session in &sessions {
-        terminate(session);
+        dispose(session);
     }
 }
 
@@ -328,6 +414,64 @@ pub fn kill_all_from_panic() {
     let sessions: Vec<Shared> = table.drain().map(|(_, s)| s).collect();
     drop(table);
     for session in &sessions {
-        terminate(session);
+        dispose(session);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::sync::atomic::AtomicBool;
+
+    #[test]
+    fn below_high_water_does_not_block() {
+        let f = Flow::new();
+        f.add(HIGH_WATER);
+        assert!(f.wait_below(HIGH_WATER, Duration::from_millis(50)));
+    }
+
+    #[test]
+    fn blocks_above_high_water_until_acked() {
+        let f = Arc::new(Flow::new());
+        f.add(HIGH_WATER + 10);
+        let released = Arc::new(AtomicBool::new(false));
+        let (f2, r2) = (Arc::clone(&f), Arc::clone(&released));
+        let t = thread::spawn(move || {
+            let ok = f2.wait_below(HIGH_WATER, Duration::from_secs(5));
+            r2.store(true, Ordering::SeqCst);
+            ok
+        });
+        thread::sleep(Duration::from_millis(100));
+        assert!(!released.load(Ordering::SeqCst), "must stay paused with no ack");
+        f.ack(100);
+        assert!(t.join().unwrap());
+    }
+
+    #[test]
+    fn close_releases_a_blocked_sender_with_false() {
+        let f = Arc::new(Flow::new());
+        f.add(HIGH_WATER * 2);
+        let f2 = Arc::clone(&f);
+        let t = thread::spawn(move || f2.wait_below(HIGH_WATER, Duration::from_secs(5)));
+        thread::sleep(Duration::from_millis(50));
+        f.close();
+        assert!(!t.join().unwrap());
+    }
+
+    #[test]
+    fn gives_up_when_nothing_is_acked() {
+        let f = Flow::new();
+        f.add(HIGH_WATER * 2);
+        let start = Instant::now();
+        assert!(!f.wait_below(HIGH_WATER, Duration::from_millis(100)));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[test]
+    fn ack_never_underflows() {
+        let f = Flow::new();
+        f.add(5);
+        f.ack(50);
+        assert_eq!(lock(&f.state).outstanding, 0);
     }
 }
