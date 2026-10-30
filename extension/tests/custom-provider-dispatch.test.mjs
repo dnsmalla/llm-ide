@@ -144,3 +144,60 @@ test('POST /kb/custom-providers: stores for the caller; 400 without a providers 
   assert.equal((await call('GET', null)).status, 405);
   syncCustomProviders([], userId);
 });
+
+// The legacy custom:<uuid> path still serves the background roles (runClaude -> completeViaApi); these were
+// covered through the deleted classic route and are pinned here against the current code.
+test('runClaude custom:<uuid>: a provider that is not registered is PROVIDER_UNAVAILABLE, with no request', async () => {
+  const { runClaude } = await import('../providers/runtime.mjs');
+  const { userId } = await setupUser();
+  syncCustomProviders([], userId);
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('must not be called'); };
+  try {
+    await assert.rejects(runClaude('hi', { userId, provider: 'custom:never-registered', model: 'glm-4', autoFallback: false }),
+      (e) => e.code === 'PROVIDER_UNAVAILABLE' && /not found/.test(e.message));
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = original; }
+});
+
+test('runClaude custom:<uuid>: no key stored is PROVIDER_UNAVAILABLE naming the provider, with no request', async () => {
+  const { runClaude } = await import('../providers/runtime.mjs');
+  const { userId } = await setupUser();
+  const pid = registerProvider(userId, { seedKey: false });
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('must not be called'); };
+  try {
+    await assert.rejects(runClaude('hi', { userId, provider: pid, model: 'glm-4', autoFallback: false }),
+      (e) => e.code === 'PROVIDER_UNAVAILABLE' && /No API key configured for GLM/.test(e.message));
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = original; syncCustomProviders([], userId); }
+});
+
+test('runClaude custom:<uuid>: the SSRF guard blocks an internal base URL before any fetch', async () => {
+  const { runClaude } = await import('../providers/runtime.mjs');
+  const { userId } = await setupUser();
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('must not be called'); };
+  try {
+    for (const baseURL of ['https://127.0.0.1/v1', 'https://169.254.169.254/v1', 'http://api.example.com/v1']) {
+      const pid = registerProvider(userId, { baseURL });
+      await assert.rejects(runClaude('hi', { userId, provider: pid, model: 'glm-4', autoFallback: false }), /SSRF guard/, baseURL);
+    }
+    assert.equal(calls, 0, 'fetch must NOT be called for a blocked base URL');
+  } finally { globalThis.fetch = original; syncCustomProviders([], userId); }
+});
+
+test('completeViaApi: a custom base URL is guarded before any fetch, and a key-less call is refused', async () => {
+  const { completeViaApi } = await import('../providers/providers.mjs');
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => { calls += 1; throw new Error('must not be called'); };
+  try {
+    await assert.rejects(completeViaApi('custom', { apiKey: 'k', model: 'm', prompt: 'x', baseUrl: 'https://10.1.2.3/v1' }), /SSRF guard/);
+    await assert.rejects(completeViaApi('custom', { apiKey: '', model: 'm', prompt: 'x', baseUrl: 'https://api.example.com/v1' }), /no API key/);
+    assert.equal(calls, 0);
+  } finally { globalThis.fetch = original; }
+});

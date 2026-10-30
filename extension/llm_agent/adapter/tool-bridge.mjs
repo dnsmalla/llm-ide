@@ -96,7 +96,7 @@ export function skillSchemaToJsonSchema(schema = {}) {
 
 // The library validates tool input only if told how; the registry handlers
 // trust their args, so a bad call is refused here with a message the model can fix.
-function checkArgs(schema, args) {
+export function checkArgs(schema, args) {
   if (!args || typeof args !== 'object' || Array.isArray(args)) return 'arguments must be an object';
   for (const [arg, def] of Object.entries(schema)) {
     const v = args[arg];

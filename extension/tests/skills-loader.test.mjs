@@ -258,3 +258,32 @@ ${sentence.repeat(60)}
   assert.ok(!/\bpadding that exists only to$/.test(d), 'no mid-sentence cut');
   rmSync(dir, { recursive: true, force: true });
 });
+
+// Required fields and the _base.md size cap (restored; they covered live loader behaviour).
+function skillDir(files) {
+  const dir = newDir();
+  for (const [name, content] of Object.entries(files)) writeFileSync(join(dir, name), content, 'utf8');
+  return dir;
+}
+
+test('a flat skill missing name reports the missing required field', () => {
+  const { skills, warnings } = loadSkills(skillDir({ 'foo.md': '---\nkind: read\n---\nbody text\n' }));
+  assert.equal(skills.size, 0);
+  assert.ok(warnings.some((w) => /missing required field 'name'/.test(w)), warnings.join('; '));
+});
+
+test('a flat skill missing kind reports the missing required field', () => {
+  const { skills, warnings } = loadSkills(skillDir({ 'foo.md': '---\nname: foo\n---\nbody text\n' }));
+  assert.equal(skills.size, 0);
+  assert.ok(warnings.some((w) => /missing required field 'kind'/.test(w)), warnings.join('; '));
+});
+
+test('an oversized _base.md is rejected, not truncated, and other skills still load', () => {
+  const { base, skills, warnings } = loadSkills(skillDir({
+    '_base.md': 'A'.repeat(70_000),
+    'ok.md': '---\nname: ok\nkind: read\n---\nfine\n',
+  }));
+  assert.equal(base, '', 'an oversized base must not be partially loaded');
+  assert.ok(warnings.some((w) => /_base\.md exceeds/.test(w)));
+  assert.equal(skills.size, 1);
+});
