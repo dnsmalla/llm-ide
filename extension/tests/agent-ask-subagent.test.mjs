@@ -176,7 +176,7 @@ test('result carries meta { subagent, provider, model, ms } after answer', async
   const subagents = new Map([['echoer', { systemPrompt: 's', allowedTools: [], maxIterations: 1, pluginName: 't' }]]);
   const out = await askSubagent({ name: 'echoer', question: 'q' },
     makeCtx({ subagents, defaultModel: 'claude-haiku-4-5', runClaude: makeStubClaude(['done']) }));
-  assert.deepEqual(Object.keys(out), ['meta', 'answer', 'pendingTool'],
+  assert.deepEqual(Object.keys(out), ['meta', 'ok', 'answer', 'pendingTool'],
     'meta first: the client sees a 20k-truncated text, so a long answer must not push meta out');
   assert.equal(out.meta.subagent, 'echoer');
   assert.equal(out.meta.model, 'claude-haiku-4-5');
@@ -251,11 +251,22 @@ test('meta: a custom provider reported by runClaude is kept, not re-guessed from
   assert.equal(out.meta.provider, 'custom:abc');
 });
 
-test('granted allowed_tools are NOT run (the nested loop is gone) and the answer says which were skipped', async () => {
+test('granted allowed_tools are NOT run (the nested loop is gone): a tools_unavailable marker with the answer as partial', async () => {
   const subagents = new Map([['judge', { systemPrompt: 'Use search-kb.', allowedTools: ['search-kb', 'decide'], maxIterations: 4, pluginName: 'test' }]]);
   const claude = makeStubClaude(['I looked at nothing.']);
   const out = await askSubagent({ name: 'judge', question: 'what is in the kb?' }, makeCtx({ subagents, runClaude: claude }));
-  assert.equal(out.answer, 'I looked at nothing.');
   assert.equal(claude.seen.length, 1, 'exactly one completion, no loop');
-  assert.match(out.note, /does not run tools; not run: search-kb, decide/);
+  assert.equal(out.ok, false);
+  assert.equal(out.error, 'tools_unavailable');
+  assert.equal(out.answer, undefined, 'never a plausible success');
+  assert.equal(out.partial, 'I looked at nothing.');
+  assert.match(out.message, /search-kb, decide.*NOT grounded/);
+  assert.equal(out.pendingTool, null);
+  assert.equal(Object.keys(out)[0], 'meta');
+});
+
+test('a subagent with no allowed_tools still answers as a plain success (ok:true, answer)', async () => {
+  const subagents = new Map([['plain', { systemPrompt: 'Say hi.', allowedTools: [], maxIterations: 1, pluginName: 'test' }]]);
+  const out = await askSubagent({ name: 'plain', question: 'hi' }, makeCtx({ subagents, runClaude: makeStubClaude(['hello']) }));
+  assert.deepEqual([out.ok, out.answer, out.error, out.partial], [true, 'hello', undefined, undefined]);
 });

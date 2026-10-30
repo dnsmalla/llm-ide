@@ -53,7 +53,7 @@ The classic engine (the text-fence tool loop `loop.mjs`, the fence parser `fence
 
 ## §2 The loop (removed)
 
-The classic loop and its fence protocol no longer exist. The turn algorithm, caps, depth model and system-prompt assembly of the engines that remain are specified in `agent-v2.md` (the Agent SDK engine) and `provider-catalog.md` (the adapter turn). `ask-subagent` is a single completion now (no nested tool loop): it runs the subagent's body as the system prompt, honours the subagent's `model:` / `tier:` and the user's `features.subagents` route, and reports any declared `allowed_tools` it did not run in a `note`; `ask-internal` answers that it is not available.
+The classic loop and its fence protocol no longer exist. The turn algorithm, caps, depth model and system-prompt assembly of the engines that remain are specified in `agent-v2.md` (the Agent SDK engine) and `provider-catalog.md` (the adapter turn). `ask-subagent` is a single completion now (no nested tool loop): it runs the subagent's body as the system prompt, honours the subagent's `model:` / `tier:` and the user's `features.subagents` route, and, when the subagent declares `allowed_tools` (`search-kb`, `decide`), returns a non-success marker instead of a plausible answer: `{ meta, ok: false, error: 'tools_unavailable', message, partial: <the one-shot answer>, pendingTool: null }` (a subagent with no tools returns `{ meta, ok: true, answer, pendingTool: null }`). A plugin author should therefore not rely on `allowed_tools` being executed by the `ask-subagent` delegation; the native replacement is the SDK's `options.agents` (plan item A5); `ask-internal` answers that it is not available.
 
 ---
 

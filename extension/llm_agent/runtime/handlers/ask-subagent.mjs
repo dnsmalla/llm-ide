@@ -24,6 +24,9 @@
 
 import { resolveProvider } from '../../../providers/providers.mjs';
 
+// The read tools a subagent could be granted when the nested loop existed.
+const GRANTABLE_TOOLS = new Set(['search-kb', 'decide']);
+
 /**
  * Compose the body the subagent runs with. We don't add the internal
  * agent's _base (fence contract) here directly — instead we rely on
@@ -65,7 +68,8 @@ export async function askSubagent(args, ctx) {
   }
 
   // Declared tools are not run (see the header); the answer says which were skipped.
-  const skippedTools = Array.isArray(subagent.allowedTools) ? [...subagent.allowedTools] : [];
+  // Only tools that could ever be granted count (an unknown name was always dropped silently).
+  const skippedTools = Array.isArray(subagent.allowedTools) ? subagent.allowedTools.filter((t) => GRANTABLE_TOOLS.has(t)) : [];
 
   const base = subagent.systemPrompt;
 
@@ -126,20 +130,23 @@ export async function askSubagent(args, ctx) {
     return { error: `subagent '${name}' failed: ${String(err?.message || err).slice(0, 300)}`, pendingTool: null };
   }
 
-  return {
-    // What ran, for the client's subagent activity view. FIRST on purpose:
-    // the client sees the tool_result text cut at 20k chars, so behind a long
-    // answer it would be lost; the model reads the whole JSON either way.
-    meta: subagentMeta({ name, route, routeTier, requestedModel, ran, ms: Date.now() - startedAt }),
-    // Redact fence sentinels from the sub-loop reply at the source,
-    // consistent with ask-internal.  The outer loop also applies
-    // redactDeep() to the whole toolResult, but redacting here adds
-    // a defense-in-depth layer so no raw sentinel survives even if
-    // the outer handler changes.
-    answer: String(reply || '').trim(),
-    pendingTool: null,
-    ...(skippedTools.length ? { note: `This delegation answers once and does not run tools; not run: ${skippedTools.join(', ')}.` } : {}),
-  };
+  const meta = subagentMeta({ name, route, routeTier, requestedModel, ran, ms: Date.now() - startedAt });
+  const text = String(reply || '').trim();
+  // A subagent that declares allowed_tools was written to look things up and act. This delegation cannot run
+  // them, so its one-shot answer is ungrounded: return a clear non-success marker with the answer under
+  // `partial`, never a plausible success. The calling model decides what to do with it.
+  if (skippedTools.length) {
+    return {
+      // First on purpose: the client sees the tool_result text cut at 20k chars.
+      meta,
+      ok: false,
+      error: 'tools_unavailable',
+      message: `Subagent '${name}' declares tools (${skippedTools.join(', ')}) that this delegation cannot run, so its answer below is NOT grounded in them. Treat it as a draft, or do the lookups yourself.`,
+      partial: text,
+      pendingTool: null,
+    };
+  }
+  return { meta, ok: true, answer: text, pendingTool: null };
 }
 
 /**

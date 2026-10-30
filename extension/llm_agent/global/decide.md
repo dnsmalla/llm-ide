@@ -87,4 +87,4 @@ say so to the user rather than acting on it.
 ## Subagents
 
 A plugin subagent can call `decide` when its frontmatter grants it:
-`allowed_tools: [decide]` (alongside any others, e.g. `[search-kb, decide]`).
+`allowed_tools: [decide]` (alongside any others, e.g. `[search-kb, decide]`). The `ask-subagent` delegation no longer runs a subagent's tools: such a subagent returns `tools_unavailable` with its one-shot answer as `partial`.

@@ -71,9 +71,10 @@ Omit `thread` (or leave it empty) for a one-shot isolated call; the
 subagent has no memory of prior turns and all needed context must be
 included in `question`.
 
-- A subagent has access only to tools its author declared in
-  `allowed_tools`. By default that's the empty set (pure-prompt
-  subagent). Some subagents may search the KB; none can write.
-- Subagent loops are bounded at 5 iterations + 90 seconds. If a
-  subagent times out you'll get a partial answer with a deadline
-  note appended.
+- A delegation answers once and does not run tools. A subagent that
+  declares `allowed_tools` (it was written to search the KB or call
+  `decide`) therefore comes back as `{ ok: false, error:
+  "tools_unavailable", partial: <its answer>, message }`: the answer is
+  NOT grounded in those tools. Treat `partial` as a draft, or do the
+  lookups yourself. A pure-prompt subagent (no tools) returns
+  `{ ok: true, answer }`.
