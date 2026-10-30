@@ -1,0 +1,199 @@
+{
+  "u1": {
+    "pluginDelivery": {
+      "sdkPlugins": [
+        {
+          "type": "local",
+          "path": "<ROOT>/plugins/alpha",
+          "skipMcpDiscovery": true
+        },
+        {
+          "type": "local",
+          "path": "<ROOT>/plugins/hooky",
+          "skipMcpDiscovery": true
+        }
+      ],
+      "native": [
+        "alpha",
+        "hooky"
+      ],
+      "translated": [],
+      "hookEvents": []
+    },
+    "skillSet": {
+      "pluginSkills": {
+        "sk-one": "alpha",
+        "sk-two": "alpha",
+        "hk-skill": "hooky",
+        "owned-skill": "owned"
+      },
+      "commands": {
+        "cmd-a": "alpha",
+        "own-cmd": "owned"
+      },
+      "subagents": {
+        "helper": "alpha"
+      }
+    },
+    "library": [
+      "runtime/gamma",
+      "skills/alpha",
+      "skills/delta"
+    ],
+    "slashCatalogPlugins": [
+      {
+        "plugin": "alpha",
+        "skills": [
+          "sk-one",
+          "sk-two"
+        ]
+      },
+      {
+        "plugin": "hooky",
+        "skills": [
+          "hk-skill"
+        ]
+      },
+      {
+        "plugin": "owned",
+        "skills": [
+          "owned-skill"
+        ]
+      }
+    ],
+    "mcp": {
+      "execute": {
+        "servers": {
+          "alpha-srv": {
+            "command": "node",
+            "args": [
+              "alpha-srv.js"
+            ]
+          },
+          "linear": {
+            "command": "npx",
+            "args": [
+              "-y",
+              "linear-mcp"
+            ]
+          },
+          "sentry": {
+            "type": "http",
+            "url": "https://mcp.example.com/sse"
+          }
+        },
+        "allowedTools": [
+          "mcp__alpha-srv",
+          "mcp__linear",
+          "mcp__sentry"
+        ]
+      },
+      "plan": {
+        "servers": {},
+        "allowedTools": []
+      }
+    }
+  },
+  "u2": {
+    "pluginDelivery": {
+      "sdkPlugins": [],
+      "native": [],
+      "translated": [],
+      "hookEvents": []
+    },
+    "skillSet": {
+      "pluginSkills": {
+        "owned-skill": "owned"
+      },
+      "commands": {
+        "own-cmd": "owned"
+      },
+      "subagents": {}
+    },
+    "library": [
+      "runtime/gamma",
+      "skills/alpha",
+      "skills/beta"
+    ],
+    "slashCatalogPlugins": [
+      {
+        "plugin": "alpha",
+        "skills": [
+          "sk-one",
+          "sk-two"
+        ]
+      },
+      {
+        "plugin": "hooky",
+        "skills": [
+          "hk-skill"
+        ]
+      },
+      {
+        "plugin": "owned",
+        "skills": [
+          "owned-skill"
+        ]
+      }
+    ],
+    "mcp": {
+      "execute": {
+        "servers": {},
+        "allowedTools": []
+      },
+      "plan": {
+        "servers": {},
+        "allowedTools": []
+      }
+    }
+  },
+  "u3": {
+    "pluginDelivery": {
+      "sdkPlugins": [],
+      "native": [],
+      "translated": [],
+      "hookEvents": []
+    },
+    "skillSet": {
+      "pluginSkills": {},
+      "commands": {},
+      "subagents": {}
+    },
+    "library": [
+      "runtime/gamma",
+      "skills/alpha",
+      "skills/beta"
+    ],
+    "slashCatalogPlugins": [
+      {
+        "plugin": "alpha",
+        "skills": [
+          "sk-one",
+          "sk-two"
+        ]
+      },
+      {
+        "plugin": "hooky",
+        "skills": [
+          "hk-skill"
+        ]
+      },
+      {
+        "plugin": "owned",
+        "skills": [
+          "owned-skill"
+        ]
+      }
+    ],
+    "mcp": {
+      "execute": {
+        "servers": {},
+        "allowedTools": []
+      },
+      "plan": {
+        "servers": {},
+        "allowedTools": []
+      }
+    }
+  }
+}
