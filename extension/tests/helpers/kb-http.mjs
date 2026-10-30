@@ -47,7 +47,19 @@ export async function startKbServer() {
             resolve({ status: res.statusCode, body: json, text });
           });
         });
-        req.on('error', reject);
+        // A server that refuses early (413) may close while the client is still
+        // writing: EPIPE/ECONNRESET on the write is then expected, not a failure,
+        // provided the answer arrives. Give it a moment before rejecting.
+        let failTimer = null;
+        req.on('response', () => { if (failTimer) clearTimeout(failTimer); });
+        req.on('error', (err) => {
+          if ((err.code === 'EPIPE' || err.code === 'ECONNRESET') && req.res) return;
+          if (err.code === 'EPIPE' || err.code === 'ECONNRESET') {
+            failTimer = setTimeout(() => reject(err), 2000);
+            return;
+          }
+          reject(err);
+        });
         if (payload !== undefined) req.write(payload);
         req.end();
       });

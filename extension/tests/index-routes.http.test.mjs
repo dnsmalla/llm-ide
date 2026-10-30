@@ -43,7 +43,11 @@ test('a normal batch round-trips: 200 with counts, then status is consistent', a
 });
 
 test('a body over 1 MB is refused with 413 PAYLOAD_TOO_LARGE and nothing is written', async () => {
-  const big = { projectId: 'p-big', notes: [note(9, { body: 'x'.repeat(1.2 * 1024 * 1024) })] };
+  // Just over the limit, not far over it: the server refuses at the limit and
+  // closes, and bytes still in flight at that moment turn the close into a TCP
+  // reset (EPIPE on the client's write) that can swallow the 413. A body that
+  // exceeds the limit by a few hundred bytes leaves nothing unread.
+  const big = { projectId: 'p-big', notes: [note(9, { body: 'x'.repeat(1024 * 1024) })] };
   const r = await srv.call('POST', '/kb/index/notes', big);
   assert.equal(r.status, 413);
   assert.equal(r.body.error.code, 'PAYLOAD_TOO_LARGE');
