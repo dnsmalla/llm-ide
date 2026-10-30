@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /code-assist/decision",
+  "status": 410,
+  "description": "Transcribed from the handler (server/ai-routes.mjs codeAssistRemovedBody) and tests/code-assist-removed.test.mjs; no model call.",
+  "request": {
+    "body": {
+      "requestId": "req-1",
+      "sdkSessionId": "s-1",
+      "action": "allow"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ENDPOINT_REMOVED",
+      "message": "This version of the LLM-IDE app is out of date: the classic chat endpoint was removed. Update the app to keep chatting.",
+      "details": {
+        "use": "/agent/v2/decision",
+        "removedInApiVersion": 92
+      }
+    }
+  }
+}

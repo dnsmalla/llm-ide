@@ -11,47 +11,7 @@
           "content": "Hi"
         }
       ],
-      "attachments": [
-        {
-          "path": "src/app.ts",
-          "content": "export const x = 1;\n"
-        }
-      ],
-      "skills": [
-        "code-review"
-      ],
-      "language": "en",
-      "model": "claude-haiku-5-5",
-      "provider": "anthropic",
-      "tier": "subagent",
-      "mode": "auto",
-      "planExecute": false,
-      "planWrite": false,
-      "clientCaps": [
-        "ask_user"
-      ],
-      "agentContext": {
-        "sessionId": "legacy-session-1",
-        "chatSessionId": "chat-1",
-        "activeProject": {
-          "id": "proj-1",
-          "name": "Example"
-        },
-        "indexedRepos": [
-          {
-            "id": "repo-1",
-            "path": "/example/repo"
-          }
-        ],
-        "recentIssues": [
-          {
-            "id": "ISSUE-1",
-            "title": "Example issue"
-          }
-        ],
-        "workspaceRoot": "/example/repo",
-        "activeRepoRoot": "/example/repo"
-      }
+      "language": "en"
     }
   },
   "response": {

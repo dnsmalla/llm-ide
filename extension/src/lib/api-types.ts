@@ -4891,50 +4891,15 @@ export type PostCodeAssistRequest = {
     /** User message (max 20 000 chars after sanitization) */
     message?: string;
     history?: Turn[];
-    /** File attachments (max 30 files, 80 000 chars each, 200 000 total) */
-    attachments?: Attachment[];
-    skills?: string[];
     language?: string;
-    model?: string;
-    /** A provider id, or custom:<uuid>. A provider without a configured key answers 400 PROVIDER_UNAVAILABLE. */
-    provider?: string;
-    /** 'subagent' or absent. */
-    tier?: string;
-    /** Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions */
-    mode?: string;
-    /** Set only by the Mac saved-plan card's "Execute plan" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request. */
-    planExecute?: boolean;
-    planWrite?: boolean;
-    clientCaps?: string[];
-    agentContext?: AgentContext;
   };
 };
 
-/** One of two JSON bodies, chosen by whether the request carried agentContext: the agent path (with continueNeeded, tasks and mode) or the legacy path (reply and usage only). Each variant has its own fixture. */
-export type PostCodeAssistResponse200 = {
-  reply: string;
-  /** A tool call waiting for the user's approval, or null. Its keys come from the model's tool call, so the object is open. */
-  pendingTool?: Record<string, unknown> | null;
-  usage: AgentUsage;
-  continueNeeded: boolean;
-  tasks: NotesGenerationTask[];
-  /** The resolved mode of the turn. */
-  mode: string;
-} | {
-  /** The model's reply, trimmed. */
-  reply: string;
-  usage: LegacyUsage;
-};
-
-/** VALIDATION_FAILED (missing or empty message), or PROVIDER_UNAVAILABLE (the named provider has no key or base URL; the Mac retries once without its tier route on this code). */
-export type PostCodeAssistResponse400 = CommonError;
-
 export type PostCodeAssistResponse401 = CommonError;
 
-export type PostCodeAssistResponse429 = CommonError;
+export type PostCodeAssistResponse410 = CommonError;
 
-/** INTERNAL_ERROR with the fixed message 'The assistant is temporarily unavailable. Please try again.' (codeAssistErrorResponse, ai-routes.mjs). The provider detail is logged server-side only. */
-export type PostCodeAssistResponse502 = CommonError;
+export type PostCodeAssistResponse429 = CommonError;
 
 /** Request parts for `POST /code-assist/decision` (schema/http/notes-generation.schema.json). */
 export type PostCodeAssistDecisionRequest = {
@@ -4945,20 +4910,12 @@ export type PostCodeAssistDecisionRequest = {
     sdkSessionId?: string;
     /** 'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once. */
     action?: "answer" | "allow" | "deny" | "always-allow";
-    /** With `deny` only: the user's instruction ("No, and do this instead"), handed to the model as the denial reason. Max 2000 chars. */
-    feedback?: string;
-    /** AskUserQuestion answers, forwarded to the engine unchanged. */
-    answers?: Record<string, unknown>;
   };
 };
 
-export type PostCodeAssistDecisionResponse200 = NotesGenerationOk;
-
 export type PostCodeAssistDecisionResponse401 = CommonError;
 
-export type PostCodeAssistDecisionResponse403 = CommonError;
-
-export type PostCodeAssistDecisionResponse404 = CommonError;
+export type PostCodeAssistDecisionResponse410 = CommonError;
 
 /** Request parts for `POST /agent-sdk/spike` (schema/http/notes-generation.schema.json). */
 export type PostAgentSdkSpikeRequest = {
@@ -7869,20 +7826,16 @@ export interface ApiEndpoints {
   "POST /code-assist": {
     request: PostCodeAssistRequest;
     responses: {
-      200: PostCodeAssistResponse200;
-      400: PostCodeAssistResponse400;
       401: PostCodeAssistResponse401;
+      410: PostCodeAssistResponse410;
       429: PostCodeAssistResponse429;
-      502: PostCodeAssistResponse502;
     };
   };
   "POST /code-assist/decision": {
     request: PostCodeAssistDecisionRequest;
     responses: {
-      200: PostCodeAssistDecisionResponse200;
       401: PostCodeAssistDecisionResponse401;
-      403: PostCodeAssistDecisionResponse403;
-      404: PostCodeAssistDecisionResponse404;
+      410: PostCodeAssistDecisionResponse410;
     };
   };
   "POST /agent-sdk/spike": {

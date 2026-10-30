@@ -4,7 +4,14 @@
   "description": "Captured from `node extension/server.mjs` on a temp DB (LLMIDE_DB_PATH in TMPDIR), replayed over HTTP. No model call: the Claude CLI path points at a missing binary. Handler: code-assist.",
   "request": {
     "body": {
-      "message": "hi"
+      "message": "Review this file.",
+      "history": [
+        {
+          "role": "user",
+          "content": "Hi"
+        }
+      ],
+      "language": "en"
     }
   },
   "response": {

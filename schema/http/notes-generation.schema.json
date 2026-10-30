@@ -1,5 +1,5 @@
 {
-  "description": "Notes and generation routes: the single-shot model calls the side panel, the Mac app's Doc Gen and the Code Assistant make (/generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx; /chat was removed in API 89 and answers 410 ENDPOINT_REMOVED for one release), the legacy Code Assistant turn (/code-assist), its run-bash approval resolver (/code-assist/decision), and the temporary Agent SDK spike (/agent-sdk/spike). Roster: all are POST paths in ALL_ENDPOINTS (extension/server.mjs), handled by extension/server/ai-routes.mjs, extension/server/export-routes.mjs and (for /generate-doc) extension/routes/doc-gen.mjs; all are token-protected. /generate-doc is gated by the doc_gen feature (LLMIDE_FEATURES without doc_gen answers 404 feature_disabled and /health omits it); every other route in this group is on the core feature set (not feature-gated). Request parts list exactly the keys each handler reads from the parsed JSON body; unknown keys are ignored by the server and are not declared. No request part is required: the server answers a missing key with 400, and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md), including /code-assist/decision (an unparseable body is refused there too, not treated as {}). Not declared: 413 (the body limit: readBody answers 413 before the handler runs, and a fixture cannot carry an over-limit body). Rate limits: /generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx and /chat share the llmFast bucket (429 declared); /code-assist uses agentTurn (429 declared); /code-assist/decision and /agent-sdk/spike are not rate-limited. Provider failures: a model call that throws answers the generic 500 INTERNAL_ERROR on the routes that call runClaude directly (its message is not sent, sendError maps a non-AppError to INTERNAL_ERROR), and 502 INTERNAL_ERROR on /code-assist (codeAssistErrorResponse); a PROVIDER_UNAVAILABLE refusal answers 400 on /code-assist. The 200 bodies of the model routes are the parsed model output, so the fixtures for them are built from the handler's response construction and the existing tests, not captured from a model; those fixtures say so in their description. Streams: /generate-notes and /code-assist answer an SSE stream instead of the JSON 200 when the request sends Accept: text/event-stream. The JSON form is specified on the 200; a status key can hold only one form and no event schema exists for the stream, so the stream form is not specified here. /agent-sdk/spike always streams and is x-unspecified. POST /kb/complete is the plain one-shot completion (agent-kit K1 P3): one prompt, one reply, llmFast bucket (429 declared); its 200 is built from the handler and the tests, not captured from a model; provider failures follow /code-assist (400 PROVIDER_UNAVAILABLE, generic 502 INTERNAL_ERROR).",
+  "description": "Notes and generation routes: the single-shot model calls the side panel, the Mac app's Doc Gen and the Code Assistant make (/generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx; /chat was removed in API 89 and answers 410 ENDPOINT_REMOVED for one release), the classic Code Assistant turn (/code-assist) and its run-bash approval resolver (/code-assist/decision), both removed in API 92 and answering 410 ENDPOINT_REMOVED for one release, and the temporary Agent SDK spike (/agent-sdk/spike). Roster: all are POST paths in ALL_ENDPOINTS (extension/server.mjs), handled by extension/server/ai-routes.mjs, extension/server/export-routes.mjs and (for /generate-doc) extension/routes/doc-gen.mjs; all are token-protected. /generate-doc is gated by the doc_gen feature (LLMIDE_FEATURES without doc_gen answers 404 feature_disabled and /health omits it); every other route in this group is on the core feature set (not feature-gated). Request parts list exactly the keys each handler reads from the parsed JSON body; unknown keys are ignored by the server and are not declared. No request part is required: the server answers a missing key with 400, and a 400 fixture carries the body it was sent. Malformed JSON bodies answer 400 on every route that reads one (not declared here, per SCHEMA.md), including /code-assist/decision (an unparseable body is refused there too, not treated as {}). Not declared: 413 (the body limit: readBody answers 413 before the handler runs, and a fixture cannot carry an over-limit body). Rate limits: /generate-notes, /generate-questions, /extract-entities, /generate-doc, /generate-docx and /chat share the llmFast bucket (429 declared); /code-assist uses agentTurn (429 declared); /code-assist/decision and /agent-sdk/spike are not rate-limited. Provider failures: a model call that throws answers the generic 500 INTERNAL_ERROR on the routes that call runClaude directly (its message is not sent, sendError maps a non-AppError to INTERNAL_ERROR), and 502 INTERNAL_ERROR on /code-assist (codeAssistErrorResponse); a PROVIDER_UNAVAILABLE refusal answers 400 on /code-assist. The 200 bodies of the model routes are the parsed model output, so the fixtures for them are built from the handler's response construction and the existing tests, not captured from a model; those fixtures say so in their description. Streams: /generate-notes and /code-assist answer an SSE stream instead of the JSON 200 when the request sends Accept: text/event-stream. The JSON form is specified on the 200; a status key can hold only one form and no event schema exists for the stream, so the stream form is not specified here. /agent-sdk/spike always streams and is x-unspecified. POST /kb/complete is the plain one-shot completion (agent-kit K1 P3): one prompt, one reply, llmFast bucket (429 declared); its 200 is built from the handler and the tests, not captured from a model; provider failures follow /code-assist (400 PROVIDER_UNAVAILABLE, generic 502 INTERNAL_ERROR).",
   "$defs": {
     "Turn": {
       "type": "object",
@@ -663,7 +663,7 @@
       "request": {
         "body": {
           "type": "object",
-          "description": "message is required in effect (400 when missing or empty after sanitization). message is capped at 20 000 characters; attachments are budgeted by selectAttachments (30 files, 80 000 characters each, 200 000 in total). history is windowed to the context budget. skills are ids read from the local skills library; unknown ids are ignored. tier 'subagent' selects LLMIDE_SUBAGENT_MODEL when model is absent. With agentContext the agent loop runs (agent path); without it, one model call runs (legacy path). 8 MB body limit (readBody). The SSE form (Accept: text/event-stream) is not specified here: its events are progress, chunk, done (reply, pendingTool, usage, mode), tasks (tasks, continueNeeded) and error (error, optional code), and no event schema exists for them.",
+          "description": "REMOVED in API 92: the body is not read and the route answers 410 ENDPOINT_REMOVED (the chat runs on POST /agent/v2/stream, plain completions on POST /kb/complete). Only the three fields the fixtures use are declared.",
           "properties": {
             "message": {
               "type": "string",
@@ -675,132 +675,21 @@
                 "$ref": "#/$defs/Turn"
               }
             },
-            "attachments": {
-              "type": "array",
-              "items": {
-                "$ref": "#/$defs/Attachment"
-              },
-              "description": "File attachments (max 30 files, 80 000 chars each, 200 000 total)"
-            },
-            "skills": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
             "language": {
               "type": "string"
-            },
-            "model": {
-              "type": "string"
-            },
-            "provider": {
-              "type": "string",
-              "description": "A provider id, or custom:<uuid>. A provider without a configured key answers 400 PROVIDER_UNAVAILABLE."
-            },
-            "tier": {
-              "type": "string",
-              "description": "'subagent' or absent."
-            },
-            "mode": {
-              "type": "string",
-              "description": "Chat mode; plan/assist_plan map to SDK plan permission mode; ask = read-only quick chat (menu bar / sheet / phone): no file edits, no shell, no git actions"
-            },
-            "planExecute": {
-              "type": "boolean",
-              "description": "Set only by the Mac saved-plan card's \"Execute plan\" action: this Execute turn is working an already-approved plan, so the server injects the plan-execution skill (subagent-driven-development when the user has subagents, executing-plans otherwise). Omitted on every other request."
-            },
-            "planWrite": {
-              "type": "boolean"
-            },
-            "clientCaps": {
-              "type": "array",
-              "items": {
-                "type": "string"
-              }
-            },
-            "agentContext": {
-              "$ref": "#/$defs/AgentContext"
             }
           }
         }
       },
       "responses": {
-        "200": {
-          "description": "One of two JSON bodies, chosen by whether the request carried agentContext: the agent path (with continueNeeded, tasks and mode) or the legacy path (reply and usage only). Each variant has its own fixture.",
-          "oneOf": [
-            {
-              "type": "object",
-              "required": [
-                "reply",
-                "usage",
-                "continueNeeded",
-                "tasks",
-                "mode"
-              ],
-              "description": "Agent path (route.mjs handleCodeAssist result, plus memoryUsage merged into usage and the task state).",
-              "properties": {
-                "reply": {
-                  "type": "string"
-                },
-                "pendingTool": {
-                  "type": [
-                    "object",
-                    "null"
-                  ],
-                  "additionalProperties": true,
-                  "description": "A tool call waiting for the user's approval, or null. Its keys come from the model's tool call, so the object is open."
-                },
-                "usage": {
-                  "$ref": "#/$defs/AgentUsage"
-                },
-                "continueNeeded": {
-                  "type": "boolean"
-                },
-                "tasks": {
-                  "type": "array",
-                  "items": {
-                    "$ref": "#/$defs/Task"
-                  }
-                },
-                "mode": {
-                  "type": "string",
-                  "description": "The resolved mode of the turn."
-                }
-              }
-            },
-            {
-              "type": "object",
-              "required": [
-                "reply",
-                "usage"
-              ],
-              "description": "Legacy path: one model call, no tools.",
-              "properties": {
-                "reply": {
-                  "type": "string",
-                  "description": "The model's reply, trimmed."
-                },
-                "usage": {
-                  "$ref": "#/$defs/LegacyUsage"
-                }
-              }
-            }
-          ]
-        },
-        "400": {
-          "$ref": "_common#/$defs/Error",
-          "description": "VALIDATION_FAILED (missing or empty message), or PROVIDER_UNAVAILABLE (the named provider has no key or base URL; the Mac retries once without its tier route on this code)."
-        },
         "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "410": {
           "$ref": "_common#/$defs/Error"
         },
         "429": {
           "$ref": "_common#/$defs/Error"
-        },
-        "502": {
-          "$ref": "_common#/$defs/Error",
-          "description": "INTERNAL_ERROR with the fixed message 'The assistant is temporarily unavailable. Please try again.' (codeAssistErrorResponse, ai-routes.mjs). The provider detail is logged server-side only."
         }
       }
     },
@@ -808,7 +697,7 @@
       "request": {
         "body": {
           "type": "object",
-          "description": "Resolves a run-bash approval parked by the legacy engine (llm_agent/sdk/decisions.mjs answerDecision). action defaults to 'answer' when answers is present. An unknown action, or an unparseable body (treated as {}), answers 404 DECISION_UNKNOWN. 64 KB body limit (not declared, see the group description).",
+          "description": "REMOVED in API 92: the body is not read and the route answers 410 ENDPOINT_REMOVED (use POST /agent/v2/decision). Only the fields the fixtures use are declared.",
           "properties": {
             "requestId": {
               "type": "string",
@@ -826,30 +715,15 @@
                 "always-allow"
               ],
               "description": "'always-allow' saves the rule the approval_request's `suggestion` offered — a project-scoped command-prefix rule for shell commands (`npm test`), a project-scoped tool rule for act tools — so later prompt-tier calls it covers skip the approval. No `suggestion` (a compound command) means it allows once."
-            },
-            "feedback": {
-              "type": "string",
-              "description": "With `deny` only: the user's instruction (\"No, and do this instead\"), handed to the model as the denial reason. Max 2000 chars."
-            },
-            "answers": {
-              "type": "object",
-              "additionalProperties": true,
-              "description": "AskUserQuestion answers, forwarded to the engine unchanged."
             }
           }
         }
       },
       "responses": {
-        "200": {
-          "$ref": "#/$defs/Ok"
-        },
         "401": {
           "$ref": "_common#/$defs/Error"
         },
-        "403": {
-          "$ref": "_common#/$defs/Error"
-        },
-        "404": {
+        "410": {
           "$ref": "_common#/$defs/Error"
         }
       }
