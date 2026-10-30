@@ -38,10 +38,10 @@ Legend: **[me]** the agent does it, **[you]** needs the user, **[wait]** time-ga
 | X1 | **Lean SDK configuration (P1, L1-L12):** compact prompt with an exploration cap, drop Bash from modes that do not need it (execute mode; `ask` is already read-only on v2), settings audit (git instructions, attachments), cache-TTL experiment, compaction window, our own per-turn calls (memory-extract, mode classifier), tool-search re-measure. | Bench A/B per item (15% tokens / 30% time). |
 | X2 | **Token-affecting SDK adoption (P2 top-15 remainder):** `sessionStore`, Haiku search sub-agent via `options.agents` (also restores plugin sub-agent tools), `Task*` tools, `skills`, `options.agent` (enables `snapshot:true`), `resumeSessionAt`, plan-mode tools. | Bench each. |
 | X3 | **Ended-chat continuation (live-then-archive Phase 5 / agent-kit P5):** per-chat summary on a cheap model + last 4-6 turns, fresh SDK session, warm-chat resume only; improves the P6b handoff (today a simple extract). | Bench + review. |
-| X4 | Track Q server half: move the 37 plugin/MCP/LLM-source routes out of `server/auth-routes.mjs` into their own route module (pure move, contract-proved). | contract-gates. |
+| X4 | Track Q server half: move the 37 plugin/MCP/LLM-source routes out of `server/auth-routes.mjs` into their own route module (pure move, contract-proved). | **Done** (`routes/extension-routes.mjs`; contract gates unchanged, route-table test). |
 | X5 | Ledger step B (agent store Stage 2): budget readers to `usage_calls` after 7 days of zero mismatches; **fail closed** to the ledger. | Your go/no-go (Y3). |
 | X6 | Router polish: switch history in the Agents hub (graph-kit page), shadow metrics on the Storage page (graph-kit), per-chat cheaper fallback at the cap. | graph-kit repo + pin bump. |
-| X7 | Provider pinning for tracker-host connectors (`connectors/issues.mjs`, `agents/dispatcher.mjs`, `agents/outcome-providers.mjs`) — currently allowlisted, not pinned. | Security review. |
+| X7 | Provider pinning for tracker-host connectors (`connectors/issues.mjs`, `agents/dispatcher.mjs`, `agents/outcome-providers.mjs`) — now pinned through `server/tracker-fetch.mjs`, allowlist entries removed. | **Done** (security review still welcome). |
 
 ## Later
 
