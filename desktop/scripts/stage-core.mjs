@@ -11,6 +11,7 @@
 import { execFileSync } from 'node:child_process';
 import { chmodSync, copyFileSync, cpSync, existsSync, lstatSync, mkdirSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
+import { removeSdkBinaryPackages, sdkBinaryAllowed, verifyNoSdkBinary } from './sdk-binary.mjs';
 
 const DESKTOP = resolve(import.meta.dirname, '..');
 const REPO = resolve(DESKTOP, '..');
@@ -127,6 +128,19 @@ walk(nm, (p, isDir) => {
   }
 });
 const nmAfter = dirBytes(nm);
+
+// Phase 0 condition 2: never ship the SDK's platform `claude` binary (see sdk-binary.mjs).
+if (sdkBinaryAllowed()) {
+  console.warn('warning: LLMIDE_STAGE_ALLOW_SDK_BINARY=1, the SDK claude binary stays in the stage (not for release)');
+} else {
+  const removedSdk = removeSdkBinaryPackages(nm);
+  if (removedSdk.length) console.log(`removed SDK claude binary package(s): ${removedSdk.map((p) => basename(p)).join(', ')}`);
+  const leftover = verifyNoSdkBinary(OUT);
+  if (leftover.length) {
+    console.error(`staging failed: the SDK claude binary must not be bundled:\n  ${leftover.join('\n  ')}`);
+    process.exit(1);
+  }
+}
 
 // 4. Schema file read from providers/ as ../../schema/models/...
 const schemaOut = join(OUT, 'root', 'schema', 'models');

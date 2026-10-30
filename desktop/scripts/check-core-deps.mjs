@@ -11,6 +11,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { sdkBinaryAllowed, verifyNoSdkBinary } from './sdk-binary.mjs';
 
 const DESKTOP = resolve(import.meta.dirname, '..');
 const CORE = join(DESKTOP, 'resources', 'core');
@@ -79,6 +80,14 @@ function insideCore(resolvedUrl) {
 if (!existsSync(NODE)) {
   console.error(`FAIL staged node missing: ${NODE} (run scripts/stage-core.mjs)`);
   process.exit(1);
+}
+
+if (!sdkBinaryAllowed()) {
+  const bundled = verifyNoSdkBinary(CORE);
+  if (bundled.length) {
+    for (const b of bundled) console.error(`FAIL  ${b} (Phase 0 condition 2: do not bundle the SDK claude binary)`);
+    process.exit(1);
+  }
 }
 
 // Keep the engine import away from the live database and the server port.

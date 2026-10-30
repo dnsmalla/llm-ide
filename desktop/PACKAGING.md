@@ -74,3 +74,12 @@ ship, so SEA saves little. Not recommended for Phase 1.
 - The `node_modules` prune in `stage-core.mjs` deletes docs/tests/`.md`/`.ts`
   files by name; only `/health` was smoke-tested here. T7 runs a real chat
   stream against the bundled core; Phase 1 should prune by allowlist.
+
+## Enforcement of "do not bundle the SDK `claude` binary"
+
+`scripts/stage-core.mjs` removes `@anthropic-ai/claude-agent-sdk-<platform>` after
+`npm ci` and fails if any such package or a `claude` executable remains;
+`scripts/check-core-deps.mjs` re-verifies the staged tree. Spike builds that still
+need the bundled binary opt out with `LLMIDE_STAGE_ALLOW_SDK_BINARY=1` (never for a
+release). Open gap: the server does not yet pass `pathToClaudeCodeExecutable`, so a
+stage without the binary needs the user's `claude` wired in (Tauri plan T6).
