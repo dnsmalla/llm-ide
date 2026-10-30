@@ -85,6 +85,7 @@ import {
 import { runBashGate, writePathGate, bashNeedsPerCallApproval } from '../tools/gates.mjs';
 import { AGENT_SDK_PROVIDER, RESERVED_MCP_NAME } from './constants.mjs';
 import { resolveAnthropicKey, agentSdkHomeFor } from './auth.mjs';
+import { requireClaudeExecutable, invalidateClaudePath } from '../../providers/claude-path.mjs';
 
 // AGENT_SDK_PROVIDER / RESERVED_MCP_NAME live in ./constants.mjs and the auth
 // ladder + engine home in ./auth.mjs — both SDK-free, so routes and the boot
@@ -1090,7 +1091,17 @@ export function fallbackModelOption(userId, model, { limits = getLimits, db = nu
 // Test fakes are built without either, and the runner treats both as optional.
 const sdkQueryFactory = (prompt, options) => {
   const held = holdOpenPrompt(prompt);
-  const q = query({ prompt: held.prompt, options });
+  // Which `claude` the SDK runs: the packaged app ships without the SDK's
+  // bundled binary, so point it at the user's install (providers/claude-path.mjs;
+  // the bundled binary, when present, stays the SDK's own default). Unresolvable
+  // throws ClaudeNotFoundError (CLAUDE_NOT_FOUND) -> an ordinary ENGINE_ERROR
+  // whose message tells the user to install Claude Code / `claude login`.
+  let opts = options;
+  if (!options?.pathToClaudeCodeExecutable) {
+    const exe = requireClaudeExecutable({ purpose: 'sdk' });
+    if (exe.source !== 'bundled') opts = { ...options, pathToClaudeCodeExecutable: exe.path };
+  }
+  const q = query({ prompt: held.prompt, options: opts });
   q.releaseInput = held.release;
   return q;
 };
@@ -2033,6 +2044,7 @@ export async function runAgentV2Turn(
     // stale one). Restate it with the errno and the cwd so the message points
     // at something the user can act on instead of at their libc.
     if (err?.errorClass === 'executable_launch_failed') {
+      invalidateClaudePath(); // re-resolve next turn (binary moved/upgraded)
       throw new Error(
         `Claude Code failed to launch (${err?.code ?? 'unknown'}) with cwd ${workspaceRoot}. `
         + 'The binary itself is fine; a spawn error at this point is a working-directory problem — '

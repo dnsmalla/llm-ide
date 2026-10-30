@@ -20,6 +20,7 @@ import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { getCustomProvider } from '../server/custom-providers.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
+import { resolveClaudeExecutable, CLAUDE_INSTALL_MESSAGE } from './claude-path.mjs';
 import { RETRY_DELAYS_MS, sleep, jittered } from './backoff.mjs';
 import { Semaphore } from '../core/semaphore.mjs';
 import { recordUsage, flagQuota, recordRateLimits, resolveModel as resolveUsageModel, noteUnmeteredModelCall } from '../kb/usage.mjs';
@@ -717,7 +718,14 @@ export function cliInvocation(provider, prompt, { cwd, model, isolated = false }
  *  Shared with the CLI health probe (route-health.mjs) so "available" means
  *  "the thing we would spawn". */
 export function cliBinFor(provider) {
-  return process.env[`LLMIDE_${provider.toUpperCase()}_CLI`] || PROVIDERS[provider]?.cli || null;
+  const override = process.env[`LLMIDE_${provider.toUpperCase()}_CLI`];
+  if (override) return override;
+  const name = PROVIDERS[provider]?.cli || null;
+  // `claude` is located by the single resolver (claude-path.mjs) — a packaged
+  // app's PATH rarely contains the user's install. Unresolved keeps the bare
+  // name so the spawn fails ENOENT and formatCliSpawnError explains it.
+  if (name === 'claude') return resolveClaudeExecutable({ purpose: 'cli' }).path || name;
+  return name;
 }
 
 // Last-resort HANG BREAKER for a CLI completion — not a work deadline.
@@ -1061,7 +1069,9 @@ function scrubCliOutput(text) {
  * the provider's own CLI login (`claude login` / `codex login` / `gemini`);
  * stack frames and absolute paths are never echoed (they go to the log).
  */
-export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'anthropic' } = {}) {
+export function formatCliSpawnError(err, { bin: rawBin = 'claude', apiKey, provider = 'anthropic' } = {}) {
+  // A resolved executable is an absolute path; the UI string names the CLI only.
+  const bin = path.basename(String(rawBin)).replace(/\.exe$/i, '') || 'claude';
   const stdout = String(err?.stdout || '').trim();
   const stderr = String(err?.stderr || '').trim();
   const combined = `${stdout}\n${stderr}`.trim();
@@ -1074,6 +1084,9 @@ export function formatCliSpawnError(err, { bin = 'claude', apiKey, provider = 'a
   }
   if (NOT_LOGGED_IN_RE.test(combined)) {
     return `${bin} is not logged in. ${login}, or ${keyHint}.`;
+  }
+  if (err?.code === 'ENOENT' && provider === 'anthropic') {
+    return `${CLAUDE_INSTALL_MESSAGE} (or ${keyHint}.)`;
   }
   if (err?.code === 'ENOENT') {
     return `${bin} CLI not found. Install it and log in (${login.toLowerCase()}), or ${keyHint}.`;
@@ -1362,7 +1375,7 @@ async function chatRouteMissing(baseUrl, apiKey) {
 }
 
 function verifyCli(provider) {
-  const bin = PROVIDERS[provider].cli;
+  const bin = cliBinFor(provider);
   if (!bin) return Promise.resolve({ ok: false, detail: `${provider} has no CLI mode — use an API key` });
   // Minimal env: the version probe only needs PATH to locate the binary.
   const env = minimalCliEnv();

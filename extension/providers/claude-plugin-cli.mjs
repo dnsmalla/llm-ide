@@ -3,6 +3,7 @@
 // plain data; a CLI release that changes the format is fixed here alone.
 import { execFile } from 'node:child_process';
 import { minimalCliEnv } from './providers.mjs';
+import { resolveClaudeExecutable } from './claude-path.mjs';
 
 const TIMEOUT_MS = 120_000;
 
@@ -78,5 +79,5 @@ export const defaultExec = (bin, args, opts) => new Promise((resolve, reject) =>
 });
 
 export function runClaudePluginCli(args, { exec = defaultExec, timeoutMs = TIMEOUT_MS } = {}) {
-  return exec('claude', args, { env: minimalCliEnv(), timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
+  return exec(resolveClaudeExecutable({ purpose: 'cli' }).path || 'claude', args, { env: minimalCliEnv(), timeout: timeoutMs, maxBuffer: 32 * 1024 * 1024 });
 }

@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import path from 'node:path';
 import {
   marketplaceUpdateArgs, listArgs, updateArgs, parseList, parseUpdateResult, runClaudePluginCli, defaultExec,
 } from '../providers/claude-plugin-cli.mjs';
@@ -52,7 +53,7 @@ test('runner passes argv to exec and returns exit code', async () => {
   const exec = async (bin, args, opts) => { calls.push({ bin, args, opts }); return { stdout: 'o', stderr: '', exitCode: 0 }; };
   const r = await runClaudePluginCli(['plugin', 'list'], { exec });
   assert.equal(r.stdout, 'o');
-  assert.equal(calls[0].bin, 'claude');
+  assert.match(path.basename(calls[0].bin), /^claude(\.exe)?$/); // resolved path or bare name
   assert.equal(calls[0].opts.timeout, 120000);
   assert.ok(!('LLMIDE_JWT_SECRET' in calls[0].opts.env));
 });

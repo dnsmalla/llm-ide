@@ -3,6 +3,7 @@
 // shape, that transient statuses retry, and that key verification reports
 // ok/fail. fetch is mocked — no network.
 
+import path from 'node:path';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import os from 'node:os';
@@ -416,7 +417,10 @@ test('formatCliSpawnError: empty streams falls back to actionable hint', () => {
 });
 
 test('cliInvocation: standard non-interactive form per provider', () => {
-  assert.deepEqual(cliInvocation('anthropic', 'hi'), { bin: 'claude', args: ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', 'hi'] });
+  // `claude` resolves to an absolute path when installed (claude-path.mjs); the name is what's pinned.
+  const anth = cliInvocation('anthropic', 'hi');
+  assert.match(path.basename(anth.bin), /^claude(\.exe)?$/);
+  assert.deepEqual({ ...anth, bin: 'claude' }, { bin: 'claude', args: ['--strict-mcp-config', '--setting-sources', '', '--tools', '', '--system-prompt', 'You are a helpful AI assistant.', '-p', 'hi'] });
   // codex is pinned read-only for chat delegation (see the dedicated test
   // below); no workspace passed here, so no -C.
   assert.deepEqual(cliInvocation('openai', 'hi'),    { bin: 'codex',  args: ['exec', '-s', 'read-only', '--', 'hi'] });
