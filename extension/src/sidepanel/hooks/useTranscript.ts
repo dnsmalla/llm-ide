@@ -261,17 +261,11 @@ export function useTranscript() {
   useEffect(() => {
     chrome.storage?.local
       ?.get(['primaryLang', 'secondaryLang', 'bilingual'])
-      .then(
-        (result: {
-          primaryLang?: string;
-          secondaryLang?: string;
-          bilingual?: boolean;
-        }) => {
-          if (result.primaryLang) setPrimaryLang(result.primaryLang);
-          if (result.secondaryLang) setSecondaryLang(result.secondaryLang);
-          if (result.bilingual !== undefined) setBilingual(result.bilingual);
-        },
-      )
+      .then((result: { primaryLang?: string; secondaryLang?: string; bilingual?: boolean }) => {
+        if (result.primaryLang) setPrimaryLang(result.primaryLang);
+        if (result.secondaryLang) setSecondaryLang(result.secondaryLang);
+        if (result.bilingual !== undefined) setBilingual(result.bilingual);
+      })
       .catch(() => {});
     // Speaker names are meeting content: an older build persisted them here. In memory only now.
     void purgeLegacyMeetingKeys(chrome.storage?.local);
