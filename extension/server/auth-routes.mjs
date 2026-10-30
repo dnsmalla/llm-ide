@@ -977,7 +977,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
   // POST /auth/me/plugins/toggle  → { name, enabled }
   // POST /auth/me/plugins/reload  → re-scan the plugin directory
   if (method === 'GET' && url.split('?')[0] === '/auth/me/plugins') {
-    const { listInstalledPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const { listInstalledPlugins } = await import('../llm_agent/skills/index.mjs');
     send(res, 200, listInstalledPlugins(req.user.id));
     return;
   }
@@ -994,7 +994,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
         throw errValidation('enabled must be a boolean');
       }
       const { setEnabled } = await import('../plugins/state.mjs');
-      const { listInstalledPlugins } = await import('../llm_agent/runtime/route.mjs');
+      const { listInstalledPlugins } = await import('../llm_agent/skills/index.mjs');
       // Refuse to enable something that isn't installed — prevents
       // stale enable entries for plugins the user uninstalled.
       const installed = listInstalledPlugins(req.user.id);
@@ -1024,7 +1024,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     try { body = await readJson(req, bodyLimit); }
     catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
     const { setPluginHookTrust } = await import('../plugins/hook-trust.mjs');
-    const { listInstalledPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const { listInstalledPlugins } = await import('../llm_agent/skills/index.mjs');
     const result = setPluginHookTrust(req.user.id, body?.name, body?.trusted, {
       listPlugins: (userId) => listInstalledPlugins(userId).plugins,
       shownKinds: Array.isArray(body?.kinds) ? body.kinds : undefined,
@@ -1116,7 +1116,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       logger.warn('plugin source record write failed', { plugin: result.plugin.name, error: err.message });
     }
     // Re-scan so the runtime picks up the new plugin immediately.
-    const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
     reloadPlugins();
     safeAudit(db, {
       userId: req.user.id, requestId, ip, userAgent: ua,
@@ -1170,7 +1170,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
       logger.warn('plugin source record removal failed', { plugin: pluginName, error: err.message });
     }
     // Reload to drop the registry entry + prune orphan state.
-    const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
     reloadPlugins();
     safeAudit(db, {
       userId: req.user.id, requestId, ip, userAgent: ua,
@@ -1261,7 +1261,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     } catch (err) {
       logger.warn('plugin source record removal failed', { plugin: result.plugin.name, error: err.message });
     }
-    const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
     reloadPlugins();
     safeAudit(db, {
       userId: req.user.id, requestId, ip, userAgent: ua,
@@ -1312,7 +1312,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     const auditBase = { userId: req.user.id, requestId, ip, userAgent: ua, action: 'claude-plugin.update', resource: name };
     try {
       const { updateClaudePlugin } = await import('../plugins/claude-update.mjs');
-      const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+      const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
       const { clearPluginMcpConsents } = await import('../mcp/state.mjs');
       const { activeTurnCount } = await import('../routes/agent-v2.mjs');
       const { status, body: out } = await updateClaudePlugin({
@@ -1406,7 +1406,7 @@ export async function handleAuth(req, res, { db, logger, requestId }) {
     } catch (err) {
       logger.warn('plugin source record removal failed', { plugin: result.plugin.name, error: err.message });
     }
-    const { reloadPlugins } = await import('../llm_agent/runtime/route.mjs');
+    const { reloadPlugins } = await import('../llm_agent/skills/index.mjs');
     reloadPlugins();
     safeAudit(db, {
       userId: req.user.id, requestId, ip, userAgent: ua,

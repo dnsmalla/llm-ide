@@ -12,10 +12,12 @@ const end = src.indexOf('\n}\n', start) + 2;
 const rateLimitProfile = new Function(`${src.slice(start, end)}; return rateLimitProfile;`)();
 
 test('POST profiles match with a query string appended', () => {
-  for (const p of ['/kb/loop/agent-run', '/code-assist', '/agent/v2/stream']) {
+  for (const p of ['/kb/loop/agent-run', '/agent/v2/stream']) {
     assert.equal(rateLimitProfile(p, 'POST'), 'agentTurn', p);
     assert.equal(rateLimitProfile(`${p}?x=1`, 'POST'), 'agentTurn', `${p}?x=1`);
   }
+  // /code-assist answers 410 (K1 P6 T6.9): never an agent turn
+  assert.equal(rateLimitProfile('/code-assist?x=1', 'POST'), 'llmFast');
   assert.equal(rateLimitProfile('/kb/dispatch?a=b', 'POST'), 'dispatch');
   assert.equal(rateLimitProfile('/kb/export-all?x=1', 'GET'), 'kbExport');
 });

@@ -1,8 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { readFileSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 import { GLOBAL_HANDLER_NAMES } from '../llm_agent/runtime/global-handlers.mjs';
 import { globalSkills, assertReadSkillsWired } from '../llm_agent/skills/index.mjs';
@@ -24,12 +23,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 // both derive from the same ENTRIES list, so there is nothing left to
 // drift-check: the dispatch table's keys are registry.names() by
 // construction.
-
-test('route.mjs dispatch is built from registry.buildDispatch, not a literal object', () => {
-  const routeSrc = readFileSync(join(__dirname, '..', 'llm_agent', 'runtime', 'route.mjs'), 'utf8');
-  assert.ok(routeSrc.includes('buildDispatch'), 'route.mjs should build its handlers via registry.buildDispatch');
-  assert.ok(!/const handlers = \{\s*\n\s*'ask-internal':/.test(routeSrc), 'the old hand-built handlers literal should be gone');
-});
 
 test('registry.names() still matches GLOBAL_HANDLER_NAMES', async () => {
   const { names } = await import('../llm_agent/tools/registry.mjs');
@@ -90,59 +83,6 @@ test('assertReadSkillsWired is silent when every read skill has a handler', () =
 // registry.buildDispatch, so the keys ARE registry.names() by construction and
 // there is no drift check left to guard. The tests above/below cover the real
 // invariant.)
-
-test('project_memory is reachable from the legacy loop (parity fix)', async () => {
-  const fakeClaude = async (prompt) => {
-    // A minimal fence call to project_memory, then a plain follow-up.
-    if (prompt.includes('<<<TOOL_RESULT>>>')) return 'Got it.';
-    return '<<<TOOL_CALL>>>\n{"name": "project_memory", "arguments": {}}\n<<<END_TOOL_CALL>>>';
-  };
-  const { handleCodeAssist } = await import('../llm_agent/runtime/route.mjs');
-  const out = await handleCodeAssist({
-    message: 'what do we know about this project?',
-    history: [],
-    agentContext: { recentIssues: [], recentMeetings: [], workspaceRoot: process.cwd() },
-    runClaude: fakeClaude,
-    kb: { search: () => [], listMeetings: () => ({ items: [] }) },
-    userId: 'user-1',
-  });
-  assert.ok(out.reply, 'expected a reply after project_memory resolved (no "Unknown tool" error)');
-});
-
-test('legacy dispatch and registry.names() match; v2 mounts the registry minus its native duplicates', async () => {
-  const { names } = await import('../llm_agent/tools/registry.mjs');
-  const { buildLlmIdeServer } = await import('../llm_agent/sdk/tools.mjs');
-  const { Client } = await import('@modelcontextprotocol/sdk/client/index.js');
-  const { InMemoryTransport } = await import('@modelcontextprotocol/sdk/inMemory.js');
-
-  const server = buildLlmIdeServer('sync-test-user', { workspaceRoot: process.cwd() });
-  const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
-  const client = new Client({ name: 'sync-test', version: '1.0.0' });
-  await Promise.all([client.connect(clientTransport), server.instance.connect(serverTransport)]);
-  const v2Names = new Set((await client.listTools()).tools.map((t) => t.name));
-
-  // names()/buildDispatch() both iterate ALL registry entries, which already
-  // includes project_memory (added in Task 3) alongside the original 12
-  // GLOBAL_HANDLER_NAMES — so registryNames/legacyNames are 13 names, not 12,
-  // with no manual addition needed here.
-  const registryNames = new Set(names());
-  const { buildDispatch } = await import('../llm_agent/tools/registry.mjs');
-  const legacyNames = new Set(Object.keys(buildDispatch({})));
-
-  // v2 skips the entries an SDK built-in already covers (sdk/tools.mjs
-  // V2_NATIVE_DUPLICATES) — spelled out here so a new skip is a deliberate
-  // edit, not a silent drift. A gateway turn keeps the web pair.
-  const firstPartySkipped = ['ask-internal', 'fetch-url', 'list-files', 'read-file', 'web-search'];
-  assert.deepEqual(
-    [...v2Names].sort(),
-    [...registryNames].filter((n) => !firstPartySkipped.includes(n)).sort(),
-    'a v2-mounted tool name diverged from the registry',
-  );
-  assert.deepEqual([...legacyNames].sort(), [...registryNames].sort(), 'a legacy-dispatched tool name diverged from the registry');
-
-  await client.close();
-  await server.instance.close();
-});
 
 // The FOURTH list that used to drift: engine.mjs's V2_ALLOWED_TOOLS (the SDK
 // `allowedTools` option). It was hand-maintained and already went stale once

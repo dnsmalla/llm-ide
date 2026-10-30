@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { resolveBashCwd, handleRunBash, buildChildEnv } from '../llm_agent/runtime/handlers/run-bash.mjs';
 
 // A model-supplied `cwd` relocates the command. Before containment existed,
@@ -435,49 +434,6 @@ after(() => {
   for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(testDbPath + s); } catch { /* ok */ } }
 });
 
-const REPO_DIR = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
-const { runAgentLoop, runNativeAgentLoop } = await import('../llm_agent/runtime/loop.mjs');
-const { handleCodeAssist } = await import('../llm_agent/runtime/route.mjs');
-const { loadSkills } = await import('../llm_agent/skills/loader.mjs');
-
-test('runAgentLoop forwards the turn signal into every tool ctx', async () => {
-  const { skills } = loadSkills(path.join(REPO_DIR, 'llm_agent', 'global'));
-  const ac = new AbortController();
-  const seen = [];
-  const handlers = { 'read-file': async (_args, ctx) => { seen.push(ctx.signal); return { content: 'x' }; } };
-  const replies = [
-    '<<<TOOL_CALL>>>\n{"name":"read-file","arguments":{"path":"a.txt"}}\n<<<END_TOOL_CALL>>>',
-    'All done.',
-  ];
-  await runAgentLoop({
-    skills, userMessage: 'read it', history: [], agentContext: { base: '' },
-    runClaude: async () => replies.shift(), kb: null, userId: 'u1', handlers,
-    signal: ac.signal,
-  });
-  assert.equal(seen.length, 1);
-  assert.equal(seen[0], ac.signal, 'the tool ctx must carry the turn signal itself');
-});
-
-test('runNativeAgentLoop forwards the turn signal into every tool ctx', async () => {
-  const skills = new Map([
-    ['run-bash', { name: 'run-bash', kind: 'read', schema: { command: { type: 'string', required: true } }, description: 'run', body: '' }],
-  ]);
-  const ac = new AbortController();
-  const seen = [];
-  const handlers = { 'run-bash': async (_args, ctx) => { seen.push(ctx.signal); return { output: 'ok', exitCode: 0 }; } };
-  let turn = 0;
-  await runNativeAgentLoop({
-    systemPrompt: 'sys', userMessage: 'run it', skills, tools: [], userId: 'u1', handlers, kb: null,
-    complete: async () => {
-      turn += 1;
-      return turn === 1
-        ? { text: '', toolCalls: [{ id: 'c1', name: 'run-bash', arguments: { command: 'echo hi' } }] }
-        : { text: 'done', toolCalls: [] };
-    },
-    signal: ac.signal,
-  });
-  assert.equal(seen[0], ac.signal);
-});
 
 test('registry.mjs hands the loop\'s signal to run-bash (legacy engine ctx shape)', async () => {
   const { get } = await import('../llm_agent/tools/registry.mjs');
@@ -520,60 +476,4 @@ test('registry.mjs hands a v2-shaped ctx.signal to run-bash too', async () => {
   await settle(150);
   ac.abort();
   assert.equal((await p).error, 'Command aborted.');
-});
-
-test('handleCodeAssist → loop → registry → handler: an aborted turn stops the command', async () => {
-  const { registerUser } = await import('../server/users.mjs');
-  const { getDb } = await import('../kb/db.mjs');
-  const user = registerUser(getDb(), {
-    email: `run-bash-e2e-${Date.now()}@example.com`,
-    password: 'CorrectHorseBattery', displayName: 't',
-  });
-  const ac = new AbortController();
-
-  const marker = path.join(tmp, 'e2e-abort-ran.txt');
-  const prompts = [];
-  const runClaude = async (prompt) => {
-    prompts.push(prompt);
-    // Abort MID-turn: after the model has asked for the tool, before the tool
-    // is dispatched. Aborting up front no longer exercises this path at all —
-    // runAgentLoop checks the signal at the top of each iteration, so a turn
-    // that starts aborted returns before any tool is reached (and before any
-    // model call, which is why the setup assertion below would fail). The
-    // thing under test is a tool being dispatched ON an aborted turn.
-    if (prompts.length === 1) {
-      ac.abort();
-      // `touch` is auto-tier like `cat`, so no approval is needed and the only
-      // thing that can stop it is the signal arriving from the route. The
-      // marker file is the side effect: if it exists, the command really ran.
-      return `<<<TOOL_CALL>>>\n{"name":"run-bash","arguments":{"command":"touch ${marker}"}}\n<<<END_TOOL_CALL>>>`;
-    }
-    return 'I could not run that.';
-  };
-
-  await handleCodeAssist({
-    message: 'show me ok.txt',
-    history: [],
-    agentContext: { sessionId: 'sig-e2e-1', workspaceRoot: workspace },
-    runClaude,
-    kb: { getUserPrefs: () => ({ language: 'en' }) },
-    userId: user.id,
-    mode: 'execute',
-    maxIterations: 2,
-    signal: ac.signal,
-  });
-
-  // The proof the signal travelled the whole way down is the missing side
-  // effect: the model asked for a `touch`, the tool was dispatched, and no
-  // file appeared.
-  assert.ok(prompts.length >= 1, 'test setup: the model was never called');
-  assert.equal(fs.existsSync(marker), false, 'the command ran despite an aborted turn');
-
-  // And the turn stops there rather than calling the model again: the loop
-  // returns an aborted reply at the top of the next iteration instead of
-  // issuing a fresh, unabortable request. (This used to assert a SECOND
-  // prompt carrying the refusal text, on the assumption that the loop always
-  // feeds a tool result back to the model — which would now mean billing the
-  // user for a turn they cancelled.)
-  assert.equal(prompts.length, 1, 'an aborted turn must not issue another model call');
 });

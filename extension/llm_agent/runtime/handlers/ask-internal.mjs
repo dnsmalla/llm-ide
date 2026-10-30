@@ -1,79 +1,15 @@
-// Read handler: delegates a question to the internal LLM-IDE
-// agent. Runs a fresh internal sub-loop and bundles its
-// {reply, pendingTool} as {answer, pendingTool} for global to read.
-
-import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { dirname, join } from 'node:path';
-import { runAgentLoop } from '../loop.mjs';
+// Read handler: `ask-internal` delegated a question to a nested internal agent loop (the classic
+// fence loop). That loop is gone (agent-kit K1 P6 T6.8): the v2 engine never mounts this tool (it has
+// native search-kb / project_memory / Read) and the provider adapter refuses it. The name stays
+// registered so the skill set (central kit) keeps one handler per core read skill, and a stray call
+// gets an honest answer instead of "no handler".
 import { searchKb } from './search-kb.mjs';
-import { redactFence } from '../redaction.mjs';
 
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const INTERNAL_ROLE_PROMPT_PATH = join(__dirname, '..', '..', 'internal', 'prompt.md');
-
-// Cache the static role-and-rules prompt once per process.
-const internalRolePrompt = readFileSync(INTERNAL_ROLE_PROMPT_PATH, 'utf8').trim();
-
-// Exported so route.mjs can verify at startup that every core 'read'
-// skill has a registered handler — a missing handler should fail loud
-// at boot, not surface as "no read handler" mid-session.
 export const INTERNAL_HANDLERS = { 'search-kb': searchKb };
 
-export async function askInternal(args, ctx) {
-  // A delegation is the most expensive thing this handler can do — a whole
-  // nested agent loop of model calls, in THIS process. Refuse to start one for
-  // a turn the user already stopped. (On v2 the SDK's abortController kills
-  // only its CLI subprocess, so nothing else would have stopped this.)
-  if (ctx.signal?.aborted) {
-    return { error: 'Cancelled — the user stopped this turn.', pendingTool: null };
-  }
-  // Build internal's "base" string: role + rules from internal/prompt.md
-  // PLUS the fence-shape contract from internal/skills/_base.md. The
-  // existing runAgentLoop puts agentContext.base first in the composed
-  // system prompt, before the system-context block and skill bodies —
-  // exactly where the role description belongs.
-  const internalBase = [internalRolePrompt, ctx.internalSkills.base]
-    .filter((s) => s && s.length > 0)
-    .join('\n\n');
-
-  // Pass agentContext through unchanged so internal's composeSystemContext
-  // renders all the app-specific sections. We don't carry global's chat
-  // history into internal — that would defeat the token-saving goal.
-  // Global is responsible for restating any needed context inside
-  // `args.question`.
-  const result = await runAgentLoop({
-    skills: ctx.internalSkills.skills,
-    userMessage: args.question,
-    history: [],                        // fresh — internal is stateless
-    agentContext: { ...(ctx.agentContext || {}), base: internalBase, includeSystemContext: true, includeRepoMemory: false },
-    runClaude: ctx.runClaude,
-    kb: ctx.kb,
-    userId: ctx.userId,
-    handlers: INTERNAL_HANDLERS,
-    // Sub-model routing: route.mjs passes LLMIDE_INTERNAL_MODEL here
-    // so internal can run on a different tier than global.
-    model: ctx.model,
-    depth: ctx.depth ?? 1,
-    // The outer turn's cancellation, so a Stop mid-delegation ends the SUB-loop
-    // too — it checks the signal each iteration and passes it into its model
-    // calls. Without it the sub-loop kept spending after the user cancelled,
-    // and the "the user's cancel propagating through the outer loop" the note
-    // below relies on was never actually wired.
-    signal: ctx.signal,
-    // No sub-loop deadline. This used to be 120 s, budgeted against the outer
-    // loop's 360 s — and both are gone: a delegation that needs to read several
-    // files or search the KB properly is work, and cutting it at two minutes
-    // returned a half-answer to the outer loop, which then answered the user
-    // from it. The sub-loop is bounded by its own iteration cap and by the
-    // user's cancel propagating through the outer loop.
-  });
+export async function askInternal() {
   return {
-    // Redact fence sentinels from the sub-loop reply before returning it
-    // as the outer loop's toolResult.  Without this, a KB snippet echoed
-    // by the internal agent could contain <<<TOOL_CALL>>> and forge a
-    // write-tool invocation when the outer loop embeds the answer.
-    answer: redactFence(result.reply || ''),
-    pendingTool: result.pendingTool ?? null,
+    error: 'ask-internal is not available any more: use search-kb or project_memory directly.',
+    pendingTool: null,
   };
 }

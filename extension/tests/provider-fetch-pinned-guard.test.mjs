@@ -43,3 +43,17 @@ test('the OpenAI-compatible, Google and model-list calls in providers.mjs use th
   assert.ok(!/(^|[^.\w])fetch\(/m.test(src.replace(/^\s*\/\/.*$/gm, '')), 'providers.mjs has a bare fetch(');
   assert.ok((src.match(/makePinnedFetch\(\)\(/g) || []).length >= 4, 'callOpenAI, callGoogle, listProviderModels and the chat-route probe');
 });
+
+test('callOpenAI is only used inside providers.mjs (the classic loop that called it per hop is gone)', () => {
+  const offenders = DIRS.flatMap((d) => walk(d)).filter((f) => {
+    if (f === 'providers/providers.mjs') return false;
+    return /\bcallOpenAI\b/.test(fs.readFileSync(path.join(root, f), 'utf8').replace(/^\s*\/\/.*$/gm, ''));
+  });
+  assert.deepEqual(offenders, []);
+});
+
+test('the deleted classic runtime files stay deleted', () => {
+  for (const f of ['fence', 'loop', 'route', 'openai-tools']) {
+    assert.equal(fs.existsSync(path.join(root, 'llm_agent/runtime', `${f}.mjs`)), false, f);
+  }
+});

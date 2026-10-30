@@ -252,7 +252,7 @@ function ranOn({ model, provider: explicitProvider }) {
   return { provider, model: (provider === 'anthropic' ? resolveModel(model) : model) ?? null };
 }
 
-async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, tools, autoFallback = true, mcpConfig, cwd, warm = false } = {}) {
+async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscript, signal, provider: explicitProvider, images, endpoint, autoFallback = true, mcpConfig, cwd, warm = false } = {}) {
   if (typeof prompt !== 'string') {
     throw new Error('runClaude: prompt must be a string');
   }
@@ -325,7 +325,7 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
     if (typeof provider === 'string' && provider.startsWith('custom:')) {
       const r = resolveCustomProviderDispatch(provider, userId);
       if (r.error) throw providerUnavailable(r.message);
-      return completeViaApi(provider, { apiKey: r.apiKey, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: r.baseUrl, signal, meter, tools });
+      return completeViaApi(provider, { apiKey: r.apiKey, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: r.baseUrl, signal, meter });
     }
 
     const key = providerApiKey(userId, provider);
@@ -333,12 +333,12 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
       if (provider === 'custom') {
         const baseUrl = customBaseUrl(userId);
         if (!baseUrl) throw providerUnavailable('No base URL configured for the custom provider. Add one in Settings → Model Providers.');
-        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter, tools });
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl, signal, meter });
       }
       if (provider === 'deepseek') {
-        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: DEFAULT_DEEPSEEK_BASE, signal, meter, tools });
+        return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, baseUrl: DEFAULT_DEEPSEEK_BASE, signal, meter });
       }
-      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal, meter, tools });
+      return completeViaApi(provider, { apiKey: key, model, prompt, maxTokens: resolvedMaxTokens, signal, meter });
     }
     // custom and deepseek have no CLI subscription mode; other providers fall
     // back to their logged-in CLI.

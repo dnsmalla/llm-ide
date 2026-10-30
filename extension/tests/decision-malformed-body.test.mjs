@@ -1,4 +1,4 @@
-// Both decision routes refuse a body that is not JSON with
+// The decision route refuses a body that is not JSON with
 // 400 VALIDATION_FAILED (SCHEMA.md "Malformed JSON bodies"), through the one
 // shared reader in core/utils.mjs. A body that parses to a non-object reads as
 // {} and gets the route's own "no pending decision" 404.
@@ -18,7 +18,6 @@ for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch 
 
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
-const { handleAIRoutes } = await import('../server/ai-routes.mjs');
 const { handleAgentV2Routes } = await import('../routes/agent-v2.mjs');
 
 const user = registerUser(getDb(), { email: 'decision-malformed@example.com', password: 'CorrectHorseBattery', displayName: 't' });
@@ -46,7 +45,6 @@ function fakeRes() {
 }
 
 const routes = [
-  ['/code-assist/decision', (req, res) => handleAIRoutes(req, res)],
   ['/agent/v2/decision', (req, res) => handleAgentV2Routes(req, res)],
 ];
 

@@ -4,8 +4,11 @@
 // the named subagent across the union of subagent maps from every
 // plugin the user has enabled, build a restricted handler set
 // (intersection of internal's read handlers and the subagent's
-// declared `allowed_tools` list), and run a fresh `runAgentLoop`
-// with the subagent's body as the system prompt.
+// declared `allowed_tools` list), and answer ONE completion with the subagent's body as the system
+// prompt. The nested tool loop it used to run (the classic fence loop) was removed in agent-kit K1
+// P6 T6.8: a subagent's `allowed_tools` are NOT executed any more, the result says so, and the model
+// that called this tool decides what to do with a tool-less answer. The native replacement is the SDK's
+// `options.agents` (plan item A5, bench-gated).
 //
 // Design choices:
 // - Subagents are isolated: they don't see the chat history. The
@@ -19,34 +22,7 @@
 // - Subagent names are validated by the loader to match
 //   /^[a-z][a-z0-9-]{0,40}$/ — safe to interpolate.
 
-import { runAgentLoop } from '../loop.mjs';
-import { searchKb } from './search-kb.mjs';
-import { handleDecide } from './decide.mjs';
-import { redactFence } from '../redaction.mjs';
 import { resolveProvider } from '../../../providers/providers.mjs';
-
-// Same registry as ask-internal — extend here when new read tools
-// become available to subagents. A subagent opts in per tool through its
-// frontmatter `allowed_tools: [search-kb, decide]` (or vendor `tools:`);
-// nothing is granted by default. Handlers get the sub-loop's per-call ctx
-// (`{ userId, kb, handlers, depth, emit, signal }` — loop.mjs runReadHandler).
-const ALL_SUBAGENT_TOOLS = {
-  'search-kb': searchKb,
-  decide: (args, loopCtx) => handleDecide(args, { userId: loopCtx?.userId, signal: loopCtx?.signal }),
-};
-
-// The global skill docs (schema + call shape) for the subagent's granted
-// tools. The loop validates and dispatches a fence ONLY for a name in its
-// `skills` map, so an empty map left every granted tool answering "Unknown
-// tool". Loaded lazily: skills/registry.mjs imports this module's importer
-// chain at boot (global-handlers → tools/registry → here), so a static
-// import would be a cycle.
-async function grantedToolSkills(handlers) {
-  const names = Object.keys(handlers);
-  if (!names.length) return new Map();
-  const { globalSkills } = await import('../../skills/index.mjs');
-  return new Map(names.map((n) => [n, globalSkills.skills.get(n)]).filter(([, s]) => s));
-}
 
 /**
  * Compose the body the subagent runs with. We don't add the internal
@@ -88,22 +64,10 @@ export async function askSubagent(args, ctx) {
     };
   }
 
-  // Build the restricted handler map. Default = empty set (subagent
-  // has no tools); plugin opts in by listing names in allowed_tools.
-  const handlers = {};
-  for (const tool of subagent.allowedTools) {
-    if (tool in ALL_SUBAGENT_TOOLS) handlers[tool] = ALL_SUBAGENT_TOOLS[tool];
-  }
-  const hasTools = Object.keys(handlers).length > 0;
+  // Declared tools are not run (see the header); the answer says which were skipped.
+  const skippedTools = Array.isArray(subagent.allowedTools) ? [...subagent.allowedTools] : [];
 
-  // Skills the subagent sees: nothing by default — pure prompt agent.
-  // If allowed_tools were declared, only those tools' own docs are passed
-  // (grantedToolSkills); the rest of the global/internal skill set is NOT
-  // shared because subagents are a separate trust boundary. Tool-call
-  // awareness comes from internalSkills.base (the fence contract markdown).
-  const baseParts = [subagent.systemPrompt];
-  if (hasTools && ctx.internalSkillsBase) baseParts.unshift(ctx.internalSkillsBase);
-  const base = baseParts.join('\n\n');
+  const base = subagent.systemPrompt;
 
   // Tier routing. Precedence: the subagent's own frontmatter `model:` (an
   // author's explicit pick, provider inferred from the id as before) → its
@@ -147,42 +111,20 @@ export async function askSubagent(args, ctx) {
     : ctx.runClaude;
   const startedAt = Date.now();
 
-  const result = await runAgentLoop({
-    // Only the docs of the tools this subagent was granted (none by default):
-    // the subagent body IS the prompt, these just make the grants callable.
-    skills: await grantedToolSkills(handlers),
-    userMessage: sanitisedQuestion,
-    history: [],               // isolated from global's chat history
-    agentContext: {
-      base,
-      // includeSystemContext intentionally omitted — subagents don't
-      // get the app-state block. If a subagent needs project info,
-      // pass it inside `question`.
-      // The workspace root is not app state: a granted search-kb scopes code
-      // hits by it, and without it searched every repo the user indexed.
-      workspaceRoot: ctx.agentContext?.workspaceRoot,
-    },
-    runClaude,
-    kb: ctx.kb,
-    userId: ctx.userId,
-    handlers,
-    maxIterations: subagent.maxIterations,
-    // Sub-model routing: a subagent's own frontmatter `model:` wins,
-    // then the tier route above, then the deployment-wide
-    // LLMIDE_SUBAGENT_MODEL, then the runClaude default.  Leaf calls are
-    // the natural place to run a cheaper/faster tier.
-    model: requestedModel,
-    // A routed hop that cannot run retries once on today's default model.
-    ...(route ? { provider: route.provider, routeFallback: { model: ctx.defaultModel } } : {}),
-    depth: ctx.depth ?? 1,
-    // The outer turn's cancellation — the sub-loop consults it every iteration
-    // and composes it into each model call, so Stop ends a subagent mid-flight
-    // instead of letting it run out its iteration budget on the user's quota.
-    signal: ctx.signal,
-    // No deadline — was 90 s. "Leaf call" bounds how DEEP it can go, not how
-    // long the model may legitimately take to answer. Depth (MAX_LOOP_DEPTH) and
-    // the iteration cap are the bounds that still apply.
-  });
+  const workspaceLine = ctx.agentContext?.workspaceRoot ? `\n\nThe workspace root is ${ctx.agentContext.workspaceRoot}.` : '';
+  const prompt = `${base}${workspaceLine}\n\n# Question\n${sanitisedQuestion}`;
+  let reply = '';
+  try {
+    reply = await runClaude(prompt, {
+      model: requestedModel,
+      // A routed hop that cannot run retries once on today's default model.
+      ...(route ? { provider: route.provider, routeFallback: { model: ctx.defaultModel } } : {}),
+      signal: ctx.signal,
+      maxTokens: 4096,
+    });
+  } catch (err) {
+    return { error: `subagent '${name}' failed: ${String(err?.message || err).slice(0, 300)}`, pendingTool: null };
+  }
 
   return {
     // What ran, for the client's subagent activity view. FIRST on purpose:
@@ -194,8 +136,9 @@ export async function askSubagent(args, ctx) {
     // redactDeep() to the whole toolResult, but redacting here adds
     // a defense-in-depth layer so no raw sentinel survives even if
     // the outer handler changes.
-    answer: redactFence(result.reply || ''),
-    pendingTool: result.pendingTool ?? null,
+    answer: String(reply || '').trim(),
+    pendingTool: null,
+    ...(skippedTools.length ? { note: `This delegation answers once and does not run tools; not run: ${skippedTools.join(', ')}.` } : {}),
   };
 }
 

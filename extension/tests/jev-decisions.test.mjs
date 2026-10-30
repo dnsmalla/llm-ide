@@ -30,10 +30,7 @@ const { decide, normalizeAnswer } = await import('../llm_agent/runtime/decide.mj
 const { handleDecide } = await import('../llm_agent/runtime/handlers/decide.mjs');
 const { names, get } = await import('../llm_agent/tools/registry.mjs');
 const { allowedToolNames } = await import('../llm_agent/runtime/mode-personas.mjs');
-const { validateArgs } = await import('../llm_agent/runtime/fence.mjs');
 const { globalSkills } = await import('../llm_agent/skills/index.mjs');
-const { skillToOpenAITool } = await import('../llm_agent/runtime/openai-tools.mjs');
-const { askSubagent } = await import('../llm_agent/runtime/handlers/ask-subagent.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { syncTierRouting } = await import('../server/tier-routing.mjs');
 const { resolveFeatureRoute, tierRoutingStatus } = await import('../providers/tier-routing.mjs');
@@ -345,18 +342,6 @@ test('decide is a read registry tool, allowed in every mode, with a synced globa
   assert.equal(skill.schema.state.required, true);
   assert.equal(skill.schema.questions.type, 'object');
   assert.equal(skill.schema.questions.required, true);
-  const tool = skillToOpenAITool(skill);
-  assert.deepEqual(tool.function.parameters.properties.questions.type, 'object');
-  assert.deepEqual(tool.function.parameters.required.sort(), ['questions', 'state']);
-});
-
-test('validateArgs: the object type accepts a plain object and refuses arrays, null and oversized values', () => {
-  const schema = { q: { type: 'object', required: true, maxLength: 50 } };
-  assert.deepEqual(validateArgs(schema, { q: { a: 1 } }).value, { q: { a: 1 } });
-  assert.match(validateArgs(schema, { q: [1] }).error, /must be an object/);
-  assert.match(validateArgs(schema, { q: null }).error, /must be an object/);
-  assert.match(validateArgs(schema, { q: 'str' }).error, /must be an object/);
-  assert.match(validateArgs(schema, { q: { a: 'x'.repeat(60) } }).error, /exceeds maxLength/);
 });
 
 test('handleDecide returns the core result, or a bounded { error } — never throws', async () => {
@@ -369,24 +354,6 @@ test('handleDecide returns the core result, or a bounded { error } — never thr
   assert.match((await handleDecide({}, {})).error, /userId is required/);
   const ctl = new AbortController(); ctl.abort();
   assert.match((await handleDecide({}, { userId: 'u', signal: ctl.signal })).error, /Cancelled/);
-});
-
-test('a plugin subagent that grants allowed_tools: [decide] can actually call it', async () => {
-  const subagents = new Map([['judge', { systemPrompt: 'Use decide.', allowedTools: ['decide'], maxIterations: 2, pluginName: 't' }]]);
-  const seen = [];
-  const replies = [
-    '<<<TOOL_CALL>>>\n{"name":"decide","arguments":{"state":"s","questions":{"bad id!":{"type":"noul","instructions":"x"}}}}\n<<<END_TOOL_CALL>>>',
-    'done',
-  ];
-  const out = await askSubagent({ name: 'judge', question: 'judge it' }, {
-    userId: 'u', subagents, kb: {},
-    runClaude: async (prompt) => { seen.push(prompt); return replies[seen.length - 1]; },
-  });
-  assert.equal(out.answer, 'done');
-  // The handler ran (its validation error came back), rather than the loop
-  // rejecting the call as an unknown tool.
-  assert.match(seen[1], /question id/);
-  assert.doesNotMatch(seen[1], /Unknown tool: decide/);
 });
 
 // ── review follow-ups: one answer shape, size caps, hardening ────────────

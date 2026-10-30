@@ -288,7 +288,7 @@ function chatRouteError(err, base) {
 
 // OpenAI Chat Completions. Newer reasoning models reject `temperature` and
 // use `max_completion_tokens`, so we send only the portable fields.
-export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, signal, baseUrl, tools }) {
+export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, signal, baseUrl }) {
   // An empty/absent model would be dropped by JSON.stringify below, so the
   // request body reaches the provider with NO `model` field — which surfaces
   // as an opaque, provider-specific error (GLM: HTTP 400 code 1211 "Unknown
@@ -309,12 +309,6 @@ export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, s
       : [{ role: 'user', content: prompt }],
     max_completion_tokens: maxTokens,
   };
-  // OpenAI-compatible function-calling (deepseek/openai/custom): expose the
-  // agent's tools so the model can return a structured `tool_calls` array.
-  if (Array.isArray(tools) && tools.length) {
-    body.tools = tools;
-    body.tool_choice = 'auto';
-  }
   const res = await makePinnedFetch()(`${base}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
@@ -332,33 +326,9 @@ export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, s
   // (usedForModel) counts it — so it stays whole here, not split into a
   // cache-read field the quota would then skip.
   const usage = { inputTokens: data?.usage?.prompt_tokens, outputTokens: data?.usage?.completion_tokens };
-  // Return tool_calls STRUCTURED (id/name/arguments) so callers can choose:
-  // the native loop appends them as assistant+tool messages; the fence path
-  // (completeViaApi) collapses them into a <<<TOOL_CALL>>> fence string.
-  const rawCalls = Array.isArray(msg?.tool_calls) ? msg.tool_calls : [];
-  const toolCalls = rawCalls.map((c) => {
-    const fn = c?.function || {};
-    let args = {};
-    if (typeof fn.arguments === 'string' && fn.arguments.trim()) {
-      try { args = JSON.parse(fn.arguments); } catch { /* malformed → empty */ }
-    } else if (fn.arguments && typeof fn.arguments === 'object') {
-      args = fn.arguments;
-    }
-    return { id: c?.id ?? null, name: fn.name, arguments: args };
-  });
   const text = typeof msg?.content === 'string' ? msg.content : '';
-  if (!toolCalls.length && !text) throw new Error('empty response from OpenAI-compatible endpoint');
-  return { text, toolCalls, usage, headers: res.headers };
-}
-
-// Collapse structured tool_calls into the single <<<TOOL_CALL>>> fence the
-// fence-based agent loop dispatches on (one call per turn, matching the fence
-// contract). Used by completeViaApi for providers still driven through the
-// prompt/fence path.
-function toolCallsToFence(toolCalls) {
-  if (!Array.isArray(toolCalls) || !toolCalls.length) return null;
-  const tc = toolCalls[0];
-  return `<<<TOOL_CALL>>>\n${JSON.stringify({ name: tc.name, arguments: tc.arguments })}\n<<<END_TOOL_CALL>>>`;
+  if (!text) throw new Error('empty response from OpenAI-compatible endpoint');
+  return { text, usage, headers: res.headers };
 }
 
 // Google Gemini generateContent. Model id may arrive bare or as
@@ -411,7 +381,7 @@ function resolveAdapter(provider) {
  * prompt-caching / overflow handling is provider-specific). Throws on a
  * non-transient error or after exhausting retries.
  */
-export async function completeViaApi(provider, { apiKey, model, prompt, maxTokens = 8192, signal, baseUrl, meter, tools } = {}) {
+export async function completeViaApi(provider, { apiKey, model, prompt, maxTokens = 8192, signal, baseUrl, meter } = {}) {
   assertChatProvider(provider);
   const adapter = resolveAdapter(provider);
   if (!adapter) throw new Error(`completeViaApi: unsupported provider '${provider}'`);
@@ -424,7 +394,7 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
   let fellBack = false;
   for (let attempt = 0; attempt <= RETRY_DELAYS_MS.length; attempt++) {
     try {
-      const { text, toolCalls, usage, headers } = await adapter({ apiKey, model, prompt, maxTokens, signal, baseUrl, tools });
+      const { text, usage, headers } = await adapter({ apiKey, model, prompt, maxTokens, signal, baseUrl });
       log.info('provider_complete', { provider, model });
       // Best-effort usage metering — never let a ledger write break the call.
       if (meter?.userId) {
@@ -440,10 +410,7 @@ export async function completeViaApi(provider, { apiKey, model, prompt, maxToken
       } else {
         noteUnmeteredModelCall();
       }
-      // Fence-path callers get a single synthesized fence from the first native
-      // tool_call so the existing <<<TOOL_CALL>>> loop dispatches unchanged.
-      const fence = toolCallsToFence(toolCalls);
-      return fence ? ((text && text.trim() ? text.trim() + '\n' : '') + fence) : text;
+      return text;
     } catch (err) {
       lastErr = err;
       // Reactive fallback on a non-transient 429 (quota/billing): flag the model

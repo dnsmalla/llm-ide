@@ -43,7 +43,7 @@ const tmpDb = path.join(__dirname, '_code-assist-decision-test.db');
 process.env.LLMIDE_DB_PATH = tmpDb;
 for (const s of ['', '-wal', '-shm']) { try { fs.unlinkSync(tmpDb + s); } catch { /* ok */ } }
 
-const { registerDecision, answerDecision } = await import('../llm_agent/sdk/decisions.mjs');
+const { answerDecision } = await import('../llm_agent/sdk/decisions.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { getDb } = await import('../kb/db.mjs');
 
@@ -120,54 +120,6 @@ test('a prompt-tier command covered by a project rule runs immediately with no a
   assert.equal(result.stdout.trim(), 'hello');
 });
 
-test('POST /code-assist/decision resolves a parked decision the same way /agent/v2/decision does', async () => {
-  const { handleAIRoutes } = await import('../server/ai-routes.mjs');
-  const user = registerUser(getDb(), { email: 'code-assist-decision-5@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-  const { requestId } = registerDecision({ sdkSessionId: 'legacy-s5', userId: user.id, kind: 'ToolApproval' });
-
-  function fakeReq(body, userId) {
-    return {
-      method: 'POST',
-      url: '/code-assist/decision',
-      user: { id: userId },
-      on(event, cb) {
-        if (event === 'data') cb(Buffer.from(JSON.stringify(body)));
-        if (event === 'end') cb();
-      },
-    };
-  }
-  function fakeRes() {
-    const res = {
-      statusCode: null,
-      body: null,
-      writeHead(code) { res.statusCode = code; },
-      end(chunk) { res.body = chunk ? JSON.parse(chunk) : null; },
-    };
-    return res;
-  }
-
-  // Wrong user is refused (tenancy), matching /agent/v2/decision's contract.
-  const badRes = fakeRes();
-  const badHandled = await handleAIRoutes(fakeReq({ requestId, sdkSessionId: 'legacy-s5', action: 'deny' }, 'someone-else'), badRes);
-  assert.equal(badHandled, true);
-  assert.equal(badRes.statusCode, 403);
-  assert.equal(badRes.body.error.code, 'DECISION_FORBIDDEN');
-
-  // Correct user resolves it.
-  const res = fakeRes();
-  const handled = await handleAIRoutes(fakeReq({ requestId, sdkSessionId: 'legacy-s5', action: 'allow' }, user.id), res);
-  assert.equal(handled, true);
-  assert.equal(res.statusCode, 200);
-  assert.deepEqual(res.body, { ok: true });
-
-  // A second answer for the same requestId is now unknown (already settled).
-  const res2 = fakeRes();
-  const handled2 = await handleAIRoutes(fakeReq({ requestId, sdkSessionId: 'legacy-s5', action: 'allow' }, user.id), res2);
-  assert.equal(handled2, true);
-  assert.equal(res2.statusCode, 404);
-  assert.equal(res2.body.error.code, 'DECISION_UNKNOWN');
-});
-
 // --- Regression: the REAL dispatch path (this is the integration point the
 // first round's bug lived in, and the one the direct entry.execute() tests
 // above cannot catch) --------------------------------------------------
@@ -237,88 +189,8 @@ test('an auto-safe command still runs on the buffered path (the no-emit guard on
 });
 
 // --- I5.1: a dropped SSE panel must unpark, not leave a 300 s zombie -------
-test('the SSE /code-assist close handler aborts the session\'s parked decisions', async () => {
-  const { handleAIRoutes } = await import('../server/ai-routes.mjs');
-  const user = registerUser(getDb(), { email: 'code-assist-decision-9@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-
-  const closeHandlers = [];
-  const req = {
-    method: 'POST',
-    url: '/code-assist',
-    headers: { accept: 'text/event-stream' },
-    user: { id: user.id },
-    on(event, cb) {
-      if (event === 'data') cb(Buffer.from(JSON.stringify({
-        message: 'hi',
-        // `provider` without `model` is route.mjs's fail-fast guard: the turn
-        // errors out before any model call, so this test exercises the REAL
-        // SSE branch (which registers the close handler before running the
-        // turn) without spawning a CLI or hitting the network.
-        provider: 'deepseek',
-        agentContext: { sessionId: 'legacy-s9', workspaceRoot: process.cwd(), recentIssues: [], indexedRepos: [] },
-      })));
-      if (event === 'end') cb();
-    },
-  };
-  const events = [];
-  const res = {
-    writableEnded: false,
-    on(event, cb) { if (event === 'close') closeHandlers.push(cb); return res; },
-    writeHead() {},
-    write(chunk) { events.push(chunk); },
-    end() { res.writableEnded = true; },
-  };
-  await handleAIRoutes(req, res);
-  assert.ok(closeHandlers.length > 0, 'the SSE branch must register a close handler');
-
-  // Park a decision under the same session key run-bash's execute uses
-  // (agentContext.sessionId), then drop the client.
-  const { promise } = registerDecision({ sdkSessionId: 'legacy-s9', userId: user.id, kind: 'ToolApproval' });
-  for (const cb of closeHandlers) cb();
-  const outcome = await promise;
-  assert.equal(outcome.action, 'aborted', 'a dropped panel must unpark its approvals immediately');
-});
-
 // A buffered (non-SSE) caller — the Mac's Loop stage repair — disconnects on
 // Stop/quit too; its parked approvals must unpark the same way.
-test('the buffered /code-assist close handler aborts the session\'s parked decisions', async () => {
-  const { handleAIRoutes } = await import('../server/ai-routes.mjs');
-  const user = registerUser(getDb(), { email: 'code-assist-decision-10@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-
-  const closeHandlers = [];
-  const req = {
-    method: 'POST',
-    url: '/code-assist',
-    headers: {},
-    user: { id: user.id },
-    on(event, cb) {
-      if (event === 'data') cb(Buffer.from(JSON.stringify({
-        message: 'hi',
-        provider: 'deepseek', // fail-fast guard: no model call (see the SSE test above)
-        agentContext: { sessionId: 'legacy-s10', workspaceRoot: process.cwd(), recentIssues: [], indexedRepos: [] },
-      })));
-      if (event === 'end') cb();
-    },
-  };
-  const res = {
-    writableEnded: false,
-    writableFinished: false,
-    headersSent: false,
-    on(event, cb) { if (event === 'close') closeHandlers.push(cb); return res; },
-    setHeader() {},
-    writeHead() { res.headersSent = true; },
-    write() {},
-    end() { res.writableEnded = true; },
-  };
-  await handleAIRoutes(req, res);
-  assert.ok(closeHandlers.length > 0, 'the buffered branch must register a close handler');
-
-  const { promise } = registerDecision({ sdkSessionId: 'legacy-s10', userId: user.id, kind: 'ToolApproval' });
-  for (const cb of closeHandlers) cb();
-  const outcome = await promise;
-  assert.equal(outcome.action, 'aborted', 'a dropped buffered caller must unpark its approvals immediately');
-});
-
 test('a saved one-word rule never skips the prompt for a sensitive-path command (legacy)', async () => {
   const { get } = await import('../llm_agent/tools/registry.mjs');
   const { addRule } = await import('../kb/tool-permissions.mjs');
@@ -337,29 +209,4 @@ test('a saved one-word rule never skips the prompt for a sensitive-path command 
   assert.equal(req.suggestion, undefined, 'no always-allow offer for a sensitive command');
   answerDecision({ requestId: req.requestId, sdkSessionId: 'legacy-sens', userId: user.id, action: 'deny' });
   assert.ok((await runPromise).error);
-});
-
-test('POST /code-assist/decision answers 400 VALIDATION_FAILED for a body that is not JSON', async () => {
-  const { handleAIRoutes } = await import('../server/ai-routes.mjs');
-  const user = registerUser(getDb(), { email: 'code-assist-decision-badjson@example.com', password: 'CorrectHorseBattery', displayName: 't' });
-  const req = {
-    method: 'POST',
-    url: '/code-assist/decision',
-    user: { id: user.id },
-    on(event, cb) {
-      if (event === 'data') cb(Buffer.from('{"requestId": '));
-      if (event === 'end') cb();
-    },
-  };
-  let statusCode = null;
-  let body = null;
-  const res = {
-    writeHead(code) { statusCode = code; },
-    setHeader() {},
-    end(chunk) { body = chunk ? JSON.parse(chunk) : null; },
-  };
-  const handled = await handleAIRoutes(req, res);
-  assert.equal(handled, true);
-  assert.equal(statusCode, 400);
-  assert.equal(body.error.code, 'VALIDATION_FAILED');
 });

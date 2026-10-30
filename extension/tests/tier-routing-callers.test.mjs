@@ -23,7 +23,6 @@ const db = await import('../kb/db.mjs');
 const { registerUser } = await import('../server/users.mjs');
 const { setSecret } = await import('../server/vault.mjs');
 const { syncTierRouting } = await import('../server/tier-routing.mjs');
-const { agentCallModelProvider, codeAssistErrorResponse } = await import('../server/ai-routes.mjs');
 const { generatePlan } = await import('../agents/planner.mjs');
 const { generateCodeForTask } = await import('../agents/codegen.mjs');
 
@@ -43,41 +42,7 @@ function freshUser() {
 
 // ── ai-routes runClaude wrapper ──────────────────────────────────────────
 
-test('wrapper: a routed subagent call keeps its own { model, provider }', () => {
-  assert.deepEqual(
-    agentCallModelProvider({ model: 'glm-4.6', provider: 'custom:glm' }, 'claude-sonnet-4-5', 'anthropic'),
-    { model: 'glm-4.6', provider: 'custom:glm' },
-  );
-});
-
-test('wrapper: a model-only call on a custom: chat does NOT inherit the composer provider', () => {
-  assert.deepEqual(
-    agentCallModelProvider({ model: 'claude-haiku-4-5' }, 'glm-4.6', 'custom:glm'),
-    { model: 'claude-haiku-4-5', provider: undefined },
-  );
-});
-
-test('wrapper: no per-call model → the composer\'s tier model and provider', () => {
-  assert.deepEqual(
-    agentCallModelProvider({}, 'glm-4.6', 'custom:glm'),
-    { model: 'glm-4.6', provider: 'custom:glm' },
-  );
-  assert.deepEqual(agentCallModelProvider(undefined, 'm', undefined), { model: 'm', provider: undefined });
-});
-
 // ── /code-assist error envelope ──────────────────────────────────────────
-
-test('code-assist: a provider-config error is a 400 with its code; anything else stays a generic 502', () => {
-  const cfg = Object.assign(new Error('Custom provider custom:x not found. Register it in Settings → Model Providers.'),
-    { code: 'PROVIDER_UNAVAILABLE' });
-  assert.deepEqual(codeAssistErrorResponse(cfg), {
-    status: 400, body: { error: { code: 'PROVIDER_UNAVAILABLE', message: cfg.message } },
-  });
-  const other = codeAssistErrorResponse(new Error('/Users/x/secret path blew up'));
-  assert.equal(other.status, 502);
-  assert.equal(other.body.error.code, 'INTERNAL_ERROR');
-  assert.doesNotMatch(other.body.error.message, /secret/);
-});
 
 // ── planner / codegen pass routeOpts('pipeline') ─────────────────────────
 
