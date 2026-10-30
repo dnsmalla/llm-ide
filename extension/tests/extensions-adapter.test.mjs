@@ -452,3 +452,32 @@ test('an HTTP response over the size cap is refused, declared or streamed', asyn
   const sse = await client._cappedFetch(mk(big, { 'content-type': 'text/event-stream' }), 1_000)('http://x');
   assert.equal((await sse.arrayBuffer()).byteLength, 3_000, 'event streams are not capped here');
 });
+
+test('an INSTALLED, enabled and consented plugin server is mounted on an adapter turn, asks first, and vanishes when disabled', async () => {
+  const { repoArchive, fixtureFetch } = await import('./helpers/tar-fixture.mjs');
+  const inst = await import('../llm_agent/extensions/install.mjs');
+  const { pathToFileURL } = await import('node:url');
+  process.env.LLMIDE_EXT_ALLOWED_SOURCES = '*/*';
+  const SHA = 'f'.repeat(40);
+  const files = {
+    '.claude-plugin/plugin.json': JSON.stringify({ name: 'instsrv', version: '1.0.0' }),
+    '.mcp.json': JSON.stringify({ mcpServers: { fake: { command: process.execPath, args: ['${CLAUDE_PLUGIN_ROOT}/run.mjs'], env: { FAKE_MCP_LOG: LOG } } } }),
+    'run.mjs': `import ${JSON.stringify(pathToFileURL(FIXTURE).href)};\n`,
+  };
+  const s = setup({ activate: [] });
+  const f = fixtureFetch({ [`https://codeload.github.com/acme/instsrv/tar.gz/${SHA}`]: repoArchive(files) });
+  await inst.installFromGithub({ userId: s.a, url: 'https://github.com/acme/instsrv', commit: SHA }, { fetch: f });
+  const off = await turn(s, [textStep('hi')]);
+  assert.deepEqual(off.init.mcpServers, [], 'installed but not enabled');
+  inst.setInstalledEnabled(s.a, 'plugin:acme/instsrv', true, { consents: ['mcp'] });
+  const on = await turn(s, [toolStep('c1', 'mcp__instsrv-fake__echo', { text: 'hi' }), textStep('done')], { answer: 'allow' });
+  assert.deepEqual(on.init.mcpServers, [{ name: 'instsrv-fake', status: 'connected' }]);
+  const req = on.evs.find((e) => e.type === 'approval_request');
+  assert.equal(req.toolName, 'mcp__instsrv-fake__echo');
+  assert.deepEqual(calls(), ['call echo']);
+  inst.setInstalledEnabled(s.a, 'plugin:acme/instsrv', false);
+  const gone = await turn(s, [textStep('hi')]);
+  assert.deepEqual(gone.init.mcpServers, []);
+  inst.forgetUserExtensions(s.a);
+  delete process.env.LLMIDE_EXT_ALLOWED_SOURCES;
+});

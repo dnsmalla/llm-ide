@@ -811,6 +811,19 @@ function loadOnePlugin(dir) {
 }
 
 /**
+ * Load ONE plugin directory (an item installed from the extensions catalog).
+ * Same checks as discovery: the directory itself must not be a symbolic link.
+ * Returns { plugin, warnings } or { error }.
+ */
+export function loadPluginAt(dir) {
+  let st;
+  try { st = lstatSync(dir); } catch (err) { return { error: `read failed: ${err.message}` }; }
+  if (st.isSymbolicLink()) return { error: 'symbolic links are not allowed as plugin directories' };
+  if (!st.isDirectory()) return { error: 'not a directory' };
+  return loadOnePlugin(dir);
+}
+
+/**
  * Discover every plugin under the per-user plugin root.
  * Returns { plugins, warnings }. Warnings are non-fatal — a bad
  * plugin.json should not block the server from starting.

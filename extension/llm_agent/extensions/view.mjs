@@ -142,3 +142,22 @@ export function materializePluginView(plugin, disabled, { userId }) {
     return { error: String(err?.message || err).slice(0, 200) };
   }
 }
+
+const userViewsDir = (userId) => join(viewsRoot(), createHash('sha256').update(String(userId)).digest('hex').slice(0, 16));
+
+/** Remove the generated views of one plugin for one user (uninstall). Best effort. */
+export function removeViewsFor(userId, pluginName) {
+  try {
+    const dir = userViewsDir(userId);
+    for (const e of readdirSync(dir)) {
+      if (e.length === String(pluginName).length + 17 && e.startsWith(`${pluginName}-`) && /^[0-9a-f]{16}$/.test(e.slice(-16))) {
+        rmSync(join(dir, e), { recursive: true, force: true });
+      }
+    }
+  } catch { /* nothing there */ }
+}
+
+/** Remove every generated view of one user (account deletion). Best effort. */
+export function removeAllViewsFor(userId) {
+  try { rmSync(userViewsDir(userId), { recursive: true, force: true }); } catch { /* nothing there */ }
+}

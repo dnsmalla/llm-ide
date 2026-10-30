@@ -1384,9 +1384,10 @@ export async function runAgentV2Turn(
   // the act-tool branch and (Task 3) the native Edit/Write/Bash branch.
   // `args` is the structured payload the Mac renders as a diff; older
   // clients ignore it and keep reading argsSummary.
-  const awaitToolApproval = async ({ toolName, argsSummary, args = null, input, callSignal }) => {
+  const awaitToolApproval = async ({ toolName, argsSummary, args = null, input, callSignal, once = false }) => {
     const sessionId = currentSdkSessionId;
-    const suggestion = suggestionFor(toolName, input);
+    // `once`: no "always allow" is offered (a third-party MCP tool asks every time).
+    const suggestion = once ? null : suggestionFor(toolName, input);
     const { requestId, promise } = registerDecision({ sdkSessionId: sessionId, userId, kind: 'ToolApproval' });
     const onAbort = () => { abortDecisionsForSession(sessionId); };
     const signals = [callSignal, signal].filter(Boolean);
@@ -1480,6 +1481,17 @@ export async function runAgentV2Turn(
       return awaitToolApproval({
         toolName: NETWORK_TOOL, argsSummary: `${networkHost(input) ?? rawHost}${port}`, input,
         callSignal: callOpts?.signal,
+      });
+    }
+    // A tool of an MCP server installed from the extensions catalog: never
+    // pre-approved, never remembered; every call parks an approval.
+    const mcpParts = toolName.startsWith('mcp__') ? toolName.split('__') : null;
+    if (mcpParts && mcpParts.length >= 3 && userMcp?.askServers?.includes(mcpParts[1])) {
+      let preview = '';
+      try { preview = JSON.stringify(input ?? {}).slice(0, 300); } catch { preview = ''; }
+      return awaitToolApproval({
+        toolName, argsSummary: `${mcpParts[1]}: ${mcpParts.slice(2).join('__')} ${preview}`.trim(), input,
+        callSignal: callOpts?.signal, once: true,
       });
     }
     if (toolName !== 'AskUserQuestion' && !(entry && entry.kind === 'act') && !NATIVE_GATED.has(toolName)) {

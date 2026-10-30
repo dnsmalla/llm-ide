@@ -25,6 +25,7 @@ import { scanTree, summarizeFindings } from './scan.mjs';
 import { validateSource } from '../../plugins/source-store.mjs';
 import { publisherFromSource, parseItemId, parseMemberId } from './model.mjs';
 import { catalogEnabled, scanEnabled } from './flags.mjs';
+import { removeViewsFor, removeAllViewsFor } from './view.mjs';
 import { readOverlay, setItemEnabled, setMembersEnabled, clearItem, forgetUser } from './store.mjs';
 import { readInstalled, putInstalled, removeInstalled, forgetInstalledUser, itemStoreDir, userStoreDir, baseDir } from './installed.mjs';
 
@@ -206,6 +207,7 @@ export function uninstall(userId, id) {
   if (!installed.items.has(id)) throw new InstallError('not_found', 'not installed');
   if (installed.corrupt) throw new InstallError('state_unreadable', 'the installed-extensions record cannot be read');
   removeStore(itemStoreDir(userId, id), userId);
+  if (parseItemId(id)?.kind === 'plugin') removeViewsFor(userId, parseItemId(id).name);
   removeInstalled(userId, id);
   clearItem(userId, id);
   return { ok: true };
@@ -218,5 +220,6 @@ export function forgetUserExtensions(userId) {
     forgetInstalledUser(userId);
     forgetUser(userId);
     rmSync(userStoreDir(userId), { recursive: true, force: true });
+    removeAllViewsFor(userId);
   } catch { /* nothing to do */ }
 }

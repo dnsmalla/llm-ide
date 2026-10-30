@@ -33,6 +33,9 @@ function indexOverlay(overlay) {
     // Several publishers for one name: the union of restrictions.
     byKindName.set(key, {
       off: (cur?.off === true) || entry.enabled === false,
+      // An explicit enable: only an INSTALLED item needs it (an installed item is
+      // recorded switched off); the legacy builders never read it.
+      on: (cur?.on === true) || entry.enabled === true,
       disabled: new Set([...(cur?.disabled ?? []), ...entry.disabledMembers]),
     });
   }
@@ -54,7 +57,7 @@ export function makeGate(userId, { overlay = readOverlay(userId) } = {}) {
   const itemOn = (kind, name) => !failClosed && entry(kind, name)?.off !== true;
   const memberOn = (kind, name, type, member) => itemOn(kind, name) && !entry(kind, name)?.disabled.has(`${type}:${member}`);
   // A stable fingerprint of the restrictions, for caches keyed by the gate.
-  const signature = failClosed ? 'closed' : JSON.stringify([...idx].map(([k, v]) => [k, v.off, [...v.disabled].sort()]).sort());
+  const signature = failClosed ? 'closed' : JSON.stringify([...idx].map(([k, v]) => [k, v.off, v.on, [...v.disabled].sort()]).sort());
   return {
     failClosed,
     signature,
@@ -65,6 +68,13 @@ export function makeGate(userId, { overlay = readOverlay(userId) } = {}) {
     llmSourceActive: (sourceId) => itemOn('llm-source', sourceId),
     librarySkillActive: (sourceId, skillName) => memberOn('llm-source', sourceId, 'skill', skillName),
     mcpActive: (id) => itemOn('mcp', id),
+    /**
+     * An item installed from a catalog source is loaded only after an explicit
+     * enable (it is recorded off), and any entry that switches its name off wins.
+     */
+    installedActive: (kind, name) => !failClosed && entry(kind, name)?.on === true && entry(kind, name)?.off !== true,
+    installedMemberActive: (kind, name, type, member) =>
+      !failClosed && entry(kind, name)?.on === true && entry(kind, name)?.off !== true && !entry(kind, name)?.disabled.has(`${type}:${member}`),
   };
 }
 

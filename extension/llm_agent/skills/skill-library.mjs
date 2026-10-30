@@ -20,6 +20,7 @@ import * as yaml from 'js-yaml';
 import { listSources, snapshotSource, BUILTIN_ID, seedBuiltinOnce } from '../../llm-sources/registry.mjs';
 import { listEnabled, listDisabledItems, itemKey } from '../../llm-sources/state.mjs';
 import { gateFor } from '../extensions/gate.mjs';
+import { activeInstalled } from '../extensions/installed-runtime.mjs';
 
 // Families NOT already surfaced via /kb/agent/catalog (which covers
 // agent-globals + agent-tools). These are the "all the other skills".
@@ -68,7 +69,10 @@ export function listSkillLibrary(userId, { gate } = {}) {
   // source can stand in for one the catalog switched off. A gated result is
   // cached under the gate's own signature, never in the legacy slot.
   const g = gate === undefined ? gateFor(userId) : gate;
-  const cacheKey = g ? `${userId || ''}\u0000${g.signature}` : (userId || '');
+  // Skills of items installed from the catalog (switched on, consented): read every
+  // call, so a switched-off or uninstalled item is gone at once; part of the cache key.
+  const installedSkills = g ? activeInstalled(userId, g).skills : [];
+  const cacheKey = g ? `${userId || ''}\u0000${g.signature}\u0000${installedSkills.map((k) => k.path).join('|')}` : (userId || '');
   if (_cache.has(cacheKey)) return _cache.get(cacheKey);
   seedBuiltinOnce();
   const enabled = userId
@@ -113,6 +117,12 @@ export function listSkillLibrary(userId, { gate } = {}) {
         });
       }
     }
+  }
+  // After every legacy source, so a legacy skill keeps its id.
+  for (const k of installedSkills) {
+    if (seenIds.has(k.id)) continue;
+    seenIds.add(k.id);
+    skills.push(k);
   }
   skills.sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name));
   const result = { repo: builtinRepo, skills };

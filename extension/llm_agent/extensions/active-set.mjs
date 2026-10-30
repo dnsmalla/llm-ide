@@ -19,6 +19,7 @@ import {
 import { buildUserMcpServers } from './mcp-servers.mjs';
 import { importCatalogItems } from './importer.mjs';
 import { makeGate } from './gate.mjs';
+import { activeInstalled } from './installed-runtime.mjs';
 
 const sha = (v) => createHash('sha256').update(typeof v === 'string' ? v : JSON.stringify(v)).digest('hex');
 
@@ -49,7 +50,11 @@ export function computeActiveSet(userId, mode = 'execute', o = {}) {
   const commands = [...set.commands].map(([trigger, c]) => ({ trigger, plugin: c.pluginName }));
   const subagents = [...set.subagents].map(([name, s]) => ({ name, plugin: s.pluginName }));
   const skills = library.skills.map((s) => ({ id: s.id, name: s.name, description: s.description, sourceId: s.sourceId, path: s.path }));
-  const activeItems = imported.items.filter((i) => i.state.enabled);
+  const installed = activeInstalled(userId, gate, { legacyPluginNames: new Set(plugins.map((p) => p.name)) });
+  const activeItems = [
+    ...imported.items.filter((i) => i.state.enabled),
+    ...installed.items,
+  ];
 
   // What identifies "this exact set of loaded things", never their text or secrets.
   const fingerprint = sha({
@@ -76,7 +81,7 @@ export function computeActiveSet(userId, mode = 'execute', o = {}) {
     fingerprint,
     excluded,
     failClosed: gate.failClosed,
-    warnings: imported.warnings,
+    warnings: [...imported.warnings, ...installed.warnings],
   };
 }
 

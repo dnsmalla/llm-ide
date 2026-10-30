@@ -8,6 +8,7 @@ import { restrictsTools } from '../modes/mode-personas.mjs';
 import { pluginEnabledFor } from '../skills/index.mjs';
 import { RESERVED_MCP_NAME } from '../sdk/constants.mjs';
 import { gateFor, mcpServerGate } from './gate.mjs';
+import { activeInstalled } from './installed-runtime.mjs';
 
 // The in-process llmide server owns RESERVED_MCP_NAME (./constants.mjs); a
 // user server answering to it would REPLACE llm-ide's own tool surface for
@@ -62,5 +63,20 @@ export function buildUserMcpServers(userId, mode, {
     }
     servers[id] = cfg;
   }
-  return { servers, allowedTools: Object.keys(servers).map((id) => `mcp__${id}`) };
+  const allowedTools = Object.keys(servers).map((id) => `mcp__${id}`);
+  // Servers of items installed from the catalog (switched on AND consented for the
+  // item's pinned commit). A third party wrote them, so they are NOT pre-approved:
+  // every call asks (`askServers`; the SDK engine's canUseTool and the provider
+  // adapter both park an approval). The key is absent when there are none, so a
+  // user with nothing installed gets exactly the legacy result.
+  if (g) {
+    const asked = [];
+    for (const s of activeInstalled(userId, g).mcp) {
+      if (s.id === RESERVED_MCP_NAME || Object.hasOwn(servers, s.id)) continue;
+      servers[s.id] = s.config;
+      asked.push(s.id);
+    }
+    if (asked.length) return { servers, allowedTools, askServers: asked };
+  }
+  return { servers, allowedTools };
 }

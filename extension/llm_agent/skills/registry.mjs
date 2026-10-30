@@ -25,6 +25,7 @@ import { INTERNAL_HANDLERS } from '../tools/handlers/ask-internal.mjs';
 import { GLOBAL_HANDLER_NAMES } from '../tools/global-handlers.mjs';
 import { gateFor } from '../extensions/gate.mjs';
 import { materializePluginView } from '../extensions/view.mjs';
+import { activeInstalled } from '../extensions/installed-runtime.mjs';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const GLOBAL_DIR = join(__dirname, '..', 'global');
@@ -230,8 +231,11 @@ export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env
   const translated = [];
   const toTranslate = [];
 
-  for (const p of pluginRegistry.plugins.values()) {
-    if (!enabled.has(p.name)) continue;
+  // Items installed from the catalog and switched on (flag on only; nothing
+  // without a gate), after the legacy plugins so a legacy name always wins.
+  const installedPlugins = g ? activeInstalled(userId, g, { legacyPluginNames: new Set(pluginRegistry.plugins.keys()) }).plugins : [];
+  for (const p of [...pluginRegistry.plugins.values(), ...installedPlugins]) {
+    if (!p.installedItem && !enabled.has(p.name)) continue;
     if (g && !g.pluginActive(p.name)) continue;
     // Catalog member switches (flag on only): the hooks component off means the
     // plugin's hooks run through NEITHER mechanism; any other unchecked member
@@ -259,7 +263,7 @@ export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env
     const hasHooks = remainingExecutable
       ? remainingExecutable.length > 0
       : (hooks.length > 0 || (!hooksOff && p.declaresHooks === true));
-    const hookTrusted = trusted.has(p.name);
+    const hookTrusted = p.installedItem ? p.installedItem.trusted === true : trusted.has(p.name);
 
     if (nativeEnabled && sdkReadable && (!hasHooks || hookTrusted)) {
       sdkPlugins.push({ type: 'local', path: deliverPath, skipMcpDiscovery: true });
@@ -272,6 +276,7 @@ export function buildUserPluginDelivery(userId, { nativeEnabled = true, cwd, env
     if (hooks.length > 0 && hookTrusted) {
       toTranslate.push({ name: p.name, hooks });
       translated.push(p.name);
+      if (p.installedItem) trusted.add(p.name);
     }
   }
 
@@ -490,8 +495,9 @@ export function buildPerUserSkillSet(userId, { gate } = {}) {
   const skills = new Map(internalSkills.skills);
   const commands = new Map();
   const subagents = new Map();
-  for (const p of pluginRegistry.plugins.values()) {
-    if (!enabled.has(p.name)) continue;
+  const installedPlugins = g ? activeInstalled(userId, g, { legacyPluginNames: new Set(pluginRegistry.plugins.keys()) }).plugins : [];
+  for (const p of [...pluginRegistry.plugins.values(), ...installedPlugins]) {
+    if (!p.installedItem && !enabled.has(p.name)) continue;
     if (g && !g.pluginActive(p.name)) continue;
     // Skill files: re-run the strict skill-loader on the plugin's
     // skills/ directory so we get the same validation guarantees the
@@ -519,6 +525,7 @@ export function buildPerUserSkillSet(userId, { gate } = {}) {
     // directory order).
     for (const [trigger, cmd] of Object.entries(p.commands)) {
       if (g && !g.pluginMemberActive(p.name, 'command', trigger)) continue;
+      if (p.installedItem && commands.has(trigger)) continue; // a legacy command keeps its trigger
       commands.set(trigger, { ...cmd, pluginName: p.name });
     }
     // Subagents — single global namespace across plugins. First
