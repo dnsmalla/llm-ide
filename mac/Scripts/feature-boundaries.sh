@@ -601,7 +601,7 @@ fi
 #    Scope is deliberately narrow: scripts/, mac/Scripts/, and Makefile —
 #    not a repo-wide scan. A repo-wide grep for "Sources/LlmIdeMac" also
 #    matches explanatory comments naming a file for context
-#    (extension/kb/chat-sessions.mjs, extension/llm_agent/runtime/loop.mjs)
+#    (extension/kb/chat-sessions.mjs, the deleted extension/llm_agent/runtime/loop.mjs)
 #    and test/schema fixture payloads that deliberately reference paths as
 #    sample data, not real files (extension/tests/fence-output-hygiene.test.mjs,
 #    schema/agent-v2/fixtures/approval_request_tool.json). None of those live

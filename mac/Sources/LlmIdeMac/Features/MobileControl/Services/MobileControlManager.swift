@@ -1029,7 +1029,7 @@ final class MobileControlManager {
                 provider: provider,
                 // Classified like the Mac's Auto, then clamped server-side to
                 // a mode that cannot write (`auto_read_only` — see
-                // llm_agent/runtime/mode-classify.mjs).
+                // llm_agent/modes/mode-classify.mjs).
                 //
                 // It used to send a flat `"ask"`, for a real reason: the phone
                 // has no approval UI, so a write-capable mode would park a

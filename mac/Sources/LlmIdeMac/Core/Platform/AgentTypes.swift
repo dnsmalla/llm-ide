@@ -76,7 +76,7 @@ struct AgentContext: Codable, Equatable {
 }
 
 /// Mirrors the server's task-tracking status strings exactly (see
-/// `extension/llm_agent/runtime/handlers/session-tasks.mjs`'s
+/// `extension/llm_agent/tools/handlers/session-tasks.mjs`'s
 /// `taskStatusIcon` and `task-update.md`'s schema enum) — the raw values
 /// below are NOT freely renameable, they must match the wire strings.
 public enum AgentTaskStatus: String, Codable, Equatable, Sendable {

@@ -18,7 +18,7 @@ import Foundation
 ///     created and consumed inside that queue.
 ///  3. **Every run is bounded** — wall-clock timeout, SIGTERM→SIGKILL
 ///     escalation, and a captured-output cap, mirroring the server-side twin
-///     (`extension/llm_agent/runtime/handlers/run-bash.mjs`). Unbounded output
+///     (`extension/llm_agent/tools/handlers/run-bash.mjs`). Unbounded output
 ///     used to be appended to the chat verbatim, where it evicted the rest of
 ///     the conversation from the model's context.
 final class BashService: Sendable {

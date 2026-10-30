@@ -152,7 +152,7 @@ extension CodeAssistantPanel {
         // server injects the execution skill (executing-plans or
         // subagent-driven-development, chosen from whether this user has
         // subagents) plus its bindings for a turn sent with `planExecute`.
-        // See extension/llm_agent/runtime/plan-pipeline.mjs. This message
+        // See extension/llm_agent/plan/plan-pipeline.mjs. This message
         // carries only what the server cannot derive: the parsed step list.
         parts.append("Follow the execution skill in your instructions, starting at step 1.")
         parts.append("Steps:")

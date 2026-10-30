@@ -4,7 +4,7 @@
 # The tool .md files (name/kind/schema + the prompt body) are authored centrally
 # in dnsmalla/agent-kit (the `agent-tools/` family), NOT here. This mirrors them into
 # llm_agent/internal/skills/ so the server loads the canonical set. The read-tool
-# HANDLERS (llm_agent/runtime/handlers/*.mjs) stay local and are resolved by name.
+# HANDLERS (llm_agent/tools/handlers/*.mjs) stay local and are resolved by name.
 #
 # Central repo located via: $SKILLS_REPO, then the project `.skills`
 # submodule (pinned), then ~/skills / ~/Desktop/skills, then a cached clone.

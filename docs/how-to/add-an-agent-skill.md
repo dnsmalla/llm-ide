@@ -63,7 +63,7 @@ This pulls `agent-tools/` → `internal/skills/` and `agent-globals/` (the `.md`
 
 ### 4. Server side — the handler (stays local)
 
-- **Read tool:** create a handler module under `extension/llm_agent/runtime/handlers/<name>.mjs` exporting a single function `(args, ctx) => Promise<result>`. Wire it into the handlers map at the top of `extension/llm_agent/runtime/handlers/ask-internal.mjs` — that's where internal's handler set is built.
+- **Read tool:** create a handler module under `extension/llm_agent/tools/handlers/<name>.mjs` exporting a single function `(args, ctx) => Promise<result>`. Wire it into the handlers map at the top of `extension/llm_agent/tools/handlers/ask-internal.mjs` — that's where internal's handler set is built.
 - **Write tool:** no server code needed — internal's loop returns the validated arguments as `pendingTool` and the Mac client decides what to do.
 
 ### 5. Mac client side (write tools only)

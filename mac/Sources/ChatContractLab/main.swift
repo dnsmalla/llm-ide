@@ -784,7 +784,7 @@ do {
     expect(PlanEditPolicy.looksLikePlan(content: "# Summary\n\n" + proseOnly) == false,
            "a long sectioned answer with nothing enumerated is not a plan")
 
-    // The plan bindings' triage contract (extension/llm_agent/runtime/
+    // The plan bindings' triage contract (extension/llm_agent/plan/
     // plan-pipeline.mjs TRIAGE_CLAUSE): a plan-mode reply to a request with
     // nothing to change opens with "**Nothing to execute.**". Its findings are
     // naturally a sectioned, numbered list — plan-shaped — and it used to get

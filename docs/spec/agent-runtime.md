@@ -13,19 +13,22 @@ The following files are governed by this document.
 
 ### Core runtime modules
 
-The classic engine (the text-fence tool loop `loop.mjs`, the fence parser `fence.mjs`, the `/code-assist` orchestrator `route.mjs` and the OpenAI tool translation `openai-tools.mjs`) was **deleted in API 92** (agent-kit K1 Phase 6). Every chat turn runs on the Claude Agent SDK engine (`extension/llm_agent/sdk/`) or, through the session router, on the multi-provider adapter (`extension/llm_agent/adapter/`); `POST /code-assist` answers 410. What stays in this folder is shared by both:
+The classic engine (the text-fence tool loop `loop.mjs`, the fence parser `fence.mjs`, the `/code-assist` orchestrator `route.mjs` and the OpenAI tool translation `openai-tools.mjs`) was **deleted in API 92** (agent-kit K1 Phase 6). Every chat turn runs on the Claude Agent SDK engine (`extension/llm_agent/sdk/`) or, through the session router, on the multi-provider adapter (`extension/llm_agent/adapter/`); `POST /code-assist` answers 410. The former `runtime/` folder no longer exists (agent-kit K4): what stayed was relocated by owner and is shared by both engines:
 
-- `extension/llm_agent/runtime/redaction.mjs` — sentinel neutralisation shared by all handlers
-- `extension/llm_agent/runtime/model-tier.mjs` — per-tier model resolution
+- `extension/llm_agent/tools/` — `registry.mjs`, `gates.mjs`, `global-handlers.mjs`, `decide.mjs` (Jev), `redaction.mjs` (sentinel neutralisation shared by all handlers) and `handlers/*`
+- `extension/llm_agent/modes/` — `mode-classify.mjs`, `mode-personas.mjs`, `model-tier.mjs` (per-tier model resolution)
+- `extension/llm_agent/memory/` — `memory-extract.mjs`, `memory-persist.mjs`, `session-memory-select.mjs`
+- `extension/llm_agent/plan/` — `plan-pipeline.mjs`, `execute-guidance.mjs`
+- `extension/llm_agent/tasks/` — `task-session-context.mjs`, `task-skill-routing.mjs`
 
 ### Read handlers (server-executed)
 
-- `extension/llm_agent/runtime/handlers/ask-internal.mjs`
-- `extension/llm_agent/runtime/handlers/ask-subagent.mjs`
-- `extension/llm_agent/runtime/handlers/search-kb.mjs`
-- `extension/llm_agent/runtime/handlers/find-code.mjs` — index→graph code search (`find-code`); staged query in `extension/graphkit/graph.mjs` (`searchCodeIndex`), paths gated on the same readable roots as `read-file`
-- `extension/llm_agent/runtime/handlers/web-search.mjs` — web search; backed by `extension/providers/web-client.mjs`
-- `extension/llm_agent/runtime/handlers/fetch-url.mjs` — URL fetch (SSRF-guarded); same backend
+- `extension/llm_agent/tools/handlers/ask-internal.mjs`
+- `extension/llm_agent/tools/handlers/ask-subagent.mjs`
+- `extension/llm_agent/tools/handlers/search-kb.mjs`
+- `extension/llm_agent/tools/handlers/find-code.mjs` — index→graph code search (`find-code`); staged query in `extension/graphkit/graph.mjs` (`searchCodeIndex`), paths gated on the same readable roots as `read-file`
+- `extension/llm_agent/tools/handlers/web-search.mjs` — web search; backed by `extension/providers/web-client.mjs`
+- `extension/llm_agent/tools/handlers/fetch-url.mjs` — URL fetch (SSRF-guarded); same backend
 
 ### Skill loading and registry
 
@@ -61,7 +64,7 @@ The classic loop and its fence protocol no longer exist. The turn algorithm, cap
 
 ### Redaction (`redaction.mjs`)
 
-Source: `extension/llm_agent/runtime/redaction.mjs`
+Source: `extension/llm_agent/tools/redaction.mjs`
 
 `redactFence(s)` (redaction.mjs:16–19) neutralises both `<<<` and `>>>` by inserting a Unicode zero-width joiner (U+200D) between the angle brackets:
 
@@ -244,7 +247,7 @@ These are joined with `\n\n` and passed as `agentContext.base` to the internal `
 
 ## §5 Sub-model routing
 
-Sources: `extension/llm_agent/runtime/model-tier.mjs`, `extension/providers/runtime.mjs`
+Sources: `extension/llm_agent/modes/model-tier.mjs`, `extension/providers/runtime.mjs`
 
 ### Tier→env mapping
 

@@ -19,8 +19,8 @@ Line counts by `wc -l` on 2026-10-29.
 | Piece | Path | Lines | Notes |
 |---|---|---|---|
 | v2 engine (Agent SDK) | `llm_agent/sdk/` (20 `.mjs`, plus `sdk-surface.json` 733) | 4 692 | `engine.mjs` 2 025: `buildEngineOptions` `:559`, `runAgentV2Turn` `:1204`, `MAX_TURNS = 40` `:1064`, `settingSources: []` `:853`, SDK `plugins:` `:1663`, `maxBudgetUsd` `:1617,1690`, `resume` `:1336,1725`. `events.mjs` 165 maps SDK messages to wire events. `tools.mjs` 272 mounts the llmide in-process MCP server. `decisions.mjs` 128 parks approvals. `models.mjs` 205 asks the SDK for `supportedModels()`. `updater.mjs` 204 installs a newer SDK. `loop-agent.mjs` 783 is the Loop's headless engine (route is automation-kit's). SDK pinned `0.3.301` (`package.json:31`) |
-| Classic engine (fence loop) | `llm_agent/runtime/` (18 `.mjs`) | 4 047 | `loop.mjs` 976 (`runAgentLoop` `:463`, `runNativeAgentLoop` `:831`), `fence.mjs` 209 (`<<<TOOL_CALL>>>` sentinels `:5-6`), `route.mjs` 752 (`handleCodeAssist` `:132`), `openai-tools.mjs` 70, `mode-classify.mjs` 232, `mode-personas.mjs` 124, `plan-pipeline.mjs` 428, `memory-extract.mjs` 441, `memory-persist.mjs` 155, `decide.mjs` 329 |
-| Tool handlers and registry | `llm_agent/runtime/handlers/` (14), `llm_agent/tools/` (2) | 2 078 + 589 | One registry (`tools/registry.mjs:1-8`) feeds both engines; `gates.mjs` 266 classifies act tools `blocked` / `auto` / `prompt` |
+| Classic engine (fence loop), deleted in P6; its shared survivors were relocated in K4 (P7) to `llm_agent/{tools,modes,memory,plan,tasks}/`, no `runtime/` folder remains | former `llm_agent/runtime/` (18 `.mjs`) | 4 047 | `loop.mjs` 976 (`runAgentLoop` `:463`, `runNativeAgentLoop` `:831`), `fence.mjs` 209 (`<<<TOOL_CALL>>>` sentinels `:5-6`), `route.mjs` 752 (`handleCodeAssist` `:132`), `openai-tools.mjs` 70, `modes/mode-classify.mjs` 232, `modes/mode-personas.mjs` 124, `plan/plan-pipeline.mjs` 428, `memory/memory-extract.mjs` 441, `memory/memory-persist.mjs` 155, `tools/decide.mjs` 329 |
+| Tool handlers and registry | `llm_agent/tools/handlers/` (14), `llm_agent/tools/` (2) | 2 078 + 589 | One registry (`tools/registry.mjs:1-8`) feeds both engines; `gates.mjs` 266 classifies act tools `blocked` / `auto` / `prompt` |
 | Skills loader | `llm_agent/skills/` (5) | 1 203 | `registry.mjs` 496, `loader.mjs` 320; skill text still delivered as prompt blocks (`engine.mjs:1578` `readSkill`) beside native `plugins:` |
 | Agent content | `llm_agent/global/`, `internal/` | 31 `.md`, 1 798 | Prompts and tool frontmatter; `README.md:1-20` |
 | Whole `llm_agent/` | | 65 `.mjs`, 12 837 | Counted by `find`/`wc` |
@@ -190,7 +190,7 @@ Under the plan: *delegated* pieces are thin adapters; *owned* pieces are project
 | Tenancy and secrets for the SDK subprocess | **Owned** | `sdk/subprocess-env.mjs:1-12` (env denylist), per-user `CLAUDE_CONFIG_DIR` (`auth.mjs:49-52`), `redactSecretsForStorage` on stored chat text (`chat-sessions.mjs:166-170`) |
 | Plugin and MCP trust | **Owned** | `plugins/hook-trust.mjs`, `import-trust.mjs`; hooks gated three ways (`sdk/hooks.mjs:1-14`) |
 | Plugin format readers | **Owned** | `claude-adapter.mjs` 501, `codex-adapter.mjs` 404 read vendor formats; Claude's are partly superseded by SDK-native delivery, Codex's are not |
-| Jev decisions | **Owned**, optional vendor | `providers/jev.mjs:1-14`, `runtime/decide.mjs:1-12`; decision-only, never a chat model |
+| Jev decisions | **Owned**, optional vendor | `providers/jev.mjs:1-14`, `tools/decide.mjs:1-12`; decision-only, never a chat model |
 | Mac chat UI and engine | **Owned** | `ChatEngine` is UI state (messages, parked approvals, plan tracker); `ClaudeLink/` is the thin adapter (`AgentV2Transport` implements the Core `ChatTransport` contract; docs `docs/explanation/claude-linker.md`) |
 | Mac chat persistence | **Owned** | section 5 |
 | Agent history store (`agent.db`) | **Owned** (observability) | metadata only, queue, rollups, retention |

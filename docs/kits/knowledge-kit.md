@@ -113,7 +113,7 @@ Legend: **C** = through `Core/Contracts` or an HTTP route; **D** = direct refere
 | E10 | MobileControl | browses `llm-doc/` read-only | files, wire `llmdoc_*` | `LlmDocBrowser.swift:10` |
 | E11 | ReviewConflicts | tree of code and notes; chat scope `.conflicts` | D `LibraryItemStore`; C `ChatPanelRegistry` | `ReviewView.swift:18-27,151` |
 | E12 | Core/Notes | classifies files with Library's source list | C `NoteSourceClassifying` | `LibraryItemStore.swift:83`; `SourceRegistry.swift:67` |
-| E13 | Agent (search-kb tool) | server FTS | S `ctx.kb.search` | `llm_agent/runtime/handlers/search-kb.mjs:27`, `tools/registry.mjs:154` |
+| E13 | Agent (search-kb tool) | server FTS | S `ctx.kb.search` | `llm_agent/tools/handlers/search-kb.mjs:27`, `tools/registry.mjs:154` |
 | E14 | Planner, risk, graphkit | `findContext`, `getMeeting`, `getMeetingTranscript` | S | `agents/planner.mjs:8-9`; `graphkit/graph.mjs:8,70,80`; `agents/code-sync.mjs:9` |
 | E15 | Legacy chat engine | recent meetings in prompt context | S `kb.listMeetings` | `server/ai-routes.mjs:554` |
 | E16 | os-kit | counts of `sources` and `meetings` | S | `kb/os-state.mjs:151-180` |

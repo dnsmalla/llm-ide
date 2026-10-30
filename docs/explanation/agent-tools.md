@@ -56,7 +56,7 @@ Mac client ── POST /code-assist ──▶ extension/server/ai-routes.mjs
 
 The first Code Assistant carried the full system context — capabilities, project, repos, issues, meetings — on every prompt. As we added more pre-loaded context, every general engineering question started paying for ~3.5 K tokens of unused state.
 
-The split keeps the front door lean. Pure general turns are ~85% cheaper. System-related turns pay the same as before (the full context still loads, just on internal's side). Architectural separation between mechanism (`runtime/`) and content (`global/`, `internal/`) makes the system easier to extend.
+The split keeps the front door lean. Pure general turns are ~85% cheaper. System-related turns pay the same as before (the full context still loads, just on internal's side). Architectural separation between mechanism (`tools/`, `modes/`, `memory/`, `plan/`, `tasks/`) and content (`global/`, `internal/`) makes the system easier to extend.
 
 ## Why fence convention over native tool_use
 

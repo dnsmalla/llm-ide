@@ -15,7 +15,7 @@ Wire the pinned [dnsmalla/agent-kit](https://github.com/dnsmalla/agent-kit) kit 
 |---|---|---|
 | Process / domain `SKILL.md` skills | `.skills/skills/` (submodule) | `bash scripts/install-skills.sh` → relative symlinks under `.claude/skills`, `.cursor/skills`, `.codex/skills`, `.agents/skills`, `.gemini/skills` |
 | Agent-loop tool defs | `.skills/agent-tools/` + `.skills/agent-globals/` | `cd extension && npm run sync:skills` → committed mirrors under `extension/llm_agent/` |
-| Handlers (executable code) | stay in this repo | `extension/llm_agent/runtime/handlers/` |
+| Handlers (executable code) | stay in this repo | `extension/llm_agent/tools/handlers/` |
 
 Do **not** add project-local skills under `.claude/skills/` anymore. Author them in the central kit, bump the `.skills` submodule pin, then re-install.
 

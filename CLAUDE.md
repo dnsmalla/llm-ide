@@ -85,7 +85,7 @@ llm-ide/
 │   ├── routes/          # HTTP route modules (router.mjs + agent/chat/live/planning/review/…)
 │   ├── providers/       # Model-provider layer: dispatch, CLI spawn, retry/backoff, web client
 │   ├── agents/          # Server pipeline agents (planner, risk, codegen, dispatcher, …) — not skills
-│   ├── llm_agent/       # Claude CLI orchestrator + synced agent-tool defs
+│   ├── llm_agent/       # Agent engine glue: sdk/ adapter/ tools/ modes/ memory/ plan/ tasks/ skills/ + synced agent-tool defs
 │   ├── connectors/      # Inbound source adapters (box, git, issues, qa, scip, email, slack + OAuth)
 │   ├── llm-sources/     # LLM source registry + state (feeds kb/sources.mjs hub)
 │   ├── mcp/             # MCP server config + Claude MCP source adapter

@@ -157,13 +157,13 @@ const NON_WIRE_TYPE_LITERALS = new Set([
   'preset',                   // sdk/engine.mjs — systemPrompt: { type: 'preset' }
   'custom',                   // sdk/engine.mjs — systemPrompt: { type: 'custom' } (LLMIDE_V2_COMPACT_PROMPT)
   'function',                 // runtime/openai-tools.mjs — OpenAI tool definition
-  'web_fetch_tool_result',    // runtime/handlers/fetch-url.mjs — Anthropic content block
+  'web_fetch_tool_result',    // tools/handlers/fetch-url.mjs — Anthropic content block
   'web_fetch_result',
-  'web_search_tool_result',   // runtime/handlers/web-search.mjs — Anthropic content block
+  'web_search_tool_result',   // tools/handlers/web-search.mjs — Anthropic content block
   'web_search_result',
   'image',                    // sdk/engine.mjs buildPromptInput — Anthropic image block
   'user',                     // sdk/engine.mjs buildPromptInput — SDKUserMessage envelope
-  'noul', 'choice', 'score',  // runtime/decide.mjs — Jev answer shapes inside the `decide` tool result, never stream events
+  'noul', 'choice', 'score',  // tools/decide.mjs — Jev answer shapes inside the `decide` tool result, never stream events
   'hello',                    // routes/os.mjs — first event of GET /kb/os/stream (the System view change feed), a separate wire
   // JSON-Schema fragments inside tool definitions.
   'text', 'object', 'string', 'boolean', 'number', 'integer', 'array',

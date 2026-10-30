@@ -1,7 +1,7 @@
 import Foundation
 
 /// Mirrors the server's mode strings exactly (see
-/// extension/llm_agent/runtime/mode-personas.mjs / route.mjs's
+/// extension/llm_agent/modes/mode-personas.mjs / route.mjs's
 /// `resolvedMode`) — raw values are wire contracts, not renameable.
 enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption {
     case auto
@@ -36,7 +36,7 @@ enum CodeAssistMode: String, Codable, CaseIterable, Identifiable, ChipMenuOption
     /// `.assistPlan` runs mattpocock's `grilling` (take the stated direction
     /// and hunt for what is unexamined in it, one numbered round per turn).
     /// The process lives in those skill files, not in the app — see the
-    /// server's `llm_agent/runtime/plan-pipeline.mjs`.
+    /// server's `llm_agent/plan/plan-pipeline.mjs`.
     case assistPlan = "assist_plan"
     case review, document, execute
     var id: String { rawValue }

@@ -120,7 +120,7 @@ struct ChatTransportInput: Sendable {
     let mode: String?
     /// True only for the turn the saved-plan card's "Execute plan" action
     /// fires. The server uses it to inject the plan-execution skill
-    /// (extension/llm_agent/runtime/plan-pipeline.mjs) — it is the one signal
+    /// (extension/llm_agent/plan/plan-pipeline.mjs) — it is the one signal
     /// the backend can trust that this Execute turn is working an
     /// already-approved plan rather than a fresh request. `var` with a
     /// default so the memberwise init stays source-compatible with every
