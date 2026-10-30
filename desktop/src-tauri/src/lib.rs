@@ -1,5 +1,6 @@
 mod ax_probe;
 mod core_host;
+mod graph_file;
 mod pty;
 mod sse_replay;
 
@@ -17,30 +18,12 @@ fn ping() -> &'static str {
     "pong"
 }
 
-/// Upper bound on a graph file the webview may load (the real graph is ~1 MB).
-const GRAPH_FILE_MAX_BYTES: u64 = 256 * 1024 * 1024;
-
-/// Reads a graph-kit `graph.json`. PoC: any path named graph.json is accepted.
-/// Phase 1 must restrict this to the active project root (canonical path
-/// prefix check) before the Graph tab can open arbitrary projects. The webview cannot read arbitrary files, so
-/// this is the only file read the Graph tab can trigger, and it is limited to
-/// files named exactly `graph.json`.
+/// Reads a graph-kit `graph.json` from inside the active project root only
+/// (see `graph_file`); the root is host-chosen, never supplied by the webview.
 #[tauri::command]
 fn read_graph_file(path: String) -> Result<String, String> {
-    let canonical =
-        std::fs::canonicalize(&path).map_err(|e| format!("cannot resolve {path}: {e}"))?;
-    let is_graph = canonical
-        .file_name()
-        .and_then(|n| n.to_str())
-        .is_some_and(|n| n == "graph.json");
-    if !is_graph {
-        return Err("only files named graph.json can be read".into());
-    }
-    let meta = std::fs::metadata(&canonical).map_err(|e| e.to_string())?;
-    if !meta.is_file() || meta.len() > GRAPH_FILE_MAX_BYTES {
-        return Err("graph.json is not a regular file within the size limit".into());
-    }
-    std::fs::read_to_string(&canonical).map_err(|e| format!("read failed: {e}"))
+    let root = graph_file::project_root().ok_or("no project root configured")?;
+    graph_file::read_within(&root, &path)
 }
 
 /// Prints one measurement as `BENCH <json>` on stdout. The line must be a
