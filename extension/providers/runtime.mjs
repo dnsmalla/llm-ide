@@ -316,6 +316,12 @@ async function runClaudeDirect(prompt, { userId, model, maxTokens, cacheTranscri
     // shared resolver (single source of truth with route.mjs's native loop).
     // The resolver also covers disabled/not-found/no-key with a surfacable
     // message, and degrades a bad vault key to no_key instead of throwing.
+    // A provider-catalog connection (custom:cat-…) is completed through the multi-provider adapter: no
+    // tools, and every request goes through the pinned fetch like a chat turn does.
+    if (typeof provider === 'string' && provider.startsWith('custom:cat-')) {
+      const { completeViaAdapter } = await import('./adapter-complete.mjs');
+      return completeViaAdapter(provider, { userId, model, prompt, maxTokens: resolvedMaxTokens, signal, meter });
+    }
     if (typeof provider === 'string' && provider.startsWith('custom:')) {
       const r = resolveCustomProviderDispatch(provider, userId);
       if (r.error) throw providerUnavailable(r.message);

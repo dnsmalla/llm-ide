@@ -16,6 +16,7 @@ import { createInterface } from 'node:readline';
 import { lookup } from 'node:dns/promises';
 import { getSecret } from '../server/vault.mjs';
 import { ipRefusal } from '../server/ip-classifier.mjs';
+import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { getCustomProvider } from '../server/custom-providers.mjs';
 import { getDb } from '../kb/db.mjs';
 import { logger } from '../core/logger.mjs';
@@ -314,7 +315,7 @@ export async function callOpenAI({ apiKey, model, prompt, messages, maxTokens, s
     body.tools = tools;
     body.tool_choice = 'auto';
   }
-  const res = await fetch(`${base}/chat/completions`, {
+  const res = await makePinnedFetch()(`${base}/chat/completions`, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
     body: JSON.stringify(body),
@@ -365,7 +366,7 @@ function toolCallsToFence(toolCalls) {
 async function callGoogle({ apiKey, model, prompt, maxTokens, signal }) {
   const id = String(model).replace(/^models\//, '');
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(id)}:generateContent?key=${encodeURIComponent(apiKey)}`;
-  const res = await fetch(url, {
+  const res = await makePinnedFetch()(url, {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({
@@ -1306,7 +1307,7 @@ export async function listProviderModels(provider, { apiKey, baseUrl, signal } =
   }
   // redirect:'error' — custom path carries the apiKey in the Authorization
   // header to a user-supplied baseUrl; don't follow a 3xx with the credential.
-  const res = await fetch(url, { method: 'GET', headers, redirect: 'error', signal: signal || AbortSignal.timeout(15_000) });
+  const res = await makePinnedFetch()(url, { method: 'GET', headers, redirect: 'error', signal: signal || AbortSignal.timeout(15_000) });
   if (!res.ok) throw await readError(res, apiKey);
   const data = await res.json();
   return parseModelIds(provider, data);
@@ -1377,7 +1378,7 @@ export async function verifyProvider({ provider, mode, apiKey, baseUrl } = {}) {
 async function chatRouteMissing(baseUrl, apiKey) {
   const url = `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   try {
-    const res = await fetch(url, {
+    const res = await makePinnedFetch()(url, {
       method: 'POST',
       headers: { Authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
       body: '{}',

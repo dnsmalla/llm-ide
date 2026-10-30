@@ -24,6 +24,9 @@ export class SsrfBlockedError extends Error {
 }
 
 let testTransport = null;
+// NODE_ENV=test only: a test that stands in for the network by replacing globalThis.fetch (the older provider
+// tests do) is honoured too. Never consulted in production.
+const nativeFetch = globalThis.fetch;
 /** Test seam (NODE_ENV=test only): route tests stand in for the network here; pinned-fetch.test.mjs covers the real thing. */
 export function _setPinnedFetchForTests(fn) { testTransport = fn; }
 
@@ -37,7 +40,10 @@ export const systemResolver = (hostname) => dns.promises.lookup(hostname, { all:
  * @returns {typeof fetch}
  */
 export function makePinnedFetch({ allowPrivate = false, resolver = systemResolver, gate = privateProvidersAllowed } = {}) {
-  if (testTransport && process.env.NODE_ENV === 'test') return testTransport;
+  if (process.env.NODE_ENV === 'test') {
+    if (testTransport) return testTransport;
+    if (globalThis.fetch !== nativeFetch) return (...a) => globalThis.fetch(...a);
+  }
   return function pinnedFetch(input, init = {}) {
     return new Promise((resolve, reject) => {
       const effective = allowPrivate && gate();
