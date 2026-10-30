@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Generates desktop/src/design/tokens.css from the macOS app's Theme.swift.
+// Generates desktop/src/design/tokens.css from the macOS app's ThemeTokens.swift + Theme.swift.
 //
 //   npm run tokens            write the file
 //   npm run tokens -- --check exit 1 if the file on disk differs (drift guard)
@@ -12,7 +12,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
-const THEME_SWIFT = resolve(here, "../../mac/Sources/LlmIdeMac/Core/Platform/Theme.swift");
+const PLATFORM = resolve(here, "../../mac/Sources/LlmIdeMac/Core/Platform");
+const THEME_SWIFT = resolve(PLATFORM, "Theme.swift"); // derived-colour aliases
+const TOKENS_SWIFT = resolve(PLATFORM, "ThemeTokens.swift"); // palettes, scales, type
 const OUT = resolve(here, "../src/design/tokens.css");
 
 const THEME_IDS = ["dark", "light", "midnight"];
@@ -20,8 +22,9 @@ const COLOR_ROLES = [
   "body", "surface", "surface2", "border", "text", "textMuted",
   "accent", "accent2", "accent3", "accent4", "danger", "rowAlt", "gridLine",
 ];
+const CATEGORY_ROLES = ["categoryPurple", "categoryTeal", "categoryAmber"];
 const TEXT_STYLE_PT = {
-  // macOS HIG text-style sizes; Theme.swift refers to these by style name only.
+  // macOS HIG text-style sizes; ThemeTokens.swift refers to these by style name only.
   largeTitle: 26, title: 22, title2: 17, title3: 15, headline: 13, body: 13,
   callout: 12, subheadline: 11, footnote: 10, caption: 10, caption2: 10,
 };
@@ -35,75 +38,53 @@ function fail(msg) {
 
 const kebab = (s) => s.replace(/([a-z])([A-Z])/g, "$1-$2").toLowerCase();
 
-/** Parses `Color(red:, green:, blue:)` or `Color.white|black.opacity(a)` → {r,g,b,a}. */
-function parseColor(expr, where) {
-  let m = expr.match(/^Color\(red:\s*([\d.]+),\s*green:\s*([\d.]+),\s*blue:\s*([\d.]+)\)$/);
-  if (m) {
-    return { r: Math.round(+m[1] * 255), g: Math.round(+m[2] * 255), b: Math.round(+m[3] * 255), a: 1 };
-  }
-  m = expr.match(/^Color\.(white|black)(?:\.opacity\(([\d.]+)\))?$/);
-  if (m) {
-    const v = m[1] === "white" ? 255 : 0;
-    return { r: v, g: v, b: v, a: m[2] === undefined ? 1 : +m[2] };
-  }
-  return fail(`cannot parse colour in ${where}: ${expr}`);
-}
-
 const cssColor = ({ r, g, b, a }) =>
   a === 1 ? `rgb(${r}, ${g}, ${b})` : `rgba(${r}, ${g}, ${b}, ${a})`;
 
-function themeBlock(src, id) {
-  const re = new RegExp(`static let ${id} = Theme\\(([\\s\\S]*?)\\n    \\)`);
+/** `.rgb(r, g, b)` | `.white(a)` | `.black(a)` (ThemeTokens.Swatch) → {r,g,b,a}. */
+function parseSwatch(expr, where) {
+  let m = expr.match(/^\.rgb\(\s*([\d.]+),\s*([\d.]+),\s*([\d.]+)\s*\)$/);
+  if (m) {
+    return { r: Math.round(+m[1] * 255), g: Math.round(+m[2] * 255), b: Math.round(+m[3] * 255), a: 1 };
+  }
+  m = expr.match(/^\.(white|black)\(\s*([\d.]+)\s*\)$/);
+  if (m) {
+    const v = m[1] === "white" ? 255 : 0;
+    return { r: v, g: v, b: v, a: +m[2] };
+  }
+  return fail(`cannot parse swatch in ${where}: ${expr}`);
+}
+
+function paletteBlock(src, id) {
+  const re = new RegExp(`static let ${id} = Palette\\(([\\s\\S]*?)\\n    \\)`);
   const m = src.match(re);
-  if (!m) fail(`no "static let ${id} = Theme(" block`);
+  if (!m) fail(`no "static let ${id} = Palette(" block in ThemeTokens.swift`);
   return m[1];
 }
 
+/** Colour roles + category hues per theme, from ThemeTokens.swift palettes. */
 function parseThemes(src) {
-  const out = {};
+  const themes = {};
+  const switches = Object.fromEntries(CATEGORY_ROLES.map((n) => [n, {}]));
   for (const id of THEME_IDS) {
-    const block = themeBlock(src, id).replace(/\/\/.*$/gm, "");
+    const block = paletteBlock(src, id).replace(/\/\/.*$/gm, "");
     const roles = {};
     for (const line of block.split("\n")) {
       const m = line.match(/^\s+(\w+):\s*(.+?),?\s*$/);
       if (!m) continue;
       const [, key, value] = m;
       if (key === "id" || key === "name" || key === "isDark") continue;
-      if (!COLOR_ROLES.includes(key)) fail(`unexpected role "${key}" in theme "${id}"`);
-      roles[key] = parseColor(value.replace(/,\s*$/, ""), `${id}.${key}`);
+      if (COLOR_ROLES.includes(key)) roles[key] = parseSwatch(value, `${id}.${key}`);
+      else if (CATEGORY_ROLES.includes(key)) switches[key][id] = parseSwatch(value, `${id}.${key}`);
+      else fail(`unexpected role "${key}" in palette "${id}"`);
     }
-    const missing = COLOR_ROLES.filter((r) => !roles[r]);
-    if (missing.length) fail(`theme "${id}" is missing roles: ${missing.join(", ")}`);
-    out[id] = roles;
+    const missing = [...COLOR_ROLES, ...CATEGORY_ROLES].filter(
+      (r) => !roles[r] && !switches[r]?.[id],
+    );
+    if (missing.length) fail(`palette "${id}" is missing roles: ${missing.join(", ")}`);
+    themes[id] = roles;
   }
-  return out;
-}
-
-/** `var categoryPurple: Color { switch id { case "light": …; default: … } }` per theme. */
-function parseSwitchColors(src) {
-  const names = ["categoryPurple", "categoryTeal", "categoryAmber"];
-  const out = {};
-  for (const name of names) {
-    const m = src.match(new RegExp(`var ${name}: Color \\{([\\s\\S]*?)\\n    \\}`));
-    if (!m) fail(`no computed colour "${name}"`);
-    const body = m[1].replace(/\/\/.*$/gm, "");
-    const perTheme = {};
-    for (const c of body.matchAll(/case "(\w+)":\s*return (Color[^\n]*?\))\s*$/gm)) {
-      perTheme[c[1]] = parseColor(c[2], `${name}.${c[1]}`);
-    }
-    const d = body.match(/default:\s*return (Color[^\n]*?\))\s*$/m);
-    if (!d) fail(`"${name}" has no default case`);
-    perTheme.default = parseColor(d[1], `${name}.default`);
-    for (const id of ["light", "midnight"]) {
-      if (!perTheme[id]) fail(`"${name}" has no case "${id}"`);
-    }
-    out[name] = {
-      dark: perTheme.default,
-      light: perTheme.light,
-      midnight: perTheme.midnight,
-    };
-  }
-  return out;
+  return { themes, switches };
 }
 
 /** Single-line derived colours: `var success: Color { accent3 }`, `… { success.opacity(0.16) }`. */
@@ -116,58 +97,52 @@ function parseAliases(src) {
   return out;
 }
 
-function parseSpacing(src, enumName) {
-  const m = src.match(new RegExp(`enum ${enumName} \\{([\\s\\S]*?)\\n\\}`));
-  if (!m) fail(`no enum ${enumName}`);
+function parseScale(src, valueName, structName) {
+  const m = src.match(new RegExp(`static let ${valueName} = ${structName}\\(([\\s\\S]*?)\\n    \\)`));
+  if (!m) fail(`no "static let ${valueName} = ${structName}("`);
   const out = [];
-  for (const s of m[1].matchAll(/static let (\w+): CGFloat = ([\d.]+)/g)) {
+  for (const s of m[1].matchAll(/^\s+(\w+):\s*([\d.]+),?\s*$/gm)) {
     out.push({ name: s[1], value: +s[2] });
   }
-  if (!out.length) fail(`enum ${enumName} has no CGFloat values`);
+  if (!out.length) fail(`${valueName} has no values`);
   return out;
 }
 
 function parseTypography(src) {
-  const m = src.match(/enum Typography \{([\s\S]*?)\n\}/);
-  if (!m) fail("no enum Typography");
+  const m = src.match(/static let typeScale = TypeScale\(([\s\S]*?)\n    \)/);
+  if (!m) fail('no "static let typeScale = TypeScale("');
   const out = [];
   for (const line of m[1].split("\n")) {
-    const decl = line.match(/^\s*static let (\w+)\s*=\s*(.+?)\s*$/);
+    const decl = line.match(/^\s*(\w+):\s*TypeToken\((.*)\),?\s*$/);
     if (!decl) continue;
-    const [, name, expr] = decl;
-    let size;
-    let weight = "regular";
-    let mono = false;
-    let s = expr.match(/^Font\.system\(size: (\d+)(.*)\)$/);
-    if (s) {
-      size = +s[1];
-      const w = s[2].match(/weight: \.(\w+)/);
-      if (w) weight = w[1];
-      mono = /design: \.monospaced/.test(s[2]);
-    } else {
-      s = expr.match(/^Font\.(\w+)(?:\.weight\(\.(\w+)\))?$/);
-      if (!s) fail(`cannot parse Typography.${name}: ${expr}`);
-      if (!(s[1] in TEXT_STYLE_PT)) fail(`unknown text style "${s[1]}" in Typography.${name}`);
-      size = TEXT_STYLE_PT[s[1]];
-      if (s[2]) weight = s[2];
-    }
-    if (!(weight in WEIGHT)) fail(`unknown weight "${weight}" in Typography.${name}`);
-    out.push({ name, size, weight, mono });
+    const [, name, args] = decl;
+    const size = args.match(/size: ([\d.]+)/);
+    const style = args.match(/textStyle: \.(\w+)/);
+    const w = args.match(/weight: \.(\w+)/);
+    const weight = w ? w[1] : "regular";
+    const mono = /monospaced: true/.test(args);
+    let pt;
+    if (size) pt = +size[1];
+    else if (style) {
+      if (!(style[1] in TEXT_STYLE_PT)) fail(`unknown text style "${style[1]}" in typeScale.${name}`);
+      pt = TEXT_STYLE_PT[style[1]];
+    } else fail(`typeScale.${name} has neither size nor textStyle`);
+    if (!(weight in WEIGHT)) fail(`unknown weight "${weight}" in typeScale.${name}`);
+    out.push({ name, size: pt, weight, mono });
   }
-  if (!out.length) fail("enum Typography has no entries");
+  if (!out.length) fail("typeScale has no entries");
   return out;
 }
 
-function render(src) {
-  const themes = parseThemes(src);
-  const switches = parseSwitchColors(src);
-  const aliases = parseAliases(src);
-  const spacing = parseSpacing(src, "Spacing");
-  const radius = parseSpacing(src, "Radius");
-  const typo = parseTypography(src);
+export function render(themeSrc, tokensSrc) {
+  const { themes, switches } = parseThemes(tokensSrc);
+  const aliases = parseAliases(themeSrc);
+  const spacing = parseScale(tokensSrc, "spacing", "SpacingScale");
+  const radius = parseScale(tokensSrc, "radius", "RadiusScale");
+  const typo = parseTypography(tokensSrc);
 
   const lines = [];
-  lines.push("/* GENERATED from mac/Sources/LlmIdeMac/Core/Platform/Theme.swift — do not edit.");
+  lines.push("/* GENERATED from mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.swift (+ Theme.swift aliases) — do not edit.");
   lines.push(" * Regenerate with: npm run tokens   (drift check: npm run tokens -- --check) */");
   lines.push("");
   lines.push(":root {");
@@ -205,8 +180,8 @@ function render(src) {
   return lines.join("\n") + "\n";
 }
 
-const src = readFileSync(THEME_SWIFT, "utf8");
-const css = render(src);
+function main() {
+const css = render(readFileSync(THEME_SWIFT, "utf8"), readFileSync(TOKENS_SWIFT, "utf8"));
 const check = process.argv.includes("--check");
 
 if (check) {
@@ -220,3 +195,6 @@ if (check) {
   writeFileSync(OUT, css);
   console.log(`wrote ${OUT}`);
 }
+}
+
+if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
