@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 200 token, 12 public
 - Handler found: 210; no handler found: 2
-- No Mac and no extension caller: 38 (tests only: 25, comments/docs only: 13, no reference: 0)
+- No Mac and no extension caller: 40 (tests only: 27, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -46,9 +46,11 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (38):
+Endpoints with no client caller (40):
 
 - `/chat` — tests only
+- `/code-assist` — tests only
+- `/code-assist/decision` — tests only
 - `/agent-sdk/spike` — tests only
 - `/kb/entity/:id` — tests only
 - `/kb/system/status` — tests only
@@ -101,8 +103,8 @@ Endpoints with no client caller (38):
 | `/kb/docs/seed` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/docs-routes.mjs:138` | `LlmIdeAPIClient+Docs.swift` | - | - |
 | `/kb/projects/register` | ALL_ENDPOINTS | POST | token | doc_gen | `extension/routes/doc-gen.mjs:204` | `LlmIdeAPIClient+Docs.swift` | - | - |
 | `/chat` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:195` | - | - | tests only |
-| `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:251` | `LlmIdeAPIClient+CodeAssist.swift`, `RegressionRunner.swift` | - | - |
-| `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:251` | `LlmIdeAPIClient+CodeAssist.swift` | - | - |
+| `/code-assist` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:251` | - | - | tests only |
+| `/code-assist/decision` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:251` | - | - | tests only |
 | `/agent-sdk/spike` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:208` | - | - | tests only |
 | `/agent/v2/stream` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:301` | `LlmIdeAPIClient+CodeAssist.swift` | `App.tsx`, `agent-v2-client.ts` | - |
 | `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:304` | `LlmIdeAPIClient+CodeAssist.swift` | `agent-v2-client.ts` | - |
@@ -111,7 +113,7 @@ Endpoints with no client caller (38):
 | `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:315` | `LlmIdeAPIClient+ChatRoute.swift` | - | - |
 | `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:321` | `LlmIdeAPIClient+ChatRoute.swift` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:106` | `LlmIdeAPIClient+LoopAgent.swift` | - | - |
-| `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `LlmIdeAPIClient+Complete.swift`, `RegressionRunner.swift` | - | - |
+| `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `LlmIdeAPIClient+Complete.swift` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:257` | - | `App.tsx`, `useQuestions.ts` | - |
 | `/extract-entities` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:328` | - | `App.tsx` | - |
 | `/kb/ingest` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:151` | `LlmIdeAPIClient+KB.swift` | `App.tsx` | - |
@@ -306,7 +308,7 @@ Endpoints with no client caller (38):
 
 ## Consistency
 
-Checked: 212 roster entries, 753 Swift files, 51 extension source files.
+Checked: 212 roster entries, 751 Swift files, 51 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
