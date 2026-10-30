@@ -170,6 +170,10 @@ const SKIP_RULES = [
     when: (fx) => fx.status < 300 && fx.endpoint === 'POST /auth/me/mcp-plugins/toggle',
   },
   {
+    why: 'extensions catalog (P4/P5): installs and updates need a GitHub archive (fixture fetch in tests/extensions-*.test.mjs) and every item route needs an item installed by an earlier call; the rows are covered by tests/extensions-catalog-routes.test.mjs',
+    when: (fx) => /^POST \/auth\/me\/extensions\/(install|update|update\/preview|rollback|repair|toggle|uninstall)$/.test(fx.endpoint) && fx.status !== 401,
+  },
+  {
     why: 'fixture path must exist on the server host (project install-skills)',
     when: (fx) => fx.status === 400 && fx.endpoint === 'POST /kb/project/install-skills',
   },
