@@ -58,22 +58,35 @@ function writeAll(users) {
 
 /**
  * One user's overlay: Map<itemId, { enabled?: boolean, disabledMembers: Set<string> }>.
- * Malformed entries are skipped, not fatal; an unreadable FILE is `corrupt`.
+ * An unreadable FILE, or any unrecognised entry in this user's part of it, is `corrupt` (consumers fail closed).
  */
 export function readOverlay(userId) {
   const all = readAll();
   const items = new Map();
   if (!safeUser(userId)) return { corrupt: all.corrupt, items };
-  const entries = all.users[userId]?.items;
-  if (entries && typeof entries === 'object' && !Array.isArray(entries)) {
-    for (const [id, raw] of Object.entries(entries)) {
-      if (!parseItemId(id) || !raw || typeof raw !== 'object') continue;
-      const disabled = new Set((Array.isArray(raw.disabledMembers) ? raw.disabledMembers : [])
-        .filter((m) => typeof m === 'string' && parseMemberId(m)));
-      items.set(id, { ...(typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : {}), disabledMembers: disabled });
+  // Fail closed: anything in THIS user's entry that we do not recognise means the
+  // switches may be half-readable, and "skip it" would silently turn an item back
+  // on that the user had switched off. Report the whole overlay corrupt instead.
+  let corrupt = all.corrupt;
+  const user = all.users[userId];
+  if (user !== undefined) {
+    if (!user || typeof user !== 'object' || Array.isArray(user)) corrupt = true;
+    else if (user.items !== undefined) {
+      const entries = user.items;
+      if (!entries || typeof entries !== 'object' || Array.isArray(entries)) corrupt = true;
+      else {
+        for (const [id, raw] of Object.entries(entries)) {
+          if (!parseItemId(id) || !raw || typeof raw !== 'object' || Array.isArray(raw)) { corrupt = true; continue; }
+          if (raw.enabled !== undefined && typeof raw.enabled !== 'boolean') corrupt = true;
+          const members = raw.disabledMembers;
+          if (members !== undefined && (!Array.isArray(members) || members.some((m) => typeof m !== 'string' || !parseMemberId(m)))) corrupt = true;
+          const disabled = new Set((Array.isArray(members) ? members : []).filter((m) => typeof m === 'string' && parseMemberId(m)));
+          items.set(id, { ...(typeof raw.enabled === 'boolean' ? { enabled: raw.enabled } : {}), disabledMembers: disabled });
+        }
+      }
     }
   }
-  return { corrupt: all.corrupt, items };
+  return { corrupt, items };
 }
 
 function mutate(userId, itemIdValue, fn) {

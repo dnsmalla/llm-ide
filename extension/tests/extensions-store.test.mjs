@@ -48,13 +48,14 @@ test('invalid ids and members are refused, prototype keys are inert', () => {
   assert.equal({}.polluted, undefined);
 });
 
-test('malformed entries are skipped without losing the good ones', () => {
+test("an unrecognised entry in a user's overlay fails closed; the good entries are still read", () => {
   fs.writeFileSync(store.storeFilePath(), JSON.stringify({ version: 1, users: {
     w: { items: { [P]: { enabled: false }, 'junk': { enabled: false }, 'plugin:local/b': 'str', 'plugin:local/c': { disabledMembers: 'nope' } } },
     __proto__: { items: {} },
   } }));
   const o = store.readOverlay('w');
-  assert.equal(o.corrupt, false);
+  assert.equal(o.corrupt, true, 'a partly unreadable overlay must not be treated as "nothing switched off"');
+  assert.equal(store.readOverlay('someone-else').corrupt, false, 'another user is not affected');
   assert.equal(o.items.get(P).enabled, false);
   assert.equal(o.items.has('junk'), false);
   assert.equal(o.items.get('plugin:local/c').disabledMembers.size, 0);
@@ -77,4 +78,17 @@ test('forgetUser removes one user and only that user', () => {
   assert.equal(store.readOverlay('a').items.size, 0);
   assert.equal(store.readOverlay('b').items.size, 1);
   assert.equal(store.forgetUser('nobody'), false);
+});
+
+test('each shape of partial corruption in one user entry is reported corrupt', () => {
+  const bad = [
+    { items: [] }, 'str', { items: { [P]: { enabled: 'yes' } } }, { items: { [P]: { disabledMembers: ['command:ok', 'nonsense'] } } },
+    { items: { [P]: [] } }, { items: { 'not-an-id': { enabled: false } } },
+  ];
+  for (const user of bad) {
+    fs.writeFileSync(store.storeFilePath(), JSON.stringify({ version: 1, users: { w: user } }));
+    assert.equal(store.readOverlay('w').corrupt, true, JSON.stringify(user));
+  }
+  fs.writeFileSync(store.storeFilePath(), JSON.stringify({ version: 1, users: { w: { items: { [P]: { enabled: false, disabledMembers: ['command:ok'] } } } } }));
+  assert.equal(store.readOverlay('w').corrupt, false, 'a clean entry is fine');
 });
