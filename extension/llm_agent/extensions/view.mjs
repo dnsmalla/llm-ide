@@ -33,6 +33,23 @@ export function viewsRoot() {
   return join(dirname(defaultPluginDir()), 'extensions', 'views');
 }
 
+function treeStamp(root) {
+  const parts = [];
+  const walk = (dir) => {
+    for (const e of readdirSync(dir, { withFileTypes: true }).sort((a, b) => (a.name < b.name ? -1 : 1))) {
+      if (e.isSymbolicLink() || (dir === root && SKIP_TOP.has(e.name))) continue;
+      const p = join(dir, e.name);
+      if (e.isDirectory()) { parts.push(`d:${relative(root, p)}`); if (parts.length < 20_000) walk(p); } else {
+        const st = statSync(p);
+        parts.push(`${relative(root, p)}:${st.size}:${st.mtimeMs}`);
+      }
+      if (parts.length >= 20_000) return;
+    }
+  };
+  walk(root);
+  return parts.join('\n');
+}
+
 const noLinks = (src) => {
   try { return !lstatSync(src).isSymbolicLink(); } catch { return false; }
 };
@@ -62,10 +79,9 @@ export function materializePluginView(plugin, disabled, { userId }) {
     const stamp = createHash('sha256');
     stamp.update(JSON.stringify([userId, plugin.name, plugin.version ?? '', [...off].sort(), statSync(plugin.dir).mtimeMs,
       statSync(join(plugin.dir, plugin.manifestRel)).mtimeMs]));
-    for (const dir of ['skills', 'commands', 'agents']) {
-      const d = join(plugin.dir, dir);
-      if (existsSync(d)) stamp.update(`${dir}:${statSync(d).mtimeMs}`);
-    }
+    // Every file that can end up in the view, by path, size and mtime: editing a skill in place changes
+    // neither its directory's mtime nor the manifest's.
+    stamp.update(treeStamp(plugin.dir));
     const hash = stamp.digest('hex').slice(0, 16);
     const userDir = join(viewsRoot(), createHash('sha256').update(String(userId)).digest('hex').slice(0, 16));
     const target = join(userDir, `${plugin.name}-${hash}`);
@@ -75,9 +91,10 @@ export function materializePluginView(plugin, disabled, { userId }) {
 
     if (existsSync(join(target, plugin.manifestRel))) return { path: target, remainingExecutable };
 
-    mkdirSync(userDir, { recursive: true });
+    // Private: the view holds a user's plugin files (and the folder name hints at who uses what).
+    mkdirSync(userDir, { recursive: true, mode: 0o700 });
     const tmp = `${target}.tmp-${process.pid}-${Date.now()}`;
-    mkdirSync(tmp, { recursive: true });
+    mkdirSync(tmp, { recursive: true, mode: 0o700 });
     try {
       // Everything at the top level that is not a filtered component.
       for (const entry of readdirSync(plugin.dir, { withFileTypes: true })) {

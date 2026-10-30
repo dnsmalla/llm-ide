@@ -268,3 +268,24 @@ test('flag on: the extensions-state file is the only thing read; legacy files ar
   delivery(u1); registry.buildPerUserSkillSet(u1); libraryIds(u1); mcpNow(u1);
   assert.deepEqual(stamp(), before);
 });
+
+test('flag on: editing a skill file in place (no directory mtime change) gives a fresh view; views are created private', () => {
+  store.setMembersEnabled(u1, 'plugin:local/alpha', ['skill:sk-one'], false);
+  flagOn();
+  const first = delivery(u1).sdkPlugins.find((p) => p.path.includes('alpha')).path;
+  assert.equal(fs.statSync(path.dirname(first)).mode & 0o077, 0, 'the per-user views folder is owner-only');
+  const file = path.join(world.pluginDir, 'alpha', 'skills', 'sk-two', 'SKILL.md');
+  const original = fs.readFileSync(file, 'utf8');
+  try {
+    fs.writeFileSync(file, `${original}\nedited in place\n`);
+    const later = new Date(Date.now() + 9000);
+    fs.utimesSync(file, later, later);
+    registry.reloadPlugins();
+    const second = delivery(u1).sdkPlugins.find((p) => p.path.includes('alpha')).path;
+    assert.notEqual(second, first);
+    assert.match(fs.readFileSync(path.join(second, 'skills', 'sk-two', 'SKILL.md'), 'utf8'), /edited in place/);
+  } finally {
+    fs.writeFileSync(file, original);
+    registry.reloadPlugins();
+  }
+});
