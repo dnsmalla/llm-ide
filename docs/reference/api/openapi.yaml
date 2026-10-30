@@ -568,6 +568,18 @@ paths:
                   items:
                     type: "object"
                   description: "read only when fresh is true"
+                routeSeed:
+                  type: "object"
+                  description: "The client's own copy of the chat's route (session router, K1 P6b): the server re-creates a missing route row from it before the cap check. It can only restore or raise, never lower an existing row. Ignored with the router off."
+                  properties:
+                    tokenLimit:
+                      type: "integer"
+                    tokensUsed:
+                      type: "integer"
+                    provider:
+                      type: "string"
+                    model:
+                      type: "string"
       responses:
         "200":
           description: "SSE stream of engine events — init first, mode_set right after init, result or error last. Event types: init, delta, tool_use_start, tool_args_delta, tool_result, usage, approval_request, approval_resolved, mode_set, result, error, sdk. Unknown event types and fields must be ignored by clients."

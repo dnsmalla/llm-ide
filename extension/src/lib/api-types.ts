@@ -1783,6 +1783,13 @@ export type PostAgentV2StreamRequest = {
     fresh?: boolean;
     /** read only when fresh is true */
     history?: Record<string, unknown>[];
+    /** The client's own copy of the chat's route (session router, K1 P6b): the server re-creates a missing route row from it before the cap check. It can only restore or raise, never lower an existing row. Ignored with the router off. */
+    routeSeed?: {
+      tokenLimit?: number;
+      tokensUsed?: number;
+      provider?: string;
+      model?: string;
+    };
   };
 };
 

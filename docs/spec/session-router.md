@@ -26,7 +26,7 @@ Preserved across a switch: the conversation itself (the Mac session file), the h
 | Prompt compression of adapter turns (needs the router on) | `LLMIDE_ROUTER_COMPRESS=on` | off |
 | Learned per-key limits read by the start-of-turn pick | `LLMIDE_ROUTER_LEARN=on` | off |
 
-Each is on only when set to exactly `on`. There is no automatic-switch switch: the router never changes the pick because a cache expired (answer Q-R3), and nothing for it is built. The Mac preference `chat.router` shows or hides the control and, at the next backend start, sets `LLMIDE_ROUTER` for the server it launches.
+Each is on only when set to exactly `on` (no trimming or case folding: `ON` and a padded value are off). There is no automatic-switch switch: the router never changes the pick because a cache expired (answer Q-R3), and nothing for it is built. The Mac preference `chat.router` shows or hides the control and, at the next backend start, sets `LLMIDE_ROUTER` for the server it launches.
 
 ## §3 Files
 
@@ -52,20 +52,24 @@ Main DB, not agent.db, because a limit must fail closed: agent.db is "history, n
 - `warm_json`, `sticky_until`: the last cache touch per `provider|model`, trusted after a restart (a stale value costs one avoidable cold prefill). A stamp more than a minute in the future (a clock moved back) is not trusted as warm.
 - `switch_seq`: a version for compare-and-set between two windows.
 - `pending_json`: a provider or model change requested while a turn ran.
-- `handoff_up_to`: the id of the last message the client's note covers. `handoff_note` is never written in v1 (Mac chats only, answer Q-R4).
+- `handoff_up_to`: the id of the last message the client's note covers. The server stores no note text (migration 0054 dropped the unused column).
+- `last_engine`: `claude`, `adapter` or empty, set by every turn that names a provider. It is what keeps a Claude SDK session from being resumed after an adapter turn even when the warm map was pruned or expired.
 
 `agent_route_events` (agent.db) holds switch history: `switch`, `cap_reached`, `cap_changed`, `handoff_built`. Metadata only: no prompt, no note text. A lost row changes no routing. Rows older than the user's retention horizon are removed by the agent.db rollup.
+
+Rows are bounded per user (5000): when a new row would pass the bound, the least recently updated rows make room. A pin may only name Claude or a custom provider or catalog connection the user owns (else 400), and an unowned provider in a seed is dropped.
 
 Removed with the chat: quit-archive (`purgeWorkingState`), delete-everywhere tombstone replay, `DELETE /agent/v2/session`, and account delete (`deleteUserCascade`, `AGENT_USER_TABLES`). The Mac chat file keeps the pin, the limit and the tokens used, and re-sends them on the next open (§9).
 
 ## §5 Turn behaviour
 
+0. **Seed.** A stream request may carry `routeSeed` `{tokenLimit, tokensUsed, provider, model}`, the client's own copy of the route (the Mac chat file; a phone or extension turn sends what it has). When the row is missing it is created from the seed before the cap check, so a first turn after a quit-purge (or a restore that failed or is late) is capped and keeps what the chat had used. A seed can only restore or raise: it never lowers an existing row's counter and never changes its limit or pin. Invalid fields are ignored. The Mac also holds the first send of a reopened chat for up to three seconds while its restore runs.
 1. **Early probe** (before the mode classifier's model call): with the router on, read the route. A store error is `503 ROUTE_UNAVAILABLE`; a chat at its cap is `402 SESSION_TOKEN_LIMIT` (402, not the plan's 409: 409 is the turn lock, which every client retries and reports as "still working"). Both are plain JSON before any model call, and the request's rate-limit token is refunded.
-2. **Authoritative pass** (the chat's turn lock held, before the SSE headers): apply a pending change, check the cap again, and pick. A pinned chat runs on its pin whatever the request says. An adapter provider (`custom:cat-*`) goes through the adapter, never the Claude engine, and its session key is never bound as an SDK session.
+2. **Authoritative pass** (the chat's turn lock held, before the SSE headers): check the cap again, then apply a pending change and pick. A refused turn does not consume a pending change. A pinned chat runs on its pin whatever the request says. An adapter provider (`custom:cat-*`) goes through the adapter, never the Claude engine, and its session key is never bound as an SDK session.
 3. **A change of provider since the last turn** does not resume a Claude SDK session. The turn is seeded with the handoff.
 4. **Never mid-stream.** The pick is made once. A change made during a turn is stored as pending and answers `appliesAt: "next_turn"`; the running turn finishes on its model.
 5. **Cap, fail closed.** The remaining billable tokens go to the engine as `maxBillableTokens`. The Claude engine checks as responses stream and ends the turn with the SDK interrupt (a clean result and a resumable transcript; usage totals stay complete); the adapter checks between model calls. Overshoot is bounded by one reply, which the UI says. The stop is a stop, not a switch (answer Q-R5): the Mac offers a one-click raise.
-6. **Counters** are committed once per turn on every exit path. The engine's single `usage` event commits before the terminal events; an exit with no such event commits from the final totals. After a crash the counter can under-count by at most the running turn and never over-counts.
+6. **Counters** are committed once per turn (the mode classifier's own call is counted too when the cap is on; a classifier call that reports no usage stays uncounted, a bounded under-count) on every exit path. The engine's single `usage` event commits before the terminal events; an exit with no such event commits from the final totals. After a crash the counter can under-count by at most the running turn and never over-counts.
 7. **Notices** (additive `notice` kinds, `warning` for the cap, `info` otherwise): `route_switch` with `{from, to, reason, cold, estimatedPrefillTokens}` after `mode_set`; `session_budget` with `{used, limit, remaining, level}` where level is `warn80` or `reached`. An older Mac ignores the info notices and shows the warning as one status line.
 
 The pick order, with the existing start-of-turn fallback (rate limit, provider error) applied by the adapter after the router, is: pin, then fallback, then cap. Warm expiry never changes the pick.
@@ -88,9 +92,9 @@ All token-protected, user-scoped, in `ALL_ENDPOINTS`. Shapes: `schema/http/agent
 
 ## §8 Learned limits and compression
 
-**Learned limits** (`LLMIDE_ROUTER_LEARN=on`). `provider_learned_limits` holds per-key rpm, rpd, tpm and tpd, fed from rate-limit header snapshots (`recordRateLimits`) and from 429s, and read by `pickTurnProvider` as `limit_near` (at 90 percent of a learned requests or tokens per minute figure, measured from this user's ledger). A value the user set always wins and never expires; a learned value expires after 24 hours without a fresh observation. A near-limit key is skipped for the next turn only, never mid-stream, and only in favour of the user's own ordered fallback list (no rotation across accounts).
+**Learned limits** (`LLMIDE_ROUTER_LEARN=on`). `provider_learned_limits` holds per-key rpm, rpd, tpm and tpd, fed from rate-limit header snapshots (`recordRateLimits`, which the adapter calls for every response, a 429 included). A bare 429 is never turned into a number (it does not say which limit was hit); it only parks the key for a short cooldown. A new observation replaces the whole row, so a dimension it does not carry does not outlive its own expiry. Read by `pickTurnProvider` as `limit_near` (at 90 percent of a learned requests or tokens per minute figure, measured from this user's ledger). A value the user set always wins and never expires (`setUserLimit`; no route or screen writes one in v1, and the limits a user sets for built-in providers live in `model_limits`, consulted first by `getLimits`); a learned value expires after 24 hours without a fresh observation. A near-limit key is skipped for the next turn only, never mid-stream, and only in favour of the user's own ordered fallback list (no rotation across accounts).
 
-**Compression** (`LLMIDE_ROUTER_COMPRESS=on`, router on). `providers/compress.mjs` runs on adapter turns only (never the Claude path, whose prompt the SDK builds): it drops repeated identical tool outputs and file reads, caps tool outputs by characters keeping head and tail, and replaces tool results older than a number of turns with a one-line stub. JSON compaction is not done. Redaction runs first. Nothing it produces is stored.
+**Compression** (`LLMIDE_ROUTER_COMPRESS=on`, router on). `providers/compress.mjs` runs on adapter turns only (never the Claude path, whose prompt the SDK builds): it caps long outputs of an allowlisted set of tools (web search, URL fetch, shell, KB and code search, listings, sub-agents) keeping head and tail, and stubs an identical repeat call only while the first full result is still within the recent context (same tool, same arguments, same content). File-content tools (`read-file`), loaded skills, citation checks, tasks and decisions are never cut or stubbed, and neither is an error. Older history messages keep head and tail. Every tool result is redacted, objects included. JSON compaction is not done. Redaction runs first. Nothing it produces is stored.
 
 ## §9 The Mac control
 
