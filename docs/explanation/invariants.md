@@ -502,7 +502,7 @@ Run through this against a real meeting before merging:
 
 ---
 
-## Code Assistant modes (`extension/llm_agent/runtime/route.mjs`, `mode-personas.mjs`, `plan-pipeline.mjs`)
+## Code Assistant modes (`extension/llm_agent/runtime/mode-personas.mjs`, `plan-pipeline.mjs`; the classic `route.mjs` was deleted in API 92)
 
 ### ✅ MUST preserve
 

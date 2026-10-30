@@ -123,6 +123,20 @@ struct CatalogTransportTests {
         #expect(stream.bodies.first?["model"] as? String == "deepseek-chat")
     }
 
+    @Test("router OFF with a catalog model still selected: the turn fails before any request with the unsupported message")
+    func routerOffSelectedCatalogModel() async {
+        let stream = QueuedAgentV2Stream()
+        let composite = AgentV2EngineTransport(
+            v2: AgentV2Transport(streamer: stream),
+            capableProviders: { AgentV2Selection.agentCapableProviders(customProviders: [], catalogWireIds: CatalogConnectionIndex.shared.capableWireIds(routerOn: false)) })
+        CatalogConnectionIndex.shared.update(connections: [CatalogConnectionSummary(wireId: "custom:cat-deepseek", name: "DeepSeek", models: [])],
+                                             providerChatEnabled: true)
+        await #expect(throws: ChatProviderUnsupportedError.self) {
+            _ = try await composite.roundTrip(self.input(), onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        }
+        #expect(stream.bodies.isEmpty)
+    }
+
     @Test("a refusal such as MODEL_LACKS_TOOLS reaches the user with the server's own message")
     func refusalMessage() async {
         let stream = QueuedAgentV2Stream()

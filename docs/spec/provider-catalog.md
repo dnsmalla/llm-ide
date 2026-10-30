@@ -149,6 +149,13 @@ A turn never changes provider or model while it streams. A 429 mid-turn ends tha
 - **Prompt injection.** Tool results are framed as data and the two egress tools ask first (§7); the permission gate is unchanged.
 - **Keys.** Accepted once, vault only; the library's default error logging is off; error text is redacted with the key; the adapter's fetch cannot leave the connection's host or follow a redirect.
 
+## §9b Chat integration and completion (T6.6)
+
+- **Model picker.** The Mac composer lists every enabled catalog connection with its models and a `tools` / `no tools` badge. With the session router off (Settings, Providers) or provider chat off (`settings.toolsEnabled`) the models are shown disabled with a note; nothing is enabled silently. A pick pins the chat's route (`PUT /agent/v2/session/route`, provider `custom:cat-*`) and the turn goes to `/agent/v2/stream`, where the router hands it to the adapter. Any other pick releases a catalog pin.
+- **Tool modes** (`TOOL_MODES`: execute, plan, assist_plan, review) refuse a model without tools with `MODEL_LACKS_TOOLS` and a message naming the fix; ask and document run without tools.
+- **Completion.** `runClaude` dispatches a catalog provider to `providers/adapter-complete.mjs` (one completion, no tools, metered, transient errors retried, `PROVIDER_UNAVAILABLE` for config problems). `POST /kb/complete`, the tier-routed background roles (a Strong or Cheap tier may name a connection; Settings, Tiers and Roles) and the `internal` role of `/generate-notes` (JSON path), `/generate-questions` and `/extract-entities` use it. Not migrated: the streaming `/generate-notes` (CLI streaming), `/generate-doc` and `/kb/export` (their own prompt paths), `analyze-risks` (rule based, no model), the Loop's agent step (Claude Agent SDK by design).
+- **Network.** Every request to a model-provider host goes through the pinned fetch; `tests/provider-fetch-pinned-guard.test.mjs` fails on a bare `fetch(` outside the fixed-host allowlist (api.anthropic.com, the web-fetch tool, Jev).
+
 ## §10 Tests
 
 `extension/tests/ip-classifier.test.mjs`, `pinned-fetch.test.mjs` (a real local server, a fake resolver, a rebinding sequence), `eslint-ai-sdk-fence.test.mjs` and `provider-*.test.mjs` (catalog, connections, models, adapter incl. recorded wire, fallback, turn, wire conformance, routes) and `mac/Tests/LlmIdeMacTests/ProviderCatalogModelTests.swift`. No test reaches a real provider.

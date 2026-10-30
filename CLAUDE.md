@@ -199,7 +199,7 @@ llm-ide/
 │   │   │   │            #   ShellFaultVerifier, AgentFaultRepairer, RepairScopeGuard,
 │   │   │   │            #   GroupedSubprocess) + Models/ (VerifyApprovalStore, AppWrittenFiles)
 │   │   │   ├── Chat/    #   splits further: Models/ (incl. DiffStats, ProposedEdit, ProposedPlan)
-│   │   │   │            #   Engine/ Session/ Transport/ (CodeAssistTransport, AgentV2Selection)
+│   │   │   │            #   Engine/ Session/ Transport/ (AgentV2Selection)
 │   │   │   │            #   Services/ Views/ (Panel/ = CodeAssistant
 │   │   │   │            #   + its action sheets, Quick/ = menu bar + sheet, Shared/)
 │   │   │   ├── MobileControl/  # WebSocket server, Bonjour, PIN cache, pairing UI

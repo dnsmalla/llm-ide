@@ -11,13 +11,12 @@ This is the rebuild-grade contract for the agent runtime; verbatim prompts are l
 
 The following files are governed by this document.
 
-### Core runtime loop and protocol
+### Core runtime modules
 
-- `extension/llm_agent/runtime/loop.mjs` — iteration engine, prompt assembly, caching, depth guard
-- `extension/llm_agent/runtime/fence.mjs` — fence parser and argument validator
+The classic engine (the text-fence tool loop `loop.mjs`, the fence parser `fence.mjs`, the `/code-assist` orchestrator `route.mjs` and the OpenAI tool translation `openai-tools.mjs`) was **deleted in API 92** (agent-kit K1 Phase 6). Every chat turn runs on the Claude Agent SDK engine (`extension/llm_agent/sdk/`) or, through the session router, on the multi-provider adapter (`extension/llm_agent/adapter/`); `POST /code-assist` answers 410. What stays in this folder is shared by both:
+
 - `extension/llm_agent/runtime/redaction.mjs` — sentinel neutralisation shared by all handlers
 - `extension/llm_agent/runtime/model-tier.mjs` — per-tier model resolution
-- `extension/llm_agent/runtime/route.mjs` — `/code-assist` orchestrator; wires global loop, handlers, skill views
 
 ### Read handlers (server-executed)
 
@@ -52,127 +51,13 @@ The following files are governed by this document.
 
 ---
 
-## §2 The loop
+## §2 The loop (removed)
 
-Source: `extension/llm_agent/runtime/loop.mjs`
-
-### Caps and limits
-
-| Constant | Value | Line |
-|---|---|---|
-| `DEFAULT_MAX_ITERATIONS` | 10 | loop.mjs:57 |
-| `DEFAULT_DEADLINE_MS` | `null` (no wall-clock limit — see below) | loop.mjs:79 |
-| `MAX_TOTAL_SKILL_BYTES` | 131 072 bytes (128 KB) | loop.mjs:68 |
-| `MAX_USER_MESSAGE_BYTES` | 500 000 bytes (500 KB) | loop.mjs:134 |
-| `MAX_LOOP_DEPTH` | 2 | loop.mjs:141 |
-| `MAX_CACHE_SIZE` | 100 entries | loop.mjs:175 |
-
-The global agent overrides `maxIterations` because it is user-facing and delegates depth to internal. The internal sub-loop runs with the default 10 iterations.
-
-**No loop has a wall-clock deadline.** `DEFAULT_DEADLINE_MS` is `null` (loop.mjs), and no call site passes one: the global loop (route.mjs), the internal sub-loop (ask-internal.mjs), and plugin subagents (ask-subagent.mjs) all run unbounded in time. They previously used 360 s / 120 s / 90 s, and a legitimate multi-step turn that exceeded its budget lost the whole reply to `_(reached the Ns deadline — try again)_` — a retry that costs more time and tokens than finishing the first attempt would have. A loop is bounded by `maxIterations` (a call budget), `MAX_LOOP_DEPTH`, and client cancellation. `deadlineMs` is still honoured when a caller passes a finite value, so a specific site or a test can opt in; absent, `null`, `0`, and `Infinity` all mean unlimited. `server.requestTimeout` is `0` to match (server.mjs) — a socket cut out from under running work is strictly worse than the deadline message it would replace.
-
-### Depth model
-
-`runAgentLoop` receives a `depth` parameter (default 0). The guard at loop.mjs:150–151 throws immediately if `depth > MAX_LOOP_DEPTH` (2). Depth is incremented **once**, at loop.mjs:270, when the loop dispatches a read handler — the handler receives `ctx.depth = depth + 1` and forwards it verbatim to any nested `runAgentLoop` call. This is the single enforcement point; handler authors cannot forget the increment.
-
-Practical depth levels:
-
-- **depth 0** — global agent (`handleCodeAssist` in route.mjs calls `runAgentLoop` at depth 0)
-- **depth 1** — internal agent (ask-internal.mjs) or plugin subagent (ask-subagent.mjs); both receive `ctx.depth` from the loop (already +1)
-- **depth 2** — any further nesting (not currently wired but bounded by the cap)
-
-### Per-turn algorithm
-
-Each iteration of the `for` loop (loop.mjs:195–295) executes the following steps:
-
-1. **Deadline check** — skipped entirely unless the caller opted into a finite `deadlineMs` (the default is `null` = unlimited; see above). When one was supplied and the wall-clock elapsed exceeds it, return `{ reply, pendingTool: null }` with a deadline-expired annotation, and the in-flight `runClaude` call is bounded by an `AbortSignal` for the remaining budget. With no deadline, no abort signal is created at all.
-
-   That signal comes from `deadlineSignal()` — an explicit `AbortController` plus an ordinary timer, cleared in a `finally` — **not** `AbortSignal.timeout()`. The latter schedules an *unref'd* timer, so it fires only while some other handle happens to be keeping the event loop alive; with nothing else pending the loop drains, the timer never runs, and a call awaiting the signal hangs instead of being bounded. Under the server an open socket incidentally provided that handle, which is luck rather than a guarantee. The choice also matters for the native loop, whose abort branch matches `AbortError`/`ABORT_ERR`: `AbortSignal.timeout` makes `fetch` reject with a **`TimeoutError`**, which that branch does not match, so a deadline that did fire was rethrown as a hard failure instead of returning `_(agent timed out)_`. Both loops are covered by `tests/agent-loop-deadline.test.mjs` (the native-loop cases hang rather than fail if this regresses).
-2. **Prompt assembly** — `buildIterationPrompt` (loop.mjs:109–130) concatenates:
-   - The composed system prompt (base role + optional context block + skill bodies)
-   - Replayed history, selected by `selectHistoryTurns` (loop.mjs) under a **char budget** rather than a turn count, each turn clipped to `config.history.perTurnChars` (24 000) with fence sentinels redacted. The budget is `config.history.promptBudgetChars` (460 000, safely under `runClaude`'s hard 500 000-char throw) minus the system prompt, user message, and `prevOutput`, capped by `config.history.maxChars` (240 000) — so history yields to the parts of the prompt that cannot be dropped, and can never be what fails a turn. The **first user turn is always kept** as an anchor and any gap is disclosed inline (`_(N earlier turn(s) omitted…)_`). Replaced a fixed "last 8 turns" window: each client-executed tool call appends a synthetic result turn plus a reply, so a four-step task evicted the user's original request and the agent lost track of what it had been asked. `runNativeAgentLoop` and the non-agent `/code-assist` prompt in `server/ai-routes.mjs` share the same selector.
-   - The user message (fence-redacted, loop.mjs:116)
-   - The previous assistant output `prevOutput`, if any
-   - A `<<<TOOL_RESULT>>>` block (or tool-error block), if the previous iteration produced one (loop.mjs:124–126)
-   - A trailing `Assistant:` marker
-3. **Model call** — `runClaude(prompt, { userId, model, maxTokens })` (loop.mjs:218–223). `maxTokens` defaults to 2048 when not provided (loop.mjs:221).
-4. **Parse** — `parseFence(out)` (loop.mjs:229) extracts any fence call from the raw model output (see §3).
-5. **No fence** — if `parseFence` returns no fence:
-   - If `parseError` is set, record it as `toolError` and continue to next iteration (loop.mjs:233–236).
-   - Otherwise, return `{ reply: preToolText, pendingTool: null, iterations, cacheHits }` (loop.mjs:237).
-6. **Skill lookup** — look up `fence.name` in `skills` map; unknown name → `toolError`, continue (loop.mjs:240–244).
-7. **Validate args** — `validateArgs(skill.schema, fence.arguments)` (loop.mjs:246–250). Validation error → `toolError`, continue.
-8. **Write skill** — if `skill.kind === 'write'`, return immediately with `{ reply: preToolText, pendingTool: { name, arguments } }` (loop.mjs:252–257). The loop does NOT execute write tools; they go to the client.
-9. **Read skill cache** — key shape: `"<toolName>:<JSON-stable-args>"` (loop.mjs:261). Cache hit → return cached result, increment `cacheHits`. Cache stores only successes (loop.mjs:275). Cache capped at 100 entries; oldest entry evicted when full (loop.mjs:272–274).
-10. **Read skill execution** — `runReadHandler(name, args, { userId, kb, handlers, depth: depth + 1 })` (loop.mjs:270).
-11. **Handler error** → `toolError`, continue.
-12. **Pending tool from nested loop** — if the handler returns `result.pendingTool`, propagate it up unchanged (loop.mjs:286–293). This is how an internal write fence surfaces to the client through the global loop.
-13. **Feed result** — `toolResult = result`; next iteration embeds it as `<<<TOOL_RESULT>>>`.
-
-When the iteration cap is exhausted, the loop returns with an iteration-limit annotation (loop.mjs:297–298).
-
-### System prompt assembly
-
-`buildSystemPrompt` (loop.mjs:70–93) takes `{ base, skills, agentContextBlock }` and joins them in this order:
-
-1. `base` — the pre-composed role/rules prompt for the active agent
-2. `agentContextBlock` — the rendered `# System context` block (internal only; empty string for global)
-3. `# Available skills` heading
-4. Skill bodies joined with `\n\n---\n\n`
-
-Skill bodies are iterated in `skills.values()` order and skipped once their cumulative UTF-8 size exceeds `MAX_TOTAL_SKILL_BYTES` (131 072 bytes). Core skills load first and are never skipped (loop.mjs:60–72).
+The classic loop and its fence protocol no longer exist. The turn algorithm, caps, depth model and system-prompt assembly of the engines that remain are specified in `agent-v2.md` (the Agent SDK engine) and `provider-catalog.md` (the adapter turn). `ask-subagent` is a single completion now (no nested tool loop): it runs the subagent's body as the system prompt, honours the subagent's `model:` / `tier:` and the user's `features.subagents` route, and reports any declared `allowed_tools` it did not run in a `note`; `ask-internal` answers that it is not available.
 
 ---
 
-## §3 Fence protocol
-
-### Parse sentinels
-
-Source: `extension/llm_agent/runtime/fence.mjs`
-
-The two sentinel strings (fence.mjs:5–6):
-
-```text
-<<<TOOL_CALL>>>
-<<<END_TOOL_CALL>>>
-```
-
-The tool-result sentinels embedded by the loop (loop.mjs:111):
-
-```text
-<<<TOOL_RESULT>>>
-<<<END_TOOL_RESULT>>>
-```
-
-### Parse rules (`parseFence`, fence.mjs:8–42)
-
-1. If the raw output contains no `<<<TOOL_CALL>>>`, return `{ text: raw, fence: null }`.
-2. If `<<<END_TOOL_CALL>>>` is missing after the open sentinel, return `parseError: 'unterminated fence: missing <<<END_TOOL_CALL>>>'`.
-3. Extract the JSON blob between the two sentinels and `JSON.parse` it. Parse failure → `parseError`.
-4. The blob must be a non-array object; must have a non-empty string `name`; must have a non-array object `arguments`. Any violation → `parseError`.
-5. Return `{ text: <text-before-sentinel>, fence: { name, arguments } }`.
-
-Text before the open sentinel is accumulated into `preToolText` across iterations (loop.mjs:196), forming the plain-text portion of the final reply.
-
-### Argument validation (`validateArgs`, fence.mjs:44–92)
-
-Iterates the skill's `schema` object. For each declared argument:
-
-- **Missing + required** → error `"missing required argument '<name>'"` (fence.mjs:52)
-- **Missing + optional** → skipped (not included in validated value)
-- **type `string`** — checks `typeof v !== 'string'`; checks `v.length > maxLength` if set (fence.mjs:56–59)
-- **type `number`** — checks `typeof v !== 'number' || !Number.isFinite(v)` (fence.mjs:61–63)
-- **type `boolean`** — checks `typeof v !== 'boolean'` (fence.mjs:65–66)
-- **type `string[]`** — checks array-of-strings; checks element count against `maxItems` (default 512, fence.mjs:74); applies `maxLength` per element (fence.mjs:78–85)
-- **Unsupported type** → error (fence.mjs:87)
-- **Enum constraint** — a `string` arg with a non-empty `enum` array in its schema rejects any value not present in that list, returning `"must be one of: <values>"`.
-- **Undeclared-key rejection** — any key present in `fence.arguments` that is not declared in the skill's schema is rejected with `"unexpected argument '<key>'"`. This prevents the model from passing extra keys that the handler never reads, which would otherwise be silently ignored.
-
-Returns `{ value }` on success or `{ error }` on first failure.
-
-### Error → retry behavior
-
-A `parseError` or validation error sets `toolError` and the loop continues to the next iteration (loop.mjs:199–201, 215–216). The error is embedded in the next iteration's prompt as a `<<<TOOL_RESULT>>>` block containing `{ "error": "<message>" }` (loop.mjs:113). The model is expected to correct its call.
+## §3 Fence protocol (removed), redaction (kept)
 
 ### Redaction (`redaction.mjs`)
 
@@ -347,7 +232,7 @@ These are joined with `\n\n` and passed as `agentContext.base` to the internal `
 
 `persistTurnMemory` (memory-persist.mjs) runs fire-and-forget after each reply: it resolves the write target through the same `resolveAllowedRepoRoot` gate the reader uses, asks a summarize-tier model for 0–N durable facts (memory-extract.mjs), and merges them into `<repo>/system/memory/chat-memory.md` (memory-writer.mjs). Every outcome is logged as one `project_memory` line with `outcome` (`captured` / `no_facts` / `skipped` / `error`) plus counts.
 
-**Typed ledger (migration 0038, `kb/memory-ledger.mjs`).** Beside the markdown store, `project_memory_ledger` records per fact (keyed by a SHA-1 of `factIndex` — never the fact's text — and pruned to the facts still in the file on each capture; local-time timestamps): category, first-seen / last-confirmed time, confirmation count, the chat that taught it and the last one to confirm it, and `active` / `superseded`. Every extracted fact counts as a confirmation — including a byte-identical restatement, which deliberately leaves `chat-memory.md` untouched — and the reader breaks relevance ties by the last confirmation, then the count. The file stays the content's single source of truth; the ledger is best-effort and never gates a capture.
+**Typed ledger (migration 0038, `extension/kb/memory-ledger.mjs`).** Beside the markdown store, `project_memory_ledger` records per fact (keyed by a SHA-1 of `factIndex` — never the fact's text — and pruned to the facts still in the file on each capture; local-time timestamps): category, first-seen / last-confirmed time, confirmation count, the chat that taught it and the last one to confirm it, and `active` / `superseded`. Every extracted fact counts as a confirmation — including a byte-identical restatement, which deliberately leaves `chat-memory.md` untouched — and the reader breaks relevance ties by the last confirmation, then the count. The file stays the content's single source of truth; the ledger is best-effort and never gates a capture.
 
 **The upsert index.** Each fact may carry a stable subject id in its tag — `[category|subject-id] text` — supplied by the extractor and asked to be reused when it revises a known fact. `factIndex` returns that id when present and falls back to full-text `factKey` otherwise, and `appendChatMemory` treats a repeat index as an **update in place** (position preserved), not a duplicate to discard. Without the id, "binds to port 3456" and "binds to port 4000" have different text keys and the store held both, leaving the agent two contradictory facts with no way to tell which was current.
 
@@ -359,7 +244,7 @@ These are joined with `\n\n` and passed as `agentContext.base` to the internal `
 
 ## §5 Sub-model routing
 
-Sources: `extension/llm_agent/runtime/model-tier.mjs`, `extension/llm_agent/runtime/route.mjs`, `extension/providers/runtime.mjs`
+Sources: `extension/llm_agent/runtime/model-tier.mjs`, `extension/providers/runtime.mjs`
 
 ### Tier→env mapping
 
@@ -420,19 +305,9 @@ Source: `extension/providers/runtime.mjs`
 
 The sections below detail the **Anthropic** provider's two paths; other providers follow the same HTTP-then-CLI shape through `providers.mjs`.
 
-### Chat-turn provider selection
+### Chat-turn provider selection (replaced)
 
-Source: `extension/llm_agent/runtime/route.mjs`
-
-`runClaude` is a single completion. A **chat turn** (`handleCodeAssist`) additionally chooses which agent loop runs, and that is a three-way decision on the turn's effective provider (`provider` from the client, else `resolveProvider(model)`):
-
-1. **An OpenAI-compatible provider with a usable API key** → `runNativeAgentLoop`: the full tool loop (skills, file tools, approval cards) over OpenAI-style function calling. `NATIVE_PROVIDERS` is `deepseek`, `openai`, `custom`, `google`, plus any `custom:<uuid>`. Base URLs: `custom` from the vault, `deepseek` `DEFAULT_DEEPSEEK_BASE`, `google` `DEFAULT_GEMINI_OPENAI_BASE` (Gemini's OpenAI-compatible surface, which supports `tools`/`tool_choice`), `custom:<uuid>` from the caller's own provider registry (`server/custom-providers.mjs` — per user, persisted in `user_flags` under `custom.providers`, synced by the Mac via `POST /kb/custom-providers`).
-2. **A non-Anthropic provider with no key but a logged-in CLI** (`providerHasCli` — `openai` → `codex`, `google` → `gemini`) → the turn is delegated to that CLI as a **single-shot completion** via `runClaude`. Those CLIs are their own agents and do not speak this server's tool protocol, so this server's tool loop is not in play and no `pendingTool` can be produced. An API key is what buys the full loop.
-
-   The delegate is **rooted in the chat's workspace**: `agentContext.workspaceRoot` (tilde-expanded — Node's spawn does not expand `~`) is passed as `runClaude`'s `cwd`, through `runViaCli` to the `spawnCli`/`spawnCliStream` child. Without it the child inherited the *server's* cwd (`extension/`) and reasoned about the wrong tree. `codex` additionally receives the root explicitly as `-C <cwd>` and is pinned to `-s read-only`; the Gemini CLI has no documented read-only flag, so it keeps its own default (interactive approval, which headless can never grant). **Neither is ever given `--yolo`** — auto-approving writes is opted into per-task by the auto-task runner, never by chatting, and it matters here specifically because a write made inside the CLI could not pass through the approval cards that gate the API-key path. Pinned by `tests/providers.test.mjs`.
-3. **A non-Anthropic provider with neither** (`deepseek`/`glm`/`custom`, all `cli: null`) → a provider-specific error naming what is missing. GLM's points at Settings → Custom Providers rather than asking for a key it cannot use.
-
-Anything that resolves to `anthropic` runs the text-fence `runAgentLoop`. **Invariant:** a non-Anthropic selection must never reach that branch — it ignores `model` (it passes `GLOBAL_AGENT_MODEL`), so before this split, choosing Gemini or GLM silently returned a Claude answer. Pinned by `tests/code-assist-provider-model.test.mjs`.
+`handleCodeAssist` and its three-way provider decision are gone with the classic engine. A chat turn picks its engine in `routes/agent-v2.mjs`: Claude (and an Anthropic-compatible custom provider) on the Agent SDK engine; a provider-catalog connection (`custom:cat-*`) on the adapter, only while the session router is on (`docs/spec/session-router.md`). Any other provider is refused with `PROVIDER_NOT_AGENT_CAPABLE`. `runClaude` itself (one completion) still serves the background callers; for a catalog connection it dispatches to `providers/adapter-complete.mjs` (no tools, pinned fetch), so `POST /kb/complete`, the tier-routed background roles and the notes, questions and entities routes can use the user's chosen provider.
 
 ### Prompt cap
 

@@ -5,6 +5,9 @@ status: draft
 
 # Agent runtime
 
+!!! warning "The classic loop described below was deleted in API 92"
+    The two-agent text-fence loop (`runtime/loop.mjs`, `fence.mjs`, `route.mjs`) and `POST /code-assist` were removed in agent-kit K1 Phase 6. Chat runs on the Agent SDK engine (`llm_agent/sdk/`) or the multi-provider adapter (`llm_agent/adapter/`); `POST /code-assist` answers 410. Read the sections below as history; the live contracts are in `docs/spec/agent-v2.md` and `docs/spec/provider-catalog.md`.
+
 !!! info "Rebuild-grade detail"
     Exact contracts (loop algorithm, fence protocol, skill schema, sub-model cascade, runClaude, dispatch) are in [`../spec/agent-runtime.md`](../spec/agent-runtime.md).
 
