@@ -17,10 +17,10 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
 | Shared server and core | 10 | 2 | 5 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
-| Agents, providers, extensions | 7 | 1 | 9 | 17 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
+| Agents, providers, extensions | 8 | 1 | 9 | 18 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 5 | 1 | 7 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
-| Release and CI | 4 | 1 | 8 | 13 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 60 | 13 | 84 | 157 |  |
+| Release and CI | 5 | 1 | 8 | 14 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
+| Total | 62 | 13 | 84 | 159 |  |
 
 ## How the surfaces connect
 
@@ -239,6 +239,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Provider pinning for tracker-host connectors (`ff0960e9`, ROADMAP X7) (me)
 - [x] DeepSeek: a tool mode with tools off degrades to plain chat with a notice; current model ids tool-capable (`27a641a6`) (me)
 - [x] Extensions catalog P0-P3: baseline `a3897732`, item model + importer + shadow active set `c25e1c46`, consumers behind `LLMIDE_EXT_ACTIVE_SET` `ebf20127`, MCP on provider-adapter turns behind `LLMIDE_EXT_ADAPTER` `c0b3067c`, spec `4045f2af` (me)
+- [x] Extensions MCP review findings fixed: `853f130b`, `9d792d1b`, `9b96282a` (me)
 - [~] Retire `llm_agent/runtime/` (P7): 2 commits local, finishing gates (`844b1213`, `ece843c6`) (me)
 - [ ] Extensions catalog P4-P9: sources, install, scan, updates, Mac screen, rollout (plan 2026-10-31) (me)
 - [ ] Y1 bench go-ahead and runs: baselines, noise check, A/B per switch (USER-CHECKLIST A) (you)
@@ -279,7 +280,8 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Pre-push gate runs the same lint CI does (`a0dd8473`) (me)
 - [x] `make regression` aggregates graph-kit pin, feature, contract, Mac, chat/loop/api gates (`Makefile`) (me)
 - [~] Mac Sparkle `CFBundleVersion` limitation (project notes 2026-10; fix state unverified) (me)
-- [ ] Night-push job: set up the nightly job that pushes local `main` commits (me, next)
+- [x] Night-push job built (`746b94f9`) (me)
+- [ ] Install the nightly push job: commands in `scripts/nightly-push.sh --help` (you)
 - [ ] CI result checked after every push (`gh run list`) (you)
 - [ ] Tauri release workflow: macOS, Windows, Linux bundles (me)
 - [ ] Windows code signing and Linux packaging (deb/AppImage) decision (you)
