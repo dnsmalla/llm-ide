@@ -1,6 +1,6 @@
 # Extensions catalog: skills, MCP servers and plugins from GitHub, one switch per item, only active items loaded
 
-Status: **P0 to P3 implemented** on `main` (local, not pushed; see section 16); P4 onward not started. Branch: `main` (no feature branches, no push). Date: 2026-10-31 (request 2026-10-30).
+Status: **P0 to P3 implemented, P4 implemented for GitHub sources** on `main` (local, not pushed; see section 16); P5 onward not started. Branch: `main` (no feature branches, no push). Date: 2026-10-31 (request 2026-10-30).
 Research basis: read-only pass at `b1cb2817` (`SERVER_API_VERSION = 92`, `extension/server.mjs:298`). Inputs: [agent-kit](../../kits/agent-kit.md) (K0 map), [agent-kit K1](2026-10-30-agent-kit-k1.md) (Track Q, lean config, bench gates), [provider catalog spec](../../spec/provider-catalog.md) (the catalog pattern), [LLM-source items design](../specs/2026-09-25-llm-source-items-and-update-design.md). Every `path:line` was read in this pass. Nothing was run (no bench, no test, no Mac build). External facts carry a URL; anything I could not confirm is marked **(unverified)** and collected in section 15.
 
 User request (2026-10-30): "upgrade plugin, skill, MCP to a more professional way; reduce OUR generated skills; use popular skills from GitHub; select/deselect each to use or not; do the same for MCP, plugin and skills; when updating, update the system so only ACTIVE ones are used."
@@ -355,6 +355,7 @@ Spec: [extensions-catalog](../../spec/extensions-catalog.md). All four phases ar
 | P1 model, importer, shadow | done | `feat(extensions): catalog item model, importer, switch overlay and shadow active set` |
 | P2 consumers on the active set | done | `test(extensions): consumers honour catalog switches behind LLMIDE_EXT_ACTIVE_SET` |
 | P3 adapter parity | done | `feat(adapter): mount the user's active MCP servers on provider-adapter turns` |
+| P4 GitHub sources + install | done for GitHub (user-named repo); marketplace/MCP-registry indexes, search, and loading installed items into turns remain | `feat(extensions): GitHub source, in-memory tar reader, inspect and warn-only scan`, `feat(extensions): install at a pinned commit...`, `feat(api): extensions catalog routes (API 93)` |
 
 Deviations from the plan text, with the reason:
 
@@ -367,4 +368,6 @@ Deviations from the plan text, with the reason:
 7. **Local HTTP MCP servers** are refused on adapter turns (pinned fetch with no private-network opt-in); a local server is a stdio one. A per-server opt-in would need a registry field.
 8. **MCP client.** The official `@modelcontextprotocol/sdk` already pinned at 1.30.0 (the AI SDK 6.0.317 has no MCP client). No new dependency, so no new `npm audit signatures` target; the import is fenced by ESLint like the AI SDK.
 
-Open items for P4 and later: the `GET`/`POST` extension routes and the API bump; account-deletion cleanup of the overlay; SDK behaviour on a generated subset plugin root (R3, unverified); real-data shadow numbers (the compare is implemented and tested on synthetic state only); a registry field for per-server private-network opt-in; per-tool MCP deny lists; pooling MCP connections across turns (today each adapter turn pays the connect time, bounded at 15 s).
+P4 deviations: only the `github-url` adapter exists (a repo the user names, classified by contents; a marketplace repo is refused with its entry names so the user installs one by `path`); `marketplace`, `skills-repo`, `mcp-registry`, `mcp-seed` index adapters, the index cache and `GET catalog|active` are left for P5 with the Mac screen. The store is per user (Q-E4 answered conservatively: no shared bytes). Installed items are recorded and switchable but no consumer loads them yet. Routes shipped: installed, install, toggle (item or members, with consent), uninstall; consent is a field of toggle, not a route. Account-deletion cleanup of the overlay is done (`forgetUserExtensions`). The GitHub archive URL (`codeload.github.com/<o>/<r>/tar.gz/<sha>`, 200 without redirect) is unverified against the live service; every test uses fixtures.
+
+Open items for P5 and later: the `GET`/`POST` extension routes and the API bump; account-deletion cleanup of the overlay; SDK behaviour on a generated subset plugin root (R3, unverified); real-data shadow numbers (the compare is implemented and tested on synthetic state only); a registry field for per-server private-network opt-in; per-tool MCP deny lists; pooling MCP connections across turns (today each adapter turn pays the connect time, bounded at 15 s).
