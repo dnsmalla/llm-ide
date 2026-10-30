@@ -12,15 +12,15 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 7 | 2 | 17 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
-| Mobile (iPhone native, PWA) | 6 | 2 | 7 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 4 | 0 | 8 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
+| Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
+| Web app and relay | 4 | 1 | 7 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 10 | 3 | 4 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Shared server and core | 11 | 3 | 3 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 10 | 1 | 9 | 20 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
-| Security | 6 | 1 | 6 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
+| Security | 6 | 2 | 5 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 5 | 1 | 8 | 14 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 67 | 14 | 80 | 161 |  |
+| Total | 68 | 17 | 76 | 161 |  |
 
 ## How the surfaces connect
 
@@ -144,7 +144,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Background / reconnect behaviour verified on device (unverified) (you)
 - [ ] Phone works with the Mac off (needs relay, S4) (wait)
 - [ ] Retire cleartext `:3006` + PIN link once the relay reaches parity (ADR 0018 "Supersedes") (wait)
-- [ ] sync-kit K0 map (`docs/kits/` has no sync-kit page yet) and K1-K4 (me)
+- [~] sync-kit K0 map done (`docs/kits/sync-kit.md`, `845aa869`); K1-K4 not started (me)
 - [ ] Phone PWA served by the relay (decided: Q-WEB-1 = A; built last in sync-kit) (wait)
 
 ## S4. Web app and relay
@@ -158,7 +158,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Decided what the web app is: relay-served phone web view, built last in sync-kit (Q-WEB-1 = A; Q-WEB-3: phone through the Mac is enough for now) (you)
 - [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2; decided later with the relay work (Q-WEB-2) (you)
 - [ ] Relay service: snapshot store, inbox, per-device tokens (no code exists; no `relay/` folder) (me)
-- [ ] End-to-end crypto design: team key, QR enrollment, rotate on revoke; independent security review (me)
+- [~] End-to-end crypto design: team key, QR enrollment, rotate on revoke written (`docs/superpowers/plans/2026-10-31-relay-design.md`, `93e8b083`); independent security review not done (me)
 - [ ] Snapshot producer on the desktop and request consumer with permission re-check (me)
 - [ ] Phone PWA (installable, offline read, queue) (me)
 - [ ] Extension read/queue through the relay when the desktop is off (me)
@@ -204,7 +204,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] K1 per kit, in order: ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
 - [~] Core job runner: library done (`extension/kb/job-queue.mjs`, `job-runner.mjs`, `core/process-group.mjs`, migration 0055, spec `docs/spec/job-runner.md`, 10 tests in `extension/tests/job-runner.test.mjs`); not wired into boot or HTTP, no flake gate yet (me)
 - [ ] automation-kit (Loop + Auto Tasks) logic into Node, the largest kit (me)
-- [ ] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/` has docs, graph, knowledge, agent only) (me)
+- [x] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/*.md`, `845aa869`; each lists numbered decisions for the user) (me)
 - [ ] Flaky tests under full-gate load hardened (`index-routes.http` 1 MB body, `loop-contract-lab` probes) (me)
 
 ## S7. Data and storage
@@ -266,7 +266,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Provider and connector fetch pinning: done for provider catalog and trackers; independent review welcome (ROADMAP X7) (me)
 - [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
 - [x] Tauri capability manifest and path scoping (see S2; `desktop/src-tauri/capabilities/`, `graph_file.rs`) (me)
-- [ ] Relay: E2E design review, key rotation on revoke, no plaintext (see S4) (me)
+- [~] Relay: E2E design written with threat model (`93e8b083`); independent review, key rotation on revoke and no-plaintext tests are phases R1 to R4 of that design (me)
 - [ ] Workspace Trust: untrusted folders run no hooks, install scripts or MCP stdio servers (Tauri plan §8) (me)
 - [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
 - [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5) (you)
