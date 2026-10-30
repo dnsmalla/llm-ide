@@ -136,7 +136,7 @@ function validateKey(apiKey) {
  * put the key in the vault, record the connection. Throws an Error with a
  * `code` (VALIDATION_FAILED | NOT_FOUND | LIMIT) the route maps to a status.
  */
-export function connectProvider(userId, { catalogId, apiKey, baseURL, slug, name, allowPrivate } = {}, db = getDb()) {
+export function connectProvider(userId, { catalogId, apiKey, baseURL, slug, name, allowPrivate, enabled } = {}, db = getDb()) {
   if (!userId) throw new Error('connectProvider requires a userId');
   const entry = catalogEntry(catalogId);
   if (!entry) throw Object.assign(new Error(`Unknown catalog provider '${String(catalogId).slice(0, 40)}'`), { code: 'NOT_FOUND' });
@@ -186,7 +186,7 @@ export function connectProvider(userId, { catalogId, apiKey, baseURL, slug, name
   const conn = {
     id, catalogId: entry.id,
     name: (typeof name === 'string' && name.trim() ? name.trim() : entry.name).slice(0, 100),
-    baseURL: cleanUrl, allowPrivate: priv, enabled: true,
+    baseURL: cleanUrl, allowPrivate: priv, enabled: enabled !== false,
   };
   state.connections = [...state.connections.filter((c) => c.id !== id), conn];
   write(db, userId, state);

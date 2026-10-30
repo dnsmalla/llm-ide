@@ -21,7 +21,7 @@ import {
 } from '../server/provider-connections.mjs';
 import { listConnectionModels, testConnection } from '../providers/provider-models.mjs';
 import { runProviderTurn, ProviderTurnError } from '../llm_agent/adapter/provider-turn.mjs';
-import { migrateLegacyProviderKeys, migrationView } from '../providers/legacy-key-migration.mjs';
+import { migrateLegacyProviderKeys, migrationView, legacyKeyFor } from '../providers/legacy-key-migration.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 
@@ -79,6 +79,12 @@ export async function handleProviderCatalog(req, res, { userId, url }) {
   if (m === 'POST' && path === '/kb/providers/catalog/connect') {
     const b = await body(req, res); if (!b) return true;
     try {
+      // "Move to catalog": copy the key of a legacy provider the caller already has (never deleted, never returned).
+      if (typeof b.apiKey !== 'string' && typeof b.copyKeyFrom === 'string') {
+        const copied = legacyKeyFor(userId, b.copyKeyFrom, db);
+        if (!copied) { err(res, 400, 'VALIDATION_FAILED', 'No stored key found for that provider'); return true; }
+        b.apiKey = copied;
+      }
       const connection = connectProvider(userId, b, db);
       sendJSON(res, 200, { ok: true, connection });
     } catch (e) {

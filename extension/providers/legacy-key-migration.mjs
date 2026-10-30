@@ -113,3 +113,22 @@ export function migrateLegacyProviderKeys(userId, { db = getDb() } = {}) {
 
 /** The stored record without running anything. */
 export function getMigrationRecord(userId, db = getDb()) { return userId ? readRecord(db, userId) : null; }
+
+/**
+ * The stored key behind one legacy provider id, for an explicit "Move to catalog" copy: a built-in
+ * (openai, google, deepseek), the shared "custom" endpoint, or one of the caller's own `custom:<id>`
+ * providers. Only these vault slots can be named (never an arbitrary vault key), and the value is read
+ * for the caller's own user only. Returns null when there is no such provider or no key. Nothing is
+ * deleted or changed.
+ */
+export function legacyKeyFor(userId, legacyId, db = getDb()) {
+  if (!userId || typeof legacyId !== 'string') return null;
+  const built = BUILT_IN.find((b) => b.provider === legacyId);
+  if (built) return keyOf(db, userId, built.vaultKey);
+  if (legacyId === 'custom') return keyOf(db, userId, 'custom.apiKey');
+  if (legacyId.startsWith('custom:') && !legacyId.startsWith('custom:cat-')) {
+    const cp = listCustomProviders(userId, db).find((c) => `custom:${c.id}` === legacyId);
+    return cp ? keyOf(db, userId, cp.vaultKey) : null;
+  }
+  return null;
+}

@@ -240,3 +240,23 @@ test('first GET of the catalog carries a DeepSeek-only user over once: a connect
   assert.equal(second.providers.find((p) => p.id === 'deepseek').connections.length, 1);
   assert.deepEqual(second.migration, first.migration);
 });
+
+test('connect copyKeyFrom copies a legacy key (old one kept, never echoed); an unknown or foreign source is refused; enabled:false sticks', async () => {
+  const { db, users: [a, b] } = freshDb();
+  const { setSecret, getSecret } = await import('../server/vault.mjs');
+  setSecret(db, a, 'openai.apiKey', KEY);
+  let res = await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'openai', copyKeyFrom: 'openai' });
+  assert.equal(res.statusCode, 200);
+  assert.ok(!res._body.includes(KEY));
+  assert.equal(res.json().connection.hasKey, true);
+  assert.equal(getSecret(db, a, 'custom.cat-openai.apiKey'), KEY);
+  assert.equal(getSecret(db, a, 'openai.apiKey'), KEY, 'the legacy key is untouched');
+  // another user has no such legacy key; an arbitrary vault key name is not a valid source
+  res = await call(b, 'POST', '/kb/providers/catalog/connect', { catalogId: 'openai', copyKeyFrom: 'openai' });
+  assert.equal(res.statusCode, 400);
+  res = await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'groq', copyKeyFrom: 'openai.apiKey' });
+  assert.equal(res.statusCode, 400);
+  // switching a connection off keeps its key and shows enabled:false
+  res = await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'openai', enabled: false });
+  assert.deepEqual([res.json().connection.enabled, res.json().connection.hasKey], [false, true]);
+});
