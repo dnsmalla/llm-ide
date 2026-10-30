@@ -96,12 +96,13 @@ export function pickRoute({ route, requested, now = new Date() }) {
   const pick = pinned
     ? { provider: route.provider, model: route.model, source: 'route' }
     : { provider: requested.provider, model: requested.model ?? null, source: 'request' };
+  const pickModel = pick.model ?? '';
   const last = lastTouched(route?.warm);
   const sameProvider = !last || catalogIdOf(last.provider) === catalogIdOf(pick.provider);
-  const warm = isWarm(route?.warm, pick.provider, pick.model ?? '', now);
+  const warm = isWarm(route?.warm, pick.provider, pickModel, now);
   let cold = false;
   let coldReason = null;
-  const changed = !!last && (last.provider !== pick.provider || last.model !== (pick.model ?? ''));
+  const changed = !!last && (last.provider !== pick.provider || last.model !== pickModel);
   if (changed) {
     cold = !warm;
     coldReason = cold ? 'switch' : null;
@@ -109,7 +110,10 @@ export function pickRoute({ route, requested, now = new Date() }) {
     cold = true;
     coldReason = 'expired';
   }
-  return { ...pick, pinned, changed, freshSession: !!last && !sameProvider, cold, coldReason };
+  // An adapter turn after the last Claude turn leaves the Claude SDK session behind the conversation, even when
+  // the warm map is empty or has pruned that turn's stamp: last_engine remembers it. Never resume it then.
+  const adapterSince = route?.lastEngine === 'adapter' && !String(pick.provider).startsWith('custom:cat-');
+  return { ...pick, pinned, changed, freshSession: (!!last && !sameProvider) || adapterSince, cold, coldReason };
 }
 
 /**

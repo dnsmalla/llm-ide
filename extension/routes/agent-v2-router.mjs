@@ -14,19 +14,28 @@ import { routerEnabled, routerCapEnabled } from '../core/router-flags.mjs';
 import { sendJSON, readBody, parseJSON } from '../core/utils.mjs';
 import { logger } from '../core/logger.mjs';
 import {
-  RouteError, getRoute, putRoute, applyPending, commitTurnUsage, listRouteEvents, recordRouteEvent,
+  RouteError, getRoute, putRoute, applyPending, seedRouteIfMissing, commitTurnUsage, listRouteEvents, recordRouteEvent,
 } from '../kb/chat-route.mjs';
 import { pickRoute, capState, cacheTtl, switchCost } from '../providers/route-policy.mjs';
 import { AGENT_SDK_PROVIDER } from '../llm_agent/sdk/constants.mjs';
+import { getCustomProvider } from '../server/custom-providers.mjs';
 
 const log = logger.child({ component: 'agent-v2-router' });
 
-/** The providers a v2 chat can be pinned to: Claude, or a connected catalog / custom provider. */
-function normalizePinnedProvider(provider) {
+/**
+ * The providers a v2 chat can be pinned to: Claude, or a custom provider or catalog connection THIS user owns.
+ * A pin naming another user's (or a nonexistent) provider is refused here, not discovered at turn time.
+ */
+function normalizePinnedProvider(provider, userId, db) {
   if (provider === '' || provider === undefined) return provider;
   if (provider === 'claude' || provider === AGENT_SDK_PROVIDER) return AGENT_SDK_PROVIDER;
-  if (typeof provider === 'string' && provider.startsWith('custom:')) return provider;
-  throw new RouteError('VALIDATION_FAILED', 'provider must be "anthropic" or a connected custom:<id> provider', 400);
+  if (typeof provider === 'string' && provider.startsWith('custom:')) {
+    let owned = false;
+    try { owned = !!getCustomProvider(provider, userId, db); } catch { owned = false; }
+    if (owned) return provider;
+    throw new RouteError('VALIDATION_FAILED', 'That provider is not one of your connected providers', 400);
+  }
+  throw new RouteError('VALIDATION_FAILED', 'provider must be "anthropic" or one of your connected custom:<id> providers', 400);
 }
 
 /** True for a catalog connection: the Claude engine cannot run it, the adapter does. */
@@ -52,27 +61,33 @@ const unavailable = (err) => {
  * @returns {{ enabled: false } | { enabled: true, route: object|null, pick: object, switched: object|null,
  *            capOn: boolean, cap: object, refusal: object|null }}
  */
-export function beginRouteTurn({ db, userId, chatSessionId, requested, apply = false, now = new Date(), env = process.env }) {
+export function beginRouteTurn({ db, userId, chatSessionId, requested, seed = null, apply = false, now = new Date(), env = process.env }) {
   if (!routerEnabled(env)) return { enabled: false };
   let route;
   let switched = null;
   try {
-    if (apply) {
-      const a = applyPending(db, userId, chatSessionId);
-      route = a.route;
-      switched = a.switched;
-    } else {
-      route = getRoute(db, userId, chatSessionId);
-    }
+    // A missing row is re-created from the client's own copy BEFORE the cap check (see seedRouteIfMissing).
+    route = seedRouteIfMissing(db, userId, chatSessionId, seed) ?? getRoute(db, userId, chatSessionId);
   } catch (err) {
     throw unavailable(err);
   }
   const capOn = routerCapEnabled(env);
-  const cap = capState(route);
-  const pick = pickRoute({ route, requested, now });
+  let cap = capState(route);
   const refusal = capOn && cap.blocked
     ? { status: 402, code: 'SESSION_TOKEN_LIMIT', message: 'This chat reached its session token limit. Raise the limit to continue.', used: cap.used, limit: cap.limit }
     : null;
+  // A refused turn does not start, so it must not consume a pending switch: apply it only once the turn is allowed.
+  if (apply && !refusal) {
+    try {
+      const a = applyPending(db, userId, chatSessionId);
+      route = a.route ?? route;
+      switched = a.switched;
+      cap = capState(route);
+    } catch (err) {
+      throw unavailable(err);
+    }
+  }
+  const pick = pickRoute({ route, requested, now });
   return { enabled: true, route, pick, switched, capOn, cap, refusal };
 }
 
@@ -104,7 +119,7 @@ export function createRouteTurn({ db, userId, chatSessionId, begin, provider, mo
       committed = true;
       try {
         const route = commitTurnUsage(db, userId, chatSessionId, usage, {
-          provider: answered?.provider ?? provider, model: answered?.model ?? model, now: now(), ttlMs: cacheTtl(answered?.provider ?? provider).ms,
+          provider: answered?.provider ?? provider, model: answered?.model ?? model ?? '', now: now(), ttlMs: cacheTtl(answered?.provider ?? provider).ms,
         });
         const after = capState(route);
         if (begin.capOn && after.limit !== null) {
@@ -133,7 +148,7 @@ export function routeSwitchNotice({ userId, chatSessionId, begin, provider, mode
   if (!begin.enabled) return null;
   if (!begin.switched && !begin.pick.changed) return null;
   const from = begin.switched?.from ?? null;
-  const cost = switchCost({ route: begin.route, target: { provider, model }, now });
+  const cost = switchCost({ route: begin.route, target: { provider, model: model ?? '' }, now });
   recordRouteEvent(userId, chatSessionId, {
     kind: 'switch', fromProvider: from?.provider, fromModel: from?.model, toProvider: provider, toModel: model,
     reason, coldPrefillTokens: cost.estimatedPrefillTokens,
@@ -141,7 +156,7 @@ export function routeSwitchNotice({ userId, chatSessionId, begin, provider, mode
   return {
     type: 'notice', kind: 'route_switch', level: 'info',
     text: `This chat now runs on ${model || provider}.${cost.cold ? ' The prompt cache starts cold on this turn.' : ''}`,
-    data: { from, to: { provider, model }, reason, cold: cost.cold, estimatedPrefillTokens: cost.estimatedPrefillTokens },
+    data: { from, to: { provider, model: model ?? '' }, reason, cold: cost.cold, estimatedPrefillTokens: cost.estimatedPrefillTokens },
   };
 }
 
@@ -180,8 +195,8 @@ export function routeWire(route, chatSessionId, env = process.env) {
     chatSessionId, provider: '', model: '', pinned: false, pinnedBy: 'user', tokenLimit: null, used: EMPTY_USED,
     remaining: null, stickyUntil: null, warm: {}, switchSeq: 0, handoffUpTo: null, pending: null, updatedAt: null,
   };
-  const { handoffUpTo: _drop, ...rest } = base;
-  void _drop;
+  const { handoffUpTo: _h, lastEngine: _e, ...rest } = base;
+  void _h; void _e;
   return { enabled: routerEnabled(env), capEnforced: routerCapEnabled(env), ...rest };
 }
 
@@ -230,7 +245,7 @@ export async function handleRoutePut(req, res, userId, db, { isChatTurnInFlight,
   try {
     const patch = { tokenLimit: body.tokenLimit, tokensUsed: body.tokensUsed, ifSeq: body.ifSeq };
     if (body.provider !== undefined || body.model !== undefined) {
-      patch.provider = normalizePinnedProvider(body.provider);
+      patch.provider = normalizePinnedProvider(body.provider, userId, db);
       patch.model = body.model;
     }
     for (const k of Object.keys(patch)) if (patch[k] === undefined) delete patch[k];

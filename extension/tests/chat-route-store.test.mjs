@@ -156,3 +156,36 @@ test('history events queue, list per user and chat, and never throw when the sto
   assert.equal(h.events[0].coldPrefillTokens, 1234);
   void agentDb;
 });
+
+test('seedRouteIfMissing: creates from a seed, only raises an existing row, ignores junk, is per user', () => {
+  assert.equal(route.seedRouteIfMissing(conn, U, 's-none', null), null);
+  assert.equal(route.seedRouteIfMissing(conn, U, 's-none', { tokenLimit: -1, tokensUsed: 'x' }), null, 'nothing usable in the seed: no row');
+  const made = route.seedRouteIfMissing(conn, U, 's-1', { tokenLimit: 500, tokensUsed: 120, provider: 'anthropic', model: 'm' });
+  assert.deepEqual([made.tokenLimit, made.used.billable, made.pinned], [500, 120, true]);
+  const again = route.seedRouteIfMissing(conn, U, 's-1', { tokenLimit: 9, tokensUsed: 10, provider: 'custom:x', model: 'y' });
+  assert.deepEqual([again.tokenLimit, again.used.billable, again.provider], [500, 120, 'anthropic'], 'an existing row is not lowered or re-pinned');
+  assert.equal(route.seedRouteIfMissing(conn, U, 's-1', { tokensUsed: 300 }).used.billable, 300, 'but its used-count can be raised');
+  assert.equal(route.getRoute(conn, V, 's-1'), null, 'another user never sees it');
+  const noPin = route.seedRouteIfMissing(conn, U, 's-2', { tokenLimit: 5, provider: 'openai', model: 'x' });
+  assert.equal(noPin.pinned, false, 'a provider the router cannot run is not pinned');
+});
+
+test('the route count per user is bounded and the oldest rows make room', () => {
+  const W = mk('cr4');
+  const ins = conn.prepare("INSERT INTO chat_session_route (user_id, chat_session_id, provider, model, updated_at) VALUES (?, ?, '', '', ?)");
+  conn.transaction(() => { for (let i = 0; i < route.MAX_ROUTES_PER_USER; i += 1) ins.run(W, `c-${i}`, `2020-01-01T00:${String(Math.floor(i / 60) % 60).padStart(2, '0')}:${String(i % 60).padStart(2, '0')}.000Z`); })();
+  route.commitTurnUsage(conn, W, 'fresh-one', { inputTokens: 1 }, { provider: 'anthropic', model: 'm' });
+  const n = conn.prepare('SELECT COUNT(*) AS n FROM chat_session_route WHERE user_id = ?').get(W).n;
+  assert.ok(n <= route.MAX_ROUTES_PER_USER);
+  assert.ok(route.getRoute(conn, W, 'fresh-one'));
+  assert.equal(route.getRoute(conn, W, 'c-0'), null, 'the oldest went first');
+});
+
+test('commitTurnUsage records the engine of the last turn and keeps it when a turn names no provider', () => {
+  route.commitTurnUsage(conn, U, 'eng-1', { inputTokens: 1 }, { provider: 'custom:cat-groq', model: 'g' });
+  assert.equal(route.getRoute(conn, U, 'eng-1').lastEngine, 'adapter');
+  route.commitTurnUsage(conn, U, 'eng-1', { inputTokens: 1 }, {});
+  assert.equal(route.getRoute(conn, U, 'eng-1').lastEngine, 'adapter', 'a classifier-only commit changes nothing');
+  route.commitTurnUsage(conn, U, 'eng-1', { inputTokens: 1 }, { provider: 'anthropic', model: 'm' });
+  assert.equal(route.getRoute(conn, U, 'eng-1').lastEngine, 'claude');
+});

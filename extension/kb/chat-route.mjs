@@ -20,6 +20,7 @@ import { enqueueAgentWrite, getAgentDb, flushAgentQueue, localDay } from './agen
 export const MAX_TOKEN_LIMIT = 1_000_000_000_000;   // 1e12: far above any real chat, far below 2^53
 const MAX_COUNT = 1_000_000_000;                    // one turn's counter increment is clamped to this
 const WARM_KEEP = 8;
+export const MAX_ROUTES_PER_USER = 5000;
 const ID_MAX = 200;
 const NOW_SQL = "strftime('%Y-%m-%dT%H:%M:%fZ','now')";
 export const ROUTE_EVENT_KINDS = new Set(['switch', 'cap_reached', 'cap_changed', 'cooldown', 'handoff_built']);
@@ -94,6 +95,7 @@ function shape(row, chatSessionId) {
     stickyUntil: row.sticky_until ?? null,
     warm: safeJson(row.warm_json, {}),
     handoffUpTo: row.handoff_up_to ?? null,
+    lastEngine: row.last_engine ?? '',
     switchSeq: row.switch_seq,
     pending: row.pending_json ? safeJson(row.pending_json, null) : null,
     updatedAt: row.updated_at,
@@ -113,11 +115,66 @@ export function getRoute(db, userId, chatSessionId) {
   return shape(readRow(db, userId, chatSessionId), chatSessionId);
 }
 
-/** The server-held handoff note of a chat with no Mac file, or null. Never part of the wire route. */
-export function getServerHandoffNote(db, userId, chatSessionId) {
+/** The engine a provider runs on, for `last_engine`: a catalog connection is the adapter, anything else is Claude. */
+export function engineOf(provider) {
+  if (!provider) return '';
+  return String(provider).startsWith('custom:cat-') ? 'adapter' : 'claude';
+}
+
+/**
+ * Keep a user's route rows bounded. Called before a new row is inserted: at the cap, the least recently
+ * updated rows (the stale ones a deleted or never-reopened chat leaves) make room. Cheap when under the cap.
+ */
+function makeRoom(db, userId) {
+  const n = lazyPrepare(db, 'SELECT COUNT(*) AS n FROM chat_session_route WHERE user_id = ?').get(userId).n;
+  if (n < MAX_ROUTES_PER_USER) return 0;
+  const drop = n - MAX_ROUTES_PER_USER + 1 + 50;   // free a little headroom so this is not a per-insert cost
+  return lazyPrepare(db, `
+    DELETE FROM chat_session_route WHERE rowid IN (
+      SELECT rowid FROM chat_session_route WHERE user_id = ? ORDER BY updated_at ASC LIMIT ?)
+  `).run(userId, drop).changes;
+}
+
+/**
+ * Re-create a missing route from the client's own copy (the Mac chat file) before a turn's cap check.
+ * Quit-archive deletes the row and the Mac re-creates it asynchronously, so a first turn can arrive
+ * (from the Mac before its restore lands, or from a phone) with no row; without this it would run uncapped
+ * and forget what the chat had used.
+ *
+ * The seed can only restore or RAISE, never lower: a missing row is created from it (limit, tokens used and
+ * pin); an existing row only has its used-counter raised to the seed's (a stale file can never reset it, and
+ * never changes the limit or pin the server holds). Invalid seed fields are ignored, never an error: a bad
+ * seed must not stop a turn. Returns the route, or null when there was no seed and no row.
+ */
+export function seedRouteIfMissing(db, userId, chatSessionId, seed) {
   requireUser(userId);
   requireChatId(chatSessionId);
-  return readRow(db, userId, chatSessionId)?.handoff_note ?? null;
+  return db.transaction(() => {
+    const cur = readRow(db, userId, chatSessionId);
+    const limit = Number.isSafeInteger(seed?.tokenLimit) && seed.tokenLimit > 0 && seed.tokenLimit <= MAX_TOKEN_LIMIT ? seed.tokenLimit : null;
+    const used = Number.isSafeInteger(seed?.tokensUsed) && seed.tokensUsed > 0 ? Math.min(seed.tokensUsed, MAX_COUNT) : 0;
+    if (cur) {
+      if (used > billableOf(cur)) {
+        lazyPrepare(db, `UPDATE chat_session_route SET tokens_in = tokens_in + ?, updated_at = ${NOW_SQL} WHERE user_id = ? AND chat_session_id = ?`)
+          .run(used - billableOf(cur), userId, chatSessionId);
+      }
+      return shape(readRow(db, userId, chatSessionId), chatSessionId);
+    }
+    if (limit === null && used === 0 && !(typeof seed?.provider === 'string' && seed.provider && typeof seed?.model === 'string' && seed.model)) return null;
+    let provider = '';
+    let model = '';
+    if (typeof seed?.provider === 'string' && typeof seed?.model === 'string' && seed.provider && seed.model
+      && seed.provider.length <= ID_MAX && seed.model.length <= ID_MAX && !hasControl(seed.provider) && !hasControl(seed.model)
+      && (seed.provider === 'anthropic' || seed.provider.startsWith('custom:'))) {
+      provider = seed.provider; model = seed.model;
+    }
+    makeRoom(db, userId);
+    lazyPrepare(db, `
+      INSERT INTO chat_session_route (user_id, chat_session_id, provider, model, pinned_by, token_limit, tokens_in, switch_seq)
+      VALUES (?, ?, ?, ?, 'user', ?, ?, 1)
+    `).run(userId, chatSessionId, provider, model, limit, used);
+    return shape(readRow(db, userId, chatSessionId), chatSessionId);
+  })();
 }
 
 /**
@@ -162,6 +219,7 @@ export function putRoute(db, userId, chatSessionId, patch = {}, { inFlight = fal
       throw new RouteError('ROUTE_CONFLICT', 'The route changed since you read it', 409, { current: shape(cur, chatSessionId) });
     }
     if (!cur) {
+      makeRoom(db, userId);
       const seedIn = seed ? Math.min(seed, MAX_COUNT) : 0;
       lazyPrepare(db, `
         INSERT INTO chat_session_route
@@ -252,9 +310,14 @@ export function applyPending(db, userId, chatSessionId) {
  * counters (so two writers cannot lose an update) and the row is created if the chat has none yet.
  * Called once per turn, from a `finally` (see routes/agent-v2.mjs); `usage` is what the model reported.
  */
-export function commitTurnUsage(db, userId, chatSessionId, usage, { provider = '', model = '', now = new Date(), ttlMs = 0 } = {}) {
+export function commitTurnUsage(db, userId, chatSessionId, usage, { provider, model, now = new Date(), ttlMs = 0 } = {}) {
   requireUser(userId);
   requireChatId(chatSessionId);
+  // A turn with no model of its own (the client sent none) keys the warm map as '' everywhere; a null must
+  // never become the string "null" (that read as a switch on every turn).
+  provider = typeof provider === 'string' ? provider : '';
+  model = typeof model === 'string' ? model : '';
+  const engine = engineOf(provider);
   const inTok = count(usage?.inputTokens);
   const outTok = count(usage?.outputTokens);
   const cw = count(usage?.cacheCreationTokens);
@@ -265,12 +328,13 @@ export function commitTurnUsage(db, userId, chatSessionId, usage, { provider = '
   return db.transaction(() => {
     const cur = readRow(db, userId, chatSessionId);
     if (!cur) {
+      makeRoom(db, userId);
       lazyPrepare(db, `
         INSERT INTO chat_session_route
           (user_id, chat_session_id, provider, model, pinned_by, tokens_in, tokens_out, tokens_cache_write, tokens_cache_read,
-           warm_json, sticky_until)
-        VALUES (?, ?, '', '', 'router', ?, ?, ?, ?, ?, ?)
-      `).run(userId, chatSessionId, inTok, outTok, cw, cr, provider ? JSON.stringify({ [key]: touch }) : '{}', until);
+           warm_json, sticky_until, last_engine)
+        VALUES (?, ?, '', '', 'router', ?, ?, ?, ?, ?, ?, ?)
+      `).run(userId, chatSessionId, inTok, outTok, cw, cr, provider ? JSON.stringify({ [key]: touch }) : '{}', until, engine);
     } else {
       let warm = safeJson(cur.warm_json, {});
       if (provider) {
@@ -282,9 +346,10 @@ export function commitTurnUsage(db, userId, chatSessionId, usage, { provider = '
         UPDATE chat_session_route
            SET tokens_in = tokens_in + ?, tokens_out = tokens_out + ?,
                tokens_cache_write = tokens_cache_write + ?, tokens_cache_read = tokens_cache_read + ?,
-               warm_json = ?, sticky_until = COALESCE(?, sticky_until), updated_at = ${NOW_SQL}
+               warm_json = ?, sticky_until = COALESCE(?, sticky_until), last_engine = CASE WHEN ? <> '' THEN ? ELSE last_engine END,
+               updated_at = ${NOW_SQL}
          WHERE user_id = ? AND chat_session_id = ?
-      `).run(inTok, outTok, cw, cr, JSON.stringify(warm), until, userId, chatSessionId);
+      `).run(inTok, outTok, cw, cr, JSON.stringify(warm), until, engine, engine, userId, chatSessionId);
     }
     return shape(readRow(db, userId, chatSessionId), chatSessionId);
   })();

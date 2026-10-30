@@ -47,6 +47,8 @@ function makeRes() {
 const mk = (n) => registerUser(db, { email: `${n}-${Date.now()}@example.test`, password: 'CorrectHorseBattery', displayName: n });
 const A = mk('rt-a');
 const B = mk('rt-b');
+const conns = await import('../server/provider-connections.mjs');
+conns.connectProvider(A.id, { catalogId: 'groq', apiKey: 'sk-test-0123456789abcdef' }, db);   // A owns custom:cat-groq; B does not
 
 let n = 0;
 const chatId = () => `rt-chat-${++n}`;
@@ -325,7 +327,7 @@ test('switching back to Claude after another provider never resumes the old SDK 
   assert.ok(seen[0].history.length <= 8, 'a note and the last turns, not 40 turns');
   const hist = route.listRouteEvents(A.id, chat).events;
   assert.ok(hist.some((e) => e.kind === 'handoff_built' && e.reason === 'client'));
-  assert.equal(db.prepare('SELECT handoff_up_to, handoff_note FROM chat_session_route WHERE user_id = ? AND chat_session_id = ?').get(A.id, chat).handoff_note, null, 'the server stores no note text');
+  assert.ok(!db.prepare('PRAGMA table_info(chat_session_route)').all().some((c) => c.name === 'handoff_note'), 'the server has no column for note text');
   assert.equal(route.getRoute(db, A.id, chat).handoffUpTo, 'msg-9');
 });
 
@@ -417,4 +419,141 @@ test('attack: a stop (abort) mid-turn still commits what streamed, once', async 
     throw Object.assign(new Error('aborted'), { name: 'AbortError' });
   } });
   assert.equal(used(chat), 50);
+});
+
+// --- review fixes (M1, M2, L2, L3, L4, L6) ----------------------------------------
+
+test('M1: a turn with no model never reads as a switch on the next turn', async () => {
+  ON();
+  const chat = chatId();
+  await turn(chat, { runTurn: okTurn(usageEv(5, 5)) });          // no model sent, none resolved
+  const r = route.getRoute(db, A.id, chat);
+  assert.deepEqual(Object.keys(r.warm), ['anthropic|'], 'the warm key uses an empty model, never the string null');
+  const { res } = await turn(chat, { runTurn: okTurn(usageEv(5, 5)) });
+  assert.equal(res.sseEvents().some((e) => e.kind === 'route_switch'), false);
+  route.commitTurnUsage(db, A.id, chat, { inputTokens: 1 }, { provider: 'anthropic', model: null });
+  route.commitTurnUsage(db, A.id, chat, { inputTokens: 1 }, { provider: undefined, model: undefined });
+  assert.ok(!Object.keys(route.getRoute(db, A.id, chat).warm).some((k) => /null|undefined/.test(k)));
+});
+
+test('M2: a first turn with no route row is capped from the client seed, and a failed restore does not lose usage', async () => {
+  ON();
+  const chat = chatId();                       // no PUT: the row was purged at quit and the Mac restore never landed
+  const seed = { tokenLimit: 100, tokensUsed: 100 };
+  let called = 0;
+  const { res } = await turn(chat, { runTurn: async () => { called += 1; return { usageTotals: {} }; } }, { routeSeed: seed });
+  assert.equal(res.statusCode, 402);
+  assert.equal(called, 0);
+  assert.equal(route.getRoute(db, A.id, chat).used.billable, 100, 'the prior usage came back with the row');
+  assert.equal(route.getRoute(db, A.id, chat).tokenLimit, 100);
+});
+
+test('M2: a phone or extension turn that arrives first with a seed is capped; the engine gets the remaining ceiling', async () => {
+  ON();
+  const chat = chatId();
+  const seen = [];
+  await turn(chat, { runTurn: okTurn(usageEv(10, 10), seen) }, { routeSeed: { tokenLimit: 1000, tokensUsed: 400, provider: 'anthropic', model: 'seeded-model' } });
+  assert.equal(seen[0].maxBillableTokens, 600, 'the ceiling is what is left: limit 1000 minus the 400 the file said was used');
+  assert.equal(seen[0].model, 'seeded-model', 'the seeded pin applies too');
+  assert.equal(route.getRoute(db, A.id, chat).used.billable, 420);
+});
+
+test('M2: a seed can only restore or raise, never lower or re-limit an existing row', async () => {
+  ON();
+  const chat = chatId();
+  await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, tokenLimit: 500, tokensUsed: 300 });
+  await turn(chat, { runTurn: okTurn(usageEv(1, 1)) }, { routeSeed: { tokenLimit: 99999, tokensUsed: 5 } });
+  let r = route.getRoute(db, A.id, chat);
+  assert.equal(r.tokenLimit, 500, 'a stale file does not change the limit the server holds');
+  assert.equal(r.used.billable, 302, 'a lower used-count does not reset the row');
+  await turn(chat, { runTurn: okTurn(usageEv(1, 1)) }, { routeSeed: { tokensUsed: 450 } });
+  r = route.getRoute(db, A.id, chat);
+  assert.ok(r.used.billable >= 450, 'a higher count (turns another window ran) raises it');
+});
+
+test('M2: hostile seeds are ignored, never an error, and a foreign provider pin is dropped', async () => {
+  ON();
+  for (const routeSeed of ['x', 5, [1], { tokenLimit: -1, tokensUsed: 'a' }, { tokenLimit: 1e300 }, { provider: 'custom:cat-groq', model: 'm', tokensUsed: 1e300 }]) {
+    const chat = chatId();
+    const { res } = await turn(chat, { runTurn: okTurn(usageEv(1, 1)) }, { routeSeed });
+    assert.equal(res.statusCode, 200, JSON.stringify(routeSeed));
+  }
+  const chatB = chatId();
+  const seen = [];
+  await turn(chatB, { runTurn: okTurn(usageEv(1, 1), seen) }, { routeSeed: { provider: 'custom:cat-groq', model: 'llama', tokenLimit: 1000 } }, B);
+  assert.equal(route.getRoute(db, B.id, chatB).pinned, false, 'B does not own groq: the pin is dropped');
+  assert.equal(route.getRoute(db, B.id, chatB).tokenLimit, 1000, 'its limit still applies');
+});
+
+test('L1: a switch value is on only when it is exactly on', async () => {
+  const flags = await import('../core/router-flags.mjs');
+  for (const v of ['ON', ' on', 'on ', 'On', '1', 'true', '']) assert.equal(flags.routerEnabled({ LLMIDE_ROUTER: v }), false, JSON.stringify(v));
+  assert.equal(flags.routerEnabled({ LLMIDE_ROUTER: 'on' }), true);
+  assert.equal(flags.routerCapEnabled({ LLMIDE_ROUTER: 'on', LLMIDE_ROUTER_CAP: 'ON' }), false);
+  assert.equal(flags.routerCompressEnabled({ LLMIDE_ROUTER_COMPRESS: 'on' }), false, 'compression needs the router');
+  assert.equal(flags.routerLearnEnabled({ LLMIDE_ROUTER_LEARN: 'on' }), true);
+});
+
+test('L2: the classifier call counts against the chat when the cap is on, and not when it is off', async () => {
+  ON();
+  const { recordUsage } = await import('../kb/usage.mjs');
+  const classify = async () => { recordUsage(db, { userId: A.id, provider: 'anthropic', model: 'haiku', source: 'api', endpoint: '/classify', inputTokens: 40, outputTokens: 10 }); return { mode: 'ask' }; };
+  const chat = chatId();
+  await turn(chat, { runTurn: okTurn(usageEv(5, 5)), classifyMode: classify }, { mode: 'auto' });
+  assert.equal(used(chat), 60, 'classifier 50 + turn 10');
+  delete process.env.LLMIDE_ROUTER_CAP;
+  const chat2 = chatId();
+  await turn(chat2, { runTurn: okTurn(usageEv(5, 5)), classifyMode: classify }, { mode: 'auto' });
+  assert.equal(used(chat2), 10, 'cap off: the classifier is not counted');
+});
+
+test('L3: a refused turn does not consume the pending switch', async () => {
+  ON();
+  const chat = chatId();
+  await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, provider: 'anthropic', model: 'model-a', tokenLimit: 10 });
+  route.commitTurnUsage(db, A.id, chat, { inputTokens: 50 }, { provider: 'anthropic', model: 'model-a', ttlMs: 60000 });
+  route.putRoute(db, A.id, chat, { provider: 'anthropic', model: 'model-b' }, { inFlight: true });
+  assert.equal((await turn(chat, { runTurn: okTurn(usageEv(1, 1)) })).res.statusCode, 402);
+  assert.equal(route.getRoute(db, A.id, chat).pending?.model, 'model-b', 'still pending after the refused turn');
+  await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, tokenLimit: 100000 });
+  const seen = [];
+  const { res } = await turn(chat, { runTurn: okTurn(usageEv(1, 1), seen) });
+  assert.equal(seen[0].model, 'model-b');
+  assert.equal(res.sseEvents().find((e) => e.kind === 'route_switch').data.to.model, 'model-b');
+});
+
+test('L4: a pin to a provider the user does not own is a 400; routes per user are bounded', async () => {
+  ON();
+  const chat = chatId();
+  assert.equal((await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, provider: 'custom:cat-groq', model: 'm' }, B)).res.statusCode, 400);
+  assert.equal((await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, provider: 'custom:cat-nonexistent', model: 'm' })).res.statusCode, 400);
+  assert.equal((await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, provider: 'custom:cat-groq', model: 'm' })).res.statusCode, 200);
+  const C = mk('rt-c');
+  const cap = route.MAX_ROUTES_PER_USER;
+  const ins = db.prepare("INSERT INTO chat_session_route (user_id, chat_session_id, provider, model, updated_at) VALUES (?, ?, '', '', ?)");
+  db.transaction(() => { for (let i = 0; i < cap; i += 1) ins.run(C.id, `old-${i}`, `2020-01-01T00:00:${String(i % 60).padStart(2, '0')}.000Z`); })();
+  route.putRoute(db, C.id, 'brand-new', { tokenLimit: 5 });
+  const n = db.prepare('SELECT COUNT(*) AS n FROM chat_session_route WHERE user_id = ?').get(C.id).n;
+  assert.ok(n <= cap, `bounded (${n})`);
+  assert.ok(route.getRoute(db, C.id, 'brand-new'), 'the new row exists; the oldest made room');
+  assert.equal(db.prepare('SELECT COUNT(*) AS n FROM chat_session_route WHERE user_id = ?').get(A.id).n > 0, true, 'another user is untouched');
+});
+
+test('L6: an adapter turn after the last Claude turn forces a fresh Claude session even with an empty warm map', async () => {
+  ON();
+  const chat = chatId();
+  getOrCreateAgentSession(db, A.id, chat);
+  markAgentSessionUsed(db, A.id, chat, { sdkSessionId: 'claude-old', model: 'm', mode: 'execute' });
+  route.putRoute(db, A.id, chat, { provider: 'anthropic', model: 'm' });
+  route.commitTurnUsage(db, A.id, chat, { inputTokens: 1 }, { provider: 'custom:cat-groq', model: 'g', ttlMs: 1000 });
+  db.prepare("UPDATE chat_session_route SET warm_json = '{}' WHERE user_id = ? AND chat_session_id = ?").run(A.id, chat);   // pruned or expired
+  assert.equal(route.getRoute(db, A.id, chat).lastEngine, 'adapter');
+  const seen = [];
+  await turn(chat, { runTurn: okTurn(usageEv(1, 1), seen) }, { history: [{ role: 'user', content: 'a' }, { role: 'assistant', content: 'b' }] });
+  assert.equal(seen[0].resumeSdkSessionId, undefined, 'never resumed');
+  assert.ok(seen[0].history.length > 0);
+  assert.equal(route.getRoute(db, A.id, chat).lastEngine, 'claude', 'the next Claude turn resets it');
+  const again = [];
+  await turn(chat, { runTurn: okTurn(usageEv(1, 1), again) });
+  assert.notEqual(again[0].history.length > 0 && again[0].resumeSdkSessionId === undefined, true, 'not forced again');
 });

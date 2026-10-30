@@ -11,7 +11,7 @@
 //   LLMIDE_ROUTER_COMPRESS=on   adapter-turn prompt compression (needs LLMIDE_ROUTER=on)
 //   LLMIDE_ROUTER_LEARN=on      learned per-key limits read by pickTurnProvider
 
-const on = (name, env) => String(env[name] ?? '').trim().toLowerCase() === 'on';
+const on = (name, env) => env[name] === 'on';
 
 export function routerEnabled(env = process.env) { return on('LLMIDE_ROUTER', env); }
 export function routerCapEnabled(env = process.env) { return routerEnabled(env) && on('LLMIDE_ROUTER_CAP', env); }

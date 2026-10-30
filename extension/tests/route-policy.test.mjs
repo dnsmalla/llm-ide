@@ -68,3 +68,18 @@ test('cap state: unlimited, under, at and over the limit; warn at 80 percent', (
   assert.equal(p.capState({ tokenLimit: 100, used: { billable: 100 } }).blocked, true);
   assert.equal(p.capState({ tokenLimit: 100, used: { billable: 150 } }).remaining, 0);
 });
+
+test('last_engine adapter forces a fresh Claude session; a pick that stays on an adapter does not', () => {
+  const claudePick = p.pickRoute({ route: { pinned: true, provider: 'anthropic', model: 'a', warm: {}, lastEngine: 'adapter' }, requested: {}, now: T0 });
+  assert.equal(claudePick.freshSession, true);
+  const adapterPick = p.pickRoute({ route: { pinned: true, provider: 'custom:cat-groq', model: 'g', warm: {}, lastEngine: 'adapter' }, requested: {}, now: T0 });
+  assert.equal(adapterPick.freshSession, false);
+  assert.equal(p.pickRoute({ route: { pinned: true, provider: 'anthropic', model: 'a', warm: {}, lastEngine: 'claude' }, requested: {}, now: T0 }).freshSession, false);
+});
+
+test('a null model is the empty model everywhere in the pick', () => {
+  const route = { pinned: false, warm: { 'anthropic|': at(0) } };
+  const r = p.pickRoute({ route, requested: { provider: 'anthropic', model: null }, now: new Date(T0.getTime() + 1000) });
+  assert.equal(r.changed, false);
+  assert.equal(r.cold, false);
+});

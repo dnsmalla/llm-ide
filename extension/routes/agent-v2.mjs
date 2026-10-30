@@ -30,7 +30,7 @@ import {
   markAgentSessionUsed,
   deleteAgentSession,
 } from '../kb/agent-sessions.mjs';
-import { recordUsage, pickMainModelRow } from '../kb/usage.mjs';
+import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
 import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { createNoticeEffects } from '../llm_agent/sdk/notice-effects.mjs';
@@ -48,9 +48,10 @@ import {
   beginRouteTurn, createRouteTurn, routeSwitchNotice, runAdapterTurn, isAdapterProvider, sendRouteRefusal,
   handleRouteGet, handleRoutePut, handleRouteHistory,
 } from './agent-v2-router.mjs';
-import { RouteError, deleteRoute, setHandoffPointer, recordRouteEvent } from '../kb/chat-route.mjs';
+import { RouteError, deleteRoute, setHandoffPointer, recordRouteEvent, commitTurnUsage } from '../kb/chat-route.mjs';
 import { buildHandoff } from '../providers/handoff.mjs';
-import { routerEnabled } from '../core/router-flags.mjs';
+import { getCustomProvider } from '../server/custom-providers.mjs';
+import { routerEnabled, routerCapEnabled } from '../core/router-flags.mjs';
 
 const log = logger.child({ component: 'agent-v2' });
 
@@ -325,6 +326,23 @@ export async function handleAgentV2Routes(
   return true;
 }
 
+/**
+ * The optional `routeSeed` of a stream request: the client's own copy of the chat's route (the Mac chat file).
+ * Only plain fields are read; the store validates and bounds them (seedRouteIfMissing).
+ */
+export function routeSeedFrom(body, userId, db) {
+  const seed = body?.routeSeed;
+  if (!seed || typeof seed !== 'object' || Array.isArray(seed)) return null;
+  // A pin naming a provider this user does not own is dropped from the seed (the limit and tokens still apply).
+  let { provider, model } = seed;
+  if (typeof provider === 'string' && provider.startsWith('custom:')) {
+    let owned = false;
+    try { owned = !!getCustomProvider(provider, userId, db); } catch { owned = false; }
+    if (!owned) { provider = undefined; model = undefined; }
+  }
+  return { tokenLimit: seed.tokenLimit, tokensUsed: seed.tokensUsed, provider, model };
+}
+
 // --- POST /agent/v2/stream ----------------------------------------------------
 //
 // Body: { message, language?, model?, provider?, mode?, skills?, planExecute?,
@@ -401,7 +419,7 @@ async function handleV2Stream(req, res, userId, deps) {
   if (routerEnabled()) {
     try {
       const early = beginRouteTurn({
-        db: getDb(), userId, chatSessionId, apply: false,
+        db: getDb(), userId, chatSessionId, apply: false, seed: routeSeedFrom(body, userId, getDb()),
         requested: { provider: typeof body.provider === 'string' && body.provider ? body.provider : AGENT_SDK_PROVIDER, model: typeof body.model === 'string' ? body.model : null },
       });
       if (early.refusal) { sendRouteRefusal(req, res, early.refusal); return true; }
@@ -433,7 +451,13 @@ async function handleV2Stream(req, res, userId, deps) {
   } else if (requestedMode === 'auto' || readOnly) {
     try {
       const classifyStartedAt = Date.now();
-      const classified = (await deps.classifyMode(message, { userId }))?.mode;
+      // The classifier is a model call the chat caused: with the cap on its billable tokens count against the chat
+      // (a call that reports no usage stays uncounted: a bounded under-count, see docs/spec/session-router.md).
+      const classifierTokens = newTurnTokenTotals();
+      const classified = (await countTurnTokens(classifierTokens, () => deps.classifyMode(message, { userId })))?.mode;
+      if (routerCapEnabled() && classifierTokens.calls > 0) {
+        try { commitTurnUsage(getDb(), userId, chatSessionId, classifierTokens, {}); } catch (e) { log.warn('classifier_tokens_not_counted', { message: String(e?.message || e).slice(0, 120) }); }
+      }
       // Timed only when the model was asked: a local quickMode answer takes
       // ~0 ms and would drag the histogram toward a latency nobody waits for.
       if (quickMode(message) === null) {
@@ -511,7 +535,7 @@ async function runV2Stream(req, res, userId, chatSessionId, agentContext, mode, 
   // Off (the default) this is `{ enabled: false }` and nothing below differs from before.
   let begin;
   try {
-    begin = beginRouteTurn({ db, userId, chatSessionId, apply: true, requested: { provider: requestedProvider, model: requestedModel } });
+    begin = beginRouteTurn({ db, userId, chatSessionId, apply: true, seed: routeSeedFrom(body, userId, getDb()), requested: { provider: requestedProvider, model: requestedModel } });
   } catch (err) {
     if (err instanceof RouteError) { sendRouteRefusal(req, res, err); return true; }
     throw err;
