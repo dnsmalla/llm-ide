@@ -256,7 +256,7 @@ extension ChatEngine {
                 },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
                 onApproval: { [self] approval in
-                    handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
+                    handleApprovalArrival(approval)
                     // handleApprovalArrival recorded the Mac-pending note
                     // into the turn's tool steps for the mirrored transcript;
                     // the phone's LIVE label channel doesn't observe
@@ -265,6 +265,7 @@ extension ChatEngine {
                     onProgress(Self.externalApprovalNote)
                 }
             )
+            noteTurnLanded(input)
             try Task.checkCancellation()
             // Second race, found by code review after the entry guard above:
             // `transport.roundTrip` can take seconds, and NOTHING stops the

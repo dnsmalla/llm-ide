@@ -104,7 +104,7 @@ extension ChatTransport {
 /// field (minus `tier`, which no caller of `codeAssistRoundTrip` sets today).
 struct ChatTransportInput: Sendable {
     let message: String
-    let history: [LlmIdeAPIClient.CodeAssistTurn]
+    var history: [LlmIdeAPIClient.CodeAssistTurn]
     let attachments: [LlmIdeAPIClient.CodeAttachment]
     let skills: [String]
     /// `var`, not `let`: the engine overwrites this context's identity
@@ -168,6 +168,9 @@ struct ChatTransportInput: Sendable {
     /// the packed `history` even on a non-fresh turn and the server seeds the turn from it. `var` with
     /// a default so existing call sites are unchanged.
     var routeSendsHistory: Bool = false
+    /// The chat was written by the classic engine (no Agent-engine marker): this first turn starts a fresh
+    /// Agent session seeded with `history` (its recent turns), so the chat continues without the old engine.
+    var continuesLegacyChat: Bool = false
 
     /// The chat file's own copy of its route (limit, tokens used, pin), sent with the turn so the server can
     /// re-create a purged route row BEFORE its cap check. Nil when the router pref is off or the chat has none.

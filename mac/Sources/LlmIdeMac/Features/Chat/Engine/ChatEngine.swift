@@ -341,7 +341,7 @@ final class ChatEngine {
     /// shown one at a time (`finishCurrentApproval`). A second request used
     /// to REPLACE the first, which was then never shown and waited out the
     /// 15-minute decision timeout with the chat locked.
-    var queuedApprovals: [(approval: AgentV2Approval, legacySessionId: String?)] = []
+    var queuedApprovals: [AgentV2Approval] = []
 
     /// Saved chats for `scope`, newest `lastUsedAt` first. Reloaded from disk
     /// by `refreshSessions()` — deliberately NOT on every history change; see
@@ -355,8 +355,8 @@ final class ChatEngine {
     let route = ChatRouteModel()
     /// Memo for `currentSessionEngineMarker()`: the marker last loaded from
     /// disk, keyed by the session id it belongs to. The marker is stamped
-    /// exactly once at mint (`AgentV2Selection.engineForNewChat`) and never
-    /// rewritten, so a per-id memo is always fresh — no invalidation hooks
+    /// at mint (`AgentV2Selection.engineForNewChat`); a chat from the classic engine is re-stamped once, after its
+    /// first turn on the Agent engine (`stampAgentEngineIfLegacy`), so a per-id memo is always fresh — no invalidation hooks
     /// needed beyond the id mismatch check. Exists because the accessor is
     /// on hot paths (`usesAgentV2Engine` inside ChatMessageList's per-turn
     /// body) and a full session-file decode per streamed chunk got 10×
@@ -462,18 +462,6 @@ final class ChatEngine {
     /// under test; the panel supplies the real posting closure.
     var sendAnnouncement: (String) -> Void = { _ in }
 
-    /// The provider the NEXT minted chat is created under — the RESOLVED wire
-    /// id (`ChatTransportInput.makeProvider`), consulted exactly once per
-    /// mint by `mintFreshSession` to stamp the chat's engine: the Agent
-    /// engine only when this provider can run it (`AgentV2Selection.
-    /// engineForNewChat`). The panel wires its composer's live selection,
-    /// which is what the chat's first turn will actually send; the default
-    /// reads the Settings default provider so a mint that happens outside
-    /// the panel (registry, phone) still answers truthfully.
-    var resolveNewChatProvider: () -> String? = {
-        ChatTransportInput.makeProvider(selectedProvider: AppConfig.shared.activeCLI)
-    }
-
     /// The files that actually rode the turn currently in flight — the
     /// composer clears its own chips the moment a message is sent (one-shot,
     /// like the skill chips), so this is what everything DOWNSTREAM of the
@@ -531,14 +519,6 @@ final class ChatEngine {
     /// "deny" (the user's "do this instead", server API v55).
     var postToolDecision: (String, String, String, String?) async throws -> Bool = { _, _, _, _ in false }
 
-    /// Posts a `ToolApproval` decision on the LEGACY engine via
-    /// `POST /code-assist/decision` (Task 8) — the legacy-engine counterpart
-    /// of `postToolDecision`. The session id is the legacy chat's own
-    /// `agentContext.sessionId` (`AgentV2ApprovalState.legacySessionId`), not
-    /// an SDK session id. The panel wires the real
-    /// `LlmIdeAPIClient.codeAssistDecision`.
-    var postLegacyToolDecision: (String, String, String, String?) async throws -> Bool = { _, _, _, _ in false }
-
     init(scope: ChatScope, transport: ChatTransport) {
         self.scope = scope
         self.transport = transport
@@ -593,15 +573,6 @@ final class ChatEngine {
     /// Called from `init` and `setTransport` so a swapped transport is wired
     /// the same way the original was. No-op for legacy transports.
     private func connectTransportObservers() {
-        // A raw legacy transport (factory with useV2 false) still streams
-        // live task progress — wire its one observer and stop; everything
-        // else below is composite-only.
-        if let legacy = transport as? CodeAssistTransport {
-            legacy.onLiveTasks = { [weak self] tasks in
-                self?.applyLiveTasks(tasks)
-            }
-            return
-        }
         // On the v2 transport itself, so it holds whether that transport is
         // bare or inside the engine-selection composite.
         agentV2Transport?.onApprovalResolved = { [weak self] requestId in
@@ -620,13 +591,6 @@ final class ChatEngine {
         }
         engineTransport.onRouteSwitch = { [weak self] notice in self?.route.apply(notice) }
         engineTransport.onSessionBudget = { [weak self] notice in self?.route.apply(notice) }
-        // D3 clean cut: selection is per-chat, so the composite must see the
-        // CURRENT session's engine marker — only this engine knows which
-        // chat is loaded. Unwired (nil), the composite stays fail-closed on
-        // legacy, so an engine with no session can never take a v2 turn.
-        engineTransport.sessionEngineMarker = { [weak self] in
-            self?.currentSessionEngineMarker()
-        }
     }
 
     // MARK: - Turn lifecycle
@@ -842,10 +806,11 @@ final class ChatEngine {
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
                 onApproval: { [self] approval in
-                    handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
+                    handleApprovalArrival(approval)
                 }
             )
             // If Stop fired during the await, don't append the (now-unwanted) reply.
+            noteTurnLanded(input)
             try Task.checkCancellation()
             currentTurnTruncatedPaths = Set(resp.usage?.truncatedPaths ?? [])
             // If the buffered fallback path fired (no chunk events ever
@@ -1066,9 +1031,10 @@ final class ChatEngine {
                 onProgress: { [self] progress in recordProgress(progress) },
                 onChunk: { [self] text in appendStreamedChunk(streamingID, text) },
                 onApproval: { [self] approval in
-                    handleApprovalArrival(approval, legacySessionId: legacySessionIdForApproval(input))
+                    handleApprovalArrival(approval)
                 }
             )
+            noteTurnLanded(input)
             // Same as runTurn: a Stop that lands while the transport is
             // returning must not write the reply — and above all must not
             // reach `autoChain` below, which would run the NEXT Bypass-mode
@@ -1529,6 +1495,12 @@ final class ChatEngine {
     /// session routing) is left nil rather than fabricated.
     /// Internal (not private): the external-turn extension file stamps too.
     func stampOwnIdentity(_ input: inout ChatTransportInput) {
+        // A chat the classic engine wrote (no Agent-engine marker) continues on a fresh Agent session seeded with
+        // its last turns; `noteTurnLanded` stamps it afterwards so later turns resume instead of re-seeding.
+        if !input.history.isEmpty, currentSessionEngineMarker() != AgentV2Selection.sessionEngineV2 {
+            input.continuesLegacyChat = true
+            input.history = Array(input.history.suffix(AgentV2Selection.legacyContinuationTurns))
+        }
         guard var ctx = input.agentContext else { return }
         ctx.sessionId = agent.agentSessionId
         ctx.chatSessionId = currentSessionIDString.isEmpty ? nil : currentSessionIDString
@@ -1537,6 +1509,11 @@ final class ChatEngine {
         // A catalog provider has no server session to resume: the adapter is handed the history every turn.
         input.routeSendsHistory = route.sendsHistory || (input.provider ?? "").hasPrefix("custom:cat-")
         input.routeSeed = route.seedForTurn
+    }
+
+    /// A turn on the Agent engine returned: a legacy chat it continued is now an Agent chat.
+    func noteTurnLanded(_ input: ChatTransportInput) {
+        if input.continuesLegacyChat { stampAgentEngineIfLegacy() }
     }
 
     /// Mid-turn task list from the v2 stream. Display only: it moves the

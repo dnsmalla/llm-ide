@@ -27,7 +27,7 @@ final class ScriptedDecisionPoster: @unchecked Sendable {
 }
 
 /// Decision-poster double for `ChatEngine.postToolDecision`/
-/// `postLegacyToolDecision` — the `ToolApproval`-answering counterpart of
+/// the `ToolApproval`-answering counterpart of
 /// `ScriptedDecisionPoster` above (no `answers` dictionary; `action` instead).
 /// `sessionId` is whichever the calling closure was handed: an SDK session
 /// id for `postToolDecision`, or the legacy chat's own
@@ -285,7 +285,6 @@ struct AgentV2ApprovalTests {
         await engine.runTurn("run a command")
         #expect(engine.pendingApproval?.approval.kind == "ToolApproval")
         #expect(engine.pendingApproval?.approval.toolName == "run-bash")
-        #expect(engine.pendingApproval?.legacySessionId == nil)
 
         await engine.submitToolDecision(action: "allow")
         #expect(poster.calls == [.init(requestId: "req-tool-1", sessionId: "sdk-99", action: "allow")])
@@ -422,168 +421,10 @@ struct AgentV2ApprovalTests {
         stream.events = toolApprovalTurnEvents(requestId: "req-tool-1", sdkSessionId: nil)
         await engine.runTurn("run a command")
         #expect(engine.pendingApproval != nil)
-        #expect(engine.pendingApproval?.legacySessionId == nil)
 
         await engine.submitToolDecision(action: "allow")
         #expect(poster.calls.isEmpty)
         #expect(engine.pendingApproval?.lastError != nil)
-    }
-
-    @Test("Legacy ToolApproval: submitToolDecision routes to postLegacyToolDecision using the captured legacySessionId, never postToolDecision")
-    func legacyToolDecisionRoutesToLegacyEndpoint() async throws {
-        // ScriptedLegacyTransport (AgentV2SelectionTests.swift) now supports
-        // firing a scripted approval through its 4-callback roundTrip — the
-        // same capability Task 9's fix needed AgentV2EngineTransport to
-        // forward. Driving it directly (no composite) here isolates
-        // `submitToolDecision`'s endpoint-branch selection from that
-        // composite-forwarding concern, which AgentV2SelectionTests covers
-        // separately.
-        let legacy = ScriptedLegacyTransport()
-        let approval = AgentV2Approval(requestId: "req-legacy-9", kind: "ToolApproval",
-                                       toolName: "run-bash", argsSummary: "npm test")
-        legacy.approvalToFire = approval
-        let engine = ChatEngine(scope: .explorer, transport: legacy)
-        // The engine stamps its OWN agentSessionId over whatever the input
-        // builder supplies (stampOwnIdentity — the 409 cross-chat fix), so
-        // the id under test is set on the engine, not smuggled through the
-        // closure's context. The invariant pinned below is unchanged: the
-        // approval posts back exactly the session id the turn carried.
-        engine.agent.agentSessionId = "legacy-sess-1"
-        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
-            ChatTransportInput(message: message, history: history, attachments: attachments,
-                              skills: skills,
-                              agentContext: AgentContext(indexedRepos: [], sessionId: "ignored-by-stamp"),
-                              language: nil, model: nil, provider: nil, mode: nil)
-        }
-        let v2Poster = ScriptedToolDecisionPoster()
-        let legacyPoster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
-            try await v2Poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
-        }
-        engine.postLegacyToolDecision = { requestId, sessionId, action, _ in
-            try await legacyPoster.post(requestId: requestId, sessionId: sessionId, action: action)
-        }
-
-        await engine.runTurn("run a command")
-        #expect(engine.pendingApproval?.approval.kind == "ToolApproval")
-        #expect(engine.pendingApproval?.legacySessionId == "legacy-sess-1")
-
-        await engine.submitToolDecision(action: "allow")
-        #expect(legacyPoster.calls == [.init(requestId: "req-legacy-9", sessionId: "legacy-sess-1", action: "allow")])
-        #expect(v2Poster.calls.isEmpty)
-        #expect(engine.pendingApproval == nil)
-    }
-
-    // MARK: - I4: mixed-engine chats
-    //
-    // `agentV2SessionId` reads the v2 transport's `sdkSessionId`, which
-    // persists for the CHAT's lifetime once any v2 turn has run.
-    // `AgentContext.sessionId` (the legacy park key) is filled on EVERY turn,
-    // v2 included. So in a chat that runs a v2 turn and then a legacy one —
-    // the exact shape of a stale-server 404 fallback — BOTH are non-nil, and
-    // the pair alone cannot say which engine parked the approval.
-    //
-    // Two things make it unambiguous: the composite records which transport
-    // actually ran the turn (`lastTurnRanLegacy`), and `submitToolDecision`
-    // then trusts the state's captured `legacySessionId` FIRST. Before the
-    // fix the v2 branch won, so a legacy approval in such a chat was posted
-    // with a stale SDK session id → 403 DECISION_FORBIDDEN, an unanswerable
-    // card.
-
-    /// Mutable box so the scripted `sessionEngineMarker` closure can be
-    /// flipped between turns (the composite reads it at TURN time).
-    final class EngineSwitch: @unchecked Sendable { var useLegacy = false }
-
-    /// Composite wired v2-first, then flipped to legacy for the second turn —
-    /// a real mixed-engine chat, not a hand-built state.
-    private func makeMixedEngineChat() -> (ChatEngine, ScriptedAgentV2Stream, ScriptedLegacyTransport, EngineSwitch) {
-        let stream = ScriptedAgentV2Stream()
-        let legacy = ScriptedLegacyTransport()
-        let engineSwitch = EngineSwitch()
-        let composite = AgentV2EngineTransport(
-            v2: AgentV2Transport(streamer: stream),
-            legacy: legacy,
-            isV2Enabled: { true },
-            sessionEngineMarker: { engineSwitch.useLegacy ? nil : AgentV2Selection.sessionEngineV2 }
-        )
-        let engine = ChatEngine(scope: .explorer, transport: composite)
-        // ChatEngine's init re-points `sessionEngineMarker` at its own loaded
-        // session (connectTransportObservers), clobbering the closure passed
-        // above — restore the scripted one so this test controls the engine
-        // selection without a ChatSessionStore round-trip.
-        composite.sessionEngineMarker = { engineSwitch.useLegacy ? nil : AgentV2Selection.sessionEngineV2 }
-        // stampOwnIdentity overwrites the closure-supplied sessionId with the
-        // engine's own on every turn (the 409 cross-chat fix) — the id under
-        // test lives on the engine now.
-        engine.agent.agentSessionId = "legacy-sess-mixed"
-        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
-            ChatTransportInput(message: message, history: history, attachments: attachments,
-                               skills: skills,
-                               agentContext: AgentContext(indexedRepos: [], sessionId: "ignored-by-stamp"),
-                               language: nil, model: nil,
-                               // The composite's selection rule also requires an
-                               // Anthropic provider — without it every turn would
-                               // fall to legacy and the mixed state never forms.
-                               provider: AgentV2Selection.anthropicProvider, mode: nil)
-        }
-        return (engine, stream, legacy, engineSwitch)
-    }
-
-    @Test("Mixed-engine chat: a LEGACY approval posts the legacy session id even though agentV2SessionId is also set")
-    func mixedEngineLegacyApprovalUsesLegacySessionId() async throws {
-        let (engine, stream, legacy, engineSwitch) = makeMixedEngineChat()
-        let v2Poster = ScriptedToolDecisionPoster()
-        let legacyPoster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
-            try await v2Poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
-        }
-        engine.postLegacyToolDecision = { requestId, sessionId, action, _ in
-            try await legacyPoster.post(requestId: requestId, sessionId: sessionId, action: action)
-        }
-
-        // Turn 1 runs on v2 and leaves an SDK session id behind for the chat.
-        stream.events = plainTurnEvents(sdkSessionId: "sdk-stale-1")
-        await engine.runTurn("first, on v2")
-        #expect(engine.agentV2SessionId == "sdk-stale-1")
-
-        // Turn 2 runs on LEGACY and parks a ToolApproval.
-        engineSwitch.useLegacy = true
-        legacy.approvalToFire = AgentV2Approval(requestId: "req-mixed-1", kind: "ToolApproval",
-                                                toolName: "run-bash", argsSummary: "npm publish")
-        await engine.runTurn("second, on legacy")
-
-        // Both ids are live — this is the ambiguous state the bug lived in.
-        #expect(engine.agentV2SessionId == "sdk-stale-1")
-        #expect(engine.pendingApproval?.legacySessionId == "legacy-sess-mixed")
-
-        await engine.submitToolDecision(action: "allow")
-        #expect(legacyPoster.calls == [.init(requestId: "req-mixed-1", sessionId: "legacy-sess-mixed", action: "allow")])
-        #expect(v2Poster.calls.isEmpty, "a legacy approval must never be posted with the stale SDK session id")
-        #expect(engine.pendingApproval == nil)
-    }
-
-    @Test("Mixed-engine chat: a V2 approval still posts the SDK session id, not the always-present agentContext.sessionId")
-    func mixedEngineV2ApprovalUsesSdkSessionId() async throws {
-        let (engine, stream, _, _) = makeMixedEngineChat()
-        let v2Poster = ScriptedToolDecisionPoster()
-        let legacyPoster = ScriptedToolDecisionPoster()
-        engine.postToolDecision = { requestId, sdkSessionId, action, _ in
-            try await v2Poster.post(requestId: requestId, sessionId: sdkSessionId, action: action)
-        }
-        engine.postLegacyToolDecision = { requestId, sessionId, action, _ in
-            try await legacyPoster.post(requestId: requestId, sessionId: sessionId, action: action)
-        }
-
-        // A v2 turn parks the approval — note the input STILL carries a
-        // non-nil agentContext.sessionId ("legacy-sess-mixed"), which is why
-        // tagging every approval with it unconditionally was wrong.
-        stream.events = toolApprovalTurnEvents(requestId: "req-mixed-2", sdkSessionId: "sdk-live-2")
-        await engine.runTurn("run a command on v2")
-        #expect(engine.pendingApproval?.legacySessionId == nil, "a v2-parked approval must not be tagged legacy")
-
-        await engine.submitToolDecision(action: "deny")
-        #expect(v2Poster.calls == [.init(requestId: "req-mixed-2", sessionId: "sdk-live-2", action: "deny")])
-        #expect(legacyPoster.calls.isEmpty)
     }
 
     // MARK: - Replacement + staleness
@@ -620,7 +461,7 @@ struct AgentV2ApprovalTests {
         // Regression: B replaced A, so A was never shown and waited out the
         // 15-minute decision timeout.
         #expect(engine.pendingApproval?.approval.requestId == "req-A")
-        #expect(engine.queuedApprovals.map(\.approval.requestId) == ["req-B"])
+        #expect(engine.queuedApprovals.map(\.requestId) == ["req-B"])
         engine.dismissApproval()
         #expect(engine.pendingApproval?.approval.requestId == "req-B")
         engine.dismissApproval()
@@ -763,7 +604,7 @@ struct AgentV2ApprovalTests {
             // the requestId check — neither question could be answered.
             #expect(forwarded == ["req-1"])
             #expect(engine.pendingApproval?.approval.requestId == "req-1")
-            #expect(engine.queuedApprovals.map(\.approval.requestId) == ["req-2"])
+            #expect(engine.queuedApprovals.map(\.requestId) == ["req-2"])
         }
     }
 

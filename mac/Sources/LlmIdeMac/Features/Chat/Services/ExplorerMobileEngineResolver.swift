@@ -165,8 +165,7 @@ final class ExplorerMobileEngineResolver: ExternalEngineHolder {
         // the Mac's chip — nothing parks at all.
         let engine = ChatEngine(
             scope: .explorer,
-            transport: ChatTransportFactory.makeTransport(
-                api: api, useV2: AgentV2Selection.toggleEnabled()))
+            transport: ChatTransportFactory.makeTransport(api: api))
         // Without this the engine's decision posting kept its failing
         // defaults, and an approval parked on it could never be answered —
         // from the phone or the Mac. See `wireDecisionPosting`.

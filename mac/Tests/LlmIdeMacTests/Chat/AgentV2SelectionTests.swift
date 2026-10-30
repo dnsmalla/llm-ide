@@ -28,70 +28,18 @@ final class QueuedAgentV2Stream: AgentV2Streaming, @unchecked Sendable {
     }
 }
 
-/// Legacy-side double for the stale-server fallback path: records every
-/// input it was handed and answers a fixed result.
+/// The Agent v2 chat transport (K1 Phase 6, T6.8): every turn runs on the Agent engine. What is pinned
+/// here is the provider rule, the two in-flight recoveries (an unresumable session, a stale server), the
+/// continuation of a chat the classic engine wrote, and the new-chat stamp.
 @MainActor
-final class ScriptedLegacyTransport: ChatTransport, @unchecked Sendable {
-    var result = ChatTransportResult(reply: "legacy reply", pendingTool: nil, tasks: nil,
-                                     continueNeeded: nil, usage: nil, mode: "plan", tokenUsage: nil)
-    private(set) var inputs: [ChatTransportInput] = []
-    /// Scripted approval to fire via the 4-callback `roundTrip` below — nil
-    /// (the default) means this double never parks anything, matching every
-    /// pre-Task-9 test that drives it. Set this to prove a legacy-engine
-    /// `ToolApproval` reaches `onApproval`, including THROUGH
-    /// `AgentV2EngineTransport`'s legacy-routing branches (Task 9).
-    var approvalToFire: AgentV2Approval?
-
-    func roundTrip(
-        _ input: ChatTransportInput,
-        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
-        onChunk: @escaping @MainActor (String) -> Void
-    ) async throws -> ChatTransportResult {
-        inputs.append(input)
-        await onChunk("legacy reply")
-        return result
-    }
-
-    /// 4-callback override — Task 9: the legacy engine's gated `run-bash`
-    /// now genuinely parks a `ToolApproval`, so this double must be able to
-    /// fire one too. Without this override, calling this double through the
-    /// 4-callback entry point would fall through to `ChatTransport`'s
-    /// default (which forwards to the 3-callback method above and silently
-    /// drops `onApproval`) — exactly the shape of the bug
-    /// `AgentV2EngineTransport` had before Task 9's fix, and exactly why
-    /// that fix was otherwise unprovable: without this override the double
-    /// COULD NOT produce an approval for any test to observe.
-    func roundTrip(
-        _ input: ChatTransportInput,
-        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
-        onChunk: @escaping @MainActor (String) -> Void,
-        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
-    ) async throws -> ChatTransportResult {
-        inputs.append(input)
-        if let approval = approvalToFire {
-            onApproval(approval)
-        }
-        await onChunk("legacy reply")
-        return result
-    }
-}
-
-/// Task 12 — engine selection and the v2 turn guards: the selection rule
-/// (toggle × provider × per-chat engine marker), the transport factory seam,
-/// the sessionUnresumable fresh retry (with its in-chat note), the
-/// stale-server 404 fallback to the legacy transport, the v2 save-plan
-/// action's visibility rule, the transport swap behind the settings toggle,
-/// the D3 per-chat marker (ChatSession.engine), and deleteSession's v2
-/// server-side cleanup.
-@MainActor
-@Suite("AgentV2 selection + guards")
+@Suite("AgentV2 transport + guards")
 struct AgentV2SelectionTests {
 
     // MARK: - Helpers
 
-    func makeInput(provider: String?) -> ChatTransportInput {
+    func makeInput(provider: String?, history: [LlmIdeAPIClient.CodeAssistTurn] = []) -> ChatTransportInput {
         ChatTransportInput(
-            message: "hello", history: [], attachments: [], skills: [],
+            message: "hello", history: history, attachments: [], skills: [],
             agentContext: nil, language: nil, model: nil, provider: provider, mode: "plan")
     }
 
@@ -114,18 +62,12 @@ struct AgentV2SelectionTests {
     }
 
     func makeComposite(stream: QueuedAgentV2Stream,
-                       legacy: ScriptedLegacyTransport,
-                       toggle: @escaping () -> Bool,
-                       sessionEngine: @escaping () -> String? = { AgentV2Selection.sessionEngineV2 })
-        -> (AgentV2EngineTransport, ScriptedLegacyTransport) {
-        (AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream),
-                                legacy: legacy, isV2Enabled: toggle,
-                                sessionEngineMarker: sessionEngine), legacy)
+                       capable: Set<String> = [AgentV2Selection.anthropicProvider]) -> AgentV2EngineTransport {
+        AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream), capableProviders: { capable })
     }
 
-    /// Mirrors `AgentV2ApprovalTests.withTempStore`: deleteSession touches
-    /// `ChatSessionStore`, so the suite must hold the ChatStoreOverrideGate
-    /// and point the store at a throwaway directory.
+    /// `deleteSession` and the stamp touch `ChatSessionStore`, so the suite holds the ChatStoreOverrideGate
+    /// and points the store at a throwaway directory.
     func withTempStore(_ body: () async throws -> Void) async rethrows {
         await ChatStoreOverrideGate.shared.acquire()
         defer { ChatStoreOverrideGate.shared.release() }
@@ -140,82 +82,54 @@ struct AgentV2SelectionTests {
         try await body()
     }
 
-    // MARK: - Selection rule (truth table)
-
-    @Test("Selection truth table: toggle × provider × per-chat engine marker (D3 clean cut)")
-    func selectionRuleTruthTable() {
-        let v2 = AgentV2Selection.sessionEngineV2
-        // (toggle on, anthropic, marker v2) → v2 — the only v2 combination.
-        #expect(AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "anthropic", sessionEngine: v2))
-        // (toggle on, anthropic, marker nil/legacy) → legacy — a legacy chat
-        // stays on the legacy engine forever; flipping the toggle mid-chat
-        // must not hand it a context-blind fresh SDK session.
-        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "anthropic", sessionEngine: nil))
-        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "anthropic", sessionEngine: "legacy"))
-        // (toggle off, marker v2) → legacy — the toggle is the global kill
-        // switch: off disables v2 entirely, v2 chats included.
-        #expect(!AgentV2Selection.useV2(toggleOn: false, resolvedProvider: "anthropic", sessionEngine: v2))
-        // The provider dimension still applies to v2 chats.
-        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "openai", sessionEngine: v2))
-        #expect(!AgentV2Selection.useV2(toggleOn: false, resolvedProvider: "glm", sessionEngine: v2))
-    }
+    // MARK: - Provider rule
 
     @Test("Anthropic-ness follows the app's provider resolution, not the raw picker id")
     func providerResolution() {
-        // Built-in Claude tool resolves to the backend's anthropic id…
-        #expect(AgentV2Selection.providerIsAnthropic(
-            ChatTransportInput.makeProvider(selectedProvider: "claude_code")))
-        // …while every other built-in and custom:<uuid> does not.
-        #expect(!AgentV2Selection.providerIsAnthropic(
-            ChatTransportInput.makeProvider(selectedProvider: "openai")))
-        #expect(!AgentV2Selection.providerIsAnthropic(
-            ChatTransportInput.makeProvider(selectedProvider: "gemini")))
-        #expect(!AgentV2Selection.providerIsAnthropic(
-            ChatTransportInput.makeProvider(selectedProvider: "custom:abc-123")))
+        #expect(AgentV2Selection.providerIsAnthropic(ChatTransportInput.makeProvider(selectedProvider: AICliTool.claudeCode.rawValue)))
+        #expect(!AgentV2Selection.providerIsAnthropic(ChatTransportInput.makeProvider(selectedProvider: "custom:abc")))
         #expect(!AgentV2Selection.providerIsAnthropic(nil))
     }
 
-    // MARK: - Factory seam
-
-    @Test("Factory: v2 selected → engine transport carrying AgentV2Transport; else legacy")
-    func factoryBranches() throws {
-        let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
-        // Off → the plain legacy transport, byte-identical behavior.
-        let legacyTransport = ChatTransportFactory.makeTransport(api: api, useV2: false)
-        #expect(legacyTransport is CodeAssistTransport)
-        #expect((legacyTransport as? AgentV2EngineTransport) == nil)
-        // On → the engine-selection composite wrapping a real AgentV2Transport
-        // over the client (the client satisfies AgentV2Streaming).
-        let v2Transport = ChatTransportFactory.makeTransport(api: api, useV2: true)
-        let composite = try #require(v2Transport as? AgentV2EngineTransport)
-        #expect(composite.legacy is CodeAssistTransport)
+    @Test("A turn on a provider that cannot run a chat fails before any request, with the unsupported message")
+    func unsupportedProviderFailsFast() async {
+        let stream = QueuedAgentV2Stream()
+        let composite = makeComposite(stream: stream)
+        for provider in ["openai", "deepseek", "custom:legacy-uuid", nil] as [String?] {
+            await #expect(throws: ChatProviderUnsupportedError.self) {
+                _ = try await composite.roundTrip(self.makeInput(provider: provider),
+                                                  onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+            }
+        }
+        #expect(stream.bodies.isEmpty, "no request leaves for an unsupported provider")
+        let message = ChatProviderUnsupportedError(provider: "openai").errorDescription ?? ""
+        #expect(message.contains("Settings, Providers") && message.contains("session router"))
     }
 
-    @Test("Composite onLiveTasks forwards to BOTH inner transports")
-    func onLiveTasksForwardsToBothEngines() throws {
-        // One callback wired on the composite must reach whichever engine
-        // runs the turn: v2 fires it from tool_result events, legacy from
-        // the /code-assist stream's tasks_progress events (server v42+).
+    @Test("Factory: the transport is the v2 transport inside the chat composite")
+    func factory() throws {
         let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
-        let composite = try #require(
-            ChatTransportFactory.makeTransport(api: api, useV2: true) as? AgentV2EngineTransport)
+        _ = try #require(ChatTransportFactory.makeTransport(api: api) as? AgentV2EngineTransport)
+    }
+
+    @Test("Composite onLiveTasks forwards to the v2 transport")
+    func onLiveTasksForwards() throws {
+        let api = LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")
+        let composite = try #require(ChatTransportFactory.makeTransport(api: api) as? AgentV2EngineTransport)
         var received: [[AgentTask]] = []
         composite.onLiveTasks = { received.append($0) }
-        let legacy = try #require(composite.legacy as? CodeAssistTransport)
-        #expect(legacy.onLiveTasks != nil)
-        legacy.onLiveTasks?([AgentTask(id: "1", title: "Step", status: .inProgress)])
         composite.v2.onLiveTasks?([AgentTask(id: "2", title: "Next", status: .pending)])
-        #expect(received.count == 2)
+        #expect(received.count == 1)
     }
 
-    // MARK: - sessionUnresumable → fresh retry
+    // MARK: - sessionUnresumable -> fresh retry
 
     @Test("sessionUnresumable: retries once with fresh:true, notes, and returns the fresh reply")
     func sessionUnresumableRetriesFresh() async throws {
         let stream = QueuedAgentV2Stream()
         stream.turns = [unresumableTurn(sessionId: "sdk-old"),
                         okTurn(sessionId: "sdk-new", deltas: ["fresh ", "answer"])]
-        let (composite, legacy) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(), toggle: { true })
+        let composite = makeComposite(stream: stream)
 
         var labels: [String] = []
         let result = try await composite.roundTrip(
@@ -225,188 +139,120 @@ struct AgentV2SelectionTests {
             onApproval: { _ in })
 
         #expect(result.reply == "fresh answer")
-        // The system-style note rides the progress road (same as the parked-
-        // approval note), so it lands in the streaming turn's tool steps.
         #expect(labels.contains(AgentV2EngineTransport.freshSessionNote))
-        // Two v2 attempts; only the second carries fresh:true.
         #expect(stream.bodies.count == 2)
         #expect(stream.bodies[0]["fresh"] == nil)
         #expect(stream.bodies[1]["fresh"] as? Bool == true)
-        // Legacy never fired — recovery stayed inside v2.
-        #expect(legacy.inputs.isEmpty)
     }
 
-    @Test("sessionUnresumable twice: surfaces as a failed turn, no legacy fallback")
+    @Test("sessionUnresumable twice: surfaces as a failed turn")
     func sessionUnresumableTwiceFails() async {
         let stream = QueuedAgentV2Stream()
         stream.turns = [unresumableTurn(sessionId: "sdk-a"), unresumableTurn(sessionId: "sdk-b")]
-        let (composite, legacy) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(), toggle: { true })
-
+        let composite = makeComposite(stream: stream)
         await #expect(throws: AgentV2Error.sessionUnresumable) {
             _ = try await composite.roundTrip(
-                makeInput(provider: "anthropic"),
+                self.makeInput(provider: "anthropic"),
                 onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
         }
-        #expect(legacy.inputs.isEmpty)
     }
 
     // MARK: - Stale-server 404 guard
 
-    @Test("HTTP 404: banner fires and THIS turn completes on the legacy transport")
-    func staleServer404FallsBack() async throws {
+    @Test("HTTP 404: the banner fires and the turn fails (no classic engine to fall back to)")
+    func staleServer404RaisesBanner() async {
         let stream = QueuedAgentV2Stream()
         stream.thrownErrors = [APIError.http(status: 404, code: "HTTP_ERROR",
-                                             message: "Agent v2 stream request failed (404)",
-                                             details: nil)]
-        let (composite, legacy) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(), toggle: { true })
+                                             message: "Agent v2 stream request failed (404)", details: nil)]
+        let composite = makeComposite(stream: stream)
         var staleBanner = 0
         composite.onStaleServer = { staleBanner += 1 }
-
-        let result = try await composite.roundTrip(
-            makeInput(provider: "anthropic"),
-            onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
-
-        #expect(result.reply == "legacy reply")
-        #expect(legacy.inputs.count == 1)
+        await #expect(throws: APIError.self) {
+            _ = try await composite.roundTrip(
+                self.makeInput(provider: "anthropic"),
+                onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        }
         #expect(staleBanner == 1)
     }
 
-    @Test("Non-404 transport errors propagate — no banner, no legacy retry")
+    @Test("Non-404 transport errors propagate with no banner")
     func non404Propagates() async {
         let stream = QueuedAgentV2Stream()
-        stream.thrownErrors = [APIError.http(status: 500, code: "HTTP_ERROR",
-                                             message: "boom", details: nil)]
-        let (composite, legacy) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(), toggle: { true })
+        stream.thrownErrors = [APIError.http(status: 500, code: "HTTP_ERROR", message: "boom", details: nil)]
+        let composite = makeComposite(stream: stream)
         var staleBanner = 0
         composite.onStaleServer = { staleBanner += 1 }
-
         await #expect(throws: APIError.self) {
             _ = try await composite.roundTrip(
-                makeInput(provider: "anthropic"),
+                self.makeInput(provider: "anthropic"),
                 onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
         }
-        #expect(legacy.inputs.isEmpty)
         #expect(staleBanner == 0)
     }
 
-    // MARK: - Legacy-routed approval forwarding (Task 9 regression)
-    //
-    // Before Task 9's fix, every "route to legacy" branch below called
-    // `legacy.roundTrip(input, onProgress:onChunk:)` — the 3-callback form —
-    // which (per `ChatTransport`'s own default-forwarding extension) drops
-    // `onApproval` on the floor. That was correct pre-Task-8 (the legacy
-    // engine never parked anything), but is now a real bug: the legacy
-    // engine's gated `run-bash` DOES park a `ToolApproval`. These two tests
-    // pin the fix at both call sites — the top-level guard (never touches
-    // v2 at all) and `fallbackToLegacy` (reached after a v2 stale-404) —
-    // using `ScriptedLegacyTransport`'s new `approvalToFire`, which only
-    // exists because the double now implements the 4-callback `roundTrip`
-    // itself (see its doc comment: without that, the double could not
-    // produce an approval for either test to observe, fix or no fix).
+    // MARK: - Legacy chat continuation
 
-    @Test("Toggle off routes straight to legacy — its parked ToolApproval still reaches onApproval")
-    func legacyRoutedCompositeForwardsApproval() async throws {
+    @Test("A chat the classic engine wrote starts a fresh Agent session seeded with its recent turns")
+    func legacyContinuationSendsFreshWithHistory() async throws {
         let stream = QueuedAgentV2Stream()
-        let legacy = ScriptedLegacyTransport()
-        let approval = AgentV2Approval(requestId: "req-legacy-1", kind: "ToolApproval",
-                                       toolName: "run-bash", argsSummary: "echo hi")
-        legacy.approvalToFire = approval
-        let (composite, _) = makeComposite(stream: stream, legacy: legacy, toggle: { false })
-
-        var received: AgentV2Approval?
-        let result = try await composite.roundTrip(
-            makeInput(provider: "anthropic"),
-            onProgress: { _ in }, onChunk: { _ in },
-            onApproval: { received = $0 })
-
-        #expect(result.reply == "legacy reply")
-        #expect(received?.requestId == "req-legacy-1")
-        #expect(received?.kind == "ToolApproval")
-        #expect(received?.toolName == "run-bash")
-        #expect(received?.argsSummary == "echo hi")
+        stream.turns = [okTurn(sessionId: "sdk-1", deltas: ["continued"])]
+        let composite = makeComposite(stream: stream)
+        var input = makeInput(provider: "anthropic", history: [
+            .init(role: .user, content: "old question"), .init(role: .assistant, content: "old answer")])
+        input.continuesLegacyChat = true
+        let result = try await composite.roundTrip(input, onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        #expect(result.reply == "continued")
+        #expect(stream.bodies[0]["fresh"] as? Bool == true)
+        let history = stream.bodies[0]["history"] as? [[String: Any]]
+        #expect(history?.count == 2)
+        #expect(history?.first?["content"] as? String == "old question")
     }
 
-    @Test("Stale-404 fallback to legacy also forwards onApproval (fallbackToLegacy path)")
-    func staleServer404FallbackForwardsApproval() async throws {
+    @Test("A normal turn is not fresh and sends no history")
+    func normalTurnResumes() async throws {
         let stream = QueuedAgentV2Stream()
-        stream.thrownErrors = [APIError.http(status: 404, code: "HTTP_ERROR",
-                                             message: "Agent v2 stream request failed (404)",
-                                             details: nil)]
-        let legacy = ScriptedLegacyTransport()
-        let approval = AgentV2Approval(requestId: "req-legacy-2", kind: "ToolApproval",
-                                       toolName: "run-bash", argsSummary: "npm test")
-        legacy.approvalToFire = approval
-        let (composite, _) = makeComposite(stream: stream, legacy: legacy, toggle: { true })
-
-        var received: AgentV2Approval?
-        let result = try await composite.roundTrip(
-            makeInput(provider: "anthropic"),
-            onProgress: { _ in }, onChunk: { _ in },
-            onApproval: { received = $0 })
-
-        #expect(result.reply == "legacy reply")
-        #expect(received?.requestId == "req-legacy-2")
-        #expect(received?.kind == "ToolApproval")
+        stream.turns = [okTurn(sessionId: "sdk-1", deltas: ["ok"])]
+        let composite = makeComposite(stream: stream)
+        _ = try await composite.roundTrip(makeInput(provider: "anthropic", history: [.init(role: .user, content: "x")]),
+                                          onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
+        #expect(stream.bodies[0]["fresh"] == nil)
+        #expect(stream.bodies[0]["history"] == nil)
     }
 
-    // MARK: - Per-turn routing
+    @Test("Engine: a legacy chat's first turn is fresh with at most the last 6 turns, then the chat is stamped and the next turn resumes")
+    func engineContinuesLegacyChat() async throws {
+        try await withTempStore {
+            let stream = QueuedAgentV2Stream()
+            stream.turns = [okTurn(sessionId: "sdk-1", deltas: ["first"]), okTurn(sessionId: "sdk-1", deltas: ["second"])]
+            let engine = ChatEngine(scope: .explorer, transport: makeComposite(stream: stream))
+            engine.hooks.resolveTransportInput = { message, history, attachments, skills in
+                ChatTransportInput(message: message, history: history, attachments: attachments, skills: skills,
+                                   agentContext: nil, language: nil, model: nil, provider: "anthropic", mode: "ask")
+            }
+            var legacy = ChatSession(scope: .explorer, engine: nil)
+            legacy.messages = (0..<20).map { i in
+                ChatMessage(role: i % 2 == 0 ? .user : .assistant, content: "turn \(i)", status: .done, createdAt: Date())
+            }
+            ChatSessionStore.save(legacy)
+            engine.currentSessionIDString = legacy.id.uuidString
+            engine.messages = legacy.messages
+            #expect(engine.currentSessionEngineMarker() == nil)
 
-    @Test("Toggle off at turn time, a non-anthropic provider, or a legacy-marked chat → legacy")
-    func perTurnRouting() async throws {
-        // Toggle off → legacy even though the composite carries v2 machinery
-        // (kill switch; the chat is v2-marked).
-        do {
-            let stream = QueuedAgentV2Stream()
-            let (composite, legacy) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(), toggle: { false })
-            let result = try await composite.roundTrip(
-                makeInput(provider: "anthropic"),
-                onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
-            #expect(result.reply == "legacy reply")
-            #expect(stream.bodies.isEmpty)
-            _ = legacy
-        }
-        // Toggle on but provider openai → legacy; the v2 engine only runs
-        // Anthropic turns.
-        do {
-            let stream = QueuedAgentV2Stream()
-            let (composite, _) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(), toggle: { true })
-            let result = try await composite.roundTrip(
-                makeInput(provider: "openai"),
-                onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
-            #expect(result.reply == "legacy reply")
-            #expect(stream.bodies.isEmpty)
-        }
-        // D3: toggle on + anthropic, but the CHAT was created as a legacy
-        // chat (nil marker) → legacy; the marker, not the toggle, decides
-        // which engine owns an existing chat.
-        do {
-            let stream = QueuedAgentV2Stream()
-            stream.turns = [okTurn(sessionId: "sdk-never", deltas: ["v2 reply"])]
-            let (composite, _) = makeComposite(stream: stream, legacy: ScriptedLegacyTransport(),
-                                               toggle: { true }, sessionEngine: { nil })
-            let result = try await composite.roundTrip(
-                makeInput(provider: "anthropic"),
-                onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
-            #expect(result.reply == "legacy reply")
-            #expect(stream.bodies.isEmpty, "the v2 streamer is never contacted for a legacy-marked chat")
+            await engine.runTurn("continue please")
+            #expect(stream.bodies[0]["fresh"] as? Bool == true)
+            let sent = stream.bodies[0]["history"] as? [[String: Any]] ?? []
+            #expect(!sent.isEmpty && sent.count <= AgentV2Selection.legacyContinuationTurns)
+            #expect(engine.currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2, "stamped once it landed")
+
+            await engine.runTurn("and again")
+            #expect(stream.bodies[1]["fresh"] == nil, "the stamped chat resumes its session")
         }
     }
 
     // MARK: - Engine-level behavior
 
-    /// Engine whose transport input carries the Anthropic provider, as the
-    /// panel's `wireEngine` resolves it — the default pass-through hook
-    /// leaves `provider` nil, which (correctly) routes legacy — AND whose
-    /// current session is stamped as a v2 chat: the D3 marker the composite
-    /// reads at turn time (via the engine's `currentSessionEngineMarker`).
-    /// Without a loaded session the marker is nil and turns (correctly)
-    /// route legacy. Must run inside `withTempStore` — it saves and re-reads
-    /// a session file.
-    func makeV2Engine(stream: QueuedAgentV2Stream, legacy: ScriptedLegacyTransport) -> ChatEngine {
-        let engine = ChatEngine(
-            scope: .explorer,
-            transport: AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream),
-                                               legacy: legacy, isV2Enabled: { true }))
+    func makeV2Engine(stream: QueuedAgentV2Stream) -> ChatEngine {
+        let engine = ChatEngine(scope: .explorer, transport: makeComposite(stream: stream))
         engine.hooks.resolveTransportInput = { message, history, attachments, skills in
             ChatTransportInput(message: message, history: history, attachments: attachments,
                                skills: skills, agentContext: nil, language: nil,
@@ -418,16 +264,14 @@ struct AgentV2SelectionTests {
         return engine
     }
 
-    @Test("Engine turn over v2: fresh-retry note lands in the chat, turn succeeds")
+    @Test("Engine turn: fresh-retry note lands in the chat, turn succeeds")
     func engineFreshRetryNoteLandsInChat() async throws {
         try await withTempStore {
             let stream = QueuedAgentV2Stream()
             stream.turns = [unresumableTurn(sessionId: "sdk-old"),
                             okTurn(sessionId: "sdk-new", deltas: ["fresh ", "answer"])]
-            let engine = makeV2Engine(stream: stream, legacy: ScriptedLegacyTransport())
-
+            let engine = makeV2Engine(stream: stream)
             await engine.runTurn("hello")
-
             let last = engine.messages.last(where: { $0.role == .assistant })
             #expect(last?.content == "fresh answer")
             #expect(last?.toolSteps.map(\.label).contains(AgentV2EngineTransport.freshSessionNote) == true)
@@ -435,52 +279,38 @@ struct AgentV2SelectionTests {
         }
     }
 
-    @Test("Engine turn over v2 404: notice banner set, legacy completes the turn, next turn clears it")
+    @Test("Engine turn on a 404: the notice banner is set and the turn fails; the next healthy turn clears it")
     func engineStaleServerNotice() async throws {
         try await withTempStore {
             let stream = QueuedAgentV2Stream()
             stream.thrownErrors = [APIError.http(status: 404, code: "HTTP_ERROR",
-                                                 message: "Agent v2 stream request failed (404)",
-                                                 details: nil)]
+                                                 message: "Agent v2 stream request failed (404)", details: nil)]
             stream.turns = [[], okTurn(sessionId: "sdk-2", deltas: ["v2 ok"])]
-            let engine = makeV2Engine(stream: stream, legacy: ScriptedLegacyTransport())
-
+            let engine = makeV2Engine(stream: stream)
             await engine.runTurn("one")
-            // Turn one: banner raised, but the turn itself COMPLETED via legacy.
             #expect(engine.agentV2Notice == AgentV2EngineTransport.staleServerBannerText)
-            #expect(engine.messages.last(where: { $0.role == .assistant })?.content == "legacy reply")
-            #expect(engine.error == nil)
-
-            // Turn two (a healthy v2 turn): the transient notice is gone.
+            #expect(engine.error != nil)
             await engine.runTurn("two")
             #expect(engine.agentV2Notice == nil)
         }
     }
 
-    @Test("Engine with NO session loaded routes legacy even with the toggle on (fail-closed marker)")
-    func engineWithoutSessionRoutesLegacy() async throws {
+    @Test("Engine turn on an unsupported provider shows the unsupported message and sends nothing")
+    func engineUnsupportedProvider() async throws {
         try await withTempStore {
             let stream = QueuedAgentV2Stream()
-            stream.turns = [okTurn(sessionId: "sdk-x", deltas: ["v2 reply"])]
-            let legacy = ScriptedLegacyTransport()
-            let engine = ChatEngine(
-                scope: .explorer,
-                transport: AgentV2EngineTransport(v2: AgentV2Transport(streamer: stream),
-                                                   legacy: legacy, isV2Enabled: { true }))
+            let engine = makeV2Engine(stream: stream)
             engine.hooks.resolveTransportInput = { message, history, attachments, skills in
-                ChatTransportInput(message: message, history: history, attachments: attachments,
-                                   skills: skills, agentContext: nil, language: nil,
-                                   model: nil, provider: "anthropic", mode: "plan")
+                ChatTransportInput(message: message, history: history, attachments: attachments, skills: skills,
+                                   agentContext: nil, language: nil, model: "gpt-x", provider: "openai", mode: "ask")
             }
-
             await engine.runTurn("hello")
-
-            #expect(engine.messages.last(where: { $0.role == .assistant })?.content == "legacy reply")
             #expect(stream.bodies.isEmpty)
+            #expect(engine.error?.contains("Settings, Providers") == true)
         }
     }
 
-    // MARK: - Per-chat marker (D3 clean cut)
+    // MARK: - Per-chat marker
 
     @Test("ChatSession engine marker: files persisted before the field decode as legacy; stamps round-trip")
     func chatSessionEngineDecode() throws {
@@ -500,106 +330,18 @@ struct AgentV2SelectionTests {
                == AgentV2Selection.sessionEngineV2)
     }
 
-    @Test("Toggle defaults to on when unset")
-    func toggleDefaultsOnWhenUnset() {
-        let suite = "v2-default-on-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-        #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == true)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic")
-                == AgentV2Selection.sessionEngineV2)
-    }
-
-    @Test("Explicit opt-out is honored")
-    func explicitOptOutIsHonored() {
-        let suite = "v2-opt-out-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-        defaults.set(false, forKey: AgentV2Selection.toggleKey)
-        #expect(AgentV2Selection.toggleEnabled(defaults: defaults) == false)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic") == nil)
-    }
-
-    @Test("engineForNewChat: stamps v2 iff the toggle is on AND the provider can run the engine")
-    func engineForNewChatStamp() {
-        let suite = "agent-v2-newchat-test"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic")
-                == AgentV2Selection.sessionEngineV2,
-                "toggle on (the default) + Anthropic mints a v2 chat")
-        // The bug this fixes: with the toggle on by default, a chat created
-        // under OpenAI/Gemini was stamped v2, then spent its life on the
-        // classic engine behind a permanent "Anthropic only" hint and a
-        // Claude-locked provider menu. Born legacy, it is simply a classic
-        // chat — no hint, full menu.
-        for provider in ["openai", "google", "deepseek", "custom:abc"] {
-            #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: provider) == nil,
-                    "\(provider): a provider the engine cannot run mints a legacy chat")
-        }
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: nil) == nil)
-        defaults.set(false, forKey: AgentV2Selection.toggleKey)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "anthropic") == nil,
-                "toggle off explicitly mints a legacy chat")
-    }
-
-    @Test("mintFreshSession stamps the chat's engine from the toggle; the stamp survives, later mints don't touch it")
-    func mintStampsEngineMarker() async throws {
-        try await withTempStore {
-            let key = AgentV2Selection.toggleKey
-            let prev = UserDefaults.standard.bool(forKey: key)
-            UserDefaults.standard.set(true, forKey: key)
-            defer { UserDefaults.standard.set(prev, forKey: key) }
-
-            let engine = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
-            // Pinned: the default resolver reads the Settings default provider
-            // from UserDefaults.standard, which this test must not depend on.
-            engine.resolveNewChatProvider = { "anthropic" }
-            engine.mintFreshSession()
-            let v2Chat = UUID(uuidString: engine.currentSessionIDString)!
-            #expect(ChatSessionStore.load(id: v2Chat)?.engine == AgentV2Selection.sessionEngineV2)
-            #expect(engine.currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2)
-
-            // Toggle off later: a NEW chat mints legacy, and the v2 chat
-            // keeps its stamp (the clean cut is per chat, not global state).
-            UserDefaults.standard.set(false, forKey: key)
-            let engine2 = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
-            engine2.resolveNewChatProvider = { "anthropic" }
-            engine2.mintFreshSession()
-            let legacyChat = UUID(uuidString: engine2.currentSessionIDString)!
-            #expect(ChatSessionStore.load(id: legacyChat)?.engine == nil)
-            #expect(ChatSessionStore.load(id: v2Chat)?.engine == AgentV2Selection.sessionEngineV2)
-
-            // Toggle back on, but the chat is born under a provider the
-            // engine cannot run: legacy stamp, honestly.
-            UserDefaults.standard.set(true, forKey: key)
-            let engine3 = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
-            engine3.resolveNewChatProvider = { "openai" }
-            engine3.mintFreshSession()
-            let openAIChat = UUID(uuidString: engine3.currentSessionIDString)!
-            #expect(ChatSessionStore.load(id: openAIChat)?.engine == nil)
-        }
-    }
 
     @Test("setTransport swaps when idle and refuses mid-turn")
     func setTransportGuards() {
-        let a = ScriptedLegacyTransport()
+        let a = ScriptedChatTransport()
         let engine = ChatEngine(scope: .explorer, transport: a)
-
-        // Mid-turn: the in-flight round-trip holds the old transport; a swap
-        // under it would split one turn across two engines.
         engine.busy = true
-        let b = ScriptedLegacyTransport()
+        let b = ScriptedChatTransport()
         engine.setTransport(b)
-        #expect((engine.transport as? ScriptedLegacyTransport) === a)
-
+        #expect((engine.transport as? ScriptedChatTransport) === a)
         engine.busy = false
         engine.setTransport(b)
-        #expect((engine.transport as? ScriptedLegacyTransport) === b)
+        #expect((engine.transport as? ScriptedChatTransport) === b)
     }
 
     // MARK: - Save-plan action visibility
@@ -887,7 +629,7 @@ struct AgentV2SelectionTests {
     @Test("deleteSession additionally calls the v2 server-side session delete (best-effort)")
     func deleteSessionCallsAgentV2Cleanup() async throws {
         try await withTempStore {
-            let engine = ChatEngine(scope: .explorer, transport: ScriptedLegacyTransport())
+            let engine = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
             var deleted: [String] = []
             engine.deleteAgentV2Session = { deleted.append($0) }
 
@@ -905,60 +647,23 @@ struct AgentV2SelectionTests {
     }
 }
 
-
 @Suite("AgentV2Selection.providerHintNeeded")
 struct AgentV2ProviderHintTests {
-    // The composer's "this chat will use the classic engine" hint. It used to
-    // be gated on the bare toggle, so it fired in chats that were never
-    // eligible for the Agent engine at all — telling the user to switch
-    // provider when switching changes nothing.
-    @Test("no hint when this chat is not on the Agent engine, whatever the provider")
-    func silentOffAgentEngine() {
-        // A legacy-stamped chat, or an out-of-date server (no v2 transport):
-        // usesAgentEngine is false, so there is no fallback to warn about.
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: false, resolvedProvider: "openai") == false)
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: false, resolvedProvider: "custom:abc") == false)
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: false, resolvedProvider: nil) == false)
-    }
-
-    @Test("hint when an Agent-engine chat has a provider the engine cannot run")
-    func firesOnRealConflict() {
-        // selectedProvider is seeded from config.activeCLI regardless of the
-        // chat's engine, so a non-Anthropic default really can land here.
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "openai"))
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "google"))
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "custom:abc"))
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: nil))
-    }
-
-    @Test("no hint on Anthropic — the engine runs the turn")
-    func silentOnAnthropic() {
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "anthropic") == false)
-    }
-
-    // The hint must agree with the rule that actually picks the engine: for a
-    // v2-stamped chat with the toggle on, "hint shown" and "useV2" are exact
-    // opposites across providers. That equivalence is what stopped drifting.
-    @Test("the hint is the complement of useV2 for an eligible chat")
-    func complementsUseV2() {
-        let capable: Set<String> = ["anthropic", "custom:glm"]
-        for provider in ["anthropic", "openai", "google", "deepseek", "custom:abc", "custom:glm"] {
-            let runsV2 = AgentV2Selection.useV2(toggleOn: true, resolvedProvider: provider,
-                                                sessionEngine: AgentV2Selection.sessionEngineV2,
-                                                capableProviders: capable)
-            let hinted = AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: provider,
-                                                             capableProviders: capable)
-            #expect(runsV2 != hinted, "\(provider): hint and useV2 must never agree")
+    @Test("the hint fires for a provider the chat cannot run, never for one it can")
+    func hintFollowsCapableSet() {
+        let capable: Set<String> = ["anthropic", "custom:glm", "custom:cat-deepseek"]
+        for provider in ["anthropic", "custom:glm", "custom:cat-deepseek"] as [String] {
+            #expect(!AgentV2Selection.providerHintNeeded(resolvedProvider: provider, capableProviders: capable), "\(provider)")
+        }
+        for provider in ["openai", "google", "deepseek", "custom:abc", nil] as [String?] {
+            #expect(AgentV2Selection.providerHintNeeded(resolvedProvider: provider, capableProviders: capable), "\(provider ?? "nil")")
         }
     }
 }
 
-// The Agent SDK speaks the Anthropic Messages API only, so a non-Claude model
-// reaches the Agent engine through a custom provider's Anthropic-compatible
-// endpoint (Z.AI GLM `…/api/anthropic`). "Can this provider run the engine"
-// is therefore a set — Anthropic plus such providers — not an Anthropic check,
-// and every rule (per-turn selection, the composer hint, the new-chat stamp)
-// must read the same set.
+// The Agent SDK speaks the Anthropic Messages API only, so a non-Claude model reaches the Agent engine
+// through a custom provider's Anthropic-compatible endpoint (Z.AI GLM `.../api/anthropic`), or through the
+// session router and the adapter (a catalog connection). "Can this provider run a chat" is a set.
 @Suite("AgentV2Selection.agentCapableProviders")
 struct AgentV2CapableProviderTests {
     static func provider(_ id: String, door: String?, enabled: Bool = true) -> CustomProvider {
@@ -981,77 +686,10 @@ struct AgentV2CapableProviderTests {
         #expect(AgentV2Selection.agentCapableProviders(customProviders: []) == ["anthropic"])
     }
 
-    @Test("useV2, the hint, and the new-chat stamp all follow the capable set")
-    func rulesFollowCapableSet() {
-        let capable: Set<String> = ["anthropic", "custom:glm"]
-        let v2 = AgentV2Selection.sessionEngineV2
-        #expect(AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "custom:glm", sessionEngine: v2,
-                                       capableProviders: capable))
-        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "custom:plain", sessionEngine: v2,
-                                        capableProviders: capable))
-        #expect(!AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "custom:glm",
-                                                     capableProviders: capable))
-        #expect(AgentV2Selection.providerHintNeeded(usesAgentEngine: true, resolvedProvider: "openai",
-                                                    capableProviders: capable))
-        #expect(!AgentV2Selection.providerCanRunAgentEngine(nil, capableProviders: capable))
-
-        let suite = "v2-capable-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "custom:glm",
-                                                  capableProviders: capable) == v2)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "custom:plain",
-                                                  capableProviders: capable) == nil)
-        #expect(AgentV2Selection.engineForNewChat(defaults: defaults, resolvedProvider: "openai",
-                                                  capableProviders: capable) == nil)
-    }
-
-    /// Mutable holder so the composite's per-turn closure can observe a
-    /// Settings change between turns without capturing a `var`.
-    final class CapableBox: @unchecked Sendable {
-        var set: Set<String>
-        init(_ set: Set<String>) { self.set = set }
-    }
-
-    @Test("the composite routes a capable custom provider to v2 (provider on the wire), others to legacy, re-read per turn")
-    @MainActor
-    func compositeRoutesByCapableSet() async throws {
-        let stream = QueuedAgentV2Stream()
-        let legacy = ScriptedLegacyTransport()
-        let box = CapableBox(["anthropic", "custom:glm"])
-        let composite = AgentV2EngineTransport(
-            v2: AgentV2Transport(streamer: stream), legacy: legacy,
-            isV2Enabled: { true },
-            sessionEngineMarker: { AgentV2Selection.sessionEngineV2 },
-            capableProviders: { box.set })
-        func input(_ provider: String) -> ChatTransportInput {
-            ChatTransportInput(message: "m", history: [], attachments: [], skills: [], agentContext: nil,
-                               language: nil, model: nil, provider: provider, mode: nil)
-        }
-        let noop: @MainActor (LlmIdeAPIClient.AgentProgress) -> Void = { _ in }
-
-        // Capable custom provider → the v2 streamer is contacted and the
-        // provider id rides the request body (the server needs it to pick the
-        // gateway). The scripted stream yields nothing, so the turn's outcome
-        // is irrelevant here — only that v2 was the engine.
-        _ = try? await composite.roundTrip(input("custom:glm"), onProgress: noop, onChunk: { _ in }, onApproval: { _ in })
-        #expect(stream.bodies.count == 1)
-        #expect(stream.bodies.first?["provider"] as? String == "custom:glm")
-        #expect(composite.lastTurnRanLegacy == false)
-
-        // Not capable → legacy verbatim; v2 never contacted.
-        let result = try await composite.roundTrip(input("custom:plain"), onProgress: noop, onChunk: { _ in }, onApproval: { _ in })
-        #expect(result.reply == "legacy reply")
-        #expect(composite.lastTurnRanLegacy)
-        #expect(stream.bodies.count == 1)
-
-        // The set is read per turn: revoke the door in Settings and the same
-        // provider's next turn goes legacy.
-        box.set = ["anthropic"]
-        _ = try await composite.roundTrip(input("custom:glm"), onProgress: noop, onChunk: { _ in }, onApproval: { _ in })
-        #expect(composite.lastTurnRanLegacy)
-        #expect(stream.bodies.count == 1)
+    @Test("a catalog connection joins the set only when the caller passes it (the router is on)")
+    func catalogJoins() {
+        #expect(AgentV2Selection.agentCapableProviders(customProviders: [], catalogWireIds: ["custom:cat-groq"])
+                == ["anthropic", "custom:cat-groq"])
     }
 }
 

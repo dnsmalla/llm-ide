@@ -483,9 +483,7 @@ extension ChatEngine {
         // belonging to no project) — the exact overload the sheet's session
         // list needs. Scoped to `.quick` only; every other scope's minted
         // session is unaffected.
-        let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat(
-            resolvedProvider: resolveNewChatProvider(),
-            capableProviders: AgentV2Selection.liveAgentCapableProviders()),
+        let fresh = ChatSession(scope: scope, engine: AgentV2Selection.engineForNewChat(),
             projectId: projectIdForNewSession)
         ChatSessionStore.save(fresh)
         currentSessionIDString = fresh.id.uuidString
@@ -495,22 +493,14 @@ extension ChatEngine {
         resetTransientSessionState()
     }
 
-    /// Re-choose the engine of an EMPTY chat for the provider the composer now
-    /// uses. A chat's engine is stamped at creation from the provider at that
-    /// moment (`mintFreshSession`); a provider picked before the first message
-    /// would otherwise run on the engine chosen for the previous one. A chat
-    /// with any message keeps its engine (the D3 clean cut).
-    func restampEngineIfEmpty(resolvedProvider: String?,
-                              capableProviders: Set<String> = AgentV2Selection.liveAgentCapableProviders()) {
-        guard messages.isEmpty, !busy,
-              let id = UUID(uuidString: currentSessionIDString),
-              var session = ChatSessionStore.load(id: id), session.messages.isEmpty else { return }
-        let marker = AgentV2Selection.engineForNewChat(resolvedProvider: resolvedProvider,
-                                                       capableProviders: capableProviders)
-        guard session.engine != marker else { return }
-        session.engine = marker
+    /// A chat written by the classic engine (no marker) was just continued on the Agent engine: stamp it, so
+    /// later turns resume the session instead of re-seeding it. Idempotent.
+    func stampAgentEngineIfLegacy() {
+        guard let id = UUID(uuidString: currentSessionIDString),
+              var session = ChatSessionStore.load(id: id), session.engine != AgentV2Selection.sessionEngineV2 else { return }
+        session.engine = AgentV2Selection.sessionEngineV2
         ChatSessionStore.save(session, touch: false)
-        engineMarkerMemo = (sessionID: currentSessionIDString, marker: marker)
+        engineMarkerMemo = (sessionID: currentSessionIDString, marker: AgentV2Selection.sessionEngineV2)
     }
 
     /// The loaded chat's engine marker (`ChatSession.engine`; nil = legacy,

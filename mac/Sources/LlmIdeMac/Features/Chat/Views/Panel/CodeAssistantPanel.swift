@@ -152,32 +152,9 @@ struct CodeAssistantPanel: View {
     @AppStorage(EditAcceptanceMode.defaultsKey) var editModeRaw = EditAcceptanceMode.review.rawValue
     @AppStorage(EffortChoice.defaultsKey) var effortRaw: String = EffortChoice.auto
     var editMode: EditAcceptanceMode { EditAcceptanceMode(rawValue: editModeRaw) ?? .review }
-    /// Agent engine — on by default. When on (AND the turn's
-    /// provider is Anthropic), the engine's transport answers turns on the
-    /// v2 agent engine; see `AgentV2Selection`. Written by
-    /// `ProvidersSettingsSection` in Settings; the panel only READS it
-    /// (plus swapping the transport when it flips).
-    @AppStorage(AgentV2Selection.toggleKey) var useAgentV2 = true
-    /// True when THIS chat would run on the Agent engine but its selected
-    /// provider can't — drives the provider hint near the mode/model chips.
-    ///
-    /// Gated on `engine.usesAgentV2Engine`, not the bare toggle: that is the
-    /// same three-part rule the transport applies (transport present AND
-    /// toggle AND the chat's own engine marker — `AgentV2Selection.useV2`).
-    /// Gating on the toggle alone made the hint fire in chats that were never
-    /// eligible for the Agent engine in the first place — a legacy-stamped
-    /// chat (stamped at creation, legacy for life) or an out-of-date server —
-    /// where switching provider changes nothing, so the hint promised a
-    /// remedy that does not exist. `ChatComposer` reasons about exactly this
-    /// trap for the provider MENU and avoids it by reading the same property;
-    /// sharing it here is what keeps the two from drifting apart.
-    ///
-    /// It still fires where it should: `selectedProvider` is seeded from
-    /// `config.activeCLI` regardless of the chat's engine (see `onAppear`
-    /// below), so a non-Anthropic default really can land in a v2 chat.
+    /// True when the composer's provider cannot run a chat on this build (drives the hint near the chips).
     var agentV2ProviderBlocked: Bool {
         AgentV2Selection.providerHintNeeded(
-            usesAgentEngine: engine.usesAgentV2Engine,
             resolvedProvider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider),
             capableProviders: AgentV2Selection.agentCapableProviders(
                 customProviders: modelState.customProviders,
@@ -333,14 +310,6 @@ struct CodeAssistantPanel: View {
             .onReceive(NotificationCenter.default.publisher(for: .revealPendingApprovalSession)) { note in
                 guard let reveal = note.object as? PendingApprovalReveal, reveal.scope == scope else { return }
                 switchToSession(reveal.sessionID)
-            }
-            .onChange(of: useAgentV2) { _, enabled in
-                // Swap the shared engine's transport to match the toggle.
-                // `setTransport` refuses mid-turn (the in-flight round-trip
-                // holds the old transport); a flip during a turn applies on
-                // the next flip — the composite re-checks the toggle every
-                // turn anyway, so at worst one turn lags.
-                engine.setTransport(ChatTransportFactory.makeTransport(api: api, useV2: enabled))
             }
             .onChange(of: activeRepoKey) { _, _ in
                 handleActiveRepoChange()
@@ -522,12 +491,6 @@ struct CodeAssistantPanel: View {
         // the context as part of a fully-formed input, exactly as
         // `codeAssistRoundTrip` built `ctx` inline) — wired for completeness.
         engine.buildContext = { await buildAgentContext() }
-        // The composer's live provider is what a new chat's first turn will
-        // send, so it — not the Settings default (`activeCLI`), which never
-        // names a custom provider — decides the engine stamp.
-        engine.resolveNewChatProvider = {
-            ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider)
-        }
         engine.sendAnnouncement = { text in
             NSAccessibility.post(
                 element: NSApp as Any,

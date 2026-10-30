@@ -107,7 +107,7 @@ extension CodeAssistantPanel {
             Image(systemName: "info.circle")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.warning)
-            Text("The Claude Agent engine runs on Anthropic-compatible providers only (Claude, or a custom provider with an Anthropic-compatible URL) — this chat's turns will use the classic engine until you pick one.")
+            Text("Chat runs on Claude, a custom provider with an Anthropic-compatible URL, or a catalog model through the session router. This provider cannot run a chat any more: pick another model, or connect it in Settings, Providers.")
                 .font(.system(size: 11))
                 .foregroundStyle(theme.current.textMuted)
                 .fixedSize(horizontal: false, vertical: true)
@@ -343,18 +343,14 @@ extension CodeAssistantPanel {
                 applyComposerProvider()
                 if leftPerChatPick { modelState.restoreSettingsModel(config: config) }
             }
-            restampEngineIfEmpty()
         }
     }
 
     /// "DeepSeek · classic engine — new chat only": which engine a provider
     /// runs on (only while the Agent engine is on at all), and why it can't
     /// be picked in this chat.
-    static func sectionTitle(_ section: ComposerProviderSection, tagEngines: Bool, pickable: Bool) -> String {
-        var title = section.title
-        if tagEngines && !section.runsOnAgentEngine { title += " · classic engine" }
-        if !pickable { title += " — new chat only" }
-        return title
+    static func sectionTitle(_ section: ComposerProviderSection, pickable: Bool) -> String {
+        pickable ? section.title : "\(section.title) — unavailable"
     }
 
     /// A pick from the grouped menu. On Settings' own provider it is the
@@ -365,7 +361,6 @@ extension CodeAssistantPanel {
         modelState.pick(model: modelId, provider: provider,
                         sessionID: engine.currentSessionIDString, settingsProvider: settingsProvider)
         modelState.persistModelChoice(modelId, config: config)
-        restampEngineIfEmpty()
         // A catalog model pins the chat's route to it (the session router answers the turn); any other
         // pick releases a pin that points at a catalog provider, so the old pin cannot override it.
         if let action = ComposerCatalog.pinAction(
@@ -380,12 +375,6 @@ extension CodeAssistantPanel {
         }
     }
 
-
-    /// An empty chat takes the engine of the provider it will now run on.
-    func restampEngineIfEmpty() {
-        engine.restampEngineIfEmpty(
-            resolvedProvider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider))
-    }
 
     // MARK: - Toolbar layouts (used by ViewThatFits)
 
@@ -578,7 +567,6 @@ extension CodeAssistantPanel {
                     catalogWireIds: CatalogConnectionIndex.shared.capableWireIds())
                 let routerOn = engine.route.routerPref && engine.route.server?.enabled != false
                 let chatIsEmpty = engine.messages.isEmpty
-                let tagEngines = AgentV2Selection.toggleEnabled()
                 ForEach(modelState.composerProviderSections(capableProviders: capable,
                                                                     available: ProviderAvailabilityStore.shared.available,
                                                                     serverUsableProvider: TierRoutingServerCache.shared.state
@@ -587,8 +575,8 @@ extension CodeAssistantPanel {
                                                                     routerOn: routerOn)) { section in
                     let pickable = CodeAssistantModelState.canPick(
                         section, chatIsEmpty: chatIsEmpty, chatRunsOnAgentEngine: engine.usesAgentV2Engine)
-                    Section(Self.sectionTitle(section, tagEngines: tagEngines, pickable: pickable)) {
-                        if section.catalog, let note = section.unavailableNote ?? (pickable ? nil : ComposerCatalog.classicChatNote) {
+                    Section(Self.sectionTitle(section, pickable: pickable)) {
+                        if let note = section.unavailableNote {
                             Text(note)
                         }
                         ForEach(section.models) { model in

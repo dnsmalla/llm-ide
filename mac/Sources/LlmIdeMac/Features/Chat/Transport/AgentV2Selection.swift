@@ -1,20 +1,11 @@
 import Foundation
 
-/// Task 12 — the Agent v2 engine's selection policy, transport factory, and
-/// engine-selection transport. Everything here exists so the rest of the
-/// system can treat "which engine answers this turn" as one rule with one
-/// implementation: the user's beta toggle, resolved against the turn's
-/// provider the same way the panel resolves it for the wire, AND the chat's
-/// per-session engine marker (the D3 clean cut — legacy chats stay legacy,
-/// v2 chats stay v2, the toggle only decides at creation + kills globally).
+/// The Agent v2 engine's provider policy, transport factory and engine transport. The classic
+/// `/code-assist` engine is gone (K1 Phase 6, API 92): every chat runs on `/agent/v2/stream`, either
+/// on the Claude Agent SDK (Anthropic, or a custom provider with an Anthropic-compatible endpoint) or,
+/// through the session router, on the multi-provider adapter (a provider-catalog connection). What
+/// this type decides is which providers can run a chat at all.
 public enum AgentV2Selection {
-
-    /// `@AppStorage`/UserDefaults key for the user's engine toggle. The
-    /// Settings row (`ProvidersSettingsSection`) writes through
-    /// `@AppStorage`, which is backed by the same `UserDefaults.standard`
-    /// this type reads — the two can never disagree. Forwards to the Core
-    /// constant so Settings can name the key without naming Chat.
-    static let toggleKey = ChatEnginePreference.useAgentV2DefaultsKey
 
     /// The backend provider id the v2 engine runs on (the built-in Claude
     /// CLI tool's `AICliTool.provider`; the server-side engine always drives
@@ -76,61 +67,22 @@ public enum AgentV2Selection {
     /// the legacy engine forever.
     static let sessionEngineV2 = "agentV2"
 
-    /// The whole selection rule: the Agent engine answers a turn only when
-    /// the user opted in (toggle off = global kill switch, v2 chats
-    /// included), the turn's provider is one the engine can run
-    /// (`capableProviders` — Anthropic, or an Anthropic-compatible custom
-    /// provider), AND the chat itself was created as a v2 chat (its engine
-    /// marker). The marker is what makes the clean cut per-chat rather than
-    /// per-turn: flipping the toggle mid-chat can never hand a legacy chat a
-    /// context-blind fresh SDK session, nor replay a v2 chat's history
-    /// through the legacy loop.
-    static func useV2(toggleOn: Bool, resolvedProvider: String?, sessionEngine: String?,
-                      capableProviders: Set<String> = [anthropicProvider]) -> Bool {
-        toggleOn && sessionEngine == sessionEngineV2
-            && providerCanRunAgentEngine(resolvedProvider, capableProviders: capableProviders)
+    /// Whether `resolvedProvider` can run a chat on this build (see `agentCapableProviders`).
+    static func canRunChat(_ resolvedProvider: String?, capableProviders: Set<String>) -> Bool {
+        providerCanRunAgentEngine(resolvedProvider, capableProviders: capableProviders)
     }
 
-    /// Whether to show the composer's "this chat will use the classic engine"
-    /// provider hint. Pure so it can be pinned by tests and cannot drift from
-    /// `useV2` the way an inline view expression did.
-    ///
-    /// `usesAgentEngine` is the caller's THREE-part answer (transport present
-    /// AND toggle on AND the chat stamped v2 — `ChatEngine.usesAgentV2Engine`),
-    /// never the bare toggle. Gating on the toggle alone made the hint fire in
-    /// chats that could never run on the Agent engine — a legacy-stamped chat,
-    /// or an out-of-date server — where switching provider fixes nothing.
-    static func providerHintNeeded(usesAgentEngine: Bool, resolvedProvider: String?,
-                                   capableProviders: Set<String> = [anthropicProvider]) -> Bool {
-        usesAgentEngine && !providerCanRunAgentEngine(resolvedProvider, capableProviders: capableProviders)
-    }
+    /// The engine marker stamped on every NEW chat. Always the Agent engine: nothing else exists any more.
+    /// A chat from before (marker nil, written by the classic engine) is continued on the Agent engine
+    /// through a fresh session seeded with its recent turns, then re-stamped (`ChatEngine`).
+    static func engineForNewChat() -> String? { sessionEngineV2 }
 
-    /// Current toggle value. UNSET defaults to true (the Agent engine is the
-    /// default for new chats since P3); an explicit user opt-out (false) is
-    /// honored forever. Read at ENGINE-CREATION time and at TURN time.
-    static func toggleEnabled(defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: toggleKey) == nil ? true : defaults.bool(forKey: toggleKey)
-    }
+    /// How many of a legacy chat's last turns seed the fresh Agent session when it is continued.
+    static let legacyContinuationTurns = 6
 
-    /// Engine marker to stamp on a NEWLY MINTED chat: the Agent v2 engine
-    /// iff the beta toggle is on at the moment of creation AND the provider
-    /// the chat is created under can run it, else nil (legacy). The one
-    /// place the toggle decides a chat's engine — after this stamp, `useV2`
-    /// keeps the chat on the engine it was created with.
-    ///
-    /// The provider half is what stops a chat from being born on an engine
-    /// it can never use: with the toggle on by default, a user whose default
-    /// provider is OpenAI/Gemini used to get a v2-stamped chat whose every
-    /// turn silently fell back to the classic engine, under a permanent
-    /// "runs on Anthropic only" hint and a provider menu locked to Claude.
-    /// Stamping legacy instead gives that chat the classic engine honestly —
-    /// no hint, full provider menu — while a Claude/GLM chat stays v2.
-    static func engineForNewChat(defaults: UserDefaults = .standard,
-                                 resolvedProvider: String?,
-                                 capableProviders: Set<String> = [anthropicProvider]) -> String? {
-        toggleEnabled(defaults: defaults)
-            && providerCanRunAgentEngine(resolvedProvider, capableProviders: capableProviders)
-            ? sessionEngineV2 : nil
+    /// True when the composer's provider cannot run a chat on this build: drives the hint near the chips.
+    static func providerHintNeeded(resolvedProvider: String?, capableProviders: Set<String>) -> Bool {
+        !canRunChat(resolvedProvider, capableProviders: capableProviders)
     }
 
     /// The plan-like modes whose v2 RESULT turns offer the "Save Plan"
@@ -202,46 +154,34 @@ public enum AgentV2Selection {
     }
 }
 
-/// The factory seam every engine construction goes through — the one place
-/// that knows the Agent v2 engine exists. `useV2` is the selection at
-/// CONSTRUCTION time (normally `AgentV2Selection.toggleEnabled()`); the
-/// composite it returns re-checks toggle + provider per turn, so only the
-/// "v2 machinery attached at all" decision is baked in here.
+/// The factory seam every engine construction goes through.
 @MainActor
 enum ChatTransportFactory {
-
-    static func makeTransport(api: LlmIdeAPIClient, useV2: Bool) -> ChatTransport {
-        guard useV2 else { return CodeAssistTransport(api: api) }
-        return AgentV2EngineTransport(
-            v2: AgentV2Transport(streamer: api),
-            legacy: CodeAssistTransport(api: api))
+    static func makeTransport(api: LlmIdeAPIClient) -> ChatTransport {
+        AgentV2EngineTransport(v2: AgentV2Transport(streamer: api))
     }
 }
 
-/// Engine-selection `ChatTransport`: answers each turn on the Agent v2
-/// engine when the selection rule says so, on the legacy `/code-assist`
-/// transport otherwise — including two in-flight recoveries that are v2's
-/// alone:
+/// A turn on a provider this build cannot run a chat on (a built-in OpenAI / Google / DeepSeek key, or a
+/// custom provider with no Anthropic-compatible endpoint, after the classic engine was removed).
+struct ChatProviderUnsupportedError: LocalizedError, Equatable {
+    let provider: String
+    var errorDescription: String? {
+        "Chat on this provider is not supported any more. Connect it in Settings, Providers (the provider catalog) "
+            + "and turn on the session router, or pick a Claude model."
+    }
+}
+
+/// The chat transport: every turn runs on the Agent v2 engine, with the two in-flight recoveries that are
+/// v2's alone:
 ///
-/// - **Stale server** — a v2 turn failing with the client's HTTP 404
-///   envelope (the route doesn't exist: the running server predates the
-///   engine) fires `onStaleServer` — the engine raises its transient
-///   "Server update needed" banner — and completes THIS turn on the legacy
-///   transport, so upgrading the server is never a hard dependency for chat.
-///   A 404 arrives before the stream starts (the client throws it on the
-///   non-200 guard), so no v2 side effects are lost by the re-run.
-/// - **Unresumable SDK session** — `AgentV2Error.sessionUnresumable` is
-///   retried ONCE through `AgentV2Transport.roundTrip(_:fresh:…)`; the
-///   server drops the chat's recorded SDK-session mapping and starts a new
-///   session. A progress event carrying `freshSessionNote` rides the normal
-///   progress road first, so it lands as a system-style note on the
-///   streaming turn (same road the parked-approval note takes — and the
-///   phone's live channel on external turns). If the fresh attempt also
-///   fails, the error propagates and the turn surfaces as failed.
+/// - **Stale server** — a v2 turn failing with HTTP 404 (the running server predates the engine) raises
+///   `onStaleServer`, the engine's transient "Server update needed" banner, and the turn fails.
+/// - **Unresumable SDK session** — `AgentV2Error.sessionUnresumable` is retried ONCE through
+///   `AgentV2Transport.roundTrip(_:fresh:…)`; the server drops the chat's recorded SDK-session mapping
+///   and starts a new session. A progress event carrying `freshSessionNote` lands first as a note.
 ///
-/// Legacy routing (toggle off — the global kill switch —, a provider the
-/// engine cannot run, or a chat whose `engine` marker isn't `agentV2`)
-/// delegates verbatim to `legacy`; the v2 streamer is never contacted.
+/// A turn whose provider cannot run a chat throws `ChatProviderUnsupportedError` before any request.
 @MainActor
 final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
 
@@ -254,51 +194,20 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     static let staleServerBannerText = "Server update needed for the Agent engine"
 
     let v2: AgentV2Transport
-    let legacy: ChatTransport
-    /// Toggle read at TURN time (injected so tests script it without touching
-    /// process-global UserDefaults; production uses the UserDefaults default).
-    let isV2Enabled: () -> Bool
-    /// Engine marker of the chat the turn runs against (`ChatSession.engine`),
-    /// read at TURN time. Injected like `isV2Enabled`, but WIRED rather than
-    /// defaulted: `ChatEngine.connectTransportObservers` points it at the
-    /// engine's current session, because only the engine knows which chat is
-    /// loaded. The default claims legacy (nil) on purpose — a composite
-    /// nobody wired stays fail-closed on /code-assist.
-    var sessionEngineMarker: () -> String?
-    /// Provider ids the Agent engine can run, read at TURN time (a custom
-    /// provider may gain or lose its Anthropic-compatible URL in Settings
-    /// between turns). Injected like `isV2Enabled`; production reads the
-    /// persisted custom providers.
+    /// Provider ids a chat can run on, read at TURN time (a custom provider may gain or lose its
+    /// Anthropic-compatible URL, or the router may be switched, between turns).
     let capableProviders: () -> Set<String>
-    /// Fired when a stale-server 404 forced a legacy fallback — the engine
-    /// raises its transient notice banner. Wired by `ChatEngine` itself
-    /// (init and `setTransport`), so the panel needs no plumbing.
+    /// Fired when a 404 says the running server predates the Agent engine.
     var onStaleServer: (() -> Void)?
-    /// Live mid-turn task list (`tasks_progress`), from WHICHEVER engine
-    /// runs the turn. Forwarded to both inner transports so `ChatEngine`
-    /// wires ONE callback on the composite it actually holds: v2 fires it
-    /// from tool_result events, legacy from the /code-assist stream's own
-    /// tasks_progress events (server v42+; an older server sends none and
-    /// legacy progress stays turn-granular).
     var onLiveTasks: (@MainActor ([AgentTask]) -> Void)? {
         get { v2.onLiveTasks }
-        set {
-            v2.onLiveTasks = newValue
-            (legacy as? CodeAssistTransport)?.onLiveTasks = newValue
-        }
+        set { v2.onLiveTasks = newValue }
     }
-
-    /// Mid-turn resolved-mode echo (`mode_set`). v2 only — the legacy
-    /// endpoint reports its mode once, on the terminal `done` event, which
-    /// `ChatEngine` already applies from the turn result. A legacy turn
-    /// therefore names its mode when it finishes rather than when it starts,
-    /// which is the most that stream can honestly say.
     var onModeResolved: (@MainActor (String) -> Void)? {
         get { v2.onModeResolved }
         set { v2.onModeResolved = newValue }
     }
-
-    /// Session router notices (v2 only; the legacy endpoint never sends them).
+    /// Session router notices.
     var onRouteSwitch: (@MainActor (ChatRouteSwitchNotice) -> Void)? {
         get { v2.onRouteSwitch }
         set { v2.onRouteSwitch = newValue }
@@ -309,64 +218,30 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
     }
 
     init(v2: AgentV2Transport,
-         legacy: ChatTransport,
-         isV2Enabled: @escaping () -> Bool = { AgentV2Selection.toggleEnabled() },
-         sessionEngineMarker: @escaping () -> String? = { nil },
          capableProviders: @escaping () -> Set<String> = { AgentV2Selection.liveAgentCapableProviders() }) {
         self.v2 = v2
-        self.legacy = legacy
-        self.isV2Enabled = isV2Enabled
-        self.sessionEngineMarker = sessionEngineMarker
         self.capableProviders = capableProviders
     }
 
-    /// Whether the round-trip currently in flight (or the most recent one)
-    /// ran on the LEGACY transport. Set at the top of every branch below,
-    /// before delegating, so a callback fired DURING the round-trip already
-    /// reads the right value.
-    ///
-    /// `ChatEngine` needs this to tag an arriving `ToolApproval` with the
-    /// session id it was actually parked under: a legacy approval keys on
-    /// `agentContext.sessionId`, a v2 one on the SDK session id. Both are
-    /// non-nil on a normal turn, and `sdkSessionId` survives for the chat's
-    /// whole lifetime once any v2 turn has run — so "which engine ran THIS
-    /// turn" is the only reliable discriminator, and a stale-server 404
-    /// fallback makes it genuinely per-turn rather than per-chat.
-    private(set) var lastTurnRanLegacy = false
-
-    /// SDK-session forwarding so `ChatEngine.agentV2SessionId` and the
-    /// session-swap reset keep working through the composite (they cast for
-    /// `AgentV2Transport` and would otherwise miss it).
+    /// SDK-session forwarding so `ChatEngine.agentV2SessionId` and the session-swap reset keep working.
     var sdkSessionId: String? { v2.sdkSessionId }
     func resetSdkSessionId() { v2.resetSdkSessionId() }
 
     // MARK: - ChatTransport
 
-    /// 3-callback requirement. Production v2 callers all use the 4-callback
-    /// form; when v2 is selected here anyway, the attempt goes through the
-    /// v2 transport's OWN 3-callback entry so an unanswerable approval still
-    /// fails fast (`APPROVAL_UNHANDLED`) rather than parking forever. The
-    /// stale-server 404 fallback still applies; the sessionUnresumable
-    /// fresh-retry does not (the fresh entry point requires an approval
-    /// handler this form doesn't have).
+    /// 3-callback requirement. Production callers all use the 4-callback form; here the attempt goes
+    /// through the v2 transport's OWN 3-callback entry so an unanswerable approval still fails fast
+    /// (`APPROVAL_UNHANDLED`) rather than parking forever.
     func roundTrip(
         _ input: ChatTransportInput,
         onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
         onChunk: @escaping @MainActor (String) -> Void
     ) async throws -> ChatTransportResult {
-        guard selectsV2(input) else {
-            lastTurnRanLegacy = true
-            return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
-        }
-        lastTurnRanLegacy = false
+        try requireCapable(input)
         do {
             return try await v2.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
         } catch {
-            if Self.isStaleServer404(error) {
-                onStaleServer?()
-                lastTurnRanLegacy = true
-                return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk)
-            }
+            if Self.isStaleServer404(error) { onStaleServer?() }
             throw error
         }
     }
@@ -377,27 +252,15 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
         onChunk: @escaping @MainActor (String) -> Void,
         onApproval: @escaping @MainActor (AgentV2Approval) -> Void
     ) async throws -> ChatTransportResult {
-        guard selectsV2(input) else {
-            // As of Task 8-9, the legacy engine's own gated `run-bash` DOES
-            // park a ToolApproval — forward through the 4-callback entry so
-            // it reaches `onApproval` instead of silently vanishing the way
-            // dropping to the 3-callback overload would (that overload only
-            // exists for the v2-only "answerless" fallback below).
-            lastTurnRanLegacy = true
-            return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
-        }
-        lastTurnRanLegacy = false
+        try requireCapable(input)
         do {
-            return try await v2.roundTrip(input, fresh: false,
+            // A legacy chat's first turn on this engine starts a fresh SDK session seeded with its recent turns.
+            return try await v2.roundTrip(input, fresh: input.continuesLegacyChat,
                                           onProgress: onProgress, onChunk: onChunk,
                                           onApproval: onApproval)
         } catch let error as AgentV2Error where error == .sessionUnresumable {
-            // The note rides the progress road BEFORE the retry: it lands as
-            // a system-style row on the streaming turn even if this call is
-            // about to fail, because the SDK session it names is gone either
-            // way. The engine's final reply-overwrite keeps the visible text
-            // correct even if the failed first attempt streamed some deltas
-            // before its `error` event.
+            // The note rides the progress road BEFORE the retry: it lands as a system-style row on the
+            // streaming turn even if the retry fails, because the SDK session it names is gone either way.
             onProgress(LlmIdeAPIClient.AgentProgress(
                 label: Self.freshSessionNote, phase: "tool", tool: nil, detail: nil))
             do {
@@ -405,48 +268,25 @@ final class AgentV2EngineTransport: ChatTransport, @unchecked Sendable {
                                               onProgress: onProgress, onChunk: onChunk,
                                               onApproval: onApproval)
             } catch {
-                if Self.isStaleServer404(error) {
-                    return try await fallbackToLegacy(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
-                }
+                if Self.isStaleServer404(error) { onStaleServer?() }
                 throw error
             }
         } catch {
-            if Self.isStaleServer404(error) {
-                return try await fallbackToLegacy(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
-            }
+            if Self.isStaleServer404(error) { onStaleServer?() }
             throw error
         }
     }
 
-    /// Banner + one legacy round-trip — the shared tail of both stale-server
-    /// branches above. Forwards `onApproval` too (see the guard-branch
-    /// comment above): a v2 turn falling back mid-flight still lands on the
-    /// same legacy transport that can itself park a ToolApproval.
-    private func fallbackToLegacy(
-        _ input: ChatTransportInput,
-        onProgress: @escaping @MainActor (LlmIdeAPIClient.AgentProgress) -> Void,
-        onChunk: @escaping @MainActor (String) -> Void,
-        onApproval: @escaping @MainActor (AgentV2Approval) -> Void
-    ) async throws -> ChatTransportResult {
-        onStaleServer?()
-        lastTurnRanLegacy = true
-        return try await legacy.roundTrip(input, onProgress: onProgress, onChunk: onChunk, onApproval: onApproval)
-    }
-
     // MARK: - Policy
 
-    private func selectsV2(_ input: ChatTransportInput) -> Bool {
-        AgentV2Selection.useV2(toggleOn: isV2Enabled(),
-                               resolvedProvider: input.provider,
-                               sessionEngine: sessionEngineMarker(),
-                               capableProviders: capableProviders())
+    private func requireCapable(_ input: ChatTransportInput) throws {
+        guard AgentV2Selection.canRunChat(input.provider, capableProviders: capableProviders()) else {
+            throw ChatProviderUnsupportedError(provider: input.provider ?? "")
+        }
     }
 
-    /// The stale-server shape: `LlmIdeAPIClient.agentV2Stream` throws its
-    /// `APIError.http` envelope on any non-200 before the stream starts —
-    /// 404 means the route isn't there, i.e. the running server predates the
-    /// Agent engine. Anything else (stream-carried errors, cancellations,
-    /// other statuses) propagates untouched.
+    /// The stale-server shape: `LlmIdeAPIClient.agentV2Stream` throws its `APIError.http` envelope on any
+    /// non-200 before the stream starts — 404 means the route isn't there.
     static func isStaleServer404(_ error: Error) -> Bool {
         if case let APIError.http(status, _, _, _) = error { return status == 404 }
         return false

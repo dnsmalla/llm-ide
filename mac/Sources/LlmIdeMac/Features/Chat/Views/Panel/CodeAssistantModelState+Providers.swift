@@ -63,17 +63,19 @@ extension CodeAssistantModelState {
             guard listed || isCurrent else { continue }
             var models = models(for: tool, includingSelected: isCurrent)
             if isCurrent { models = Self.listing(selectedModel, in: models) }
+            let runs = capableProviders.contains(tool.provider)
             sections.append(ComposerProviderSection(
                 id: tool.rawValue, title: tool.displayName, models: models,
-                runsOnAgentEngine: capableProviders.contains(tool.provider)))
+                runsOnAgentEngine: runs, unavailableNote: runs ? nil : ComposerCatalog.unsupportedNote))
         }
         for provider in customProviders where (provider.isEnabled && ProviderAvailability.isListed(provider.wireId, available: available))
             || provider.wireId == selectedProvider {
             var models = provider.models
             if provider.wireId == selectedProvider { models = Self.listing(selectedModel, in: models) }
+            let runs = capableProviders.contains(provider.wireId)
             sections.append(ComposerProviderSection(
                 id: provider.wireId, title: provider.name, models: models,
-                runsOnAgentEngine: capableProviders.contains(provider.wireId)))
+                runsOnAgentEngine: runs, unavailableNote: runs ? nil : ComposerCatalog.unsupportedNote))
         }
         sections += ComposerCatalog.sections(catalogConnections, routerOn: routerOn, providerChatEnabled: catalogProviderChatEnabled)
         return sections.filter { !$0.models.isEmpty }
@@ -86,16 +88,10 @@ extension CodeAssistantModelState {
         return models + [AIModel(id: id, displayName: id)]
     }
 
-    /// Whether a section can be picked in the displayed chat. A chat's engine
-    /// is fixed once it has messages: an Agent-engine chat cannot move to a
-    /// provider the Agent engine cannot run (the turn would fall to the classic
-    /// engine without the Agent session's context). A classic chat can take any
-    /// provider, and an empty chat is re-stamped for the provider picked.
+    /// Whether a section can be picked in the displayed chat: every chat runs on the Agent engine, so a
+    /// section is pickable exactly when its provider can run one right now (no note).
     static func canPick(_ section: ComposerProviderSection, chatIsEmpty: Bool, chatRunsOnAgentEngine: Bool) -> Bool {
-        // A catalog model is answered by the adapter behind the session router: it needs the router on and
-        // a chat that runs on the Agent engine (an empty chat is re-stamped for it).
-        if section.catalog { return section.unavailableNote == nil && (chatIsEmpty || chatRunsOnAgentEngine) }
-        return chatIsEmpty || !chatRunsOnAgentEngine || section.runsOnAgentEngine
+        section.unavailableNote == nil && section.runsOnAgentEngine
     }
 
     /// The provider Settings gives the composer: the "Code Assistant provider"

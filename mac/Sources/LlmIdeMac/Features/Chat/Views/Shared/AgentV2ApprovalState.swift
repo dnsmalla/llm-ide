@@ -16,16 +16,6 @@ import Foundation
 @Observable
 final class AgentV2ApprovalState {
     let approval: AgentV2Approval
-    /// The legacy chat's own `agentContext.sessionId` at the moment this
-    /// approval arrived — captured because the legacy `CodeAssistTransport`
-    /// (unlike `AgentV2Transport`, which persists its `sdkSessionId` across
-    /// the turn) holds no session state of its own. Nil for a v2-engine
-    /// approval, which instead reads `ChatEngine.agentV2SessionId` at submit
-    /// time. Non-nil here is the AUTHORITATIVE signal that the LEGACY engine
-    /// parked this approval, so `submitToolDecision` prefers it over
-    /// `agentV2SessionId` — which can linger from an earlier v2 turn in the
-    /// same chat and would route the answer to the wrong endpoint.
-    let legacySessionId: String?
     /// What the user typed into the card's "tell it what to do instead" field;
     /// sent with a Deny as the reason the model sees (server API v55).
     var denyFeedback: String = ""
@@ -56,9 +46,8 @@ final class AgentV2ApprovalState {
     }
     func endSubmit() { isSubmitting = false }
 
-    init(approval: AgentV2Approval, legacySessionId: String? = nil) {
+    init(approval: AgentV2Approval) {
         self.approval = approval
-        self.legacySessionId = legacySessionId
     }
 
     func markSubmitted() {
@@ -124,38 +113,9 @@ extension ChatEngine {
         agentV2Transport?.sdkSessionId
     }
 
-    /// True when this engine carries the v2 machinery, the beta toggle
-    /// currently selects it, AND the loaded chat is a v2 chat (its engine
-    /// marker) — the per-turn rule minus the per-turn provider, which is
-    /// exactly what view-level affordances keyed to "this is a v2 chat"
-    /// (the save-plan message action) need. Mirrors the selection the
-    /// transport itself applies each turn, so the two can't drift.
-    var usesAgentV2Engine: Bool {
-        agentV2Transport != nil
-            && AgentV2Selection.toggleEnabled()
-            && currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2
-    }
-
-    /// The `legacySessionId` to tag an approval arriving from THIS turn with:
-    /// the chat's `agentContext.sessionId` when the turn ran on the legacy
-    /// engine, `nil` when it ran on v2 (whose approvals key on the SDK session
-    /// id instead, read at submit time).
-    ///
-    /// Both ids are normally non-nil — `CodeAssistantPanel+Agent` fills
-    /// `AgentContext.sessionId` on EVERY turn, v2 included — so "was this
-    /// approval parked by the legacy engine?" cannot be inferred from the
-    /// context alone. The transport that actually ran the turn is the only
-    /// honest source, and it is per-TURN, not per-chat: a v2-selected turn
-    /// can still land on legacy through the stale-server 404 fallback.
-    func legacySessionIdForApproval(_ input: ChatTransportInput) -> String? {
-        if let composite = transport as? AgentV2EngineTransport {
-            return composite.lastTurnRanLegacy ? input.agentContext?.sessionId : nil
-        }
-        // A bare v2 transport never parks a legacy approval; anything else
-        // (CodeAssistTransport and its doubles) always does.
-        if transport is AgentV2Transport { return nil }
-        return input.agentContext?.sessionId
-    }
+    /// True when this engine carries the v2 machinery. Every chat runs on the Agent engine now; a chat
+    /// written by the classic engine is continued on it through a fresh session (`ChatEngine`).
+    var usesAgentV2Engine: Bool { agentV2Transport != nil }
 
     /// Sink for the transport's 4-callback `onApproval`. Called by every
     /// round-trip site (runTurn / sendFollowup / performExternalTurn), so the
@@ -168,12 +128,12 @@ extension ChatEngine {
     /// step takes (`recordProgress`): it lands in the streaming message's
     /// `toolSteps`, persisted with the turn and visible wherever the session
     /// renders.
-    func handleApprovalArrival(_ approval: AgentV2Approval, legacySessionId: String? = nil) {
+    func handleApprovalArrival(_ approval: AgentV2Approval) {
         if let current = pendingApproval, !current.submitted, !current.isExpired {
-            queuedApprovals.append((approval, legacySessionId))
+            queuedApprovals.append(approval)
             return
         }
-        presentApproval(approval, legacySessionId: legacySessionId)
+        presentApproval(approval)
     }
 
     /// Make `approval` the current card — and, on a phone-driven turn, the
@@ -181,8 +141,8 @@ extension ChatEngine {
     /// question per command, so forwarding a queued one at arrival replaced
     /// the question it was showing, its answer then failed the requestId
     /// check ("no longer open"), and neither could be answered from it.
-    func presentApproval(_ approval: AgentV2Approval, legacySessionId: String?) {
-        pendingApproval = AgentV2ApprovalState(approval: approval, legacySessionId: legacySessionId)
+    func presentApproval(_ approval: AgentV2Approval) {
+        pendingApproval = AgentV2ApprovalState(approval: approval)
         guard isExternalTurn else { return }
         recordProgress(LlmIdeAPIClient.AgentProgress(
             label: Self.externalApprovalNote, phase: "tool", tool: nil, detail: nil
@@ -245,7 +205,7 @@ extension ChatEngine {
     /// by policy). Its card was left up, still clickable, for a tool the turn
     /// had already been told was denied — and a click then read "timed out".
     func handleApprovalResolved(requestId: String) {
-        queuedApprovals.removeAll { $0.approval.requestId == requestId }
+        queuedApprovals.removeAll { $0.requestId == requestId }
         guard let state = pendingApproval, state.approval.requestId == requestId,
               !state.isSubmitting else { return }
         finishCurrentApproval()
@@ -262,7 +222,7 @@ extension ChatEngine {
             pendingApproval = nil
         } else {
             let next = queuedApprovals.removeFirst()
-            presentApproval(next.approval, legacySessionId: next.legacySessionId)
+            presentApproval(next)
         }
     }
 
@@ -277,17 +237,6 @@ extension ChatEngine {
     /// one of "deny" | "allow" | "always-allow", never an `answers`
     /// dictionary (that shape is `AskUserQuestion`-only; see
     /// `submitApproval`).
-    ///
-    /// Routes to whichever engine actually PARKED this approval, and
-    /// `legacySessionId` is checked FIRST because it is the ground truth for
-    /// THIS approval: it is non-nil exactly when the legacy `CodeAssistTransport`
-    /// delivered it, captured at arrival. `agentV2SessionId` is not — it reads
-    /// the v2 transport's `sdkSessionId`, which persists for the whole chat
-    /// once any v2 turn has run. A chat that takes a v2 turn and then falls
-    /// back to a legacy turn (e.g. a stale-server 404) therefore has BOTH
-    /// non-nil, and the old v2-first order posted the legacy decision to
-    /// `/agent/v2/decision` with a stale SDK session id — a 403
-    /// `DECISION_FORBIDDEN`, i.e. an unanswerable card.
     ///
     /// Same submit/retry contract as `submitApproval`: `{ok:true}` marks the
     /// state submitted and drops the card (identity-checked against a
@@ -304,9 +253,7 @@ extension ChatEngine {
             // instruction rides a deny only.
             let trimmed = state.denyFeedback.trimmingCharacters(in: .whitespacesAndNewlines)
             let feedback = action == "deny" && !trimmed.isEmpty ? trimmed : nil
-            if let legacySessionId = state.legacySessionId {
-                ok = try await postLegacyToolDecision(state.approval.requestId, legacySessionId, action, feedback)
-            } else if let sdkSessionId = agentV2SessionId {
+            if let sdkSessionId = agentV2SessionId {
                 ok = try await postToolDecision(state.approval.requestId, sdkSessionId, action, feedback)
             } else {
                 state.recordSubmitFailure("No session id for this engine — cannot post the decision. Try a new turn.")

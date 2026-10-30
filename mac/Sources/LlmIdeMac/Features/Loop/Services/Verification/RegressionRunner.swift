@@ -12,7 +12,7 @@ import Foundation
 import os.log
 
 /// Minimal interface the runner needs. Production binds this to
-/// `LlmIdeAPIClient.codeAssist`; tests bind a fake.
+/// `POST /kb/complete`; tests bind a fake.
 protocol RegressionPrompter: AnyObject {
     func ask(prompt: String) async throws -> String
 }
@@ -443,55 +443,23 @@ final class CodeAssistPrompter: RegressionPrompter {
     }
 }
 
-/// How the regression replay and judge reach a model. One prompt, one answer.
-/// Production uses `POST /kb/complete`; `loop.completionRoute` off (or a
-/// server older than API v88) uses the old tool-less `/code-assist` call, which
-/// wraps the prompt server-side. `/kb/complete` is asked for that same wrapper
-/// (`framing: "code-assist"`), so the model sees identical input either way.
+/// How the regression replay and judge reach a model. One prompt, one answer, through `POST /kb/complete`
+/// (which can run on a provider-catalog connection when the Loop's tier route names one). `framing: "code-assist"`
+/// keeps the model input identical to what the old `/code-assist` wrapper produced.
 protocol RegressionCompletionTransport: Sendable {
     func complete(prompt: String, language: String, model: String?, provider: String?,
                   tier: String?) async throws -> String
 }
 
-enum LoopCompletionRoute {
-    /// UserDefaults key. Absent = on; `false` restores the `/code-assist` call.
-    static let defaultsKey = "loop.completionRoute"
-
-    static func isEnabled(_ defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: defaultsKey) as? Bool ?? true
-    }
-
-    /// A server without the route (API < 88) answers 404; that alone is a
-    /// reason to use the old call, nothing else is.
-    static func shouldFallBack(on error: Error) -> Bool {
-        if case APIError.http(let status, _, _, _) = error { return status == 404 }
-        return false
-    }
-}
-
 final class APIRegressionCompletionTransport: RegressionCompletionTransport {
     private let api: LlmIdeAPIClient
-    private let routeEnabled: @Sendable () -> Bool
 
-    init(api: LlmIdeAPIClient, routeEnabled: @escaping @Sendable () -> Bool = { LoopCompletionRoute.isEnabled() }) {
-        self.api = api
-        self.routeEnabled = routeEnabled
-    }
+    init(api: LlmIdeAPIClient) { self.api = api }
 
     func complete(prompt: String, language: String, model: String?, provider: String?,
                   tier: String?) async throws -> String {
-        if routeEnabled() {
-            do {
-                return try await api.complete(prompt: prompt, language: language, model: model,
-                                              provider: provider, tier: tier,
-                                              framing: "code-assist").reply
-            } catch where LoopCompletionRoute.shouldFallBack(on: error) {
-                codeAssistPrompterLogger.notice("/kb/complete missing on this server; using /code-assist")
-            }
-        }
-        return try await api.codeAssist(
-            message: prompt, language: language, model: model, provider: provider, tier: tier,
-            history: [], attachments: [], agentContext: nil).reply
+        try await api.complete(prompt: prompt, language: language, model: model,
+                               provider: provider, tier: tier, framing: "code-assist").reply
     }
 }
 

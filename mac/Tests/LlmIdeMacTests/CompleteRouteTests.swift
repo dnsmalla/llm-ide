@@ -30,24 +30,6 @@ final class CompleteRouteTests: XCTestCase {
         XCTAssertNil(b.usage?.cacheReadTokens)
     }
 
-    func testRouteFlagDefaultsOnAndOffRestoresOldCall() {
-        let d = UserDefaults(suiteName: "complete-route-\(UUID().uuidString)")!
-        XCTAssertTrue(LoopCompletionRoute.isEnabled(d))
-        d.set(false, forKey: LoopCompletionRoute.defaultsKey)
-        XCTAssertFalse(LoopCompletionRoute.isEnabled(d))
-        XCTAssertEqual(LoopCompletionRoute.defaultsKey, "loop.completionRoute")
-    }
-
-    func testOnlyAMissingRouteFallsBack() {
-        XCTAssertTrue(LoopCompletionRoute.shouldFallBack(
-            on: APIError.http(status: 404, code: "NOT_FOUND", message: "", details: nil)))
-        XCTAssertFalse(LoopCompletionRoute.shouldFallBack(
-            on: APIError.http(status: 400, code: "PROVIDER_UNAVAILABLE", message: "", details: nil)))
-        XCTAssertFalse(LoopCompletionRoute.shouldFallBack(
-            on: APIError.http(status: 502, code: "INTERNAL_ERROR", message: "", details: nil)))
-        XCTAssertFalse(LoopCompletionRoute.shouldFallBack(on: APIError.noSession))
-    }
-
     private final class FakeTransport: RegressionCompletionTransport, @unchecked Sendable {
         struct Call: Equatable { let prompt: String; let language: String; let model: String?; let provider: String?; let tier: String? }
         var calls: [Call] = []

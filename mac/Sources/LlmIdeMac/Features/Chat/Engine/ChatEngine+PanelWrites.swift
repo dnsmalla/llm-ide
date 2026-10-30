@@ -177,10 +177,5 @@ extension ChatEngine {
                                               sdkSessionId: sdkSessionId,
                                               action: action, feedback: feedback)
         }
-        postLegacyToolDecision = { requestId, sessionId, action, feedback in
-            try await api.codeAssistDecision(requestId: requestId,
-                                             sessionId: sessionId,
-                                             action: action, feedback: feedback)
-        }
     }
 }

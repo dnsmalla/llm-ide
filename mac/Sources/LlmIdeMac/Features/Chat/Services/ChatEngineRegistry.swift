@@ -317,7 +317,6 @@ final class ChatEngineRegistry {
         // composer's custom-provider override. The displayed engine is
         // already wired to the composer's live selection; carry that over so
         // "+ New chat" during a running turn stamps exactly like an idle one.
-        fresh.resolveNewChatProvider = current.resolveNewChatProvider
         // Same hand-off for the project the new chat is stamped with.
         fresh.explorerProjectId = current.explorerProjectId
         fresh.mintFreshSession()
@@ -383,8 +382,7 @@ final class ChatEngineRegistry {
         if let engineFactory { return engineFactory(scope) }
         return ChatEngine(
             scope: scope,
-            transport: ChatTransportFactory.makeTransport(
-                api: api, useV2: AgentV2Selection.toggleEnabled()))
+            transport: ChatTransportFactory.makeTransport(api: api))
     }
 
     /// Move a mid-turn engine off-screen, still running.
@@ -419,8 +417,7 @@ final class ChatEngineRegistry {
         // card). On screen that is no longer true, and keeping it would mean a
         // chat stamped for the Agent engine quietly answering on the legacy
         // one. `setTransport` defers to the next idle if a turn is in flight.
-        engine.setTransport(ChatTransportFactory.makeTransport(
-            api: api, useV2: AgentV2Selection.toggleEnabled()))
+        engine.setTransport(ChatTransportFactory.makeTransport(api: api))
         displayed[scope] = engine
         // The pointer is what a relaunch restores, and this chat is now the
         // scope's visible one — `switchSession` would have done this, but

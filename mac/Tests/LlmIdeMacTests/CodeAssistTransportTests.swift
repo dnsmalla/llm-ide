@@ -35,7 +35,7 @@ final class ScriptedChatTransport: ChatTransport, @unchecked Sendable {
     }
 }
 
-@Suite("CodeAssistTransport fallback policy")
+@Suite("Chat transport input and server error decoding")
 struct CodeAssistTransportTests {
     @Test("makeProvider passes custom:uuid verbatim")
     func customProvider() {
@@ -46,26 +46,6 @@ struct CodeAssistTransportTests {
     func builtinProvider() {
         let p = ChatTransportInput.makeProvider(selectedProvider: AICliTool.claudeCode.rawValue)
         #expect(p == AICliTool.claudeCode.provider)
-    }
-
-    @Test("Fallback policy: .http with no progress → retry buffered; anything else → rethrow")
-    func fallbackPolicy() {
-        #expect(CodeAssistTransport.shouldFallbackBuffered(error: APIError.http(status: 502, code: "BAD", message: "x", details: nil),
-                                                           sawProgress: false) == true)
-        #expect(CodeAssistTransport.shouldFallbackBuffered(error: APIError.http(status: 502, code: "BAD", message: "x", details: nil),
-                                                           sawProgress: true) == false)
-        #expect(CodeAssistTransport.shouldFallbackBuffered(error: APIError.agent(message: "server agent error"),
-                                                           sawProgress: false) == false)
-        // Regression: a 4xx is the server refusing THIS request — re-POSTing
-        // it burned another rate-limit token on 429 and failed again on 400.
-        for status in [400, 401, 403, 409, 413, 429] {
-            #expect(CodeAssistTransport.shouldFallbackBuffered(
-                error: APIError.http(status: status, code: "X", message: "x", details: nil),
-                sawProgress: false) == false, "\(status)")
-        }
-        #expect(CodeAssistTransport.shouldFallbackBuffered(
-            error: APIError.http(status: 0, code: "NO_RESPONSE", message: "x", details: nil),
-            sawProgress: false) == true)
     }
 
     @Test("A refused stream surfaces the server's own error, redacted")
@@ -80,22 +60,5 @@ struct CodeAssistTransportTests {
         let secret = LlmIdeAPIClient.serverError(
             fromBody: Data(#"{"error":{"message":"bad token ghp_abcdefghijklmnopqrstuvwxyz0123456789"}}"#.utf8))
         #expect(secret?.message.contains("ghp_abcdefghijklmnopqrstuvwxyz0123456789") == false)
-    }
-
-    @Test("planWrite rides the legacy request only when set")
-    func planWriteEncoded() throws {
-        func body(_ planWrite: Bool?) throws -> [String: Any] {
-            var req = LlmIdeAPIClient.CodeAssistRequest(
-                message: "m", language: nil, model: nil, provider: nil, tier: nil,
-                history: [], attachments: [], skills: [], agentContext: nil, mode: nil,
-                planExecute: nil)
-            req.planWrite = planWrite
-            let data = try JSONEncoder().encode(req)
-            return try JSONSerialization.jsonObject(with: data) as? [String: Any] ?? [:]
-        }
-        // Regression: the field didn't exist, so "Write full plan" in a legacy
-        // chat re-ran stage-1 discovery.
-        #expect(try body(true)["planWrite"] as? Bool == true)
-        #expect(try body(nil)["planWrite"] == nil)
     }
 }

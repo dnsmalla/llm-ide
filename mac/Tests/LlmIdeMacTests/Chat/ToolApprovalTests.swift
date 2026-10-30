@@ -57,24 +57,6 @@ struct ToolApprovalTests {
         #expect(approval.questions.isEmpty)
     }
 
-    @Test("AgentV2ApprovalState carries a legacySessionId for the legacy engine's ToolApproval")
-    @MainActor
-    func stateCarriesLegacySessionId() {
-        let approval = AgentV2Approval(requestId: "r1", kind: "ToolApproval",
-                                        toolName: "run-bash", argsSummary: "echo hi")
-        let state = AgentV2ApprovalState(approval: approval, legacySessionId: "legacy-session-1")
-        #expect(state.legacySessionId == "legacy-session-1")
-        #expect(state.approval.kind == "ToolApproval")
-    }
-
-    @Test("AgentV2ApprovalState defaults legacySessionId to nil for a v2 approval")
-    @MainActor
-    func stateDefaultsLegacySessionIdToNil() {
-        let approval = AgentV2Approval(requestId: "r1", kind: "AskUserQuestion")
-        let state = AgentV2ApprovalState(approval: approval)
-        #expect(state.legacySessionId == nil)
-    }
-
     @Test("Decodes a ToolApproval's new structured args (Edit)")
     func decodesEditArgs() throws {
         let json = #"{"type":"approval_request","requestId":"r1","kind":"ToolApproval","toolName":"Edit","argsSummary":"/w/a.txt","args":{"filePath":"/w/a.txt","oldString":"old","newString":"new"}}"#

@@ -54,14 +54,14 @@ struct ComposerProviderMenuTests {
         #expect(claude?.models.map(\.id).contains("deepseek-chat") == false, "never under another provider")
     }
 
-    @Test("a chat already on the Agent engine cannot move to a classic-only provider; empty or classic chats can")
+    @Test("a section is pickable only when its provider can run a chat; a classic-only provider is disabled with a note")
     func pickability() {
-        let classic = ComposerProviderSection(id: "deepseek", title: "DeepSeek", models: [], runsOnAgentEngine: false)
+        let classic = ComposerProviderSection(id: "deepseek", title: "DeepSeek", models: [], runsOnAgentEngine: false,
+                                              unavailableNote: ComposerCatalog.unsupportedNote)
         let agent = ComposerProviderSection(id: "claude_code", title: "Claude", models: [], runsOnAgentEngine: true)
         #expect(!CodeAssistantModelState.canPick(classic, chatIsEmpty: false, chatRunsOnAgentEngine: true))
+        #expect(!CodeAssistantModelState.canPick(classic, chatIsEmpty: true, chatRunsOnAgentEngine: true))
         #expect(CodeAssistantModelState.canPick(agent, chatIsEmpty: false, chatRunsOnAgentEngine: true))
-        #expect(CodeAssistantModelState.canPick(classic, chatIsEmpty: true, chatRunsOnAgentEngine: true))
-        #expect(CodeAssistantModelState.canPick(agent, chatIsEmpty: false, chatRunsOnAgentEngine: false))
     }
 
     @Test("a pick on another provider is this chat's only, survives Settings' re-apply, and is restored on return")
@@ -146,30 +146,32 @@ struct ComposerProviderMenuTests {
         #expect(!ChatEngine.errorIsShownOnLastReply("HTTP 404", messages: [failed, user]))
     }
 
-    @Test("an empty chat is re-stamped for the provider picked; a chat with messages keeps its engine")
-    func restampOnlyWhenEmpty() async {
+    @Test("every new chat is stamped for the Agent engine; a classic chat is stamped once it continues")
+    func stamping() async {
         await ChatStoreOverrideGate.shared.acquire()
         defer { ChatStoreOverrideGate.shared.release() }
         let tmp = FileManager.default.temporaryDirectory
-            .appendingPathComponent("composer-restamp-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("composer-stamp-\(UUID().uuidString)", isDirectory: true)
         try? FileManager.default.createDirectory(at: tmp, withIntermediateDirectories: true)
         ChatSessionStore.baseDirectoryOverride = tmp
         defer {
             ChatSessionStore.baseDirectoryOverride = nil
             try? FileManager.default.removeItem(at: tmp)
         }
-        let capable: Set<String> = [AgentV2Selection.anthropicProvider]
         let engine = ChatEngine(scope: .explorer, transport: ScriptedChatTransport())
-        engine.resolveNewChatProvider = { "deepseek" }
         engine.mintFreshSession()
-        let toggleOn = AgentV2Selection.toggleEnabled()
+        #expect(engine.currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2, "a new chat is never stamped classic")
 
-        engine.restampEngineIfEmpty(resolvedProvider: AgentV2Selection.anthropicProvider, capableProviders: capable)
-        #expect(engine.currentSessionEngineMarker() == (toggleOn ? AgentV2Selection.sessionEngineV2 : nil))
-
-        engine.messages = [ChatMessage(role: .user, content: "hi", status: .done, createdAt: Date())]
-        engine.restampEngineIfEmpty(resolvedProvider: "deepseek", capableProviders: capable)
-        #expect(engine.currentSessionEngineMarker() == (toggleOn ? AgentV2Selection.sessionEngineV2 : nil),
-                "a chat with messages keeps the engine it has")
+        // A chat written by the classic engine: no marker.
+        var legacy = ChatSession(scope: .explorer, engine: nil)
+        legacy.messages = [ChatMessage(role: .user, content: "old question", status: .done, createdAt: Date())]
+        ChatSessionStore.save(legacy)
+        engine.currentSessionIDString = legacy.id.uuidString
+        engine.engineMarkerMemo = nil
+        #expect(engine.currentSessionEngineMarker() == nil)
+        engine.stampAgentEngineIfLegacy()
+        #expect(engine.currentSessionEngineMarker() == AgentV2Selection.sessionEngineV2)
+        #expect(ChatSessionStore.load(id: legacy.id)?.engine == AgentV2Selection.sessionEngineV2)
+        #expect(ChatSessionStore.load(id: legacy.id)?.messages.count == 1, "stamping never touches the transcript")
     }
 }

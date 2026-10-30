@@ -53,11 +53,11 @@ struct ComposerCatalogTests {
         #expect(ds.unavailableNote == ComposerCatalog.providerChatOffNote)
     }
 
-    @Test("a classic chat with messages cannot take a catalog model; an empty chat can (it is re-stamped)")
-    func classicChat() throws {
+    @Test("with the router on a catalog model is pickable in any chat, empty or not")
+    func pickableInAnyChat() throws {
         let ds = try #require(state().composerProviderSections(capableProviders: [], routerOn: true).first { $0.catalog })
-        #expect(!CodeAssistantModelState.canPick(ds, chatIsEmpty: false, chatRunsOnAgentEngine: false))
-        #expect(CodeAssistantModelState.canPick(ds, chatIsEmpty: true, chatRunsOnAgentEngine: false))
+        #expect(CodeAssistantModelState.canPick(ds, chatIsEmpty: false, chatRunsOnAgentEngine: true))
+        #expect(CodeAssistantModelState.canPick(ds, chatIsEmpty: true, chatRunsOnAgentEngine: true))
     }
 
     @Test("a connection with no models, or none connected, adds no section")
@@ -88,11 +88,9 @@ struct ComposerCatalogTests {
         #expect(cap.capableWireIds(routerOn: true).isEmpty)
         cap.update(connections: [], providerChatEnabled: false)
         let capable = AgentV2Selection.agentCapableProviders(customProviders: [], catalogWireIds: ["custom:cat-deepseek"])
-        #expect(AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "custom:cat-deepseek",
-                                       sessionEngine: AgentV2Selection.sessionEngineV2, capableProviders: capable))
-        #expect(!AgentV2Selection.useV2(toggleOn: true, resolvedProvider: "custom:cat-deepseek",
-                                        sessionEngine: AgentV2Selection.sessionEngineV2,
-                                        capableProviders: AgentV2Selection.agentCapableProviders(customProviders: [])))
+        #expect(AgentV2Selection.canRunChat("custom:cat-deepseek", capableProviders: capable))
+        #expect(!AgentV2Selection.canRunChat("custom:cat-deepseek",
+                                             capableProviders: AgentV2Selection.agentCapableProviders(customProviders: [])))
     }
 }
 
@@ -116,14 +114,11 @@ struct CatalogTransportTests {
     func routedToV2() async throws {
         let stream = QueuedAgentV2Stream()
         stream.turns = [turn()]
-        let legacy = ScriptedLegacyTransport()
         let composite = AgentV2EngineTransport(
-            v2: AgentV2Transport(streamer: stream), legacy: legacy, isV2Enabled: { true },
-            sessionEngineMarker: { AgentV2Selection.sessionEngineV2 },
+            v2: AgentV2Transport(streamer: stream),
             capableProviders: { AgentV2Selection.agentCapableProviders(customProviders: [], catalogWireIds: ["custom:cat-deepseek"]) })
         let result = try await composite.roundTrip(input(), onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })
         #expect(result.reply == "from deepseek")
-        #expect(legacy.inputs.isEmpty, "the classic transport is never used for a catalog model")
         #expect(stream.bodies.first?["provider"] as? String == "custom:cat-deepseek")
         #expect(stream.bodies.first?["model"] as? String == "deepseek-chat")
     }
@@ -133,8 +128,7 @@ struct CatalogTransportTests {
         let stream = QueuedAgentV2Stream()
         stream.turns = [[.error(code: "MODEL_LACKS_TOOLS", message: "deepseek-reasoner is not known to support tools, and plan mode needs them. Pick a model with the tools badge.")]]
         let composite = AgentV2EngineTransport(
-            v2: AgentV2Transport(streamer: stream), legacy: ScriptedLegacyTransport(), isV2Enabled: { true },
-            sessionEngineMarker: { AgentV2Selection.sessionEngineV2 },
+            v2: AgentV2Transport(streamer: stream),
             capableProviders: { AgentV2Selection.agentCapableProviders(customProviders: [], catalogWireIds: ["custom:cat-deepseek"]) })
         do {
             _ = try await composite.roundTrip(input(), onProgress: { _ in }, onChunk: { _ in }, onApproval: { _ in })

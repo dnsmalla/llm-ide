@@ -28,7 +28,7 @@ import Testing
 struct HistoryForRequestTests {
     let engine = ChatEngine(
         scope: .explorer,
-        transport: CodeAssistTransport(api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")))
+        transport: ChatTransportFactory.makeTransport(api: LlmIdeAPIClient(baseURL: "http://127.0.0.1:3456")))
 
     /// Builds the `ChatMessage` a wire turn of this shape migrates into —
     /// the same transform every real append site uses, so these fixtures

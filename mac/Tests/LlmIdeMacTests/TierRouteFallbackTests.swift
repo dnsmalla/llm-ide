@@ -90,19 +90,6 @@ struct TierRouteFallbackTests {
         #expect(!TierRouting.isStatusOnlyPhase("tool") && !TierRouting.isStatusOnlyPhase("approval_request"))
     }
 
-    @Test func legacySSEErrorWithProviderCodeMapsToTheRetryableRefusal() {
-        // ai-routes.mjs (v70) adds `code` to the SSE error event only before
-        // any progress; the Mac double-gates on its own sawProgress.
-        let refused = LlmIdeAPIClient.streamError(message: "codex is not logged in", code: "PROVIDER_UNAVAILABLE",
-                                                  sawProgress: false)
-        #expect(TierRouting.isProviderConfigError(refused))
-        let afterProgress = LlmIdeAPIClient.streamError(message: "x", code: "PROVIDER_UNAVAILABLE", sawProgress: true)
-        #expect(!TierRouting.isProviderConfigError(afterProgress))
-        let plain = LlmIdeAPIClient.streamError(message: "boom", code: nil, sawProgress: false)
-        #expect(!TierRouting.isProviderConfigError(plain))
-        if case .agent(let message) = plain { #expect(message == "boom") } else { Issue.record("expected .agent") }
-    }
-
     @Test func agentV2StreamErrorWithProviderCodeIsTheRetryableRefusal() throws {
         let wire = Data(#"{"type":"error","code":"PROVIDER_UNAVAILABLE","message":"no key","retryable":false}"#.utf8)
         guard case .error(let code, let message)? = AgentV2Event.decode(fromJSON: wire) else {

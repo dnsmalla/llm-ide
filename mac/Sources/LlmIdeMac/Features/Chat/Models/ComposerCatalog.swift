@@ -4,7 +4,7 @@ import Foundation
 enum ComposerCatalog {
     static let routerOffNote = "Turn on the session router in Settings, Providers, to use these models."
     static let providerChatOffNote = "Turn on tool-capable chat for other providers in Settings, Providers."
-    static let classicChatNote = "This chat uses the classic engine. Start a new chat to use these models."
+    static let unsupportedNote = "Chat on this provider is not supported any more. Connect it in Settings, Providers (the catalog), or use a Claude model."
 
     /// Why a catalog section cannot be picked right now, or nil when it can.
     static func unavailableNote(routerOn: Bool, providerChatEnabled: Bool) -> String? {
