@@ -11,7 +11,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 7 | 3 | 16 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 8 | 3 | 16 | 27 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 4 | 1 | 7 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -20,7 +20,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Agents, providers, extensions | 10 | 1 | 9 | 20 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 6 | 2 | 5 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 72 | 19 | 71 | 162 |  |
+| Total | 73 | 19 | 71 | 163 |  |
 
 ## How the surfaces connect
 
@@ -116,6 +116,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] ui-kit extraction and K3 screens per kit: Chat, Library, Explorer, Settings, Issues/Gantt, Doc Gen, Graph, Loop/Auto Tasks, Live (kit plan K3) (me)
 - [ ] Tauri feature-off mechanism decided: build-time tree-shake plus runtime `/health features` (kit plan "Gates added") (you)
 - [ ] Packaged Node sidecar for all three OSes, finds the user's `claude` CLI, survives quit/restart (Tauri plan T6) (me)
+- [x] Server finds the user's `claude` (`extension/providers/claude-path.mjs`: env, bundled, PATH + per-OS dirs, validated) for the SDK engine (`pathToClaudeCodeExecutable`) and CLI spawns; 9 fake-executable tests; no packaged-app run on any OS yet (me)
 - [ ] Keychain / secret store per OS (Keychain, Credential Manager, Secret Service) (me)
 - [ ] Project open through a file dialog with security-scoped access; keep the `NS*FolderUsageDescription` strings (report, `4a73b581` covers the strings only) (me)
 - [ ] Tray / menu-bar presence and notifications (me)

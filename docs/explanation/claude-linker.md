@@ -56,6 +56,7 @@ Enforcement:
 | Provider id the SDK engine meters under | `AGENT_SDK_PROVIDER` in `constants.mjs` (no imports, so routes can use it without loading the engine; re-exported by `engine.mjs`) |
 | Auth ladder (`resolveAnthropicKey`) + per-user engine home (`agentSdkHomeFor`) | `extension/llm_agent/sdk/auth.mjs` (SDK-free; re-exported by `engine.mjs`) |
 | `claude` CLI argv (`-p`, `--output-format stream-json`, `--mcp-config`, …), stream-json parsing, model-id regex, 500k prompt cap | `extension/providers/providers.mjs` + `runtime.mjs` |
+| Where the `claude` executable is: `LLMIDE_CLAUDE_PATH`, SDK-bundled binary, PATH + well-known install dirs (validated: regular executable, not in a world-writable dir, `--version` probe); memoised with TTL; `CLAUDE_NOT_FOUND` typed error. Used by the SDK engine (`pathToClaudeCodeExecutable`, bundled binary first) and the CLI spawn paths (`cliBinFor`, plugin CLI; installed `claude` first) | `extension/providers/claude-path.mjs` |
 | `claude plugin …` argv (marketplace update, list --available --json, update --json --accept-command) and its JSON parsing | `extension/providers/claude-plugin-cli.mjs` |
 | SDK pin | `extension/package.json` (`@anthropic-ai/claude-agent-sdk`) |
 | SDK surface ledger (adopted / ignored / needs-human per top-level item) | `extension/llm_agent/sdk/sdk-surface.json` (gate: `tests/sdk-surface-ledger.test.mjs`, tool: `scripts/sdk-surface.mjs`) |

@@ -81,5 +81,9 @@ ship, so SEA saves little. Not recommended for Phase 1.
 `npm ci` and fails if any such package or a `claude` executable remains;
 `scripts/check-core-deps.mjs` re-verifies the staged tree. Spike builds that still
 need the bundled binary opt out with `LLMIDE_STAGE_ALLOW_SDK_BINARY=1` (never for a
-release). Open gap: the server does not yet pass `pathToClaudeCodeExecutable`, so a
-stage without the binary needs the user's `claude` wired in (Tauri plan T6).
+release). The server finds the user's `claude` itself: `extension/providers/claude-path.mjs`
+resolves it (`LLMIDE_CLAUDE_PATH`, the SDK's bundled binary if present, then PATH and
+well-known per-OS install dirs, each validated with a `--version` probe) and the SDK engine
+passes it as `pathToClaudeCodeExecutable`. When nothing is found the turn fails with an
+`ENGINE_ERROR` telling the user to install Claude Code and run `claude login`. Still open:
+a real packaged-app run on all three OSes (Tauri plan T6).
