@@ -154,6 +154,7 @@ test('POST /kb/providers/turn: 409 while the switch is off; then a full recorded
   let res = await call(a, 'POST', '/kb/providers/turn', body);
   assert.equal(res.statusCode, 409);
   assert.equal(res.json().error.code, 'PROVIDER_TOOLS_DISABLED');
+  assert.match(res.json().error.message, /Allow tools on provider models/);
   await call(a, 'PUT', '/kb/providers/settings', { toolsEnabled: true });
   const sse = [rec('openai-compatible-tool-call.sse'), rec('openai-compatible-final.sse')];
   await withFetch((url) => {
@@ -215,7 +216,7 @@ test('a submitted key is redacted even if an error message were to carry it', as
   assert.ok(!res._body.includes(key));
 });
 
-test('first GET of the catalog carries a DeepSeek-only user over once: a connection, provider chat on, the migration block', async () => {
+test('first GET of the catalog carries a DeepSeek-only user over once: a connection, tools still off but suggested, the migration block', async () => {
   const { db, users: [a] } = freshDb();
   const { setSecret } = await import('../server/vault.mjs');
   setSecret(db, a, 'deepseek.apiKey', 'sk-legacy-0123456789abcdefgh');
@@ -223,8 +224,8 @@ test('first GET of the catalog carries a DeepSeek-only user over once: a connect
   const ds = first.providers.find((p) => p.id === 'deepseek');
   assert.equal(ds.connections.length, 1);
   assert.equal(ds.connections[0].provider, 'custom:cat-deepseek');
-  assert.equal(first.settings.toolsEnabled, true);
-  assert.deepEqual(first.migration, { created: [{ provider: 'deepseek', name: 'DeepSeek' }], needsReview: [], toolsEnabled: true });
+  assert.equal(first.settings.toolsEnabled, false);
+  assert.deepEqual(first.migration, { created: [{ provider: 'deepseek', name: 'DeepSeek' }], needsReview: [], toolsSuggested: true });
   assert.ok(!JSON.stringify(first).includes('sk-legacy'), 'no key in the response');
   const second = (await call(a, 'GET', '/kb/providers/catalog')).json();
   assert.equal(second.providers.find((p) => p.id === 'deepseek').connections.length, 1);

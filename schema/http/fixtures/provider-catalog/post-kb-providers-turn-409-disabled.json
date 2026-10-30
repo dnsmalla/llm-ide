@@ -27,7 +27,7 @@
   "response": {
     "error": {
       "code": "PROVIDER_TOOLS_DISABLED",
-      "message": "Tool-capable chat on other providers is off. Turn it on in Settings, Providers."
+      "message": "Tool-capable chat on other providers is off, and this mode needs tools. Turn on \"Allow tools on provider models\" in Settings, Providers, or use ask mode."
     }
   }
 }

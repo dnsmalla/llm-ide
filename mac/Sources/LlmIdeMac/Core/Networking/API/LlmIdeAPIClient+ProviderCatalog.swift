@@ -75,7 +75,8 @@ extension LlmIdeAPIClient {
         public struct Review: Codable, Equatable, Sendable { public let provider: String; public let name: String; public let reason: String }
         public let created: [Created]
         public let needsReview: [Review]
-        public let toolsEnabled: Bool
+        /// A connection was created and tools on provider models are still off: offer the visible switch.
+        public let toolsSuggested: Bool
     }
 
     public struct CatalogResponse: Codable, Equatable, Sendable {

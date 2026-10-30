@@ -17,5 +17,9 @@ enum ProviderMigrationText {
 
     /// Why chat on a catalog model needs the router, and when the switch takes effect.
     static let routerNeeded = "Chat on these models runs through the session router. Turning it on applies the next time the backend starts."
+    /// The visible switch for tools on provider models (never enabled by the migration).
+    static let toolsSwitchLabel = "Allow tools on provider models"
+    static let toolsExplanation = "Tool turns can read files and run commands, subject to your approvals. Without this, these models still answer in ask and document modes."
+
     static let routerPending = "The session router is on; it applies the next time the backend starts."
 }

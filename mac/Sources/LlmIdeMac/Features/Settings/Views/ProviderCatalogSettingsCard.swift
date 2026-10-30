@@ -89,6 +89,16 @@ struct ProviderCatalogSettingsCard: View {
                             .font(Typography.caption).foregroundStyle(theme.current.textMuted)
                     }
                 }
+                if m.toolsSuggested && !model.settings.toolsEnabled {
+                    HStack(alignment: .firstTextBaseline) {
+                        Text(ProviderMigrationText.toolsExplanation)
+                            .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                            .fixedSize(horizontal: false, vertical: true)
+                        Spacer()
+                        Button(ProviderMigrationText.toolsSwitchLabel) { Task { await model.update { $0.toolsEnabled = true } } }
+                            .buttonStyle(.bordered).controlSize(.small)
+                    }
+                }
                 ForEach(m.needsReview, id: \.provider) { r in
                     Text(ProviderMigrationText.reviewLine(name: r.name, reason: r.reason))
                         .font(Typography.caption).foregroundStyle(theme.current.warning)
@@ -202,10 +212,10 @@ struct ProviderCatalogSettingsCard: View {
 
     private var switchesSection: some View {
         VStack(alignment: .leading, spacing: Spacing.sm) {
-            Toggle("Tool-capable chat on these providers (beta)", isOn: Binding(
+            Toggle(ProviderMigrationText.toolsSwitchLabel, isOn: Binding(
                 get: { model.settings.toolsEnabled },
                 set: { on in Task { await model.update { $0.toolsEnabled = on } } }))
-            SettingsHint("Off by default. When on, a model with the tools badge can read files, search, and run commands in a chat turn, behind the same approvals as Claude. Without it these providers answer without tools.")
+            SettingsHint("Off by default. When on, a model with the tools badge can read files, search, and run commands in a chat turn: tool turns can read files and run commands, subject to the same approvals as Claude. Without it these providers still answer in ask and document modes, without tools.")
 
             Toggle("Let these models fetch URLs and search the web without asking", isOn: Binding(
                 get: { model.settings.egressAutoApprove },

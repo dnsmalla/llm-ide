@@ -579,6 +579,19 @@ extension CodeAssistantPanel {
                     let pickable = CodeAssistantModelState.canPick(
                         section, chatIsEmpty: chatIsEmpty, chatRunsOnAgentEngine: engine.usesAgentV2Engine)
                     Section(Self.sectionTitle(section, pickable: pickable)) {
+                        if let info = section.infoNote {
+                            Text(info)
+                            Text(ComposerCatalog.toolsExplanation)
+                            Button(ComposerCatalog.toolsSwitchLabel) {
+                                Task {
+                                    if var settings = try? await api.fetchProviderCatalogSettings() {
+                                        settings.toolsEnabled = true
+                                        _ = try? await api.saveProviderCatalogSettings(settings)
+                                    }
+                                    await modelState.loadCatalogConnections(api: api)
+                                }
+                            }
+                        }
                         if let note = section.unavailableNote {
                             Text(note)
                             if ComposerCatalog.offersRouterSwitch(section) {

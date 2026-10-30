@@ -11,7 +11,7 @@ const { logger } = await import('../core/logger.mjs');
 
 const DS_KEY = 'sk-deepseek-0123456789abcdef';
 
-test('a DeepSeek-only user ends with a working catalog connection, old key kept, provider chat on', () => {
+test('a DeepSeek-only user ends with a working catalog connection, old key kept, tools NOT switched on but suggested', () => {
   const { db, users: [a] } = freshDb();
   setSecret(db, a, 'deepseek.apiKey', DS_KEY);
   const rec = migrateLegacyProviderKeys(a, { db });
@@ -21,8 +21,8 @@ test('a DeepSeek-only user ends with a working catalog connection, old key kept,
   assert.deepEqual([c[0].provider, c[0].catalogId, c[0].hasKey, c[0].enabled], ['custom:cat-deepseek', 'deepseek', true, true]);
   assert.equal(getSecret(db, a, 'custom.cat-deepseek.apiKey'), DS_KEY, 'the key was copied into the connection slot');
   assert.equal(getSecret(db, a, 'deepseek.apiKey'), DS_KEY, 'the old key is untouched');
-  assert.equal(conns.getSettings(a, db).toolsEnabled, true);
-  assert.equal(migrationView(rec).toolsEnabled, true);
+  assert.equal(conns.getSettings(a, db).toolsEnabled, false, 'the migration never enables tools by itself');
+  assert.equal(migrationView(rec).toolsSuggested, true);
 });
 
 test('idempotent: a second run changes nothing, even after the user disconnects', () => {
@@ -50,9 +50,9 @@ test("another user's keys and connections are untouched, and a user with no keys
   migrateLegacyProviderKeys(a, { db });
   assert.equal(conns.listConnections(b, db).length, 0);
   const rec = migrateLegacyProviderKeys(b, { db });
-  assert.deepEqual([rec.created.length, rec.needsReview.length, rec.toolsEnabled], [0, 0, false]);
+  assert.deepEqual([rec.created.length, rec.needsReview.length, rec.toolsSuggested], [0, 0, false]);
   assert.equal(getSecret(db, b, 'custom.cat-deepseek.apiKey'), null);
-  assert.equal(conns.getSettings(b, db).toolsEnabled, false, 'nothing migrated, nothing switched on');
+  assert.equal(conns.getSettings(b, db).toolsEnabled, false, 'nothing migrated, nothing suggested or switched on');
 });
 
 test('an OpenAI-compatible custom provider becomes a generic connection; a base URL the guard refuses is "needs review"', () => {
@@ -91,4 +91,31 @@ test('a failure for one provider does not block the others, and the key is never
   const all = lines.join('') + JSON.stringify(rec) + JSON.stringify(getMigrationRecord(a, db));
   assert.ok(!all.includes('sk-secretbad-0123456789abcdef') && !all.includes(DS_KEY), 'no key in logs or the stored record');
   void logger;
+});
+
+test('after the migration a DeepSeek-only user can chat in ask mode with no tools; a tool mode needs the visible switch', async () => {
+  const { MockLanguageModelV3, simulateReadableStream } = await import('ai/test');
+  const { runProviderTurn, ProviderTurnError } = await import('../llm_agent/adapter/provider-turn.mjs');
+  const { _clearModelCacheForTests } = await import('../providers/provider-models.mjs');
+  const { fakeFetch, jsonResponse } = await import('./provider-test-env.mjs');
+  const { db, users: [a] } = freshDb();
+  _clearModelCacheForTests();
+  setSecret(db, a, 'deepseek.apiKey', DS_KEY);
+  migrateLegacyProviderKeys(a, { db });
+  const usage = { inputTokens: { total: 5 }, outputTokens: { total: 2 } };
+  const model = new MockLanguageModelV3({ doStream: async () => ({ stream: simulateReadableStream({ chunks: [
+    { type: 'stream-start', warnings: [] }, { type: 'text-start', id: 't' }, { type: 'text-delta', id: 't', delta: 'hi' }, { type: 'text-end', id: 't' },
+    { type: 'finish', finishReason: { unified: 'stop', raw: 'stop' }, usage }] }) }) });
+  const run = (mode) => {
+    const evs = [];
+    return runProviderTurn({ userId: a, provider: 'custom:cat-deepseek', model: 'deepseek-chat', message: 'hello', mode, agentContext: {}, onEvent: (e) => evs.push(e),
+      deps: { db, fetchImpl: fakeFetch(() => jsonResponse({ data: [{ id: 'deepseek-chat' }] })), modelFor: () => model } }).then((out) => ({ out, evs }));
+  };
+  const ask = await run('ask');
+  assert.ok(ask.evs.some((e) => e.type === 'result'));
+  assert.deepEqual(ask.evs.find((e) => e.type === 'init').tools, []);
+  await assert.rejects(run('execute'), (e) => e instanceof ProviderTurnError && e.code === 'PROVIDER_TOOLS_DISABLED');
+  conns.updateSettings(a, { toolsEnabled: true }, db);
+  const exec = await run('execute');
+  assert.ok(exec.evs.find((e) => e.type === 'init').tools.length > 0, 'one visible switch later, tools are mounted');
 });

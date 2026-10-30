@@ -16,7 +16,7 @@ import { getSecret } from '../server/vault.mjs';
 import { logger } from '../core/logger.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { listCustomProviders } from '../server/custom-providers.mjs';
-import { listConnections, connectProvider, getSettings, updateSettings } from '../server/provider-connections.mjs';
+import { listConnections, connectProvider, getSettings } from '../server/provider-connections.mjs';
 
 const log = logger.child({ component: 'legacy-key-migration' });
 const FLAG = 'provider.migration.v1';
@@ -48,7 +48,7 @@ export function migrationView(record) {
   return {
     created: (record.created || []).map((c) => ({ provider: c.provider, name: c.name })),
     needsReview: (record.needsReview || []).map((r) => ({ provider: r.provider, name: r.name, reason: r.reason })),
-    toolsEnabled: record.toolsEnabled === true,
+    toolsSuggested: record.toolsSuggested === true,
   };
 }
 
@@ -63,7 +63,7 @@ export function migrateLegacyProviderKeys(userId, { db = getDb() } = {}) {
     if (existing) return existing;
 
     const connections = listConnections(userId, db);
-    const record = { doneAt: new Date().toISOString(), created: [], needsReview: [], toolsEnabled: false };
+    const record = { doneAt: new Date().toISOString(), created: [], needsReview: [], toolsSuggested: false };
     const attempt = (label, { provider, name }, key, run) => {
       try { run(); record.created.push({ provider, name }); }
       catch (err) {
@@ -99,11 +99,9 @@ export function migrateLegacyProviderKeys(userId, { db = getDb() } = {}) {
       });
     }
 
-    // Provider chat was available on these keys before (the classic engine ran tools); keep it that way.
-    if (record.created.length && !getSettings(userId, db).toolsEnabled) {
-      updateSettings(userId, { toolsEnabled: true }, db);
-      record.toolsEnabled = true;
-    }
+    // Tools on provider models are NOT switched on here: a tool turn can read files and run commands (subject to
+    // approvals), so it stays an explicit, visible opt-in. The record only suggests it.
+    record.toolsSuggested = record.created.length > 0 && !getSettings(userId, db).toolsEnabled;
     writeRecord(db, userId, record);
     log.info('legacy_key_migration_done', { created: record.created.map((c) => c.provider), needsReview: record.needsReview.map((r) => r.provider) });
     return record;

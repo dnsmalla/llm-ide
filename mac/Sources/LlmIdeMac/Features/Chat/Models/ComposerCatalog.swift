@@ -5,13 +5,15 @@ enum ComposerCatalog {
     static let routerOffNote = "Chat on these models needs the session router, which is off."
     /// The router is switched on in Settings but the running backend has not restarted with it yet.
     static let routerPendingNote = ProviderMigrationText.routerPending
-    static let providerChatOffNote = "Turn on tool-capable chat for other providers in Settings, Providers."
+    /// Shown (not blocking) on a catalog section while tools on provider models are off.
+    static let toolsOffNote = "Tools on provider models are off: these models answer in ask and document modes only."
+    static let toolsSwitchLabel = ProviderMigrationText.toolsSwitchLabel
+    static let toolsExplanation = ProviderMigrationText.toolsExplanation
     static let unsupportedNote = "Chat on this provider is not supported any more. Connect it in Settings, Providers (the catalog), or use a Claude model."
 
     /// Why a catalog section cannot be picked right now, or nil when it can.
     static func unavailableNote(routerOn: Bool, providerChatEnabled: Bool, routerPrefOn: Bool = false) -> String? {
         if !routerOn { return routerPrefOn ? routerPendingNote : routerOffNote }
-        if !providerChatEnabled { return providerChatOffNote }
         return nil
     }
 
@@ -48,7 +50,8 @@ enum ComposerCatalog {
                 runsOnAgentEngine: note == nil,
                 catalog: true,
                 toolsByModel: Dictionary(c.models.map { ($0.id, $0.toolsSupported) }, uniquingKeysWith: { a, _ in a }),
-                unavailableNote: note)
+                unavailableNote: note,
+                infoNote: providerChatEnabled ? nil : toolsOffNote)
         }
     }
 

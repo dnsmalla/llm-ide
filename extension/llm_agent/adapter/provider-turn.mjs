@@ -78,15 +78,18 @@ export async function runProviderTurn({ userId, provider, model, message, histor
   let agentContext = rawAgentContext;
   const db = deps.db ?? getDb();
   if (!userId) throw new ProviderTurnError('AUTH_REQUIRED', 'Authenticated user required', 401);
-  if (!getSettings(userId, db).toolsEnabled) {
-    throw new ProviderTurnError('PROVIDER_TOOLS_DISABLED', 'Tool-capable chat on other providers is off. Turn it on in Settings, Providers.', 409);
-  }
   if (typeof message !== 'string' || !message.trim()) throw new ProviderTurnError('VALIDATION_FAILED', 'message is required', 400);
   if (typeof model !== 'string' || !model.trim()) throw new ProviderTurnError('VALIDATION_FAILED', 'model is required', 400);
   if (!getConnection(provider, userId, db)) {
     throw new ProviderTurnError('PROVIDER_NOT_CONNECTED', 'That provider is not connected. Add it in Settings, Providers.', 404);
   }
   const needsTools = TOOL_MODES.has(mode);
+  // Provider tools are an explicit opt-in (Settings, Providers). With them off, plain chat (ask, document) still
+  // runs, without tools; a mode that needs tools is refused with the way to turn them on.
+  const toolsAllowed = getSettings(userId, db).toolsEnabled === true;
+  if (needsTools && !toolsAllowed) {
+    throw new ProviderTurnError('PROVIDER_TOOLS_DISABLED', 'Tool-capable chat on other providers is off, and this mode needs tools. Turn on "Allow tools on provider models" in Settings, Providers, or use ask mode.', 409);
+  }
   // Same normalisation as the Claude engine; a relative root is refused.
   let workspaceRoot;
   try { workspaceRoot = normalizeWorkspaceRoot(agentContext?.workspaceRoot); }
@@ -130,13 +133,13 @@ export async function runProviderTurn({ userId, provider, model, message, histor
   }
   // Optional compression (LLMIDE_ROUTER_COMPRESS=on, default off): tool outputs are capped and deduped for this turn.
   const compress = routerCompressEnabled();
-  const built = cap.toolsSupported
+  const built = cap.toolsSupported && toolsAllowed
     ? buildProviderTools({ userId, agentContext, mode, sessionKey, emit: send, signal, currentMessage: message,
       egressNeedsApproval: !getSettings(userId, db).egressAutoApprove })
     : [];
   const tools = compress ? wrapToolsForCompression(built) : built;
-  if (!cap.toolsSupported) {
-    send({ type: 'notice', kind: 'tools_unavailable', level: 'warning', text: `${active.model} is not known to support tools; this turn runs without them.`, data: { model: active.model } });
+  if (!cap.toolsSupported || !toolsAllowed) {
+    send({ type: 'notice', kind: 'tools_unavailable', level: 'warning', text: toolsAllowed ? `${active.model} is not known to support tools; this turn runs without them.` : 'Tools on provider models are off (Settings, Providers); this turn runs without them.', data: { model: active.model } });
   }
   send({ type: 'init', sessionId: sessionKey, claudeCodeVersion: null, model: active.model,
     tools: tools.map((t) => t.name), capabilities: ['provider-adapter'], mcpServers: [] });

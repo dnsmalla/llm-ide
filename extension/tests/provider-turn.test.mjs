@@ -63,11 +63,23 @@ const expectErr = async (p, code, status) => {
   await assert.rejects(p, (e) => e instanceof ProviderTurnError && e.code === code && e.status === status, code);
 };
 
-test('the switch is OFF by default: 409 before any event, no model built', async () => {
+test('tools are OFF by default: a tool mode is refused 409 before any event and no model is built', async () => {
   const s = setup({ tools: false });
-  const evs = []; let built = 0;
-  await expectErr(runProviderTurn({ userId: s.a, provider: s.provider, model: 'm', message: 'x', onEvent: (e) => evs.push(e), deps: { db: s.db, modelFor: () => { built += 1; } } }), 'PROVIDER_TOOLS_DISABLED', 409);
-  assert.deepEqual([evs.length, built], [0, 0]);
+  for (const mode of ['execute', 'plan', 'assist_plan', 'review']) {
+    const evs = []; let built = 0;
+    await expectErr(runProviderTurn({ userId: s.a, provider: s.provider, model: 'llama-3.3-70b-versatile', message: 'x', mode, onEvent: (e) => evs.push(e), deps: { db: s.db, fetchImpl: s.fetchImpl, modelFor: () => { built += 1; } } }), 'PROVIDER_TOOLS_DISABLED', 409);
+    assert.deepEqual([evs.length, built], [0, 0], mode);
+  }
+});
+
+test('tools OFF: plain chat (ask) still runs, with no tools offered, and says so', async () => {
+  const s = setup({ tools: false });
+  const { evs, model } = await turn(s, { args: { mode: 'ask' } });
+  assert.equal(evs[0].kind, 'tools_unavailable');
+  assert.match(evs[0].text, /Tools on provider models are off/);
+  assert.deepEqual(evs.find((e) => e.type === 'init').tools, []);
+  assert.ok(!model.doStreamCalls[0].tools?.length);
+  assert.ok(evs.some((e) => e.type === 'result'));
 });
 
 test('not connected, no key and bad input are refused before streaming', async () => {
@@ -79,8 +91,6 @@ test('not connected, no key and bad input are refused before streaming', async (
   s.db.prepare('DELETE FROM user_secrets WHERE user_id=? AND secret_key=?').run(s.a, 'custom.cat-groq.apiKey');
   await expectErr(runProviderTurn(base), 'PROVIDER_NO_KEY', 400);
   // another user cannot run on A's connection
-  await expectErr(runProviderTurn({ ...base, userId: s.b }), 'PROVIDER_TOOLS_DISABLED', 409);
-  conns.updateSettings(s.b, { toolsEnabled: true }, s.db);
   await expectErr(runProviderTurn({ ...base, userId: s.b }), 'PROVIDER_NOT_CONNECTED', 404);
 });
 

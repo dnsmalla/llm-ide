@@ -45,12 +45,19 @@ struct ComposerCatalogTests {
         #expect(!ds.runsOnAgentEngine)
     }
 
-    @Test("provider chat switched off in the catalog settings: disabled with its own note")
-    func providerChatOff() throws {
+    @Test("tools off in the catalog settings: the section stays pickable (ask works), with a visible note and switch")
+    func toolsOff() throws {
         let s = state()
         s.catalogProviderChatEnabled = false
         let ds = try #require(s.composerProviderSections(capableProviders: [], routerOn: true).first { $0.catalog })
-        #expect(ds.unavailableNote == ComposerCatalog.providerChatOffNote)
+        #expect(ds.unavailableNote == nil)
+        #expect(CodeAssistantModelState.canPick(ds, chatIsEmpty: true, chatRunsOnAgentEngine: true))
+        #expect(ds.infoNote == ComposerCatalog.toolsOffNote)
+        #expect(ComposerCatalog.toolsSwitchLabel == "Allow tools on provider models")
+        #expect(ComposerCatalog.toolsExplanation.contains("read files and run commands"))
+        s.catalogProviderChatEnabled = true
+        let on = try #require(s.composerProviderSections(capableProviders: [], routerOn: true).first { $0.catalog })
+        #expect(on.infoNote == nil)
     }
 
     @Test("with the router on a catalog model is pickable in any chat, empty or not")
@@ -78,14 +85,14 @@ struct ComposerCatalogTests {
         #expect(ComposerCatalog.pinAction(pickedProvider: "anthropic", pickedModel: "claude-x", currentPinnedProvider: "anthropic") == nil)
     }
 
-    @Test("the Agent engine runs a catalog connection only while the router is on and provider chat is enabled")
+    @Test("the Agent engine runs a catalog connection while the router is on (tools are a separate opt-in)")
     func capability() {
         let cap = CatalogConnectionIndex.shared
         cap.update(connections: [deepseek], providerChatEnabled: true)
         #expect(cap.capableWireIds(routerOn: true) == ["custom:cat-deepseek"])
         #expect(cap.capableWireIds(routerOn: false).isEmpty)
         cap.update(connections: [deepseek], providerChatEnabled: false)
-        #expect(cap.capableWireIds(routerOn: true).isEmpty)
+        #expect(cap.capableWireIds(routerOn: true) == ["custom:cat-deepseek"], "ask chat needs only the router")
         cap.update(connections: [], providerChatEnabled: false)
         let capable = AgentV2Selection.agentCapableProviders(customProviders: [], catalogWireIds: ["custom:cat-deepseek"])
         #expect(AgentV2Selection.canRunChat("custom:cat-deepseek", capableProviders: capable))
@@ -223,8 +230,9 @@ struct CatalogUpgradePathTests {
     @Test("the migration block decodes, and an older server's catalog without it still decodes")
     func decodesMigration() throws {
         let base = #"{"providers":[],"settings":{"toolsEnabled":true,"fallbackEnabled":false,"fallbackOrder":[],"toolOverrides":{},"egressAutoApprove":false}"#
-        let with = try JSONDecoder().decode(LlmIdeAPIClient.CatalogResponse.self, from: Data((base + #","migration":{"created":[{"provider":"deepseek","name":"DeepSeek"}],"needsReview":[{"provider":"custom:lan","name":"Lab box","reason":"private address"}],"toolsEnabled":true}}"#).utf8))
+        let with = try JSONDecoder().decode(LlmIdeAPIClient.CatalogResponse.self, from: Data((base + #","migration":{"created":[{"provider":"deepseek","name":"DeepSeek"}],"needsReview":[{"provider":"custom:lan","name":"Lab box","reason":"private address"}],"toolsSuggested":true}}"#).utf8))
         #expect(with.migration?.created.map(\.name) == ["DeepSeek"])
+        #expect(with.migration?.toolsSuggested == true)
         #expect(with.migration?.needsReview.first?.reason == "private address")
         let without = try JSONDecoder().decode(LlmIdeAPIClient.CatalogResponse.self, from: Data((base + "}").utf8))
         #expect(without.migration == nil)

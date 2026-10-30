@@ -42,7 +42,8 @@ final class CatalogConnectionIndex: @unchecked Sendable {
     /// Wire ids the Agent engine may run right now. Empty with the router off.
     func capableWireIds(routerOn: Bool = ChatRoutePreference.routerEnabled()) -> Set<String> {
         lock.lock(); defer { lock.unlock() }
-        return routerOn && providerChatOn ? ids : []
+        // Plain chat (ask, document) needs only the router; tools are a separate opt-in (`providerChatEnabled`).
+        return routerOn ? ids : []
     }
 
     /// False until the catalog has been fetched once in this launch.

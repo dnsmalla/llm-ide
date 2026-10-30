@@ -160,7 +160,7 @@
       }
     ],
     "settings": {
-      "toolsEnabled": true,
+      "toolsEnabled": false,
       "fallbackEnabled": true,
       "fallbackOrder": [
         {
@@ -190,7 +190,7 @@
           "reason": "SSRF guard: Base URL must use https unless the provider is local or private-network opted in"
         }
       ],
-      "toolsEnabled": true
+      "toolsSuggested": true
     }
   }
 }

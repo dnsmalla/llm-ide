@@ -31,6 +31,8 @@ struct ComposerProviderSection: Identifiable, Equatable {
     var toolsByModel: [String: Bool] = [:]
     /// Catalog only: why the section cannot be picked right now (router off, provider chat off).
     var unavailableNote: String? = nil
+    /// Catalog only: a non-blocking note (tools are off); the section stays pickable.
+    var infoNote: String? = nil
 }
 
 /// The composer's grouped model menu: every provider that is set up, not only
