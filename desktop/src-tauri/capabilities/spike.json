@@ -1,0 +1,19 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "spike",
+  "description": "Phase 0 spike and bench commands only; remove this file for a product build.",
+  "windows": ["main"],
+  "permissions": [
+    "allow-ping",
+    "allow-bench",
+    "allow-bench-done",
+    "allow-autobench-mode",
+    "allow-graph-path-override",
+    "allow-theme-override",
+    "allow-section-override",
+    "allow-sse-replay-start",
+    "allow-sse-replay-stop",
+    "allow-sse-channel-stream",
+    "allow-ax-probe"
+  ]
+}

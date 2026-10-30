@@ -1,11 +1,18 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Capabilities for the main window",
+  "description": "Product surface of the main window: core status, graph read (project-root scoped), terminal. No fs/shell/opener/http plugin, no wildcard permissions.",
   "windows": ["main"],
   "permissions": [
-    "core:default",
     "core:window:allow-start-dragging",
-    "core:window:allow-toggle-maximize"
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "allow-core-status",
+    "allow-read-graph-file",
+    "allow-pty-spawn",
+    "allow-pty-write",
+    "allow-pty-resize",
+    "allow-pty-ack",
+    "allow-pty-kill"
   ]
 }
