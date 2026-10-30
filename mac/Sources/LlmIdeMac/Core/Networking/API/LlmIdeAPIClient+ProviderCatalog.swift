@@ -69,9 +69,19 @@ extension LlmIdeAPIClient {
         }
     }
 
+    /// The one-time carry-over of the user's existing provider keys (server API 92). Present once it has run.
+    public struct CatalogMigration: Codable, Equatable, Sendable {
+        public struct Created: Codable, Equatable, Sendable { public let provider: String; public let name: String }
+        public struct Review: Codable, Equatable, Sendable { public let provider: String; public let name: String; public let reason: String }
+        public let created: [Created]
+        public let needsReview: [Review]
+        public let toolsEnabled: Bool
+    }
+
     public struct CatalogResponse: Codable, Equatable, Sendable {
         public let providers: [CatalogProvider]
         public let settings: CatalogSettings
+        public let migration: CatalogMigration?
     }
 
     /// A model with its capability flags. `toolsSource` says where the flag came

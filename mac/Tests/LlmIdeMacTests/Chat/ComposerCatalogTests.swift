@@ -187,3 +187,54 @@ struct CatalogTierRouteTests {
                 || ChatRoutePreference.routerEnabled())
     }
 }
+
+/// The upgrade path: carried-over keys, the router switch offered inline, never enabled silently.
+@MainActor
+@Suite("Catalog upgrade path", .serialized)
+struct CatalogUpgradePathTests {
+    private func section(routerOn: Bool, pref: Bool = false) throws -> ComposerProviderSection {
+        let c = CatalogConnectionSummary(wireId: "custom:cat-deepseek", name: "DeepSeek", models: [
+            .init(id: "deepseek-chat", toolsSupported: true, toolsSource: "catalog", streaming: true, contextWindow: nil)])
+        return try #require(ComposerCatalog.sections([c], routerOn: routerOn, providerChatEnabled: true, routerPrefOn: pref).first)
+    }
+
+    @Test("router off: the section offers the one-click switch; it is still disabled (nothing is enabled silently)")
+    func offersSwitch() throws {
+        let s = try section(routerOn: false)
+        #expect(ComposerCatalog.offersRouterSwitch(s))
+        #expect(!CodeAssistantModelState.canPick(s, chatIsEmpty: true, chatRunsOnAgentEngine: true))
+        #expect(ComposerCatalog.routerSwitchLabel.contains("next backend start"))
+    }
+
+    @Test("pref on but the running backend has not restarted: the note says it applies at the next start and no switch is offered")
+    func pendingRestart() throws {
+        let s = try section(routerOn: false, pref: true)
+        #expect(s.unavailableNote == ComposerCatalog.routerPendingNote)
+        #expect(s.unavailableNote?.contains("next time the backend starts") == true)
+        #expect(!ComposerCatalog.offersRouterSwitch(s))
+    }
+
+    @Test("router on: pickable, no switch offered")
+    func routerOn() throws {
+        let s = try section(routerOn: true)
+        #expect(s.unavailableNote == nil && !ComposerCatalog.offersRouterSwitch(s))
+    }
+
+    @Test("the migration block decodes, and an older server's catalog without it still decodes")
+    func decodesMigration() throws {
+        let base = #"{"providers":[],"settings":{"toolsEnabled":true,"fallbackEnabled":false,"fallbackOrder":[],"toolOverrides":{},"egressAutoApprove":false}"#
+        let with = try JSONDecoder().decode(LlmIdeAPIClient.CatalogResponse.self, from: Data((base + #","migration":{"created":[{"provider":"deepseek","name":"DeepSeek"}],"needsReview":[{"provider":"custom:lan","name":"Lab box","reason":"private address"}],"toolsEnabled":true}}"#).utf8))
+        #expect(with.migration?.created.map(\.name) == ["DeepSeek"])
+        #expect(with.migration?.needsReview.first?.reason == "private address")
+        let without = try JSONDecoder().decode(LlmIdeAPIClient.CatalogResponse.self, from: Data((base + "}").utf8))
+        #expect(without.migration == nil)
+    }
+
+    @Test("the words: created connections keep the old keys; a skipped one says why; the router needs a restart")
+    func text() {
+        #expect(ProviderMigrationText.createdLine(["DeepSeek"]).contains("The old keys are kept"))
+        #expect(ProviderMigrationText.createdLine(["DeepSeek", "OpenAI"]).contains("DeepSeek, OpenAI keys were"))
+        #expect(ProviderMigrationText.reviewLine(name: "Lab box", reason: "private address").contains("needs review"))
+        #expect(ProviderMigrationText.routerNeeded.contains("next time the backend starts"))
+    }
+}

@@ -68,6 +68,8 @@ enum ProviderCatalogRules {
 final class ProviderCatalogModel: ObservableObject {
     @Published private(set) var providers: [LlmIdeAPIClient.CatalogProvider] = []
     @Published private(set) var settings = LlmIdeAPIClient.CatalogSettings()
+    /// What the one-time key carry-over did (nil on a server older than API 92, or before it ran).
+    @Published private(set) var migration: LlmIdeAPIClient.CatalogMigration?
     @Published private(set) var loadError: String?
     @Published private(set) var isLoading = false
     /// Per connection id: the last test result line.
@@ -90,6 +92,7 @@ final class ProviderCatalogModel: ObservableObject {
             let r = try await api.fetchProviderCatalog()
             providers = r.providers
             settings = r.settings
+            migration = r.migration
             loadError = nil
         } catch {
             loadError = ProviderCatalogRules.failure(error)

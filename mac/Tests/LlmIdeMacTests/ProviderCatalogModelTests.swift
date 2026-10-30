@@ -98,7 +98,7 @@ final class ProviderCatalogModelTests: XCTestCase {
                               local: false, customBaseURL: false, allowPrivate: false, docsUrl: "", notes: "",
                               connections: connections)
         }
-        func fetchProviderCatalog() async throws -> C.CatalogResponse { C.CatalogResponse(providers: [entry()], settings: settings) }
+        func fetchProviderCatalog() async throws -> C.CatalogResponse { C.CatalogResponse(providers: [entry()], settings: settings, migration: nil) }
         func connectCatalogProvider(catalogId: String, apiKey: String?, baseURL: String?, slug: String?, name: String?,
                                     allowPrivate: Bool?) async throws -> C.CatalogConnection {
             connectedKeys.append(apiKey)

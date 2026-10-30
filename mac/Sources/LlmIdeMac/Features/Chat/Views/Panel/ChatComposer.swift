@@ -565,19 +565,27 @@ extension CodeAssistantPanel {
                 let capable = AgentV2Selection.agentCapableProviders(
                     customProviders: modelState.customProviders,
                     catalogWireIds: CatalogConnectionIndex.shared.capableWireIds())
-                let routerOn = engine.route.routerPref && engine.route.server?.enabled != false
+                // On only when the pref is on AND the running backend says so: a pref switched on after the
+                // backend started applies at its next start, and the note says so.
+                let routerOn = engine.route.routerPref && engine.route.serverEnabled
                 let chatIsEmpty = engine.messages.isEmpty
                 ForEach(modelState.composerProviderSections(capableProviders: capable,
                                                                     available: ProviderAvailabilityStore.shared.available,
                                                                     serverUsableProvider: TierRoutingServerCache.shared.state
                                                                         .status?[RoutingTier.standard.rawValue]?.usable == true
                                                                         ? TierRoutingConfig.load().tier(.standard)?.provider : nil,
-                                                                    routerOn: routerOn)) { section in
+                                                                    routerOn: routerOn,
+                                                                    routerPrefOn: engine.route.routerPref)) { section in
                     let pickable = CodeAssistantModelState.canPick(
                         section, chatIsEmpty: chatIsEmpty, chatRunsOnAgentEngine: engine.usesAgentV2Engine)
                     Section(Self.sectionTitle(section, pickable: pickable)) {
                         if let note = section.unavailableNote {
                             Text(note)
+                            if ComposerCatalog.offersRouterSwitch(section) {
+                                Button(ComposerCatalog.routerSwitchLabel) {
+                                    UserDefaults.standard.set(true, forKey: ChatRoutePreference.routerKey)
+                                }
+                            }
                         }
                         ForEach(section.models) { model in
                             let isCurrent = section.id == modelState.selectedProvider && model.id == modelState.selectedModel

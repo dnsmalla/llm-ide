@@ -26,6 +26,8 @@ struct ProviderCatalogSettingsCard: View {
             VStack(alignment: .leading, spacing: Spacing.sm) {
                 SettingsHint("Connect more model providers. Keys are stored encrypted on this machine's backend, per user, and are never shown again. A connected provider's models appear below with a tools badge; chat and the Loop only use tools on a model that has one.")
 
+                migrationSection
+
                 if let loadError = model.loadError {
                     HStack(alignment: .firstTextBaseline) {
                         Text("Couldn't load the catalog: \(loadError)")
@@ -58,6 +60,42 @@ struct ProviderCatalogSettingsCard: View {
         .task { await model.load() }
         .sheet(item: $connecting) { entry in
             ConnectCatalogProviderSheet(entry: entry, model: model) { connecting = nil }
+        }
+    }
+
+    // MARK: - Carried-over keys
+
+    /// The upgrade path: the keys the user already had were carried over (never deleted), a key that could
+    /// not be carried over says why, and chat on a catalog model needs the session router, which is one
+    /// click away and applies at the next backend start.
+    @ViewBuilder private var migrationSection: some View {
+        if let m = model.migration, !(m.created.isEmpty && m.needsReview.isEmpty) {
+            VStack(alignment: .leading, spacing: Spacing.xs) {
+                if !m.created.isEmpty {
+                    Text(ProviderMigrationText.createdLine(m.created.map(\.name)))
+                        .font(Typography.caption).foregroundStyle(theme.current.text)
+                        .fixedSize(horizontal: false, vertical: true)
+                    if !routerOn {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(ProviderMigrationText.routerNeeded)
+                                .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                                .fixedSize(horizontal: false, vertical: true)
+                            Spacer()
+                            Button("Turn on the session router") { routerOn = true }
+                                .buttonStyle(.borderedProminent).controlSize(.small)
+                        }
+                    } else {
+                        Text(ProviderMigrationText.routerPending)
+                            .font(Typography.caption).foregroundStyle(theme.current.textMuted)
+                    }
+                }
+                ForEach(m.needsReview, id: \.provider) { r in
+                    Text(ProviderMigrationText.reviewLine(name: r.name, reason: r.reason))
+                        .font(Typography.caption).foregroundStyle(theme.current.warning)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            .padding(.vertical, Spacing.xs)
         }
     }
 

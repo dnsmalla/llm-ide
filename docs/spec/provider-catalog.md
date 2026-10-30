@@ -156,6 +156,17 @@ A turn never changes provider or model while it streams. A 429 mid-turn ends tha
 - **Completion.** `runClaude` dispatches a catalog provider to `providers/adapter-complete.mjs` (one completion, no tools, metered, transient errors retried, `PROVIDER_UNAVAILABLE` for config problems). `POST /kb/complete`, the tier-routed background roles (a Strong or Cheap tier may name a connection; Settings, Tiers and Roles) and the `internal` role of `/generate-notes` (JSON path), `/generate-questions` and `/extract-entities` use it. Not migrated: the streaming `/generate-notes` (CLI streaming), `/generate-doc` and `/kb/export` (their own prompt paths), `analyze-risks` (rule based, no model), the Loop's agent step (Claude Agent SDK by design).
 - **Network.** Every request to a model-provider host goes through the pinned fetch; `tests/provider-fetch-pinned-guard.test.mjs` fails on a bare `fetch(` outside the fixed-host allowlist (api.anthropic.com, the web-fetch tool, Jev).
 
+## §9c Upgrade path for users with old keys
+
+The classic engine that ran the built-in OpenAI, Google and DeepSeek keys and the Custom Providers is gone (API 92), so the server carries those keys into the catalog once (`providers/legacy-key-migration.mjs`), on the first `GET /kb/providers/catalog` after the upgrade:
+
+- **What is created.** For each of the openai, google and deepseek vault keys, a catalog connection of the same provider with the key copied into `custom.<id>.apiKey`; for each enabled OpenAI-compatible custom provider (and the shared custom endpoint with a key and base URL), an `openai-compatible` connection with the same base URL after the base-URL guard passes. A connection that already exists for that catalog entry (or base URL) is left alone.
+- **Non-destructive.** The old keys and settings are never changed or deleted. A user who later disconnects a migrated connection is not reconnected: the outcome is recorded once in `user_flags` `provider.migration.v1` and the sweep never repeats.
+- **Provider chat.** When at least one connection is created, `toolsEnabled` is switched on (those keys could run tools before); a user with no keys keeps the default off.
+- **Failures.** Per provider, logged with the key redacted, never blocking the others. A base URL the guard refuses (private address, plain http) is recorded as `needsReview` with its reason (200 characters, redacted) and shown in the Provider catalog card as "needs review"; nothing is connected for it.
+- **What the user sees.** The response of `GET /kb/providers/catalog` carries `migration: { created, needsReview, toolsEnabled }`. The card says which keys were added and that the old keys are kept, lists the ones that need review, and offers "Turn on the session router". The composer shows the catalog models disabled while the router is off, with the same one-click action in its note. Both set the `chat.router` preference only (never silently); it applies the next time the backend starts, and the note says so while it is pending.
+- **Not carried over.** Keyless CLI modes (codex, gemini) and custom providers without an OpenAI-compatible endpoint. A Claude login or key is unaffected.
+
 ## §10 Tests
 
 `extension/tests/ip-classifier.test.mjs`, `pinned-fetch.test.mjs` (a real local server, a fake resolver, a rebinding sequence), `eslint-ai-sdk-fence.test.mjs` and `provider-*.test.mjs` (catalog, connections, models, adapter incl. recorded wire, fallback, turn, wire conformance, routes) and `mac/Tests/LlmIdeMacTests/ProviderCatalogModelTests.swift`. No test reaches a real provider.

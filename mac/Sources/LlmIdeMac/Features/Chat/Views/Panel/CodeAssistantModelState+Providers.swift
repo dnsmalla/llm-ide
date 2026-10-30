@@ -49,7 +49,8 @@ extension CodeAssistantModelState {
     func composerProviderSections(capableProviders: Set<String>,
                                   available: Set<String>? = nil,
                                   serverUsableProvider: String? = nil,
-                                  routerOn: Bool = false) -> [ComposerProviderSection] {
+                                  routerOn: Bool = false,
+                                  routerPrefOn: Bool = false) -> [ComposerProviderSection] {
         var sections: [ComposerProviderSection] = []
         for tool in AICliTool.selectable {
             let isCurrent = tool.rawValue == selectedProvider
@@ -77,7 +78,8 @@ extension CodeAssistantModelState {
                 id: provider.wireId, title: provider.name, models: models,
                 runsOnAgentEngine: runs, unavailableNote: runs ? nil : ComposerCatalog.unsupportedNote))
         }
-        sections += ComposerCatalog.sections(catalogConnections, routerOn: routerOn, providerChatEnabled: catalogProviderChatEnabled)
+        sections += ComposerCatalog.sections(catalogConnections, routerOn: routerOn, providerChatEnabled: catalogProviderChatEnabled,
+                                          routerPrefOn: routerPrefOn)
         return sections.filter { !$0.models.isEmpty }
     }
 
