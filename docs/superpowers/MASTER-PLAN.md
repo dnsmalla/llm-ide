@@ -11,7 +11,7 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Surface | Done | Partial | Not started | Total | State |
 |---|---|---|---|---|---|
 | Desktop Mac (Swift) | 8 | 1 | 8 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
-| Desktop multi-OS (Tauri) | 7 | 2 | 17 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Desktop multi-OS (Tauri) | 7 | 3 | 16 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 4 | 1 | 7 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
@@ -19,8 +19,8 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 10 | 1 | 9 | 20 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 6 | 2 | 5 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
-| Release and CI | 5 | 1 | 8 | 14 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 70 | 17 | 74 | 161 |  |
+| Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
+| Total | 72 | 19 | 71 | 162 |  |
 
 ## How the surfaces connect
 
@@ -121,7 +121,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Tray / menu-bar presence and notifications (me)
 - [ ] Live caption capture per OS: macOS AX first, Windows next, Linux best-effort (Tauri plan risks) (me)
 - [ ] Signing, notarisation (macOS), Authenticode (Windows), signed updates, auto-update channel (me)
-- [ ] Windows and Linux builds in CI; WebKitGTK graph render check on Linux (me)
+- [~] Windows and Linux builds in CI: `desktop-ci.yml` written (cargo check + test --lib, WebKitGTK deps), not yet run on GitHub; WebKitGTK graph render check not done (me)
 - [ ] Screen-by-screen parity checklist against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
 - [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch (me)
@@ -280,17 +280,18 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] Mac release, sign, notarize, Sparkle appcast scripts and `mac-release.yml` (`mac/Scripts/`, `docs/how-to/release-with-auto-update.md`) (me)
 - [x] CI workflows: mac, extension, ios, contract, docs, codeql, skills-drift, feature-matrix, release (`.github/workflows/`) (me)
 - [x] Pre-push gate runs the same lint CI does (`a0dd8473`) (me)
+- [x] `make test-desktop` (node, security, token drift, cargo if present); node part is in `make regression` (`Makefile`) (me)
 - [x] `make regression` aggregates graph-kit pin, feature, contract, Mac, chat/loop/api gates (`Makefile`) (me)
 - [~] Mac Sparkle `CFBundleVersion` limitation (project notes 2026-10; fix state unverified) (me)
 - [x] Night-push job built (`746b94f9`) (me)
 - [ ] Install the nightly push job: commands in `scripts/nightly-push.sh --help` (you)
 - [ ] CI result checked after every push (`gh run list`) (you)
-- [ ] Tauri release workflow: macOS, Windows, Linux bundles (me)
-- [ ] Windows code signing and Linux packaging (deb/AppImage) decision (you)
+- [~] Tauri release workflow: unsigned manual draft `desktop-release.yml` (macOS dmg, Windows NSIS, Linux deb/AppImage); never run on a runner, no signing (me)
+- [ ] Windows code signing and Linux packaging (deb/AppImage) decision; options and recommendation in `docs/how-to/desktop-signing-decisions.md` (you)
 - [ ] Auto-update for Tauri, signed (me)
 - [ ] Relay deployment pipeline and monitoring (blocked on S4 hosting) (wait)
 - [ ] Chrome Web Store publishing step in the extension release (you)
-- [ ] Release notes / CHANGELOG discipline per surface (me)
+- [x] Release notes / CHANGELOG discipline per surface (October summary by surface in `CHANGELOG.md`, `docs/how-to/maintain-the-changelog.md`) (me)
 
 ## Cross-cutting rules
 
