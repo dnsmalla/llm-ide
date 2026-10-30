@@ -1,6 +1,6 @@
 # Extensions catalog: skills, MCP servers and plugins from GitHub, one switch per item, only active items loaded
 
-Status: plan, **not started** (no code changed). Branch: `main` (no feature branches, no push). Date: 2026-10-31 (request 2026-10-30).
+Status: **P0 to P3 implemented** on `main` (local, not pushed; see section 16); P4 onward not started. Branch: `main` (no feature branches, no push). Date: 2026-10-31 (request 2026-10-30).
 Research basis: read-only pass at `b1cb2817` (`SERVER_API_VERSION = 92`, `extension/server.mjs:298`). Inputs: [agent-kit](../../kits/agent-kit.md) (K0 map), [agent-kit K1](2026-10-30-agent-kit-k1.md) (Track Q, lean config, bench gates), [provider catalog spec](../../spec/provider-catalog.md) (the catalog pattern), [LLM-source items design](../specs/2026-09-25-llm-source-items-and-update-design.md). Every `path:line` was read in this pass. Nothing was run (no bench, no test, no Mac build). External facts carry a URL; anything I could not confirm is marked **(unverified)** and collected in section 15.
 
 User request (2026-10-30): "upgrade plugin, skill, MCP to a more professional way; reduce OUR generated skills; use popular skills from GitHub; select/deselect each to use or not; do the same for MCP, plugin and skills; when updating, update the system so only ACTIVE ones are used."
@@ -344,3 +344,27 @@ Sizing: about **P0 M, P1 L, P2 L, P3 M, P4 L, P5 L, P6 L, P7 M, P8 S+S, P9 M**; 
 - The security statistics in section 2 are from secondary reports (Snyk, Antiy, Koi, CSA, OWASP as cited by blogs), not read in the primary documents.
 - Whether all 13 kit `runtime/` skills are still invoked by server code; whether any route for rollback already exists (grep only, not exhaustive); the exact Mobile Control shape for listing plugins/skills; contract schema location for new routes.
 - Nothing in this plan was run: no bench, no test, no Mac build, no network fetch of GitHub registries beyond the doc pages cited.
+
+## 16. Implementation status (2026-10-30, P0 to P3)
+
+Spec: [extensions-catalog](../../spec/extensions-catalog.md). All four phases are behind flags or inert: with `LLMIDE_EXT_ACTIVE_SET` off the Claude path is byte-identical to the baseline golden file; with `LLMIDE_EXT_ADAPTER=off` the adapter path is.
+
+| Phase | State | Commit subject |
+|---|---|---|
+| P0 baseline | done | `test(extensions): baseline of what each extension consumer loads today` |
+| P1 model, importer, shadow | done | `feat(extensions): catalog item model, importer, switch overlay and shadow active set` |
+| P2 consumers on the active set | done | `test(extensions): consumers honour catalog switches behind LLMIDE_EXT_ACTIVE_SET` |
+| P3 adapter parity | done | `feat(adapter): mount the user's active MCP servers on provider-adapter turns` |
+
+Deviations from the plan text, with the reason:
+
+1. **Location.** The code lives in `extension/llm_agent/extensions/`, not a new top-level `extensions/` directory: `llm_agent` already may import `plugins`, `mcp` and `llm-sources`, and a new layer would have needed an ESLint allow-table change for no gain.
+2. **Store.** A JSON overlay (`extensions-state.json`), not a SQL table and not new fields in the plugin state file: the three sources are files, the overlay can only restrict until P4, and no migration is needed. If P4 needs SQL the next free migration is 0055. `deleteUserCascade` therefore does not apply; `forgetUser` exists, but, like the three legacy files, nothing calls it on account deletion yet (a gap to close in P4).
+3. **Consumers.** Instead of consumers calling `computeActiveSet`, the legacy builders take a `gate` and apply it themselves. The active set runs the same builders through the same gate, so flag-on equals the active set by construction and "no change for unchanged data" is exact. `buildUserMcpServers` moved to `llm_agent/extensions/mcp-servers.mjs` (re-exported by the engine) so an adapter turn can use it without importing the Claude SDK.
+4. **No new route, event or Swift.** The plan's `GET installed` and `GET active` routes and the API 93 bump wait for P4, where a UI needs them. The `turn_composition` fingerprint column (migration) also waits; the fingerprint is in the shadow log line.
+5. **Adapter skills block not shipped.** It would add tokens to every provider turn, and `init` has no `skills` field. `load-skill` is already mounted on adapter turns. `init.mcpServers` carries the servers (`connected` or `failed`), the existing schema.
+6. **Adapter default.** On by default (the user's decision, section 14), kill switch `LLMIDE_EXT_ADAPTER=off`. It only affects users who turned on provider tools AND enabled and consented to MCP servers. Calls ask for approval unless egress auto-approve is on, which is stricter than the Claude path (server-level pre-approval).
+7. **Local HTTP MCP servers** are refused on adapter turns (pinned fetch with no private-network opt-in); a local server is a stdio one. A per-server opt-in would need a registry field.
+8. **MCP client.** The official `@modelcontextprotocol/sdk` already pinned at 1.30.0 (the AI SDK 6.0.317 has no MCP client). No new dependency, so no new `npm audit signatures` target; the import is fenced by ESLint like the AI SDK.
+
+Open items for P4 and later: the `GET`/`POST` extension routes and the API bump; account-deletion cleanup of the overlay; SDK behaviour on a generated subset plugin root (R3, unverified); real-data shadow numbers (the compare is implemented and tested on synthetic state only); a registry field for per-server private-network opt-in; per-tool MCP deny lists; pooling MCP connections across turns (today each adapter turn pays the connect time, bounded at 15 s).
