@@ -17,6 +17,27 @@ build:
 clean:
 	rm -rf extension/dist extension/extension-v*.zip
 
+# --- desktop (Tauri) ---------------------------------------------------------
+
+.PHONY: test-desktop test-desktop-node
+# Desktop gates: node tests, capability/DOMPurify checks, generated-token drift
+# check, then `cargo test --lib` when a REAL cargo exists. A toolchain counts
+# only if `cargo --version` prints "cargo ..." (a broken rustup shim prints
+# "rustup ..." instead), and the node steps skip if desktop/node_modules is
+# absent. Rust is skipped with a notice, never failed, on a machine without it.
+test-desktop-node:
+	@if [ -d desktop/node_modules ]; then \
+	  cd desktop && npm test && npm run -s check:security && node scripts/gen-tokens.mjs --check; \
+	else echo "test-desktop: desktop/node_modules missing (cd desktop && npm ci); skipping node checks"; fi
+
+# test-desktop-node is under 2 s and is part of `make regression`; the cargo
+# step compiles Tauri (minutes cold), so it stays out of the regression gate
+# (desktop-ci.yml runs it).
+test-desktop: test-desktop-node
+	@if cargo --version 2>/dev/null | grep -q '^cargo '; then \
+	  cd desktop/src-tauri && cargo test --lib; \
+	else echo "test-desktop: no working cargo; skipping cargo test --lib"; fi
+
 # --- mac app -----------------------------------------------------------------
 
 .PHONY: build-mac build-mac-lite build-mac-min build-mac-mobile-only test-mac regression test-shared-protocol
@@ -111,7 +132,7 @@ endif
 # CSV's `status` column is the release checklist.
 # graph-kit-checkout goes FIRST: it is a one-line precondition, and failing it
 # after four Mac builds (many minutes in) is the wrong place to learn about it.
-regression: graph-kit-checkout graphkit-pin-check feature-gates contract-gates test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
+regression: graph-kit-checkout graphkit-pin-check feature-gates contract-gates test-desktop-node test-mac build-mac-lite build-mac-min build-mac-mobile-only graph-gates chat-gates generation-gates loop-gates api-gates
 
 .PHONY: feature-gates
 # Enforces the layering rule: Shell -> Features -> Core. Swift has no
