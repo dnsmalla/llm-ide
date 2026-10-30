@@ -16,11 +16,13 @@ const EXT = path.resolve(__dirname, '..');
 // they are read only by the one-time copy (kb/agent-history-copy.mjs) and
 // removed by the user cascade (kb/db.mjs). usage_ledger stays in the main DB
 // (Stage 2 moves it). Adding a file here means a reviewed new reader or writer.
+// kb/learned-limits.mjs (K1 P6b) only READS usage_ledger, scoped by user_id, to compare a key's recent use with its learned limit.
 const INVENTORY = [
   'kb/activity.mjs',
   'kb/agent-history-copy.mjs',
   'kb/agent-usage.mjs',
   'kb/db.mjs',
+  'kb/learned-limits.mjs',
   'kb/os-state.mjs',
   'kb/tool-events-summary.mjs',
   'kb/tool-events.mjs',
