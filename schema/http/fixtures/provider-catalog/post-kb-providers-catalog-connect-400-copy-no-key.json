@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/providers/catalog/connect",
+  "status": 400,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network. copyKeyFrom names a legacy provider the replay user has no key for.",
+  "request": {
+    "body": {
+      "catalogId": "openai",
+      "copyKeyFrom": "openai"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "No stored key found for that provider"
+    }
+  }
+}

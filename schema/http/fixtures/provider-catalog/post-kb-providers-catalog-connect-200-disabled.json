@@ -1,0 +1,25 @@
+{
+  "endpoint": "POST /kb/providers/catalog/connect",
+  "status": 200,
+  "description": "Captured by driving the real router in-process on a temp DB with a stand-in for fetch (the provider replies are recorded OpenAI-compatible bodies). No model call and no external network. The connection is stored switched off (enabled: false).",
+  "request": {
+    "body": {
+      "catalogId": "groq",
+      "apiKey": "sk-fixture-not-a-real-key-000000",
+      "enabled": false
+    }
+  },
+  "response": {
+    "ok": true,
+    "connection": {
+      "id": "cat-groq",
+      "provider": "custom:cat-groq",
+      "catalogId": "groq",
+      "name": "Groq",
+      "baseURL": "https://api.groq.com/openai/v1",
+      "allowPrivate": false,
+      "enabled": false,
+      "hasKey": true
+    }
+  }
+}

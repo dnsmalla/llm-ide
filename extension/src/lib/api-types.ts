@@ -5755,6 +5755,10 @@ export type PostKbProvidersCatalogConnectRequest = {
     name?: string;
     /** Opt in to a loopback or private-network address */
     allowPrivate?: boolean;
+    /** false stores the connection switched off (default true); the Mac's enable/disable switch re-sends the connection with this */
+    enabled?: boolean;
+    /** Used only when apiKey is absent: copy the stored key of a legacy provider the caller already has (openai, google, deepseek, custom, or custom:<uuid>). The old key stays; it is never returned */
+    copyKeyFrom?: string;
   };
 };
 

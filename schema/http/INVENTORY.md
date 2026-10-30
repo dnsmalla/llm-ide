@@ -167,11 +167,11 @@ Endpoints with no client caller (40):
 | `/kb/providers/models` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:217` | `LlmIdeAPIClient+Providers.swift` | - | - |
 | `/kb/providers/catalog` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:64` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
 | `/kb/providers/catalog/connect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:79` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/catalog/disconnect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:90` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/catalog/test` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:95` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/catalog/models` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:95` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/catalog/disconnect` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:96` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/catalog/test` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:101` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
+| `/kb/providers/catalog/models` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:101` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
 | `/kb/providers/settings` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:70` | `LlmIdeAPIClient+ProviderCatalog.swift` | - | - |
-| `/kb/providers/turn` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:110` | - | - | tests only |
+| `/kb/providers/turn` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/provider-catalog.mjs:116` | - | - | tests only |
 | `/kb/agent-sdk` | ALL_ENDPOINTS | GET | token | core | `extension/routes/router.mjs:200` | `LlmIdeAPIClient+AgentSdk.swift` | - | - |
 | `/kb/agent-sdk/update` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:205` | `LlmIdeAPIClient+AgentSdk.swift` | - | - |
 | `/kb/custom-providers` | ALL_ENDPOINTS | POST | token | core | `extension/routes/router.mjs:259` | `LlmIdeAPIClient+Providers.swift` | - | - |
@@ -308,7 +308,7 @@ Endpoints with no client caller (40):
 
 ## Consistency
 
-Checked: 212 roster entries, 752 Swift files, 51 extension source files.
+Checked: 212 roster entries, 754 Swift files, 51 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
