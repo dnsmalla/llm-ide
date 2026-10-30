@@ -197,7 +197,7 @@ enum TierRouting {
     }
 
     /// Built-in wire provider ids a tier may name, in menu order. `custom` is
-    /// the shared OpenAI-compatible endpoint (Model Providers → Custom): Mac-only
+    /// the shared OpenAI-compatible endpoint (Providers → the OpenAI-compatible entry): Mac-only
     /// — `TierDefaults.wireBody` never sends its tiers to the server.
     static let builtInProviders: [(wireId: String, tool: AICliTool)] = [
         (ClaudeCLI.provider, .claudeCode),
@@ -332,10 +332,10 @@ enum TierRouting {
     /// Human wording for the server's reason codes (providers/tier-routing.mjs).
     static func describeServerReason(_ code: String?) -> String {
         switch code {
-        case "no_key":            return "no API key stored on the server — add one in Model Providers"
+        case "no_key":            return "no API key stored on the server — add one in Settings → Providers"
         case "no_key_or_cli":     return "no API key on the server and its CLI (codex / gemini) isn't installed "
-                                      + "where the server runs — add a key in Model Providers, or install the CLI and log in"
-        case "not_found":         return "the server doesn't know this custom provider — re-save it in Custom Providers"
+                                      + "where the server runs — add a key in Settings → Providers, or install the CLI and log in"
+        case "not_found":         return "the server doesn't know this custom provider — re-save it in Settings → Providers"
         case "disabled":          return "the provider is disabled"
         case "not_agent_capable": return "only Claude or a custom provider with an Anthropic-compatible URL can"
         case "unset":             return "the tier is not set on the server — it has not synced yet"

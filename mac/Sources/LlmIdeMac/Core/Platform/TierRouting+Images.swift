@@ -8,7 +8,7 @@ import Foundation
 // Public so `chat-contract-lab` can assert the pure logic.
 public enum ImageTierRouting {
     /// Built-in providers with an image endpoint, in menu order. Both keys
-    /// are the ones Model Providers already holds — no new key.
+    /// are the ones Providers already holds — no new key.
     static let providers: [(wireId: String, tool: AICliTool)] = [
         ("openai", .openai),
         ("google", .gemini),

@@ -103,7 +103,7 @@ extension CodeAssistantPanel {
     /// moment the conflict does (unlike `attachNoticeBar`, there is no
     /// "later" to keep it for — the state is live).
     /// The visible degrade: a tool-mode turn on a model with no tools runs as plain chat. A switch that is off gets
-    /// a one-click "Allow tools" (the same switch as Settings, Providers); nothing is enabled silently.
+    /// a one-click "Allow tools" (the same switch as Settings → Model routing); nothing is enabled silently.
     @ViewBuilder var plainChatBar: some View {
         if let reason = ComposerCatalog.plainChatReason(
             provider: ChatTransportInput.makeProvider(selectedProvider: modelState.selectedProvider),

@@ -4,14 +4,14 @@ import Foundation
 /// one needs.
 ///
 /// Three separate literals used to encode this — `AICliTool.selectable` (what
-/// the composer offers), `ProvidersSettingsSection.providers` (what you can key)
+/// the composer offers), `ProvidersModel` rows (what you can key)
 /// and `ModelLimitsPanel.providerOptions` (what you can cap) — and they drifted:
 /// GLM appeared only in the first (and silently answered as Claude, having no
 /// backend route), DeepSeek was missing from the third, so it could be selected
 /// and keyed but never capped. All three now derive from `all` below, so adding
 /// or removing a provider is one edit and cannot half-land.
 ///
-/// Not in here: **named Custom Providers**. Those are user-created rows stored
+/// Not in here: **named custom providers** (Settings → Providers lists them next to these rows). Those are user-created rows stored
 /// at runtime (`CustomProvider`, reaching the wire as `custom:<uuid>`) with
 /// their own base URL and model list — that is how Z.AI GLM, self-hosted
 /// endpoints, and anything else OpenAI-compatible are added, and it needs no
@@ -44,7 +44,7 @@ enum ProviderCatalog {
     /// Backend id of the Jev decision provider (vault key `jev.apiKey`).
     static let jevId = "jev"
 
-    /// Every row Settings → Model Providers renders, in display order.
+    /// Every built-in credential row Settings → Providers folds into its list, in display order.
     static let all: [Entry] = [
         Entry(id: ClaudeCLI.provider, tool: .claudeCode,
               label: "Anthropic (Claude)", shortLabel: "Claude",
@@ -65,7 +65,7 @@ enum ProviderCatalog {
         Entry(id: "custom", tool: .custom,
               label: "Custom (OpenAI-compatible)", shortLabel: "Custom",
               vaultKey: "custom.apiKey", placeholder: "API key (any value for local servers)",
-              hint: "One shared OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), Mistral. Choose it as a tier (e.g. Standard) in Tiers & Roles below — its models are read from the endpoint; add one by hand with Add model… in the chat composer. For several named endpoints at once, use Custom Providers.",
+              hint: "One shared OpenAI-compatible endpoint — OpenRouter, Ollama / LM Studio (local), Mistral. Choose it as a tier (e.g. Standard) in Model routing — its models are read from the endpoint; add one by hand with Add model… in the chat composer. For several named endpoints at once, use Add provider.",
               needsBaseURL: true),
         // WHY tool nil: Jev is a decision API, not a chat model. With no
         // `tool` it is left out of `modelProviders` — so it never reaches the
@@ -76,7 +76,7 @@ enum ProviderCatalog {
         Entry(id: jevId, tool: nil,
               label: "Jev (decisions)", shortLabel: "Jev",
               vaultKey: "jev.apiKey", placeholder: "Jev API key",
-              hint: "Decision-only: answers yes/no, pick-one and score questions with calibrated probabilities. Used by the Decisions role in Tiers & Roles below and by the agent's `decide` tool — not a chat model, so it never appears in the chat composer. Key required."),
+              hint: "Decision-only: answers yes/no, pick-one and score questions with calibrated probabilities. Used by the Decisions role in Model routing and by the agent's `decide` tool — not a chat model, so it never appears in the chat composer. Key required."),
         Entry(id: "web-search", tool: nil,
               label: "Web Search (SerpAPI, optional)", shortLabel: "Web Search",
               vaultKey: "serpapi.apiKey",
@@ -84,7 +84,7 @@ enum ProviderCatalog {
               hint: "Web search works automatically through your Claude login (or Anthropic API key) — no setup needed. A SerpAPI key is only an optional fallback."),
     ]
 
-    /// The rows Settings → Model Providers shows against a server on
+    /// The built-in rows Settings → Providers shows against a server on
     /// `serverApiVersion`: Jev only from API v73 (`decisionsServerApiVersion`)
     /// — an older server's vault refuses `jev.apiKey`, so its row could only
     /// fail. Unknown version hides it too (fail closed).

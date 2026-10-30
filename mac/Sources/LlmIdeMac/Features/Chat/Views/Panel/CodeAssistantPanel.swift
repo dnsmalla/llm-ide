@@ -292,7 +292,7 @@ struct CodeAssistantPanel: View {
                                                  defaultModelId: config.defaultModelId)
                 applyComposerProvider()
             }
-            // Settings → Custom Providers edits while this panel is open: the
+            // Settings → Providers edits while this panel is open: the
             // transport reads the live provider list every turn, but the menu
             // and the Agent-engine hint read this snapshot — without the
             // reload they lag until the next appear and disagree with routing.

@@ -2,7 +2,7 @@ import Foundation
 
 /// The words for the upgrade path (K1 Phase 6): the classic engine is gone, so the keys a user already had
 /// were carried over into the provider catalog by the server, and chat on a catalog model needs the session
-/// router. Shared by the Provider catalog card (Settings) and the composer's model menu (Chat).
+/// router. Shared by Settings (Providers, Model routing) and the composer's model menu (Chat).
 enum ProviderMigrationText {
     /// "Your DeepSeek key was added as a catalog connection. The old key is kept."
     static func createdLine(_ names: [String]) -> String {

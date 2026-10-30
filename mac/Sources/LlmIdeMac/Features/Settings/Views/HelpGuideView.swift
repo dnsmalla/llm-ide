@@ -408,9 +408,9 @@ struct HelpGuideView: View {
                 helpBullet("Server & Backend — local server URL, Node process, and log")
                 helpBullet("Connections — meetings, email, Slack, Box, and other inputs")
                 helpBullet("General — theme, language, and synced preferences")
-                helpBullet("Model Providers — API keys, default model, and Agent engine toggle")
+                helpBullet("Providers — every model connection in one list: add from the catalog or by URL, API keys, test, models and tools, switch on or off, remove")
                 helpBullet("Claude Agent SDK — how the agent engine runs and loads plugins")
-                helpBullet("Custom Providers — add named OpenAI-compatible providers (optionally with an Anthropic-compatible URL for the Agent engine)")
+                helpBullet("Model routing — which model each job uses (tiers and roles), the fallback order, and the router, token-limit and tools switches")
                 helpBullet("Tool permissions — which agent tools are allowed, asked, or blocked")
                 if FeatureRegistry.shared.compiledFeatures.contains(.autoTasks) {
                     helpBullet("Loop defaults — budgets and policy inherited by new projects, and default stage timeouts")
@@ -471,7 +471,7 @@ struct HelpGuideView: View {
             }
 
             helpCard("Notes aren't being generated", icon: "doc.questionmark") {
-                helpBullet("Check Settings → Model Providers to make sure an AI provider is configured")
+                helpBullet("Check Settings → Providers to make sure an AI provider is configured")
                 helpBullet("Verify the transcript has enough content — very short meetings may not generate useful notes")
                 helpBullet("Check the status bar at the bottom for error messages")
             }

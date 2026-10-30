@@ -15,7 +15,7 @@ struct ModelLimitsPanel: View {
     /// Derived from `ProviderCatalog` so a provider you can select and key is
     /// always one you can cap too — DeepSeek was selectable and keyable but
     /// missing from this list, so its usage limits were unreachable. Named
-    /// Custom Providers (`custom:<uuid>`) meter under "custom".
+    /// custom providers (`custom:<uuid>`) meter under "custom".
     private static var providerOptions: [(id: String, label: String)] { ProviderCatalog.limitProviders }
 
     @State private var providerKey: String = ClaudeCLI.provider
@@ -142,7 +142,7 @@ struct ModelLimitsPanel: View {
             if loading && limits.isEmpty {
                 ProgressView().controlSize(.small).padding(.vertical, 12)
             } else if limits.isEmpty {
-                Text("No models in this provider's chain yet. Add a model in Settings → Model Providers.")
+                Text("No models in this provider's chain yet. Add a model in Settings → Providers.")
                     .font(Typography.body)
                     .foregroundStyle(theme.current.textMuted)
             } else {

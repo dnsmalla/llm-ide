@@ -77,7 +77,7 @@ enum ProviderAvailability {
         return nil
     }
 
-    static let noProviderText = "No model provider set up. Add one in Settings → Model Providers."
+    static let noProviderText = "No model provider set up. Add one in Settings → Providers."
 }
 
 /// The app's one answer to "which providers can run", refreshed at startup and

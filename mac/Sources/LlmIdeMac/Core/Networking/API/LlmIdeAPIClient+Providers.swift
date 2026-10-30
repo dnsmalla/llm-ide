@@ -59,7 +59,7 @@ extension LlmIdeAPIClient {
     /// Push the locally-persisted custom providers into the backend's
     /// per-user registry (POST /kb/custom-providers). The registry is the only
     /// place that maps a `custom:<id>` provider id → baseURL + vault key; the
-    /// server persists it, and this is re-sent whenever the Custom Providers
+    /// server persists it, and this is re-sent whenever the Providers
     /// section appears and after every add/edit/delete/toggle.
     ///
     /// Authenticated: the route is behind the global `authenticate` middleware,

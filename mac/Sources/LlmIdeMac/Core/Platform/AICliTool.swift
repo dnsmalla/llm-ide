@@ -18,7 +18,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
     /// Tools selectable in the picker. These are the direct-API providers the
     /// backend routes by model id (see extension/agents/providers.mjs):
     /// Anthropic (Claude), OpenAI, Google (Gemini). A non-Claude provider
-    /// needs an API key configured in Settings → Model Providers; without one
+    /// needs an API key configured in Settings → Providers; without one
     /// the backend returns a clear "add a key" error rather than silently
     /// running Claude. Cursor/Copilot stay hidden — they're editor tools, not
     /// direct API endpoints, so routing their gpt ids to the OpenAI API would
@@ -145,7 +145,7 @@ enum AICliTool: String, CaseIterable, Identifiable {
             // Custom Provider, which carries its own model list. The old
             // hardcoded ids here (glm-4-plus, glm-3.5-turbo) were retired
             // upstream anyway; Z.AI's current line is glm-5.2 / glm-5-turbo /
-            // glm-4.7, entered per-provider in Settings → Custom Providers.
+            // glm-4.7, entered per-provider in Settings → Providers.
             return []
         case .custom:
             // No built-in ids — the endpoint's models come from live discovery

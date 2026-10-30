@@ -54,7 +54,7 @@ extension Notification.Name {
 
     /// Posted by `CustomProvider.saveAll` after the persisted custom-provider
     /// list changes (add / edit / delete / enable toggle in Settings →
-    /// Custom Providers). CodeAssistantPanel observes it to reload its
+    /// Providers). CodeAssistantPanel observes it to reload its
     /// `modelState.customProviders` snapshot, which otherwise only loaded on
     /// appear — so an Anthropic-compatible URL added while a chat is open
     /// updates the composer's provider menu and Agent-engine hint at once,
@@ -63,10 +63,10 @@ extension Notification.Name {
     static let customProvidersChanged = Notification.Name("customProvidersChanged")
 
     /// Posted (main thread) by `ProviderAvailabilityStore.reconcile` after it
-    /// cleared / auto-filled tiers. Settings → Tiers & Roles reloads its table.
+    /// cleared / auto-filled tiers. Settings → Model routing reloads its table.
     static let tierRoutingReconciled = Notification.Name("tierRoutingReconciled")
 
-    /// Posted by Settings → Model Providers after a provider key is saved or
+    /// Posted by Settings → Providers after a provider key is saved or
     /// cleared. The app shell re-checks availability and re-reconciles tiers.
     static let providerKeysChanged = Notification.Name("providerKeysChanged")
 

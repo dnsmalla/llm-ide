@@ -1,7 +1,7 @@
 import Foundation
 
 /// What a model is being chosen FOR. Each purpose is a chat role in Settings →
-/// Tiers & Roles (`TierDefaults.chatFeature(for:)`), so a user can, say, plan
+/// Model routing (`TierDefaults.chatFeature(for:)`), so a user can, say, plan
 /// on the Strong tier and review on Cheap.
 ///
 /// Keyed by the chat's wire `mode` string, not by `CodeAssistMode`: this lives
