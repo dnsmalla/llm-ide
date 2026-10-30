@@ -338,3 +338,83 @@ test('the history route lists switches newest first and answers degraded rather 
   assert.equal(h.degraded, false);
   assert.deepEqual(h.events.filter((e) => e.kind === 'switch').map((e) => e.toModel), ['two', 'one']);
 });
+
+// --- attack pass ---------------------------------------------------------------
+
+test('attack: hostile PUT bodies are 400s that write nothing', async () => {
+  ON();
+  const chat = chatId();
+  const longId = 'x'.repeat(201);
+  const cases = [
+    { chatSessionId: chat, ifSeq: -1 }, { chatSessionId: chat, ifSeq: 1.5 }, { chatSessionId: chat, ifSeq: 'a' },
+    { chatSessionId: chat, tokensUsed: 1e300 }, { chatSessionId: chat, tokensUsed: -1 }, { chatSessionId: chat, tokensUsed: '5' },
+    { chatSessionId: chat, provider: 'custom:', model: 'm'.repeat(201) },
+    { chatSessionId: chat, provider: 'custom:ok', model: 'a\u0000b' },
+    { chatSessionId: chat, provider: 'anthropic' },
+    { chatSessionId: chat, provider: '', model: 'x' },
+    { chatSessionId: longId, tokenLimit: 5 },
+    { chatSessionId: 42, tokenLimit: 5 },
+  ];
+  for (const body of cases) {
+    const { res } = await call('PUT', '/agent/v2/session/route', body);
+    assert.equal(res.statusCode, 400, JSON.stringify(body).slice(0, 80));
+  }
+  assert.equal(route.getRoute(db, A.id, chat), null);
+  const notObj = makeReq({ method: 'PUT', url: '/agent/v2/session/route', body: [1, 2], user: A });
+  const res = makeRes();
+  await handleAgentV2Routes(notObj, res, { runTurn: async () => ({}) });
+  assert.equal(res.statusCode, 400);
+});
+
+test('attack: a late commit after the quit purge leaves a stray row the orphan sweep can see, never a wrong counter', async () => {
+  ON();
+  const chat = chatId();
+  route.putRoute(db, A.id, chat, { tokenLimit: 100, tokensUsed: 90 });
+  const lc = await import('../kb/chat-lifecycle.mjs');
+  lc.purgeWorkingState(A.id, [chat]);
+  assert.equal(route.getRoute(db, A.id, chat), null);
+  route.commitTurnUsage(db, A.id, chat, { inputTokens: 7 }, { provider: 'anthropic', model: 'm', ttlMs: 1000 });
+  const r = route.getRoute(db, A.id, chat);
+  assert.equal(r.used.billable, 7, 'the purged 90 is gone; only the late turn counts');
+  assert.equal(r.tokenLimit, null);
+  assert.ok(lc.listWorkingState(A.id).sessions.some((s) => s.chatSessionId === chat), 'the sweep can reach it');
+});
+
+test('attack: an adapter refusal before any event ends the stream with its own code and frees the chat lock', async () => {
+  ON();
+  const chat = chatId();
+  await call('PUT', '/agent/v2/session/route', { chatSessionId: chat, provider: 'custom:cat-groq', model: 'llama' });
+  const { ProviderTurnError } = await import('../llm_agent/adapter/provider-turn.mjs');
+  const { res } = await turn(chat, { runAdapterTurn: async () => { throw new ProviderTurnError('PROVIDER_NOT_CONNECTED', 'not connected', 404); }, runTurn: async () => ({}) });
+  const err = res.sseEvents().find((e) => e.type === 'error');
+  assert.equal(err.code, 'PROVIDER_NOT_CONNECTED');
+  assert.equal(route.getRoute(db, A.id, chat).used.billable, 0, 'a refusal spends nothing');
+  const again = await turn(chat, { runAdapterTurn: async (a) => { a.onEvent({ type: 'result', subtype: 'success' }); return { usageTotals: { inputTokens: 1, outputTokens: 1 }, metered: true }; }, runTurn: async () => ({}) });
+  assert.equal(again.res.statusCode, 200, 'the lock was released');
+});
+
+test('attack: a huge cap and a one-token cap both behave; the ceiling handed to the engine is exact', async () => {
+  ON();
+  const big = chatId();
+  await call('PUT', '/agent/v2/session/route', { chatSessionId: big, tokenLimit: 1e12 });
+  const seen = [];
+  await turn(big, { runTurn: okTurn(usageEv(1, 1), seen) });
+  assert.equal(seen[0].maxBillableTokens, 1e12);
+  const tiny = chatId();
+  await call('PUT', '/agent/v2/session/route', { chatSessionId: tiny, tokenLimit: 1 });
+  const first = [];
+  await turn(tiny, { runTurn: okTurn(usageEv(40, 40), first) });
+  assert.equal(first[0].maxBillableTokens, 1);
+  assert.equal((await turn(tiny, { runTurn: okTurn(usageEv(1, 1)) })).res.statusCode, 402);
+});
+
+test('attack: a stop (abort) mid-turn still commits what streamed, once', async () => {
+  ON();
+  const chat = chatId();
+  await turn(chat, { runTurn: async (args) => {
+    args.onEvent(usageEv(30, 20));
+    args.abortController.abort();
+    throw Object.assign(new Error('aborted'), { name: 'AbortError' });
+  } });
+  assert.equal(used(chat), 50);
+});
