@@ -4,6 +4,7 @@ import { debug } from '../../lib/config';
 import { isValidCaption } from '../../content/caption-validation';
 import { saveTranscriptDraft, listDrafts, stopCapture, DRAFT_STALE_MS } from '../../lib/capture-store';
 import { chromeArea, httpLiveApi, PANEL_ID } from '../../lib/capture-live';
+import { purgeLegacyMeetingKeys } from '../../lib/ui-prefs';
 import { isSupportedUrl, stripPlatformSuffix } from '../../lib/platforms';
 
 export interface TranscriptSegment {
@@ -259,21 +260,21 @@ export function useTranscript() {
   // Load preferences
   useEffect(() => {
     chrome.storage?.local
-      ?.get(['primaryLang', 'secondaryLang', 'bilingual', 'speakerNames'])
+      ?.get(['primaryLang', 'secondaryLang', 'bilingual'])
       .then(
         (result: {
           primaryLang?: string;
           secondaryLang?: string;
           bilingual?: boolean;
-          speakerNames?: Record<string, string>;
         }) => {
           if (result.primaryLang) setPrimaryLang(result.primaryLang);
           if (result.secondaryLang) setSecondaryLang(result.secondaryLang);
           if (result.bilingual !== undefined) setBilingual(result.bilingual);
-          if (result.speakerNames) setSpeakerNames(result.speakerNames);
         },
       )
       .catch(() => {});
+    // Speaker names are meeting content: an older build persisted them here. In memory only now.
+    void purgeLegacyMeetingKeys(chrome.storage?.local);
   }, []);
 
   // If this app instance opened AFTER recording had already begun (user
@@ -427,11 +428,7 @@ export function useTranscript() {
   const renameSpeaker = useCallback((speakerId: string, name: string) => {
     const trimmed = name.trim().slice(0, 50);
     if (!trimmed) return;
-    setSpeakerNames((prev) => {
-      const updated = { ...prev, [speakerId]: trimmed };
-      chrome.storage?.local?.set({ speakerNames: updated }).catch(() => {});
-      return updated;
-    });
+    setSpeakerNames((prev) => ({ ...prev, [speakerId]: trimmed }));
   }, []);
 
   // Timer

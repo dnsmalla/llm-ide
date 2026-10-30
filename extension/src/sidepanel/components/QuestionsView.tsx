@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown';
 import rehypeSanitize from 'rehype-sanitize';
 import type { TranscriptSegment } from '../hooks/useTranscript';
 import type { QuestionType } from '../hooks/useQuestions';
+import { parseQuestionPrefs, serializeQuestionPrefs } from '../../lib/ui-prefs';
 
 interface Props {
   segments: TranscriptSegment[];
@@ -43,10 +44,8 @@ const TYPE_OPTIONS: { id: QuestionType; label: string; hint: string }[] = [
   { id: 'explain', label: 'Needs more detail', hint: 'Vague or skipped reasoning' },
 ];
 
-// Persistence shape for the saved "customize" state.  Stored in
-// chrome.storage.local under one key so a sign-in switch doesn't lose
-// the user's preference, but it doesn't need to roam across devices —
-// chrome.storage.sync is overkill for a few short lists.
+// Persistence shape for the "customize" state.  Only `types` is stored (one
+// localStorage key); `participants` is meeting content and stays in memory.
 const PREFS_KEY = 'questions.prefs.v1';
 const DEFAULT_TYPES: QuestionType[] = ['conflict', 'confirm'];
 interface SavedPrefs {
@@ -56,26 +55,20 @@ interface SavedPrefs {
   types: QuestionType[];
 }
 function loadPrefs(): SavedPrefs {
+  // Only the question types persist; participant names are meeting content and
+  // stay in memory (the extension stores no meeting data). An old blob that
+  // held names is rewritten without them.
   try {
-    const raw = localStorage.getItem(PREFS_KEY);
-    if (raw) {
-      const j = JSON.parse(raw);
-      const types = Array.isArray(j?.types)
-        ? j.types.filter((t: unknown): t is QuestionType => t === 'conflict' || t === 'confirm' || t === 'explain')
-        : DEFAULT_TYPES;
-      const participants = Array.isArray(j?.participants)
-        ? j.participants.filter((p: unknown): p is string => typeof p === 'string')
-        : null;
-      return { participants, types: types.length ? types : DEFAULT_TYPES };
-    }
+    const { types, dirty } = parseQuestionPrefs(localStorage.getItem(PREFS_KEY));
+    if (dirty) localStorage.setItem(PREFS_KEY, serializeQuestionPrefs(types));
+    return { participants: null, types };
   } catch {
-    /* corrupted blob — fall through to defaults */
+    return { participants: null, types: DEFAULT_TYPES };
   }
-  return { participants: null, types: DEFAULT_TYPES };
 }
 function savePrefs(prefs: SavedPrefs) {
   try {
-    localStorage.setItem(PREFS_KEY, JSON.stringify(prefs));
+    localStorage.setItem(PREFS_KEY, serializeQuestionPrefs(prefs.types));
   } catch {
     /* quota — non-fatal, defaults still apply */
   }
@@ -368,7 +361,7 @@ export default function QuestionsView({
         common case is "just generate" with all detected speakers
         and the two most useful question types.  Open the disclosure
         to override; click Save & use to persist; Reset to defaults
-        clears the pin.  Saved prefs live in localStorage.
+        clears the pin.  Only the types are saved (localStorage); the pin is per panel session.
       */}
       <div className="questions-defaults">
         <button
