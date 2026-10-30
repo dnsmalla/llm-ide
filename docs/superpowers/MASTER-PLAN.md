@@ -1,0 +1,293 @@
+# Master plan: desktop, mobile, web and extension
+
+Created 2026-10-30 from the repo as of `a3897732`. This is the **living** total plan: what each surface needs to be complete, what exists, what is not done. Detail lives in the linked plans; this page is the one place to look. Principle (user, 2026-10-29): **professional quality over speed**; no gate is compressed to hit a date.
+
+Legend: `- [x]` done (the repo evidences it) · `- [~]` partial · `- [ ]` not done. Owner tags: **(me)** the agent can do it, **(you)** needs the user (decision, real login, real device, money), **(wait)** time-gated (real usage or data must accumulate). "unverified" means a doc claims it and this page could not confirm it in the code or a run. Evidence is a commit hash or a repo path.
+
+## Status dashboard
+
+Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs` (`--check` fails on drift; `--fix` rewrites this table).
+
+| Surface | Done | Partial | Not started | Total | State |
+|---|---|---|---|---|---|
+| Desktop Mac (Swift) | 7 | 2 | 7 | 16 | Shipping product; feature-complete for today's scope, manual checks pending |
+| Desktop multi-OS (Tauri) | 5 | 2 | 19 | 26 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
+| Mobile (iPhone native, PWA) | 6 | 2 | 7 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
+| Web app and relay | 3 | 0 | 9 | 12 | No web app plan and no relay code; scope is an open question |
+| Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
+| Shared server and core | 8 | 2 | 5 | 15 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
+| Agents, providers, extensions | 5 | 2 | 7 | 14 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
+| Security | 5 | 1 | 7 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
+| Release and CI | 4 | 1 | 7 | 12 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
+| Total | 54 | 15 | 81 | 150 |  |
+
+## How the surfaces connect
+
+```text
+ iPhone native app ──WS :3006 + Bonjour + PIN/token──► Mac app (SwiftUI) ──HTTP 127.0.0.1:3456──► Node server (core)
+ Chrome extension ──HTTP localhost, JWT (no data of its own)────────────────────────────────────────┘      │
+ Tauri desktop (future) ──Node sidecar = the same server───────────────────────────────────────────────────┤
+ Relay + phone PWA (future, ADR 0018) ◄──E2E-encrypted snapshots / inbox──► desktop (main worker)           │
+                                                                      SQLite data.db + agent.db (live) ──archive at quit──► Mac files
+```
+
+One-copy rule ([data-lifecycle](../kits/data-lifecycle.md)): a session is **live in the server DB**, then **archived once into the Mac app's files** and the server rows deleted; the **extension stores nothing** and calls the Mac app live; the **phone reads through the Mac** (relay later); the **web and external services are ingest connectors only**. Metadata (run history, usage) is outside that rule.
+
+## Dependencies and critical path
+
+Parents: [kit-by-kit migration](plans/2026-10-27-kit-by-kit-migration.md), [Tauri + relay plan](plans/2026-10-24-tauri-desktop-and-relay.md), [ADR 0018](../decisions/0018-tauri-desktop-node-core-relay.md), [ROADMAP](ROADMAP.md), [USER-CHECKLIST](USER-CHECKLIST.md).
+
+1. **Bench go-ahead (you)** unblocks every token-affecting change (lean SDK config X1, SDK adoption X2, router defaults, ended-chat continuation X3). Until then those ship OFF.
+2. **Manual app checks Y2 (you)** unblock turning live-then-archive `lta.mode` on by default and closing the Mac K1 work.
+3. **Phase 0 closing items (you)**: user-run bench, one Windows run, then ADR 0018 can move to Accepted. **Nothing in Tauri K3 or the relay starts before that.**
+4. **Decide the web app (you, open question below)** gates the whole "Web app and relay" surface, and with it the phone PWA, push and phone-without-Mac.
+5. **Kit order** (kit-by-kit plan): ui-kit, os-kit, docs-kit, graph-kit, knowledge-kit, agent-kit, work/workspace/capture, core job runner, automation-kit, sync-kit. Tauri K3 screens follow each kit's K1/K2; **sync-kit (relay + PWA) comes last** because it mirrors every other kit.
+6. **Knowledge-kit K1 needs Q1-Q14, Q16, Q19 answered (you)**; meeting work (live-then-archive Phase 5 Mac side, 3, 6) waits for you to record meetings (wait).
+7. **Swift retirement (K4 / Phase 6)** only after one release with both desktop apps and a parity checklist.
+
+## Open questions for the user (web app)
+
+**The repo has no web app plan.** Searched: `docs/superpowers/plans/*`, `docs/decisions/*`, `docs/kits/*`, ROADMAP, `desktop/`, `extension/`. The nearest existing things are:
+
+- the **relay + phone PWA** in the sync-kit row and ADR 0018 (phase 4 of the Tauri plan): an always-on service holding E2E-encrypted snapshots, a phone PWA served by it, extension read/queue while the desktop is off. **No code exists**; hosting is undecided (small VPS or Cloudflare Workers + R2);
+- the **"the web is a connector" rule** ([data-lifecycle](../kits/data-lifecycle.md) rule 3): the web and external services are ingest sources only;
+- the **React web bundles** that already run inside the Mac app (`mac/LocalPackages/graph-kit/web/`, the System/OS view, commits `b31133e0`, `641fa2fd`): not a hosted web app;
+- the Chrome extension, which is the only browser-resident surface.
+
+Q-WEB-1. **What is "the web app"?** Options:
+
+| Option | What it is | Fit with the rules |
+|---|---|---|
+| A. Relay-served PWA (recommended) | The ADR 0018 relay serves one installable web app for phone and any browser: read snapshots, queue requests, desktop does the work | Matches one-copy (snapshots are encrypted, not a second store), "no data access" on the relay, and replaces the cleartext `:3006` link |
+| B. Connector-only web | "Web" means external sources (Slack, Box, Email, MCP) only; no hosted UI | Already built; nothing to plan beyond the connector items |
+| C. Full hosted web client | A server-side app with its own login and data | Breaks one-copy, loopback-only and "no data access" rules; needs a new ADR |
+
+Recommendation: **A**, built last (sync-kit), after Tauri K3 provides the shared React UI. Q-WEB-2: relay hosting, VPS or Cloudflare (ADR 0018 decision 2, still open). Q-WEB-3: must the phone work with the Mac **off** (needs the relay) or is "through the Mac" enough for now (works today)? Until answered, the Web section below holds only decision items.
+
+## S1. Desktop Mac (Swift)
+
+**Complete means:** the SwiftUI app stays the shipping product until each kit's K4; all 16 features sealed; reduced builds work; daily-use flows verified by the user.
+**Connection:** spawns the Node server (`BackendManager`), serves the phone on `:3006`, archives live sessions to Mac files at quit.
+
+- [x] 16 features sealed, 8-check boundary gate in `make regression` (CLAUDE.md; `mac/Scripts/feature-boundaries.sh`) (me)
+- [x] Reduced builds lite / min / mobile-only (`Makefile` build-mac-*; `bb4342dc` feature matrix) (me)
+- [x] Chat on Agent SDK v2, classic engine and `/code-assist` retired (ROADMAP Done, agent-kit P6) (me)
+- [x] Settings: Agent history card, Storage hub, Clear/Compact (ROADMAP Done) (me)
+- [x] System (OS) view in a web view (`641fa2fd`, `f44e52e0`, `104f85d9`) (me)
+- [x] Quit archive with crash recovery, delete-everywhere, sign-out safety (ROADMAP Done, live-then-archive Phases 0-4) (me)
+- [x] Apply & Rebuild card for source checkouts (CLAUDE.md; `FeatureRebuildService`; unverified in a run) (me)
+- [~] Provider catalog Settings UI: server and client landed (`d7ce5367`); Providers section files are uncommitted work in progress in the tree (me)
+- [~] Plugin / MCP / LLM-source screens in sealed `Features/Extensions` (ROADMAP Track Q Mac half); real-app check pending (you)
+- [ ] Y2 manual checks: 12-step quit/relaunch with `lta.mode=on`, provider card, chat cap chip, moved screens ([USER-CHECKLIST](USER-CHECKLIST.md) B) (you)
+- [ ] Decisions Q19 (notes without `platform` invisible), Q16 (search latency at 50k notes) (you)
+- [ ] Loose ends: Q21 quit delay on macOS logout, Q11 `llmide://` from Chrome (ROADMAP Loose ends) (me)
+- [ ] Meeting flows Mac half: ack with `lines`/`hash`, dedupe by session id, meeting-attached chat (ROADMAP M1) (wait)
+- [ ] Library read-path switch to `note_index` (M3) and legacy duplicate-row deletion (L1) (wait)
+- [ ] Swift feature freeze from Phase 1 (plan decision 4); whether it is in force is unverified (you)
+- [ ] K4 Retire: remove each kit's Swift UI one release after its Tauri screen (kit plan) (wait)
+
+## S2. Desktop multi-OS (Tauri)
+
+**Complete means (macOS, Windows, Linux):** Tauri 2 + React app over the Node sidecar, feature parity with the Mac app, signed and auto-updating on three OSes, then Swift retired (ADR 0018, Tauri plan phases 3, 5, 6).
+**Connection:** the sidecar is the same Node core on loopback; becomes the main worker with one company API key; talks to the relay (S4).
+
+- [x] ADR 0018 written (status: **proposed**) (`375fc325`) (me)
+- [x] Phase 0 spike built and tracked on `main` (`desktop/`, 87 files; `23ff0813`, `d4e80fd1`, `4a73b581`) (me)
+- [x] Phase 0 report: GO with four conditions; graph 59.8 fps at 10k, 50.9-56.5 fps at 50k, Node core runs unchanged (`docs/superpowers/plans/2026-10-25-tauri-phase0-report.md`) (me)
+- [x] Design tokens generated for the desktop (`schema/design/tokens.json`, `desktop/scripts/gen-tokens.mjs`); Mac pixel parity unverified (me)
+- [x] Chat renders incrementally, no dropped events in benches (Phase 0 condition 3) (me)
+- [~] Node sidecar: `desktop/src-tauri/src/core_host.rs`, `stage-core.mjs`, `PACKAGING.md`; spike only, not the packaged T6 deliverable and no Windows run (me)
+- [~] Do not bundle the SDK's `claude` binary (condition 2): the report measures 67 MB without it; whether the staging script enforces it is unverified (me)
+- [ ] Phase 0 open: user-run autobench with the window frontmost, to confirm numbers and the 30 s hidden phase (you)
+- [ ] Phase 0 open: one Windows autobench run (graph >= 30 fps, sidecar start/quit, installer size) (you)
+- [ ] Phase 0 open: Accessibility grant to measure caption read cadence; optional Swift cold-start comparison (you)
+- [ ] ADR 0018 moved to Accepted after the gate (you)
+- [ ] Graph layout in Rust or WASM (condition 1; ForceAtlas2 in WKWebView is 4-7x slower than Node) (me)
+- [ ] Monaco's vendored DOMPurify patched or Monaco upgraded before untrusted markdown is shown (condition 4) (me)
+- [ ] Tauri capabilities scoped; `read_graph_file` restricted to the project root; terminal flow control (report "Security notes") (me)
+- [ ] ui-kit extraction and K3 screens per kit: Chat, Library, Explorer, Settings, Issues/Gantt, Doc Gen, Graph, Loop/Auto Tasks, Live (kit plan K3) (me)
+- [ ] Tauri feature-off mechanism decided: build-time tree-shake plus runtime `/health features` (kit plan "Gates added") (you)
+- [ ] Packaged Node sidecar for all three OSes, finds the user's `claude` CLI, survives quit/restart (Tauri plan T6) (me)
+- [ ] Keychain / secret store per OS (Keychain, Credential Manager, Secret Service) (me)
+- [ ] Project open through a file dialog with security-scoped access; keep the `NS*FolderUsageDescription` strings (report, `4a73b581` covers the strings only) (me)
+- [ ] Tray / menu-bar presence and notifications (me)
+- [ ] Live caption capture per OS: macOS AX first, Windows next, Linux best-effort (Tauri plan risks) (me)
+- [ ] Signing, notarisation (macOS), Authenticode (Windows), signed updates, auto-update channel (me)
+- [ ] Windows and Linux builds in CI; WebKitGTK graph render check on Linux (me)
+- [ ] Screen-by-screen parity checklist against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
+- [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
+- [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch (me)
+
+## S3. Mobile (iPhone native, PWA)
+
+**Complete means:** the iPhone is a **native chat client** with explorer and auto-task views, not a remote desktop; works with the Mac on today, and with the Mac off once the relay exists.
+**Connection:** WebSocket `:3006` served by the Mac app, Bonjour `_llmide._tcp`, PIN pairing then a per-device token; wire types in `ios_app/SharedProtocol`; chat proxies to `:3456` through the Mac. Details: `docs/mobile/quick-start.md`, `verification.md`.
+
+- [x] Native iOS app with Chat, Explorer chat, Auto Tasks, Loop, Files, Issues, Source Control, Usage, Self-Heal stores (`ios_app/MyApp/Services/*`) (me)
+- [x] Pairing: PIN, then per-device token, PIN rotates; paired-device list with revoke (`docs/mobile/quick-start.md`) (me)
+- [x] Bonjour discovery and manual / Tailscale IP entry (quick-start) (me)
+- [x] Shared wire types and `make test-shared-protocol`; kit invariant 7 keeps it green (CLAUDE.md, kit plan) (me)
+- [x] Phone capabilities, access switches, opt-in relay of tool/edit approvals to the phone (`b868756b`, `32eedf3e`, `224a9179`) (me)
+- [x] Loopback pairing script `scripts/mobile/verify-native-pairing.swift` and `ios-ci.yml` (me)
+- [~] Manual device verification list (`docs/mobile/verification.md`): written, no recorded run (you)
+- [~] App Store readiness: `ios_app/APP_REVIEW_NOTES.md` exists; submission state unverified (you)
+- [ ] Phone sees archived chats and notes only through the Mac; verify after live-then-archive Y2 run (you)
+- [ ] Push notifications (approvals, task done) (me)
+- [ ] Background / reconnect behaviour verified on device (unverified) (you)
+- [ ] Phone works with the Mac off (needs relay, S4) (wait)
+- [ ] Retire cleartext `:3006` + PIN link once the relay reaches parity (ADR 0018 "Supersedes") (wait)
+- [ ] sync-kit K0 map (`docs/kits/` has no sync-kit page yet) and K1-K4 (me)
+- [ ] Phone PWA served by the relay (blocked on Q-WEB-1) (wait)
+
+## S4. Web app and relay
+
+**Complete means:** undefined until Q-WEB-1 is answered. Under option A (recommended): an always-on relay with E2E-encrypted snapshots and an inbox, a PWA served by it, QR device enrollment, revocation by key rotation, no LLM calls and no code execution on the relay (ADR 0018 decisions 4-5, Tauri plan §8).
+**Connection:** desktop encrypts and pushes snapshots, pulls inbox requests and re-checks them against its own permission rules; phone PWA and the extension read and queue.
+
+- [x] Rule recorded: the web and external services are connectors / ingest only (`docs/kits/data-lifecycle.md` rule 3) (me)
+- [x] Connector adapters for Box, git, issues, QA, SCIP, email, Slack with OAuth (`extension/connectors/`, CLAUDE.md) (me)
+- [x] Reusable React web bundles run inside the Mac app (`mac/LocalPackages/graph-kit/web/`, OS view `b31133e0`); not a hosted web app (me)
+- [ ] **Decide what the web app is (Q-WEB-1)** (you)
+- [ ] Decide relay hosting: small VPS (Node) or Cloudflare Workers + R2 (ADR 0018, Tauri plan §10) (you)
+- [ ] Relay service: snapshot store, inbox, per-device tokens (no code exists; no `relay/` folder) (me)
+- [ ] End-to-end crypto design: team key, QR enrollment, rotate on revoke; independent security review (me)
+- [ ] Snapshot producer on the desktop and request consumer with permission re-check (me)
+- [ ] Phone PWA (installable, offline read, queue) (me)
+- [ ] Extension read/queue through the relay when the desktop is off (me)
+- [ ] Relay contract added to `schema/http` with conformance tests (kit plan: contract group "relay (new)") (me)
+- [ ] Connector catalog: per-user selection, MCP-backed gdrive/gcal/miro, selection-gated Settings (shipped phase 1 per project notes; unverified in this audit) (me)
+
+## S5. Chrome extension
+
+**Complete means:** captures captions on supported platforms, side panel works as a live client of the Mac app, **stores nothing**, ships through the Chrome Web Store with a pinned origin.
+**Connection:** content scripts read captions every 800 ms, the side panel sends them to the local server; reads and chat call the Mac app live; drafts exist only until copied (data-lifecycle R1).
+
+- [x] Capture content scripts for Google Meet, Teams, Zoom web (`extension/manifest.json` host patterns; `extension/src/content/caption-scraper.ts`); other platforms unverified (me)
+- [x] Side panel: notes, questions, transcript, plan, agent hooks (`extension/src/sidepanel/hooks/*`) (me)
+- [x] Side-panel chat is a live Agent v2 client; `/chat` answers 410 (ROADMAP agent-kit P4; `extension/src/lib/agent-v2-client.ts`) (me)
+- [x] Draft release hook so a capture draft is dropped once copied (`useDraftRelease.ts`, ROADMAP live-then-archive) (me)
+- [x] CI workflow `extension-ci.yml`; 2611 files under `extension/tests` (me)
+- [~] "Extension stores nothing": chat and drafts done; `chrome.storage` is still used in `App.tsx`, `useTranscript.ts`, `capture-store.ts`, `config.ts` and others, audit against the rule pending (me)
+- [~] "Mac app not running" state for the side panel: described in USER-CHECKLIST B7; not verified in a run (you)
+- [ ] Pin the extension origin: CORS accepts every `chrome-extension://*` (ROADMAP Q22) (you)
+- [ ] Manual real-meeting checklist (`extension/CLAUDE.md` Testing Checklist) before any caption/LLM merge (you)
+- [ ] Chrome Web Store listing and review: no evidence in the repo (unverified) (you)
+- [ ] `llmide://` launch from Chrome (Q11) (me)
+- [ ] Verify the Mac/server API the extension calls for reads is sufficient (data-lifecycle section 8 open item) (me)
+- [ ] Phase 7 browser-control tools with grants and audit (Tauri plan) (wait)
+
+## S6. Shared server and core
+
+**Complete means:** one versioned, contract-tested HTTP surface for every client; kits move from Swift into Node behind it without behaviour change; every removable feature stays removable.
+**Connection:** Node 20+ pure HTTP on `127.0.0.1:3456`, SQLite WAL + FTS5, `SERVER_API_VERSION = 92` (`extension/server.mjs`).
+
+- [x] Layering lint at zero violations; lazy engine load (CLAUDE.md) (me)
+- [x] Route-group schemas, inventory, conformance runner, generated TS types, OpenAPI overlay, `make contract-gates` in `make regression` (Phase 1 plan P1-P16; `extension/src/lib/api-types.ts`, `schema/http`, `Makefile`) (me)
+- [x] Feature matrix: every key off, `404 feature_disabled`, nightly workflow (`bb4342dc`, `79e8207d`) (me)
+- [x] Server migrations append-only, up to `0054` (`extension/kb/migrations/`) (me)
+- [x] Plugin/MCP/LLM-source routes moved to `routes/extension-routes.mjs` (`58ac81b8`) (me)
+- [x] `POST /kb/complete` one-shot completion, API 88 (`ba65026b`) (me)
+- [x] docs-kit routes `/kb/docs/*` with contract (`b8b52af8`) (me)
+- [x] Test-hang protection: per-test timeout and suite watchdog (`83be5934`, `d51e4a61`) (me)
+- [~] Phase 1 P12 Swift decode check: `mac/Sources/APIContractLab` exists, docs-kit K1 routes skipped until the Mac switches (`6aa1468d`) (me)
+- [~] P17 token baseline: `schema/bench/token-baseline.json` committed; both real baselines not run per the agent-kit plan T0.2 (you)
+- [ ] K1 per kit, in order: ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
+- [ ] Core job runner: persisted queue, lane lock, cancel on quit, process-group kill (prerequisite for automation-kit) (me)
+- [ ] automation-kit (Loop + Auto Tasks) logic into Node, the largest kit (me)
+- [ ] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/` has docs, graph, knowledge, agent only) (me)
+- [ ] Flaky tests under full-gate load hardened (`index-routes.http` 1 MB body, `loop-contract-lab` probes) (me)
+
+## S7. Data and storage
+
+**Complete means:** one stored copy per kind of data, live in the server DB then archived to Mac files, nothing deleted without a verified copy, every migration N-1 readable with a tested rollback.
+**Connection:** [data-lifecycle](../kits/data-lifecycle.md); plans [agent-store](plans/2026-10-28-agent-store.md), [live-then-archive](plans/2026-10-29-live-then-archive.md).
+
+- [x] `data.db`, `agent.db`, secrets moved to Application Support, keep-2 backups, moved-kb tripwire (ROADMAP Done; `data-location-and-rollback.md`) (me)
+- [x] DB data in `<project>/system/`, notes in `llm-doc/` (ROADMAP Done) (me)
+- [x] Agent store: runs, tool events, composition, rollups, retention (ROADMAP Done) (me)
+- [x] Usage ledger shadow `usage_calls` with daily compare (ROADMAP Done) (me)
+- [x] Note index rebuildable from files, chunked reconcile, shadow compare (live-then-archive Phases 0-2 per ROADMAP) (me)
+- [x] `extension/scripts/backup.mjs` online backup (me)
+- [~] Live-then-archive `lta.mode`: built and in shadow; on-by-default waits for Y2 (you)
+- [ ] Ledger step B: budget readers to `usage_calls` after 7 days of zero mismatches, fail closed (X5) (you)
+- [ ] Ended-chat continuation: per-chat summary on a cheap model plus last turns (X3, bench-gated) (me)
+- [ ] 7-day shadow soak on real meeting notes, topK overlap, countDelta 0 (M2) (wait)
+- [ ] Delete legacy duplicate rows, destructive: export-before-delete, backup, rollback drill (L1) (wait)
+- [ ] Knowledge-kit K1: files stay the truth, server keeps a rebuildable index (L2; needs Q1-Q14) (you)
+- [ ] Real-corpus checks: platform-less note count, hidden-note semantics, iCloud placeholders (ROADMAP Loose ends) (you)
+- [ ] Two Macs on one account can flap note-index keys: detected, not prevented (ROADMAP Loose ends) (me)
+
+## S8. Agents, providers, extensions
+
+**Complete means:** the skeleton owns permission, budget, knowledge, workflow, observability and contract; the model and SDK do the rest; a new model or vendor is configuration.
+**Connection:** `extension/llm_agent/`, `providers/`, `mcp/`, `plugins/`; Mac `Features/Chat`, `ClaudeLink`; plans [agent-kit K1](plans/2026-10-30-agent-kit-k1.md), [extensions catalog](plans/2026-10-31-extensions-catalog.md).
+
+- [x] Provider catalog with Vercel AI SDK adapter, pinned fetch, per-user keys, security-reviewed (ROADMAP P6; `d7ce5367`) (me)
+- [x] Session router: per-chat provider/model, billable token cap, handoff, learned limits (ROADMAP P6b) (me)
+- [x] Non-token SDK adoption: retry, rate-limit, permission, refusal, thinking notices, MCP status, sandbox (ROADMAP P2) (me)
+- [x] Token bench harness and fake-run plumbing (`scripts/token-bench.mjs`, `make token-bench-fake`; `c528c9cf`) (me)
+- [x] Provider pinning for tracker-host connectors (ROADMAP X7) (me)
+- [~] Retire `llm_agent/runtime/` (P7): 2 commits local, finishing gates (`844b1213`, `ece843c6`) (me)
+- [~] Extensions catalog plan (2026-10-31): baseline test of extension consumers `a3897732`; plan marked not started otherwise (me)
+- [ ] Y1 bench go-ahead and runs: baselines, noise check, A/B per switch (USER-CHECKLIST A) (you)
+- [ ] Lean SDK configuration L1-L12 (compact prompt, drop Bash in execute, cache TTL, compaction, tool search); each bench-gated (X1) (me)
+- [ ] Token-affecting SDK adoption: `sessionStore`, Haiku search sub-agent, `Task*`, `skills`, `options.agent`, `resumeSessionAt` (X2) (me)
+- [ ] Plugin sub-agent tools unavailable until X2 (ROADMAP Loose ends) (me)
+- [ ] Router polish: switch history in Agents hub, shadow metrics on Storage page (X6; graph-kit pin bump) (me)
+- [ ] Second-model bench so a model upgrade is a measured setting change (kit plan principle) (you)
+- [ ] SDK upgrade-and-tune loop on each release via `extension/scripts/sdk-surface.mjs` (ongoing) (me)
+
+## S9. Security
+
+**Complete means:** loopback-only core, secrets in the vault/keychain, every external call pinned and guarded, relay sees no plaintext, builds and updates signed on every OS.
+**Connection:** Tauri plan §8, ADR 0004 (loopback), CLAUDE.md "Server" invariants.
+
+- [x] Server binds `127.0.0.1`; remote bind needs `LLMIDE_ALLOW_REMOTE=1` (CLAUDE.md invariants) (me)
+- [x] CORS allowlist, 8 MB body cap, 500k-char prompt cap, JWT + rate limit (CLAUDE.md) (me)
+- [x] Guardrail scanners for secrets, PII, destructive ops (`extension/guardrails/`) (me)
+- [x] Claude-style permissions: Ask / Accept Edits / Bypass with prefix rules (project notes, PR #65; unverified in this audit) (me)
+- [x] Phase 0 staging script excludes secrets, keys, DBs (report "Packaging") (me)
+- [~] Provider and connector fetch pinning: done for provider catalog and trackers; independent review welcome (ROADMAP X7) (me)
+- [ ] Pin extension origin instead of `chrome-extension://*` (Q22) (you)
+- [ ] Tauri capability manifest and path scoping (see S2) (me)
+- [ ] Relay: E2E design review, key rotation on revoke, no plaintext (see S4) (me)
+- [ ] Workspace Trust: untrusted folders run no hooks, install scripts or MCP stdio servers (Tauri plan §8) (me)
+- [ ] Signed builds and signed updates on every platform; plugins hash-pinned (S10) (me)
+- [ ] One company API key with per-user caps replaces any shared personal subscription (ADR 0018 decision 5) (you)
+- [ ] Phase 7 desktop-control grants, "agent is driving" indicator, kill switch, audit log (me)
+
+## S10. Release and CI
+
+**Complete means:** one reproducible release per OS with signed artifacts, an update channel, and CI that runs every gate.
+**Connection:** `mac/Scripts/{release,sign,notarize,appcast}.sh`, `.github/workflows/*`, `docs/how-to/release*.md`.
+
+- [x] Mac release, sign, notarize, Sparkle appcast scripts and `mac-release.yml` (`mac/Scripts/`, `docs/how-to/release-with-auto-update.md`) (me)
+- [x] CI workflows: mac, extension, ios, contract, docs, codeql, skills-drift, feature-matrix, release (`.github/workflows/`) (me)
+- [x] Pre-push gate runs the same lint CI does (`a0dd8473`) (me)
+- [x] `make regression` aggregates graph-kit pin, feature, contract, Mac, chat/loop/api gates (`Makefile`) (me)
+- [~] Mac Sparkle `CFBundleVersion` limitation (project notes 2026-10; fix state unverified) (me)
+- [ ] CI result checked after every push (`gh run list`); nightly job pushes local commits (you)
+- [ ] Tauri release workflow: macOS, Windows, Linux bundles (me)
+- [ ] Windows code signing and Linux packaging (deb/AppImage) decision (you)
+- [ ] Auto-update for Tauri, signed (me)
+- [ ] Relay deployment pipeline and monitoring (blocked on S4 hosting) (wait)
+- [ ] Chrome Web Store publishing step in the extension release (you)
+- [ ] Release notes / CHANGELOG discipline per surface (me)
+
+## Cross-cutting rules
+
+- **Quality over speed.** A phase ships only when its exit gate, its independent review (Sonnet reviews data-, money- and security-touching code, Fable for each kit's final review) and the full pre-push gate are green.
+- **Night push.** Agents commit on `main` (no branches) and do not push; a nightly job pushes. Ask before pushing `main` by hand.
+- **Bench-gated token changes.** Every token-affecting change ships OFF by default; paid or subscription bench runs happen after the end-to-end build (user decision 2026-10-30). Keep a change only if it beats noise and stays inside +15% tokens, +30% time, +20% hops.
+- **No data deletion without a verified copy.** Archive, verify, then delete; real-data checks and an old-format fixture (N-1 readable, rollback tested) before any destructive switch.
+- **Kit invariants** at every kit step: sealed Mac boundaries, removable features, server layering at zero, additive contract (version bump on wire change), current app keeps working, no token or latency regression, phone keeps working through the Mac until sync-kit lands.
+- Markdownlint before every push; never `--no-verify`.
+
+## How to keep this current
+
+1. **Every phase that ships ticks its boxes and updates this page in the same commit.** Change `[ ]` to `[~]` or `[x]`, cite the commit or doc in the item, and add new items when scope appears (never delete an unfinished item; mark it done or move the decision to the open questions).
+2. Run `node scripts/plan-status.mjs --fix` to refresh the dashboard numbers, edit the one-line State if it changed, then `node scripts/plan-status.mjs --check` (also covered by `extension/tests/plan-status.test.mjs`, so `npm test` fails on drift).
+3. Read the status any time with `node scripts/plan-status.mjs` (table) or `--json`.
+4. When something is `unverified`, verifying it is itself a task: turn the doubt into a run, then tick the box.
+5. Keep [ROADMAP](ROADMAP.md) as the dated narrative and [USER-CHECKLIST](USER-CHECKLIST.md) as the hands-on list; this page is the all-surface index over both.
