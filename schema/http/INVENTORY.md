@@ -15,7 +15,7 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 - Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
 - Auth: 200 token, 12 public
 - Handler found: 210; no handler found: 2
-- No Mac and no extension caller: 40 (tests only: 27, comments/docs only: 13, no reference: 0)
+- No Mac and no extension caller: 38 (tests only: 25, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -46,12 +46,10 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (40):
+Endpoints with no client caller (38):
 
 - `/chat` — tests only
 - `/agent-sdk/spike` — tests only
-- `/agent/v2/session/route` — tests only
-- `/agent/v2/session/route/history` — tests only
 - `/kb/entity/:id` — tests only
 - `/kb/system/status` — tests only
 - `/kb/delete` — tests only
@@ -110,8 +108,8 @@ Endpoints with no client caller (40):
 | `/agent/v2/decision` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:303` | `LlmIdeAPIClient+CodeAssist.swift` | `agent-v2-client.ts` | - |
 | `/agent/v2/session` | ALL_ENDPOINTS | DELETE | token | core | `extension/routes/agent-v2.mjs:306` | `LlmIdeAPIClient+CodeAssist.swift` | `agent-v2-client.ts` | - |
 | `/agent/v2/cancel` | ALL_ENDPOINTS | POST | token | core | `extension/routes/agent-v2.mjs:309` | `LlmIdeAPIClient+CodeAssist.swift`, `SystemBridge.swift` | - | - |
-| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:314` | - | - | tests only |
-| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:320` | - | - | tests only |
+| `/agent/v2/session/route` | ALL_ENDPOINTS | GET, PUT | token | core | `extension/routes/agent-v2.mjs:314` | `LlmIdeAPIClient+ChatRoute.swift` | - | - |
+| `/agent/v2/session/route/history` | ALL_ENDPOINTS | GET | token | core | `extension/routes/agent-v2.mjs:320` | `LlmIdeAPIClient+ChatRoute.swift` | - | - |
 | `/kb/loop/agent-run` | ALL_ENDPOINTS | POST | token | auto_tasks | `extension/routes/loop-agent.mjs:106` | `LlmIdeAPIClient+LoopAgent.swift` | - | - |
 | `/kb/complete` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/complete.mjs:42` | `LlmIdeAPIClient+Complete.swift`, `RegressionRunner.swift` | - | - |
 | `/generate-questions` | ALL_ENDPOINTS | POST | token | core | `extension/server/ai-routes.mjs:723` | - | `App.tsx`, `useQuestions.ts` | - |
@@ -308,7 +306,7 @@ Endpoints with no client caller (40):
 
 ## Consistency
 
-Checked: 212 roster entries, 747 Swift files, 51 extension source files.
+Checked: 212 roster entries, 751 Swift files, 51 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 
