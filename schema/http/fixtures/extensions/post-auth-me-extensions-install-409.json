@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /auth/me/extensions/install",
+  "status": 409,
+  "request": {
+    "body": {
+      "url": "https://github.com/acme/tidy",
+      "commit": "ffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ALREADY_INSTALLED",
+      "message": "this item is installed at another commit; use update",
+      "details": {
+        "id": "skill:acme/tidy",
+        "installed": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "requested": "ffffffffffffffffffffffffffffffffffffffff",
+        "use": "/auth/me/extensions/update"
+      }
+    }
+  }
+}

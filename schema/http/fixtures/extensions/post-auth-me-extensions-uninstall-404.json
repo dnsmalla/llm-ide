@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/extensions/uninstall",
+  "status": 404,
+  "request": {
+    "body": {
+      "id": "plugin:acme/sketchy"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "not installed"
+    }
+  }
+}

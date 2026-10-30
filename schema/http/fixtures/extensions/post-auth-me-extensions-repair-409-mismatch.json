@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /auth/me/extensions/repair",
+  "status": 409,
+  "request": {
+    "body": {
+      "id": "skill:acme/tidy"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INTEGRITY_MISMATCH",
+      "message": "the downloaded files differ from what was installed; not restoring them",
+      "details": {
+        "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    }
+  }
+}

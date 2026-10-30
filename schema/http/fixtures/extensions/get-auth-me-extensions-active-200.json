@@ -1,0 +1,41 @@
+{
+  "endpoint": "GET /auth/me/extensions/active",
+  "status": 200,
+  "response": {
+    "fingerprint": "ba0e2ef65140607414807cb8f67a68823d2dabd6e87dff6eef21f7d5d36e3ccb",
+    "failClosed": false,
+    "items": [
+      {
+        "id": "llm-source:local/builtin",
+        "kind": "llm-source",
+        "trust": "local"
+      },
+      {
+        "id": "skill:acme/tidy",
+        "kind": "skill",
+        "trust": "unknown"
+      }
+    ],
+    "skills": [
+      {
+        "id": "runtime/answer-question",
+        "name": "answer-question",
+        "description": "Answers a user question using a curated set of notes loaded from the vault.",
+        "sourceId": "builtin"
+      },
+      {
+        "id": "catalog/acme__tidy/tidy",
+        "name": "Tidy",
+        "description": "Tidy up files",
+        "sourceId": "skill:acme/tidy"
+      }
+    ],
+    "pluginSkills": [],
+    "commands": [],
+    "subagents": [],
+    "sdkPlugins": 0,
+    "mcpServers": [],
+    "excluded": [],
+    "warnings": []
+  }
+}

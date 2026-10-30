@@ -493,6 +493,104 @@ export type RegisterResult = {
   root: string;
 };
 
+export type ExtensionsFinding = {
+  severity: string;
+  rule: string;
+  file: string;
+  line?: number;
+  detail: string;
+  excerpt?: string;
+};
+
+export type Member = {
+  memberId: string;
+  type: string;
+  name: string;
+  executable: boolean;
+};
+
+export type Item = {
+  id: string;
+  kind: "skill" | "plugin" | "mcp" | "llm-source";
+  name: string;
+  description: string;
+  version: string | null;
+  publisher: {
+    id: string;
+    trust: string;
+  };
+  source: {
+    kind: string;
+    url: string;
+    ref?: string;
+    commit: string;
+  };
+  subpath?: string;
+  pinnedCommit: string;
+  installedAt: string;
+  updatedAt?: string;
+  members: Member[];
+  declared: {
+    executableKinds: string[];
+  };
+  permissions: {
+    type: string;
+    executable: boolean;
+    text: string;
+  }[];
+  scan: {
+    count: number;
+    byRule?: Record<string, number>;
+    findings?: ExtensionsFinding[];
+  };
+  consents?: Record<string, {
+      grantedAt: string;
+      commit: string;
+    }>;
+  integrity?: string;
+  storeDir: string;
+  update?: {
+    latest: string;
+    checkedAt: string;
+  };
+  previous?: {
+    pinnedCommit: string;
+    version: string | null;
+    installedAt: string | null;
+  };
+  state: {
+    enabled: boolean;
+    disabledMembers: string[];
+  };
+};
+
+export type Entry = {
+  indexId: string;
+  kind: string;
+  name: string;
+  description: string;
+  publisher: string;
+  version?: string;
+  source: {
+    url?: string;
+    path?: string;
+  };
+  remote?: boolean;
+  installable: boolean;
+  reason?: string;
+  installed: boolean;
+};
+
+export type ExtensionsSource = {
+  id: string;
+  title: string;
+  kind: string;
+  status: string;
+  count: number;
+  fetchedAt: string | null;
+  error?: string;
+};
+
 export type User = {
   id: string;
   email: string;
@@ -1125,7 +1223,7 @@ export type Turn = {
 };
 
 /** One selected source for /generate-doc. name is the display name (sanitized to one line, 80 chars); content is the source text, budgeted by packSources. */
-export type Source = {
+export type NotesGenerationSource = {
   name?: string;
   content?: string;
 };
@@ -1579,7 +1677,7 @@ export type RouteRef = {
 };
 
 /** One guardrail finding (extension/guardrails/rules.mjs check()). severity is blocking (fails the gate), warning (shown, does not fail) or info. details, when present, carries the matched snippets of a secret or PII finding; snippets are redacted before they are stored. */
-export type Finding = {
+export type ReviewFinding = {
   ruleId: string;
   severity: "blocking" | "warning" | "info";
   message: string;
@@ -1589,7 +1687,7 @@ export type Finding = {
 /** The guardrail report runGuardrails returns for the item, as stored at submit and re-run at approval time. passed is false when any finding has severity blocking. findings is the full list; the server also sends blocking, warnings and info, which are the same findings partitioned by severity (open keys, so not declared here). */
 export type Guardrails = {
   passed: boolean;
-  findings: Finding[];
+  findings: ReviewFinding[];
   [key: string]: unknown;
 };
 
@@ -2558,6 +2656,369 @@ export type PostKbProjectsRegisterResponse400 = CommonError;
 
 /** TOO_MANY_PROJECTS: the user already holds 200 registered projects. */
 export type PostKbProjectsRegisterResponse409 = CommonError;
+
+/** Request parts for `GET /auth/me/extensions/installed` (schema/http/extensions.schema.json). */
+export type GetAuthMeExtensionsInstalledRequest = Record<string, never>;
+
+export type GetAuthMeExtensionsInstalledResponse200 = {
+  corrupt: boolean;
+  items: Item[];
+};
+
+export type GetAuthMeExtensionsInstalledResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/install` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsInstallRequest = {
+  body: {
+    url?: string;
+    ref?: string;
+    commit?: string;
+    path?: string;
+  };
+};
+
+export type PostAuthMeExtensionsInstallResponse200 = {
+  ok: boolean;
+  alreadyInstalled?: boolean;
+  item: Item;
+};
+
+export type PostAuthMeExtensionsInstallResponse400 = CommonError;
+
+export type PostAuthMeExtensionsInstallResponse401 = CommonError;
+
+export type PostAuthMeExtensionsInstallResponse403 = CommonError;
+
+export type PostAuthMeExtensionsInstallResponse404 = CommonError;
+
+export type PostAuthMeExtensionsInstallResponse409 = CommonError;
+
+export type PostAuthMeExtensionsInstallResponse422 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/toggle` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsToggleRequest = {
+  body: {
+    id?: string;
+    enabled?: boolean | string;
+    consents?: string[];
+    members?: string[];
+  };
+};
+
+export type PostAuthMeExtensionsToggleResponse200 = {
+  ok: boolean;
+  item: Item;
+};
+
+export type PostAuthMeExtensionsToggleResponse400 = CommonError;
+
+export type PostAuthMeExtensionsToggleResponse401 = CommonError;
+
+export type PostAuthMeExtensionsToggleResponse404 = CommonError;
+
+export type PostAuthMeExtensionsToggleResponse409 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/uninstall` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsUninstallRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostAuthMeExtensionsUninstallResponse200 = {
+  ok: boolean;
+};
+
+export type PostAuthMeExtensionsUninstallResponse401 = CommonError;
+
+export type PostAuthMeExtensionsUninstallResponse404 = CommonError;
+
+/** Request parts for `GET /auth/me/extensions/catalog` (schema/http/extensions.schema.json). */
+export type GetAuthMeExtensionsCatalogRequest = {
+  query: {
+    q?: string;
+    kind?: string;
+    limit?: string;
+    offset?: string;
+  };
+};
+
+export type GetAuthMeExtensionsCatalogResponse200 = {
+  query: string;
+  total: number;
+  offset: number;
+  results: Entry[];
+  sources: ExtensionsSource[];
+};
+
+export type GetAuthMeExtensionsCatalogResponse400 = CommonError;
+
+export type GetAuthMeExtensionsCatalogResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/catalog/refresh` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsCatalogRefreshRequest = {
+  body: {
+    source?: string | number;
+    force?: boolean;
+  };
+};
+
+export type PostAuthMeExtensionsCatalogRefreshResponse200 = {
+  results: {
+    id: string;
+    status: string;
+    count?: number;
+    error?: string;
+  }[];
+};
+
+export type PostAuthMeExtensionsCatalogRefreshResponse400 = CommonError;
+
+export type PostAuthMeExtensionsCatalogRefreshResponse401 = CommonError;
+
+export type PostAuthMeExtensionsCatalogRefreshResponse404 = CommonError;
+
+/** Request parts for `GET /auth/me/extensions/active` (schema/http/extensions.schema.json). */
+export type GetAuthMeExtensionsActiveRequest = Record<string, never>;
+
+export type GetAuthMeExtensionsActiveResponse200 = {
+  fingerprint: string;
+  failClosed: boolean;
+  items: {
+    id: string;
+    kind: string;
+    trust: string;
+  }[];
+  skills: {
+    id: string;
+    name: string;
+    description: string;
+    sourceId: string;
+  }[];
+  pluginSkills?: {
+    name: string;
+    plugin: string;
+  }[];
+  commands?: {
+    trigger: string;
+    plugin: string;
+  }[];
+  subagents?: {
+    name: string;
+    plugin: string;
+  }[];
+  sdkPlugins: number;
+  mcpServers: string[];
+  excluded?: {
+    kind: string;
+    name: string;
+    reason: string;
+  }[];
+  warnings: string[];
+};
+
+export type GetAuthMeExtensionsActiveResponse401 = CommonError;
+
+/** Request parts for `GET /auth/me/extensions/updates` (schema/http/extensions.schema.json). */
+export type GetAuthMeExtensionsUpdatesRequest = Record<string, never>;
+
+export type GetAuthMeExtensionsUpdatesResponse200 = {
+  corrupt: boolean;
+  items: ({
+    id: string;
+    name: string;
+    kind: string;
+    current: string;
+    latest: string;
+    checkedAt: string | null;
+    ref?: string;
+    hasPrevious: boolean;
+  })[];
+};
+
+export type GetAuthMeExtensionsUpdatesResponse401 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/updates/check` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsUpdatesCheckRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostAuthMeExtensionsUpdatesCheckResponse200 = {
+  checkedAt: string;
+  results: {
+    id: string;
+    current: string;
+    latest?: string;
+    updateAvailable: boolean;
+    error?: string;
+  }[];
+};
+
+export type PostAuthMeExtensionsUpdatesCheckResponse401 = CommonError;
+
+export type PostAuthMeExtensionsUpdatesCheckResponse404 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/update/preview` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsUpdatePreviewRequest = {
+  body: {
+    id?: string;
+    commit?: string | number;
+  };
+};
+
+export type PostAuthMeExtensionsUpdatePreviewResponse200 = {
+  id: string;
+  from: string;
+  to: string;
+  version: {
+    from: string | null;
+    to: string | null;
+  };
+  files: {
+    counts: {
+      added: number;
+      removed: number;
+      changed: number;
+    };
+    added: {
+      path: string;
+      size: number;
+    }[];
+    removed?: {
+      path: string;
+      size: number;
+    }[];
+    changed: {
+      path: string;
+      before: number;
+      after: number;
+    }[];
+    truncated: boolean;
+  };
+  scan: {
+    before: {
+      count: number;
+      byRule?: Record<string, number>;
+    };
+    after: {
+      count: number;
+      byRule: Record<string, number>;
+    };
+    newFindings: ExtensionsFinding[];
+    resolvedCount: number;
+  };
+  executable: {
+    newKinds: string[];
+    newMembers: {
+      memberId: string;
+      type: string;
+      name: string;
+    }[];
+    kinds: string[];
+  };
+  members: {
+    added: string[];
+    removed?: string[];
+  };
+  consent: {
+    required: boolean;
+    kinds: string[];
+  };
+  wasEnabled: boolean;
+  staysEnabledWithoutConsent: boolean;
+  flags: string[];
+};
+
+export type PostAuthMeExtensionsUpdatePreviewResponse400 = CommonError;
+
+export type PostAuthMeExtensionsUpdatePreviewResponse401 = CommonError;
+
+export type PostAuthMeExtensionsUpdatePreviewResponse404 = CommonError;
+
+export type PostAuthMeExtensionsUpdatePreviewResponse409 = CommonError;
+
+export type PostAuthMeExtensionsUpdatePreviewResponse422 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/update` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsUpdateRequest = {
+  body: {
+    id?: string;
+    commit?: string;
+    consents?: string[];
+  };
+};
+
+export type PostAuthMeExtensionsUpdateResponse200 = {
+  ok: boolean;
+  item: Item;
+  update: {
+    from: string;
+    to: string;
+    enabled: boolean;
+    wasEnabled: boolean;
+    reason?: string;
+    kinds: string[];
+  };
+};
+
+export type PostAuthMeExtensionsUpdateResponse400 = CommonError;
+
+export type PostAuthMeExtensionsUpdateResponse401 = CommonError;
+
+export type PostAuthMeExtensionsUpdateResponse404 = CommonError;
+
+export type PostAuthMeExtensionsUpdateResponse409 = CommonError;
+
+export type PostAuthMeExtensionsUpdateResponse422 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/rollback` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsRollbackRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostAuthMeExtensionsRollbackResponse200 = {
+  ok: boolean;
+  item: Item;
+  rollback: {
+    from: string;
+    to: string;
+    enabled: boolean;
+    wasEnabled: boolean;
+    reason?: string;
+    kinds: string[];
+  };
+};
+
+export type PostAuthMeExtensionsRollbackResponse401 = CommonError;
+
+export type PostAuthMeExtensionsRollbackResponse404 = CommonError;
+
+export type PostAuthMeExtensionsRollbackResponse409 = CommonError;
+
+/** Request parts for `POST /auth/me/extensions/repair` (schema/http/extensions.schema.json). */
+export type PostAuthMeExtensionsRepairRequest = {
+  body: {
+    id?: string;
+  };
+};
+
+export type PostAuthMeExtensionsRepairResponse200 = {
+  ok: boolean;
+  repaired: boolean;
+  status: string;
+  was?: string;
+  item: Item;
+};
+
+export type PostAuthMeExtensionsRepairResponse401 = CommonError;
+
+export type PostAuthMeExtensionsRepairResponse404 = CommonError;
+
+export type PostAuthMeExtensionsRepairResponse409 = CommonError;
 
 /** Request parts for `GET /` (schema/http/health-auth.schema.json). */
 export type GetRequest = Record<string, never>;
@@ -4819,7 +5280,7 @@ export type PostGenerateDocRequest = {
     /** Freeform one-off instructions from the prompt bar; combined with template/command, never required on its own */
     prompt?: string;
     /** Source material; non-empty is required, not just present. No item-count limit — sources are capped at 50 000 chars each and the RENDERED source block (headings included) is fitted to a 400 000-char total budget by equal-share water-filling; anything shortened is named in the response's truncated array, and anything that could not be given at least 200 chars is named in omitted */
-    sources?: Source[];
+    sources?: NotesGenerationSource[];
   };
 };
 
@@ -6800,6 +7261,122 @@ export interface ApiEndpoints {
       200: PostKbProjectsRegisterResponse200;
       400: PostKbProjectsRegisterResponse400;
       409: PostKbProjectsRegisterResponse409;
+    };
+  };
+  "GET /auth/me/extensions/installed": {
+    request: GetAuthMeExtensionsInstalledRequest;
+    responses: {
+      200: GetAuthMeExtensionsInstalledResponse200;
+      401: GetAuthMeExtensionsInstalledResponse401;
+    };
+  };
+  "POST /auth/me/extensions/install": {
+    request: PostAuthMeExtensionsInstallRequest;
+    responses: {
+      200: PostAuthMeExtensionsInstallResponse200;
+      400: PostAuthMeExtensionsInstallResponse400;
+      401: PostAuthMeExtensionsInstallResponse401;
+      403: PostAuthMeExtensionsInstallResponse403;
+      404: PostAuthMeExtensionsInstallResponse404;
+      409: PostAuthMeExtensionsInstallResponse409;
+      422: PostAuthMeExtensionsInstallResponse422;
+    };
+  };
+  "POST /auth/me/extensions/toggle": {
+    request: PostAuthMeExtensionsToggleRequest;
+    responses: {
+      200: PostAuthMeExtensionsToggleResponse200;
+      400: PostAuthMeExtensionsToggleResponse400;
+      401: PostAuthMeExtensionsToggleResponse401;
+      404: PostAuthMeExtensionsToggleResponse404;
+      409: PostAuthMeExtensionsToggleResponse409;
+    };
+  };
+  "POST /auth/me/extensions/uninstall": {
+    request: PostAuthMeExtensionsUninstallRequest;
+    responses: {
+      200: PostAuthMeExtensionsUninstallResponse200;
+      401: PostAuthMeExtensionsUninstallResponse401;
+      404: PostAuthMeExtensionsUninstallResponse404;
+    };
+  };
+  "GET /auth/me/extensions/catalog": {
+    request: GetAuthMeExtensionsCatalogRequest;
+    responses: {
+      200: GetAuthMeExtensionsCatalogResponse200;
+      400: GetAuthMeExtensionsCatalogResponse400;
+      401: GetAuthMeExtensionsCatalogResponse401;
+    };
+  };
+  "POST /auth/me/extensions/catalog/refresh": {
+    request: PostAuthMeExtensionsCatalogRefreshRequest;
+    responses: {
+      200: PostAuthMeExtensionsCatalogRefreshResponse200;
+      400: PostAuthMeExtensionsCatalogRefreshResponse400;
+      401: PostAuthMeExtensionsCatalogRefreshResponse401;
+      404: PostAuthMeExtensionsCatalogRefreshResponse404;
+    };
+  };
+  "GET /auth/me/extensions/active": {
+    request: GetAuthMeExtensionsActiveRequest;
+    responses: {
+      200: GetAuthMeExtensionsActiveResponse200;
+      401: GetAuthMeExtensionsActiveResponse401;
+    };
+  };
+  "GET /auth/me/extensions/updates": {
+    request: GetAuthMeExtensionsUpdatesRequest;
+    responses: {
+      200: GetAuthMeExtensionsUpdatesResponse200;
+      401: GetAuthMeExtensionsUpdatesResponse401;
+    };
+  };
+  "POST /auth/me/extensions/updates/check": {
+    request: PostAuthMeExtensionsUpdatesCheckRequest;
+    responses: {
+      200: PostAuthMeExtensionsUpdatesCheckResponse200;
+      401: PostAuthMeExtensionsUpdatesCheckResponse401;
+      404: PostAuthMeExtensionsUpdatesCheckResponse404;
+    };
+  };
+  "POST /auth/me/extensions/update/preview": {
+    request: PostAuthMeExtensionsUpdatePreviewRequest;
+    responses: {
+      200: PostAuthMeExtensionsUpdatePreviewResponse200;
+      400: PostAuthMeExtensionsUpdatePreviewResponse400;
+      401: PostAuthMeExtensionsUpdatePreviewResponse401;
+      404: PostAuthMeExtensionsUpdatePreviewResponse404;
+      409: PostAuthMeExtensionsUpdatePreviewResponse409;
+      422: PostAuthMeExtensionsUpdatePreviewResponse422;
+    };
+  };
+  "POST /auth/me/extensions/update": {
+    request: PostAuthMeExtensionsUpdateRequest;
+    responses: {
+      200: PostAuthMeExtensionsUpdateResponse200;
+      400: PostAuthMeExtensionsUpdateResponse400;
+      401: PostAuthMeExtensionsUpdateResponse401;
+      404: PostAuthMeExtensionsUpdateResponse404;
+      409: PostAuthMeExtensionsUpdateResponse409;
+      422: PostAuthMeExtensionsUpdateResponse422;
+    };
+  };
+  "POST /auth/me/extensions/rollback": {
+    request: PostAuthMeExtensionsRollbackRequest;
+    responses: {
+      200: PostAuthMeExtensionsRollbackResponse200;
+      401: PostAuthMeExtensionsRollbackResponse401;
+      404: PostAuthMeExtensionsRollbackResponse404;
+      409: PostAuthMeExtensionsRollbackResponse409;
+    };
+  };
+  "POST /auth/me/extensions/repair": {
+    request: PostAuthMeExtensionsRepairRequest;
+    responses: {
+      200: PostAuthMeExtensionsRepairResponse200;
+      401: PostAuthMeExtensionsRepairResponse401;
+      404: PostAuthMeExtensionsRepairResponse404;
+      409: PostAuthMeExtensionsRepairResponse409;
     };
   };
   "GET /": {

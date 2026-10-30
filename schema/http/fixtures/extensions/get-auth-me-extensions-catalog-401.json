@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /auth/me/extensions/catalog",
+  "status": 401,
+  "request": {
+    "query": {
+      "q": "x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Authentication required"
+    }
+  }
+}

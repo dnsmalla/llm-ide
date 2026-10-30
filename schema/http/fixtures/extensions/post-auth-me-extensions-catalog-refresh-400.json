@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/extensions/catalog/refresh",
+  "status": 400,
+  "request": {
+    "body": {
+      "source": 7
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "source must be a string and force a boolean"
+    }
+  }
+}

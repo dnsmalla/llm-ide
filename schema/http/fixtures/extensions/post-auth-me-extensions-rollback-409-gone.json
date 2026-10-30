@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /auth/me/extensions/rollback",
+  "status": 409,
+  "request": {
+    "body": {
+      "id": "skill:acme/tidy"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "PREVIOUS_UNAVAILABLE",
+      "message": "the earlier version is missing or damaged; update again instead",
+      "details": {
+        "status": "missing"
+      }
+    }
+  }
+}

@@ -1,0 +1,31 @@
+{
+  "endpoint": "POST /auth/me/extensions/catalog/refresh",
+  "status": 200,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "results": [
+      {
+        "id": "anthropics/skills",
+        "status": "refreshed",
+        "count": 1
+      },
+      {
+        "id": "anthropics/claude-plugins-official",
+        "status": "refreshed",
+        "count": 1
+      },
+      {
+        "id": "modelcontextprotocol/servers",
+        "status": "refreshed",
+        "count": 1
+      },
+      {
+        "id": "mcp-registry",
+        "status": "refreshed",
+        "count": 1
+      }
+    ]
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/extensions/catalog/refresh",
+  "status": 404,
+  "request": {
+    "body": {
+      "source": "evil.example"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "unknown index source"
+    }
+  }
+}

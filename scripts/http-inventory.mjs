@@ -5,7 +5,7 @@
 // imported: importing it boots it). ALL_ENDPOINTS in extension/server.mjs is the
 // advertised roster. The public + auth roster (scripts/lib/roster.mjs) holds the
 // pre-routing public paths (PUBLIC_PATHS, extension/server/auth.mjs) and the auth
-// namespace (literal and prefix dispatch in extension/server/auth-routes.mjs and extension/routes/extension-routes.mjs).
+// namespace (literal and prefix dispatch in extension/server/auth-routes.mjs, extension/routes/extension-routes.mjs and extension/routes/extensions-catalog.mjs).
 // Feature ownership comes from FEATURE_ROUTE_GROUPS (extension/routes/feature-routes.mjs).
 //
 // Usage:
@@ -493,7 +493,7 @@ function render(model) {
   out.push('Regenerate: `node scripts/http-inventory.mjs` (CI: `node scripts/http-inventory.mjs --check`).');
   out.push('');
   out.push('Source of truth: `ALL_ENDPOINTS` in `extension/server.mjs`, and the public + auth roster');
-  out.push('(`scripts/lib/roster.mjs`: `PUBLIC_PATHS` in `extension/server/auth.mjs`, dispatch in `extension/server/auth-routes.mjs` and `extension/routes/extension-routes.mjs`).');
+  out.push('(`scripts/lib/roster.mjs`: `PUBLIC_PATHS` in `extension/server/auth.mjs`, dispatch in `extension/server/auth-routes.mjs`, `extension/routes/extension-routes.mjs` and `extension/routes/extensions-catalog.mjs`).');
   out.push('Feature groups from `extension/routes/feature-routes.mjs`.');
   out.push('Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` string literals.');
   out.push('`*` in a client path = an interpolated or `:param` segment. Method `ANY` = no method check found.');

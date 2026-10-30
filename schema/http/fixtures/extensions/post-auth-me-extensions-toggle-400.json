@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/toggle",
+  "status": 400,
+  "request": {
+    "body": {
+      "id": "skill:acme/tidy",
+      "enabled": "yes"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "enabled must be a boolean"
+    }
+  }
+}

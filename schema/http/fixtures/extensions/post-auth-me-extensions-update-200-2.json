@@ -1,0 +1,74 @@
+{
+  "endpoint": "POST /auth/me/extensions/update",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "skill:acme/tidy",
+      "commit": "ffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  "response": {
+    "ok": true,
+    "item": {
+      "id": "skill:acme/tidy",
+      "kind": "skill",
+      "name": "Tidy",
+      "description": "Tidy up files",
+      "version": null,
+      "publisher": {
+        "id": "acme",
+        "trust": "unknown"
+      },
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/acme/tidy",
+        "commit": "ffffffffffffffffffffffffffffffffffffffff"
+      },
+      "pinnedCommit": "ffffffffffffffffffffffffffffffffffffffff",
+      "installedAt": "2026-10-30T23:41:16.611Z",
+      "members": [
+        {
+          "memberId": "skill:Tidy",
+          "type": "skill",
+          "name": "Tidy",
+          "executable": false
+        }
+      ],
+      "declared": {
+        "executableKinds": []
+      },
+      "permissions": [
+        {
+          "type": "skill",
+          "executable": false,
+          "text": "Adds instructions the assistant may follow (skills)."
+        }
+      ],
+      "scan": {
+        "count": 0,
+        "byRule": {},
+        "findings": []
+      },
+      "consents": {},
+      "integrity": "7877e152706bebe70f42341fc47743bffcc424d53a46b6570816e24189aa012b",
+      "storeDir": "extensions/store/bb82030dbc2bcaba32a90bf2/skill__acme__tidy/ffffffffffffffffffffffffffffffffffffffff",
+      "updatedAt": "2026-10-30T23:41:16.634Z",
+      "previous": {
+        "pinnedCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "version": null,
+        "installedAt": "2026-10-30T23:41:16.611Z"
+      },
+      "state": {
+        "enabled": true,
+        "disabledMembers": []
+      }
+    },
+    "update": {
+      "from": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "to": "ffffffffffffffffffffffffffffffffffffffff",
+      "enabled": true,
+      "wasEnabled": true,
+      "kinds": []
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/update",
+  "status": 404,
+  "request": {
+    "body": {
+      "id": "skill:nobody/x",
+      "commit": "9999999999999999999999999999999999999999"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "not installed"
+    }
+  }
+}

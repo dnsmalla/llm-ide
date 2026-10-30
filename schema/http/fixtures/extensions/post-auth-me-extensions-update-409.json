@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /auth/me/extensions/update",
+  "status": 409,
+  "request": {
+    "body": {
+      "id": "skill:acme/tidy",
+      "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ALREADY_CURRENT",
+      "message": "already at this commit",
+      "details": {
+        "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      }
+    }
+  }
+}

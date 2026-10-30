@@ -1,0 +1,22 @@
+{
+  "endpoint": "POST /auth/me/extensions/install",
+  "status": 422,
+  "request": {
+    "body": {
+      "url": "https://github.com/acme/market",
+      "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "MARKETPLACE",
+      "message": "this repository is a marketplace; install one of its plugins by path",
+      "details": {
+        "entries": [
+          "p1",
+          "p2"
+        ]
+      }
+    }
+  }
+}

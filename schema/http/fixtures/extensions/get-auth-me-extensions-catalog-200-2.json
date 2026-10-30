@@ -1,0 +1,66 @@
+{
+  "endpoint": "GET /auth/me/extensions/catalog",
+  "status": 200,
+  "request": {
+    "query": {
+      "q": "pdf",
+      "kind": "skill",
+      "limit": "5",
+      "offset": "0"
+    }
+  },
+  "response": {
+    "query": "pdf",
+    "total": 1,
+    "offset": 0,
+    "results": [
+      {
+        "indexId": "anthropics/skills",
+        "kind": "skill",
+        "name": "pdf",
+        "description": "Read and fill PDF forms",
+        "publisher": "anthropics",
+        "source": {
+          "url": "https://github.com/anthropics/skills",
+          "path": "skills/pdf"
+        },
+        "installable": true,
+        "installed": false
+      }
+    ],
+    "sources": [
+      {
+        "id": "anthropics/skills",
+        "title": "Anthropic skills",
+        "kind": "skills-repo",
+        "status": "fresh",
+        "count": 1,
+        "fetchedAt": "2026-10-30T23:41:16.641Z"
+      },
+      {
+        "id": "anthropics/claude-plugins-official",
+        "title": "Claude plugins (official)",
+        "kind": "marketplace",
+        "status": "fresh",
+        "count": 1,
+        "fetchedAt": "2026-10-30T23:41:16.641Z"
+      },
+      {
+        "id": "modelcontextprotocol/servers",
+        "title": "MCP reference servers",
+        "kind": "github-dirs",
+        "status": "fresh",
+        "count": 1,
+        "fetchedAt": "2026-10-30T23:41:16.641Z"
+      },
+      {
+        "id": "mcp-registry",
+        "title": "MCP registry",
+        "kind": "mcp-registry",
+        "status": "fresh",
+        "count": 1,
+        "fetchedAt": "2026-10-30T23:41:16.641Z"
+      }
+    ]
+  }
+}

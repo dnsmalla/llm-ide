@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/install",
+  "status": 403,
+  "request": {
+    "body": {
+      "url": "https://github.com/acme/tidy",
+      "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SOURCE_NOT_ALLOWED",
+      "message": "this source is not on the allowed list"
+    }
+  }
+}

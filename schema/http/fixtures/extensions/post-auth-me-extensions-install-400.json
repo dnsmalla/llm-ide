@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/extensions/install",
+  "status": 400,
+  "request": {
+    "body": {
+      "url": "https://evil.com/a/b"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_URL",
+      "message": "use a https://github.com/<owner>/<repo> address"
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "endpoint": "GET /auth/me/extensions/catalog",
+  "status": 400,
+  "request": {
+    "query": {
+      "kind": "bogus"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "kind must be skill, plugin, mcp or llm-source"
+    }
+  }
+}

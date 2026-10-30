@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/update/preview",
+  "status": 400,
+  "request": {
+    "body": {
+      "id": "plugin:acme/runner",
+      "commit": 5
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "commit must be a string"
+    }
+  }
+}

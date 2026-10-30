@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/extensions/rollback",
+  "status": 404,
+  "request": {
+    "body": {
+      "id": "plugin:acme/sketchy"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NO_PREVIOUS",
+      "message": "there is no earlier version to go back to"
+    }
+  }
+}

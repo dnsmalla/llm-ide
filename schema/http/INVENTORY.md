@@ -4,7 +4,7 @@
 Regenerate: `node scripts/http-inventory.mjs` (CI: `node scripts/http-inventory.mjs --check`).
 
 Source of truth: `ALL_ENDPOINTS` in `extension/server.mjs`, and the public + auth roster
-(`scripts/lib/roster.mjs`: `PUBLIC_PATHS` in `extension/server/auth.mjs`, dispatch in `extension/server/auth-routes.mjs` and `extension/routes/extension-routes.mjs`).
+(`scripts/lib/roster.mjs`: `PUBLIC_PATHS` in `extension/server/auth.mjs`, dispatch in `extension/server/auth-routes.mjs`, `extension/routes/extension-routes.mjs` and `extension/routes/extensions-catalog.mjs`).
 Feature groups from `extension/routes/feature-routes.mjs`.
 Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` string literals.
 `*` in a client path = an interpolated or `:param` segment. Method `ANY` = no method check found.
@@ -12,10 +12,10 @@ Clients: Mac `mac/Sources/LlmIdeMac/**/*.swift` and `extension/src/**/*.ts(x)` s
 ## Summary
 
 - Endpoints in `ALL_ENDPOINTS`: **146**
-- Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **66**
-- Auth: 200 token, 12 public
-- Handler found: 210; no handler found: 2
-- No Mac and no extension caller: 40 (tests only: 27, comments/docs only: 13, no reference: 0)
+- Public + auth roster (pre-routing public paths and the auth namespace; not advertised by `/health`): **79**
+- Auth: 213 token, 12 public
+- Handler found: 223; no handler found: 2
+- No Mac and no extension caller: 53 (tests only: 40, comments/docs only: 13, no reference: 0)
 
 By first path segment:
 
@@ -24,7 +24,7 @@ By first path segment:
 | `/` | 1 |
 | `/agent` | 7 |
 | `/agent-sdk` | 1 |
-| `/auth` | 63 |
+| `/auth` | 76 |
 | `/chat` | 1 |
 | `/code-assist` | 2 |
 | `/extract-entities` | 1 |
@@ -40,13 +40,13 @@ By feature group (LLMIDE_FEATURES key; `core` = always on):
 
 | group | endpoints |
 |---|---:|
-| core | 201 |
+| core | 214 |
 | code_graph_3d | 1 |
 | gantt_issues | 1 |
 | doc_gen | 8 |
 | auto_tasks | 1 |
 
-Endpoints with no client caller (40):
+Endpoints with no client caller (53):
 
 - `/chat` — tests only
 - `/code-assist` — tests only
@@ -88,6 +88,19 @@ Endpoints with no client caller (40):
 - `/auth/me/audit` — tests only
 - `/auth/mcp-connector/start` — tests only
 - `/auth/mcp-connector/status` — tests only
+- `/auth/me/extensions/installed` — tests only
+- `/auth/me/extensions/updates` — tests only
+- `/auth/me/extensions/catalog` — tests only
+- `/auth/me/extensions/active` — tests only
+- `/auth/me/extensions/install` — tests only
+- `/auth/me/extensions/catalog/refresh` — tests only
+- `/auth/me/extensions/updates/check` — tests only
+- `/auth/me/extensions/update/preview` — tests only
+- `/auth/me/extensions/update` — tests only
+- `/auth/me/extensions/rollback` — tests only
+- `/auth/me/extensions/repair` — tests only
+- `/auth/me/extensions/toggle` — tests only
+- `/auth/me/extensions/uninstall` — tests only
 
 ## Endpoints
 
@@ -240,7 +253,7 @@ Endpoints with no client caller (40):
 | `/kb/os/state` | ALL_ENDPOINTS | ANY | token | core | `extension/routes/os.mjs:184` | `SystemBridge.swift` | - | - |
 | `/kb/os/stream` | ALL_ENDPOINTS | GET | token | core | `extension/routes/os.mjs:181` | `SystemEventStream.swift` | - | - |
 | `/` | public+auth | DELETE, GET, PATCH | public | core | `extension/routes/chat.mjs:63` | - | - | tests only |
-| `/health` | public+auth | GET | public | core | `extension/server.mjs:719` | `BackendManager.swift` | - | - |
+| `/health` | public+auth | GET | public | core | `extension/server.mjs:721` | `BackendManager.swift` | - | - |
 | `/auth/well-known` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:100` | `LlmIdeAPIClient.swift` | `config.ts` | - |
 | `/auth/register` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:112` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
 | `/auth/login` | public+auth | POST | public | core | `extension/server/auth-routes.mjs:137` | `LlmIdeAPIClient+Auth.swift` | `config.ts` | - |
@@ -250,7 +263,7 @@ Endpoints with no client caller (40):
 | `/auth/google/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:286` | - | - | tests only |
 | `/auth/slack/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:336` | - | - | tests only |
 | `/auth/mcp-connector/callback` | public+auth | GET | public | core | `extension/server/auth-routes.mjs:381` | - | - | tests only |
-| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:743` | - | `App.tsx`, `service-worker.ts` | - |
+| `/launch-app` | public+auth | GET | public | core | `extension/server.mjs:745` | - | `App.tsx`, `service-worker.ts` | - |
 | `/auth/logout` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:428` | - | `config.ts` | - |
 | `/auth/me` | public+auth | GET | token | core | `extension/server/auth-routes.mjs:610` | `LlmIdeAPIClient+Auth.swift` | `UserAccountSettings.tsx` | - |
 | `/auth/me/delete` | public+auth | POST | token | core | `extension/server/auth-routes.mjs:625` | - | - | tests only |
@@ -298,6 +311,19 @@ Endpoints with no client caller (40):
 | `/auth/me/mcp-plugins/consent` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:945` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
 | `/auth/me/mcp-plugins/toggle` | public+auth | POST | token | core | `extension/routes/extension-routes.mjs:961` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
 | `/auth/me/mcp-plugins/updates` | public+auth | GET | token | core | `extension/routes/extension-routes.mjs:987` | `LlmIdeAPIClient+McpPlugins.swift` | - | - |
+| `/auth/me/extensions/installed` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:52` | - | - | tests only |
+| `/auth/me/extensions/updates` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:52` | - | - | tests only |
+| `/auth/me/extensions/catalog` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:52` | - | - | tests only |
+| `/auth/me/extensions/active` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:52` | - | - | tests only |
+| `/auth/me/extensions/install` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:133` | - | - | tests only |
+| `/auth/me/extensions/catalog/refresh` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:141` | - | - | tests only |
+| `/auth/me/extensions/updates/check` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:154` | - | - | tests only |
+| `/auth/me/extensions/update/preview` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:162` | - | - | tests only |
+| `/auth/me/extensions/update` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:162` | - | - | tests only |
+| `/auth/me/extensions/rollback` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:174` | - | - | tests only |
+| `/auth/me/extensions/repair` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:180` | - | - | tests only |
+| `/auth/me/extensions/toggle` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:186` | - | - | tests only |
+| `/auth/me/extensions/uninstall` | public+auth | ANY | token | core | `extension/routes/extensions-catalog.mjs:200` | - | - | tests only |
 | `/auth/me/connectors/:id` | public+auth | DELETE | token | core | `extension/server/auth-routes.mjs:857` | `LlmIdeAPIClient+Connectors.swift` | - | - |
 | `/auth/me/plugins/uninstall/:name` | public+auth | DELETE | token | core | `extension/routes/extension-routes.mjs:302` | `LlmIdeAPIClient+Auth.swift` | - | - |
 | `/auth/me/llm-sources/:id` | public+auth | DELETE, GET | token | core | `extension/routes/extension-routes.mjs:740` | `LlmIdeAPIClient+LlmSources.swift` | - | - |
@@ -308,7 +334,7 @@ Endpoints with no client caller (40):
 
 ## Consistency
 
-Checked: 212 roster entries, 754 Swift files, 52 extension source files.
+Checked: 225 roster entries, 754 Swift files, 52 extension source files.
 
 Allowlisted client paths outside the roster (0 distinct paths, 0 reasons):
 

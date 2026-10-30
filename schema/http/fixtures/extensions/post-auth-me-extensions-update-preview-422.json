@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /auth/me/extensions/update/preview",
+  "status": 422,
+  "request": {
+    "body": {
+      "id": "plugin:acme/runner",
+      "commit": "9999999999999999999999999999999999999999"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "IDENTITY_CHANGED",
+      "message": "this commit describes a different item; install it separately",
+      "details": {
+        "id": "plugin:acme/runner",
+        "found": "plugin:acme/renamed"
+      }
+    }
+  }
+}

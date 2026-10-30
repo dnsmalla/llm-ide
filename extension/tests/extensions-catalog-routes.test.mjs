@@ -105,3 +105,111 @@ test('wrong method, bad body and a marketplace repo get precise errors', async (
   delete process.env.LLMIDE_EXT_CATALOG;
   assert.equal(off.body.error.code, 'CATALOG_DISABLED');
 });
+
+// ---- P5: updates, rollback, repair, indexes, search, active -----------------
+
+const SHA2 = 'f'.repeat(40);
+const SKILL2 = '---\nname: Tidy\n---\nTidy harder.\n';
+const heads = new Map();
+const registryBody = JSON.stringify({ servers: [{ server: { name: 'io.github.acme/notes', description: 'Notes', repository: { url: 'https://github.com/acme/notes' } } }] });
+_setPinnedFetchForTests(async (url) => {
+  const u = String(url);
+  if (heads.has(u)) return new Response(heads.get(u), { status: 200 });
+  if (u.startsWith('https://registry.modelcontextprotocol.io/')) return new Response(registryBody, { status: 200 });
+  const hit = archives.get(u);
+  return hit ? new Response(hit, { status: 200 }) : new Response('nope', { status: 404 });
+});
+
+test('P5 routes belong to the extension dispatcher; reads are GET, steps are POST', async () => {
+  for (const p of ['catalog?q=x', 'catalog/refresh', 'active', 'updates', 'updates/check', 'update/preview', 'update', 'rollback', 'repair']) {
+    assert.equal(isExtensionRoute(`/auth/me/extensions/${p}`), true, p);
+  }
+  assert.equal((await call('POST', '/auth/me/extensions/catalog', {})).status, 405);
+  assert.equal((await call('GET', '/auth/me/extensions/update')).status, 405);
+  assert.equal((await call('GET', '/auth/me/extensions/repair')).status, 405);
+  for (const p of ['catalog', 'active', 'updates', 'update', 'rollback']) assert.equal((await call('GET', `/auth/me/extensions/${p}`, undefined, null)).status, 401, p);
+});
+
+test('update flow over HTTP: check, preview, apply (consent), rollback, repair; per user', async () => {
+  const ins = await call('POST', '/auth/me/extensions/install', { url: 'https://github.com/acme/tidy', commit: SHA }, { id: 'p1' });
+  const id = ins.body.item.id;
+  archives.set(`https://codeload.github.com/acme/tidy/tar.gz/${SHA2}`, repoArchive({ 'SKILL.md': SKILL2 }));
+  heads.set('https://api.github.com/repos/acme/tidy/commits/HEAD', SHA2);
+
+  assert.deepEqual((await call('GET', '/auth/me/extensions/updates', undefined, { id: 'p1' })).body.items, [], 'a GET never goes to the network');
+  const chk = await call('POST', '/auth/me/extensions/updates/check', {}, { id: 'p1' });
+  assert.equal(chk.status, 200);
+  assert.deepEqual(chk.body.results.map((r) => [r.id, r.updateAvailable, r.latest]), [[id, true, SHA2]]);
+  assert.equal((await call('GET', '/auth/me/extensions/updates', undefined, { id: 'p1' })).body.items[0].latest, SHA2);
+  assert.deepEqual((await call('GET', '/auth/me/extensions/updates', undefined, { id: 'p2' })).body.items, []);
+  assert.equal((await call('POST', '/auth/me/extensions/updates/check', { id: '../x' }, { id: 'p1' })).status, 404);
+
+  const pv = await call('POST', '/auth/me/extensions/update/preview', { id }, { id: 'p1' });
+  assert.equal(pv.status, 200);
+  assert.deepEqual([pv.body.from, pv.body.to, pv.body.files.counts], [SHA, SHA2, { added: 0, removed: 0, changed: 1 }]);
+  assert.equal((await call('POST', '/auth/me/extensions/update/preview', { id: 'skill:nobody/x' }, { id: 'p1' })).status, 404);
+  assert.equal((await call('POST', '/auth/me/extensions/update/preview', { id, commit: 5 }, { id: 'p1' })).status, 400);
+  assert.equal((await call('POST', '/auth/me/extensions/update/preview', { id }, { id: 'p2' })).status, 404, 'p2 has not installed it');
+
+  assert.equal((await call('POST', '/auth/me/extensions/update', { id, consents: 'hook' }, { id: 'p1' })).status, 400);
+  const ap = await call('POST', '/auth/me/extensions/update', { id }, { id: 'p1' });
+  assert.equal(ap.status, 200);
+  assert.equal(ap.body.item.pinnedCommit, SHA2);
+  assert.equal(ap.body.item.previous.pinnedCommit, SHA);
+  assert.equal(ap.body.update.enabled, false);
+  assert.equal((await call('POST', '/auth/me/extensions/update', { id, commit: SHA2 }, { id: 'p1' })).body.error.code, 'ALREADY_CURRENT');
+
+  const rb = await call('POST', '/auth/me/extensions/rollback', { id }, { id: 'p1' });
+  assert.equal(rb.body.item.pinnedCommit, SHA);
+  assert.equal((await call('POST', '/auth/me/extensions/rollback', { id }, { id: 'p2' })).status, 404);
+
+  const rp = await call('POST', '/auth/me/extensions/repair', { id }, { id: 'p1' });
+  assert.deepEqual([rp.status, rp.body.status], [200, 'ok']);
+  // a reinstall at another commit says where to go
+  const re = await call('POST', '/auth/me/extensions/install', { url: 'https://github.com/acme/tidy', commit: SHA2 }, { id: 'p1' });
+  assert.equal(re.status, 409);
+  assert.equal(re.body.error.details.use, '/auth/me/extensions/update');
+});
+
+test('rollback with nothing to go back to, and a missing archive, get precise errors', async () => {
+  await call('POST', '/auth/me/extensions/install', { url: 'https://github.com/acme/tidy', commit: SHA }, { id: 'p3' });
+  const no = await call('POST', '/auth/me/extensions/rollback', { id: 'skill:acme/tidy' }, { id: 'p3' });
+  assert.deepEqual([no.status, no.body.error.code], [404, 'NO_PREVIOUS']);
+  const gone = await call('POST', '/auth/me/extensions/update', { id: 'skill:acme/tidy', commit: 'a'.repeat(40) }, { id: 'p3' });
+  assert.deepEqual([gone.status, gone.body.error.code], [404, 'NOT_FOUND']);
+  const bad = await call('POST', '/auth/me/extensions/update', { id: 'skill:acme/tidy', commit: 'nope' }, { id: 'p3' });
+  assert.deepEqual([bad.status, bad.body.error.code], [400, 'INVALID_COMMIT']);
+});
+
+test('catalog: refresh is a POST, search is a cache-only GET, bad kind is 400, unknown source 404', async () => {
+  const empty = await call('GET', '/auth/me/extensions/catalog?q=notes');
+  assert.equal(empty.status, 200);
+  assert.equal(empty.body.total, 0);
+  assert.equal(empty.body.sources.length, 4);
+  assert.equal((await call('GET', '/auth/me/extensions/catalog?kind=bogus')).status, 400);
+  assert.equal((await call('POST', '/auth/me/extensions/catalog/refresh', { source: 'evil.example' })).status, 404);
+  assert.equal((await call('POST', '/auth/me/extensions/catalog/refresh', { source: 7 })).status, 400);
+  const r = await call('POST', '/auth/me/extensions/catalog/refresh', { source: 'mcp-registry', force: true });
+  assert.equal(r.status, 200);
+  assert.deepEqual(r.body.results.map((x) => [x.id, x.status]), [['mcp-registry', 'refreshed']]);
+  const hit = await call('GET', '/auth/me/extensions/catalog?q=notes&kind=mcp&limit=5');
+  assert.deepEqual(hit.body.results.map((e) => [e.name, e.installable, e.reason]), [['io.github.acme/notes', false, 'registry_install_not_supported']]);
+  // another source fails (404 on GitHub) without breaking the response
+  const all = await call('POST', '/auth/me/extensions/catalog/refresh', {});
+  assert.equal(all.status, 200);
+  assert.equal(all.body.results.length, 4);
+  process.env.LLMIDE_EXT_CATALOG = 'off';
+  const off = await call('POST', '/auth/me/extensions/catalog/refresh', {});
+  delete process.env.LLMIDE_EXT_CATALOG;
+  assert.equal(off.body.error.code, 'CATALOG_DISABLED');
+});
+
+test('active: names and counts only, per user, no configs and no paths', async () => {
+  await call('POST', '/auth/me/extensions/install', { url: 'https://github.com/acme/tidy', commit: SHA }, { id: 'p4' });
+  const r = await call('GET', '/auth/me/extensions/active', undefined, { id: 'p4' });
+  assert.equal(r.status, 200);
+  assert.equal(typeof r.body.fingerprint, 'string');
+  assert.ok(Array.isArray(r.body.mcpServers) && Array.isArray(r.body.items) && Array.isArray(r.body.skills));
+  assert.equal(typeof r.body.sdkPlugins, 'number');
+  assert.ok(!JSON.stringify(r.body).includes(root), 'no file system path leaks');
+});

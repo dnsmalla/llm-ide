@@ -1,0 +1,8 @@
+{
+  "endpoint": "GET /auth/me/extensions/installed",
+  "status": 200,
+  "response": {
+    "corrupt": false,
+    "items": []
+  }
+}

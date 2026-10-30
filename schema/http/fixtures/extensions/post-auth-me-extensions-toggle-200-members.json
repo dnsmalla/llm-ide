@@ -1,0 +1,66 @@
+{
+  "endpoint": "POST /auth/me/extensions/toggle",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "plugin:acme/runner",
+      "enabled": false,
+      "members": [
+        "skill:a"
+      ]
+    }
+  },
+  "response": {
+    "ok": true,
+    "item": {
+      "id": "plugin:acme/runner",
+      "kind": "plugin",
+      "name": "runner",
+      "description": "Runs things",
+      "version": "1.0.0",
+      "publisher": {
+        "id": "acme",
+        "trust": "unknown"
+      },
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/acme/runner",
+        "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "pinnedCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "installedAt": "2026-10-30T23:41:16.616Z",
+      "members": [
+        {
+          "memberId": "skill:a",
+          "type": "skill",
+          "name": "a",
+          "executable": false
+        }
+      ],
+      "declared": {
+        "executableKinds": []
+      },
+      "permissions": [
+        {
+          "type": "skill",
+          "executable": false,
+          "text": "Adds instructions the assistant may follow (skills)."
+        }
+      ],
+      "scan": {
+        "count": 0,
+        "byRule": {},
+        "findings": []
+      },
+      "consents": {},
+      "integrity": "a4023b85ae51f0b2b59963a69240ed597e750024743ec9d27eb18157efac2c15",
+      "storeDir": "extensions/store/bb82030dbc2bcaba32a90bf2/plugin__acme__runner/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "state": {
+        "enabled": true,
+        "disabledMembers": [
+          "skill:a"
+        ]
+      }
+    }
+  }
+}

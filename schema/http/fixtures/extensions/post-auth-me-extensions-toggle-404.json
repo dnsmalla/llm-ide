@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/toggle",
+  "status": 404,
+  "request": {
+    "body": {
+      "id": "skill:nobody/x",
+      "enabled": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "not installed"
+    }
+  }
+}

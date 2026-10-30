@@ -1,0 +1,1560 @@
+{
+  "description": "Extensions catalog (installed items, install, switches, updates, rollback, repair, indexes, search, active set). Per user. Nothing here executes fetched code; every route that reaches the network is a POST. Shared by the Mac Extensions screen.",
+  "$defs": {
+    "Finding": {
+      "type": "object",
+      "properties": {
+        "severity": {
+          "type": "string"
+        },
+        "rule": {
+          "type": "string"
+        },
+        "file": {
+          "type": "string"
+        },
+        "line": {
+          "type": "number",
+          "x-optional": true
+        },
+        "detail": {
+          "type": "string"
+        },
+        "excerpt": {
+          "type": "string",
+          "x-optional": true
+        }
+      },
+      "required": [
+        "severity",
+        "rule",
+        "file",
+        "detail"
+      ]
+    },
+    "Member": {
+      "type": "object",
+      "properties": {
+        "memberId": {
+          "type": "string"
+        },
+        "type": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "executable": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "memberId",
+        "type",
+        "name",
+        "executable"
+      ]
+    },
+    "Item": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string",
+          "enum": [
+            "skill",
+            "plugin",
+            "mcp",
+            "llm-source"
+          ]
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "publisher": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "trust": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id",
+            "trust"
+          ]
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string",
+              "x-optional": true
+            },
+            "commit": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "kind",
+            "url",
+            "commit"
+          ]
+        },
+        "subpath": {
+          "type": "string",
+          "x-optional": true
+        },
+        "pinnedCommit": {
+          "type": "string"
+        },
+        "installedAt": {
+          "type": "string"
+        },
+        "updatedAt": {
+          "type": "string",
+          "x-optional": true
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/Member"
+          }
+        },
+        "declared": {
+          "type": "object",
+          "properties": {
+            "executableKinds": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "executableKinds"
+          ]
+        },
+        "permissions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "type": {
+                "type": "string"
+              },
+              "executable": {
+                "type": "boolean"
+              },
+              "text": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "type",
+              "executable",
+              "text"
+            ]
+          }
+        },
+        "scan": {
+          "type": "object",
+          "properties": {
+            "count": {
+              "type": "number"
+            },
+            "byRule": {
+              "type": "object",
+              "additionalProperties": {
+                "type": "number"
+              },
+              "x-optional": true
+            },
+            "findings": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Finding"
+              },
+              "x-optional": true
+            }
+          },
+          "required": [
+            "count"
+          ]
+        },
+        "consents": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "grantedAt": {
+                "type": "string"
+              },
+              "commit": {
+                "type": "string"
+              }
+            },
+            "required": [
+              "grantedAt",
+              "commit"
+            ]
+          },
+          "x-optional": true
+        },
+        "integrity": {
+          "type": "string",
+          "x-optional": true
+        },
+        "storeDir": {
+          "type": "string"
+        },
+        "update": {
+          "type": "object",
+          "properties": {
+            "latest": {
+              "type": "string"
+            },
+            "checkedAt": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "latest",
+            "checkedAt"
+          ],
+          "x-optional": true
+        },
+        "previous": {
+          "type": "object",
+          "properties": {
+            "pinnedCommit": {
+              "type": "string"
+            },
+            "version": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "installedAt": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "required": [
+            "pinnedCommit",
+            "version",
+            "installedAt"
+          ],
+          "x-optional": true
+        },
+        "state": {
+          "type": "object",
+          "properties": {
+            "enabled": {
+              "type": "boolean"
+            },
+            "disabledMembers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "enabled",
+            "disabledMembers"
+          ]
+        }
+      },
+      "required": [
+        "id",
+        "kind",
+        "name",
+        "description",
+        "version",
+        "publisher",
+        "source",
+        "pinnedCommit",
+        "installedAt",
+        "members",
+        "declared",
+        "permissions",
+        "scan",
+        "storeDir",
+        "state"
+      ]
+    },
+    "Entry": {
+      "type": "object",
+      "properties": {
+        "indexId": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "description": {
+          "type": "string"
+        },
+        "publisher": {
+          "type": "string"
+        },
+        "version": {
+          "type": "string",
+          "x-optional": true
+        },
+        "source": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string",
+              "x-optional": true
+            },
+            "path": {
+              "type": "string",
+              "x-optional": true
+            }
+          },
+          "required": []
+        },
+        "remote": {
+          "type": "boolean",
+          "x-optional": true
+        },
+        "installable": {
+          "type": "boolean"
+        },
+        "reason": {
+          "type": "string",
+          "x-optional": true
+        },
+        "installed": {
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "indexId",
+        "kind",
+        "name",
+        "description",
+        "publisher",
+        "source",
+        "installable",
+        "installed"
+      ]
+    },
+    "Source": {
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string"
+        },
+        "title": {
+          "type": "string"
+        },
+        "kind": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string"
+        },
+        "count": {
+          "type": "number"
+        },
+        "fetchedAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "error": {
+          "type": "string",
+          "x-optional": true
+        }
+      },
+      "required": [
+        "id",
+        "title",
+        "kind",
+        "status",
+        "count",
+        "fetchedAt"
+      ]
+    }
+  },
+  "endpoints": {
+    "GET /auth/me/extensions/installed": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "corrupt": {
+              "type": "boolean"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Item"
+              }
+            }
+          },
+          "required": [
+            "corrupt",
+            "items"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/install": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "url": {
+              "type": "string"
+            },
+            "ref": {
+              "type": "string",
+              "x-optional": true
+            },
+            "commit": {
+              "type": "string",
+              "x-optional": true
+            },
+            "path": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "alreadyInstalled": {
+              "type": "boolean",
+              "x-optional": true
+            },
+            "item": {
+              "$ref": "#/$defs/Item"
+            }
+          },
+          "required": [
+            "ok",
+            "item"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "422": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/toggle": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "enabled": {
+              "type": [
+                "boolean",
+                "string"
+              ]
+            },
+            "consents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true
+            },
+            "members": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "item": {
+              "$ref": "#/$defs/Item"
+            }
+          },
+          "required": [
+            "ok",
+            "item"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/uninstall": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "ok"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/extensions/catalog": {
+      "request": {
+        "query": {
+          "type": "object",
+          "properties": {
+            "q": {
+              "type": "string",
+              "x-optional": true
+            },
+            "kind": {
+              "type": "string",
+              "x-optional": true
+            },
+            "limit": {
+              "type": "string",
+              "x-optional": true
+            },
+            "offset": {
+              "type": "string",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "query": {
+              "type": "string"
+            },
+            "total": {
+              "type": "number"
+            },
+            "offset": {
+              "type": "number"
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Entry"
+              }
+            },
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Source"
+              }
+            }
+          },
+          "required": [
+            "query",
+            "total",
+            "offset",
+            "results",
+            "sources"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/catalog/refresh": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "source": {
+              "type": [
+                "string",
+                "number"
+              ],
+              "x-optional": true
+            },
+            "force": {
+              "type": "boolean",
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "status": {
+                    "type": "string"
+                  },
+                  "count": {
+                    "type": "number",
+                    "x-optional": true
+                  },
+                  "error": {
+                    "type": "string",
+                    "x-optional": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "status"
+                ]
+              }
+            }
+          },
+          "required": [
+            "results"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/extensions/active": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "fingerprint": {
+              "type": "string"
+            },
+            "failClosed": {
+              "type": "boolean"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "trust": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "kind",
+                  "trust"
+                ]
+              }
+            },
+            "skills": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "sourceId": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "description",
+                  "sourceId"
+                ]
+              }
+            },
+            "pluginSkills": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "plugin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "plugin"
+                ]
+              },
+              "x-optional": true
+            },
+            "commands": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "trigger": {
+                    "type": "string"
+                  },
+                  "plugin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "trigger",
+                  "plugin"
+                ]
+              },
+              "x-optional": true
+            },
+            "subagents": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string"
+                  },
+                  "plugin": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "name",
+                  "plugin"
+                ]
+              },
+              "x-optional": true
+            },
+            "sdkPlugins": {
+              "type": "number"
+            },
+            "mcpServers": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "excluded": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "kind": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "reason": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "kind",
+                  "name",
+                  "reason"
+                ]
+              },
+              "x-optional": true
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "fingerprint",
+            "failClosed",
+            "items",
+            "skills",
+            "sdkPlugins",
+            "mcpServers",
+            "warnings"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/extensions/updates": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "corrupt": {
+              "type": "boolean"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "name": {
+                    "type": "string"
+                  },
+                  "kind": {
+                    "type": "string"
+                  },
+                  "current": {
+                    "type": "string"
+                  },
+                  "latest": {
+                    "type": "string"
+                  },
+                  "checkedAt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ]
+                  },
+                  "ref": {
+                    "type": "string",
+                    "x-optional": true
+                  },
+                  "hasPrevious": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name",
+                  "kind",
+                  "current",
+                  "latest",
+                  "checkedAt",
+                  "hasPrevious"
+                ]
+              }
+            }
+          },
+          "required": [
+            "corrupt",
+            "items"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/updates/check": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "checkedAt": {
+              "type": "string"
+            },
+            "results": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string"
+                  },
+                  "current": {
+                    "type": "string"
+                  },
+                  "latest": {
+                    "type": "string",
+                    "x-optional": true
+                  },
+                  "updateAvailable": {
+                    "type": "boolean"
+                  },
+                  "error": {
+                    "type": "string",
+                    "x-optional": true
+                  }
+                },
+                "required": [
+                  "id",
+                  "current",
+                  "updateAvailable"
+                ]
+              }
+            }
+          },
+          "required": [
+            "checkedAt",
+            "results"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/update/preview": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "commit": {
+              "type": [
+                "string",
+                "number"
+              ],
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "from": {
+              "type": "string"
+            },
+            "to": {
+              "type": "string"
+            },
+            "version": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "to": {
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                }
+              },
+              "required": [
+                "from",
+                "to"
+              ]
+            },
+            "files": {
+              "type": "object",
+              "properties": {
+                "counts": {
+                  "type": "object",
+                  "properties": {
+                    "added": {
+                      "type": "number"
+                    },
+                    "removed": {
+                      "type": "number"
+                    },
+                    "changed": {
+                      "type": "number"
+                    }
+                  },
+                  "required": [
+                    "added",
+                    "removed",
+                    "changed"
+                  ]
+                },
+                "added": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "size"
+                    ]
+                  }
+                },
+                "removed": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "size": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "size"
+                    ]
+                  },
+                  "x-optional": true
+                },
+                "changed": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "path": {
+                        "type": "string"
+                      },
+                      "before": {
+                        "type": "number"
+                      },
+                      "after": {
+                        "type": "number"
+                      }
+                    },
+                    "required": [
+                      "path",
+                      "before",
+                      "after"
+                    ]
+                  }
+                },
+                "truncated": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "counts",
+                "added",
+                "changed",
+                "truncated"
+              ]
+            },
+            "scan": {
+              "type": "object",
+              "properties": {
+                "before": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "number"
+                    },
+                    "byRule": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      },
+                      "x-optional": true
+                    }
+                  },
+                  "required": [
+                    "count"
+                  ]
+                },
+                "after": {
+                  "type": "object",
+                  "properties": {
+                    "count": {
+                      "type": "number"
+                    },
+                    "byRule": {
+                      "type": "object",
+                      "additionalProperties": {
+                        "type": "number"
+                      }
+                    }
+                  },
+                  "required": [
+                    "count",
+                    "byRule"
+                  ]
+                },
+                "newFindings": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/$defs/Finding"
+                  }
+                },
+                "resolvedCount": {
+                  "type": "number"
+                }
+              },
+              "required": [
+                "before",
+                "after",
+                "newFindings",
+                "resolvedCount"
+              ]
+            },
+            "executable": {
+              "type": "object",
+              "properties": {
+                "newKinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "newMembers": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "memberId": {
+                        "type": "string"
+                      },
+                      "type": {
+                        "type": "string"
+                      },
+                      "name": {
+                        "type": "string"
+                      }
+                    },
+                    "required": [
+                      "memberId",
+                      "type",
+                      "name"
+                    ]
+                  }
+                },
+                "kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "newKinds",
+                "newMembers",
+                "kinds"
+              ]
+            },
+            "members": {
+              "type": "object",
+              "properties": {
+                "added": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                },
+                "removed": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "x-optional": true
+                }
+              },
+              "required": [
+                "added"
+              ]
+            },
+            "consent": {
+              "type": "object",
+              "properties": {
+                "required": {
+                  "type": "boolean"
+                },
+                "kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "required",
+                "kinds"
+              ]
+            },
+            "wasEnabled": {
+              "type": "boolean"
+            },
+            "staysEnabledWithoutConsent": {
+              "type": "boolean"
+            },
+            "flags": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "required": [
+            "id",
+            "from",
+            "to",
+            "version",
+            "files",
+            "scan",
+            "executable",
+            "members",
+            "consent",
+            "wasEnabled",
+            "staysEnabledWithoutConsent",
+            "flags"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "422": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/update": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            },
+            "commit": {
+              "type": "string",
+              "x-optional": true
+            },
+            "consents": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "item": {
+              "$ref": "#/$defs/Item"
+            },
+            "update": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "wasEnabled": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string",
+                  "x-optional": true
+                },
+                "kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "enabled",
+                "wasEnabled",
+                "kinds"
+              ]
+            }
+          },
+          "required": [
+            "ok",
+            "item",
+            "update"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "422": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/rollback": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "item": {
+              "$ref": "#/$defs/Item"
+            },
+            "rollback": {
+              "type": "object",
+              "properties": {
+                "from": {
+                  "type": "string"
+                },
+                "to": {
+                  "type": "string"
+                },
+                "enabled": {
+                  "type": "boolean"
+                },
+                "wasEnabled": {
+                  "type": "boolean"
+                },
+                "reason": {
+                  "type": "string",
+                  "x-optional": true
+                },
+                "kinds": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  }
+                }
+              },
+              "required": [
+                "from",
+                "to",
+                "enabled",
+                "wasEnabled",
+                "kinds"
+              ]
+            }
+          },
+          "required": [
+            "ok",
+            "item",
+            "rollback"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /auth/me/extensions/repair": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "repaired": {
+              "type": "boolean"
+            },
+            "status": {
+              "type": "string"
+            },
+            "was": {
+              "type": "string",
+              "x-optional": true
+            },
+            "item": {
+              "$ref": "#/$defs/Item"
+            }
+          },
+          "required": [
+            "ok",
+            "repaired",
+            "status",
+            "item"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

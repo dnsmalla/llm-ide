@@ -1,0 +1,12 @@
+{
+  "endpoint": "POST /auth/me/extensions/uninstall",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "plugin:acme/sketchy"
+    }
+  },
+  "response": {
+    "ok": true
+  }
+}

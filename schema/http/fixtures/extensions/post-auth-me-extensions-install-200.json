@@ -1,0 +1,61 @@
+{
+  "endpoint": "POST /auth/me/extensions/install",
+  "status": 200,
+  "request": {
+    "body": {
+      "url": "https://github.com/acme/tidy",
+      "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  "response": {
+    "ok": true,
+    "item": {
+      "id": "skill:acme/tidy",
+      "kind": "skill",
+      "name": "Tidy",
+      "description": "Tidy up files",
+      "version": null,
+      "publisher": {
+        "id": "acme",
+        "trust": "unknown"
+      },
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/acme/tidy",
+        "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+      },
+      "pinnedCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "installedAt": "2026-10-30T23:41:16.611Z",
+      "members": [
+        {
+          "memberId": "skill:Tidy",
+          "type": "skill",
+          "name": "Tidy",
+          "executable": false
+        }
+      ],
+      "declared": {
+        "executableKinds": []
+      },
+      "permissions": [
+        {
+          "type": "skill",
+          "executable": false,
+          "text": "Adds instructions the assistant may follow (skills)."
+        }
+      ],
+      "scan": {
+        "count": 0,
+        "byRule": {},
+        "findings": []
+      },
+      "consents": {},
+      "integrity": "2126004e4449db6b4442daa318b80a6deed73aed808ff81aca82086352332cea",
+      "storeDir": "extensions/store/bb82030dbc2bcaba32a90bf2/skill__acme__tidy/eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "state": {
+        "enabled": false,
+        "disabledMembers": []
+      }
+    }
+  }
+}

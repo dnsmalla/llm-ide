@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 93
+  x-api-version: 94
 servers:
   - url: "https://{host}"
     variables:
@@ -22,6 +22,7 @@ tags:
   - name: "agent"
   - name: "agent-history"
   - name: "docs"
+  - name: "extensions"
   - name: "health-auth"
   - name: "index"
   - name: "kb-sources"
@@ -1440,6 +1441,1029 @@ paths:
                       type: "integer"
         "401":
           description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/active:
+    get:
+      tags:
+        - "extensions"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  fingerprint:
+                    type: "string"
+                  failClosed:
+                    type: "boolean"
+                  items:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        id:
+                          type: "string"
+                        kind:
+                          type: "string"
+                        trust:
+                          type: "string"
+                      required:
+                        - "id"
+                        - "kind"
+                        - "trust"
+                  skills:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        id:
+                          type: "string"
+                        name:
+                          type: "string"
+                        description:
+                          type: "string"
+                        sourceId:
+                          type: "string"
+                      required:
+                        - "id"
+                        - "name"
+                        - "description"
+                        - "sourceId"
+                  pluginSkills:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        name:
+                          type: "string"
+                        plugin:
+                          type: "string"
+                      required:
+                        - "name"
+                        - "plugin"
+                  commands:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        trigger:
+                          type: "string"
+                        plugin:
+                          type: "string"
+                      required:
+                        - "trigger"
+                        - "plugin"
+                  subagents:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        name:
+                          type: "string"
+                        plugin:
+                          type: "string"
+                      required:
+                        - "name"
+                        - "plugin"
+                  sdkPlugins:
+                    type: "number"
+                  mcpServers:
+                    type: "array"
+                    items:
+                      type: "string"
+                  excluded:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        kind:
+                          type: "string"
+                        name:
+                          type: "string"
+                        reason:
+                          type: "string"
+                      required:
+                        - "kind"
+                        - "name"
+                        - "reason"
+                  warnings:
+                    type: "array"
+                    items:
+                      type: "string"
+                required:
+                  - "fingerprint"
+                  - "failClosed"
+                  - "items"
+                  - "skills"
+                  - "sdkPlugins"
+                  - "mcpServers"
+                  - "warnings"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/catalog:
+    get:
+      tags:
+        - "extensions"
+      parameters:
+        - name: "q"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "kind"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "limit"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+        - name: "offset"
+          in: "query"
+          required: false
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  query:
+                    type: "string"
+                  total:
+                    type: "number"
+                  offset:
+                    type: "number"
+                  results:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Entry"
+                  sources:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/ExtensionsSource"
+                required:
+                  - "query"
+                  - "total"
+                  - "offset"
+                  - "results"
+                  - "sources"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/catalog/refresh:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                source:
+                  type:
+                    - "string"
+                    - "number"
+                force:
+                  type: "boolean"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  results:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        id:
+                          type: "string"
+                        status:
+                          type: "string"
+                        count:
+                          type: "number"
+                        error:
+                          type: "string"
+                      required:
+                        - "id"
+                        - "status"
+                required:
+                  - "results"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/install:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                url:
+                  type: "string"
+                ref:
+                  type: "string"
+                commit:
+                  type: "string"
+                path:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  alreadyInstalled:
+                    type: "boolean"
+                  item:
+                    "$ref": "#/components/schemas/Item"
+                required:
+                  - "ok"
+                  - "item"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "422":
+          description: "Unprocessable Entity"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/installed:
+    get:
+      tags:
+        - "extensions"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  corrupt:
+                    type: "boolean"
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/Item"
+                required:
+                  - "corrupt"
+                  - "items"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/repair:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  repaired:
+                    type: "boolean"
+                  status:
+                    type: "string"
+                  was:
+                    type: "string"
+                  item:
+                    "$ref": "#/components/schemas/Item"
+                required:
+                  - "ok"
+                  - "repaired"
+                  - "status"
+                  - "item"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/rollback:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  item:
+                    "$ref": "#/components/schemas/Item"
+                  rollback:
+                    type: "object"
+                    properties:
+                      from:
+                        type: "string"
+                      to:
+                        type: "string"
+                      enabled:
+                        type: "boolean"
+                      wasEnabled:
+                        type: "boolean"
+                      reason:
+                        type: "string"
+                      kinds:
+                        type: "array"
+                        items:
+                          type: "string"
+                    required:
+                      - "from"
+                      - "to"
+                      - "enabled"
+                      - "wasEnabled"
+                      - "kinds"
+                required:
+                  - "ok"
+                  - "item"
+                  - "rollback"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/toggle:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+                enabled:
+                  type:
+                    - "boolean"
+                    - "string"
+                consents:
+                  type: "array"
+                  items:
+                    type: "string"
+                members:
+                  type: "array"
+                  items:
+                    type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  item:
+                    "$ref": "#/components/schemas/Item"
+                required:
+                  - "ok"
+                  - "item"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/uninstall:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                required:
+                  - "ok"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/update:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+                commit:
+                  type: "string"
+                consents:
+                  type: "array"
+                  items:
+                    type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  item:
+                    "$ref": "#/components/schemas/Item"
+                  update:
+                    type: "object"
+                    properties:
+                      from:
+                        type: "string"
+                      to:
+                        type: "string"
+                      enabled:
+                        type: "boolean"
+                      wasEnabled:
+                        type: "boolean"
+                      reason:
+                        type: "string"
+                      kinds:
+                        type: "array"
+                        items:
+                          type: "string"
+                    required:
+                      - "from"
+                      - "to"
+                      - "enabled"
+                      - "wasEnabled"
+                      - "kinds"
+                required:
+                  - "ok"
+                  - "item"
+                  - "update"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "422":
+          description: "Unprocessable Entity"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/update/preview:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+                commit:
+                  type:
+                    - "string"
+                    - "number"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  id:
+                    type: "string"
+                  from:
+                    type: "string"
+                  to:
+                    type: "string"
+                  version:
+                    type: "object"
+                    properties:
+                      from:
+                        type:
+                          - "string"
+                          - "null"
+                      to:
+                        type:
+                          - "string"
+                          - "null"
+                    required:
+                      - "from"
+                      - "to"
+                  files:
+                    type: "object"
+                    properties:
+                      counts:
+                        type: "object"
+                        properties:
+                          added:
+                            type: "number"
+                          removed:
+                            type: "number"
+                          changed:
+                            type: "number"
+                        required:
+                          - "added"
+                          - "removed"
+                          - "changed"
+                      added:
+                        type: "array"
+                        items:
+                          type: "object"
+                          properties:
+                            path:
+                              type: "string"
+                            size:
+                              type: "number"
+                          required:
+                            - "path"
+                            - "size"
+                      removed:
+                        type: "array"
+                        items:
+                          type: "object"
+                          properties:
+                            path:
+                              type: "string"
+                            size:
+                              type: "number"
+                          required:
+                            - "path"
+                            - "size"
+                      changed:
+                        type: "array"
+                        items:
+                          type: "object"
+                          properties:
+                            path:
+                              type: "string"
+                            before:
+                              type: "number"
+                            after:
+                              type: "number"
+                          required:
+                            - "path"
+                            - "before"
+                            - "after"
+                      truncated:
+                        type: "boolean"
+                    required:
+                      - "counts"
+                      - "added"
+                      - "changed"
+                      - "truncated"
+                  scan:
+                    type: "object"
+                    properties:
+                      before:
+                        type: "object"
+                        properties:
+                          count:
+                            type: "number"
+                          byRule:
+                            type: "object"
+                            additionalProperties:
+                              type: "number"
+                        required:
+                          - "count"
+                      after:
+                        type: "object"
+                        properties:
+                          count:
+                            type: "number"
+                          byRule:
+                            type: "object"
+                            additionalProperties:
+                              type: "number"
+                        required:
+                          - "count"
+                          - "byRule"
+                      newFindings:
+                        type: "array"
+                        items:
+                          "$ref": "#/components/schemas/ExtensionsFinding"
+                      resolvedCount:
+                        type: "number"
+                    required:
+                      - "before"
+                      - "after"
+                      - "newFindings"
+                      - "resolvedCount"
+                  executable:
+                    type: "object"
+                    properties:
+                      newKinds:
+                        type: "array"
+                        items:
+                          type: "string"
+                      newMembers:
+                        type: "array"
+                        items:
+                          type: "object"
+                          properties:
+                            memberId:
+                              type: "string"
+                            type:
+                              type: "string"
+                            name:
+                              type: "string"
+                          required:
+                            - "memberId"
+                            - "type"
+                            - "name"
+                      kinds:
+                        type: "array"
+                        items:
+                          type: "string"
+                    required:
+                      - "newKinds"
+                      - "newMembers"
+                      - "kinds"
+                  members:
+                    type: "object"
+                    properties:
+                      added:
+                        type: "array"
+                        items:
+                          type: "string"
+                      removed:
+                        type: "array"
+                        items:
+                          type: "string"
+                    required:
+                      - "added"
+                  consent:
+                    type: "object"
+                    properties:
+                      required:
+                        type: "boolean"
+                      kinds:
+                        type: "array"
+                        items:
+                          type: "string"
+                    required:
+                      - "required"
+                      - "kinds"
+                  wasEnabled:
+                    type: "boolean"
+                  staysEnabledWithoutConsent:
+                    type: "boolean"
+                  flags:
+                    type: "array"
+                    items:
+                      type: "string"
+                required:
+                  - "id"
+                  - "from"
+                  - "to"
+                  - "version"
+                  - "files"
+                  - "scan"
+                  - "executable"
+                  - "members"
+                  - "consent"
+                  - "wasEnabled"
+                  - "staysEnabledWithoutConsent"
+                  - "flags"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "422":
+          description: "Unprocessable Entity"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/updates:
+    get:
+      tags:
+        - "extensions"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  corrupt:
+                    type: "boolean"
+                  items:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        id:
+                          type: "string"
+                        name:
+                          type: "string"
+                        kind:
+                          type: "string"
+                        current:
+                          type: "string"
+                        latest:
+                          type: "string"
+                        checkedAt:
+                          type:
+                            - "string"
+                            - "null"
+                        ref:
+                          type: "string"
+                        hasPrevious:
+                          type: "boolean"
+                      required:
+                        - "id"
+                        - "name"
+                        - "kind"
+                        - "current"
+                        - "latest"
+                        - "checkedAt"
+                        - "hasPrevious"
+                required:
+                  - "corrupt"
+                  - "items"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/updates/check:
+    post:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                id:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  checkedAt:
+                    type: "string"
+                  results:
+                    type: "array"
+                    items:
+                      type: "object"
+                      properties:
+                        id:
+                          type: "string"
+                        current:
+                          type: "string"
+                        latest:
+                          type: "string"
+                        updateAvailable:
+                          type: "boolean"
+                        error:
+                          type: "string"
+                      required:
+                        - "id"
+                        - "current"
+                        - "updateAvailable"
+                required:
+                  - "checkedAt"
+                  - "results"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
           content:
             application/json:
               schema:
@@ -3105,7 +4129,7 @@ paths:
                 sources:
                   type: "array"
                   items:
-                    "$ref": "#/components/schemas/Source"
+                    "$ref": "#/components/schemas/NotesGenerationSource"
                   description: "Source material; non-empty is required, not just present. No item-count limit — sources are capped at 50 000 chars each and the RENDERED source block (headings included) is fitted to a 400 000-char total budget by equal-share water-filling; anything shortened is named in the response's truncated array, and anything that could not be given at least 200 chars is named in omitted"
       responses:
         "200":
@@ -13625,6 +14649,46 @@ components:
             type: "string"
         quote:
           type: "string"
+    Entry:
+      type: "object"
+      properties:
+        indexId:
+          type: "string"
+        kind:
+          type: "string"
+        name:
+          type: "string"
+        description:
+          type: "string"
+        publisher:
+          type: "string"
+        version:
+          type: "string"
+        source:
+          type: "object"
+          properties:
+            url:
+              type: "string"
+            path:
+              type: "string"
+          required: []
+        remote:
+          type: "boolean"
+        installable:
+          type: "boolean"
+        reason:
+          type: "string"
+        installed:
+          type: "boolean"
+      required:
+        - "indexId"
+        - "kind"
+        - "name"
+        - "description"
+        - "publisher"
+        - "source"
+        - "installable"
+        - "installed"
     Error:
       description: "The error envelope every failing /kb/* and legacy route returns (extension/core/errors.mjs, sendError). code is a stable identifier clients switch on; message is prose; details is optional structured context (e.g. the guardrail report on GUARDRAIL_FAILED)."
       type: "object"
@@ -13664,6 +14728,52 @@ components:
               type: "string"
         item:
           "$ref": "#/components/schemas/ReviewItem"
+    ExtensionsFinding:
+      type: "object"
+      properties:
+        severity:
+          type: "string"
+        rule:
+          type: "string"
+        file:
+          type: "string"
+        line:
+          type: "number"
+        detail:
+          type: "string"
+        excerpt:
+          type: "string"
+      required:
+        - "severity"
+        - "rule"
+        - "file"
+        - "detail"
+    ExtensionsSource:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        title:
+          type: "string"
+        kind:
+          type: "string"
+        status:
+          type: "string"
+        count:
+          type: "number"
+        fetchedAt:
+          type:
+            - "string"
+            - "null"
+        error:
+          type: "string"
+      required:
+        - "id"
+        - "title"
+        - "kind"
+        - "status"
+        - "count"
+        - "fetchedAt"
     FallbackEntry:
       type: "object"
       required:
@@ -13686,29 +14796,6 @@ components:
         feature:
           type: "string"
       description: "404 body for a path owned by a feature the server was started without (LLMIDE_FEATURES). Deliberately not the Error envelope: a client can tell it from an unknown route without parsing a message."
-    Finding:
-      type: "object"
-      description: "One guardrail finding (extension/guardrails/rules.mjs check()). severity is blocking (fails the gate), warning (shown, does not fail) or info. details, when present, carries the matched snippets of a secret or PII finding; snippets are redacted before they are stored."
-      required:
-        - "ruleId"
-        - "severity"
-        - "message"
-      properties:
-        ruleId:
-          type: "string"
-        severity:
-          type: "string"
-          enum:
-            - "blocking"
-            - "warning"
-            - "info"
-        message:
-          type: "string"
-        details:
-          type: "array"
-          items:
-            type: "object"
-            additionalProperties: true
     GitIndex:
       type: "object"
       required:
@@ -13790,7 +14877,7 @@ components:
         findings:
           type: "array"
           items:
-            "$ref": "#/components/schemas/Finding"
+            "$ref": "#/components/schemas/ReviewFinding"
       additionalProperties: true
     Health:
       type: "object"
@@ -13931,6 +15018,173 @@ components:
           type: "string"
         isPR:
           type: "boolean"
+    Item:
+      type: "object"
+      properties:
+        id:
+          type: "string"
+        kind:
+          type: "string"
+          enum:
+            - "skill"
+            - "plugin"
+            - "mcp"
+            - "llm-source"
+        name:
+          type: "string"
+        description:
+          type: "string"
+        version:
+          type:
+            - "string"
+            - "null"
+        publisher:
+          type: "object"
+          properties:
+            id:
+              type: "string"
+            trust:
+              type: "string"
+          required:
+            - "id"
+            - "trust"
+        source:
+          type: "object"
+          properties:
+            kind:
+              type: "string"
+            url:
+              type: "string"
+            ref:
+              type: "string"
+            commit:
+              type: "string"
+          required:
+            - "kind"
+            - "url"
+            - "commit"
+        subpath:
+          type: "string"
+        pinnedCommit:
+          type: "string"
+        installedAt:
+          type: "string"
+        updatedAt:
+          type: "string"
+        members:
+          type: "array"
+          items:
+            "$ref": "#/components/schemas/Member"
+        declared:
+          type: "object"
+          properties:
+            executableKinds:
+              type: "array"
+              items:
+                type: "string"
+          required:
+            - "executableKinds"
+        permissions:
+          type: "array"
+          items:
+            type: "object"
+            properties:
+              type:
+                type: "string"
+              executable:
+                type: "boolean"
+              text:
+                type: "string"
+            required:
+              - "type"
+              - "executable"
+              - "text"
+        scan:
+          type: "object"
+          properties:
+            count:
+              type: "number"
+            byRule:
+              type: "object"
+              additionalProperties:
+                type: "number"
+            findings:
+              type: "array"
+              items:
+                "$ref": "#/components/schemas/ExtensionsFinding"
+          required:
+            - "count"
+        consents:
+          type: "object"
+          additionalProperties:
+            type: "object"
+            properties:
+              grantedAt:
+                type: "string"
+              commit:
+                type: "string"
+            required:
+              - "grantedAt"
+              - "commit"
+        integrity:
+          type: "string"
+        storeDir:
+          type: "string"
+        update:
+          type: "object"
+          properties:
+            latest:
+              type: "string"
+            checkedAt:
+              type: "string"
+          required:
+            - "latest"
+            - "checkedAt"
+        previous:
+          type: "object"
+          properties:
+            pinnedCommit:
+              type: "string"
+            version:
+              type:
+                - "string"
+                - "null"
+            installedAt:
+              type:
+                - "string"
+                - "null"
+          required:
+            - "pinnedCommit"
+            - "version"
+            - "installedAt"
+        state:
+          type: "object"
+          properties:
+            enabled:
+              type: "boolean"
+            disabledMembers:
+              type: "array"
+              items:
+                type: "string"
+          required:
+            - "enabled"
+            - "disabledMembers"
+      required:
+        - "id"
+        - "kind"
+        - "name"
+        - "description"
+        - "version"
+        - "publisher"
+        - "source"
+        - "pinnedCommit"
+        - "installedAt"
+        - "members"
+        - "declared"
+        - "permissions"
+        - "scan"
+        - "storeDir"
+        - "state"
     KbSourcesOk:
       type: "object"
       required:
@@ -14419,6 +15673,22 @@ components:
           type: "object"
           additionalProperties: true
           description: "kind-specific metadata; open set"
+    Member:
+      type: "object"
+      properties:
+        memberId:
+          type: "string"
+        type:
+          type: "string"
+        name:
+          type: "string"
+        executable:
+          type: "boolean"
+      required:
+        - "memberId"
+        - "type"
+        - "name"
+        - "executable"
     ModelCapability:
       type: "object"
       required:
@@ -14619,6 +15889,14 @@ components:
       properties:
         ok:
           const: true
+    NotesGenerationSource:
+      type: "object"
+      description: "One selected source for /generate-doc. name is the display name (sanitized to one line, 80 chars); content is the source text, budgeted by packSources."
+      properties:
+        name:
+          type: "string"
+        content:
+          type: "string"
     NotesGenerationTask:
       type: "object"
       description: "A session task (llm_agent/tools/handlers/session-tasks.mjs). status is one of pending, in_progress, completed, skipped, failed; a model-written status is stored as given, so it is typed as a string."
@@ -15411,6 +16689,29 @@ components:
           type: "string"
         engaged:
           type: "boolean"
+    ReviewFinding:
+      type: "object"
+      description: "One guardrail finding (extension/guardrails/rules.mjs check()). severity is blocking (fails the gate), warning (shown, does not fail) or info. details, when present, carries the matched snippets of a secret or PII finding; snippets are redacted before they are stored."
+      required:
+        - "ruleId"
+        - "severity"
+        - "message"
+      properties:
+        ruleId:
+          type: "string"
+        severity:
+          type: "string"
+          enum:
+            - "blocking"
+            - "warning"
+            - "info"
+        message:
+          type: "string"
+        details:
+          type: "array"
+          items:
+            type: "object"
+            additionalProperties: true
     ReviewItem:
       type: "object"
       description: "A review item as the GET, submit, approve and reject routes send it (redactReviewItem: the payload has no credentials). result is {} while the item is undecided, the apply result after codegen-apply (baseDir, files, count), or {error} after a failed execution. decidedAt is null until the item is decided."
@@ -15923,14 +17224,6 @@ components:
             type: "object"
             description: "channels found for the connected workspace"
         message:
-          type: "string"
-    Source:
-      type: "object"
-      description: "One selected source for /generate-doc. name is the display name (sanitized to one line, 80 chars); content is the source text, budgeted by packSources."
-      properties:
-        name:
-          type: "string"
-        content:
           type: "string"
     Stats:
       type: "object"

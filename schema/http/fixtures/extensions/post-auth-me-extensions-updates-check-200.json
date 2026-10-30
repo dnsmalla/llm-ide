@@ -1,0 +1,30 @@
+{
+  "endpoint": "POST /auth/me/extensions/updates/check",
+  "status": 200,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "checkedAt": "2026-10-30T23:41:16.626Z",
+    "results": [
+      {
+        "id": "plugin:acme/runner",
+        "current": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "latest": "ffffffffffffffffffffffffffffffffffffffff",
+        "updateAvailable": true
+      },
+      {
+        "id": "plugin:acme/sketchy",
+        "current": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "updateAvailable": false,
+        "error": "not_found"
+      },
+      {
+        "id": "skill:acme/tidy",
+        "current": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "latest": "ffffffffffffffffffffffffffffffffffffffff",
+        "updateAvailable": true
+      }
+    ]
+  }
+}

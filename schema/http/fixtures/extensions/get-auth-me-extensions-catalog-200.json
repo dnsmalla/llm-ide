@@ -1,0 +1,49 @@
+{
+  "endpoint": "GET /auth/me/extensions/catalog",
+  "status": 200,
+  "request": {
+    "query": {
+      "q": "pdf"
+    }
+  },
+  "response": {
+    "query": "pdf",
+    "total": 0,
+    "offset": 0,
+    "results": [],
+    "sources": [
+      {
+        "id": "anthropics/skills",
+        "title": "Anthropic skills",
+        "kind": "skills-repo",
+        "status": "empty",
+        "count": 0,
+        "fetchedAt": null
+      },
+      {
+        "id": "anthropics/claude-plugins-official",
+        "title": "Claude plugins (official)",
+        "kind": "marketplace",
+        "status": "empty",
+        "count": 0,
+        "fetchedAt": null
+      },
+      {
+        "id": "modelcontextprotocol/servers",
+        "title": "MCP reference servers",
+        "kind": "github-dirs",
+        "status": "empty",
+        "count": 0,
+        "fetchedAt": null
+      },
+      {
+        "id": "mcp-registry",
+        "title": "MCP registry",
+        "kind": "mcp-registry",
+        "status": "empty",
+        "count": 0,
+        "fetchedAt": null
+      }
+    ]
+  }
+}

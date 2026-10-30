@@ -1,0 +1,103 @@
+{
+  "endpoint": "POST /auth/me/extensions/update",
+  "status": 200,
+  "request": {
+    "body": {
+      "id": "plugin:acme/runner",
+      "commit": "ffffffffffffffffffffffffffffffffffffffff"
+    }
+  },
+  "response": {
+    "ok": true,
+    "item": {
+      "id": "plugin:acme/runner",
+      "kind": "plugin",
+      "name": "runner",
+      "description": "Runs things",
+      "version": "2.0.0",
+      "publisher": {
+        "id": "acme",
+        "trust": "unknown"
+      },
+      "source": {
+        "kind": "git",
+        "url": "https://github.com/acme/runner",
+        "commit": "ffffffffffffffffffffffffffffffffffffffff"
+      },
+      "pinnedCommit": "ffffffffffffffffffffffffffffffffffffffff",
+      "installedAt": "2026-10-30T23:41:16.616Z",
+      "members": [
+        {
+          "memberId": "skill:a",
+          "type": "skill",
+          "name": "a",
+          "executable": false
+        },
+        {
+          "memberId": "hook:Stop",
+          "type": "hook",
+          "name": "Stop",
+          "executable": true
+        }
+      ],
+      "declared": {
+        "executableKinds": [
+          "hook"
+        ]
+      },
+      "permissions": [
+        {
+          "type": "hook",
+          "executable": true,
+          "text": "Runs commands automatically when events happen in a session (hooks)."
+        },
+        {
+          "type": "skill",
+          "executable": false,
+          "text": "Adds instructions the assistant may follow (skills)."
+        }
+      ],
+      "scan": {
+        "count": 1,
+        "byRule": {
+          "injection_phrase": 1
+        },
+        "findings": [
+          {
+            "severity": "warn",
+            "rule": "injection_phrase",
+            "file": "notes.md",
+            "line": 1,
+            "detail": "reads like an instruction to override the assistant's earlier instructions",
+            "excerpt": "ignore all previous instructions"
+          }
+        ]
+      },
+      "consents": {},
+      "integrity": "a1e1808978bc15ade3be050ec48d9c44e7be563cdc85c69957e52a1a0d18b5b7",
+      "storeDir": "extensions/store/bb82030dbc2bcaba32a90bf2/plugin__acme__runner/ffffffffffffffffffffffffffffffffffffffff",
+      "updatedAt": "2026-10-30T23:41:16.632Z",
+      "previous": {
+        "pinnedCommit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "version": "1.0.0",
+        "installedAt": "2026-10-30T23:41:16.616Z"
+      },
+      "state": {
+        "enabled": false,
+        "disabledMembers": [
+          "skill:a"
+        ]
+      }
+    },
+    "update": {
+      "from": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+      "to": "ffffffffffffffffffffffffffffffffffffffff",
+      "enabled": false,
+      "wasEnabled": true,
+      "reason": "consent_required",
+      "kinds": [
+        "hook"
+      ]
+    }
+  }
+}

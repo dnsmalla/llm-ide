@@ -21,3 +21,10 @@ test('POST profiles match with a query string appended', () => {
   assert.equal(rateLimitProfile('/kb/dispatch?a=b', 'POST'), 'dispatch');
   assert.equal(rateLimitProfile('/kb/export-all?x=1', 'GET'), 'kbExport');
 });
+
+test('extension catalog steps that reach GitHub or the MCP registry ride the dispatch bucket; offline ones do not', () => {
+  for (const p of ['install', 'catalog/refresh', 'updates/check', 'update/preview', 'update', 'repair']) {
+    assert.equal(rateLimitProfile(`/auth/me/extensions/${p}`, 'POST'), 'dispatch', p);
+  }
+  for (const p of ['toggle', 'uninstall', 'rollback']) assert.notEqual(rateLimitProfile(`/auth/me/extensions/${p}`, 'POST'), 'dispatch', p);
+});

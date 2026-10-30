@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /auth/me/extensions/repair",
+  "status": 404,
+  "request": {
+    "body": {
+      "id": "skill:nobody/x"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "not installed"
+    }
+  }
+}

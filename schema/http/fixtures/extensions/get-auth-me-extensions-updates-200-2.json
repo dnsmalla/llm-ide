@@ -1,0 +1,27 @@
+{
+  "endpoint": "GET /auth/me/extensions/updates",
+  "status": 200,
+  "response": {
+    "corrupt": false,
+    "items": [
+      {
+        "id": "plugin:acme/runner",
+        "name": "runner",
+        "kind": "plugin",
+        "current": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "latest": "ffffffffffffffffffffffffffffffffffffffff",
+        "checkedAt": "2026-10-30T23:41:16.628Z",
+        "hasPrevious": false
+      },
+      {
+        "id": "skill:acme/tidy",
+        "name": "Tidy",
+        "kind": "skill",
+        "current": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee",
+        "latest": "ffffffffffffffffffffffffffffffffffffffff",
+        "checkedAt": "2026-10-30T23:41:16.626Z",
+        "hasPrevious": false
+      }
+    ]
+  }
+}

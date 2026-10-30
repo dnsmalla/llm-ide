@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /auth/me/extensions/install",
+  "status": 404,
+  "request": {
+    "body": {
+      "url": "https://github.com/acme/none",
+      "commit": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "that commit was not found"
+    }
+  }
+}
