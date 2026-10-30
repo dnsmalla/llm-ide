@@ -15,12 +15,12 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Mobile (iPhone native, PWA) | 6 | 2 | 7 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 4 | 0 | 8 | 12 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 5 | 2 | 6 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 10 | 2 | 5 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Shared server and core | 10 | 3 | 4 | 17 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 10 | 1 | 9 | 20 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 5 | 1 | 7 | 13 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 5 | 1 | 8 | 14 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 64 | 13 | 84 | 161 |  |
+| Total | 64 | 14 | 83 | 161 |  |
 
 ## How the surfaces connect
 
@@ -202,7 +202,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] Phase 1 P12 Swift decode check: `mac/Sources/APIContractLab` exists, docs-kit K1 routes skipped until the Mac switches (`6aa1468d`) (me)
 - [~] P17 token baseline: `schema/bench/token-baseline.json` committed; both real baselines not run per the agent-kit plan T0.2 (you)
 - [ ] K1 per kit, in order: ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
-- [ ] Core job runner: persisted queue, lane lock, cancel on quit, process-group kill (prerequisite for automation-kit) (me)
+- [~] Core job runner: library done (`extension/kb/job-queue.mjs`, `job-runner.mjs`, `core/process-group.mjs`, migration 0055, spec `docs/spec/job-runner.md`, 10 tests in `extension/tests/job-runner.test.mjs`); not wired into boot or HTTP, no flake gate yet (me)
 - [ ] automation-kit (Loop + Auto Tasks) logic into Node, the largest kit (me)
 - [ ] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/` has docs, graph, knowledge, agent only) (me)
 - [ ] Flaky tests under full-gate load hardened (`index-routes.http` 1 MB body, `loop-contract-lab` probes) (me)
