@@ -14,7 +14,7 @@
     "type-check": "tsc --noEmit",
     "server": "node server.mjs",
     "backup": "node scripts/backup.mjs",
-    "test": "node --test --experimental-strip-types tests/**/*.test.{ts,mjs}",
+    "test": "node scripts/test-watchdog.mjs --test --experimental-strip-types --test-timeout=180000 tests/**/*.test.{ts,mjs}",
     "test:render": "node scripts/test-render.mjs",
     "test:watch": "node --test --watch --experimental-strip-types tests/**/*.test.{ts,mjs}",
     "lint": "eslint --max-warnings 0 src agents kb core routes graphkit connectors llm_agent server providers guardrails plugins llm-sources mcp scripts tests server.mjs",

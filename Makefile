@@ -79,11 +79,18 @@ build-mac-min: ## Chat only: excludes all 7 excludable features
 build-mac-mobile-only: ## Build with Chat + Mobile only (no AutoTask/Loop — guards the bridge seam)
 	cd mac && GIT_CONFIG_GLOBAL=/dev/null LLMIDE_FEATURES=agent_chat,mobile_sync swift build --manifest-cache none --scratch-path .build-mobile
 
+# Hard wall-clock cap for `swift test` (seconds): a wedged test helper (e.g.
+# after the Mac slept) must FAIL the gate, not hang a push. perl is on every
+# macOS (gtimeout/timeout are not), and `alarm` + `exec` makes SIGALRM end
+# swift test itself (exit 142). The suite normally takes ~1-5 min.
+SWIFT_TEST_TIMEOUT ?= 2400
+PERL_ALARM = perl -e 'alarm shift; exec @ARGV or die "exec: $$!"' $(SWIFT_TEST_TIMEOUT)
+
 test-mac:
 	cd mac && swift build --product LlmIdeMac
 ifeq ($(HAS_XCTEST),1)
 	# memory keychain: tests must never touch (or prompt for) the login keychain — see KeychainStore.backend
-	cd mac && LLMIDE_KEYCHAIN_BACKEND=memory swift test
+	cd mac && LLMIDE_KEYCHAIN_BACKEND=memory $(PERL_ALARM) swift test
 else
 	@echo "⚠ Skipping mac swift test — full Xcode required (XCTest not in $$(xcode-select -p))"
 endif
