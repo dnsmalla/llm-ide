@@ -116,23 +116,39 @@ extension LlmIdeAPIClient {
         try await get("/kb/providers/catalog", authenticated: true)
     }
 
+    /// The body of POST /kb/providers/catalog/connect. `copyKeyFrom` (used only without `apiKey`) names a
+    /// legacy provider whose stored key the SERVER copies into the connection ("Move to catalog"); the Mac
+    /// never reads a key. `enabled: false` stores the connection switched off. Both are ignored by a server
+    /// that predates them, which the caller sees in the returned connection.
+    public struct CatalogConnectRequest: Encodable, Equatable, Sendable {
+        public var catalogId: String
+        public var apiKey: String?
+        public var baseURL: String?
+        public var slug: String?
+        public var name: String?
+        public var allowPrivate: Bool?
+        public var enabled: Bool?
+        public var copyKeyFrom: String?
+
+        public init(catalogId: String, apiKey: String? = nil, baseURL: String? = nil, slug: String? = nil,
+                    name: String? = nil, allowPrivate: Bool? = nil, enabled: Bool? = nil,
+                    copyKeyFrom: String? = nil) {
+            self.catalogId = catalogId; self.apiKey = apiKey; self.baseURL = baseURL; self.slug = slug
+            self.name = name; self.allowPrivate = allowPrivate; self.enabled = enabled
+            self.copyKeyFrom = copyKeyFrom
+        }
+    }
+
     /// POST /kb/providers/catalog/connect. `apiKey` nil on a reconnect keeps the stored key.
     func connectCatalogProvider(catalogId: String, apiKey: String?, baseURL: String? = nil,
                                 slug: String? = nil, name: String? = nil,
                                 allowPrivate: Bool? = nil) async throws -> CatalogConnection {
-        struct Req: Encodable {
-            let catalogId: String
-            let apiKey: String?
-            let baseURL: String?
-            let slug: String?
-            let name: String?
-            let allowPrivate: Bool?
-        }
-        let ack: CatalogConnectAck = try await post(
-            "/kb/providers/catalog/connect",
-            body: Req(catalogId: catalogId, apiKey: apiKey, baseURL: baseURL, slug: slug, name: name,
-                      allowPrivate: allowPrivate),
-            authenticated: true)
+        try await connectCatalogProvider(CatalogConnectRequest(
+            catalogId: catalogId, apiKey: apiKey, baseURL: baseURL, slug: slug, name: name, allowPrivate: allowPrivate))
+    }
+
+    func connectCatalogProvider(_ request: CatalogConnectRequest) async throws -> CatalogConnection {
+        let ack: CatalogConnectAck = try await post("/kb/providers/catalog/connect", body: request, authenticated: true)
         return ack.connection
     }
 

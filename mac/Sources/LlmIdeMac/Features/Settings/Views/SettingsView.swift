@@ -8,6 +8,17 @@ struct SettingsView: View {
     let api: LlmIdeAPIClient
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var projectStore: ProjectStore
+    /// ONE catalog snapshot shared by Providers (connections) and Model routing (switches, fallback), and the
+    /// one list both the connections and the legacy entries are folded into.
+    @StateObject private var providers: ProvidersModel
+
+    init(api: LlmIdeAPIClient) {
+        self.api = api
+        let catalog = ProviderCatalogModel(api: api)
+        _providers = StateObject(wrappedValue: ProvidersModel(
+            api: api, catalog: catalog,
+            indexRefresh: { await api.refreshCatalogConnectionIndex() }))
+    }
 
     var body: some View {
         // ScrollViewReader so Library's "Open in Settings" deep-link can
@@ -44,14 +55,11 @@ struct SettingsView: View {
                         Group {
                             AgentSdkSettingsSection(api: api)
                             TokenSavingSettingsSection()
-                            ProvidersSettingsSection(api: api)
-                            // One child (a nested Group), so this block stays at the
-                            // ViewBuilder's ten-child limit.
-                            Group {
-                                CustomProvidersSection(api: api)
-                                SettingsSlotView(slot: .providerCatalog)
-                            }
-                            TierRoutingSection(api: api)
+                            // Two sections replace the old four (Model Providers, Custom
+                            // Providers, Provider catalog, Tiers & Roles): every connection in
+                            // one list, then how models are chosen.
+                            ProvidersSection(model: providers, api: api).id(SettingsAnchor.providers)
+                            ModelRoutingSection(api: api, catalog: providers.catalog).id(SettingsAnchor.modelRouting)
                             SettingsSlotView(slot: .loopDefaults)
                             SettingsSlotView(slot: .docGen)
                             SettingsSlotView(slot: .agentHistory)

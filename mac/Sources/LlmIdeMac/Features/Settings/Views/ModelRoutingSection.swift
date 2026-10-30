@@ -3,13 +3,21 @@ import os.log
 
 private let tierRoutingSectionLogger = Logger(subsystem: "com.llmide.macapp", category: "TierRouting")
 
-/// Settings card "Tiers & Roles": Standard (required, the default) plus
+/// Settings card "Model routing": Standard (required, the default) plus
 /// optional Strong / Cheap and the Image tier (an image model, Mac-only), each
 /// a provider + model; then the tier each role uses, grouped Chat · Background
 /// · Server · Media. Saving Standard writes it through
-/// to the legacy default fields (`AppConfig.applyStandardTier`).
-struct TierRoutingSection: View {
+/// to the legacy default fields (`AppConfig.applyStandardTier`). Below them: the fallback order and the
+/// router / token-cap / tools switches (`ModelRoutingSwitches`), which used to sit in the Provider catalog card.
+struct ModelRoutingSection: View {
     let api: LlmIdeAPIClient
+    /// Shared with the Providers section: one snapshot of the catalog settings the switches write.
+    @ObservedObject var catalog: ProviderCatalogModel
+
+    init(api: LlmIdeAPIClient, catalog: ProviderCatalogModel) {
+        self.api = api
+        self.catalog = catalog
+    }
     @EnvironmentObject var theme: ThemeStore
     @EnvironmentObject var config: AppConfig
     /// The composer override Standard's write-through sets for a custom Standard.
@@ -33,9 +41,9 @@ struct TierRoutingSection: View {
     @State private var modelsRevision = 0
 
     var body: some View {
-        SettingsSectionCard(icon: "dial.medium", title: "Tiers & Roles") {
+        SettingsSectionCard(icon: "dial.medium", title: ModelRoutingText.title) {
             VStack(alignment: .leading, spacing: Spacing.sm) {
-                SettingsHint("Standard is the default: new chats and every role on this Mac left on Standard use it. Strong and Cheap are optional; Image holds an image model for the Image generation role only. Then choose the tier each role uses. A tier that can't be used is skipped silently, and its row says what runs instead.")
+                SettingsHint(ModelRoutingText.intro)
 
                 if let versionNote = serverVersionNote {
                     Text(versionNote)
@@ -66,6 +74,9 @@ struct TierRoutingSection: View {
                         featureRow(feature)
                     }
                 }
+
+                Divider().padding(.vertical, Spacing.xs)
+                ModelRoutingSwitches(catalog: catalog, api: api)
 
                 if !serverState.dropped.isEmpty {
                     note("The server ignored: "
@@ -206,7 +217,7 @@ struct TierRoutingSection: View {
             }
             if tier == .standard {
                 if route == nil, ProviderAvailability.nothingAvailable(ProviderAvailabilityStore.shared.available) {
-                    note("No provider set up — add one in Model Providers.")
+                    note("No provider set up — add one in Providers.")
                 }
                 standardNotes(route)
             } else if tier == .image {

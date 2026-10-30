@@ -10,6 +10,7 @@ protocol ProviderCatalogAPI: AnyObject {
     func disconnectCatalogProvider(id: String) async throws -> Bool
     func testCatalogProvider(id: String) async throws -> LlmIdeAPIClient.CatalogTestResult
     func fetchCatalogModels(id: String, refresh: Bool) async throws -> LlmIdeAPIClient.CatalogModelList
+    func fetchProviderCatalogSettings() async throws -> LlmIdeAPIClient.CatalogSettings
     func saveProviderCatalogSettings(_ settings: LlmIdeAPIClient.CatalogSettings) async throws -> LlmIdeAPIClient.CatalogSettings
 }
 
@@ -64,7 +65,7 @@ enum ProviderCatalogRules {
     }
 }
 
-/// State of the Settings → Provider catalog card.
+/// State shared by Settings → Providers (connections, models) and Settings → Model routing (switches, fallback).
 @MainActor
 final class ProviderCatalogModel: ObservableObject {
     @Published private(set) var providers: [LlmIdeAPIClient.CatalogProvider] = []
@@ -73,6 +74,8 @@ final class ProviderCatalogModel: ObservableObject {
     @Published private(set) var migration: LlmIdeAPIClient.CatalogMigration?
     @Published private(set) var loadError: String?
     @Published private(set) var isLoading = false
+    /// True once a load has succeeded: before that (or after a failure) nothing can be deduped against the catalog.
+    @Published private(set) var hasLoaded = false
     /// Per connection id: the last test result line.
     @Published private(set) var testResults: [String: (ok: Bool, text: String)] = [:]
     /// Per connection id: the model list once opened.
@@ -94,6 +97,7 @@ final class ProviderCatalogModel: ObservableObject {
             providers = r.providers
             settings = r.settings
             migration = r.migration
+            hasLoaded = true
             loadError = nil
         } catch {
             loadError = ProviderCatalogRules.failure(error)
@@ -157,7 +161,9 @@ final class ProviderCatalogModel: ObservableObject {
 
     /// Save a settings change; the server's answer is what the card then shows.
     func update(_ change: (inout LlmIdeAPIClient.CatalogSettings) -> Void) async {
-        var next = settings
+        // Start from the server's current copy: the composer's "Allow tools" and the other card save the same
+        // document, and writing a stale snapshot back would undo their change.
+        var next = (try? await api.fetchProviderCatalogSettings()) ?? settings
         change(&next)
         next.fallbackOrder = ProviderCatalogRules.pruned(next.fallbackOrder, connected: Set(connections.map(\.provider)))
         do {

@@ -114,6 +114,7 @@ final class ProviderCatalogModelTests: XCTestCase {
         func fetchCatalogModels(id: String, refresh: Bool) async throws -> C.CatalogModelList {
             C.CatalogModelList(models: [], source: "static", detail: nil)
         }
+        func fetchProviderCatalogSettings() async throws -> C.CatalogSettings { settings }
         func saveProviderCatalogSettings(_ s: C.CatalogSettings) async throws -> C.CatalogSettings { savedSettings.append(s); settings = s; return s }
     }
 

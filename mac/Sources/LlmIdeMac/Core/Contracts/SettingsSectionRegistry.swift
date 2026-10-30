@@ -27,9 +27,6 @@ enum SettingsSectionSlot: String, CaseIterable, Sendable {
     case docGen
     /// App group, after Doc Gen: agent history storage, retention, clear and compact.
     case agentHistory
-    /// App group, after Custom Providers: the provider catalog (connect OpenAI,
-    /// Groq, Ollama …, capability flags, tool-chat and fallback switches).
-    case providerCatalog
 }
 
 /// Scroll anchors a deep link can post with `.scrollSettingsToCard`.
@@ -43,6 +40,10 @@ enum SettingsAnchor {
     /// Library's Connections card (inputs hub) — the target of Library's
     /// "Connect a source…" / "Open in Settings" deep links.
     static let connections = "connections"
+    /// Settings → Providers: the one list of every model connection.
+    static let providers = "providers"
+    /// Settings → Model routing: tiers, roles, fallback order and the router / cap / tools switches.
+    static let modelRouting = "model-routing"
 }
 
 /// One registered Settings card. `make` is evaluated on every render of the

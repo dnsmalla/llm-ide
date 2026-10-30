@@ -1,9 +1,9 @@
 import SwiftUI
 
-/// The role rows of "Tiers & Roles": which tier each role uses, and why a
+/// The role rows of "Model routing": which tier each role uses, and why a
 /// role still runs something else. Kept apart from the tier rows so each file
 /// stays readable.
-extension TierRoutingSection {
+extension ModelRoutingSection {
     func featureRow(_ feature: RoutedFeature) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             HStack(spacing: Spacing.sm) {

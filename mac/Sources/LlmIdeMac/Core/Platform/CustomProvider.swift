@@ -182,6 +182,12 @@ extension CustomProvider {
         return []
     }
 
+    /// `loadAll()` against a given store (no stash on a decode failure; `[]` for display).
+    static func loadAll(from defaults: UserDefaults) -> [CustomProvider] {
+        if case .loaded(let providers) = readStored(from: defaults).outcome { return providers }
+        return []
+    }
+
     /// FNV-1a, so the stash file name is stable across launches and repeated
     /// loads of the same bad blob don't write a new file each time.
     private static func stableHash(_ data: Data) -> UInt64 {
@@ -232,7 +238,7 @@ extension CustomProvider {
             // sits behind the global `authenticate` middleware) silently 401'd
             // — so the registry was never populated and custom providers never
             // resolved at code-assist time. Sync is driven from the view layer
-            // (CustomProvidersSection) via LlmIdeAPIClient.syncCustomProviders,
+            // (ProvidersModel) via LlmIdeAPIClient.syncCustomProviders,
             // which injects the Bearer token.
             return true
         } catch {
