@@ -20,10 +20,16 @@
 //   tools             48 per server, 96 per turn
 //   one tool result   30 000 characters kept, the rest dropped
 //   tool schema       16 000 characters of JSON
+//   all tools of a turn  60 000 characters of tool JSON; tools past it are dropped (and reported)
+//   HTTP response     5 MB per non-streaming response
 // A server that streams more than that in one message is still read in full by
 // the SDK before it reaches us; the call timeout is what bounds that.
 
 import { createHash } from 'node:crypto';
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport, getDefaultEnvironment } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
@@ -38,6 +44,8 @@ export const MCP_LIMITS = Object.freeze({
   toolsPerTurn: 96,
   resultChars: 30_000,
   schemaChars: 16_000,
+  turnToolChars: 60_000,
+  httpResponseBytes: 5_000_000,
   descriptionChars: 1_000,
   pages: 4,
 });
@@ -70,13 +78,32 @@ export function modelToolName(server, tool) {
   return `${full.slice(0, 64 - 9)}_${h}`;
 }
 
-function schemaOf(tool) {
+// Every string in a schema (descriptions, titles, enum and default values, even
+// property names) is server text. Values are cleaned like descriptions; a KEY
+// that would change is refused because renaming it would break the call.
+function cleanSchema(node, depth = 0) {
+  if (depth > 24) throw new Error('schema too deep');
+  if (typeof node === 'string') return cleanServerText(node, 500);
+  if (Array.isArray(node)) return node.map((v) => cleanSchema(v, depth + 1));
+  if (node && typeof node === 'object') {
+    const out = {};
+    for (const [k, v] of Object.entries(node)) {
+      if (cleanServerText(k, 200) !== k) throw new Error('schema key carries hidden text');
+      if (k === '__proto__') continue;
+      out[k] = cleanSchema(v, depth + 1);
+    }
+    return out;
+  }
+  return node;
+}
+
+function schemaOf(tool, max = MCP_LIMITS.schemaChars) {
   const schema = tool?.inputSchema;
   if (!schema || typeof schema !== 'object' || Array.isArray(schema) || schema.type !== 'object') return null;
   let text;
   try { text = JSON.stringify(schema); } catch { return null; }
-  if (!text || text.length > MCP_LIMITS.schemaChars) return null;
-  return JSON.parse(text);
+  if (!text || text.length > max) return null;
+  try { return cleanSchema(JSON.parse(text)); } catch { return null; }
 }
 
 function withDeadline(promise, ms, label, onTimeout) {
@@ -88,7 +115,7 @@ function withDeadline(promise, ms, label, onTimeout) {
 }
 
 /** The transport for one server config, or throws. HTTP goes through the pinned fetch (SSRF guard). */
-export function transportFor(cfg, { allowPrivate = false, makeFetch = makePinnedFetch } = {}) {
+export function transportFor(cfg, { allowPrivate = false, makeFetch = makePinnedFetch, cwd, maxResponseBytes = MCP_LIMITS.httpResponseBytes } = {}) {
   if (cfg && (cfg.type === 'http' || cfg.type === 'sse')) {
     let url;
     try { url = new URL(cfg.url); } catch { throw new Error('the server url is not valid'); }
@@ -96,7 +123,7 @@ export function transportFor(cfg, { allowPrivate = false, makeFetch = makePinned
     const bare = new URL(url); bare.search = ''; bare.hash = '';
     try { assertProviderBaseUrl(bare.toString(), { allowPrivate }); }
     catch (e) { throw new SsrfBlockedError(e.message); }
-    const fetchImpl = makeFetch({ allowPrivate });
+    const fetchImpl = cappedFetch(makeFetch({ allowPrivate }), maxResponseBytes);
     const headers = { ...(cfg.headers && typeof cfg.headers === 'object' ? cfg.headers : {}) };
     const requestInit = { headers, redirect: 'error' };
     return cfg.type === 'sse'
@@ -106,13 +133,58 @@ export function transportFor(cfg, { allowPrivate = false, makeFetch = makePinned
   if (!cfg || typeof cfg.command !== 'string' || !cfg.command) throw new Error('the server has no command');
   const env = { ...getDefaultEnvironment() };
   for (const [k, v] of Object.entries(cfg.env && typeof cfg.env === 'object' ? cfg.env : {})) if (typeof v === 'string') env[k] = v;
-  return new StdioClientTransport({
-    command: cfg.command,
-    args: Array.isArray(cfg.args) ? cfg.args.filter((a) => typeof a === 'string') : [],
+  const args = Array.isArray(cfg.args) ? cfg.args.filter((a) => typeof a === 'string') : [];
+  // Own process group (see spawn-group.mjs) so closing the transport also ends the server's helpers.
+  const grouped = process.platform !== 'win32';
+  const transport = new StdioClientTransport({
+    command: grouped ? process.execPath : cfg.command,
+    args: grouped ? [SPAWN_GROUP, cfg.command, ...args] : args,
     env,
+    cwd,
     stderr: 'ignore',
   });
+  installExitHook();
+  liveStdio.add(transport);
+  return transport;
 }
+
+const SPAWN_GROUP = fileURLToPath(new URL('./spawn-group.mjs', import.meta.url));
+const liveStdio = new Set();
+let exitHookInstalled = false;
+function installExitHook() {
+  if (exitHookInstalled) return;
+  exitHookInstalled = true;
+  // If the server process exits mid-turn, tell every launcher still running to take its group down.
+  process.on('exit', () => {
+    for (const t of liveStdio) { try { if (t.pid) process.kill(t.pid, 'SIGTERM'); } catch { /* gone */ } }
+  });
+}
+
+/** Stdio transports whose launcher is still running (tests and diagnostics). */
+export const liveStdioCount = () => [...liveStdio].filter((t) => t.pid).length;
+
+// Cap the body of a non-streaming HTTP response: a hostile server cannot make us
+// buffer an unbounded one. Event streams (SSE, long-lived by design) are left
+// alone; their individual messages are bounded by the SDK's read buffer.
+function cappedFetch(inner, max) {
+  return async (input, init) => {
+    const res = await inner(input, init);
+    const type = String(res.headers?.get?.('content-type') || '');
+    if (!res.body || /text\/event-stream/i.test(type)) return res;
+    const declared = Number(res.headers.get('content-length'));
+    if (Number.isFinite(declared) && declared > max) { try { await res.body.cancel(); } catch { /* ignore */ } throw new Error('the server response is too large'); }
+    let seen = 0;
+    const limiter = new TransformStream({
+      transform(chunk, controller) {
+        seen += chunk.byteLength;
+        if (seen > max) controller.error(new Error('the server response is too large'));
+        else controller.enqueue(chunk);
+      },
+    });
+    return new Response(res.body.pipeThrough(limiter), { status: res.status, statusText: res.statusText, headers: res.headers });
+  };
+}
+export { cappedFetch as _cappedFetch };
 
 /** MCP result content to text, bounded. */
 export function resultToText(result, max = MCP_LIMITS.resultChars) {
@@ -147,11 +219,17 @@ export function resultToText(result, max = MCP_LIMITS.resultChars) {
  * @returns {Promise<{ tools: Array<{ name: string, server: string, tool: string, description: string, parameters: object,
  *   call: (args: object, o?: { signal?: AbortSignal }) => Promise<{ text: string, truncated: boolean, isError: boolean }> }>,
  *   statuses: Array<{ name: string, status: 'connected'|'failed', toolCount: number, reason?: string }>,
+ *   dropped: string[],
  *   close: () => Promise<void> }>}
  */
-export async function connectMcpServers(servers, { signal, allowPrivate = false, deps = {} } = {}) {
+export async function connectMcpServers(servers, { signal, allowPrivate = false, cwd, deps = {} } = {}) {
   const limits = { ...MCP_LIMITS, ...(deps.limits || {}) };
+  // A stdio server runs in the workspace when there is one, else in an empty
+  // private directory: never in whatever directory the LLM-IDE server happens to be in.
+  let neutralDir = null;
+  const cwdFor = () => cwd || (neutralDir ??= mkdtempSync(join(tmpdir(), 'llmide-mcp-')));
   const clients = [];
+  const dropped = [];
   const statuses = [];
   const found = [];   // { id, client, transport, tools: [{ t, parameters }] }
 
@@ -159,30 +237,38 @@ export async function connectMcpServers(servers, { signal, allowPrivate = false,
     let client;
     let transport;
     try {
-      transport = deps.transport ? deps.transport(id, cfg) : transportFor(cfg, { allowPrivate, makeFetch: deps.makeFetch });
+      const stdio = !(cfg && (cfg.type === 'http' || cfg.type === 'sse'));
+      const tcwd = stdio ? cwdFor() : undefined;
+      transport = deps.transport ? deps.transport(id, cfg, { cwd: tcwd }) : transportFor(cfg, { allowPrivate, makeFetch: deps.makeFetch, cwd: tcwd, maxResponseBytes: limits.httpResponseBytes });
+      // No sampling, roots or elicitation: capabilities {} means a server asking for them gets "method not found".
       client = new Client(CLIENT_INFO, { capabilities: {} });
       clients.push({ client, transport });
-      await withDeadline(client.connect(transport, { timeout: limits.connectMs, signal }), limits.connectMs, 'connect', () => transport.close?.());
-      const listed = [];
-      let cursor;
-      for (let page = 0; page < limits.pages; page += 1) {
-        const res = await withDeadline(client.listTools(cursor ? { cursor } : {}, { timeout: limits.connectMs, signal }), limits.connectMs, 'list tools');
-        listed.push(...(Array.isArray(res?.tools) ? res.tools : []));
-        cursor = res?.nextCursor;
-        if (!cursor || listed.length >= limits.toolsPerServer * 2) break;
-      }
-      const usable = [];
-      for (const t of listed) {
-        if (usable.length >= limits.toolsPerServer) break;
-        if (typeof t?.name !== 'string' || !t.name || t.name.length > 128) continue;
-        const parameters = schemaOf(t);
-        if (parameters) usable.push({ t, parameters });
-      }
+      // One budget for connect AND listing, so a slow lister cannot add up to minutes.
+      const usable = await withDeadline((async () => {
+        await client.connect(transport, { timeout: limits.connectMs, signal });
+        const listed = [];
+        let cursor;
+        for (let page = 0; page < limits.pages; page += 1) {
+          const res = await client.listTools(cursor ? { cursor } : {}, { timeout: limits.connectMs, signal });
+          listed.push(...(Array.isArray(res?.tools) ? res.tools : []));
+          cursor = res?.nextCursor;
+          if (!cursor || listed.length >= limits.toolsPerServer * 2) break;
+        }
+        const ok = [];
+        for (const t of listed) {
+          if (ok.length >= limits.toolsPerServer) break;
+          if (typeof t?.name !== 'string' || !t.name || t.name.length > 128) continue;
+          const parameters = schemaOf(t, limits.schemaChars);
+          if (parameters) ok.push({ t, parameters });
+        }
+        return ok;
+      })(), limits.connectMs, 'connect', () => transport.close?.());
       found.push({ id, client, transport, tools: usable });
     } catch (err) {
       const blocked = err?.code === 'SSRF_BLOCKED' || err instanceof SsrfBlockedError;
       statuses.push({ name: id, status: 'failed', toolCount: 0, reason: blocked ? 'blocked' : (err?.code === 'MCP_TIMEOUT' ? 'timeout' : 'error') });
       try { await transport?.close?.(); } catch { /* already gone */ }
+      liveStdio.delete(transport);
     }
   };
 
@@ -191,12 +277,16 @@ export async function connectMcpServers(servers, { signal, allowPrivate = false,
   // Assemble in a fixed order (server id, then tool name) so names, collisions
   // and the per-turn cap do not depend on which server answered first.
   const tools = [];
+  let budget = 0;
   const taken = new Set();
   found.sort((a, b) => a.id.localeCompare(b.id));
   for (const { id, client, transport, tools: usable } of found) {
     let mounted = 0;
     for (const { t, parameters } of [...usable].sort((a, b) => a.t.name.localeCompare(b.t.name))) {
       if (tools.length >= limits.toolsPerTurn) break;
+      const cost = JSON.stringify(parameters).length + String(t.description ?? '').slice(0, limits.descriptionChars).length + t.name.length + 40;
+      if (budget + cost > limits.turnToolChars) { dropped.push(modelToolName(id, t.name)); continue; }
+      budget += cost;
       let name = modelToolName(id, t.name);
       for (let n = 2; taken.has(name); n += 1) name = `${modelToolName(id, t.name).slice(0, 58)}_${n}`;
       taken.add(name);
@@ -219,9 +309,11 @@ export async function connectMcpServers(servers, { signal, allowPrivate = false,
   }
   statuses.sort((a, b) => a.name.localeCompare(b.name));
   return {
-    tools, statuses,
+    tools, statuses, dropped,
     async close() {
-      await Promise.allSettled(clients.map(({ client, transport }) => Promise.resolve().then(() => client.close?.()).then(() => transport?.close?.())));
+      await Promise.allSettled(clients.map(({ client, transport }) => Promise.resolve().then(() => client.close?.()).then(() => transport?.close?.())
+        .finally(() => liveStdio.delete(transport))));
+      if (neutralDir) { try { rmSync(neutralDir, { recursive: true, force: true }); } catch { /* best effort */ } neutralDir = null; }
     },
   };
 }

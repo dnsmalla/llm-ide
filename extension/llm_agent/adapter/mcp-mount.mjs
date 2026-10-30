@@ -8,10 +8,11 @@
 //     on in the catalog; none at all in a restricted mode (buildUserMcpServers);
 //   - mounted only when provider tools are allowed and the model can call tools
 //     (the caller checks); LLMIDE_EXT_ADAPTER=off turns the whole thing off;
-//   - every call asks first (the approval card, parked in sdk/decisions.mjs)
-//     unless the user turned on egress auto-approve: a tool call hands model-
-//     chosen text to a third-party process or host, which is what that switch is
-//     about;
+//   - every call ALWAYS asks first (the approval card, parked in sdk/decisions.mjs).
+//     "Egress auto-approve" is for fetch-url and web-search and does not apply:
+//     an MCP call hands model-chosen text to an arbitrary third-party process
+//     or host and can act there. There is deliberately no switch for it yet;
+//   - the servers a turn will use are announced in a notice before the first call;
 //   - results are framed as untrusted data (fenceToolResult) and cut at the same
 //     size as every other provider tool; tool DESCRIPTIONS are untrusted too and
 //     are cleaned (hidden characters, fence markers) and marked as server text;
@@ -47,11 +48,11 @@ const EMPTY = Object.freeze({ tools: [], statuses: [], async close() {} });
  * @param {(ev: object) => void} o.emit
  * @param {AbortSignal} [o.signal]
  * @param {string} o.sessionKey          the approval session id (init.sessionId)
- * @param {boolean} [o.egressNeedsApproval]
+ * @param {string} [o.workspaceRoot]      normalised root; stdio servers start there (else an empty temp dir)
  * @param {{ servers?: object, connect?: Function, readSecret?: Function, gate?: object }} [o.deps]  test seams
  * @returns {Promise<{ tools: Array, statuses: Array<{name: string, status: string, toolCount: number}>, close: () => Promise<void> }>}
  */
-export async function mountMcpTools({ userId, mode, emit, signal, sessionKey, egressNeedsApproval = true, deps = {} }) {
+export async function mountMcpTools({ userId, mode, emit, signal, sessionKey, workspaceRoot, deps = {} }) {
   if (!adapterEnabled()) return EMPTY;
   let servers;
   try {
@@ -66,17 +67,32 @@ export async function mountMcpTools({ userId, mode, emit, signal, sessionKey, eg
 
   let conn;
   try {
-    conn = await (deps.connect ?? connectMcpServers)(servers, { signal, allowPrivate: false, deps: deps.clientDeps });
+    conn = await (deps.connect ?? connectMcpServers)(servers, { signal, allowPrivate: false, ...(workspaceRoot ? { cwd: workspaceRoot } : {}), deps: deps.clientDeps });
   } catch (err) {
     logger.warn('adapter_mcp_connect_failed', { error: String(err?.message || err).slice(0, 120) });
     return EMPTY;
   }
+  // Anything that throws between connecting and handing the connection back (an emit sink, say) must not leak the servers.
+  try {
   for (const st of conn.statuses) {
     if (st.status === 'connected') continue;
     // The id is a registry slug the user chose; shown cleaned and bounded.
     emit({ type: 'notice', kind: 'extensions_mcp', level: 'warning',
       text: `MCP server "${cleanServerText(st.name, 40)}" is unavailable (${REASON_TEXT[st.reason] ?? REASON_TEXT.error}); this turn runs without its tools.`,
       data: { server: cleanServerText(st.name, 40), reason: st.reason ?? 'error' } });
+  }
+
+  const connected = conn.statuses.filter((st) => st.status === 'connected');
+  if (connected.length) {
+    const list = connected.map((st) => `${cleanServerText(st.name, 40)} (${st.toolCount} tool${st.toolCount === 1 ? '' : 's'})`).join(', ');
+    emit({ type: 'notice', kind: 'extensions_mcp', level: 'info',
+      text: `This turn can use your MCP servers: ${list}. Each call asks for approval first.`,
+      data: { servers: connected.map((st) => ({ name: cleanServerText(st.name, 40), toolCount: st.toolCount })) } });
+  }
+  if (conn.dropped?.length) {
+    emit({ type: 'notice', kind: 'extensions_mcp', level: 'warning',
+      text: `${conn.dropped.length} MCP tool${conn.dropped.length === 1 ? ' was' : 's were'} left out of this turn because the tool definitions were too large.`,
+      data: { dropped: conn.dropped.length } });
   }
 
   const ctx = { userId, signal };
@@ -92,10 +108,8 @@ export async function mountMcpTools({ userId, mode, emit, signal, sessionKey, eg
       try {
         const aborted = abortedResult(ctx);
         if (aborted) { outcome = 'aborted'; return aborted; }
-        if (egressNeedsApproval) {
-          const refusal = await parkApproval({ entry: { name: t.name }, args, ctx, emit, sessionKey });
-          if (refusal) { outcome = 'error'; return refusal; }
-        }
+        const refusal = await parkApproval({ entry: { name: t.name }, args, ctx, emit, sessionKey });
+        if (refusal) { outcome = 'error'; return refusal; }
         const res = await t.call(args, { signal });
         if (res.isError) outcome = 'error';
         const text = res.text.length > MAX_TOOL_RESULT_CHARS ? res.text.slice(0, MAX_TOOL_RESULT_CHARS) : res.text;
@@ -112,4 +126,8 @@ export async function mountMcpTools({ userId, mode, emit, signal, sessionKey, eg
     },
   }));
   return { tools, statuses: conn.statuses, close: () => conn.close() };
+  } catch (err) {
+    await Promise.resolve(conn.close()).catch(() => {});
+    throw err;
+  }
 }

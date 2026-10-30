@@ -136,13 +136,22 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     : [];
   // The user's ACTIVE MCP servers, mounted like any other provider tool (mcp-mount.mjs): only when tools are
   // allowed and the model can call them; LLMIDE_EXT_ADAPTER=off is the operator's kill switch. Plugin hooks are
-  // not part of this path and are skipped without a word.
-  const mcp = cap.toolsSupported && toolsAllowed
-    ? await mountMcpTools({ userId, mode, emit: send, signal, sessionKey,
-      egressNeedsApproval: !getSettings(userId, db).egressAutoApprove, deps: deps.mcp })
-    : { tools: [], statuses: [], close: async () => {} };
+  // not part of this path and are skipped without a word. MCP calls always ask first, whatever egressAutoApprove says.
+  let mcp = { tools: [], statuses: [], close: async () => {} };
   const closeMcp = () => Promise.resolve(mcp.close()).catch(() => {});
-  const all = [...built, ...mcp.tools];
+  try {
+  if (cap.toolsSupported && toolsAllowed) {
+    mcp = await mountMcpTools({ userId, mode, emit: send, signal, sessionKey, workspaceRoot: agentContext?.workspaceRoot, deps: deps.mcp });
+  }
+  // A server tool never shadows one of ours: the built-in wins and the MCP tool is left out, visibly.
+  const builtNames = new Set(built.map((t) => t.name));
+  const clash = mcp.tools.filter((t) => builtNames.has(t.name));
+  if (clash.length) {
+    send({ type: 'notice', kind: 'extensions_mcp', level: 'warning',
+      text: `${clash.length} MCP tool${clash.length === 1 ? ' has' : 's have'} the same name as a built-in tool and ${clash.length === 1 ? 'was' : 'were'} left out.`,
+      data: { names: clash.map((t) => t.name) } });
+  }
+  const all = [...built, ...mcp.tools.filter((t) => !builtNames.has(t.name))];
   const tools = compress ? wrapToolsForCompression(all) : all;
   const degraded = !cap.toolsSupported || !toolsAllowed;
   if (degraded) {
@@ -203,4 +212,8 @@ export async function runProviderTurn({ userId, provider, model, message, histor
     } catch (err) { log.warn('provider_turn_meter_failed', { message: redactWithKey(String(err?.message || err), null).slice(0, 120) }); }
   }
   return { ...summary, usageTotals: totals, metered: true, provider: active.provider, model: active.model, switched: pick.switched, tools: tools.map((t) => t.name), entry: catalogEntry(conn.catalogId)?.id };
+  } finally {
+    // The mount, the notices, the model construction and the turn all sit inside this: the servers never outlive it.
+    await closeMcp();
+  }
 }
