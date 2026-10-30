@@ -79,7 +79,9 @@ export function makePinnedFetch({ allowPrivate = false, resolver = systemResolve
         path: `${url.pathname}${url.search}`, method: init.method || 'GET', headers, lookup, agent: false,
         signal: init.signal,
       }, (res) => {
-        if (res.statusCode >= 300 && res.statusCode < 400) {
+        // Default: a redirect is refused (a key rides in Authorization). `redirect: 'manual'` hands the 3xx
+        // response back so a caller can re-validate and pin each hop itself (the web-fetch tool does).
+        if (res.statusCode >= 300 && res.statusCode < 400 && init.redirect !== 'manual') {
           res.destroy();
           reject(new TypeError('fetch failed', { cause: new Error('redirect refused') }));
           return;

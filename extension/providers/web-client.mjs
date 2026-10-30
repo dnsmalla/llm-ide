@@ -12,7 +12,8 @@
 //      (fetchUrl), used only when no Anthropic credential is available.
 // The handlers pick a backend at call time; this module just exposes each one.
 
-import { spawnCli, minimalCliEnv, anthropicWebCliArgs, assertSafeBaseUrlResolved } from './providers.mjs';
+import { spawnCli, minimalCliEnv, anthropicWebCliArgs } from './providers.mjs';
+import { makePinnedFetch } from '../server/pinned-fetch.mjs';
 import { redactWithKey } from '../core/redact-secrets.mjs';
 import { noteUnmeteredModelCall } from '../kb/usage.mjs';
 import { readFileSync } from 'node:fs';
@@ -210,11 +211,45 @@ export async function searchWeb(query, { apiKey, timeoutMs = DEFAULT_TIMEOUT_MS 
   }
 }
 
+/** Largest page body the direct fetch reads; the rest is dropped and the text says so. */
+export const MAX_FETCH_BODY_BYTES = 2 * 1024 * 1024;
+
+/** Read at most `max` bytes of a response body, streamed. @returns {{ text: string, truncated: boolean }} */
+async function readCappedText(res, max) {
+  if (!res.body) return { text: await res.text().then((t) => t.slice(0, max)), truncated: false };
+  const reader = res.body.getReader();
+  const chunks = [];
+  let total = 0;
+  let truncated = false;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (total + value.length > max) {
+      chunks.push(value.subarray(0, max - total));
+      total = max;
+      truncated = true;
+      try { await reader.cancel(); } catch { /* already closing */ }
+      break;
+    }
+    chunks.push(value);
+    total += value.length;
+  }
+  return { text: Buffer.concat(chunks.map((c) => Buffer.from(c))).toString('utf8'), truncated };
+}
+
 /**
  * Fetch a URL and extract text content.
  * Returns { text: "extracted markdown", title: "page title" }
+ *
+ * Every hop (the first request and each redirect, at most `maxRedirects`) goes through the pinned fetch
+ * (server/pinned-fetch.mjs): the hostname is resolved once by the socket itself, every address is
+ * classified, and only a checked address is dialled, so a DNS rebinding answer cannot steer a hop to a
+ * private address. Redirects are followed manually and each Location is re-validated the same way. The
+ * body is streamed and cut at MAX_FETCH_BODY_BYTES.
+ *
+ * `fetchImpl` is a test seam (a pinned fetch built with a fake resolver).
  */
-export async function fetchUrl(urlString, { timeoutMs = DEFAULT_TIMEOUT_MS, maxRedirects = 5 } = {}) {
+export async function fetchUrl(urlString, { timeoutMs = DEFAULT_TIMEOUT_MS, maxRedirects = 5, fetchImpl, maxBytes = MAX_FETCH_BODY_BYTES } = {}) {
   if (!urlString || typeof urlString !== 'string') {
     throw new Error('URL must be a non-empty string');
   }
@@ -228,33 +263,28 @@ export async function fetchUrl(urlString, { timeoutMs = DEFAULT_TIMEOUT_MS, maxR
 
   const controller = new AbortController();
   const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+  const doFetch = fetchImpl || makePinnedFetch();
 
   try {
-    // Follow redirects MANUALLY so every hop is re-checked by the SSRF
-    // guard. The handler validates only the FIRST url; with fetch's default
-    // redirect:'follow' a 302 → http://169.254.169.254 (cloud metadata) or a
-    // private IP would be fetched unchecked. We re-run assertSafeBaseUrlResolved
-    // (https-only + literal + DNS-resolved private-range block) on each
-    // Location before following it.
     let currentUrl = url.toString();
     let res;
     for (let hop = 0; ; hop++) {
-      res = await fetch(currentUrl, { signal: controller.signal, redirect: 'manual' });
+      res = await doFetch(currentUrl, { signal: controller.signal, redirect: 'manual' });
       const isRedirect = res.status >= 300 && res.status < 400 && res.headers.has('location');
       if (!isRedirect) break;
+      try { await res.body?.cancel(); } catch { /* nothing to drain */ }
       if (hop >= maxRedirects) {
         throw new Error(`Too many redirects (>${maxRedirects}) fetching ${urlString}`);
       }
-      const next = new URL(res.headers.get('location'), currentUrl).toString();
-      await assertSafeBaseUrlResolved(next); // throws on private/loopback/non-https target
-      currentUrl = next;
+      currentUrl = new URL(res.headers.get('location'), currentUrl).toString();   // validated and pinned by the next doFetch
     }
     if (!res.ok) {
       throw new Error(`HTTP ${res.status} fetching ${urlString}`);
     }
-    const html = await res.text();
+    const { text: html, truncated } = await readCappedText(res, maxBytes);
     const title = extractTitle(html);
-    const text = extractTextContent(html);
+    let text = extractTextContent(html);
+    if (truncated) text += `\n[page truncated at ${Math.round(maxBytes / 1024)} KB]`;
     return { text, title };
   } finally {
     clearTimeout(timeoutHandle);

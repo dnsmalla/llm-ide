@@ -12,7 +12,7 @@ import { assertSafeBaseUrlResolved, providerApiKey } from '../../../providers/pr
  *   3. Otherwise → a direct HTTP fetch + HTML strip (fallback).
  * `assertSafeBaseUrlResolved` runs first as an SSRF guard — it blocks
  * localhost/private targets and, for the direct-fetch fallback, is the only
- * thing standing between the URL and our own network.
+ * early refusal; the direct fetch itself is pinned per hop (providers/web-client.mjs).
  * Returns { title, text } on success.
  */
 export async function handleFetchUrl(args, { userId } = {}) {
@@ -44,7 +44,7 @@ export async function handleFetchUrl(args, { userId } = {}) {
     if (text) return { title, text };
   } catch (err) { errors.push(`cli: ${err.message}`); }
 
-  // 3. Direct HTTP fetch + HTML strip (SSRF already checked above).
+  // 3. Direct HTTP fetch + HTML strip: pinned at connect time on every hop, body capped (web-client fetchUrl).
   try {
     const { title, text } = await fetchUrl(args.url);
     return { title, text };
