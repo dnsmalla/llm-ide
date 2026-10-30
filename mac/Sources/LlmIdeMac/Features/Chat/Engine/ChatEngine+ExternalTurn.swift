@@ -331,6 +331,7 @@ extension ChatEngine {
                 drainQueueOrRelease()
                 throw error
             }
+            noteTurnFailed(error)
             let isCancellation = Self.isCancellation(error)
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)

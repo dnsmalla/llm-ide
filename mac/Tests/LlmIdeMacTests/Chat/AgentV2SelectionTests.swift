@@ -249,6 +249,71 @@ struct AgentV2SelectionTests {
         }
     }
 
+    /// A legacy (unstamped) chat with a few turns on disk, loaded into a fresh engine over `stream`.
+    func legacyEngine(stream: QueuedAgentV2Stream) -> (ChatEngine, UUID) {
+        let engine = ChatEngine(scope: .explorer, transport: makeComposite(stream: stream))
+        engine.hooks.resolveTransportInput = { message, history, attachments, skills in
+            ChatTransportInput(message: message, history: history, attachments: attachments, skills: skills,
+                               agentContext: nil, language: nil, model: nil, provider: "anthropic", mode: "ask")
+        }
+        var legacy = ChatSession(scope: .explorer, engine: nil)
+        legacy.messages = (0..<4).map { i in
+            ChatMessage(role: i % 2 == 0 ? .user : .assistant, content: "turn \(i)", status: .done, createdAt: Date())
+        }
+        ChatSessionStore.save(legacy)
+        engine.currentSessionIDString = legacy.id.uuidString
+        engine.messages = legacy.messages
+        return (engine, legacy.id)
+    }
+
+    @Test("A stopped or failed first Agent turn that reached the server still stamps the chat, so the next send does not re-seed")
+    func firstTurnStampedAfterServerContact() async throws {
+        try await withTempStore {
+            // streamed text, then the user stops
+            let stopped = QueuedAgentV2Stream()
+            stopped.turns = [okTurn(sessionId: "sdk-1", deltas: ["partial"]).dropLast()]
+            stopped.thrownErrors = [CancellationError()]
+            let (e1, id1) = legacyEngine(stream: stopped)
+            await e1.runTurn("continue")
+            #expect(ChatSessionStore.load(id: id1)?.engine == AgentV2Selection.sessionEngineV2)
+
+            // the server answers with an error of its own
+            let failed = QueuedAgentV2Stream()
+            failed.thrownErrors = [APIError.http(status: 500, code: "ENGINE_ERROR", message: "boom", details: nil)]
+            let (e2, id2) = legacyEngine(stream: failed)
+            await e2.runTurn("continue")
+            #expect(ChatSessionStore.load(id: id2)?.engine == AgentV2Selection.sessionEngineV2)
+        }
+    }
+
+    @Test("A first turn that fails before any server contact leaves the chat legacy, so the next send seeds again")
+    func firstTurnNotStampedBeforeContact() async throws {
+        try await withTempStore {
+            let down = QueuedAgentV2Stream()
+            down.thrownErrors = [URLError(.cannotConnectToHost)]
+            let (e1, id1) = legacyEngine(stream: down)
+            await e1.runTurn("continue")
+            #expect(ChatSessionStore.load(id: id1)?.engine == nil)
+            // and the retry seeds: fresh + history
+            down.thrownErrors = []
+            down.turns = [[], okTurn(sessionId: "sdk-2", deltas: ["ok"])]
+            await e1.runTurn("again")
+            #expect(down.bodies.last?["fresh"] as? Bool == true)
+            #expect(ChatSessionStore.load(id: id1)?.engine == AgentV2Selection.sessionEngineV2)
+
+            // an unsupported provider is also local: nothing was seeded
+            let stream = QueuedAgentV2Stream()
+            let (e2, id2) = legacyEngine(stream: stream)
+            e2.hooks.resolveTransportInput = { message, history, attachments, skills in
+                ChatTransportInput(message: message, history: history, attachments: attachments, skills: skills,
+                                   agentContext: nil, language: nil, model: "gpt-x", provider: "openai", mode: "ask")
+            }
+            await e2.runTurn("continue")
+            #expect(stream.bodies.isEmpty)
+            #expect(ChatSessionStore.load(id: id2)?.engine == nil)
+        }
+    }
+
     // MARK: - Engine-level behavior
 
     func makeV2Engine(stream: QueuedAgentV2Stream) -> ChatEngine {

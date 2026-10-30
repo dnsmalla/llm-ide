@@ -362,6 +362,8 @@ final class ChatEngine {
     /// body) and a full session-file decode per streamed chunk got 10×
     /// heavier when the persist cap rose from 50 to 500 messages.
     var engineMarkerMemo: (sessionID: String, marker: String?)?
+    /// A legacy chat's first Agent-engine turn is running (see `noteServerContact`).
+    var legacyContinuationInFlight = false
 
     /// Agent-turn metadata. The engine owns it; the panel reads the same
     /// object (it is a reference type, so both see one state).
@@ -856,6 +858,7 @@ final class ChatEngine {
             // forever either way — plus the `self.error` banner explaining
             // what went wrong, and a per-message `.failed` status carrying the
             // reason (Task 16 hangs the retry affordance off exactly that).
+            noteTurnFailed(error)
             let isCancellation = Self.isCancellation(error)
             if revealingTurnID == streamingID {
                 finishStreamingTurn(streamingID, pendingTool: nil, tasks: nil, continueNeeded: nil, usage: nil, mode: nil, stopped: true)
@@ -1177,6 +1180,7 @@ final class ChatEngine {
     /// Internal (not private) since Task 17's file split: the external-turn
     /// extension file forwards progress through it.
     func recordProgress(_ progress: LlmIdeAPIClient.AgentProgress) {
+        noteServerContact()
         statusText = progress.label
         // Keep a durable row for each TOOL step (not for thinking/writing,
         // which are momentary): this is the record that replaces the raw fence
@@ -1219,6 +1223,7 @@ final class ChatEngine {
     /// turn calls before it reads or overwrites the turn's content — so no
     /// caller can observe a partially-drained stream.
     func appendStreamedChunk(_ id: UUID, _ text: String) {
+        noteServerContact()
         // A chunk for a different turn means the previous turn is done
         // receiving text; the buffer lands its batch rather than appending
         // across the boundary, and hands it back here to publish.
@@ -1499,6 +1504,7 @@ final class ChatEngine {
         // its last turns; `noteTurnLanded` stamps it afterwards so later turns resume instead of re-seeding.
         if !input.history.isEmpty, currentSessionEngineMarker() != AgentV2Selection.sessionEngineV2 {
             input.continuesLegacyChat = true
+            legacyContinuationInFlight = true
             input.history = Array(input.history.suffix(AgentV2Selection.legacyContinuationTurns))
         }
         guard var ctx = input.agentContext else { return }
@@ -1514,6 +1520,36 @@ final class ChatEngine {
     /// A turn on the Agent engine returned: a legacy chat it continued is now an Agent chat.
     func noteTurnLanded(_ input: ChatTransportInput) {
         if input.continuesLegacyChat { stampAgentEngineIfLegacy() }
+        legacyContinuationInFlight = false
+    }
+
+    /// The server answered something (progress, text, or an error of its own): a legacy chat's first Agent turn
+    /// has made contact, so the chat is stamped even if the turn is then stopped or fails. The server holds a
+    /// session seeded from the recent turns by now; re-seeding on the next send would start another one.
+    func noteServerContact() {
+        guard legacyContinuationInFlight else { return }
+        legacyContinuationInFlight = false
+        stampAgentEngineIfLegacy()
+    }
+
+    /// A turn failed. Stamps unless the failure happened before any server contact (the provider was refused
+    /// locally, or the server could not be reached): then nothing was seeded and the chat stays legacy, so the
+    /// next send seeds again.
+    func noteTurnFailed(_ error: Error) {
+        defer { legacyContinuationInFlight = false }
+        guard legacyContinuationInFlight, !Self.failedBeforeServerContact(error) else { return }
+        stampAgentEngineIfLegacy()
+    }
+
+    static func failedBeforeServerContact(_ error: Error) -> Bool {
+        if error is ChatProviderUnsupportedError { return true }
+        if let urlError = error as? URLError {
+            switch urlError.code {
+            case .cannotConnectToHost, .cannotFindHost, .notConnectedToInternet, .dnsLookupFailed: return true
+            default: return false
+            }
+        }
+        return false
     }
 
     /// Mid-turn task list from the v2 stream. Display only: it moves the
