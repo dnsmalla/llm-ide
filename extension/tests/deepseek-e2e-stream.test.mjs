@@ -88,12 +88,15 @@ test('a DeepSeek chat turn runs the tool loop through the adapter and streams a 
   assert.ok(evs.find((e) => e.type === 'tasks'), 'the stream ends like a Claude turn (tasks event)');
 });
 
-test('execute mode on a model without tools is refused with a message that says what to do', async () => {
-  network();
+test('execute mode on a model without tools degrades to plain chat with a notice and no tool calls', async () => {
+  const posts = network();
   const out = await turn('ds-chat-2', { mode: 'execute', model: 'unlisted-model' });
-  const err = out.events().find((e) => e.type === 'error');
-  assert.equal(err?.code, 'MODEL_LACKS_TOOLS');
-  assert.match(err.message, /tools badge|Settings/);
+  const evs = out.events();
+  assert.ok(!evs.some((e) => e.type === 'error'), 'no refusal');
+  assert.equal(evs.find((e) => e.type === 'notice')?.kind, 'tools_unavailable');
+  assert.deepEqual(evs.find((e) => e.type === 'init').tools, []);
+  assert.ok(posts.every((p) => !p.tools), 'no tools on the wire');
+  assert.ok(!evs.some((e) => e.type === 'approval_request'));
 });
 
 test('the provider going down mid-conversation ends the turn with a retryable error and frees the chat', async () => {

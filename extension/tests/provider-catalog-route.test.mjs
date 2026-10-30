@@ -152,9 +152,16 @@ test('POST /kb/providers/turn: 409 while the switch is off; then a full recorded
   await call(a, 'POST', '/kb/providers/catalog/connect', { catalogId: 'groq', apiKey: KEY });
   const body = { provider: 'custom:cat-groq', model: 'llama-3.3-70b-versatile', message: 'add a task', mode: 'execute', agentContext: { chatSessionId: 'c1' } };
   let res = await call(a, 'POST', '/kb/providers/turn', body);
-  assert.equal(res.statusCode, 409);
-  assert.equal(res.json().error.code, 'PROVIDER_TOOLS_DISABLED');
-  assert.match(res.json().error.message, /Allow tools on provider models/);
+  // tools off: not a refusal; a plain-chat stream opens with the notice
+  await withFetch((url) => (url.endsWith('/models')
+    ? json({ data: [{ id: 'llama-3.3-70b-versatile' }] })
+    : new Response(rec('openai-compatible-final.sse'), { status: 200, headers: { 'content-type': 'text/event-stream' } })), async (calls) => {
+    res = await call(a, 'POST', '/kb/providers/turn', body);
+    assert.equal(res.statusCode, 200);
+    const evs = res.events();
+    assert.deepEqual([evs[0].type, evs[0].kind, evs[0].data.reason], ['notice', 'tools_unavailable', 'tools_off']);
+    assert.ok(!calls.some((c) => c.url.endsWith('/chat/completions') && JSON.parse(c.init.body).tools), 'no tools sent to the provider');
+  });
   await call(a, 'PUT', '/kb/providers/settings', { toolsEnabled: true });
   const sse = [rec('openai-compatible-tool-call.sse'), rec('openai-compatible-final.sse')];
   await withFetch((url) => {
@@ -172,11 +179,13 @@ test('POST /kb/providers/turn: 409 while the switch is off; then a full recorded
     assert.equal(chat.length, 2);
     assert.ok(chat.every((c) => c.url.startsWith('https://api.groq.com/')), 'the key only ever went to the catalog host');
   });
-  // a model without tools in a tool mode is a 400 before any stream
-  await withFetch(() => json({ data: [{ id: 'unknown-model' }] }), async () => {
+  // a model without tools in a tool mode degrades the same way
+  await withFetch((url) => (url.endsWith('/models')
+    ? json({ data: [{ id: 'unknown-model' }] })
+    : new Response(rec('openai-compatible-final.sse'), { status: 200, headers: { 'content-type': 'text/event-stream' } })), async () => {
     res = await call(a, 'POST', '/kb/providers/turn', { ...body, model: 'unknown-model' });
-    assert.equal(res.statusCode, 400);
-    assert.equal(res.json().error.code, 'MODEL_LACKS_TOOLS');
+    assert.equal(res.statusCode, 200);
+    assert.equal(res.events()[0].data.reason, 'model_lacks_tools');
   });
 });
 

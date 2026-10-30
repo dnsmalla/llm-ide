@@ -93,9 +93,9 @@ test('a failure for one provider does not block the others, and the key is never
   void logger;
 });
 
-test('after the migration a DeepSeek-only user can chat in ask mode with no tools; a tool mode needs the visible switch', async () => {
+test('after the migration a DeepSeek-only user can chat in any mode: tools off degrades with a notice, one visible switch mounts tools', async () => {
   const { MockLanguageModelV3, simulateReadableStream } = await import('ai/test');
-  const { runProviderTurn, ProviderTurnError } = await import('../llm_agent/adapter/provider-turn.mjs');
+  const { runProviderTurn } = await import('../llm_agent/adapter/provider-turn.mjs');
   const { _clearModelCacheForTests } = await import('../providers/provider-models.mjs');
   const { fakeFetch, jsonResponse } = await import('./provider-test-env.mjs');
   const { db, users: [a] } = freshDb();
@@ -114,7 +114,10 @@ test('after the migration a DeepSeek-only user can chat in ask mode with no tool
   const ask = await run('ask');
   assert.ok(ask.evs.some((e) => e.type === 'result'));
   assert.deepEqual(ask.evs.find((e) => e.type === 'init').tools, []);
-  await assert.rejects(run('execute'), (e) => e instanceof ProviderTurnError && e.code === 'PROVIDER_TOOLS_DISABLED');
+  const degraded = await run('execute');
+  assert.equal(degraded.evs[0].kind, 'tools_unavailable');
+  assert.deepEqual(degraded.evs.find((e) => e.type === 'init').tools, []);
+  assert.ok(degraded.evs.some((e) => e.type === 'result'), 'no refusal');
   conns.updateSettings(a, { toolsEnabled: true }, db);
   const exec = await run('execute');
   assert.ok(exec.evs.find((e) => e.type === 'init').tools.length > 0, 'one visible switch later, tools are mounted');

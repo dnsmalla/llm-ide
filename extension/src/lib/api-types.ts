@@ -1496,8 +1496,8 @@ export type SettingsPatch = {
 export type ModelCapability = {
   id: string;
   toolsSupported: boolean;
-  /** Where the flag came from; unknown counts as not supported */
-  toolsSource: "catalog" | "provider" | "inferred" | "override" | "unknown";
+  /** Where the flag came from; pattern = the id matches a family third-party guides say supports tools, unverified against the vendor's docs (shown as "tools (assumed)"); unknown counts as not supported */
+  toolsSource: "catalog" | "provider" | "inferred" | "pattern" | "override" | "unknown";
   streaming: boolean;
   contextWindow: number | null;
 };
@@ -5864,8 +5864,6 @@ export type PostKbProvidersTurnResponse403 = CommonError;
 
 export type PostKbProvidersTurnResponse404 = CommonError;
 
-export type PostKbProvidersTurnResponse409 = CommonError;
-
 /** Request parts for `POST /kb/providers/verify` (schema/http/providers-usage.schema.json). */
 export type PostKbProvidersVerifyRequest = {
   body: {
@@ -8114,7 +8112,6 @@ export interface ApiEndpoints {
       401: PostKbProvidersTurnResponse401;
       403: PostKbProvidersTurnResponse403;
       404: PostKbProvidersTurnResponse404;
-      409: PostKbProvidersTurnResponse409;
     };
   };
   "POST /kb/providers/verify": {

@@ -527,8 +527,9 @@ test('flush call sites: shutdown, logout, SDK update, plugin update, MCP consent
   assert.match(server, /flushWarmCliPool\('shutdown'\)/);
   const auth = read('server/auth-routes.mjs');
   assert.match(auth, /flushWarmCliPool\('logout'\)/);
-  assert.match(auth, /flushWarmCliPool\('plugin_update'\)/);
-  assert.match(auth, /flushWarmCliPool\('mcp_consent'\)/);
+  const ext = read('routes/extension-routes.mjs');
+  assert.match(ext, /flushWarmCliPool\('plugin_update'\)/);
+  assert.match(ext, /flushWarmCliPool\('mcp_consent'\)/);
   const router = read('routes/router.mjs');
   assert.match(router, /flushWarmCliPool\('sdk_update'\)/);
 });

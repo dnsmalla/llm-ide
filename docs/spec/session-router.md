@@ -7,6 +7,8 @@ This is the contract for the per-chat route (agent-kit K1 Phase 6b): one chat ca
 
 Everything here is **off by default**. With the switches below unset, a turn behaves exactly as before: no route row is read or written, the routes answer `enabled: false`, and no new column is on the turn path.
 
+A turn on a catalog model that the router hands to the adapter is never refused for lack of tools: with tools off or unsupported it runs as plain chat and opens with a `tools_unavailable` notice ([provider-catalog](provider-catalog.md) section 7), so a chat pinned to a model without tools keeps working in every mode.
+
 Not covered here: the provider catalog and the adapter ([provider-catalog](provider-catalog.md)), the Claude engine ([claude-linker](../explanation/claude-linker.md)), and the chat file lifecycle (live-then-archive).
 
 ---

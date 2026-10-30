@@ -5,7 +5,7 @@
   "request": {
     "body": {
       "provider": "custom:cat-groq",
-      "model": "unknown-model",
+      "model": "",
       "message": "add a task called write tests",
       "mode": "execute",
       "history": [
@@ -26,8 +26,8 @@
   },
   "response": {
     "error": {
-      "code": "MODEL_LACKS_TOOLS",
-      "message": "unknown-model is not known to support tools, and execute mode needs them. Pick a model with the tools badge, or mark this one as tool-capable in Settings, Providers."
+      "code": "VALIDATION_FAILED",
+      "message": "model is required"
     }
   }
 }

@@ -77,3 +77,28 @@ test('base-url guard: private opt-in still refuses link-local and metadata addre
     assert.throws(() => assertProviderBaseUrl(bad, { allowPrivate: true }), undefined, bad);
   }
 });
+
+test('capability patterns: current DeepSeek ids are tool-capable but flagged as assumed; reasoner and unknown stay no-tools; the override wins', () => {
+  const ds = catalogEntry('deepseek');
+  for (const id of ['deepseek-flash', 'deepseek-pro', 'deepseek-v4-pro', 'deepseek-v4-flash']) {
+    const c = modelCapability(ds, id);
+    assert.deepEqual([c.toolsSupported, c.toolsSource], [true, 'pattern'], id);
+  }
+  assert.deepEqual([modelCapability(ds, 'deepseek-chat').toolsSupported, modelCapability(ds, 'deepseek-chat').toolsSource], [true, 'catalog']);
+  assert.equal(modelCapability(ds, 'deepseek-reasoner').toolsSupported, false);
+  assert.deepEqual([modelCapability(ds, 'deepseek-mystery').toolsSupported, modelCapability(ds, 'deepseek-mystery').toolsSource], [false, 'unknown']);
+  const off = modelCapability(ds, 'deepseek-v4-pro', { override: false });
+  assert.deepEqual([off.toolsSupported, off.toolsSource], [false, 'override']);
+});
+
+test('capability patterns: current families of the other vendors are tool-capable, unknown ids are not', () => {
+  const yes = { openai: ['gpt-5', 'gpt-5-mini', 'o4-mini'], google: ['gemini-3-pro', 'models/gemini-2.5-flash'], xai: ['grok-4-fast'], mistral: ['mistral-medium-2508', 'devstral-small'],
+    groq: ['llama-3.1-8b-instant', 'meta-llama/llama-4-scout-17b-16e-instruct', 'qwen/qwen3-32b', 'openai/gpt-oss-120b'], cerebras: ['qwen-3-32b', 'gpt-oss-120b'],
+    together: ['Qwen/Qwen3-235B-A22B', 'meta-llama/Llama-4-Maverick-17B-128E-Instruct-FP8'] };
+  for (const [id, models] of Object.entries(yes)) {
+    for (const m of models) assert.equal(modelCapability(catalogEntry(id), m).toolsSupported, true, `${id}/${m}`);
+  }
+  for (const id of ['openai', 'google', 'mistral', 'groq', 'xai', 'cerebras', 'together']) {
+    assert.equal(modelCapability(catalogEntry(id), 'totally-unknown-model-9').toolsSupported, false, id);
+  }
+});

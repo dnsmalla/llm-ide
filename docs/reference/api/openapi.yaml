@@ -10392,12 +10392,6 @@ paths:
             application/json:
               schema:
                 "$ref": "#/components/schemas/Error"
-        "409":
-          description: "Conflict"
-          content:
-            application/json:
-              schema:
-                "$ref": "#/components/schemas/Error"
   /kb/providers/verify:
     post:
       summary: "Verify an LLM provider credential (live probe or CLI binary check)"
@@ -14438,9 +14432,10 @@ components:
             - "catalog"
             - "provider"
             - "inferred"
+            - "pattern"
             - "override"
             - "unknown"
-          description: "Where the flag came from; unknown counts as not supported"
+          description: "Where the flag came from; pattern = the id matches a family third-party guides say supports tools, unverified against the vendor's docs (shown as \"tools (assumed)\"); unknown counts as not supported"
         streaming:
           type: "boolean"
         contextWindow:

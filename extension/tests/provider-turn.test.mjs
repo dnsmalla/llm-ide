@@ -63,12 +63,21 @@ const expectErr = async (p, code, status) => {
   await assert.rejects(p, (e) => e instanceof ProviderTurnError && e.code === code && e.status === status, code);
 };
 
-test('tools are OFF by default: a tool mode is refused 409 before any event and no model is built', async () => {
+const DEGRADE = /Tools are off for .*; answering without tools\. Turn on "Allow tools on provider models" or pick a tool-capable model for edits and commands\./;
+
+test('tools OFF (the default): a tool mode degrades to plain chat with a notice first, no tools mounted, no approvals', async () => {
   const s = setup({ tools: false });
   for (const mode of ['execute', 'plan', 'assist_plan', 'review']) {
-    const evs = []; let built = 0;
-    await expectErr(runProviderTurn({ userId: s.a, provider: s.provider, model: 'llama-3.3-70b-versatile', message: 'x', mode, onEvent: (e) => evs.push(e), deps: { db: s.db, fetchImpl: s.fetchImpl, modelFor: () => { built += 1; } } }), 'PROVIDER_TOOLS_DISABLED', 409);
-    assert.deepEqual([evs.length, built], [0, 0], mode);
+    const { evs, model } = await turn(s, { args: { mode } });
+    const notice = evs[0];
+    assert.equal(notice.type, 'notice', mode);
+    assert.deepEqual([notice.kind, notice.level, notice.data.reason], ['tools_unavailable', 'warning', 'tools_off'], mode);
+    assert.match(notice.text, DEGRADE, mode);
+    assert.deepEqual(evs.find((e) => e.type === 'init').tools, [], mode);
+    assert.ok(!model.doStreamCalls[0].tools?.length, `${mode}: no tools on the wire`);
+    assert.match(JSON.stringify(model.doStreamCalls[0].prompt), /NO tools/, `${mode}: the prompt says no tools exist`);
+    assert.ok(!evs.some((e) => e.type === 'approval_request'), `${mode}: no approvals`);
+    assert.ok(evs.some((e) => e.type === 'result'), `${mode}: the turn answers`);
   }
 });
 
@@ -94,12 +103,15 @@ test('not connected, no key and bad input are refused before streaming', async (
   await expectErr(runProviderTurn({ ...base, userId: s.b }), 'PROVIDER_NOT_CONNECTED', 404);
 });
 
-test('a tool mode refuses a model without tools instead of silently dropping them', async () => {
+test('a tool mode on a model without tools degrades to plain chat with a notice (no refusal, no tools, no approvals)', async () => {
   const s = setup();
   for (const mode of ['execute', 'plan', 'assist_plan', 'review']) {
-    let built = 0;
-    await expectErr(runProviderTurn({ userId: s.a, provider: s.provider, model: 'brand-new-model', message: 'x', mode, onEvent: () => {}, deps: { db: s.db, fetchImpl: s.fetchImpl, modelFor: () => { built += 1; } } }), 'MODEL_LACKS_TOOLS', 400);
-    assert.equal(built, 0, mode);
+    const { evs, model } = await turn(s, { args: { model: 'brand-new-model', mode } });
+    assert.deepEqual([evs[0].kind, evs[0].data.reason, evs[0].data.toolsAllowed], ['tools_unavailable', 'model_lacks_tools', true], mode);
+    assert.match(evs[0].text, DEGRADE, mode);
+    assert.deepEqual(evs.find((e) => e.type === 'init').tools, [], mode);
+    assert.ok(!model.doStreamCalls[0].tools?.length, mode);
+    assert.ok(!evs.some((e) => e.type === 'approval_request' || e.type === 'tool_use_start'), mode);
   }
 });
 

@@ -79,6 +79,7 @@ _setRegistryFetchForTests(async (url) => {
 });
 const kb = await import('../kb/db.mjs');
 const { handleAuth, isAuthRoute } = await import('../server/auth-routes.mjs');
+const { handleExtensionRoute, isExtensionRoute } = await import('../routes/extension-routes.mjs');
 const { authenticate, isPublicPath } = await import('../server/auth.mjs');
 const jwtMod = await import('../server/jwt.mjs');
 
@@ -121,7 +122,9 @@ function makeRes() {
 async function callAuth(reqOpts) {
   const req = makeReq(reqOpts);
   const res = makeRes();
-  await handleAuth(req, res, { db: kb.getDb(), logger: noopLogger, requestId: 'test-req' });
+  // Same dispatch order as server.mjs: auth routes first, then the extension routes.
+  const handler = isExtensionRoute(req.url) ? handleExtensionRoute : handleAuth;
+  await handler(req, res, { db: kb.getDb(), logger: noopLogger, requestId: 'test-req' });
   return res;
 }
 

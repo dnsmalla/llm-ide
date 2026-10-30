@@ -36,7 +36,7 @@
     },
     {
       "id": "groq", "name": "Groq", "baseURL": "https://api.groq.com/openai/v1", "keyRequired": true, "local": false,
-      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^llama-3\\.[123]", "^llama-4", "^qwen", "^openai/gpt-oss", "^moonshotai/"],
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^llama-3\\.[123]", "^llama-4", "^qwen", "^openai/gpt-oss", "^moonshotai/"], "unverifiedToolPatterns": ["^meta-llama/llama-[34]", "^llama-"],
       "chatPatterns": [".*"], "excludePatterns": ["whisper", "guard", "tts", "playai", "distil-whisper"],
       "docsUrl": "https://console.groq.com/docs",
       "models": [
@@ -46,7 +46,7 @@
     },
     {
       "id": "deepseek", "name": "DeepSeek", "baseURL": "https://api.deepseek.com/v1", "keyRequired": true, "local": false,
-      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^deepseek-chat"],
+      "listKind": "openai", "toolsDefault": false, "toolPatterns": ["^deepseek-chat"], "unverifiedToolPatterns": ["^deepseek-(v\\d+-)?(flash|pro)"],
       "chatPatterns": ["deepseek"], "excludePatterns": [],
       "docsUrl": "https://api-docs.deepseek.com",
       "models": [
@@ -87,7 +87,7 @@
     },
     {
       "id": "together", "name": "Together AI", "baseURL": "https://api.together.xyz/v1", "keyRequired": true, "local": false,
-      "listKind": "together", "toolsDefault": false, "toolPatterns": ["Llama-3\\.[123]", "Llama-4", "Qwen2\\.5", "Qwen3", "Mixtral", "gpt-oss", "DeepSeek-V3"],
+      "listKind": "together", "toolsDefault": false, "toolPatterns": ["Llama-3\\.[123]", "Llama-4", "Qwen2\\.5", "Qwen3", "Mixtral", "gpt-oss", "DeepSeek-V3"], "unverifiedToolPatterns": ["^moonshotai/", "^Qwen/", "^zai-org/"],
       "chatPatterns": [".*"], "excludePatterns": ["embed", "rerank"],
       "docsUrl": "https://docs.together.ai",
       "models": [

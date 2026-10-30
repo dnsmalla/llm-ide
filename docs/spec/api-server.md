@@ -17,7 +17,7 @@ The following source files together constitute the server and its API:
 |---|---|
 | Entry point | `extension/server.mjs` |
 | Auth middleware | `extension/server/auth.mjs`, `extension/server/jwt.mjs` |
-| Route handlers | `extension/server/auth-routes.mjs`, `extension/server/ai-routes.mjs`, `extension/server/export-routes.mjs` |
+| Route handlers | `extension/server/auth-routes.mjs`, `extension/routes/extension-routes.mjs` (plugin, LLM-source and MCP-plugin routes, still under `/auth/me/*`), `extension/server/ai-routes.mjs`, `extension/server/export-routes.mjs` |
 | KB router | `extension/routes/router.mjs` (mounted under `/kb`) |
 | Rate limiting | `extension/server/rate-limit.mjs` |
 | Observability | `extension/server/audit.mjs`, `extension/server/metrics.mjs` |

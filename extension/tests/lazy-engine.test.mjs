@@ -57,6 +57,7 @@ const agentV2 = await import('../routes/agent-v2.mjs');
 await import('../routes/router.mjs');
 await import('../server/ai-routes.mjs');
 await import('../server/auth-routes.mjs');
+await import('../routes/extension-routes.mjs');
 // Loaded at boot whenever auto_tasks is enabled (routes/feature-routes.mjs);
 // its Loop engine import is lazy for the same reason.
 const { handleLoopAgentRoutes } = await import('../routes/loop-agent.mjs');
