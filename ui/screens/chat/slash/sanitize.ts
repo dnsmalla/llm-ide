@@ -20,6 +20,15 @@ export function safeToken(value: unknown, max = 64): string | null {
   return value.length > 0 && value.length <= max && /^[A-Za-z0-9][A-Za-z0-9_.:@+-]*$/.test(value) ? value : null;
 }
 
+/**
+ * A skill or subagent name that is written into the model-facing directive ("Use the <name> skill:"). Ids only:
+ * plugin free text (spaces, quotes, newlines, instructions) must never reach the prompt, so anything else is null.
+ */
+export function safeDirectiveName(value: unknown, max = 64): string | null {
+  if (typeof value !== "string") return null;
+  return value.length > 0 && value.length <= max && /^[A-Za-z0-9][A-Za-z0-9._:/-]*$/.test(value) ? value : null;
+}
+
 /** `<owner> · <description>` with an empty owner dropped (the Mac's `ownedDetail`). */
 export function ownedDetail(owner: unknown, description: unknown, max = 200): string {
   const o = safeLine(owner, 60);

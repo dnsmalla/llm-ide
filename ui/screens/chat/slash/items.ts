@@ -3,7 +3,7 @@
 // Every string that came from a plugin, a catalog or the user's notes is untrusted: it goes through `safeLine`
 // (text only, bidi stripped, capped) and anything inserted into the draft through `safeToken`.
 import { BUILTINS, RESERVED_NAMES, builtinDetail } from "./builtins";
-import { ownedDetail, safeLine, safeToken } from "./sanitize";
+import { ownedDetail, safeDirectiveName, safeLine, safeToken } from "./sanitize";
 import type { Rankable } from "./rank";
 
 export type ItemKind = "command" | "skill" | "subagent" | "librarySkill" | "hook" | "mcp" | "mode" | "model" | "file" | "note";
@@ -90,9 +90,10 @@ export function buildCatalogItems(raw: unknown): Catalog {
   const root = isObj(raw) ? raw : {};
   const sk = isObj(root.skills) ? root.skills : {};
   const pushSkill = (id: string, name: unknown, owner: unknown, desc: unknown) => {
-    const n = safeLine(name, 80);
-    if (!n || skills.length >= MAX_ITEMS_PER_SOURCE) return;
-    skills.push(item("skill", id, n, ownedDetail(owner, desc), { insert: `Use the ${n} skill:` }));
+    // The directive carries the id-shaped name only; a name with free text is not offered (it cannot be referenced safely).
+    const directive = safeDirectiveName(name);
+    if (!directive || skills.length >= MAX_ITEMS_PER_SOURCE) return;
+    skills.push(item("skill", id, directive, ownedDetail(owner, desc), { insert: `Use the ${directive} skill:` }));
   };
   for (const s of [...arr(sk.global), ...arr(sk.internal)]) if (isObj(s)) pushSkill(`skill:${safeLine(s.name, 80)}`, s.name, null, s.description);
   for (const g of arr(sk.plugins)) {
@@ -104,7 +105,7 @@ export function buildCatalogItems(raw: unknown): Catalog {
     if (!isObj(g)) continue;
     for (const s of arr(g.subagents)) {
       if (!isObj(s) || subagents.length >= MAX_ITEMS_PER_SOURCE) continue;
-      const n = safeLine(s.name, 80);
+      const n = safeDirectiveName(s.name);
       if (n) subagents.push(item("subagent", `sub:${safeLine(g.pluginName, 60)}:${n}`, n, ownedDetail(g.pluginName, s.description), { insert: `Use the ${n} subagent:` }));
     }
   }
