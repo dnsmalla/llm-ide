@@ -181,6 +181,34 @@ pub fn rel_of(root: &Path, abs: &Path) -> String {
     out
 }
 
+/// True for a path component git treats as its metadata folder: `.git` in any case, with
+/// NTFS trailing dots/spaces, the `GIT~1` short name, and HFS+/APFS ignorable code points.
+pub fn is_git_component(name: &str) -> bool {
+    let cleaned: String = name
+        .chars()
+        .filter(|c| !matches!(*c, '\u{200c}'..='\u{200f}' | '\u{202a}'..='\u{202e}' | '\u{206a}'..='\u{206f}' | '\u{feff}'))
+        .collect();
+    let t = cleaned.trim_end_matches(['.', ' ']).to_lowercase();
+    t == ".git" || t == "git~1"
+}
+
+fn protected<T>() -> R<T> {
+    err("protected_path", "git metadata (.git) cannot be changed from the editor")
+}
+
+/// Refuses a client path with a `.git` component anywhere (checked before anything touches disk).
+pub fn deny_git_rel(rel: &str) -> R<()> {
+    if rel.split('/').any(is_git_component) {
+        return protected();
+    }
+    Ok(())
+}
+
+/// Refuses a RESOLVED absolute path whose in-root part has a `.git` component (catches symlinks).
+fn deny_git_abs(root: &Path, abs: &Path) -> R<()> {
+    deny_git_rel(&rel_of(root, abs))
+}
+
 // ---- verified file open ---------------------------------------------------------------
 
 pub(crate) fn open_nofollow(p: &Path, write: bool) -> std::io::Result<File> {
@@ -715,6 +743,7 @@ fn current_hash(root: &Path, canonical: &Path) -> R<String> {
 }
 
 pub fn write_file(root: &Path, req: &WriteReq) -> R<WriteResult> {
+    deny_git_rel(&req.path)?;
     let bytes = encode(&req.text, &req.encoding, req.bom)?;
     if bytes.len() > WRITE_MAX {
         return err("too_large", "file is too large to save from the editor");
@@ -727,6 +756,7 @@ pub fn write_file(root: &Path, req: &WriteReq) -> R<WriteResult> {
     };
     let (target, dir, name, orig_meta) = match existing {
         Some(real) => {
+            deny_git_abs(root, &real)?;
             let (_, meta) = open_verified(root, &real)?;
             if !req.force {
                 match &req.expected_hash {
@@ -744,6 +774,7 @@ pub fn write_file(root: &Path, req: &WriteReq) -> R<WriteResult> {
                 return err("conflict", "the file was deleted on disk");
             }
             let (dir, name) = resolve_new(root, &req.path)?;
+            deny_git_abs(root, &dir.join(&name))?;
             (dir.join(&name), dir, name, None)
         }
     };
@@ -799,8 +830,10 @@ pub struct CreateReq {
 }
 
 pub fn create(root: &Path, req: &CreateReq) -> R<String> {
+    deny_git_rel(&req.path)?;
     let (dir, name) = resolve_new(root, &req.path)?;
     let target = dir.join(&name);
+    deny_git_abs(root, &target)?;
     match req.kind.as_str() {
         "file" => {
             let mut o = std::fs::OpenOptions::new();
@@ -886,8 +919,10 @@ pub struct RenameReq {
 
 /// The source is addressed WITHOUT resolving a final symlink (a link is renamed, not its target).
 fn resolve_entry(root: &Path, rel: &str) -> R<PathBuf> {
+    deny_git_rel(rel)?;
     let (dir, name) = resolve_new(root, rel)?;
     let p = dir.join(name);
+    deny_git_abs(root, &p)?;
     if std::fs::symlink_metadata(&p).is_err() {
         return err("not_found", "no such file or folder");
     }
@@ -896,8 +931,10 @@ fn resolve_entry(root: &Path, rel: &str) -> R<PathBuf> {
 
 pub fn rename(root: &Path, req: &RenameReq) -> R<String> {
     let from = resolve_entry(root, &req.from)?;
+    deny_git_rel(&req.to)?;
     let (to_dir, to_name) = resolve_new(root, &req.to)?;
     let to = to_dir.join(&to_name);
+    deny_git_abs(root, &to)?;
     // A folder cannot move into itself.
     if to.starts_with(&from) && to != from {
         return err("invalid_path", "cannot move a folder into itself");
@@ -1194,6 +1231,43 @@ mod tests {
         // Case-only rename works on both case-sensitive and insensitive filesystems.
         assert_eq!(rename(&root, &RenameReq { from: "a".into(), to: "A".into() }).unwrap(), "A");
         assert!(list_dir(&root, &lr("")).unwrap().entries.iter().any(|e| e.name == "A"));
+    }
+
+    #[test]
+    fn git_metadata_is_never_mutable_from_the_webview() {
+        let root = scratch("dotgit");
+        fs::create_dir_all(root.join(".git/hooks")).unwrap();
+        fs::write(root.join(".git/config"), "[core]\n").unwrap();
+        fs::create_dir(root.join("sub")).unwrap();
+        fs::write(root.join("sub/f.txt"), "x").unwrap();
+        for p in [".git/config", ".GIT/config", ".Git/hooks/pre-commit", "sub/.git/config", ".git ", ".git.", "GIT~1/config", ".g\u{200c}it/config"] {
+            assert_eq!(code(write_file(&root, &wr(p, "[core]\nfsmonitor=x\n", None))), "protected_path", "write {p:?}");
+            assert_eq!(code(create(&root, &CreateReq { path: p.into(), kind: "file".into() })), "protected_path", "create {p:?}");
+            assert_eq!(code(rename(&root, &RenameReq { from: "sub/f.txt".into(), to: p.into() })), "protected_path", "rename target {p:?}");
+        }
+        assert_eq!(code(create(&root, &CreateReq { path: ".git".into(), kind: "dir".into() })), "protected_path");
+        assert_eq!(code(rename(&root, &RenameReq { from: ".git".into(), to: "gone".into() })), "protected_path");
+        assert_eq!(code(rename(&root, &RenameReq { from: ".git/config".into(), to: "c".into() })), "protected_path");
+        assert_eq!(code(delete(&root, ".git")), "protected_path");
+        assert_eq!(code(delete(&root, ".git/hooks")), "protected_path");
+        assert_eq!(fs::read_to_string(root.join(".git/config")).unwrap(), "[core]\n");
+        // .gitignore and friends are ordinary files.
+        write_file(&root, &wr(".gitignore", "x\n", None)).unwrap();
+        write_file(&root, &wr(".gitattributes", "* text\n", None)).unwrap_or_else(|e| panic!("{e:?}"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlinks_into_git_metadata_are_protected_too() {
+        let root = scratch("dotgit-link");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::write(root.join(".git/config"), "[core]\n").unwrap();
+        std::os::unix::fs::symlink(root.join(".git/config"), root.join("alias")).unwrap();
+        std::os::unix::fs::symlink(root.join(".git"), root.join("d")).unwrap();
+        assert_eq!(code(write_file(&root, &wr("alias", "x", Some("0")))), "protected_path");
+        assert_eq!(code(write_file(&root, &WriteReq { force: true, ..wr("alias", "x", None) })), "protected_path");
+        assert_eq!(code(write_file(&root, &wr("d/hooks-new", "x", None))), "protected_path");
+        assert_eq!(fs::read_to_string(root.join(".git/config")).unwrap(), "[core]\n");
     }
 
     #[test]
