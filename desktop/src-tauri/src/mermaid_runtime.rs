@@ -323,6 +323,31 @@ pub async fn mermaid_runtime_install() -> Result<Status, FsError> {
     blocking(move || if accepted { install_with(&data, &pin, &CurlFetcher) } else { Ok(status(&data, &pin)) }).await
 }
 
+/// Deletes the installed runtime (idempotent). The caller has already asked the user.
+pub fn remove(data: &Path, pin: &Pin) -> Result<Status, FsError> {
+    let target = runtime_dir(data).join(pin.file_name());
+    match std::fs::remove_file(&target) {
+        Ok(()) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(e) => return Err(herr("io", format!("cannot remove the runtime: {e}"))),
+    }
+    Ok(status(data, pin))
+}
+
+/// Asks the user (native dialog, Cancel first), then deletes the installed runtime.
+/// A declined dialog returns the unchanged status.
+#[tauri::command]
+pub async fn mermaid_runtime_remove() -> Result<Status, FsError> {
+    let data = data_dir()?;
+    let pin = Pin::embedded().map_err(|e| herr("bad_pin", e))?;
+    let text = "Remove the diagram renderer?\n\nMermaid diagrams in Doc Gen and Visual stop rendering until it is \
+                installed again. Notes, documents and every other component are untouched.";
+    let accepted = tauri::async_runtime::spawn_blocking(move || ask("Remove diagram renderer?", text, "Remove", false))
+        .await
+        .map_err(|e| herr("io", format!("task failed: {e}")))?;
+    blocking(move || if accepted { remove(&data, &pin) } else { Ok(status(&data, &pin)) }).await
+}
+
 /// The verified runtime bytes (UTF-8 JavaScript) for the main window to place in a sandboxed frame.
 /// Re-verified against the pin on every call. The host never executes it.
 #[tauri::command]
@@ -435,6 +460,18 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             assert_eq!(std::fs::metadata(data.join("runtime/mermaid-9.9.9.js")).unwrap().permissions().mode() & 0o777, 0o600);
         }
+    }
+
+    #[test]
+    fn remove_deletes_the_runtime_and_is_idempotent() {
+        let data = tmp("remove");
+        let body = b"console.log('mermaid')";
+        let pin = pin_for(body);
+        install_with(&data, &pin, &Fake::ok(body)).unwrap();
+        assert!(read_verified(&data, &pin).unwrap().is_some());
+        assert!(!remove(&data, &pin).unwrap().installed);
+        assert!(files(&data).is_empty(), "the file is gone");
+        assert!(!remove(&data, &pin).unwrap().installed, "removing again is not an error");
     }
 
     #[test]

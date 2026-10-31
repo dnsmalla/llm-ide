@@ -49,12 +49,6 @@ export const NOTICES: Readonly<Record<string, GroupNotice>> = {
     meanwhile: "Doc Gen keeps working as it does today; the server-files switch is simply not offered yet.",
     blockedBy: "Needs a host preference (the Mac keeps docGenUseServerStore in UserDefaults) and the Doc Gen screen to honour it.",
   },
-  "optional-components": {
-    mac: "On-demand downloads that keep the app small (the Mermaid diagram renderer), each checked against a pinned checksum, with Remove.",
-    status: "Planned",
-    meanwhile: "Nothing is downloaded by the desktop app today.",
-    blockedBy: "Needs a host command that downloads a pinned component and verifies its checksum, plus the component store on disk.",
-  },
   "self-heal": {
     mac: "Records app errors, proposes fixes in an isolated worktree, and lets you review and apply a proposal. Only appears on a source checkout.",
     status: "Managed in the Mac app",
@@ -98,7 +92,7 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   workspace:
     "On the Mac this group also holds the workspace profile, menu-bar visibility and Home page choice. The desktop shows the open project, the notes folder and the core's feature set; the profile presets and toolbar toggles are Planned (they need a feature-profile host preference).",
   server:
-    "On the Mac this group also edits the server URL and the Node and project paths, starts and stops the backend and shows its log. Here the core is started and stopped by the app itself; those controls are Planned (they need host commands to restart the core and to read its log).",
+    "On the Mac this group also edits the server URL and the Node and project paths and starts and stops the backend. Here the app starts and owns the core, the log viewer above is real, and a manual restart is not offered yet.",
   updates:
     "The Mac's automatic update checks (Sparkle) and its Check now button are Planned on the desktop (they need the host updater).",
   general:

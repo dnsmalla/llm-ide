@@ -32,7 +32,6 @@ export const MobileGroup = make("mobile");
 export const TokenSavingGroup = make("token-saving");
 export const LoopDefaultsGroup = make("loop-defaults");
 export const DocGenGroup = make("doc-gen");
-export const OptionalComponentsGroup = make("optional-components");
 export const SelfHealGroup = make("self-heal");
 export const ConnectionsGroup = make("connections");
 export const PathsGroup = make("paths");

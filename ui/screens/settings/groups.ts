@@ -43,7 +43,7 @@ export const APP_GROUPS: readonly GroupDef[] = [
   { id: "agent-history", title: "Agent history", sf: "clock.arrow.circlepath", icon: "rotate-ccw-clock", status: "works", band: "app" },
   { id: "folder-trust", title: "Folder trust", sf: "lock.shield", icon: "shield-check", status: "works", band: "app" },
   { id: "extension-sources", title: "Extension sources", sf: "checklist", icon: "list-checks", status: "works", band: "app" },
-  { id: "optional-components", title: "Optional components", sf: "puzzlepiece.extension", icon: "puzzle", status: "host", band: "app" },
+  { id: "optional-components", title: "Optional components", sf: "puzzlepiece.extension", icon: "puzzle", status: "works", band: "app" },
   { id: "self-heal", title: "Self-Heal", sf: "stethoscope", icon: "stethoscope", status: "mac-only", band: "app" },
 ];
 

@@ -32,7 +32,7 @@ const BODIES: Readonly<Record<string, Loader<SectionComponent>>> = {
   "agent-history": dflt(() => import("./sections/AgentHistorySection.tsx")),
   "folder-trust": named(trust, "TrustedFolders"),
   "extension-sources": named(trust, "Allowlist"),
-  "optional-components": named(notices, "OptionalComponentsGroup"),
+  "optional-components": dflt(() => import("./sections/OptionalComponentsSection.tsx")),
   "self-heal": named(notices, "SelfHealGroup"),
   paths: named(notices, "PathsGroup"),
   repositories: named(notices, "RepositoriesGroup"),

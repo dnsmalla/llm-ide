@@ -8,6 +8,7 @@ mod chat_store;
 mod confirm;
 mod core_env;
 mod core_host;
+mod core_log;
 mod foreign_core;
 mod fs_ops;
 mod fs_watch;
@@ -265,6 +266,8 @@ macro_rules! product_handlers {
     ($($spike:path),* $(,)?) => {
         tauri::generate_handler![
                 core_host::core_status,
+                core_log::core_log_read,
+                core_log::core_log_clear,
                 secrets::secrets_status,
                 read_graph_file,
                 project::project_open,
@@ -349,6 +352,7 @@ macro_rules! product_handlers {
                 host_approval::host_bus_proof,
                 mermaid_runtime::mermaid_runtime_status,
                 mermaid_runtime::mermaid_runtime_install,
+                mermaid_runtime::mermaid_runtime_remove,
                 mermaid_runtime::mermaid_runtime_read,
             $($spike),*
         ]

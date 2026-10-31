@@ -8,6 +8,7 @@
 //  - pickFolder: `pick_folder` (no side effect) then a single-use `pick_folder_redeem`; confirmTrust: `trust_confirm`.
 // Still not provided: nothing blocks a macOS build; Windows/Linux hosts share the same commands.
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
+import { decodeComponentStatus, decodeCoreLog } from "../settings/components-model";
 import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { CoreError, type CoreClient } from "./core";
 import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
@@ -78,6 +79,29 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           return path;
         },
         confirmTrust: async (path) => (await d.invoke<unknown>("trust_confirm", { path })) === true,
+        async mermaidStatus() {
+          const s = decodeComponentStatus(await d.invoke<unknown>("mermaid_runtime_status"));
+          if (!s) throw new Error("the desktop host returned a component status this app cannot read");
+          return s;
+        },
+        async installMermaid() {
+          const s = decodeComponentStatus(await d.invoke<unknown>("mermaid_runtime_install"));
+          if (!s) throw new Error("the desktop host returned a component status this app cannot read");
+          return s;
+        },
+        async removeMermaid() {
+          const s = decodeComponentStatus(await d.invoke<unknown>("mermaid_runtime_remove"));
+          if (!s) throw new Error("the desktop host returned a component status this app cannot read");
+          return s;
+        },
+        async coreLog() {
+          const l = decodeCoreLog(await d.invoke<unknown>("core_log_read"));
+          if (!l) throw new Error("the desktop host returned a log this app cannot read");
+          return l;
+        },
+        async clearCoreLog() {
+          await d.invoke<unknown>("core_log_clear");
+        },
       }
     : {};
   const host: SettingsHost = {

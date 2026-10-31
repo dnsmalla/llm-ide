@@ -18,6 +18,22 @@ export interface DiagnosticsInfo {
   platform: string;
 }
 
+/** One optional component the host can install on demand (the Mermaid diagram renderer today). */
+export interface ComponentStatus {
+  installed: boolean;
+  version: string;
+  sizeBytes: number;
+  /** The download host named by the embedded pin (shown before an install). */
+  host: string;
+}
+
+/** The core's log tail as the Server & Backend group shows it. Paths come from the host, never the page. */
+export interface CoreLogText {
+  path: string;
+  text: string;
+  exists: boolean;
+}
+
 export interface SettingsHost {
   /** Versions and core trust state (nonce verified = "spawned"). */
   diagnostics(): Promise<DiagnosticsInfo>;
@@ -44,6 +60,13 @@ export interface SettingsHost {
   setExtraPrefs?(prefs: Partial<{ compress: boolean; learn: boolean; terminal: boolean }>): Promise<void>;
   /** Native, default-Cancel confirmation for trusting a folder (fixed text naming the path). Resolves false on cancel. */
   confirmTrust?(path: string): Promise<boolean>;
+  /** The optional-component store (Mermaid): status, and install/remove behind the host's native dialogs. */
+  mermaidStatus?(): Promise<ComponentStatus>;
+  installMermaid?(): Promise<ComponentStatus>;
+  removeMermaid?(): Promise<ComponentStatus>;
+  /** The core's log tail for the Server & Backend group (fixed paths under the app data dir, bounded). */
+  coreLog?(): Promise<CoreLogText>;
+  clearCoreLog?(): Promise<void>;
   /** The developer-tools switch (shows the Spike item in the toolbar): per viewer, applies at once. */
   getDevTools?(): boolean;
   setDevTools?(on: boolean): void;

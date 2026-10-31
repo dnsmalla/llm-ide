@@ -36,6 +36,9 @@ before(async () => {
       notices: join(SETTINGS, "sections/NoticeSections.tsx"),
       toolperm: join(SETTINGS, "sections/ToolPermissionsSection.tsx"),
       sdk: join(SETTINGS, "sections/AgentSdkSection.tsx"),
+      optional: join(SETTINGS, "sections/OptionalComponentsSection.tsx"),
+      server: join(SETTINGS, "sections/ServerSection.tsx"),
+      componentsModel: join(SETTINGS, "components-model.ts"),
       registryDefault: join(SETTINGS, "registry-default.ts"),
       historyModel: join(SETTINGS, "agent-history-model.ts"),
       secret: join(SETTINGS, "secret-field.ts"),
@@ -56,7 +59,7 @@ before(async () => {
   });
   const t = `?t=${Date.now()}`;
   m = {};
-  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
+  for (const k of ["screen", "providers", "history", "ui", "context", "registry", "groups", "notices", "toolperm", "sdk", "optional", "server", "componentsModel", "registryDefault", "historyModel", "secret"]) m[k] = await import(join(outdir, `${k}.js`) + t);
 });
 
 const env = (client) => ({ client, host: { diagnostics: async () => ({}), copyText: async () => {} } });
@@ -126,13 +129,54 @@ test("SettingsScreen: the real registry renders the Mac's 19 App groups in order
 });
 
 test("Mac-only and planned groups render an honest status card with no control (buttons, inputs, switches)", () => {
-  for (const [name, status] of [["BuildGroup", "Managed in the Mac app"], ["MobileGroup", "Managed in the Mac app"], ["SelfHealGroup", "Managed in the Mac app"], ["TokenSavingGroup", "Status: planned"], ["LoopDefaultsGroup", "Status: planned"], ["DocGenGroup", "Status: planned"], ["OptionalComponentsGroup", "Status: planned"]]) {
+  for (const [name, status] of [["BuildGroup", "Managed in the Mac app"], ["MobileGroup", "Managed in the Mac app"], ["SelfHealGroup", "Managed in the Mac app"], ["TokenSavingGroup", "Status: planned"], ["LoopDefaultsGroup", "Status: planned"], ["DocGenGroup", "Status: planned"]]) {
     const out = html(h(m.notices[name], {}, null));
     assert.ok(out.includes(status), name);
     assert.match(out, /role="group" aria-label="Status on the desktop"/);
     assert.match(out, /Meanwhile:/);
     assert.ok(!/<(button|input|select|textarea)\b/.test(out), `${name} must not contain a control`);
   }
+});
+
+test("Optional components: a real card over the host commands, with no status pretending before data arrives", () => {
+  const e = {
+    client: {},
+    host: {
+      diagnostics: async () => ({}),
+      copyText: async () => {},
+      mermaidStatus: async () => ({ installed: false, version: "11.17.2", sizeBytes: 40_053, host: "cdn.jsdelivr.net" }),
+      installMermaid: async () => ({ installed: true, version: "11.17.2", sizeBytes: 40_053, host: "cdn.jsdelivr.net" }),
+      removeMermaid: async () => ({ installed: false, version: "11.17.2", sizeBytes: 40_053, host: "cdn.jsdelivr.net" }),
+    },
+  };
+  const wrap = (el) => h(m.context.SettingsEnvProvider, { env: e }, el);
+  const out = html(wrap(h(m.optional.default)));
+  assert.match(out, /Mermaid diagram renderer/);
+  assert.match(out, /Reading the component state/);
+  assert.match(out, /<button[^>]*>[^<]*Install renderer<\/button>/);
+  assert.ok(!/Installed<\/span>/.test(out), "nothing claims an install before the host answers");
+  assert.match(out, /sandboxed frame/);
+
+  const noHost = { client: {}, host: { diagnostics: async () => ({}), copyText: async () => {} } };
+  const bare = html(h(m.context.SettingsEnvProvider, { env: noHost }, h(m.optional.default)));
+  assert.match(bare, /needs the desktop host/);
+});
+
+test("Server & Backend: the log viewer is a labelled, read-only block when the host can read the log", () => {
+  const e = {
+    client: { request: async () => ({ status: 200, body: {} }) },
+    host: {
+      diagnostics: async () => ({ appVersion: "0.0.0", coreTrust: "spawned", coreLogPath: "/d/core.log", platform: "macOS" }),
+      copyText: async () => {},
+      coreLog: async () => ({ path: "/d/core/server.log", text: "", exists: false }),
+      clearCoreLog: async () => {},
+    },
+  };
+  const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.server.default)));
+  assert.match(out, /aria-label="Backend log"/);
+  assert.match(out, /No log entries yet/);
+  assert.match(out, /Refresh log/);
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Clear log<\/button>/, "nothing to clear before a log exists");
 });
 
 test("Tool permissions and Agent SDK render labelled controls before any data arrives (loading state)", () => {

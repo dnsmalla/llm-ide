@@ -8,6 +8,8 @@
     "core:window:allow-toggle-maximize",
     "core:window:allow-internal-toggle-maximize",
     "allow-core-status",
+    "allow-core-log-read",
+    "allow-core-log-clear",
     "allow-secrets-status",
     "allow-read-graph-file",
     "allow-project-open",
@@ -92,6 +94,7 @@
     "allow-host-bus-proof",
     "allow-mermaid-runtime-status",
     "allow-mermaid-runtime-install",
+    "allow-mermaid-runtime-remove",
     "allow-mermaid-runtime-read"
   ]
 }

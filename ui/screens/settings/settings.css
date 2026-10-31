@@ -33,6 +33,7 @@
 .st-note { border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-md); background: var(--tok-color-surface); padding: var(--tok-space-md); display: flex; flex-direction: column; gap: var(--tok-space-xs); }
 .st-note ul { margin: 0; padding-left: var(--tok-space-lg); }
 .st-pre { margin: 0; white-space: pre-wrap; font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); }
+.st-log { box-sizing: border-box; margin: 0; max-height: 260px; overflow: auto; padding: var(--tok-space-sm); border: 1px solid var(--tok-color-border); border-radius: var(--tok-radius-sm); background: var(--tok-color-body); color: var(--tok-color-text); font-family: var(--tok-type-mono-family); font-size: var(--tok-type-mono-size); white-space: pre-wrap; overflow-wrap: anywhere; }
 .st-table { width: 100%; border-collapse: collapse; }
 .st-table th, .st-table td { text-align: left; padding: var(--tok-space-xs) var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
 .st-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }

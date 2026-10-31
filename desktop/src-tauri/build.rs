@@ -7,6 +7,8 @@
 const COMMANDS: &[&str] = &[
     "ping",
     "core_status",
+    "core_log_read",
+    "core_log_clear",
     "secrets_status",
     "read_graph_file",
     "project_open",
@@ -101,6 +103,7 @@ const COMMANDS: &[&str] = &[
     "host_bus_proof",
     "mermaid_runtime_status",
     "mermaid_runtime_install",
+    "mermaid_runtime_remove",
     "mermaid_runtime_read",
 ];
 
