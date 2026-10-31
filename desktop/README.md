@@ -15,5 +15,5 @@ npm run tauri build    # release bundle (LLM-IDE Desktop PoC.app on macOS)
 npm run tauri build -- --debug --bundles app   # faster debug .app
 ```
 
-Requirements: Node 20.19+ (tested on 22), Rust 1.84+ (tested on 1.84.1, Homebrew).
+Requirements: Node 20.19+ (tested on 22), Rust 1.88+ (required by `time` 0.3.47; tested on stable 1.99).
 The Rust lockfile (`src-tauri/Cargo.lock`) is resolved for Rust 1.84.

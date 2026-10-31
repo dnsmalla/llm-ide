@@ -3,7 +3,7 @@ name = "llmide-desktop-poc"
 version = "0.0.0"
 description = "LLM-IDE Desktop Tauri PoC (throwaway)"
 edition = "2021"
-rust-version = "1.84"
+rust-version = "1.88"
 resolver = "3"
 publish = false
 
