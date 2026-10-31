@@ -20,4 +20,7 @@ enum LibrarySelection: Hashable {
     /// A connector row. String is the catalog entry's `id` field
     /// (e.g. "box", "slack", "gdrive").
     case connector(String)
+    /// The Extensions catalog screen (installed items, browse, install). A
+    /// single row, so no payload.
+    case extensionsCatalog
 }

@@ -545,6 +545,8 @@ enum ExtensionsSeams {
                     return AnyView(LlmSourcesLibrarySection(model: model, isExpanded: request.isExpanded))
                 case .mcpPlugins:
                     return AnyView(McpPluginsLibrarySection(model: model, isExpanded: request.isExpanded))
+                case .catalog:
+                    return AnyView(ExtensionsCatalogLibrarySection(isExpanded: request.isExpanded))
                 }
             },
             lifecycle: { host in
@@ -565,6 +567,8 @@ enum ExtensionsSeams {
                     return AnyView(LlmSourceDetailView(api: api, sourceId: id).id(id))
                 case .mcpPlugin(let id):
                     return AnyView(McpPluginDetailView(api: api, pluginId: id).id(id))
+                case .extensionsCatalog:
+                    return AnyView(ExtensionsCatalogView(api: api))
                 case .meeting, .file, .connector:
                     return nil
                 }

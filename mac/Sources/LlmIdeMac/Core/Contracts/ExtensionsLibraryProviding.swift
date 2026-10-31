@@ -15,6 +15,8 @@ enum ExtensionsLibrarySectionKind: String, CaseIterable {
     case plugins
     case llmSources
     case mcpPlugins
+    /// One row that opens the installed-extensions catalog screen.
+    case catalog
 }
 
 /// What Library asks of Extensions' per-sidebar state object. Everything else

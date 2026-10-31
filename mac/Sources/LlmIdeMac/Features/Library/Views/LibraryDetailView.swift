@@ -22,7 +22,7 @@ struct LibraryDetailView: View {
                 shell.librarySelection = nil
             }
 
-        case .plugin, .llmSource, .mcpPlugin:
+        case .plugin, .llmSource, .mcpPlugin, .extensionsCatalog:
             // Plugins, LLM sources and MCP servers are Extensions' screens,
             // reached through its detail seam (it applies the per-item `.id`).
             if let selection = shell.librarySelection {
