@@ -141,6 +141,7 @@
       "tier": "T1",
       "lane": "write",
       "write": true,
+      "clients": ["desktop-ui"],
       "available": false,
       "unavailableReason": "Saved custom tasks (named prompt, cron, project) live in the Mac app; Node has no store to resolve a customTaskId.",
       "description": "Run a saved custom task by id (the prompt is part of the saved task, never of the command).",

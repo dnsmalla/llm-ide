@@ -289,6 +289,17 @@ test('a client that claims desktop-ui without host proof is capped at extension;
   }
 });
 
+test('custom.run is desktop-only: every other client class gets 403 KIND_NOT_ALLOWED_FOR_CLIENT and it is reported not allowed', async () => {
+  await reset();
+  for (const client of ['phone-pwa', 'extension', 'ios-native']) {
+    const r = await call('POST', '/bus/commands', cmd({ kind: 'custom.run', args: { customTaskId: 'c-1' } }), { client });
+    assert.equal(r.status, 403, `${client}: ${r.text}`); assert.equal(r.body.error.code, 'KIND_NOT_ALLOWED_FOR_CLIENT', client);
+    const kinds = (await call('GET', '/bus/kinds', undefined, { client })).body;
+    assert.equal(kinds.kinds.find((k) => k.kind === 'custom.run').allowed, false, client);
+  }
+  assert.equal((await call('GET', '/bus/commands')).body.items.length, 0);
+});
+
 test('unavailable kinds answer KIND_NOT_AVAILABLE with the reason; nothing is stubbed as success', async () => {
   await reset();
   for (const [kind, args, client] of [

@@ -35,7 +35,7 @@
       "client": "phone-pwa",
       "kind": "custom.run",
       "flagEnabled": false,
-      "expect": "tier_denied"
+      "expect": "kind_not_allowed"
     },
     {
       "client": "extension",
@@ -71,7 +71,7 @@
       "client": "extension",
       "kind": "custom.run",
       "flagEnabled": false,
-      "expect": "tier_denied"
+      "expect": "kind_not_allowed"
     },
     {
       "client": "ios-native",
@@ -107,7 +107,7 @@
       "client": "ios-native",
       "kind": "custom.run",
       "flagEnabled": false,
-      "expect": "not_available"
+      "expect": "kind_not_allowed"
     },
     {
       "client": "desktop-ui",

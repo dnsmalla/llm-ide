@@ -106,6 +106,7 @@ export function createBus({
       if (Date.now() > Date.parse(cmd.ttlAt)) fail('expired');
       if (!info.available) fail('kind_not_available');
       if (!classInfo(cmd.originClient)?.mayStart.includes(info.tier)) fail('tier_denied');
+      if (Array.isArray(info.clients) && !info.clients.includes(cmd.originClient)) fail('tier_denied');
       const approved = !!cmd.approvedBy;
       if (info.tier === 'T0' && cmd.originClient !== 'desktop-ui' && !approved && !isKindEnabled(userId, kind)) fail('switch_off');
       if (!getDb().prepare('SELECT 1 FROM users WHERE id = ?').get(userId)) fail('not_found');
@@ -181,6 +182,7 @@ export function createBus({
     const flagEnabled = isKindEnabled(userId, frame.kind);
     const gate = decideReceipt({ client, kind: frame.kind, flagEnabled });
     if (gate.outcome === 'tier_denied') throw new BusError(403, 'TIER_DENIED', 'this client may not start that kind of command', { tier: info.tier, client });
+    if (gate.outcome === 'kind_not_allowed') throw new BusError(403, 'KIND_NOT_ALLOWED_FOR_CLIENT', 'this kind can only be started from the desktop', { kind: frame.kind, client });
     if (gate.outcome === 'not_available') throw new BusError(501, 'KIND_NOT_AVAILABLE', 'this kind is not available on this server', { reason: info.unavailableReason });
     if (frame.args.projectId) {
       try { projectRootFor(userId, frame.args.projectId); } catch { throw new BusError(404, 'NOT_FOUND', 'project not found'); }

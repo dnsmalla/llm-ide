@@ -14,12 +14,15 @@ export const classInfo = (client) => (Object.hasOwn(REGISTRY.clientClasses, clie
 /**
  * Receipt-time decision for `kind` started by `client`. Pure.
  * `flagEnabled`: the user's enable flag for the kind (set from the desktop only).
- * @returns {{ outcome: 'run'|'needs_approval'|'tier_denied'|'unknown_kind'|'not_available', reason?: string }}
+ * @returns {{ outcome: 'run'|'needs_approval'|'tier_denied'|'kind_not_allowed'|'unknown_kind'|'not_available', reason?: string }}
  */
 export function decideReceipt({ client, kind, flagEnabled = false }) {
   const info = kindInfo(kind);
   if (!info) return { outcome: 'unknown_kind' };
   const cls = classInfo(client);
+  // A kind may name the only client classes allowed to start it (custom.run: desktop-ui). Checked before the tier so every
+  // other class gets the same answer, whatever its tier ceiling.
+  if (Array.isArray(info.clients) && !info.clients.includes(client)) return { outcome: 'kind_not_allowed', reason: 'kind_clients' };
   if (!cls || !cls.mayStart.includes(info.tier)) return { outcome: 'tier_denied', reason: 'client_class' };
   if (!info.available) return { outcome: 'not_available' };
   const approval = REGISTRY.tiers[info.tier].approval;

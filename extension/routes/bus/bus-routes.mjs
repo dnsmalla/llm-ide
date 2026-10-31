@@ -122,7 +122,7 @@ function describeKind(userId, client, flags, kind, info) {
   const out = {
     kind, tier: info.tier, lane: info.lane, write: info.write, available: info.available, description: info.description,
     engines: engineStatus.filter((e) => e.available).map((e) => e.id), engineStatus, args: info.args, enabled: !!flags[kind],
-    allowed: gate.outcome !== 'tier_denied' && gate.outcome !== 'unknown_kind',
+    allowed: gate.outcome !== 'tier_denied' && gate.outcome !== 'kind_not_allowed' && gate.outcome !== 'unknown_kind',
     needsApproval: gate.outcome === 'needs_approval',
   };
   if (!info.available) out.unavailableReason = info.unavailableReason;
