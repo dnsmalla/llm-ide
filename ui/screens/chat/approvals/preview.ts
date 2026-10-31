@@ -69,3 +69,18 @@ export function buildPreview(a: Pick<PendingApproval, "args" | "argsSummary" | "
   if (a.argsSummary) return { kind: "summary", block: block("Summary", a.argsSummary) };
   return { kind: "none" };
 }
+
+const lines = (v: unknown): number => (typeof v === "string" && v.length > 0 ? v.split("\n").length : 0);
+const len = (v: unknown): number => (typeof v === "string" ? v.length : 0);
+
+/** Size of an edit for a one-line summary: lines removed/added and characters touched. MultiEdit sums its `edits`. */
+export function editStats(args: unknown): { removed: number; added: number; chars: number } {
+  const o = (args && typeof args === "object" ? args : {}) as Record<string, unknown>;
+  const parts: Record<string, unknown>[] = Array.isArray(o.edits) ? (o.edits.filter((e) => e && typeof e === "object") as Record<string, unknown>[]) : [o];
+  let removed = 0, added = 0, chars = 0;
+  for (const e of parts) {
+    const oldS = e.oldString ?? e.old_string, newS = e.newString ?? e.new_string;
+    removed += lines(oldS); added += lines(newS); chars += len(oldS) + len(newS);
+  }
+  return { removed, added, chars };
+}

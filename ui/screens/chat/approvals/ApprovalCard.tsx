@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react"
 import type { PendingApproval } from "../state";
 import { ArgsPreview } from "./ArgsPreview";
 import { DWELL_MS, counterText, nextFocusIndex, routeCardKey, type CardUi, type KeyEventLike } from "./machine";
-import { buildPreview } from "./preview";
+import { buildPreview, editStats } from "./preview";
 import { classifyApproval, toolTitle } from "./risk";
 import { describeRule } from "./rules";
 import { sanitizeText } from "./sanitize";
@@ -24,7 +24,12 @@ export interface ApprovalCardProps {
   turnClosed: boolean;
   onDecide: (action: ToolAction, feedback?: string) => void;
   onConfirmRule: (on: boolean) => void;
-  onBatch: () => void;
+  /** Allow exactly the reviewed members, once each. */
+  onBatch: (members: PendingApproval[]) => void;
+  /** The batch review was opened: these members are now ON SCREEN, so each one's digest is recorded as shown. */
+  onShowBatch?: (members: PendingApproval[]) => void;
+  /** Open the batch review already (tests and restored views). */
+  reviewedInitial?: PendingApproval[] | null;
   batchProgress: { done: number; total: number } | null;
   cardRef?: (el: HTMLElement | null) => void;
   /** Dwell before decisions are accepted (default DWELL_MS; 0 = immediately, for tests). */
@@ -39,9 +44,10 @@ const commandOf = (a: PendingApproval): string | null => {
 
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex='0']";
 
-export function ApprovalCard({ approval, ui, projectRoot, position, total, batch, turnClosed, onDecide, onConfirmRule, onBatch, batchProgress, cardRef, dwellMs = DWELL_MS }: ApprovalCardProps) {
+export function ApprovalCard({ approval, ui, projectRoot, position, total, batch, turnClosed, onDecide, onConfirmRule, onBatch, onShowBatch, reviewedInitial = null, batchProgress, cardRef, dwellMs = DWELL_MS }: ApprovalCardProps) {
   const [note, setNote] = useState("");
-  const [reviewBatch, setReviewBatch] = useState(false);
+  // The batch is frozen when the review opens: what is listed here is exactly what "Allow" decides, even if the queue grows meanwhile.
+  const [reviewed, setReviewed] = useState<PendingApproval[] | null>(reviewedInitial);
   // The panel keys this card by request id, so every new head starts un-armed: see DWELL_MS.
   const [armed, setArmed] = useState(dwellMs <= 0);
   useEffect(() => {
@@ -122,18 +128,19 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
 
       {batch.length > 0 && (
         <div className="appr-batch">
-          {!reviewBatch ? (
-            <button type="button" className="chat-link-btn" disabled={locked} onClick={() => setReviewBatch(true)}>Review {batch.length} similar edits together...</button>
+          {!reviewed ? (
+            <button type="button" className="chat-link-btn" disabled={locked} onClick={() => { const snap = batch.slice(); onShowBatch?.(snap); setReviewed(snap); }}>Review {batch.length} similar edits together...</button>
           ) : (
-            <div role="group" aria-label={`Allow ${batch.length} edits together`}>
-              <p>Allow these {batch.length} edits once each. Each is checked against what was shown for it.</p>
+            <div role="group" aria-label={`Allow ${reviewed.length} edits together`}>
+              <p>Allow these {reviewed.length} edits once each. Every edit is listed below with its file and size, and each can be opened to read its diff. Each is checked against what was shown for it.</p>
+              <p className="chat-muted">Paths are checked as text; links inside the project are resolved by the host when the edit is applied.{batch.length > reviewed.length ? ` ${batch.length - reviewed.length} more similar edits arrived after this list was opened and are not included.` : ""}</p>
               <ul className="appr-batch-list" aria-label="Files in this batch">
-                {batch.map((b) => <li key={b.requestId}>{sanitizeText(classifyApproval(b, projectRoot).path ?? b.argsSummary ?? "", 300).text}</li>)}
+                {reviewed.map((b) => <BatchMember key={b.requestId} approval={b} projectRoot={projectRoot} stats={editStats(b.args)} />)}
               </ul>
               {batchProgress && <p role="status" aria-live="polite">Allowing {batchProgress.done} of {batchProgress.total}...</p>}
               <div className="appr-actions">
-                <button type="button" className="chat-btn chat-primary" disabled={locked} onClick={onBatch}>Allow {batch.length} edits once</button>
-                <button type="button" className="chat-btn" disabled={locked} onClick={() => setReviewBatch(false)}>Cancel</button>
+                <button type="button" className="chat-btn chat-primary" disabled={locked} onClick={() => onBatch(reviewed)}>Allow {reviewed.length} edits once</button>
+                <button type="button" className="chat-btn" disabled={locked} onClick={() => setReviewed(null)}>Cancel</button>
               </div>
             </div>
           )}
@@ -143,5 +150,19 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
         {turnClosed ? "The turn is stopping; this request can no longer be answered." : phase === "expired" ? "Expired. This request can no longer be answered." : "Waiting for you. It is never allowed automatically, and a timeout only denies."}
       </p>
     </section>
+  );
+}
+
+/** One member of a batch: file, size, and its full diff on request (built lazily, so 50 members stay cheap). */
+function BatchMember({ approval, projectRoot, stats }: { approval: PendingApproval; projectRoot: string | null; stats: { removed: number; added: number; chars: number } }) {
+  const [open, setOpen] = useState(false);
+  const path = sanitizeText(classifyApproval(approval, projectRoot).path ?? approval.argsSummary ?? "(no path)", 300).text;
+  return (
+    <li className="appr-batch-member" data-batch-member={approval.requestId}>
+      <span className="appr-path">{path}</span>{" "}
+      <span className="chat-muted">{`+${stats.added}/-${stats.removed} lines, ${stats.chars} characters`}</span>{" "}
+      <button type="button" className="chat-link-btn" aria-expanded={open} aria-label={`${open ? "Hide" : "Show"} the diff for ${path}`} onClick={() => setOpen(!open)}>{open ? "Hide diff" : "Show diff"}</button>
+      {open && <ArgsPreview preview={buildPreview(approval)} />}
+    </li>
   );
 }

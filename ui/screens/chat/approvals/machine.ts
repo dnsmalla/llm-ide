@@ -84,7 +84,8 @@ export function batchGroup(pending: readonly PendingApproval[], head: PendingApp
     if (a.kind !== "ToolApproval" || a.toolName !== head.toolName) return false;
     if (ui.cards[a.requestId]?.phase === "expired" || ui.cards[a.requestId]?.phase === "submitting") return false;
     const r = classifyApproval(a, projectRoot);
-    return r.risk === "edit" && !r.destructive && r.reasons.length === 0;
+    // Positive checks only: a known in-root path, not "not flagged". The classifier is advisory.
+    return r.risk === "edit" && r.pathKnown && !r.outsideProject && !r.destructive && r.reasons.length === 0;
   };
   if (!ok(head)) return [];
   const group = pending.filter(ok).slice(0, MAX_BATCH);

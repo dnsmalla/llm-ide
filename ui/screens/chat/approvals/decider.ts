@@ -17,6 +17,11 @@ export interface DeciderDeps {
 
 export const CHANGED_MESSAGE = "This request changed after it was shown. Review it again before answering.";
 
+/** Record every listed member as SHOWN (its digest is what a later decision is bound to). Call when the members are put on screen. */
+export function showMembers(dispatch: (a: UiAction) => void, members: readonly PendingApproval[]): void {
+  for (const m of members) dispatch({ type: "show", requestId: m.requestId, digest: approvalDigest(m) });
+}
+
 export function makeDecider(d: DeciderDeps) {
   /** One decision. True only when the core accepted it. A refusal leaves the request pending (or expired), never allowed. */
   async function send(a: PendingApproval, req: Omit<DecideRequest, "requestId">): Promise<boolean> {

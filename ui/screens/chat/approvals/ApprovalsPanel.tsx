@@ -8,7 +8,7 @@ import type { DecisionResult } from "../controller";
 import { ApprovalCard, type ToolAction } from "./ApprovalCard";
 import { QuestionCard } from "./QuestionCard";
 import { approvalDigest } from "./digest";
-import { makeDecider, type DecideRequest } from "./decider";
+import { makeDecider, showMembers, type DecideRequest } from "./decider";
 import { batchGroup, counterText, emptyQueueUi, headOf, reduceUi, summarize } from "./machine";
 import { classifyApproval, toolTitle } from "./risk";
 import { sanitizeText } from "./sanitize";
@@ -16,7 +16,8 @@ import { sanitizeText } from "./sanitize";
 export type { DecideRequest };
 
 export interface ApprovalsPanelProps {
-  state: Pick<ChatState, "pendingApprovals" | "phase">;
+  state: Pick<ChatState, "pendingApprovals" | "phase"> & { turnWorkspaceRoot?: string | null };
+  /** The project open NOW. Approvals are judged against the root the turn was SENT with (`state.turnWorkspaceRoot`) when the state carries it. */
   projectRoot: string | null;
   decide: (req: DecideRequest) => Promise<DecisionResult>;
   /** S-L hook: plan cards rendered above the approvals, inside the same region. */
@@ -25,7 +26,10 @@ export interface ApprovalsPanelProps {
 
 const NEXT_UP = 5;
 
-export function ApprovalsPanel({ state, projectRoot, decide, extra }: ApprovalsPanelProps) {
+export function ApprovalsPanel({ state, projectRoot: openRoot, decide, extra }: ApprovalsPanelProps) {
+  // The core scopes rules and checks edits to the turn's root. Unknown (a reattached turn) stays null: nothing is then inside it.
+  const projectRoot = state.turnWorkspaceRoot !== undefined ? state.turnWorkspaceRoot : openRoot;
+  const rootMoved = state.turnWorkspaceRoot !== undefined && state.turnWorkspaceRoot !== null && openRoot !== null && openRoot !== state.turnWorkspaceRoot;
   const pending = state.pendingApprovals;
   const [ui, dispatch] = useReducer(reduceUi, emptyQueueUi);
   const [batchProgress, setBatchProgress] = useState<{ done: number; total: number } | null>(null);
@@ -55,6 +59,7 @@ export function ApprovalsPanel({ state, projectRoot, decide, extra }: ApprovalsP
 
   const decider = useMemo(() => makeDecider({ getUi: () => uiRef.current, getPending: () => pendingRef.current, dispatch, decide }), [decide]);
   const send = decider.send;
+  const onShowBatch = useCallback((members: PendingApproval[]) => showMembers(dispatch, members), []);
   const onBatch = useCallback(async (group: PendingApproval[]) => {
     await decider.batch(group, (done, total) => setBatchProgress(done < total || total === 0 ? { done, total } : null));
     setBatchProgress(null);
@@ -70,6 +75,7 @@ export function ApprovalsPanel({ state, projectRoot, decide, extra }: ApprovalsP
     <div className="appr-region" role="region" aria-label="Requests waiting for you">
       <p className="appr-sr" role="status" aria-live="polite">{counterText(position || 1, pending.length)}{summary.needsIndividualReview ? `, ${summary.needsIndividualReview} need individual review` : ""}</p>
       {extra}
+      {rootMoved && <p className="chat-muted" role="note">The project changed after this turn started. These requests are checked against the project the turn started in: {sanitizeText(state.turnWorkspaceRoot ?? "", 200).text}</p>}
       {pending.length > 1 && (
         <p className="chat-muted appr-counter">
           {pending.length} waiting{summary.needsIndividualReview ? `, ${summary.needsIndividualReview} need individual review` : ""}. Press Alt+. to jump to the current request.
@@ -81,7 +87,7 @@ export function ApprovalsPanel({ state, projectRoot, decide, extra }: ApprovalsP
           batch={group} turnClosed={turnClosed} batchProgress={batchProgress} cardRef={(n) => { cardEl.current = n; }}
           onDecide={(action: ToolAction, feedback) => { void send(head, { action, feedback }); }}
           onConfirmRule={(on) => dispatch({ type: "confirm_rule", requestId: head.requestId, on })}
-          onBatch={() => void onBatch(group)}
+          onShowBatch={onShowBatch} onBatch={(members) => void onBatch(members)}
         />
       )}
       {head && head.kind === "AskUserQuestion" && (

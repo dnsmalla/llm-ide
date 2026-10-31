@@ -251,3 +251,68 @@ test("H8: the session 'all edits' rule is only for a plain in-project edit with 
   assert.equal(A.describeRule({ scope: "session", toolName: "Bash" }, A.classifyApproval(edit("e", "/p/a"), "/p"), "/p", null).ok, false, "the offered rule must name an edit tool");
   assert.equal(sess(edit("e", "/p/a.ts"), null).ok, false, "no root known for the turn");
 });
+
+// ---- M2 batch: every member shown and bound ----
+test("M2: with the old flow only the head is bound, so member 2 fails not_shown (the defect)", () => {
+  const members = Array.from({ length: 5 }, (_, i) => edit(`m${i}`, `/p/f${i}.ts`));
+  let ui = A.emptyQueueUi;
+  ui = A.reduceUi(ui, { type: "show", requestId: "m0", digest: A.approvalDigest(members[0]) });
+  assert.deepEqual(A.checkBinding(ui, members[1]), { ok: false, reason: "not_shown" });
+});
+test("M2: a 50-member batch lists every member and, once shown, all 50 are allowed once each", async () => {
+  const members = Array.from({ length: 50 }, (_, i) => edit(`m${i}`, `/p/dir/f${i}.ts`, { oldString: "a\nb", newString: "a\nb\nc" }));
+  const group = A.batchGroup(members, members[0], "/p", A.emptyQueueUi);
+  assert.equal(group.length, 50);
+  // What the card renders when the review is open: a row per member with path and size, each expandable.
+  const out = html(h(A.ApprovalCard, { approval: members[0], ui: { phase: "idle", error: null, shown: "d", confirmingRule: false }, projectRoot: "/p", position: 1, total: 50, batch: group, turnClosed: false, batchProgress: null, onDecide() {}, onConfirmRule() {}, onBatch() {}, dwellMs: 0, reviewedInitial: group }));
+  assert.equal((out.match(/data-batch-member=/g) ?? []).length, 50);
+  for (const i of [0, 1, 25, 49]) assert.match(out, new RegExp(`/p/dir/f${i}\\.ts`));
+  assert.match(out, /\+3\/-2 lines, 8 characters/);
+  assert.match(out, /Show diff/);
+  // Opening the review records every member as shown; then the decider runs all 50 with real binding checks.
+  let ui = A.emptyQueueUi;
+  const dispatch = (a) => { ui = A.reduceUi(ui, a); };
+  A.showMembers(dispatch, group);
+  const decided = [];
+  const d = A.makeDecider({ getUi: () => ui, getPending: () => members, dispatch, decide: async (req) => { decided.push(req.requestId); return { ok: true }; } });
+  const n = await d.batch(group, () => {});
+  assert.equal(n, 50);
+  assert.equal(decided.length, 50);
+  assert.equal(new Set(decided).size, 50);
+});
+test("M2: a member that changes after the list was shown is refused, not allowed", async () => {
+  const members = Array.from({ length: 4 }, (_, i) => edit(`m${i}`, `/p/f${i}.ts`));
+  let ui = A.emptyQueueUi;
+  const dispatch = (a) => { ui = A.reduceUi(ui, a); };
+  A.showMembers(dispatch, members);
+  const live = members.map((m, i) => (i === 2 ? { ...m, args: { ...m.args, newString: "rm -rf" } } : m));
+  const decided = [];
+  const d = A.makeDecider({ getUi: () => ui, getPending: () => live, dispatch, decide: async (req) => { decided.push(req.requestId); return { ok: true }; } });
+  assert.equal(await d.batch(members, () => {}), 2, "stops at the changed member");
+  assert.deepEqual(decided, ["m0", "m1"]);
+});
+test("M2: the panel wires the card's review to showMembers and decides the card's snapshot", async () => {
+  const fs = await import("node:fs");
+  const panel = fs.readFileSync(new URL("../approvals/ApprovalsPanel.tsx", import.meta.url), "utf8");
+  assert.match(panel, /showMembers\(dispatch, members\)/);
+  assert.match(panel, /onShowBatch=\{onShowBatch\}/);
+  const card = fs.readFileSync(new URL("../approvals/ApprovalCard.tsx", import.meta.url), "utf8");
+  assert.match(card, /onShowBatch\?\.\(snap\)/);
+  const q = Array.from({ length: 60 }, (_, i) => edit(`q${i}`, `/p/f${i}.ts`));
+  const out = html(h(A.ApprovalsPanel, { state: { pendingApprovals: q, phase: "streaming", turnWorkspaceRoot: "/p" }, projectRoot: "/elsewhere", decide: async () => ({ ok: true }) }));
+  assert.match(out, /Review 50 similar edits together/, "judged against the turn's root, not the project open now");
+  assert.match(out, /The project changed after this turn started/);
+  const reattached = html(h(A.ApprovalsPanel, { state: { pendingApprovals: q, phase: "streaming", turnWorkspaceRoot: null }, projectRoot: "/p", decide: async () => ({ ok: true }) }));
+  assert.ok(!/similar edits together/.test(reattached), "unknown turn root: nothing is batchable");
+});
+
+// ---- M1 scope text uses the turn's root ----
+test("M1: the rule's scope text names the root the panel was given by the turn, not the open project", () => {
+  const a = bash("g", "git status", { suggestion: { scope: "project", toolName: "Bash", pattern: "git status" } });
+  const out = html(h(A.ApprovalsPanel, { state: { pendingApprovals: [a], phase: "streaming", turnWorkspaceRoot: "/turn-root" }, projectRoot: "/other" , decide: async () => ({ ok: true }) }));
+  assert.match(out, /Always allow &quot;git status&quot; here/);
+  const r = A.classifyApproval(a, "/turn-root");
+  assert.match(A.describeRule(a.suggestion, r, "/turn-root", "git status").view.scopeText, /Only in \/turn-root\./);
+  const none = html(h(A.ApprovalsPanel, { state: { pendingApprovals: [a], phase: "streaming", turnWorkspaceRoot: null }, projectRoot: "/other", decide: async () => ({ ok: true }) }));
+  assert.ok(!/Always allow/.test(none), "no rule for a turn whose root is unknown");
+});
