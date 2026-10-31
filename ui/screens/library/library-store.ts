@@ -223,6 +223,48 @@ export class LibraryStore {
     this.publish(loaded, { listingDone: true, selectedGone });
   }
 
+  // ---- incremental updates from the write side ------------------------------------------
+  // A write updates the in-memory list from its own result instead of rescanning the folder (50,000
+  // notes must not be re-listed after every save). External changes are picked up by `scan()` (the
+  // Refresh button) or by a save/open conflict.
+
+  /** A note was created or saved: refresh its record from the write result (and its text, when known). */
+  noteWritten(entry: { rel: string; size: number; mtimeMs: number }, text?: string): void {
+    if (this.disposed) return;
+    let rec = recordFromEntry({ rel: entry.rel, size: entry.size, mtimeMs: entry.mtimeMs, placeholder: false });
+    if (text !== undefined) rec = applyHead(rec, text.slice(0, HEAD_BYTES));
+    this.byRel.set(entry.rel, rec);
+    this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done" });
+  }
+
+  /** Notes left the folder (moved to the Trash). */
+  noteRemoved(rels: readonly string[]): void {
+    if (this.disposed) return;
+    let any = false;
+    for (const rel of rels) any = this.byRel.delete(rel) || any;
+    if (!any) return;
+    if (this.pending.length) {
+      this.pending = this.pending.filter((r) => this.byRel.has(r));
+      this.pendingSet = new Set(this.pending);
+    }
+    const sel = this.state.selectedRel;
+    this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done", selectedGone: sel !== null && !this.byRel.has(sel) });
+  }
+
+  /** A note was renamed or moved; it stays selected under its new path. */
+  noteRenamed(from: string, entry: { rel: string; size: number; mtimeMs: number }, text?: string): void {
+    if (this.disposed) return;
+    const wasSelected = this.state.selectedRel === from;
+    const old = this.byRel.get(from);
+    this.byRel.delete(from);
+    let rec = recordFromEntry({ rel: entry.rel, size: entry.size, mtimeMs: entry.mtimeMs, placeholder: false });
+    if (text !== undefined) rec = applyHead(rec, text.slice(0, HEAD_BYTES));
+    else if (old?.headRead) rec = { ...old, rel: rec.rel, name: rec.name, size: rec.size, mtimeMs: rec.mtimeMs, area: rec.area, typeDir: rec.typeDir };
+    this.byRel.set(entry.rel, rec);
+    this.publish(this.byRel.size, { listingDone: this.state.listing.phase === "done" });
+    if (wasSelected) this.patch({ selectedRel: entry.rel });
+  }
+
   /** Asks for these notes' heads next (the rows on screen). */
   prioritize(rels: readonly string[]): void {
     let any = false;
