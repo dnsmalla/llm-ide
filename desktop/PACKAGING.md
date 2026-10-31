@@ -117,8 +117,9 @@ ignorer, leader-already-gone).
 **`core_status` (additive, no existing field changed).** New `state` value `restarting`; new
 fields `restarts` (count), `restart_in_ms` (while restarting), `fatal` (bool), `claude`
 (`unknown` | `found` | `missing`), `claude_source` (`env` | `bundled` | `installed`, never a
-path) and `claude_notice` (the server's own install message when `missing`). A consumer that
-switches on `state` must handle `restarting`.
+path) and `claude_notice` (the server's own install message when `missing`), and
+`core_log_path` (the absolute path of the redacted failure log `core.log`, never its contents; the
+file exists only after a failure). A consumer that switches on `state` must handle `restarting`.
 
 **Data dir.** `llm-ide-desktop` under `~/Library/Application Support` (macOS),
 `%LOCALAPPDATA%` (Windows) or `$XDG_DATA_HOME`/`~/.local/share` (Linux); override with an
@@ -223,6 +224,61 @@ Per-OS caveats:
   installed (NSIS) build with an AppUserModelID is needed for correct attribution.
 - **macOS**: the first `notify` triggers the system permission prompt; the menu-bar icon
   is a color icon unless a template image is supplied (icon polish open).
+
+## Host prefs, neutral folder pick and trust confirmation
+
+**`prefs.json`** (`src-tauri/src/prefs.rs`, `get_prefs` / `set_prefs`). Bounded (16 KB), atomic, 0600, in the
+data dir. Strict typed schema: unknown keys and bad values are refused at deserialisation; an unreadable,
+oversized or hand-edited file means the defaults. Keys: `ltaMode` (`off` default | `shadow` | `on`), `router`,
+`cap`, `compress`, `learn` (token-affecting, default OFF; `cap` and `compress` are stored only while `router`
+is on), `terminal` (default on), `theme`. The file is read once at launch (`prefs::init`, before the core is
+spawned); a change applies at the NEXT start and `restartNeeded` says so. What each does:
+
+- router/cap/compress/learn become `LLMIDE_ROUTER`, `_CAP`, `_COMPRESS`, `_LEARN` for the SPAWNED core, only as
+  the exact value `on` (`extension/core/router-flags.mjs`). The core's environment is scrubbed, so the host's own
+  environment cannot turn them on; an adopted core keeps its own.
+- `terminal` off removes `terminal` from the host's Terminal gate and from the `LLMIDE_FEATURES` the core gets
+  (the explicit list of every other feature; `FEATURE_KEYS` in `prefs.rs` is pinned to `config.mjs` by a test).
+- `ltaMode` is not read by the core (in the Mac app it is a UserDefaults key too): the host's chat archive uses it
+  (`ArchivePolicy`): off = no quit archive and the start sweep only forwards pending deletes; shadow = verify and
+  record receipts, never purge; on = the full verify, receipt, purge.
+- `theme` is mirrored from the webview and used at boot only if the webview's own storage lost the choice.
+There is no `tools` host switch: "tools on provider models" is a core setting (Settings > Model routing).
+
+**`pick_folder`** (`source_pick.rs`) opens the native folder dialog and changes no state (not the project, not the
+notes folder). It returns an opaque single-use token and the folder name; `pick_folder_redeem(token)` releases the
+canonical path once, within two minutes (8 tokens at most). The choice is validated like a project root
+(`project::validate_root`, too-broad refusal). One dialog at a time, rate limited.
+
+**`trust_confirm(path)`** (`confirm.rs`) is the native, default-Cancel confirmation for trusting a folder. The text
+is fixed and names the folder (control and bidi characters removed, capped); the page cannot change the text,
+only name the path (absolute paths only). Used by the chat trust banner (`nativeConfirm`) and Settings > Extensions
+trust. `bypass_confirm` is unchanged.
+
+**Shell exit.** `pty_spawn` takes a second channel, `on_exit`: after a shell's last output batch is delivered it
+fires once, so a tab reads "(exited)" at once.
+
+## macOS app build (`scripts/build-desktop-mac.sh`)
+
+`scripts/build-desktop-mac.sh [--dmg] [--skip-checks] [--no-smoke]` builds `LLM-IDE.app` for this Mac. Steps, each
+idempotent: `npm ci` in `ui/kit` and `desktop` when their lockfile is newer; `stage-core.mjs --target <host>` with
+`LLMIDE_STAGE_RELEASE=1` (pinned, hash-checked official Node, production deps, no SDK `claude` binary, staged-tree
+verifier); `check:security`; `tauri build --bundles app` (runs `npm run build` itself); ad-hoc `codesign --force
+--deep --sign -` then `codesign --verify --deep --strict`; `scripts/verify-bundle.mjs` (layout, node present and
+executable, `server.mjs`, no `claude` executable or SDK package, no `.db` / `.pre-move` / secret files via the
+staged-tree verifier run on the bundle's own copy, Info.plist: `CFBundleIdentifier` `com.llmide.desktop`
+(distinct from the Swift app's `com.llmide.macapp`), `CFBundleName` `LLM-IDE`, the three folder usage
+descriptions); `smoke-core.mjs` against the core inside the app (`LLMIDE_CORE_DIR`); optional `.dmg` with
+`hdiutil` (no Finder scripting, so it works headless). Output:
+`desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app`. It never launches the app.
+
+Signing: ad hoc, no hardened runtime, no entitlements file. That is what a locally built app needs. A Developer ID
+signature with the hardened runtime and notarization additionally needs `com.apple.security.cs.allow-jit` and
+`com.apple.security.cs.disable-library-validation` (the bundled node JITs and loads `better_sqlite3.node`), and
+each nested executable signed with the same identity ([desktop-signing-decisions](../docs/how-to/desktop-signing-decisions.md)).
+Ad-hoc identity changes with every build, so macOS asks again for keychain and folder access after a rebuild.
+Quarantine: a build made here has none; a copied or downloaded app needs
+`xattr -dr com.apple.quarantine /Applications/LLM-IDE.app`. Run it with [RUN-ON-MAC.md](RUN-ON-MAC.md).
 
 ## Host commands for the screens (links, attachments, Bypass, reveal)
 
