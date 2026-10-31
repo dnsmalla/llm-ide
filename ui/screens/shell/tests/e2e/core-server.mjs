@@ -13,7 +13,11 @@ import { fileURLToPath } from "node:url";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "../../../../..");
-const EXT = join(REPO, "extension");
+// LLMIDE_E2E_BUNDLE=<.../LLM-IDE.app/Contents/Resources/core> runs the same suite against the BUNDLED core (its pinned
+// node and pruned extension tree) instead of the source checkout; the build script's headless check for a built app.
+const BUNDLE = process.env.LLMIDE_E2E_BUNDLE ? resolve(process.env.LLMIDE_E2E_BUNDLE) : null;
+const EXT = BUNDLE ? join(BUNDLE, "root", "extension") : join(REPO, "extension");
+const NODE = BUNDLE ? join(BUNDLE, "node", "node") : process.execPath;
 
 function freePort() {
   return new Promise((res, rej) => {
@@ -47,7 +51,7 @@ export async function startCore({ bootTimeoutMs = 40_000 } = {}) {
     LLMIDE_ENGINE_PREWARM: "0",
     LLMIDE_BENCH_FAKE: "1",
   });
-  const child = spawn(process.execPath, ["server.mjs", "--bench-fake"], { cwd: EXT, env, stdio: ["ignore", "pipe", "pipe"] });
+  const child = spawn(NODE, ["server.mjs", "--bench-fake"], { cwd: EXT, env, stdio: ["ignore", "pipe", "pipe"] });
   let output = "";
   child.stdout.on("data", (d) => { output += d; });
   child.stderr.on("data", (d) => { output += d; });

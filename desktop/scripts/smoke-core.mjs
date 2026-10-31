@@ -7,6 +7,7 @@
 //   3. the `claude` probe the host uses runs and prints its marker (found or missing both pass)
 //   4. SIGTERM to the group stops the core, and NO process of the tree survives
 // Usage: node scripts/smoke-core.mjs     (run stage-core.mjs first; host target only)
+//        LLMIDE_CORE_DIR=<.../Contents/Resources/core> node scripts/smoke-core.mjs   (a copy inside a built app)
 import { execFileSync, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
@@ -15,7 +16,9 @@ import { tmpdir } from 'node:os';
 import { delimiter, join, resolve } from 'node:path';
 
 const DESKTOP = resolve(import.meta.dirname, '..');
-const CORE = join(DESKTOP, 'resources', 'core');
+// LLMIDE_CORE_DIR points the smoke test at another copy of the staged core (the build script uses the one
+// inside the finished .app); default is the stage directory.
+const CORE = process.env.LLMIDE_CORE_DIR ? resolve(process.env.LLMIDE_CORE_DIR) : join(DESKTOP, 'resources', 'core');
 const WIN = process.platform === 'win32';
 const NODE = join(CORE, 'node', WIN ? 'node.exe' : 'node');
 const EXT = join(CORE, 'root', 'extension');
