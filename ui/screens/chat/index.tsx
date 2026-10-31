@@ -2,7 +2,8 @@
 // while other sections are shown, so running turns and drafts survive section switches.
 import "@llmide/ui-kit/styles.css";
 import "./chat.css";
-import { useEffect, useMemo, useRef } from "react";
+import "./approvals/approvals.css";
+import { useCallback, useEffect, useMemo, useRef } from "react";
 import { chatBinding, core as shellCore, host as shellHost, invokeHost, relativeToProject, shellBus } from "@llmide/screens/shell";
 import type { SectionProps } from "@llmide/screens/shell";
 import { coreTransportFrom } from "./adapter";
@@ -11,6 +12,8 @@ import { ChatController } from "./controller";
 import { HttpChatStore, type ChatStore } from "./store";
 import { TauriChatStore } from "./tauri-store";
 import { safeHref } from "./markdown";
+import { ApprovalsPanel, TrustBanner } from "./approvals";
+import type { ChatState } from "./state";
 
 export { ChatScreen, type ChatHost, type ChatScreenProps } from "./ChatScreen";
 export { ChatController, type ControllerDeps, type SendOptions, type ChatView } from "./controller";
@@ -76,5 +79,12 @@ export default function ChatSection({ active, projectRoot }: SectionProps) {
     }),
     [],
   );
-  return <ChatScreen controller={controller} store={store} core={transport} host={host} noProject={projectRoot === null} />;
+  // S-G: approval/question cards and the trust banner read the running chat's state; decisions go through the controller.
+  const approvals = useCallback((s: ChatState) => (
+    <ApprovalsPanel state={s} projectRoot={root.current} decide={(req) => controller.decide(s.sessionId, req)} />
+  ), [controller]);
+  const banner = useCallback((s: ChatState) => (
+    <TrustBanner trust={s.workspaceTrust} core={transport} onTrusted={(path) => controller.trustGranted(s.sessionId, path)} />
+  ), [controller, transport]);
+  return <ChatScreen controller={controller} store={store} core={transport} host={host} approvals={approvals} banner={banner} noProject={projectRoot === null} />;
 }

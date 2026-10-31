@@ -6,6 +6,7 @@ import { Composer, type ComposerProps } from "./Composer";
 import { MessageList } from "./MessageList";
 import { CapChip, ModePicker, ModelPicker, PermissionChip } from "./Pickers";
 import { SessionList } from "./SessionList";
+import { ModeBanner } from "./approvals/ModeBanner";
 import type { ChatController } from "./controller";
 import { useChatState, useControllerVersion } from "./hooks";
 import {
@@ -39,7 +40,7 @@ export interface ChatScreenProps {
   /** S-G slot: approval and question cards for the running turn. */
   approvals?: (state: ChatState) => ReactNode;
   /** Shown above the conversation (trust banner, S-G). */
-  banner?: ReactNode;
+  banner?: ReactNode | ((state: ChatState) => ReactNode);
   /** No project is open: the core needs a workspace root, so sending is disabled with a reason. */
   noProject?: boolean;
 }
@@ -148,7 +149,8 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
       />
       <section className="chat-main" aria-label="Chat">
         {listError && <StatusBanner severity="error" message={listError} onDismiss={() => setListError(null)} />}
-        {banner}
+        <ModeBanner mode={permission} />
+        {typeof banner === "function" ? banner(state) : banner}
         {!activeId ? (
           <div className="chat-empty"><p>Select a chat or start a new one.</p><button type="button" className="chat-btn chat-primary" onClick={() => void newChat()}>New chat</button></div>
         ) : (

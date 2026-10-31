@@ -14,3 +14,4 @@ export * from "../SessionList";
 export * from "../Composer";
 export * from "../Pickers";
 export * from "../ChatScreen";
+export * as approvals from "../approvals";
