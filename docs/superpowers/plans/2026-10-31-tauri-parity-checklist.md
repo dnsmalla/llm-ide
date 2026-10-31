@@ -1,6 +1,6 @@
 # Tauri parity checklist against the Mac app
 
-Status: **created 2026-10-31; all Tauri cells empty except where the spike exists.** Date: 2026-10-31, at `main`. Parents: [Phase 3 plan](2026-10-31-tauri-phase3-plan.md), [MASTER-PLAN](../MASTER-PLAN.md) S2, [ADR 0018](../../decisions/0018-tauri-desktop-node-core-relay.md).
+Status: **created 2026-10-31; every Tauri cell is not started (`-`) or deferred; the Phase 0 spike (Monaco, xterm, chat replay) is not counted until a row is verified.** Date: 2026-10-31, at `main`. Parents: [Phase 3 plan](2026-10-31-tauri-phase3-plan.md), [MASTER-PLAN](../MASTER-PLAN.md) S2, [ADR 0018](../../decisions/0018-tauri-desktop-node-core-relay.md).
 
 How to use: one row per behaviour. **Mac** is the reference (Swift source named in the row). **Tauri** is one of `-` (not started), `~` (built, not verified), `x` (verified on macOS), `x+w` (verified on macOS and Windows), `n/a` (decided not to port, with a reason in Evidence), `defer` (planned later). **Evidence** is a test name, a screenshot under `desktop/parity/`, or a commit hash. A row is `x` only with evidence, and visual rows also need the user's side-by-side check. Each slice owner edits only their own section, in the same commit that lands the work. Rows were derived from the Mac source tree, not from memory; an unknown behaviour found later is added as a new row, not skipped.
 
