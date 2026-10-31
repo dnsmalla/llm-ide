@@ -247,11 +247,12 @@ fn another_users_chat_is_invisible_and_never_overwritten() {
     let alice = store(&t, "alice");
     let bob = store(&t, "bob");
     alice.save(session(ID1, 2), SaveMode::Replace, None, true).unwrap();
-    // an unowned (older) file is visible to both, as on the Mac
+    // an unowned (older) file belongs to whoever claimed the legacy chats first (alice opened the store first)
     put(&t, ID2, &fixture("session-v2-no-engine-no-project.json"));
     assert!(bob.list(&q(10)).unwrap().items.iter().all(|c| c.id != ID1));
     assert!(alice.list(&q(10)).unwrap().items.iter().any(|c| c.id == ID1));
-    assert_eq!(bob.list(&q(10)).unwrap().total, 1);
+    assert_eq!(bob.list(&q(10)).unwrap().total, 0, "bob did not claim the unowned chats");
+    assert_eq!(alice.list(&q(10)).unwrap().total, 2);
     assert_eq!(bob.load(ID1, None, 10).unwrap_err().code, "not_found");
     assert_eq!(bob.delete(ID1).unwrap_err().code, "not_found");
     let rev = alice.load(ID1, None, 1).unwrap().revision;
@@ -792,4 +793,66 @@ fn an_oversized_pending_deletes_file_fails_closed_too() {
     f.set_len(SMALL_FILE_MAX + 1).unwrap();
     assert_eq!(s.save(session(ID1, 1), SaveMode::Replace, None, true).unwrap_err().code, "pending_corrupt");
     assert_eq!(std::fs::metadata(&p).unwrap().len(), SMALL_FILE_MAX + 1);
+}
+
+
+fn session_json_unowned() -> Vec<u8> {
+    serde_json::to_vec(&session(ID1, 1)).unwrap()
+}
+
+// ---- user ids and unowned chats --------------------------------------------------------------------
+
+#[test]
+fn user_ids_that_a_filesystem_would_mangle_are_refused() {
+    for ok in ["alice", "user-42", "a.b", "A_1", "u-1.2", "console", "com10", "lpt0", "nulla"] {
+        assert!(valid_user_id(ok), "{ok}");
+    }
+    for bad in [
+        "", ".hidden", "trailing.", "dots..", "con", "CON", "Prn", "aux", "NUL", "com1", "COM9", "lpt1", "LPT9", "con.txt", "NUL.tar.gz",
+        "a b", "a/b", "a\\b", "..", "a:b", &"x".repeat(129),
+    ] {
+        assert!(!valid_user_id(bad), "{bad:?}");
+    }
+}
+
+#[test]
+fn per_user_folders_differing_only_by_case_are_refused() {
+    assert_eq!(dir_case_collision(&["alice", "Bob"], "alice"), None, "the same name is the same user");
+    assert_eq!(dir_case_collision(&["Alice", "bob"], "alice").as_deref(), Some("Alice"));
+    assert_eq!(dir_case_collision(&["ALICE"], "alice").as_deref(), Some("ALICE"));
+    assert_eq!(dir_case_collision(&["carol"], "alice"), None);
+    // end to end: the second casing cannot open the first one's folder
+    let t = Tmp::new("case");
+    let mk = |user: &str| {
+        let base = t.0.join("chats").join(user);
+        ChatStore::open(StoreLayout { sessions: base.join("sessions"), base, shared_with_mac: false }, user, None)
+    };
+    mk("Alice").unwrap();
+    assert_eq!(mk("alice").err().unwrap().code, "user_dir_collision");
+    mk("Alice").unwrap();
+}
+
+#[test]
+fn unowned_chats_belong_to_the_first_user_to_open_the_store_only() {
+    let t = Tmp::new("claim");
+    put(&t, ID2, &fixture("session-v2-no-engine-no-project.json"));
+    let alice = store(&t, "alice");
+    let bob = store(&t, "bob");
+    assert_eq!(alice.list(&q(10)).unwrap().total, 1);
+    assert_eq!(bob.list(&q(10)).unwrap().total, 0);
+    assert_eq!(bob.load(ID2, None, 5).unwrap_err().code, "not_found");
+    assert_eq!(bob.delete(ID2).unwrap_err().code, "not_found");
+    let rev = alice.load(ID2, None, 1).unwrap().revision;
+    assert_eq!(bob.save(session(ID2, 1), SaveMode::Replace, Some(&rev), true).unwrap_err().code, "foreign_owner");
+    assert_eq!(bob.archive_facts(ID2).unwrap().owned_by_user, false);
+    assert_eq!(bob.enforce_tombstones().unwrap(), 0);
+    assert!(alice.load(ID2, None, 5).is_ok());
+    // alice's next save stamps the owner, so the file no longer depends on the claim
+    alice.save(session(ID2, 2), SaveMode::Replace, Some(&rev), true).unwrap();
+    assert_eq!(alice.list(&q(10)).unwrap().total, 1);
+    // a corrupt claim file fails closed: nobody owns the unowned chats
+    std::fs::write(t.0.join("unowned-claim.json"), b"garbage").unwrap();
+    put(&t, ID1, &session_json_unowned());
+    let carol = store(&t, "carol");
+    assert!(carol.list(&q(10)).unwrap().items.iter().all(|c| c.id != ID1));
 }

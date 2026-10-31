@@ -16,7 +16,8 @@
 //! Security and safety rules:
 //! - the webview never supplies a path: ids must parse as UUIDs and the user id as a short
 //!   `[A-Za-z0-9._-]` segment, so no id can leave the store directory;
-//! - files owned by another user (`ownerUserId`) are invisible and never overwritten;
+//! - files owned by another user (`ownerUserId`) are invisible and never overwritten; files with no owner
+//!   (older chats) belong to the first user to open the store (`claim_unowned`);
 //! - an id in `pending-deletes.json` (the Mac's tombstone file, same format) is hidden, refused on
 //!   save, and a resurrected file is removed (delete wins, both ways);
 //! - a writer holds an advisory lock file (`chat-store.lock`, pid + process start time, stale
@@ -117,12 +118,54 @@ pub fn canonical_chat_id(raw: &str) -> Option<String> {
     Some(raw.to_ascii_uppercase())
 }
 
-/// A user id usable as one path segment: 1..=128 of `[A-Za-z0-9._-]`, not starting with a dot.
+const WIN_RESERVED: [&str; 22] = [
+    "con", "prn", "aux", "nul", "com1", "com2", "com3", "com4", "com5", "com6", "com7", "com8", "com9", "lpt1", "lpt2", "lpt3", "lpt4", "lpt5", "lpt6", "lpt7",
+    "lpt8", "lpt9",
+];
+
+/// A user id usable as one path segment on every OS: 1..=128 of `[A-Za-z0-9._-]`, not starting or ending
+/// with a dot (Windows silently drops a trailing dot or space, so `alice.` would be `alice`), and not a
+/// Windows device name (`CON`, `NUL`, `COM1`, ... also with an extension, `con.txt`).
 pub fn valid_user_id(raw: &str) -> bool {
-    !raw.is_empty()
-        && raw.len() <= 128
-        && !raw.starts_with('.')
-        && raw.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-'))
+    if raw.is_empty() || raw.len() > 128 || raw.starts_with('.') || raw.ends_with('.') {
+        return false;
+    }
+    if !raw.bytes().all(|c| c.is_ascii_alphanumeric() || matches!(c, b'.' | b'_' | b'-')) {
+        return false;
+    }
+    let stem = raw.split('.').next().unwrap_or("").to_ascii_lowercase();
+    !WIN_RESERVED.contains(&stem.as_str())
+}
+
+/// A sibling folder name that equals `user` ignoring ASCII case but not exactly: on a case-insensitive
+/// filesystem (macOS, Windows) both ids would share one folder and so one set of chats.
+pub fn dir_case_collision(siblings: &[&str], user: &str) -> Option<String> {
+    siblings.iter().find(|s| **s != user && s.eq_ignore_ascii_case(user)).map(|s| s.to_string())
+}
+
+/// First-claim rule for chat files that carry no `ownerUserId` (older chats): the first user to open the
+/// store claims them (`unowned-claim.json`, created exclusively) and only that user sees them. The Mac app
+/// instead shows unowned chats to whoever is signed in until its explicit "Claim N older chats" action;
+/// this store has no UI for that action, so the first opener is the claimant. Any read problem fails closed.
+fn claim_unowned(base: &Path, user: &str) -> bool {
+    let path = base.join("unowned-claim.json");
+    let body = serde_json::json!({ "userId": user }).to_string();
+    let mut opts = OpenOptions::new();
+    opts.write(true).create_new(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        opts.mode(0o600);
+    }
+    match opts.open(&path) {
+        Ok(mut f) => f.write_all(body.as_bytes()).and_then(|()| f.sync_all()).is_ok(),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => read_small(&path, 4096)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok())
+            .and_then(|v| v.get("userId").and_then(Value::as_str).map(|u| u == user))
+            .unwrap_or(false),
+        Err(_) => false,
+    }
 }
 
 // ---- time -----------------------------------------------------------------------------------
@@ -728,6 +771,8 @@ struct Inner {
     index_path: Option<PathBuf>,
     cache: Mutex<IndexCache>,
     lock_timeout: Duration,
+    /// This user claimed the chat files that have no owner (see `claim_unowned`).
+    claims_unowned: bool,
 }
 
 #[derive(Default, Serialize, Deserialize)]
@@ -838,8 +883,19 @@ impl ChatStore {
         if !valid_user_id(user_id) {
             return Err(StoreError::new("invalid_user", "invalid user id"));
         }
+        // Per-user folder names must not alias on a case-insensitive filesystem.
+        if !layout.shared_with_mac && layout.base.file_name().and_then(|n| n.to_str()) == Some(user_id) {
+            if let Some(parent) = layout.base.parent() {
+                let names: Vec<String> = std::fs::read_dir(parent).map(|rd| rd.flatten().filter_map(|e| e.file_name().to_str().map(str::to_owned)).collect()).unwrap_or_default();
+                let refs: Vec<&str> = names.iter().map(String::as_str).collect();
+                if dir_case_collision(&refs, user_id).is_some() {
+                    return Err(StoreError::new("user_dir_collision", "another user id differs from this one only by letter case"));
+                }
+            }
+        }
         ensure_dir(&layout.base)?;
         ensure_dir(&layout.sessions)?;
+        let claims_unowned = claim_unowned(&layout.base, user_id);
         Ok(Self {
             inner: Arc::new(Inner {
                 layout,
@@ -848,12 +904,21 @@ impl ChatStore {
                 cache: Mutex::new(IndexCache::default()),
                 // Tests share the process-wide lock across parallel threads; a loaded CI box must not turn that into flakes.
                 lock_timeout: if cfg!(test) { Duration::from_secs(30) } else { Duration::from_secs(3) },
+                claims_unowned,
             }),
         })
     }
 
     pub fn user_id(&self) -> &str {
         &self.inner.user_id
+    }
+
+    /// May this user touch a chat whose file names `owner` (`None` = an unowned, older chat)?
+    fn may_access(&self, owner: Option<&str>) -> bool {
+        match owner {
+            Some(o) => o == self.user_id(),
+            None => self.inner.claims_unowned,
+        }
     }
 
     fn file_path(&self, canonical: &str) -> PathBuf {
@@ -1079,7 +1144,7 @@ impl ChatStore {
                     if tomb.contains(id) {
                         continue;
                     }
-                    if owner.as_deref().is_some_and(|o| o != self.user_id()) {
+                    if !self.may_access(owner.as_deref()) {
                         continue;
                     }
                     if q.scope.as_deref().is_some_and(|s| summary.scope.as_deref() != Some(s)) {
@@ -1133,7 +1198,7 @@ impl ChatStore {
             return Err(StoreError::new("unsupported", "chat file has no messages array"));
         };
         let owner = fields.get("ownerUserId").and_then(Value::as_str);
-        if owner.is_some_and(|o| o != self.user_id()) {
+        if !self.may_access(owner) {
             return Err(StoreError::new("not_found", "no such chat"));
         }
         if canonical_chat_id(fields.get("id").and_then(Value::as_str).unwrap_or("")).as_deref() != Some(id.as_str()) {
@@ -1196,10 +1261,8 @@ impl ChatStore {
             let bytes = read_small(&path, MAX_WRITE_BYTES as u64 + 1).map_err(|e| io_err("read chat", &e))?;
             match serde_json::from_slice::<Value>(&bytes) {
                 Ok(Value::Object(m)) => {
-                    if let Some(o) = m.get("ownerUserId").and_then(Value::as_str) {
-                        if o != self.user_id() {
-                            return Err(StoreError::new("foreign_owner", "this chat belongs to another user"));
-                        }
+                    if !self.may_access(m.get("ownerUserId").and_then(Value::as_str)) {
+                        return Err(StoreError::new("foreign_owner", "this chat belongs to another user"));
                     }
                     stored = Some(m);
                 }
@@ -1277,7 +1340,7 @@ impl ChatStore {
         let path = self.file_path(&id);
         if let Ok(b) = read_small(&path, SMALL_FILE_MAX) {
             if let Ok(Value::Object(m)) = serde_json::from_slice::<Value>(&b) {
-                if m.get("ownerUserId").and_then(Value::as_str).is_some_and(|o| o != self.user_id()) {
+                if !self.may_access(m.get("ownerUserId").and_then(Value::as_str)) {
                     return Err(StoreError::new("not_found", "no such chat"));
                 }
             }
@@ -1309,7 +1372,7 @@ impl ChatStore {
         let f = File::open(self.file_path(id)).ok()?;
         let size = f.metadata().ok()?.len();
         match parse_header(&f, size, id) {
-            Parsed::Ok { summary, owner } if owner.as_deref().is_none_or(|o| o == self.user_id()) => Some(summary.title),
+            Parsed::Ok { summary, owner } if self.may_access(owner.as_deref()) => Some(summary.title),
             _ => None,
         }
     }
@@ -1393,7 +1456,7 @@ impl ChatStore {
                 if m.is_file() {
                     // Only this user's (or unowned) files; another user's tombstone is theirs to send.
                     let owner = read_small(&path, SMALL_FILE_MAX).ok().and_then(|b| serde_json::from_slice::<Value>(&b).ok()).and_then(|v| v.get("ownerUserId").and_then(Value::as_str).map(str::to_owned));
-                    if owner.as_deref().is_none_or(|o| o == self.user_id()) && matches!(self.trash_file(&id), Ok(true)) {
+                    if self.may_access(owner.as_deref()) && matches!(self.trash_file(&id), Ok(true)) {
                         n += 1;
                     }
                 }
@@ -1436,7 +1499,7 @@ impl ChatStore {
             high_water: hw,
             exists: true,
             decoded: id_ok,
-            owned_by_user: owner.is_none_or(|o| o == self.user_id()),
+            owned_by_user: self.may_access(owner),
             message_count: h.0,
             last_used_apple: doc.fields.get("lastUsedAt").and_then(Value::as_f64),
             hash: Some(h.1),
