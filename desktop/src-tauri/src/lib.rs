@@ -14,6 +14,36 @@ use core_host::CoreHost;
 use tauri::ipc::{Channel, Response};
 use tauri::{Manager, RunEvent};
 
+/// True for the app's own origin only: the bundled frontend (`tauri://localhost`, or
+/// `http(s)://tauri.localhost` on Windows) and `about:blank`; debug builds also allow
+/// the Vite dev server. Any other navigation (a link, a redirect, `location=`) is
+/// blocked so the webview, which holds the IPC grants, can never show remote content.
+fn navigation_allowed(url: &tauri::Url) -> bool {
+    match url.scheme() {
+        "tauri" => url.host_str() == Some("localhost"),
+        "http" | "https" => {
+            if url.host_str() == Some("tauri.localhost") {
+                return true;
+            }
+            cfg!(debug_assertions) && url.scheme() == "http" && url.host_str() == Some("127.0.0.1") && url.port() == Some(5173)
+        }
+        "about" => url.as_str() == "about:blank",
+        _ => false,
+    }
+}
+
+fn navigation_guard() -> tauri::plugin::TauriPlugin<tauri::Wry> {
+    tauri::plugin::Builder::<tauri::Wry, ()>::new("navigation-guard")
+        .on_navigation(|_webview, url| {
+            let ok = navigation_allowed(url);
+            if !ok {
+                eprintln!("blocked navigation to {}://{}", url.scheme(), url.host_str().unwrap_or(""));
+            }
+            ok
+        })
+        .build()
+}
+
 /// Process-wide handle so the panic hook can reach the spawned child.
 static CORE: OnceLock<CoreHost> = OnceLock::new();
 
@@ -162,6 +192,7 @@ pub fn run() {
 
     let app = tauri::Builder::default()
         .manage(host)
+        .plugin(navigation_guard())
         .plugin(tauri_plugin_notification::init())
         // A reload drops the webview's terminal state; its shells must not outlive it.
         .on_page_load(|_webview, payload| {
@@ -240,4 +271,27 @@ pub fn run() {
         }
         _ => {}
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::navigation_allowed;
+
+    fn url(s: &str) -> tauri::Url {
+        s.parse().unwrap()
+    }
+
+    #[test]
+    fn only_the_apps_own_origin_may_be_navigated_to() {
+        for ok in ["tauri://localhost/index.html", "http://tauri.localhost/", "https://tauri.localhost/x", "about:blank"] {
+            assert!(navigation_allowed(&url(ok)), "{ok}");
+        }
+        for bad in [
+            "https://example.com/", "http://127.0.0.1:3456/health", "http://localhost/", "file:///etc/passwd",
+            "javascript:alert(1)", "data:text/html,hi", "tauri://evil/", "http://tauri.localhost.evil.com/",
+            "about:srcdoc", "blob:http://tauri.localhost/x", "ftp://tauri.localhost/",
+        ] {
+            assert!(!navigation_allowed(&url(bad)), "{bad}");
+        }
+    }
 }
