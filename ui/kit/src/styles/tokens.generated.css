@@ -1,0 +1,126 @@
+/* GENERATED - do not edit.
+ * Source: schema/design/tokens.json
+ * Regenerate with `node scripts/gen-design-tokens.mjs` (or `make design-tokens`).
+ * Check with `node scripts/gen-design-tokens.mjs --check` (part of `make contract-gates`).
+ *
+ * :root holds the default theme's colours and the theme-independent tokens
+ * (spacing, radius, type). Each [data-theme="<id>"] block overrides only the
+ * colours. Colour values are written as rgb() percentages so they carry the
+ * exact authored components. Variables are prefixed --tok- so they cannot
+ * collide with a stylesheet's own names.
+ */
+:root {
+  /* default theme: dark */
+  --tok-color-body: rgb(7% 8% 11%);
+  --tok-color-surface: rgb(14% 15% 20%);
+  --tok-color-surface2: rgb(19% 20% 26%);
+  --tok-color-border: rgb(100% 100% 100% / 14%);
+  --tok-color-text: rgb(94% 95% 98%);
+  --tok-color-text-muted: rgb(78% 81% 90%);
+  --tok-color-accent: rgb(40% 72% 82%);
+  --tok-color-accent2: rgb(55% 70% 100%);
+  --tok-color-accent3: rgb(38% 90% 65%);
+  --tok-color-accent4: rgb(98% 82% 40%);
+  --tok-color-danger: rgb(96% 50% 50%);
+  --tok-color-row-alt: rgb(100% 100% 100% / 4%);
+  --tok-color-grid-line: rgb(100% 100% 100% / 12%);
+  --tok-color-category-purple: rgb(70% 56% 95%);
+  --tok-color-category-teal: rgb(42% 78% 82%);
+  --tok-color-category-amber: rgb(90% 70% 35%);
+  --tok-space-xs: 4px;
+  --tok-space-sm: 8px;
+  --tok-space-md: 12px;
+  --tok-space-lg: 16px;
+  --tok-space-xl: 24px;
+  --tok-space-xxl: 32px;
+  --tok-radius-sm: 6px;
+  --tok-radius-md: 10px;
+  --tok-radius-lg: 14px;
+  --tok-type-sans-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif;
+  --tok-type-mono-family: ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace;
+  --tok-type-display-size: 26px;
+  --tok-type-display-weight: 700;
+  --tok-type-title-size: 18px;
+  --tok-type-title-weight: 600;
+  --tok-type-section-size: 12px;
+  --tok-type-section-weight: 600;
+  --tok-type-body-size: 13px;
+  --tok-type-body-weight: 400;
+  --tok-type-body-strong-size: 13px;
+  --tok-type-body-strong-weight: 600;
+  --tok-type-caption-size: 11px;
+  --tok-type-caption-weight: 400;
+  --tok-type-caption-strong-size: 11px;
+  --tok-type-caption-strong-weight: 600;
+  --tok-type-mono-size: 11px;
+  --tok-type-mono-weight: 400;
+  --tok-type-filename-size: 12px;
+  --tok-type-filename-weight: 400;
+  --tok-type-file-meta-size: 10px;
+  --tok-type-file-meta-weight: 400;
+  --tok-type-tree-header-size: 10px;
+  --tok-type-tree-header-weight: 600;
+  --tok-type-empty-title-size: 12px; /* platform callout text style */
+  --tok-type-empty-title-weight: 500;
+  --tok-type-empty-hint-size: 10px; /* platform caption text style */
+  --tok-type-empty-hint-weight: 400;
+  --tok-type-button-size: 12px; /* platform callout text style */
+  --tok-type-button-weight: 500;
+}
+
+:root[data-theme="dark"] {
+  --tok-color-body: rgb(7% 8% 11%);
+  --tok-color-surface: rgb(14% 15% 20%);
+  --tok-color-surface2: rgb(19% 20% 26%);
+  --tok-color-border: rgb(100% 100% 100% / 14%);
+  --tok-color-text: rgb(94% 95% 98%);
+  --tok-color-text-muted: rgb(78% 81% 90%);
+  --tok-color-accent: rgb(40% 72% 82%);
+  --tok-color-accent2: rgb(55% 70% 100%);
+  --tok-color-accent3: rgb(38% 90% 65%);
+  --tok-color-accent4: rgb(98% 82% 40%);
+  --tok-color-danger: rgb(96% 50% 50%);
+  --tok-color-row-alt: rgb(100% 100% 100% / 4%);
+  --tok-color-grid-line: rgb(100% 100% 100% / 12%);
+  --tok-color-category-purple: rgb(70% 56% 95%);
+  --tok-color-category-teal: rgb(42% 78% 82%);
+  --tok-color-category-amber: rgb(90% 70% 35%);
+}
+
+:root[data-theme="light"] {
+  --tok-color-body: rgb(97% 97% 98%);
+  --tok-color-surface: rgb(100% 100% 100%);
+  --tok-color-surface2: rgb(95% 96% 98%);
+  --tok-color-border: rgb(0% 0% 0% / 10%);
+  --tok-color-text: rgb(12% 14% 18%);
+  --tok-color-text-muted: rgb(42% 46% 55%);
+  --tok-color-accent: rgb(18% 49% 56%);
+  --tok-color-accent2: rgb(20% 40% 85%);
+  --tok-color-accent3: rgb(18% 65% 40%);
+  --tok-color-accent4: rgb(85% 55% 10%);
+  --tok-color-danger: rgb(80% 20% 20%);
+  --tok-color-row-alt: rgb(0% 0% 0% / 2.5%);
+  --tok-color-grid-line: rgb(0% 0% 0% / 8%);
+  --tok-color-category-purple: rgb(52% 36% 78%);
+  --tok-color-category-teal: rgb(10% 52% 55%);
+  --tok-color-category-amber: rgb(72% 48% 8%);
+}
+
+:root[data-theme="midnight"] {
+  --tok-color-body: rgb(6% 7% 13%);
+  --tok-color-surface: rgb(12% 14% 21%);
+  --tok-color-surface2: rgb(17% 19% 27%);
+  --tok-color-border: rgb(100% 100% 100% / 16%);
+  --tok-color-text: rgb(93% 95% 99%);
+  --tok-color-text-muted: rgb(78% 83% 93%);
+  --tok-color-accent: rgb(55% 74% 100%);
+  --tok-color-accent2: rgb(65% 82% 100%);
+  --tok-color-accent3: rgb(45% 92% 72%);
+  --tok-color-accent4: rgb(99% 85% 50%);
+  --tok-color-danger: rgb(98% 55% 55%);
+  --tok-color-row-alt: rgb(100% 100% 100% / 4%);
+  --tok-color-grid-line: rgb(100% 100% 100% / 12%);
+  --tok-color-category-purple: rgb(76% 64% 100%);
+  --tok-color-category-teal: rgb(52% 86% 90%);
+  --tok-color-category-amber: rgb(95% 78% 45%);
+}

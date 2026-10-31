@@ -1,0 +1,322 @@
+/* ui-kit component styles. Styled only with the generated tokens (tokens.generated.css)
+ * and the derived aliases (aliases.css); no raw colours. Metrics mirror
+ * mac/Sources/LlmIdeMac/Core/DesignSystem/*. */
+
+/* ---- Shared primitives ----------------------------------------------- */
+
+.ui-icon-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--tok-radius-sm);
+  background: transparent;
+  color: var(--tok-color-text-muted);
+  cursor: pointer;
+}
+.ui-icon-button:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
+.ui-icon-button[aria-pressed="true"] { color: var(--tok-color-accent); background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); }
+
+.ui-chrome-bar { display: flex; align-items: center; gap: var(--tok-space-sm); height: 30px; flex: none; box-sizing: border-box; padding: 0 var(--tok-space-md); background: var(--tok-color-surface); border-bottom: 1px solid var(--tok-color-border); }
+.ui-chrome-title { font-size: var(--tok-type-section-size); font-weight: var(--tok-type-section-weight); color: var(--tok-color-text-muted); }
+.ui-chrome-spacer { flex: 1; min-width: 0; }
+
+/* Keyboard focus: every interactive kit element shows the accent ring. */
+:where([class*="ui-"]):focus-visible { outline: 2px solid var(--tok-color-accent); outline-offset: 1px; }
+
+/* Reduced motion: no transitions or animations inside kit components. */
+@media (prefers-reduced-motion: reduce) {
+  :where([class*="ui-"]), :where([class*="ui-"])::before, :where([class*="ui-"])::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}
+
+/* Library sidebar (LibraryView: 368 px at this width). */
+.ui-library {
+  width: 368px;
+  flex: none;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--tok-color-surface);
+  border-right: 1px solid var(--tok-color-border);
+  overflow-y: auto;
+}
+.ui-lib-search {
+  height: 44px;
+  flex: none;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 10px;
+  border-bottom: 1px solid var(--tok-color-border);
+  color: var(--tok-color-text-muted);
+}
+.ui-lib-search-input {
+  flex: 1;
+  min-width: 0;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--tok-color-text);
+  font: inherit;
+  font-size: 14px;
+}
+.ui-lib-search-input::placeholder { color: var(--tok-color-text-muted); opacity: 0.8; }
+.ui-lib-empty { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 20px 16px; text-align: center; color: var(--tok-color-text-muted); }
+.ui-lib-empty-title { font-size: 14px; font-weight: 500; color: var(--tok-color-text-muted); }
+.ui-lib-empty-hint { font-size: 12px; line-height: 1.4; opacity: 0.8; max-width: 300px; }
+.ui-lib-sections { display: flex; flex-direction: column; padding: 0 22px; }
+.ui-lib-section { display: flex; flex-direction: column; }
+.ui-lib-header {
+  display: flex;
+  align-items: center;
+  padding: 12px 0 3px;
+  border-bottom: 1px solid var(--tok-color-border);
+}
+.ui-lib-header-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  text-align: left;
+}
+.ui-lib-chevron { width: 10px; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); opacity: 0.6; transition: transform 0.18s ease-in-out; }
+.ui-lib-chevron[data-open="true"] { transform: rotate(90deg); }
+.ui-lib-chevron svg { width: 8px; height: 8px; }
+.ui-lib-chip { width: 18px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border-radius: 4px; }
+.ui-lib-title { font-size: 11px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.5px; white-space: nowrap; }
+.ui-lib-count { font-size: 9px; font-weight: 600; }
+.ui-lib-plus { width: 20px; height: 18px; flex: none; display: inline-flex; align-items: center; justify-content: center; border: 0; background: transparent; cursor: pointer; }
+.ui-lib-section-body { padding: 6px 0 8px 34px; font-size: 11px; color: var(--tok-color-text-muted); opacity: 0.8; }
+
+/* Empty "Select an Item" state (LibraryDetailView). */
+.ui-select-empty {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  text-align: center;
+  color: var(--tok-color-text-muted);
+}
+.ui-select-empty-icon { opacity: 0.4; display: inline-flex; }
+.ui-select-empty-title { font-size: 28px; font-weight: 600; opacity: 0.6; }
+.ui-select-empty-hint { font-size: 14px; opacity: 0.6; }
+
+
+.ui-section-label {
+  font-size: var(--tok-type-tree-header-size);
+  font-weight: var(--tok-type-tree-header-weight);
+  color: var(--tok-color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+/* ---- Editor tab strip (EditorTabBar.swift) --------------------------- */
+
+.ui-tabbar {
+  height: 35px;
+  flex: none;
+  display: flex;
+  overflow-x: auto;
+  scrollbar-width: none;
+  background: var(--tok-color-surface);
+  border-bottom: 1px solid var(--tok-color-border);
+}
+.ui-tabbar::-webkit-scrollbar { display: none; }
+.ui-tab {
+  position: relative;
+  flex: none;
+  height: 35px;
+  display: flex;
+  align-items: center;
+  box-sizing: border-box;
+  padding: 0 6px 0 12px;
+  color: var(--tok-color-text-muted);
+  background: transparent;
+}
+.ui-tab:hover { background: color-mix(in srgb, var(--tok-color-text) 6%, transparent); }
+.ui-tab[aria-selected="true"] { background: var(--tok-color-body); color: var(--tok-color-text); }
+.ui-tab[aria-selected="true"]::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 2px;
+  background: var(--tok-color-accent);
+}
+.ui-tab-select {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: var(--tok-type-filename-size);
+  cursor: pointer;
+  min-width: 0;
+}
+.ui-tab-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.ui-tab-dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--tok-color-accent); flex: none; }
+.ui-tab-close {
+  width: 16px;
+  height: 16px;
+  margin-left: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--tok-color-text-muted);
+  font-size: 9px;
+  line-height: 16px;
+  opacity: 0;
+  cursor: pointer;
+}
+.ui-tab:hover .ui-tab-close,
+.ui-tab[aria-selected="true"] .ui-tab-close { opacity: 1; }
+.ui-tab-close:hover { color: var(--tok-color-text); background: color-mix(in srgb, var(--tok-color-text) 15%, transparent); }
+.ui-tab-divider { width: 1px; height: 18px; margin-left: 6px; align-self: center; background: var(--tok-color-border); flex: none; }
+
+/* ---- File tree rows (TreeRowLabel.swift) ------------------------------ */
+
+.ui-tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px var(--tok-space-xs) 2px 0;
+  font-size: var(--tok-type-filename-size);
+  color: var(--tok-color-text);
+  cursor: default;
+  user-select: none;
+  min-width: 0;
+}
+.ui-tree-row:hover { background: color-mix(in srgb, var(--tok-color-text) 5%, transparent); }
+.ui-tree-row[aria-selected="true"] { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
+.ui-tree-guides { display: flex; align-self: stretch; }
+.ui-tree-guide { width: 1px; margin: 0 7px 0 6px; background: color-mix(in srgb, var(--tok-color-text-muted) 18%, transparent); }
+.ui-tree-chevron { width: 10px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); font-size: 9px; font-weight: 600; background: none; border: 0; padding: 0; cursor: pointer; }
+.ui-tree-chevron-static { width: 10px; flex: none; }
+.ui-tree-icon { width: 16px; flex: none; display: inline-flex; justify-content: center; color: var(--tok-color-text-muted); }
+.ui-tree-icon-file { font-size: 11px; }
+.ui-tree-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.ui-tree-badge { font-size: 9px; font-weight: 600; color: var(--tok-color-text-muted); margin-left: 4px; }
+.ui-tree-spacer { flex: 1; }
+.ui-tree-git-letter { font-size: var(--tok-type-file-meta-size); font-weight: 600; opacity: 0.7; padding-right: 2px; }
+.ui-tree-row[data-deleted="true"] .ui-tree-name { text-decoration: line-through; }
+/* Git status palette: same mapping as Theme.color(for: GitTruthStore.Decoration). */
+.ui-tree-row[data-git="added"],
+.ui-tree-row[data-git="untracked"] { color: var(--tok-color-success); }
+.ui-tree-row[data-git="deleted"] { color: var(--tok-color-danger); }
+.ui-tree-row[data-git="conflicted"] { color: var(--tok-color-warning); }
+.ui-tree-row[data-git="modified"] { color: var(--tok-color-info); }
+.ui-tree-row[data-git] .ui-tree-git-letter { color: inherit; }
+
+/* ---- Settings section card (SettingsSectionCard.swift) ---------------- */
+
+.ui-settings-section { display: flex; flex-direction: column; gap: var(--tok-space-sm); }
+.ui-settings-header {
+  display: flex;
+  align-items: center;
+  gap: var(--tok-space-sm);
+  width: 100%;
+  padding: 4px 0;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+.ui-settings-icon { font-size: 13px; font-weight: 600; color: var(--tok-color-info); display: inline-flex; }
+.ui-settings-title {
+  font-size: var(--tok-type-section-size);
+  font-weight: var(--tok-type-section-weight);
+  color: var(--tok-color-text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+.ui-settings-spacer { flex: 1; }
+.ui-settings-chevron { display: inline-flex; color: var(--tok-color-text-muted); transition: transform 0.18s ease-in-out; }
+.ui-settings-chevron[data-open="true"] { transform: rotate(90deg); }
+.ui-card {
+  box-sizing: border-box;
+  width: 100%;
+  padding: var(--tok-space-lg);
+  background: var(--tok-color-surface);
+  border: 0.5px solid var(--tok-color-border);
+  border-radius: var(--tok-radius-md);
+}
+
+/* ---- Chip (Components/Chip.swift) ------------------------------------- */
+
+.ui-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  box-sizing: border-box;
+  padding: 4px 8px;
+  border: 1px solid var(--tok-color-border);
+  border-radius: 999px;
+  background: var(--tok-color-surface);
+  color: var(--tok-color-text-muted);
+  font-size: 11px;
+  font-weight: 400;
+  white-space: nowrap;
+  cursor: default;
+}
+.ui-chip[data-compact="true"] { padding: 4px 5px; }
+.ui-chip[data-active="true"] {
+  background: color-mix(in srgb, var(--tok-color-accent) 10%, transparent);
+  border-color: color-mix(in srgb, var(--tok-color-accent) 35%, transparent);
+  color: var(--tok-color-accent);
+  font-weight: 500;
+}
+button.ui-chip { cursor: pointer; }
+.ui-chip-label { overflow: hidden; text-overflow: ellipsis; }
+.ui-chip-trailing { font-size: 8px; }
+
+/* ---- Status banner (Components/StatusBanner.swift) -------------------- */
+
+.ui-banner {
+  --tint: var(--tok-color-info);
+  display: flex;
+  align-items: flex-start;
+  gap: var(--tok-space-sm);
+  box-sizing: border-box;
+  width: 100%;
+  padding: 12px;
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--tint) 8%, transparent);
+  color: var(--tok-color-text);
+  font-size: var(--tok-type-section-size);
+  line-height: 1.4;
+}
+.ui-banner[data-severity="error"] { --tint: var(--tok-color-danger); }
+.ui-banner[data-severity="warning"] { --tint: var(--tok-color-warning); }
+.ui-banner[data-severity="info"] { --tint: var(--tok-color-info); }
+.ui-banner-icon { color: var(--tint); flex: none; font-size: 13px; line-height: 1.4; }
+.ui-banner-message { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+.ui-banner-dismiss { flex: none; color: var(--tok-color-text-muted); }
+
+/* ---- Resizable divider (Components/ResizableDivider.swift) ------------ */
+
+.ui-divider { position: relative; flex: none; width: 1px; background: var(--tok-color-border); }
+.ui-divider-handle {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 8px;
+  cursor: col-resize;
+  z-index: 1;
+}
+.ui-divider-handle[data-dragging="true"] { background: color-mix(in srgb, var(--tok-color-accent) 25%, transparent); }

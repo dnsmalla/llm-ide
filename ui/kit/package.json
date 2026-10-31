@@ -1,0 +1,32 @@
+{
+  "name": "@llmide/ui-kit",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "LLM-IDE ui-kit: design tokens (CSS from schema/design/tokens.json) and shared accessible React components for every web surface",
+  "license": "UNLICENSED",
+  "exports": {
+    ".": "./src/index.ts",
+    "./styles.css": "./src/styles/kit.css",
+    "./tokens.css": "./src/styles/tokens.generated.css"
+  },
+  "sideEffects": ["*.css"],
+  "scripts": {
+    "type-check": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
+    "icons": "node scripts/vendor-icons.mjs",
+    "gallery": "node scripts/build-gallery.mjs"
+  },
+  "peerDependencies": {
+    "react": "^18.2.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "esbuild": "0.28.2",
+    "lucide-static": "1.65.0",
+    "react": "19.3.1",
+    "react-dom": "19.3.1",
+    "typescript": "5.9.3"
+  }
+}

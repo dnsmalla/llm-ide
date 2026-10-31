@@ -11,6 +11,12 @@
 //                                                           System view host (Vite); the
 //                                                           page itself is graph-kit's web/
 //
+//   ui/kit/src/styles/tokens.generated.css                 the same CSS, shipped by the
+//                                                           shared React package ui/kit
+//                                                           (desktop, phone PWA, relay web)
+//   ui/kit/src/themes.generated.ts                         theme ids/names for the kit's
+//                                                           theme switcher (TypeScript)
+//
 //   node scripts/gen-design-tokens.mjs           write the files
 //   node scripts/gen-design-tokens.mjs --check   exit 1 when a file is stale, or when
 //                                                the source is malformed
@@ -18,9 +24,9 @@
 // Output is deterministic, so --check is a plain byte comparison. The source
 // lists every value; nothing here invents a value.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join, dirname, resolve, relative } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SOURCE = join(ROOT, 'schema/design/tokens.json');
@@ -28,6 +34,8 @@ const SWIFT_OUT = join(ROOT, 'mac/Sources/LlmIdeMac/Core/Platform/ThemeTokens.sw
 const CSS_OUT = join(ROOT, 'schema/design/tokens.css');
 const EXT_CSS_OUT = join(ROOT, 'extension/src/styles/tokens.generated.css');
 const UI_CSS_OUT = join(ROOT, 'ui/os-view/src/tokens.generated.css');
+const KIT_CSS_OUT = join(ROOT, 'ui/kit/src/styles/tokens.generated.css');
+const KIT_THEMES_OUT = join(ROOT, 'ui/kit/src/themes.generated.ts');
 const CHECK = process.argv.includes('--check');
 
 // The colour roles every theme must define, in the order the Swift Palette lists them.
@@ -44,6 +52,11 @@ const TYPE = [
 ];
 const WEIGHTS = { regular: 400, medium: 500, semibold: 600, bold: 700 };
 const TEXT_STYLES = ['callout', 'caption'];
+// Web fallback sizes for the platform text styles (macOS HIG point sizes), so a web
+// surface paints the same size the Mac resolves from the style name.
+const TEXT_STYLE_PX = { callout: 12, caption: 10 };
+const SANS_STACK = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif';
+const MONO_STACK = 'ui-monospace, "SF Mono", SFMono-Regular, Menlo, Consolas, monospace';
 
 // ---------- validation ----------
 
@@ -285,19 +298,30 @@ function colourBlock(t) {
   return ROLES.map((r) => `  --tok-color-${kebab(r)}: ${cssColour(t.colors[r])};`).join('\n');
 }
 
-function generateCss(src) {
+// `web` adds what a web surface needs beyond the legacy outputs (kept byte-identical
+// so the committed System-view bundle stays valid): the sans family, a cross-platform
+// mono stack, the platform text-style sizes, and an explicit weight for every role.
+function generateCss(src, { web = false } = {}) {
   const defaultTheme = src.themes[0];
   const shared = [
     ...SPACING.map((k) => `  --tok-space-${k}: ${lit(src.spacing[k])}px;`),
     ...RADIUS.map((k) => `  --tok-radius-${k}: ${lit(src.radius[k])}px;`),
-    '  --tok-type-mono-family: ui-monospace, SFMono-Regular, Menlo, monospace;',
+    ...(web
+      ? [`  --tok-type-sans-family: ${SANS_STACK};`, `  --tok-type-mono-family: ${MONO_STACK};`]
+      : ['  --tok-type-mono-family: ui-monospace, SFMono-Regular, Menlo, monospace;']),
   ];
   for (const k of TYPE) {
     const t = src.typography[k];
     const name = kebab(k);
-    if (t.size !== undefined) shared.push(`  --tok-type-${name}-size: ${lit(t.size)}px;`);
-    if (t.weight !== undefined) shared.push(`  --tok-type-${name}-weight: ${WEIGHTS[t.weight]};`);
-    if (t.textStyle !== undefined) {
+    if (t.size !== undefined) {
+      shared.push(`  --tok-type-${name}-size: ${lit(t.size)}px;`);
+    } else if (web) {
+      shared.push(`  --tok-type-${name}-size: ${TEXT_STYLE_PX[t.textStyle]}px; /* platform ${t.textStyle} text style */`);
+    }
+    if (t.weight !== undefined || web) {
+      shared.push(`  --tok-type-${name}-weight: ${WEIGHTS[t.weight ?? 'regular']};`);
+    }
+    if (t.size === undefined && !web) {
       shared.push(`  /* ${name}: platform ${t.textStyle} text style, no fixed size */`);
     }
   }
@@ -320,34 +344,72 @@ ${blocks.join('\n\n')}
 `;
 }
 
+// ---------- TypeScript themes ----------
+
+function generateThemesTs(src) {
+  const rows = src.themes
+    .map((t) => `  { id: ${JSON.stringify(t.id)}, label: ${JSON.stringify(t.name)}, isDark: ${t.isDark} },`)
+    .join('\n');
+  return `// GENERATED - do not edit.
+// Source: schema/design/tokens.json
+// Regenerate with \`node scripts/gen-design-tokens.mjs\` (or \`make design-tokens\`).
+
+export const THEMES = [
+${rows}
+] as const;
+
+export type ThemeId = (typeof THEMES)[number]["id"];
+`;
+}
+
 // ---------- main ----------
 
-const src = JSON.parse(readFileSync(SOURCE, 'utf8'));
-validate(src);
-const outputs = [
-  { file: SWIFT_OUT, text: generateSwift(src) },
-  { file: CSS_OUT, text: generateCss(src) },
-  { file: EXT_CSS_OUT, text: generateCss(src) },
-  { file: UI_CSS_OUT, text: generateCss(src) },
-];
+export function loadSource(text = readFileSync(SOURCE, 'utf8')) {
+  // A Windows checkout may carry CRLF; JSON.parse accepts it, but be explicit.
+  const src = JSON.parse(text.replace(/\r\n/g, '\n'));
+  validate(src);
+  return src;
+}
 
-if (CHECK) {
-  const problems = [];
-  for (const { file, text } of outputs) {
-    const current = existsSync(file) ? readFileSync(file, 'utf8') : '';
-    if (current !== text) {
-      problems.push(`${relative(ROOT, file)} is stale; run node scripts/gen-design-tokens.mjs`);
+export { generateCss, generateSwift, generateThemesTs, validate };
+
+function buildOutputs(src) {
+  return [
+    { file: SWIFT_OUT, text: generateSwift(src) },
+    { file: CSS_OUT, text: generateCss(src) },
+    { file: EXT_CSS_OUT, text: generateCss(src) },
+    { file: UI_CSS_OUT, text: generateCss(src) },
+    { file: KIT_CSS_OUT, text: generateCss(src, { web: true }) },
+    { file: KIT_THEMES_OUT, text: generateThemesTs(src) },
+  ];
+}
+
+function main() {
+  const src = loadSource();
+  const outputs = buildOutputs(src);
+  // Generated files may be CRLF on a Windows checkout (core.autocrlf): compare on LF only.
+  const lf = (t) => t.replace(/\r\n/g, '\n');
+  if (CHECK) {
+    const problems = [];
+    for (const { file, text } of outputs) {
+      const current = existsSync(file) ? lf(readFileSync(file, 'utf8')) : '';
+      if (current !== text) {
+        problems.push(`${relative(ROOT, file)} is stale; run node scripts/gen-design-tokens.mjs`);
+      }
+    }
+    if (problems.length) {
+      console.error(`design-tokens: ${problems.length} problem(s)`);
+      for (const p of problems) console.error(`  - ${p}`);
+      process.exit(1);
+    }
+    console.log(`design-tokens: ok (${src.themes.length} themes, ${outputs.length} outputs)`);
+  } else {
+    for (const { file, text } of outputs) {
+      mkdirSync(dirname(file), { recursive: true });
+      writeFileSync(file, text);
+      console.log(`wrote ${relative(ROOT, file)}`);
     }
   }
-  if (problems.length) {
-    console.error(`design-tokens: ${problems.length} problem(s)`);
-    for (const p of problems) console.error(`  - ${p}`);
-    process.exit(1);
-  }
-  console.log(`design-tokens: ok (${src.themes.length} themes, ${outputs.length} outputs)`);
-} else {
-  for (const { file, text } of outputs) {
-    writeFileSync(file, text);
-    console.log(`wrote ${relative(ROOT, file)}`);
-  }
 }
+
+if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main();

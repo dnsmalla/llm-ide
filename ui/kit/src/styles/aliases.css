@@ -1,0 +1,18 @@
+/* Derived colour roles: aliases of tokens.json roles, mirroring the single-line
+ * `var x: Color { role }` / `{ role.opacity(a) }` declarations in
+ * mac/Sources/LlmIdeMac/Core/Platform/Theme.swift. tokens.json deliberately does not
+ * store them; tests/aliases.test.mjs fails when this file and Theme.swift disagree. */
+:root {
+  --tok-color-success: var(--tok-color-accent3);
+  --tok-color-warning: var(--tok-color-accent4);
+  --tok-color-info: var(--tok-color-accent2);
+  --tok-color-diff-added-fg: var(--tok-color-success);
+  --tok-color-diff-added-bg: color-mix(in srgb, var(--tok-color-success) 16%, transparent);
+  --tok-color-diff-deleted-fg: var(--tok-color-danger);
+  --tok-color-diff-deleted-bg: color-mix(in srgb, var(--tok-color-danger) 16%, transparent);
+  --tok-color-gutter-added-mark: var(--tok-color-success);
+  --tok-color-gutter-modified-mark: var(--tok-color-info);
+  --tok-color-gutter-deleted-mark: var(--tok-color-danger);
+  --tok-color-editor-background: var(--tok-color-body);
+  --tok-color-editor-line-number: var(--tok-color-text-muted);
+}
