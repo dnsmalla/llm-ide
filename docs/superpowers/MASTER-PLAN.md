@@ -40,7 +40,7 @@ Parents: [kit-by-kit migration](plans/2026-10-27-kit-by-kit-migration.md), [Taur
 
 1. **Bench go-ahead (you)** unblocks every token-affecting change (lean SDK config X1, SDK adoption X2, router defaults, ended-chat continuation X3). Until then those ship OFF.
 2. **Manual app checks Y2 (you)** unblock turning live-then-archive `lta.mode` on by default and closing the Mac K1 work.
-3. **Phase 0 closing items (you)**: user-run bench, one Windows run, then ADR 0018 can move to Accepted. **Nothing in Tauri K3 or the relay starts before that.**
+3. **Phase 0 closing items (you)**: user-run bench, one Windows run, Accessibility cadence. **Decided 2026-10-31:** ADR 0018 is accepted for the Phase 3 start, conditional; these measurements must be recorded before Phase 3 exits, and a failed Windows gate pauses the work. The relay still waits for sync-kit.
 4. **Web app decided (Q-WEB-1 = A, relay-served phone web view, last, in sync-kit).** The relay, PWA, push and phone-without-Mac stay behind sync-kit; only relay hosting (Q-WEB-2) is still open.
 5. **Kit order** (kit-by-kit plan): ui-kit, os-kit, docs-kit, graph-kit, knowledge-kit, agent-kit, work/workspace/capture, core job runner, automation-kit, sync-kit. Tauri K3 screens follow each kit's K1/K2; **sync-kit (relay + PWA) comes last** because it mirrors every other kit.
 6. **Knowledge-kit K1 needs Q1-Q14, Q16, Q19 answered (you)**; meeting work (live-then-archive Phase 5 Mac side, 3, 6) waits for you to record meetings (wait).
@@ -91,7 +91,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Loose ends: Q21 quit delay on macOS logout, Q11 `llmide://` from Chrome (ROADMAP Loose ends) (me)
 - [ ] Meeting flows Mac half: ack with `lines`/`hash`, dedupe by session id, meeting-attached chat (ROADMAP M1) (wait)
 - [ ] Library read-path switch to `note_index` (M3) and legacy duplicate-row deletion (L1) (wait)
-- [ ] Swift feature freeze from Phase 1 (plan decision 4): **not in force, trigger undefined** (the plan's Phase 1 starts after ADR 0018 is Accepted; 50 `feat` commits touched `mac/Sources` since 2026-10-24, all kit work); you decide when and what it covers, see sync-kit S2 (`plans/2026-10-31-status-audit.md` (d)) (you)
+- [~] Swift feature freeze: **in force with the Phase 3 start (inferred consequence of the 2026-10-31 acceptance; user to confirm).** New Mac features stop; allowed: bug and security fixes, work needed for parity or for the shared core contract, and release/build upkeep. Exact definition and exceptions in `plans/2026-10-31-tauri-phase3-plan.md` section 10 (you)
 - [ ] K4 Retire: remove each kit's Swift UI one release after its Tauri screen (kit plan) (wait)
 
 ## S2. Desktop multi-OS (Tauri)
@@ -109,7 +109,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Phase 0 open: user-run autobench with the window frontmost, to confirm numbers and the 30 s hidden phase (you)
 - [ ] Phase 0 open: one Windows autobench run (graph >= 30 fps, sidecar start/quit, installer size) (you)
 - [ ] Phase 0 open: Accessibility grant to measure caption read cadence; optional Swift cold-start comparison (you)
-- [ ] ADR 0018 moved to Accepted after the gate (you)
+- [~] ADR 0018 accepted for the Phase 3 start, conditional (user decision 2026-10-31): the Phase 0 measurements above are recorded before Phase 3 exits, a failed Windows run pauses work; the gate itself has not passed yet (me)
 - [ ] Graph layout in Rust or WASM (condition 1; ForceAtlas2 in WKWebView is 4-7x slower than Node) (me)
 - [x] Monaco's vendored DOMPurify patched: vite redirects its import to pinned `dompurify` 3.4.17 (b1b3d17f); `npm run check:security` + `vite build` show no 3.4.15 in dist (me)
 - [x] Tauri capabilities scoped (AppManifest + explicit allow-*, no core:default/wildcards, `check-capabilities`), `read_graph_file` limited to the project root (8 cargo tests), terminal credit-based flow control (5 cargo tests); cargo check/test and 14 node tests pass, GUI launch and a real `yes` flood not run here (me)
@@ -124,7 +124,9 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Live caption capture per OS: macOS AX first, Windows next, Linux best-effort (Tauri plan risks) (me)
 - [ ] Signing, notarisation (macOS), Authenticode (Windows), signed updates, auto-update channel (me)
 - [~] Windows and Linux builds in CI: `desktop-ci.yml` written (cargo check + test --lib, WebKitGTK deps), not yet run on GitHub; WebKitGTK graph render check not done (me)
-- [ ] Screen-by-screen parity checklist against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
+- [x] Parity checklist exists (`plans/2026-10-31-tauri-parity-checklist.md`; rows filled as screens land) (me)
+- [ ] Phase 3: Chat + Explorer + Library + Settings screens on ui/kit, daily use on Mac and Windows (`plans/2026-10-31-tauri-phase3-plan.md`) (me)
+- [ ] Parity checklist all rows verified against the Mac app, including Home/toolbar navigation (report "Navigation parity") (you)
 - [ ] Phase 6: one release with both apps, then Swift app to maintenance (wait)
 - [ ] Phase 7: desktop and browser control via MCP with per-app grants, audit and kill switch; security-first design revised after independent review (rev 2), independent re-review next, 13 research spikes (P7.pre) before any code (`plans/2026-10-31-phase7-desktop-control-design.md`) (me)
 
