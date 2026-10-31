@@ -74,3 +74,11 @@
 .gr-file:hover { background: var(--tok-color-surface-2); }
 .gr-file[data-on] { background: var(--tok-color-accent); color: var(--tok-color-body); }
 .gr-link { border: 0; background: none; color: var(--tok-color-accent); font: inherit; cursor: pointer; padding: 0; }
+/* Graph section pages (Mac GraphSectionView): System is the default, Code graph the second tab. */
+.gr-section { display: flex; flex-direction: column; flex: 1; min-height: 0; min-width: 0; }
+.gr-pagebar { flex: none; display: flex; gap: 2px; padding: var(--tok-space-xs) var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); background: var(--tok-color-surface); }
+.gr-tab { padding: var(--tok-space-xs) var(--tok-space-md); border: 0; border-radius: var(--tok-radius-sm); background: none; color: var(--tok-color-text-muted); font: inherit; font-size: var(--tok-type-caption-size); cursor: pointer; }
+.gr-tab[aria-selected="true"] { background: var(--tok-color-surface-2); color: var(--tok-color-text); }
+.gr-page-panel { flex: 1; min-height: 0; min-width: 0; display: flex; }
+.gr-page-panel > * { flex: 1; min-width: 0; min-height: 0; }
+.gr-system { overflow: auto; }

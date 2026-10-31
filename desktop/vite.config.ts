@@ -57,9 +57,14 @@ export default defineConfig(({ mode }) => ({
       { find: /^@llmide\/ui-kit$/, replacement: fileURLToPath(new URL("../ui/kit/src/index.ts", import.meta.url)) },
       // Phase 3 screens live in ../ui/screens/<name> (one owner per folder; see ui/screens/README.md).
       { find: /^@llmide\/screens\/(.*)$/, replacement: fileURLToPath(new URL("../ui/screens/", import.meta.url)) + "$1" },
+      // The System (Agentic OS) page is graph-kit's React view, consumed from the submodule source.
+      { find: /^@dnsmalla\/graph-kit-web$/, replacement: fileURLToPath(new URL("../mac/LocalPackages/graph-kit/web/src/index.ts", import.meta.url)) },
+      // graph-kit web has its own vendored three (the desktop does not install it); resolve exactly.
+      { find: /^three\/examples\/jsm\/(.*)$/, replacement: fileURLToPath(new URL("../mac/LocalPackages/graph-kit/web/node_modules/three/examples/jsm/", import.meta.url)) + "$1" },
+      { find: /^three$/, replacement: fileURLToPath(new URL("../mac/LocalPackages/graph-kit/web/node_modules/three/build/three.module.js", import.meta.url)) },
     ],
     // graphology and sigma are imported by ui/screens/graph (outside desktop/): resolve them from here too.
-    dedupe: ["react", "react-dom", "graphology", "sigma"],
+    dedupe: ["react", "react-dom", "graphology", "sigma", "three"],
   },
   optimizeDeps: {
     esbuildOptions: {
