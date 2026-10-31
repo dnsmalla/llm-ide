@@ -31,13 +31,30 @@ static PROJECT_ITEM: Mutex<Option<MenuItem<Wry>>> = Mutex::new(None);
 
 // ---- notification templates -------------------------------------------------------------
 
-/// Plain-text, markup-free, single-line, capped detail.
+/// Invisible "format" characters (Unicode Cf): bidi overrides/isolates, zero-width
+/// joiners, BOM, tag characters. They can reorder or hide text in a notification.
+fn is_invisible_format(c: char) -> bool {
+    matches!(c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}'
+        | '\u{2060}'..='\u{206F}' | '\u{FEFF}' | '\u{FFF9}'..='\u{FFFB}' | '\u{E0000}'..='\u{E007F}')
+}
+
+/// True for a word that looks like a link: a scheme, `www.`, or a host/path.
+fn looks_like_url(word: &str) -> bool {
+    let w = word.to_ascii_lowercase();
+    w.contains("://") || w.starts_with("www.") || w.starts_with("mailto:") || w.starts_with("javascript:") || w.starts_with("data:")
+        || (w.contains('.') && w.contains('/'))
+}
+
+/// Plain-text, markup-free, single-line, capped detail with no hidden direction
+/// controls and no links (a notification is not a place for a clickable lure).
 pub fn sanitize_detail(s: &str) -> String {
     let cleaned: String = s
         .chars()
-        .filter(|c| !c.is_control() && !matches!(c, '<' | '>' | '&' | '"' | '`'))
+        .filter(|c| !c.is_control() && !is_invisible_format(*c) && !matches!(c, '<' | '>' | '&' | '"' | '`'))
         .collect();
-    cleaned.trim().chars().take(DETAIL_MAX_CHARS).collect()
+    let no_urls = cleaned.split(' ').filter(|w| !looks_like_url(w)).collect::<Vec<_>>().join(" ");
+    no_urls.trim().chars().take(DETAIL_MAX_CHARS).collect()
 }
 
 /// (title, body) for a fixed template, or an error for an unknown kind.
@@ -86,8 +103,12 @@ fn settings_file(app: &AppHandle) -> Option<PathBuf> {
     app.path().app_data_dir().ok().map(|d| d.join("tray-settings.json"))
 }
 
+/// A settings file larger than this is ignored.
+const SETTINGS_MAX_BYTES: u64 = 4 * 1024;
+
 fn load_close_to_tray(app: &AppHandle) -> bool {
     settings_file(app)
+        .filter(|f| std::fs::metadata(f).is_ok_and(|m| m.is_file() && m.len() <= SETTINGS_MAX_BYTES))
         .and_then(|f| std::fs::read_to_string(f).ok())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
         .and_then(|v| v.get("closeToTray").and_then(|b| b.as_bool()))
@@ -112,10 +133,16 @@ pub fn tray_set_close_to_tray(app: AppHandle, enabled: bool) -> Result<TrayStatu
     }
     CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
     if let Some(f) = settings_file(&app) {
-        if let Some(dir) = f.parent() {
-            let _ = std::fs::create_dir_all(dir);
+        let saved = f
+            .parent()
+            .ok_or_else(|| "no settings directory".to_string())
+            .and_then(crate::fsutil::private_dir)
+            .and_then(|_| {
+                crate::fsutil::write_private_atomic(&f, format!("{{\"closeToTray\":{enabled}}}").as_bytes(), SETTINGS_MAX_BYTES as usize)
+            });
+        if let Err(e) = saved {
+            eprintln!("tray: setting not saved: {e}");
         }
-        let _ = std::fs::write(f, format!("{{\"closeToTray\":{enabled}}}"));
     }
     Ok(tray_status())
 }
@@ -226,5 +253,17 @@ mod tests {
         assert!(should_hide_on_close());
         CLOSE_TO_TRAY.store(false, Ordering::Relaxed);
         assert!(!should_hide_on_close());
+    }
+
+    #[test]
+    fn detail_has_no_bidi_controls_or_links() {
+        let tricky = "build \u{202E}gpj.exe\u{202C} \u{200B}done \u{2066}x\u{2069}";
+        let out = sanitize_detail(tricky);
+        assert!(out.chars().all(|c| !is_invisible_format(c)), "{out:?}");
+        assert_eq!(sanitize_detail("see https://evil.example/x now"), "see now");
+        assert_eq!(sanitize_detail("go to www.evil.com ok"), "go to ok");
+        assert_eq!(sanitize_detail("evil.com/login done"), "done");
+        assert_eq!(sanitize_detail("mailto:a@b.c hi"), "hi");
+        assert_eq!(sanitize_detail("v1.2 shipped"), "v1.2 shipped", "dots alone are not links");
     }
 }
