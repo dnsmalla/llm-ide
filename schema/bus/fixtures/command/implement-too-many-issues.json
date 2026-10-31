@@ -1,0 +1,37 @@
+{
+  "description": "issueIds is capped at 20",
+  "frame": {
+    "kind": "issues.implement",
+    "idem": "k1",
+    "args": {
+      "projectId": "p",
+      "issueIds": [
+        "i0",
+        "i1",
+        "i2",
+        "i3",
+        "i4",
+        "i5",
+        "i6",
+        "i7",
+        "i8",
+        "i9",
+        "i10",
+        "i11",
+        "i12",
+        "i13",
+        "i14",
+        "i15",
+        "i16",
+        "i17",
+        "i18",
+        "i19",
+        "i20"
+      ]
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.issueIds"
+  }
+}

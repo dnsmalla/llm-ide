@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "cmd": "cmd-1",
+  "at": 1761900000000,
+  "seq": 2,
+  "type": "needs_answer",
+  "terminal": false,
+  "payload": {
+    "requestId": "q-1",
+    "question": "Which branch?"
+  }
+}

@@ -227,6 +227,7 @@ chat-gates:
 .PHONY: contract-gates
 contract-gates:
 	node scripts/conformance-http.mjs
+	node scripts/conformance-bus.mjs
 	node scripts/gen-api-types.mjs --check
 	node scripts/gen-openapi.mjs --check
 	node scripts/http-inventory.mjs --check

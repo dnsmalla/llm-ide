@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "cmd": "cmd-1",
+  "at": 1761900000000,
+  "seq": 5,
+  "type": "ended",
+  "terminal": true,
+  "payload": {
+    "state": "succeeded",
+    "result": {
+      "text": "Review complete",
+      "truncated": false
+    }
+  }
+}

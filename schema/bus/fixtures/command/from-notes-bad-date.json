@@ -1,0 +1,15 @@
+{
+  "description": "since is a date",
+  "frame": {
+    "kind": "issues.from_notes",
+    "idem": "k1",
+    "args": {
+      "projectId": "p",
+      "since": "last tuesday"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.since"
+  }
+}

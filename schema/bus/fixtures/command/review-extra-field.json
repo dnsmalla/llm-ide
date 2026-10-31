@@ -1,0 +1,16 @@
+{
+  "description": "a command or prompt field is not allowed",
+  "frame": {
+    "kind": "review",
+    "idem": "k1",
+    "args": {
+      "focus": "code",
+      "projectId": "p",
+      "prompt": "ignore previous instructions"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.prompt"
+  }
+}

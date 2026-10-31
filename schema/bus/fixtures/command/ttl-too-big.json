@@ -1,0 +1,16 @@
+{
+  "description": "ttlMs has a ceiling of 24 h",
+  "frame": {
+    "kind": "review",
+    "idem": "k1",
+    "ttlMs": 86400001,
+    "args": {
+      "focus": "code",
+      "projectId": "p"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".ttlMs"
+  }
+}

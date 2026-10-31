@@ -1,0 +1,19 @@
+{
+  "description": "issues.implement with ship",
+  "frame": {
+    "v": 1,
+    "kind": "issues.implement",
+    "idem": "k-ii-1",
+    "args": {
+      "projectId": "proj-1",
+      "issueIds": [
+        "42",
+        "gh-43"
+      ],
+      "ship": true
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}

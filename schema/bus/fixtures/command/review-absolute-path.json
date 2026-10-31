@@ -1,0 +1,15 @@
+{
+  "description": "an absolute path is never an id",
+  "frame": {
+    "kind": "review",
+    "idem": "k1",
+    "args": {
+      "focus": "code",
+      "projectId": "/Users/me/project"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.projectId"
+  }
+}

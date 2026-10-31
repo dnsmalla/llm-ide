@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "cmd": "cmd-1",
+  "at": 1761900000000,
+  "seq": 1,
+  "type": "error",
+  "terminal": true,
+  "payload": {
+    "code": "invalid_args",
+    "message": "fixture for invalid_args"
+  }
+}

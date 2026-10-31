@@ -1,0 +1,18 @@
+{
+  "description": "ship is a boolean",
+  "frame": {
+    "kind": "issues.implement",
+    "idem": "k1",
+    "args": {
+      "projectId": "p",
+      "issueIds": [
+        "1"
+      ],
+      "ship": "yes"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.ship"
+  }
+}

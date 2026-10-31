@@ -1,0 +1,14 @@
+{
+  "description": "custom.run by saved task id",
+  "frame": {
+    "v": 1,
+    "kind": "custom.run",
+    "idem": "k-cus-1",
+    "args": {
+      "customTaskId": "ct-7"
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}

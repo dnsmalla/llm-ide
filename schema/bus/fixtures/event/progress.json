@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "cmd": "cmd-1",
+  "at": 1761900000000,
+  "seq": 2,
+  "type": "progress",
+  "terminal": false,
+  "payload": {
+    "step": "reading project",
+    "note": "12 files"
+  }
+}

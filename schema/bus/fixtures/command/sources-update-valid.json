@@ -1,0 +1,17 @@
+{
+  "description": "sources.update with ids",
+  "frame": {
+    "v": 1,
+    "kind": "sources.update",
+    "idem": "k-src-1",
+    "args": {
+      "sourceIds": [
+        "box",
+        "slack"
+      ]
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "description": "loop.run of one stage",
+  "frame": {
+    "v": 1,
+    "kind": "loop.run",
+    "idem": "k-loop-1",
+    "args": {
+      "projectId": "proj-1",
+      "loopId": "regression",
+      "stageId": "verify"
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}

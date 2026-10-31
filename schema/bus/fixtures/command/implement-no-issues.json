@@ -1,0 +1,15 @@
+{
+  "description": "issueIds needs at least one id",
+  "frame": {
+    "kind": "issues.implement",
+    "idem": "k1",
+    "args": {
+      "projectId": "p",
+      "issueIds": []
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.issueIds"
+  }
+}

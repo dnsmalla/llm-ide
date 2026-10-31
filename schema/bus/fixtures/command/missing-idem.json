@@ -1,0 +1,14 @@
+{
+  "description": "idem is required",
+  "frame": {
+    "kind": "review",
+    "args": {
+      "focus": "code",
+      "projectId": "p"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".idem"
+  }
+}

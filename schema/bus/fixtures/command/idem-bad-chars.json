@@ -1,0 +1,15 @@
+{
+  "description": "idem has a strict charset",
+  "frame": {
+    "kind": "review",
+    "idem": "a b/c",
+    "args": {
+      "focus": "code",
+      "projectId": "p"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".idem"
+  }
+}

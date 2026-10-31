@@ -1,0 +1,158 @@
+{
+  "$comment": "Command bus registry (docs/spec/command-bus.md). DATA, not code: the kinds, their tier, who may start them, their typed args, the client classes and the limits. The Node executor reads extension/routes/bus/registry.json, which MUST stay byte-identical to this file (scripts/conformance-bus.mjs checks it; `node scripts/conformance-bus.mjs --sync` copies). The Mac tier gate (R-G1) can read this file later without porting a table. Schema keywords: type, properties, required, items, enum, const, additionalProperties, minItems, maxItems, minLength, maxLength, pattern, minimum, maximum, x-format (id | provider | model | date).",
+  "version": 1,
+  "limits": {
+    "maxCommandBytes": 65536,
+    "maxIdemLength": 64,
+    "defaultTtlMs": 60000,
+    "maxTtlMs": 86400000,
+    "approvalTtlMs": 86400000,
+    "maxEventPayloadBytes": 16384,
+    "maxEventsPerCommand": 5000,
+    "maxEventBytesPerCommand": 4194304,
+    "maxResultBytes": 262144,
+    "maxPendingApprovals": 20,
+    "maxActiveCommands": 20,
+    "maxStreamReadersPerUser": 4,
+    "streamMaxMs": 600000,
+    "commandRetentionDays": 7
+  },
+  "clientClasses": {
+    "phone-pwa": { "rank": 1, "mayStart": ["R"], "mayApprove": false, "note": "web client: read and queued low-risk chat only, never T0/T1/T2, never approvals" },
+    "extension": { "rank": 2, "mayStart": ["R", "C"], "mayApprove": false, "note": "the Chrome extension: read and chat on the Mac-managed server, no task start" },
+    "ios-native": { "rank": 3, "mayStart": ["R", "C", "T0", "T1", "T2"], "mayApprove": false, "note": "native phone: may start T0 and enqueue T1/T2 (which wait for a desktop click)" },
+    "desktop-ui": { "rank": 4, "mayStart": ["R", "C", "T0", "T1", "T2", "D"], "mayApprove": true, "note": "the desktop UI: the only class that approves; proven by the host nonce" }
+  },
+  "tiers": {
+    "R": { "approval": "none", "meaning": "read-only, no write, no spend beyond a chat quota" },
+    "C": { "approval": "none", "meaning": "chat under the fixed remote-safe ceiling" },
+    "T0": { "approval": "none", "meaning": "auto-task kind with a read-only ceiling; needs the kind enabled, else a desktop approval" },
+    "T1": { "approval": "desktop", "meaning": "enqueue only; waits for a desktop approval; permission re-checked at execution" },
+    "T2": { "approval": "desktop_confirm", "meaning": "writes code or leaves the machine; desktop approval with the exact ids confirmed; never inherits Bypass" },
+    "D": { "approval": "never_remote", "meaning": "desktop-only: refused for every other class" }
+  },
+  "errorCodes": [
+    "invalid_args", "unknown_kind", "unsupported_version", "tier_denied", "switch_off", "needs_desktop_approval",
+    "expired", "duplicate", "idem_conflict", "engine_not_logged_in", "engine_no_key", "rate_limited", "quota_exceeded",
+    "payload_too_large", "desktop_busy", "not_found", "kind_not_available", "project_not_registered", "project_not_allowed",
+    "engine_failed", "read_only_violated", "interrupted", "timeout", "cancelled", "server_restarted", "internal"
+  ],
+  "kinds": {
+    "review": {
+      "tier": "T0",
+      "lane": "read",
+      "write": false,
+      "available": true,
+      "description": "Read-only review of a registered project (code, docs or merge conflicts) on a chosen engine.",
+      "engines": ["claude", "adapter", "codex", "gemini"],
+      "args": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["focus", "projectId"],
+        "properties": {
+          "focus": { "type": "string", "enum": ["code", "doc", "conflicts"] },
+          "projectId": { "type": "string", "x-format": "id" },
+          "engine": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["provider"],
+            "properties": {
+              "provider": { "type": "string", "x-format": "provider" },
+              "model": { "type": "string", "x-format": "model" },
+              "credential": { "type": "string", "enum": ["cli-login", "api-key"] }
+            }
+          }
+        }
+      }
+    },
+    "sources.update": {
+      "tier": "T1",
+      "lane": "write",
+      "write": true,
+      "available": false,
+      "unavailableReason": "Node has no source registry: connector credentials and source lists live in the Mac app (email, Slack) or are sent per request (Box); no server-side refresh exists to adapt.",
+      "description": "Fetch email, Slack and document sources into the Library and re-index.",
+      "engines": [],
+      "args": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "sourceIds": { "type": "array", "maxItems": 50, "items": { "type": "string", "x-format": "id" } }
+        }
+      }
+    },
+    "issues.from_notes": {
+      "tier": "T1",
+      "lane": "write",
+      "write": true,
+      "available": false,
+      "unavailableReason": "The deterministic note action extractor and the tracker allow-list live in the Mac app; Node has only the meeting planner, a different function.",
+      "description": "Extract action items from recent notes and create upstream issues.",
+      "engines": [],
+      "args": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["projectId"],
+        "properties": {
+          "projectId": { "type": "string", "x-format": "id" },
+          "since": { "type": "string", "x-format": "date" }
+        }
+      }
+    },
+    "issues.implement": {
+      "tier": "T2",
+      "lane": "write",
+      "write": true,
+      "available": false,
+      "unavailableReason": "No Node worktree runner or write-mode engine yet. codex and gemini write mode needs an explicit design and user decision (Swift runs them with --yolo, which disables their sandbox); never copied here.",
+      "description": "Run an engine on approved issues in a worktree on a fix branch; optional ship (push, open MR/PR).",
+      "engines": [],
+      "args": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["projectId", "issueIds"],
+        "properties": {
+          "projectId": { "type": "string", "x-format": "id" },
+          "issueIds": { "type": "array", "minItems": 1, "maxItems": 20, "items": { "type": "string", "x-format": "id" } },
+          "ship": { "type": "boolean" }
+        }
+      }
+    },
+    "loop.run": {
+      "tier": "T1",
+      "lane": "write",
+      "write": true,
+      "available": false,
+      "unavailableReason": "Loop definitions (stages, verify commands, scope) live in the Mac app; Node has only the confined agent step (POST /kb/loop/agent-run), which needs the composed stage prompt.",
+      "description": "Run one of the project's Loops (or one stage) with edits inside its declared scope.",
+      "engines": [],
+      "args": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["projectId", "loopId"],
+        "properties": {
+          "projectId": { "type": "string", "x-format": "id" },
+          "loopId": { "type": "string", "x-format": "id" },
+          "stageId": { "type": "string", "x-format": "id" }
+        }
+      }
+    },
+    "custom.run": {
+      "tier": "T1",
+      "lane": "write",
+      "write": true,
+      "available": false,
+      "unavailableReason": "Saved custom tasks (named prompt, cron, project) live in the Mac app; Node has no store to resolve a customTaskId.",
+      "description": "Run a saved custom task by id (the prompt is part of the saved task, never of the command).",
+      "engines": [],
+      "args": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["customTaskId"],
+        "properties": {
+          "customTaskId": { "type": "string", "x-format": "id" }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,15 @@
+{
+  "description": "focus is an enum",
+  "frame": {
+    "kind": "review",
+    "idem": "k1",
+    "args": {
+      "focus": "everything",
+      "projectId": "p"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.focus"
+  }
+}

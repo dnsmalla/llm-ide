@@ -1,0 +1,31 @@
+{
+  "description": "a reader that re-attached with after=2 holds seq 3..4 (partial, not complete)",
+  "events": [
+    {
+      "v": 1,
+      "cmd": "cmd-1",
+      "at": 1761900000000,
+      "seq": 3,
+      "type": "chunk",
+      "terminal": false,
+      "payload": {
+        "text": "x"
+      }
+    },
+    {
+      "v": 1,
+      "cmd": "cmd-1",
+      "at": 1761900000000,
+      "seq": 4,
+      "type": "ended",
+      "terminal": true,
+      "payload": {
+        "state": "succeeded"
+      }
+    }
+  ],
+  "expect": {
+    "problem": null,
+    "partialFrom": 3
+  }
+}

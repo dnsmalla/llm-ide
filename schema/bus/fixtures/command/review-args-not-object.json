@@ -1,0 +1,12 @@
+{
+  "description": "args must be an object",
+  "frame": {
+    "kind": "review",
+    "idem": "k1",
+    "args": "code"
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args"
+  }
+}

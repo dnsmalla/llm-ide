@@ -1,0 +1,25 @@
+{
+  "description": "Which client classes may approve or deny a pending command.",
+  "rows": [
+    {
+      "client": "desktop-ui",
+      "mayApprove": true
+    },
+    {
+      "client": "ios-native",
+      "mayApprove": false
+    },
+    {
+      "client": "extension",
+      "mayApprove": false
+    },
+    {
+      "client": "phone-pwa",
+      "mayApprove": false
+    },
+    {
+      "client": "nobody",
+      "mayApprove": false
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "description": "a free prompt is never an arg; only the saved task id",
+  "frame": {
+    "kind": "custom.run",
+    "idem": "k1",
+    "args": {
+      "customTaskId": "ct",
+      "prompt": "do anything"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.prompt"
+  }
+}

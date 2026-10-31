@@ -1,0 +1,185 @@
+{
+  "description": "Receipt-time decision per (client class, kind, enable flag). Every kind appears once per client class with the flag off; review also with the flag on. A client class outside the registry is tier_denied.",
+  "rows": [
+    {
+      "client": "phone-pwa",
+      "kind": "review",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "phone-pwa",
+      "kind": "sources.update",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "phone-pwa",
+      "kind": "issues.from_notes",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "phone-pwa",
+      "kind": "issues.implement",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "phone-pwa",
+      "kind": "loop.run",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "phone-pwa",
+      "kind": "custom.run",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "extension",
+      "kind": "review",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "extension",
+      "kind": "sources.update",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "extension",
+      "kind": "issues.from_notes",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "extension",
+      "kind": "issues.implement",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "extension",
+      "kind": "loop.run",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "extension",
+      "kind": "custom.run",
+      "flagEnabled": false,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "ios-native",
+      "kind": "review",
+      "flagEnabled": false,
+      "expect": "needs_approval"
+    },
+    {
+      "client": "ios-native",
+      "kind": "sources.update",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "ios-native",
+      "kind": "issues.from_notes",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "ios-native",
+      "kind": "issues.implement",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "ios-native",
+      "kind": "loop.run",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "ios-native",
+      "kind": "custom.run",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "review",
+      "flagEnabled": false,
+      "expect": "run"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "sources.update",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "issues.from_notes",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "issues.implement",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "loop.run",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "custom.run",
+      "flagEnabled": false,
+      "expect": "not_available"
+    },
+    {
+      "client": "phone-pwa",
+      "kind": "review",
+      "flagEnabled": true,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "extension",
+      "kind": "review",
+      "flagEnabled": true,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "ios-native",
+      "kind": "review",
+      "flagEnabled": true,
+      "expect": "run"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "review",
+      "flagEnabled": true,
+      "expect": "run"
+    },
+    {
+      "client": "nobody",
+      "kind": "review",
+      "flagEnabled": true,
+      "expect": "tier_denied"
+    },
+    {
+      "client": "desktop-ui",
+      "kind": "files.write",
+      "flagEnabled": true,
+      "expect": "unknown_kind"
+    }
+  ]
+}

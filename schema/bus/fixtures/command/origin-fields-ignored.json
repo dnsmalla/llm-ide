@@ -1,0 +1,20 @@
+{
+  "description": "origin, userId, deviceId in the frame are accepted by the schema and ignored by the host",
+  "frame": {
+    "v": 1,
+    "kind": "review",
+    "idem": "k-ign-1",
+    "origin": {
+      "clientKind": "desktop-ui"
+    },
+    "userId": "someone-else",
+    "deviceId": "dev-1",
+    "args": {
+      "focus": "code",
+      "projectId": "proj-1"
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}

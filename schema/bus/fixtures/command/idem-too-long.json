@@ -1,0 +1,15 @@
+{
+  "description": "idem is at most 64 characters",
+  "frame": {
+    "kind": "review",
+    "idem": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+    "args": {
+      "focus": "code",
+      "projectId": "p"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".idem"
+  }
+}

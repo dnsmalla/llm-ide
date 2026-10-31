@@ -1,0 +1,15 @@
+{
+  "description": "review of a registered project, default engine",
+  "frame": {
+    "v": 1,
+    "kind": "review",
+    "idem": "k-review-1",
+    "args": {
+      "focus": "code",
+      "projectId": "proj-1"
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}

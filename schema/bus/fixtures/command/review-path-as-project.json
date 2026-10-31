@@ -1,0 +1,15 @@
+{
+  "description": "a filesystem path is never an id",
+  "frame": {
+    "kind": "review",
+    "idem": "k1",
+    "args": {
+      "focus": "code",
+      "projectId": "../../etc/passwd"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.projectId"
+  }
+}

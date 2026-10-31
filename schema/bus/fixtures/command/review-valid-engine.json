@@ -1,0 +1,22 @@
+{
+  "description": "review on a codex CLI login with a model",
+  "frame": {
+    "v": 1,
+    "kind": "review",
+    "idem": "k-review-2",
+    "ttlMs": 60000,
+    "createdAt": 1761900000000,
+    "args": {
+      "focus": "doc",
+      "projectId": "proj-1",
+      "engine": {
+        "provider": "openai",
+        "model": "gpt-5-codex",
+        "credential": "cli-login"
+      }
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}

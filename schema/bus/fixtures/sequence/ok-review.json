@@ -1,0 +1,54 @@
+{
+  "description": "accepted, progress, chunk, ended",
+  "events": [
+    {
+      "v": 1,
+      "cmd": "cmd-1",
+      "at": 1761900000000,
+      "seq": 1,
+      "type": "accepted",
+      "terminal": false,
+      "payload": {
+        "kind": "review",
+        "tier": "T0",
+        "state": "queued"
+      }
+    },
+    {
+      "v": 1,
+      "cmd": "cmd-1",
+      "at": 1761900000000,
+      "seq": 2,
+      "type": "progress",
+      "terminal": false,
+      "payload": {
+        "step": "running"
+      }
+    },
+    {
+      "v": 1,
+      "cmd": "cmd-1",
+      "at": 1761900000000,
+      "seq": 3,
+      "type": "chunk",
+      "terminal": false,
+      "payload": {
+        "text": "x"
+      }
+    },
+    {
+      "v": 1,
+      "cmd": "cmd-1",
+      "at": 1761900000000,
+      "seq": 4,
+      "type": "ended",
+      "terminal": true,
+      "payload": {
+        "state": "succeeded"
+      }
+    }
+  ],
+  "expect": {
+    "problem": null
+  }
+}

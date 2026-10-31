@@ -1,0 +1,16 @@
+{
+  "description": "an unknown v is refused",
+  "frame": {
+    "v": 2,
+    "kind": "review",
+    "idem": "k1",
+    "args": {
+      "focus": "code",
+      "projectId": "p"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".v"
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "description": "loopId is required",
+  "frame": {
+    "kind": "loop.run",
+    "idem": "k1",
+    "args": {
+      "projectId": "p"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.loopId"
+  }
+}

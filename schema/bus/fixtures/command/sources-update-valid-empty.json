@@ -1,0 +1,11 @@
+{
+  "description": "sources.update with no args (all sources)",
+  "frame": {
+    "kind": "sources.update",
+    "idem": "k-src-2",
+    "args": {}
+  },
+  "expect": {
+    "valid": true
+  }
+}

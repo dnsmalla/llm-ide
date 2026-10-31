@@ -1,0 +1,15 @@
+{
+  "v": 1,
+  "cmd": "cmd-1",
+  "at": 1761900000000,
+  "seq": 4,
+  "type": "data",
+  "terminal": false,
+  "payload": {
+    "name": "usage",
+    "value": {
+      "inputTokens": 10,
+      "outputTokens": 4
+    }
+  }
+}

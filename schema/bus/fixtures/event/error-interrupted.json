@@ -1,0 +1,12 @@
+{
+  "v": 1,
+  "cmd": "cmd-1",
+  "at": 1761900000000,
+  "seq": 3,
+  "type": "error",
+  "terminal": true,
+  "payload": {
+    "code": "interrupted",
+    "message": "the server restarted while this command ran"
+  }
+}

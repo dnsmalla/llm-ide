@@ -1,0 +1,12 @@
+{
+  "description": "an unknown kind is refused, never ignored",
+  "frame": {
+    "kind": "files.write",
+    "idem": "k1",
+    "args": {}
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".kind"
+  }
+}

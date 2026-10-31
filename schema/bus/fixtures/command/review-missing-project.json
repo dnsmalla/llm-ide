@@ -1,0 +1,14 @@
+{
+  "description": "projectId is required",
+  "frame": {
+    "kind": "review",
+    "idem": "k1",
+    "args": {
+      "focus": "code"
+    }
+  },
+  "expect": {
+    "valid": false,
+    "atPath": ".args.projectId"
+  }
+}

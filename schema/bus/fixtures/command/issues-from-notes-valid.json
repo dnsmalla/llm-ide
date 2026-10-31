@@ -1,0 +1,15 @@
+{
+  "description": "issues.from_notes since a date",
+  "frame": {
+    "v": 1,
+    "kind": "issues.from_notes",
+    "idem": "k-ifn-1",
+    "args": {
+      "projectId": "proj-1",
+      "since": "2026-10-01"
+    }
+  },
+  "expect": {
+    "valid": true
+  }
+}
