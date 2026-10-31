@@ -26,17 +26,23 @@ struct ExtensionsCatalogView: View {
         }
         // Cached read only: no GitHub or registry call happens on appear.
         .task { await model.loadInstalled() }
-        .sheet(item: $model.pendingConsent) { request in
-            ExtensionsConsentSheet(request: request,
-                                   onConfirm: { Task { await model.confirmConsent() } },
-                                   onCancel: { model.pendingConsent = nil })
-                .environmentObject(theme)
-        }
-        .sheet(item: $model.preview) { state in
-            ExtensionsUpdatePreviewSheet(state: state,
-                                         onApply: { Task { await model.applyPreview() } },
-                                         onCancel: { model.preview = nil })
-                .environmentObject(theme)
+        // One sheet host for both: the preview -> consent swap changes the item of a single
+        // presentation instead of dismissing one sheet while presenting another.
+        .sheet(item: Binding(
+            get: { model.activeSheet },
+            set: { if $0 == nil { model.dismissSheet() } })) { sheet in
+            switch sheet {
+            case .consent(let request):
+                ExtensionsConsentSheet(request: request,
+                                       onConfirm: { Task { await model.confirmConsent() } },
+                                       onCancel: { model.pendingConsent = nil })
+                    .environmentObject(theme)
+            case .preview(let state):
+                ExtensionsUpdatePreviewSheet(state: state,
+                                             onApply: { Task { await model.applyPreview() } },
+                                             onCancel: { model.preview = nil })
+                    .environmentObject(theme)
+            }
         }
         .confirmationDialog(
             "Roll back \(model.pendingRollback?.name ?? "")?",
@@ -451,7 +457,7 @@ struct ExtensionsBrowseTab: View {
             isPresented: Binding(get: { model.pendingBrowseInstall != nil }, set: { if !$0 { model.pendingBrowseInstall = nil } }),
             titleVisibility: .visible, presenting: model.pendingBrowseInstall
         ) { entry in
-            Button("Install") { Task { await model.installFromCatalog(entry); model.tab = .install } }
+            Button("Install") { Task { if await model.installFromCatalog(entry) { model.tab = .install } } }
             Button("Cancel", role: .cancel) { model.pendingBrowseInstall = nil }
         } message: { entry in
             Text("Downloads \(ExtensionsCatalogPresentation.repoName(entry.source.url ?? ""))\(entry.source.path.map { " (\($0))" } ?? "") at its current commit, pinned. Nothing is run and it stays off until you switch it on.")

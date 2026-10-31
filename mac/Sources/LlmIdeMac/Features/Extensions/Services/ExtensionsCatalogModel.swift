@@ -25,6 +25,28 @@ final class ExtensionsCatalogModel {
         var id: String { item.id }
     }
 
+    /// The one sheet showing now: a consent wins over a preview (apply turns the latter into the former).
+    enum ActiveSheet: Identifiable, Equatable {
+        case consent(ConsentRequest)
+        case preview(PreviewState)
+        var id: String {
+            switch self {
+            case .consent(let r): return "consent|" + r.id
+            case .preview(let p): return "preview|" + p.id
+            }
+        }
+    }
+
+    var activeSheet: ActiveSheet? {
+        if let r = pendingConsent { return .consent(r) }
+        if let p = preview { return .preview(p) }
+        return nil
+    }
+
+    func dismissSheet() {
+        if pendingConsent != nil { pendingConsent = nil } else { preview = nil }
+    }
+
     enum Tab: String, CaseIterable, Identifiable {
         case installed = "Installed"
         case browse = "Browse"
@@ -73,6 +95,7 @@ final class ExtensionsCatalogModel {
     private(set) var browseLoaded = false
     var browseError: String?
     private(set) var refreshing = false
+    private var searchSeq = 0
 
     // MARK: Installed
 
@@ -113,11 +136,18 @@ final class ExtensionsCatalogModel {
     }
 
     /// Runs `work` with the item marked busy; one request per item at a time.
-    private func withBusy(_ id: String, _ work: () async -> Void) async {
-        guard !busy.contains(id) else { return }
+    /// A rejected call (the item is already busy) says so instead of doing nothing.
+    @discardableResult
+    private func withBusy(_ id: String, _ work: () async -> Void) async -> Bool {
+        guard !busy.contains(id) else {
+            notice = "Busy, try again."
+            noticeIsError = true
+            return false
+        }
         busy.insert(id)
         defer { busy.remove(id) }
         await work()
+        return true
     }
 
     // MARK: Enable / consent
@@ -152,12 +182,21 @@ final class ExtensionsCatalogModel {
     func confirmConsent() async {
         guard let request = pendingConsent else { return }
         pendingConsent = nil
+        guard let item = item(request.itemId) else {
+            notice = "\(request.itemName) is no longer installed, so nothing was changed."
+            noticeIsError = true
+            return
+        }
         switch request.purpose {
         case .enable:
-            guard let item = item(request.itemId) else { return }
+            // The consent named the code at this commit; a different one needs its own consent.
+            guard item.pinnedCommit == request.commit else {
+                notice = "\(item.name) changed while you were deciding. Switch it on again to review it."
+                noticeIsError = true
+                return
+            }
             await toggle(item, enabled: true, consents: request.kinds)
         case .update(let commit):
-            guard let item = item(request.itemId) else { return }
             await applyUpdate(item, commit: commit, consents: request.kinds)
         }
     }
@@ -182,14 +221,17 @@ final class ExtensionsCatalogModel {
         await runInstall(url: url, path: path.isEmpty ? nil : path)
     }
 
-    func installFromCatalog(_ entry: ExtCatalogEntry) async {
+    /// True when the install succeeded (the Browse tab then moves to Install to show the result).
+    @discardableResult
+    func installFromCatalog(_ entry: ExtCatalogEntry) async -> Bool {
         pendingBrowseInstall = nil
-        guard entry.installable, let url = entry.source.url else { return }
-        await runInstall(url: url, path: entry.source.path)
+        guard entry.installable, let url = entry.source.url else { return false }
+        return await runInstall(url: url, path: entry.source.path)
     }
 
-    private func runInstall(url: String, path: String?) async {
-        guard !installing else { return }
+    @discardableResult
+    private func runInstall(url: String, path: String?) async -> Bool {
+        guard !installing else { return false }
         installing = true
         defer { installing = false }
         do {
@@ -200,9 +242,11 @@ final class ExtensionsCatalogModel {
                     ? "\(r.item.name) was already installed at this commit."
                     : "Installed \(r.item.name). It is off until you switch it on.")
             await loadBrowseAfterInstall()
+            return true
         } catch {
             lastInstall = nil
             fail(error)
+            return false
         }
     }
 
@@ -222,7 +266,9 @@ final class ExtensionsCatalogModel {
                 items.removeAll { $0.id == item.id }
                 if lastInstall?.item.id == item.id { lastInstall = nil }
                 succeed("Removed \(item.name) and its stored files.")
-            } catch { fail(error) }
+            } catch { fail(error); return }
+            // The Browse list's "installed" badge came from the server before the removal.
+            if browseLoaded { await search() }
         }
     }
 
@@ -246,11 +292,12 @@ final class ExtensionsCatalogModel {
     }
 
     /// Downloads the candidate in memory and shows what would change. Writes nothing.
-    func openPreview(_ item: ExtInstalledItem) async {
+    func openPreview(_ item: ExtInstalledItem, notice reviewNotice: String? = nil) async {
         await withBusy(item.id) {
             do {
                 let p = try await api.extPreviewUpdate(id: item.id, commit: item.update?.latest)
                 preview = PreviewState(item: item, preview: p)
+                if let reviewNotice { succeed(reviewNotice) }
             } catch {
                 if ExtensionsCatalogPresentation.errorCode(error) == "ALREADY_CURRENT" { await loadInstalled() }
                 fail(error)
@@ -278,13 +325,33 @@ final class ExtensionsCatalogModel {
         await applyUpdate(state.item, commit: p.to, consents: nil)
     }
 
+    /// Always sends the commit the user previewed (and consented to), so the server refuses
+    /// anything that moved since: UPDATE_CHANGED goes back to a fresh preview, ALREADY_CURRENT
+    /// reloads the list.
     private func applyUpdate(_ item: ExtInstalledItem, commit: String, consents: [String]?) async {
+        enum Follow { case repreview, reload }
+        var follow: Follow?
         await withBusy(item.id) {
             do {
                 let r = try await api.extApplyUpdate(id: item.id, commit: commit, consents: consents)
                 replace(r.item)
                 succeed(ExtensionsCatalogPresentation.updateOutcomeText(r.update, verb: "Updated"))
-            } catch { fail(error) }
+            } catch {
+                switch ExtensionsCatalogPresentation.errorCode(error) {
+                case "UPDATE_CHANGED": follow = .repreview
+                case "ALREADY_CURRENT": follow = .reload
+                default: fail(error)
+                }
+            }
+        }
+        switch follow {
+        case .repreview:
+            await loadInstalled()
+            await openPreview(self.item(item.id) ?? item, notice: "That update changed; review it again.")
+        case .reload:
+            await loadInstalled()
+            succeed("Already up to date.")
+        case nil: break
         }
     }
 
@@ -313,12 +380,17 @@ final class ExtensionsCatalogModel {
 
     /// Reads the cached catalog (no network). Safe on appear.
     func search() async {
+        searchSeq += 1
+        let mine = searchSeq
         do {
-            page = try await api.extCatalog(query: query.trimmingCharacters(in: .whitespaces), kind: kindFilter,
-                                            limit: 50, offset: 0)
+            let result = try await api.extCatalog(query: query.trimmingCharacters(in: .whitespaces), kind: kindFilter,
+                                                  limit: 50, offset: 0)
+            guard mine == searchSeq else { return }  // a newer search superseded this one
+            page = result
             browseError = nil
             browseLoaded = true
         } catch {
+            guard mine == searchSeq else { return }
             browseError = ExtensionsCatalogPresentation.message(for: error)
             if ExtensionsCatalogPresentation.errorCode(error) == "CATALOG_DISABLED" { catalogOff = true }
         }

@@ -96,6 +96,22 @@ final class ExtensionsCatalogPresentationTests: XCTestCase {
         XCTAssertTrue(lines[0].detail.contains("Declared: Stop"))
     }
 
+    func testNewServerCodesHaveOwnSentences() {
+        let want: [String: String] = [
+            "COMMIT_NOT_IN_REPO": "default branch or the named ref",
+            "VERIFY_UNAVAILABLE": "Try again in a minute",
+            "UPDATE_CHANGED": "Review it again",
+            "INVALID_REF": "branch or tag",
+            "INVALID_COMMIT": "commit id",
+            "STATE_UNREADABLE": "could not be read",
+            "BUSY": "in progress"]
+        for (code, frag) in want {
+            let m = ExtensionsCatalogPresentation.message(forCode: code, serverMessage: "server text")
+            XCTAssertTrue(m.contains(frag), "\(code): \(m)")
+            XCTAssertNotEqual(m, "server text", code)
+        }
+    }
+
     func testCatalogStates() {
         let empty = ExtCatalogSource(id: "a", title: "A", kind: "k", status: "empty", count: 0, fetchedAt: nil)
         let fresh = ExtCatalogSource(id: "b", title: "B", kind: "k", status: "fresh", count: 1, fetchedAt: "t")
@@ -112,6 +128,11 @@ private final class FakeExtAPI: ExtensionsCatalogAPI, @unchecked Sendable {
     var consentsSeen: [[String]?] = []
     var previewResult: ExtUpdatePreview?
     var failWith: Error?
+    var applyFailure: Error?
+    var toggleDelay: UInt64 = 0
+    var applyCommits: [String?] = []
+    var catalogDelay: [UInt64] = []
+    var catalogQueries: [String] = []
     init(installed: [ExtInstalledItem]) { self.installed = installed }
 
     private func note(_ s: String) throws { calls.append(s); if let e = failWith { throw e } }
@@ -121,6 +142,7 @@ private final class FakeExtAPI: ExtensionsCatalogAPI, @unchecked Sendable {
     }
     func extToggle(id: String, enabled: Bool, consents: [String]?) async throws -> ExtToggleResult {
         try note("toggle"); consentsSeen.append(consents)
+        if toggleDelay > 0 { try? await Task.sleep(nanoseconds: toggleDelay) }
         return ExtToggleResult(ok: true, item: withEnabled(id, enabled))
     }
     func extToggleMembers(id: String, members: [String], enabled: Bool) async throws -> ExtToggleResult {
@@ -133,14 +155,17 @@ private final class FakeExtAPI: ExtensionsCatalogAPI, @unchecked Sendable {
     }
     func extPreviewUpdate(id: String, commit: String?) async throws -> ExtUpdatePreview { try note("preview"); return previewResult! }
     func extApplyUpdate(id: String, commit: String?, consents: [String]?) async throws -> ExtUpdateResult {
-        try note("apply"); consentsSeen.append(consents)
+        try note("apply"); consentsSeen.append(consents); applyCommits.append(commit)
+        if let applyFailure { throw applyFailure }
         return ExtUpdateResult(ok: true, item: installed[0],
                                update: ExtUpdateSummary(from: "a", to: "b", enabled: true, wasEnabled: true, reason: nil, kinds: []))
     }
     func extRollback(id: String) async throws -> ExtRollbackResult { throw APIError.noSession }
     func extRepair(id: String) async throws -> ExtRepairResult { throw APIError.noSession }
     func extCatalog(query: String, kind: String?, limit: Int, offset: Int) async throws -> ExtCatalogPage {
-        try note("catalog"); return ExtCatalogPage(query: query, total: 0, offset: 0, results: [], sources: [])
+        try note("catalog"); catalogQueries.append(query)
+        if !catalogDelay.isEmpty { try? await Task.sleep(nanoseconds: catalogDelay.removeFirst()) }
+        return ExtCatalogPage(query: query, total: 0, offset: 0, results: [], sources: [])
     }
     func extRefreshCatalog(source: String?) async throws -> ExtRefreshResult { try note("refresh"); return ExtRefreshResult(results: []) }
 
@@ -242,5 +267,127 @@ final class ExtensionsCatalogModelTests: XCTestCase {
         await model.search()
         XCTAssertEqual(api.calls, ["catalog"])
         XCTAssertTrue(model.browseLoaded)
+    }
+
+    func testApplySendsPreviewedCommitAndConsents() async throws {
+        let item = try runnerItem()
+        let api = FakeExtAPI(installed: [item])
+        let preview = try fixture("post-auth-me-extensions-update-preview-200.json", as: ExtUpdatePreview.self)
+        api.previewResult = preview
+        let model = ExtensionsCatalogModel(api: api)
+        await model.loadInstalled()
+        await model.openPreview(item)
+        await model.applyPreview()
+        await model.confirmConsent()
+        XCTAssertEqual(api.applyCommits.last ?? nil, preview.to)
+        XCTAssertEqual(api.consentsSeen.last ?? nil, ["hook"])
+    }
+
+    func testUpdateChangedReopensPreviewWithNotice() async throws {
+        let item = try runnerItem()
+        let api = FakeExtAPI(installed: [item])
+        api.previewResult = try fixture("post-auth-me-extensions-update-preview-200.json", as: ExtUpdatePreview.self)
+        let model = ExtensionsCatalogModel(api: api)
+        await model.loadInstalled()
+        await model.openPreview(item)
+        await model.applyPreview()
+        api.applyFailure = APIError.http(status: 409, code: "UPDATE_CHANGED", message: "m", details: nil)
+        await model.confirmConsent()
+        XCTAssertNotNil(model.preview, "the user is shown the new candidate")
+        XCTAssertEqual(model.notice, "That update changed; review it again.")
+        XCTAssertFalse(model.noticeIsError)
+        XCTAssertEqual(api.calls.filter { $0 == "preview" }.count, 2)
+    }
+
+    func testAlreadyCurrentReloadsInstalled() async throws {
+        let item = try runnerItem()
+        let api = FakeExtAPI(installed: [item])
+        api.previewResult = try fixture("post-auth-me-extensions-update-preview-200.json", as: ExtUpdatePreview.self)
+        let model = ExtensionsCatalogModel(api: api)
+        await model.loadInstalled()
+        await model.openPreview(item)
+        await model.applyPreview()
+        api.applyFailure = APIError.http(status: 409, code: "ALREADY_CURRENT", message: "m", details: nil)
+        let before = api.calls.filter { $0 == "installed" }.count
+        await model.confirmConsent()
+        XCTAssertEqual(api.calls.filter { $0 == "installed" }.count, before + 1)
+        XCTAssertNil(model.preview)
+        XCTAssertEqual(model.notice, "Already up to date.")
+    }
+
+    func testConsentForVanishedItemIsNoticedNotSilent() async throws {
+        let item = withHook(try runnerItem())
+        let api = FakeExtAPI(installed: [item])
+        let model = ExtensionsCatalogModel(api: api)
+        await model.loadInstalled()
+        await model.requestEnable(item)
+        api.installed = []
+        await model.loadInstalled()
+        await model.confirmConsent()
+        XCTAssertTrue(model.noticeIsError)
+        XCTAssertTrue(model.notice?.contains("no longer installed") == true)
+        XCTAssertFalse(api.calls.contains("toggle"))
+    }
+
+    func testConsentCommitMismatchIsRefused() async throws {
+        let item = withHook(try runnerItem())
+        let api = FakeExtAPI(installed: [item])
+        let model = ExtensionsCatalogModel(api: api)
+        await model.loadInstalled()
+        model.pendingConsent = ExtensionsCatalogModel.ConsentRequest(
+            itemId: item.id, itemName: item.name, commit: "other", purpose: .enable, lines: [])
+        await model.confirmConsent()
+        XCTAssertTrue(model.notice?.contains("changed") == true)
+        XCTAssertFalse(api.calls.contains("toggle"))
+    }
+
+    func testStaleSearchResponseIsDropped() async throws {
+        let api = FakeExtAPI(installed: [try runnerItem()])
+        api.catalogDelay = [200_000_000, 0]
+        let model = ExtensionsCatalogModel(api: api)
+        model.query = "old"
+        async let first: Void = model.search()
+        try await Task.sleep(nanoseconds: 30_000_000)
+        model.query = "new"
+        await model.search()
+        await first
+        XCTAssertEqual(model.page?.query, "new")
+    }
+
+    func testUninstallRefreshesBrowseWhenLoaded() async throws {
+        let api = FakeExtAPI(installed: [try runnerItem()])
+        let model = ExtensionsCatalogModel(api: api)
+        await model.search()
+        await model.loadInstalled()
+        await model.uninstall(model.items[0])
+        XCTAssertEqual(api.calls.filter { $0 == "catalog" }.count, 2)
+    }
+
+    func testBrowseInstallReportsSuccessOnlyOnSuccess() async throws {
+        let api = FakeExtAPI(installed: [try runnerItem()])
+        let model = ExtensionsCatalogModel(api: api)
+        let page = try fixture("get-auth-me-extensions-catalog-200-2.json", as: ExtCatalogPage.self)
+        guard let entry = page.results.first(where: \.installable) else { return }
+        api.failWith = APIError.http(status: 403, code: "SOURCE_NOT_ALLOWED", message: "x", details: nil)
+        let bad = await model.installFromCatalog(entry)
+        XCTAssertFalse(bad)
+        api.failWith = nil
+        let good = await model.installFromCatalog(entry)
+        XCTAssertTrue(good)
+    }
+
+    func testBusyRejectionIsShown() async throws {
+        let item = try runnerItem()
+        let api = FakeExtAPI(installed: [item])
+        api.toggleDelay = 150_000_000
+        let model = ExtensionsCatalogModel(api: api)
+        await model.loadInstalled()
+        async let first: Void = model.disable(item)
+        try await Task.sleep(nanoseconds: 30_000_000)
+        await model.disable(item)
+        XCTAssertEqual(model.notice, "Busy, try again.")
+        XCTAssertTrue(model.noticeIsError)
+        await first
+        XCTAssertEqual(api.calls.filter { $0 == "toggle" }.count, 1)
     }
 }
