@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { THEME_CHOICES } from "../misc-model.ts";
+import { THEME_CHOICES, TRAY_TEXT } from "../misc-model.ts";
 import { LANGUAGES, PREFS_TEXT, UserPrefsModel, isLanguage } from "../app-model.ts";
 import { useEnv, useModel, useRefreshOnFocus, useStore } from "../context.tsx";
 import type { ThemeChoice } from "../host.ts";
@@ -7,12 +7,31 @@ import { ErrorText, Field, NeedsHost, Switch } from "../ui.tsx";
 import AccountSection from "./AccountSection.tsx";
 import { PartialNote } from "./NoticeSections.tsx";
 
-/** The Mac's "General" group: Appearance, synced preferences (language, native plugins), plus Account (the desktop has no account menu yet). */
+/** The Mac's "General" group: Appearance, the menu-bar icon, synced preferences (language, native plugins), plus Account. */
 export default function GeneralSection() {
   const { client, host } = useEnv();
   const [theme, setTheme] = useState<ThemeChoice | null>(null);
   useEffect(() => { setTheme(host.getTheme?.() ?? null); }, [host]);
   const [devTools, setDevToolsState] = useState(() => host.getDevTools?.() ?? false);
+  const [trayIcon, setTrayIcon] = useState<boolean | null>(null);
+  const [trayError, setTrayError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!host.getTrayIcon) return;
+    let live = true;
+    host.getTrayIcon().then((v) => { if (live) setTrayIcon(v); }, () => { if (live) setTrayIcon(null); });
+    return () => { live = false; };
+  }, [host]);
+  const toggleTray = async (on: boolean) => {
+    if (!host.setTrayIcon) return;
+    setTrayIcon(on); // optimistic; corrected by the host's answer
+    setTrayError(null);
+    try {
+      setTrayIcon(await host.setTrayIcon(on));
+    } catch {
+      setTrayError("The host could not change the menu-bar icon.");
+      try { setTrayIcon(await host.getTrayIcon?.() ?? null); } catch { /* leave as is */ }
+    }
+  };
   const m = useModel(() => new UserPrefsModel(client));
   const s = useStore(m);
   useRefreshOnFocus(() => void m.load());
@@ -29,6 +48,16 @@ export default function GeneralSection() {
         )) : <NeedsHost what="The theme choice" />}
         <p className="st-hint">The theme applies at once and is remembered on this computer.</p>
       </div>
+      {host.getTrayIcon && host.setTrayIcon ? (
+        <div className="st-stack">
+          {trayIcon === null ? (
+            <p className="st-hint" role="status">Reading the menu-bar setting...</p>
+          ) : (
+            <Switch label={TRAY_TEXT.label} hint={TRAY_TEXT.hint} checked={trayIcon} onChange={(v) => void toggleTray(v)} />
+          )}
+          {trayError ? <ErrorText text={trayError} /> : null}
+        </div>
+      ) : null}
       <div className="st-stack">
         <span className="st-label">Preferences (synced)</span>
         <ErrorText text={s.error} />

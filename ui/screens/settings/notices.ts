@@ -66,13 +66,13 @@ export const PARTIAL_NOTES: Readonly<Record<string, string>> = {
   paths:
     "On the Mac this group can also change the project's folder layout with a native folder dialog. The desktop lists the folders (present or missing) and opens them in Finder; editing is not offered.",
   workspace:
-    "On the Mac this group also holds the workspace profile, menu-bar visibility and Home page choice. The desktop shows the open project, the notes folder and the core's feature set; the profile presets and toolbar toggles are Planned (they need a feature-profile host preference).",
+    "On the Mac this group also holds the workspace profile (feature presets) and per-section toolbar toggles. The desktop shows the open project, the notes folder, the Home page choice and the core's feature set; the profile presets and toolbar toggles are Planned (they need a feature-profile host preference).",
   server:
     "On the Mac this group also edits the server URL and the Node and project paths and starts and stops the backend. Here the app starts and owns the core, the log viewer above is real, and a manual restart is not offered yet.",
   updates:
     "The Mac's automatic update checks (Sparkle) and its Check now button are Planned on the desktop (they need the host updater).",
   general:
-    "On the Mac this group also holds the menu-bar chat icon and a bilingual switch; those are Planned here (the menu-bar icon needs a host tray command).",
+    "On the Mac this group also holds a bilingual switch, which is Planned here. The menu-bar icon switch is real (the host shows or hides the tray icon, and hiding it turns close-to-tray off).",
 };
 
 // ---- Server & Backend rows (pure; the section renders them) -------------------------------------------

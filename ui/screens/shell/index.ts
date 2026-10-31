@@ -16,5 +16,6 @@ export type { SectionProps } from "./sections";
 export { shellBus, createShellBus, safeRelativePath, relativeToProject, type ShellBus, type ShellEvent } from "./bus";
 export { getTheme, setTheme, subscribeTheme, seedThemeFromHost, hasStoredTheme, THEMES } from "./theme";
 export { projectStore } from "./project-store";
-export { devToolsEnabled, setDevTools, subscribeDevTools } from "./sections";
+export { devToolsEnabled, setDevTools, subscribeDevTools, SECTIONS, type SectionId } from "./sections";
+export { HOME_CHOICES, DEFAULT_HOME, readHome, storeHome } from "./landing";
 export { ChatDockSlot, installChatDock, type ChatDockProps } from "./chat-dock";

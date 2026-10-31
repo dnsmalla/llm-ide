@@ -112,6 +112,9 @@ export interface SettingsHost {
   /** rtk (Token Saving): detect, and install through Homebrew behind the host's native confirmation. */
   rtkStatus?(): Promise<RtkStatus>;
   installRtk?(): Promise<RtkStatus>;
+  /** The menu-bar icon switch (host tray). Hidden also disables close-to-tray in the host. */
+  getTrayIcon?(): Promise<boolean>;
+  setTrayIcon?(on: boolean): Promise<boolean>;
   /** The developer-tools switch (shows the Spike item in the toolbar): per viewer, applies at once. */
   getDevTools?(): boolean;
   setDevTools?(on: boolean): void;

@@ -13,6 +13,28 @@ export function isThemeChoice(v: unknown): v is ThemeChoice {
   return v === "dark" || v === "light" || v === "midnight";
 }
 
+// ---- menu-bar icon (host tray; General) --------------------------------------------------------
+
+export interface TrayStatus {
+  available: boolean;
+  closeToTray: boolean;
+  iconVisible: boolean;
+}
+
+/** `tray_status` / `tray_set_icon_visible` answers (camelCase from the host). */
+export function decodeTrayStatus(v: unknown): TrayStatus | null {
+  if (!v || typeof v !== "object") return null;
+  const o = v as Record<string, unknown>;
+  if (typeof o.available !== "boolean" || typeof o.closeToTray !== "boolean" || typeof o.iconVisible !== "boolean") return null;
+  return { available: o.available, closeToTray: o.closeToTray, iconVisible: o.iconVisible };
+}
+
+export const TRAY_TEXT = {
+  label: "Menu-bar icon",
+  hint: "Shows the LLM-IDE icon in the menu bar. Hiding it also turns off “close to tray”, so the window can never become unreachable.",
+  unavailable: "This desktop does not provide a menu-bar icon.",
+} as const;
+
 // ---- live-then-archive mode (host pref, applies at next start) ---------------------------------
 
 export type LtaMode = "off" | "shadow" | "on";

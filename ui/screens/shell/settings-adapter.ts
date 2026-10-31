@@ -10,6 +10,7 @@
 import type { CoreClient as SettingsCoreClient, CoreResponse } from "../settings/core-api";
 import { decodeComponentStatus, decodeCoreLog, decodeRtkStatus } from "../settings/components-model";
 import { decodeMemory, decodePaths } from "../settings/project-model";
+import { decodeTrayStatus } from "../settings/misc-model";
 import type { CoreTrust, DiagnosticsInfo, SettingsEnv, SettingsHost, ThemeChoice } from "../settings/host";
 import { CoreError, type CoreClient } from "./core";
 import { decodePickedChoice, decodePickedFolder, decodePrefsView, type HostPrefsPatch, type HostPrefsView } from "./host-prefs";
@@ -125,6 +126,16 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
           const s = decodeRtkStatus(await d.invoke<unknown>("rtk_install"));
           if (!s) throw new Error("the desktop host returned an rtk status this app cannot read");
           return s;
+        },
+        async getTrayIcon() {
+          const s = decodeTrayStatus(await d.invoke<unknown>("tray_status"));
+          if (!s) throw new Error("the desktop host returned a tray status this app cannot read");
+          return s.iconVisible;
+        },
+        async setTrayIcon(on) {
+          const s = decodeTrayStatus(await d.invoke<unknown>("tray_set_icon_visible", { visible: on }));
+          if (!s) throw new Error("the desktop host returned a tray status this app cannot read");
+          return s.iconVisible;
         },
       }
     : {};

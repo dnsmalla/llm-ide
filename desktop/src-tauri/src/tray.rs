@@ -25,6 +25,7 @@ const NO_PROJECT_LABEL: &str = "No project open";
 const MIN_NOTIFY_INTERVAL_MS: u64 = 500;
 
 static CLOSE_TO_TRAY: AtomicBool = AtomicBool::new(false);
+static ICON_VISIBLE: AtomicBool = AtomicBool::new(true);
 static TRAY_READY: AtomicBool = AtomicBool::new(false);
 static LAST_NOTIFY_MS: AtomicU64 = AtomicU64::new(0);
 static PROJECT_ITEM: Mutex<Option<MenuItem<Wry>>> = Mutex::new(None);
@@ -97,7 +98,7 @@ pub fn notify(app: AppHandle, kind: String, detail: Option<String>) -> Result<()
     n.builder().title(title).body(body).show().map_err(|e| e.to_string())
 }
 
-// ---- close-to-tray setting ---------------------------------------------------------------
+// ---- tray settings (close-to-tray, menu-bar icon) ---------------------------------------
 
 fn settings_file(_app: &AppHandle) -> Option<PathBuf> {
     crate::fsutil::desktop_data_dir().ok().map(|d| d.join("tray-settings.json"))
@@ -106,50 +107,103 @@ fn settings_file(_app: &AppHandle) -> Option<PathBuf> {
 /// A settings file larger than this is ignored.
 const SETTINGS_MAX_BYTES: u64 = 4 * 1024;
 
-fn load_close_to_tray(app: &AppHandle) -> bool {
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct TraySettings {
+    pub close_to_tray: bool,
+    pub icon_visible: bool,
+}
+
+impl Default for TraySettings {
+    fn default() -> Self {
+        // Close-to-tray is off by default; the menu-bar icon is on (the Mac's menu-bar chat icon is on).
+        Self { close_to_tray: false, icon_visible: true }
+    }
+}
+
+/// Both settings from one JSON object; a missing or non-boolean field keeps its default.
+pub fn parse_settings(v: &serde_json::Value) -> TraySettings {
+    let d = TraySettings::default();
+    TraySettings {
+        close_to_tray: v.get("closeToTray").and_then(|b| b.as_bool()).unwrap_or(d.close_to_tray),
+        icon_visible: v.get("iconVisible").and_then(|b| b.as_bool()).unwrap_or(d.icon_visible),
+    }
+}
+
+pub fn settings_json(s: TraySettings) -> String {
+    format!("{{\"closeToTray\":{},\"iconVisible\":{}}}", s.close_to_tray, s.icon_visible)
+}
+
+fn load_settings(app: &AppHandle) -> TraySettings {
     settings_file(app)
         .filter(|f| std::fs::metadata(f).is_ok_and(|m| m.is_file() && m.len() <= SETTINGS_MAX_BYTES))
         .and_then(|f| std::fs::read_to_string(f).ok())
         .and_then(|s| serde_json::from_str::<serde_json::Value>(&s).ok())
-        .and_then(|v| v.get("closeToTray").and_then(|b| b.as_bool()))
-        .unwrap_or(false)
+        .map(|v| parse_settings(&v))
+        .unwrap_or_default()
 }
 
-#[derive(serde::Serialize)]
-pub struct TrayStatus {
-    pub available: bool,
-    pub close_to_tray: bool,
-}
-
-#[tauri::command]
-pub fn tray_status() -> TrayStatus {
-    TrayStatus { available: TRAY_READY.load(Ordering::Relaxed), close_to_tray: CLOSE_TO_TRAY.load(Ordering::Relaxed) }
-}
-
-#[tauri::command]
-pub fn tray_set_close_to_tray(app: AppHandle, enabled: bool) -> Result<TrayStatus, String> {
-    if enabled && !TRAY_READY.load(Ordering::Relaxed) {
-        return Err("no tray icon is available on this desktop".into());
-    }
-    CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
-    if let Some(f) = settings_file(&app) {
+fn save_settings(app: &AppHandle, s: TraySettings) {
+    if let Some(f) = settings_file(app) {
         let saved = f
             .parent()
             .ok_or_else(|| "no settings directory".to_string())
             .and_then(crate::fsutil::private_dir)
-            .and_then(|_| {
-                crate::fsutil::write_private_atomic(&f, format!("{{\"closeToTray\":{enabled}}}").as_bytes(), SETTINGS_MAX_BYTES as usize)
-            });
+            .and_then(|_| crate::fsutil::write_private_atomic(&f, settings_json(s).as_bytes(), SETTINGS_MAX_BYTES as usize));
         if let Err(e) = saved {
             eprintln!("tray: setting not saved: {e}");
         }
     }
+}
+
+fn current() -> TraySettings {
+    TraySettings { close_to_tray: CLOSE_TO_TRAY.load(Ordering::Relaxed), icon_visible: ICON_VISIBLE.load(Ordering::Relaxed) }
+}
+
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TrayStatus {
+    pub available: bool,
+    pub close_to_tray: bool,
+    /// False after the user hides the menu-bar icon in Settings > General.
+    pub icon_visible: bool,
+}
+
+#[tauri::command]
+pub fn tray_status() -> TrayStatus {
+    TrayStatus { available: TRAY_READY.load(Ordering::Relaxed), close_to_tray: CLOSE_TO_TRAY.load(Ordering::Relaxed), icon_visible: ICON_VISIBLE.load(Ordering::Relaxed) }
+}
+
+#[tauri::command]
+pub fn tray_set_close_to_tray(app: AppHandle, enabled: bool) -> Result<TrayStatus, String> {
+    if enabled && (!TRAY_READY.load(Ordering::Relaxed) || !ICON_VISIBLE.load(Ordering::Relaxed)) {
+        return Err("no tray icon is available on this desktop".into());
+    }
+    CLOSE_TO_TRAY.store(enabled, Ordering::Relaxed);
+    save_settings(&app, current());
+    Ok(tray_status())
+}
+
+/// Shows or hides the menu-bar icon. Hiding it also turns close-to-tray off: with no icon the window would be
+/// unreachable after a close. The Settings page is still open, so the icon can be brought back.
+#[tauri::command]
+pub fn tray_set_icon_visible(app: AppHandle, visible: bool) -> Result<TrayStatus, String> {
+    if !TRAY_READY.load(Ordering::Relaxed) {
+        return Err("no tray icon is available on this desktop".into());
+    }
+    ICON_VISIBLE.store(visible, Ordering::Relaxed);
+    if !visible {
+        CLOSE_TO_TRAY.store(false, Ordering::Relaxed);
+    }
+    if let Some(tray) = app.tray_by_id("main") {
+        let _ = tray.set_visible(visible);
+    }
+    save_settings(&app, current());
     Ok(tray_status())
 }
 
 /// True when a window close should hide to the tray instead of closing.
 pub fn should_hide_on_close() -> bool {
-    CLOSE_TO_TRAY.load(Ordering::Relaxed) && TRAY_READY.load(Ordering::Relaxed)
+    CLOSE_TO_TRAY.load(Ordering::Relaxed) && TRAY_READY.load(Ordering::Relaxed) && ICON_VISIBLE.load(Ordering::Relaxed)
 }
 
 // ---- tray ---------------------------------------------------------------------------------------
@@ -176,10 +230,19 @@ fn toggle_main_window(app: &AppHandle) {
 
 /// Builds the tray icon; failure is logged and leaves the app tray-less.
 pub fn setup(app: &AppHandle) {
-    CLOSE_TO_TRAY.store(load_close_to_tray(app), Ordering::Relaxed);
+    let s = load_settings(app);
+    CLOSE_TO_TRAY.store(s.close_to_tray, Ordering::Relaxed);
+    ICON_VISIBLE.store(s.icon_visible, Ordering::Relaxed);
     if let Err(e) = build(app) {
         eprintln!("tray: not available: {e}");
         CLOSE_TO_TRAY.store(false, Ordering::Relaxed);
+        return;
+    }
+    // The user may have hidden the menu-bar icon in Settings > General; the window is still the way back.
+    if !s.icon_visible {
+        if let Some(tray) = app.tray_by_id("main") {
+            let _ = tray.set_visible(false);
+        }
     }
 }
 
@@ -246,13 +309,27 @@ mod tests {
 
     #[test]
     fn close_to_tray_needs_a_tray() {
+        ICON_VISIBLE.store(true, Ordering::Relaxed);
         CLOSE_TO_TRAY.store(true, Ordering::Relaxed);
         TRAY_READY.store(false, Ordering::Relaxed);
         assert!(!should_hide_on_close());
         TRAY_READY.store(true, Ordering::Relaxed);
         assert!(should_hide_on_close());
+        ICON_VISIBLE.store(false, Ordering::Relaxed);
+        assert!(!should_hide_on_close(), "a hidden menu-bar icon must never hide the window");
+        ICON_VISIBLE.store(true, Ordering::Relaxed);
         CLOSE_TO_TRAY.store(false, Ordering::Relaxed);
         assert!(!should_hide_on_close());
+    }
+
+    #[test]
+    fn tray_settings_parse_both_flags_with_defaults() {
+        assert_eq!(parse_settings(&serde_json::json!({})), TraySettings::default());
+        assert_eq!(TraySettings::default(), TraySettings { close_to_tray: false, icon_visible: true });
+        assert_eq!(parse_settings(&serde_json::json!({"closeToTray":true})), TraySettings { close_to_tray: true, icon_visible: true });
+        assert_eq!(parse_settings(&serde_json::json!({"iconVisible":false})), TraySettings { close_to_tray: false, icon_visible: false });
+        assert_eq!(parse_settings(&serde_json::json!({"closeToTray":"yes","iconVisible":1})), TraySettings::default());
+        assert_eq!(settings_json(TraySettings { close_to_tray: true, icon_visible: false }), "{\"closeToTray\":true,\"iconVisible\":false}");
     }
 
     #[test]

@@ -313,6 +313,7 @@ macro_rules! product_handlers {
                 tray::notify,
                 tray::tray_status,
                 tray::tray_set_close_to_tray,
+                tray::tray_set_icon_visible,
                 pty_status,
                 pty_retry_consent,
                 pty_spawn,

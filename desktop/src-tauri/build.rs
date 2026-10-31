@@ -52,6 +52,7 @@ const COMMANDS: &[&str] = &[
     "notify",
     "tray_status",
     "tray_set_close_to_tray",
+    "tray_set_icon_visible",
     "bench",
     "bench_done",
     "autobench_mode",

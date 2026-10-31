@@ -1,6 +1,7 @@
 // Appearance, Workspace, Features: small sections that share one file (one lazy chunk each
 // is not worth it for a few lines; the heavy ones have their own files).
 import { useEffect, useState } from "react";
+import { HOME_CHOICES, readHome, SECTIONS, storeHome } from "@llmide/screens/shell";
 import { call } from "../core-api.ts";
 import { decodeHealth, type Health } from "../decoders.ts";
 import { describeError } from "../errors.ts";
@@ -30,6 +31,7 @@ export function WorkspaceSection() {
   const { host } = useEnv();
   const [notes, setNotes] = useState<string | null>(null);
   const [asked, setAsked] = useState(false);
+  const [home, setHome] = useState(() => readHome());
   useEffect(() => {
     let live = true;
     void host.notesFolderPath?.().then((p) => { if (live) { setNotes(p); setAsked(true); } });
@@ -47,6 +49,25 @@ export function WorkspaceSection() {
         {host.notesFolderPath ? <p>{asked ? notes ?? "Not chosen yet." : "Loading..."}</p> : <NeedsHost what="The notes folder" />}
         {host.pickFolder && host.notesFolderPath ? <p className="st-hint">Changing the notes folder is done from the Library, which owns the move of existing notes.</p> : null}
       </div>
+      <label className="st-field">
+        <span className="st-label">Home page</span>
+        <select
+          className="st-select"
+          value={home}
+          onChange={(e) => {
+            const id = e.currentTarget.value;
+            if (!(HOME_CHOICES as readonly string[]).includes(id)) return;
+            const next = id as (typeof HOME_CHOICES)[number];
+            setHome(next);
+            storeHome(next);
+          }}
+        >
+          {SECTIONS.filter((s) => (HOME_CHOICES as readonly string[]).includes(s.id)).map((s) => (
+            <option key={s.id} value={s.id}>{s.label}</option>
+          ))}
+        </select>
+        <span className="st-hint">Where the app lands once a project is open (the Home button always returns to Welcome). Applies at once.</span>
+      </label>
     </div>
   );
 }
