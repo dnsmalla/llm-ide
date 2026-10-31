@@ -39,6 +39,8 @@ import { sweepStaleCliTempDirs } from './providers/providers.mjs';
 import { flushWarmCliPool } from './providers/warm-cli-pool.mjs';
 
 const PORT = config.port;
+// Per-launch identity nonce from the desktop host (see the /health handler); never logged.
+const CORE_NONCE = /^[0-9a-f]{32,128}$/.test(process.env.LLMIDE_CORE_NONCE || '') ? process.env.LLMIDE_CORE_NONCE : '';
 const HOST = config.host;
 
 // Bump whenever the HTTP surface changes so the extension can detect
@@ -725,6 +727,11 @@ const server = http.createServer(async (req, res) => {
     // gated behind ?debug=1 but that was no gate at all: any caller
     // could just append the query. Operators who need verbose status
     // should authenticate and hit /metrics or /auth/me/audit.
+    // Desktop host identity proof: a host that spawned this process passed a
+    // per-launch random nonce (LLMIDE_CORE_NONCE) and checks it comes back
+    // here, so a different process squatting the port cannot pass as this core.
+    // Header only: the JSON body (and its schema) is unchanged.
+    if (CORE_NONCE) res.setHeader('x-llmide-nonce', CORE_NONCE);
     sendJSON(res, 200, await collectHealth());
     return;
   }
