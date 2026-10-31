@@ -11,9 +11,11 @@ without touching its data.
 | Core port | 3457 (then 3458, 3459) | 3456 |
 | Keychain service | `com.llmide.desktop` | its own |
 
-Nothing is shared: accounts, chats and the database are separate. The desktop app only adopts a core that
-answers on 3456 if one is already running, and then marks it "adopted (unverified)" in the status bar and in
-Settings > About; quit the Swift app first if you want the verified, app-owned core.
+Nothing is shared: accounts, chats and the database are separate. The desktop app never uses a server it
+did not start: if something already answers on 3456 it is only reported ("Another LLM-IDE server is running on
+port 3456 ... It is not used by this app") and the app starts its own core on 3457-3459. (Adopting a 3456 core
+is a developer opt-in: debug builds, or `LLMIDE_ADOPT_CORE=1`; it is shown as "adopted (unverified)" and
+cannot be reached from a release build's web view.)
 
 ## Prerequisites
 
@@ -109,8 +111,17 @@ Try these in order. Note anything that differs in the bug-report template at the
   (stop it with Cmd+Q in the app, or Ctrl+C in that terminal).
 - **Reset:** quit the app and move `~/Library/Application Support/llm-ide-desktop` aside to start from an empty
   core. Remove the keychain item `com.llmide.desktop` too if the app says the secret store is unreadable.
-- **Two apps on one port:** if the Swift app runs, the desktop app can adopt its core (unverified). Quit the
-  Swift app and relaunch the desktop app for an app-owned core.
+- **Two apps on one port:** if the Swift app (or an old `node server.mjs`) holds 3456, the desktop app leaves
+  it alone and runs its own core on 3457-3459. Nothing needs to be quit.
+- **"Cannot reach the core":** the web view could not talk to a core it may use. Look at the status bar first:
+  it says whether the core is starting, restarting, failed, or has a hint. Then, in a terminal:
+  - `lsof -nP -iTCP:3456 -sTCP:LISTEN` shows who holds 3456 (not used by the app; stop it yourself with
+    `kill <pid>` only if you want it gone, the app never does).
+  - `lsof -nP -iTCP:3457-3459 -sTCP:LISTEN` shows who holds the app's ports. The app's own core listens on one
+    of them while it runs; if all three are held by other programs the status bar says "Ports 3457-3459 are
+    busy: free one of them or restart".
+  - `tail -n 40 ~/Library/Application Support/llm-ide-desktop/core.log` (quote the path) shows why a core failed.
+  Older versions adopted a server on 3456 and then showed this message for every request; update and relaunch.
 
 ## Known gaps
 

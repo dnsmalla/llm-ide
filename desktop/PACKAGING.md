@@ -93,8 +93,9 @@ What the host guarantees about the Node core. Code: `src-tauri/src/core_host.rs`
 (lifecycle), `proc_tree.rs` (tree stop), `core_env.rs` (environment), `fsutil.rs`
 (data dir); staging: `scripts/stage-core.mjs`, `node-runtime.mjs`, `node-pin.json`.
 
-**Lifecycle.** The core starts on launch (a healthy `:3456` is adopted, never supervised or
-killed). A supervisor thread watches the spawned core: child exit, and `/health` every 5 s
+**Lifecycle.** The core starts on launch (a healthy `:3456` is NOT adopted in a release build: it is reported as
+`core_status.foreign_core` and the app spawns its own core; adoption needs a debug build or
+`LLMIDE_ADOPT_CORE=1`, and an adopted core is never supervised or killed). A supervisor thread watches the spawned core: child exit, and `/health` every 5 s
 that must echo the launch nonce (3 consecutive failures = hung: the tree is killed). A crash or
 hang restarts the core with exponential backoff (1 s doubling, cap 30 s, fresh nonce, first
 free port of 3457..3459). `RestartPolicy`: 5 crashes inside 5 minutes is a **fatal** state
@@ -297,7 +298,7 @@ Not verified: any of the dialogs in a real window (macOS, Windows or Linux), the
 An independent review of the Tauri host drove these changes (all covered by tests; none of the GUI paths was run in a window here).
 
 - **Terminal is gated in the host** (`pty.rs`). `pty_spawn`/`pty_write` need (1) the Terminal feature enabled in the host's own `LLMIDE_FEATURES` (unset/empty = all, same rule as the Mac app and server; the key is `terminal`), and (2) the user's approval in a native confirm dialog (`rfd`, run by the host, default deny) once per page load. A "No" is remembered until the page reloads; a reload or window close revokes consent and kills every shell. The shell runs with a scrubbed environment (no `LLMIDE_*`, `MEETNOTES_*`, `ANTHROPIC_*`, provider keys, or any variable named like a secret) and starts in the active project root (else `$HOME`; the repo root only in debug builds).
-- **Core identity** (`core_host.rs`). A spawned server gets a per-launch random nonce (`LLMIDE_CORE_NONCE`, 32 bytes hex) and echoes it as the `x-llmide-nonce` header on `/health` (additive; the JSON body and schema are unchanged, no API version bump). The host never trusts a /health that lacks the nonce (a squatter on the port is rejected), tries ports 3457..3459, skips busy ones, and never follows HTTP redirects. An **adopted** `:3456` server cannot be verified (nothing shares a secret with it): `core_status` reports `trust: "adopted_unverified"` plus a `notice`, the status bar shows "adopted (unverified)", and the host sends it nothing credential-bearing. A same-user proof (a nonce file written by a server the host did not spawn) would need a server-side writer and is not built.
+- **Core identity** (`core_host.rs`). A spawned server gets a per-launch random nonce (`LLMIDE_CORE_NONCE`, 32 bytes hex) and echoes it as the `x-llmide-nonce` header on `/health` (additive; the JSON body and schema are unchanged, no API version bump). The host never trusts a /health that lacks the nonce (a squatter on the port is rejected), tries ports 3457..3459, skips busy ones, and never follows HTTP redirects. A foreign `:3456` server is not adopted by default (the release CSP `connect-src` only allows 3457-3459 and the trust gate refuses credentials to unverified cores, so adopting it made every request fail as "Cannot reach the core."); the host reports it additively as `core_status.foreign_core {port, detected, pid?, command?, notice}` (best-effort `/usr/sbin/lsof -nP -iTCP:3456 -sTCP:LISTEN -Fpc`, scrubbed env, 2 s budget, never any signal), and if all of 3457..3459 are busy the state is `failed` with `error_code: "ports_busy"` and `ports_tried`. The shell shows plain-language hints with a text-only command to copy and decorates NETWORK errors with the core status (`describeCoreError` in `ui/screens/shell/index.ts`). An **adopted** `:3456` server (opt-in) cannot be verified (nothing shares a secret with it): `core_status` reports `trust: "adopted_unverified"` plus a `notice`, the status bar shows "adopted (unverified)", and the host sends it nothing credential-bearing. A same-user proof (a nonce file written by a server the host did not spawn) would need a server-side writer and is not built.
 - **Command-bus host proof** (`host_approval.rs`, `host_bus_proof`; review finding H1). The `/health` nonce above is identity only: it is served unauthenticated, so it is never a credential. The desktop class on the command bus is proven by a SEPARATE secret, `proof = hex(HMAC-SHA256(approval_key, "bus-host-proof/v1"))`, derived from the per-launch `LLMIDE_HOST_APPROVAL_KEY`. The host command `host_bus_proof()` returns it to the main window only (label check, one capability entry `allow-host-bus-proof`) and only while the core is `ready` and `spawned` (else `null`). The shell (`ui/screens/shell/bus-proof.ts`) keeps it in memory, and the core client (`core.ts`, option `hostProof`) adds `x-llmide-client: desktop-ui` and `x-llmide-host-nonce: <proof>` to authenticated requests of a trusted core only (never `auth: false` routes, never an adopted core). It is a bearer secret equal in power to the Bypass key for bus approvals (approve, deny, list approval nonces, enable kinds): treat like a password. With `LLMIDE_HOST_APPROVAL_KEY` unset the core lets nobody prove host. The Swift host must compute the same HMAC (spec: `docs/spec/command-bus.md` section 1.4).
 - **Private state.** The spawned core's DB lives in `<app data dir>/core/poc.db` (dir created 0700, symlink and foreign-owner refused), not under the temp dir. `recent-projects.json` and `tray-settings.json` are bounded, written atomically with mode 0600. A lock file (`instance.lock`, `flock`) allows one app instance per data dir so two first-run instances cannot overwrite the keychain secrets.
 - **Errors.** `core_status.error` is a fixed message; the last core output, with secrets and long opaque tokens redacted, goes to `<app data dir>/core.log` (0600) only.
@@ -375,3 +376,15 @@ as `<img>` in both themes (htmlLabels are off, so any diagram type that insists 
 the sanitiser drops that element); the native confirm dialog; the real download through `curl` (offline, proxy-only
 networks and certificate errors surface as "download failed", the app uses no proxy settings). Run the app, open a Visual
 result with a mermaid fence, press Install, and check the diagram and an adversarial one (`click`, `%%{init` loose).
+
+## Troubleshooting: "Cannot reach the core"
+
+Meaning: the web view has no core it is allowed to use. Check, in order:
+
+1. Status bar: starting/restarting/failed states, or a hint ("Other server on :3456", "Ports busy").
+2. `lsof -nP -iTCP:3456 -sTCP:LISTEN` (foreign server, not used by the app; the app never stops it).
+3. `lsof -nP -iTCP:3457-3459 -sTCP:LISTEN` (the app's own core, or what blocks it: `ports_busy`).
+4. `~/Library/Application Support/llm-ide-desktop/core.log` (redacted tail of a failed core).
+
+Behaviour: a foreign :3456 server is ignored and the own core starts on 3457-3459; adoption is a dev opt-in
+(`LLMIDE_ADOPT_CORE=1` or a debug build). Not verified: the behaviour in a real window with an old server on 3456.
