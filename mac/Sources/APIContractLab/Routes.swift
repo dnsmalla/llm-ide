@@ -98,6 +98,19 @@ let apiRoutes: [Route] = [
     route("GET /kb/storage", "StorageReport", LlmIdeAPIClient.StorageReport.self),  // storageReport
     route("GET /kb/providers/catalog", "CatalogResponse", LlmIdeAPIClient.CatalogResponse.self),  // fetchProviderCatalog
     route("POST /kb/providers/catalog/connect", "CatalogConnectAck", LlmIdeAPIClient.CatalogConnectAck.self),  // connectCatalogProvider
+    route("GET /auth/me/extensions/active", "ExtActiveView", ExtActiveView.self),  // extActive
+    route("GET /auth/me/extensions/catalog", "ExtCatalogPage", ExtCatalogPage.self),  // extCatalog
+    route("GET /auth/me/extensions/installed", "ExtInstalledList", ExtInstalledList.self),  // extInstalled
+    route("GET /auth/me/extensions/updates", "ExtUpdateList", ExtUpdateList.self),  // extUpdates
+    route("POST /auth/me/extensions/catalog/refresh", "ExtRefreshResult", ExtRefreshResult.self),  // extRefreshCatalog
+    route("POST /auth/me/extensions/install", "ExtInstallResult", ExtInstallResult.self),  // extInstall
+    route("POST /auth/me/extensions/repair", "ExtRepairResult", ExtRepairResult.self),  // extRepair
+    route("POST /auth/me/extensions/rollback", "ExtRollbackResult", ExtRollbackResult.self),  // extRollback
+    route("POST /auth/me/extensions/toggle", "ExtToggleResult", ExtToggleResult.self),  // extToggle
+    route("POST /auth/me/extensions/uninstall", "ExtOk", ExtOk.self),  // extUninstall
+    route("POST /auth/me/extensions/update", "ExtUpdateResult", ExtUpdateResult.self),  // extApplyUpdate
+    route("POST /auth/me/extensions/update/preview", "ExtUpdatePreview", ExtUpdatePreview.self),  // extPreviewUpdate
+    route("POST /auth/me/extensions/updates/check", "ExtUpdateCheckResult", ExtUpdateCheckResult.self),  // extCheckUpdates
     route("POST /kb/providers/catalog/disconnect", "CatalogAck", LlmIdeAPIClient.CatalogAck.self),  // disconnectCatalogProvider
     route("POST /kb/providers/catalog/test", "CatalogTestResult", LlmIdeAPIClient.CatalogTestResult.self),  // testCatalogProvider
     route("POST /kb/providers/catalog/models", "CatalogModelList", LlmIdeAPIClient.CatalogModelList.self),  // fetchCatalogModels
@@ -147,10 +160,6 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("GET /auth/mcp-connector/callback", "OAuth browser callback page, not a JSON API body"),
     ("GET /auth/mcp-connector/status", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("GET /auth/me/audit", "no Mac caller (see schema/http/INVENTORY.md)"),
-    ("GET /auth/me/extensions/active", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("GET /auth/me/extensions/catalog", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("GET /auth/me/extensions/installed", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("GET /auth/me/extensions/updates", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
     ("GET /auth/me/llm-sources/updates", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("GET /auth/me/prefs", "Mac decodes the private UserPrefsWrap ({prefs: ...}); not in this table yet"),
     ("GET /auth/me/secrets", "Mac decodes a private Resp; not in this table yet"),
@@ -191,15 +200,6 @@ let apiSkipped: [(endpoint: String, reason: String)] = [
     ("POST /auth/logout", "no Mac caller (see schema/http/INVENTORY.md)"),
     ("POST /auth/me/connectors/add", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
     ("POST /auth/me/delete", "no Mac caller (see schema/http/INVENTORY.md)"),
-    ("POST /auth/me/extensions/catalog/refresh", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/install", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/repair", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/rollback", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/toggle", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/uninstall", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/update", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/update/preview", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
-    ("POST /auth/me/extensions/updates/check", "no Mac caller yet (the Extensions screen is the next step and will add the models)"),
     ("POST /auth/me/llm-sources/items", "Mac decodes a private wrapper and returns [String]; not in this table yet"),
     ("POST /auth/me/llm-sources/toggle", "Mac method returns Bool from a private ack; no model type to decode"),
     ("POST /auth/me/mcp-plugins/add", "Mac client calls this path but the decode is a private wrapper, ack or tuple; not in this table yet"),
