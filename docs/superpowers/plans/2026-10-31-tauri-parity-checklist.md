@@ -24,25 +24,25 @@ How to use: one row per behaviour. **Mac** is the reference (Swift source named 
 
 | Row | Mac (source) | Tauri | Evidence |
 |---|---|---|---|
-| Streaming reply renders incrementally, no dropped events | yes (`ChatMessageList, ChatEngine`) | - |  |
-| Markdown bubble: code blocks with copy, tables, links, no raw HTML (sanitised) | yes (`ChatMarkdownBubble`) | - |  |
-| Composer: multiline, history recall, send, stop, attachments via host dialog, drag drop | yes (`ChatComposer, HistoryTextEditor`) | - |  |
+| Streaming reply renders incrementally, no dropped events | yes (`ChatMessageList, ChatEngine`) | ~ | sealed-block streaming, only the last message changes, 10k-delta reply micro-batched (`ui/screens/chat/state.ts`, `controller.ts`; tests "10k-token reply reduces fast", "a 10k-delta reply is micro-batched", "every fixture can be applied in a turn"); live run on the real core and the 10k-token main-thread check are not measured |
+| Markdown bubble: code blocks with copy, tables, links, no raw HTML (sanitised) | yes (`ChatMarkdownBubble`) | ~ | AST to React, no HTML strings, allowlisted links via host opener, images never loaded, code copy, tables (`markdown.ts`, `MarkdownView.tsx`; tests in `markdown.test.mjs`: script/iframe/img/javascript: links); desktop link opener host command `open_external_url` does not exist yet (clicks are ignored in the app, blocked-by host) |
+| Composer: multiline, history recall, send, stop, attachments via host dialog, drag drop | yes (`ChatComposer, HistoryTextEditor`) | ~ | multiline, Enter/Shift+Enter, history recall, send, Stop, queue while streaming, per-chat draft (`Composer.tsx`, tests "Composer: ..."); attachments and drag-drop NOT built (no host file-dialog command; the button is hidden) |
 | Slash menu: 7 dynamic surfaces (built-ins, skills, plugins, MCP, commands, modes, models) from the server | yes (`ChatSlashCommands, CompletionMenu`) | - |  |
 | @ file mentions / completion | yes (`CompletionController`) | - |  |
-| Mode picker incl. plan and assist-plan modes, per-chat mode memory, mode badge | yes (`ModeBadge, ModePolicy`) | - |  |
+| Mode picker incl. plan and assist-plan modes, per-chat mode memory, mode badge | yes (`ModeBadge, ModePolicy`) | ~ | 7 modes, Auto follows the server `mode_set`, hand-picked mode never moves, new chat starts on Auto (`route.ts`, test "mode picker rules"); mode kept per chat for the app run only; mode badge and plan flow not built |
 | Plan flow: plan card, edit sheet, save card, execution card, timeline, 'Nothing to execute.' marker | yes (`CodeAssistant+Plan*, PlanEditSheet`) | - |  |
-| Model picker with live model list, provider routing control, route history | yes (`CodeAssistantModelState, ChatRouteControl`) | - |  |
-| Cap chip (per-model usage caps, same thresholds, fallback notice) | yes (`usage ledger, notice events`) | - |  |
-| Context usage meter (`context_usage`) | yes (`ChatSessionHeader`) | - |  |
-| Tool activity list, subagent chip, task list and progress (`tasks`, `tasks_progress`) | yes (`ToolActivityList, SubagentActivityChip`) | - |  |
-| Permission mode: Ask / Accept Edits / Bypass chip and Bypass confirmation | yes (`EditAcceptanceMode`) | - |  |
+| Model picker with live model list, provider routing control, route history | yes (`CodeAssistantModelState, ChatRouteControl`) | ~ | live Claude list + connected catalog models with tools badge and plain-chat note, pin via `PUT /agent/v2/session/route` (`route.ts`, tests "loadModelGroups", "plain-chat note"); route history and cold-switch confirmation not built |
+| Cap chip (per-model usage caps, same thresholds, fallback notice) | yes (`usage ledger, notice events`) | ~ | billable-token SESSION cap chip: presets, k/m input, raise at cap, same 80 percent warn and reached thresholds as the Mac (`Pickers.tsx`, `route.ts`; tests "cap thresholds", "parseLimit", "CapChip"); the per-model usage-cap ledger and fallback notice (`/kb/usage/limits`) are not built |
+| Context usage meter (`context_usage`) | yes (`ChatSessionHeader`) | ~ | percent from `context_usage` in the header (`ChatScreen.tsx`, test "fixtures can be applied"); no category breakdown |
+| Tool activity list, subagent chip, task list and progress (`tasks`, `tasks_progress`) | yes (`ToolActivityList, SubagentActivityChip`) | ~ | collapsed tool cards with capped args and output, 'show more' in steps, task list from `tasks`/`tasks_progress` (`MessageView.tsx`, tests "tool cards", "tool output preview is capped"); subagent chip not built; full output beyond the core's own truncation needs a core route (blocked-by) |
+| Permission mode: Ask / Accept Edits / Bypass chip and Bypass confirmation | yes (`EditAcceptanceMode`) | ~ | Ask / Accept Edits / Bypass select sent as `permissionMode`; Bypass fails closed unless the host supplies a native confirm (`confirmBypass`, not wired yet) (`Pickers.tsx`, `route.ts`; test "Bypass needs one confirmation"); persistent red header state not built |
 | Tool approval card (Allow once / always for project / Deny), parked approval survives reload | yes (`ToolApprovalCard, AgentV2ApprovalState`) | - |  |
 | Question card (AskUserQuestion) | yes (`AskUserQuestionCard, ApprovalQuestionCard`) | - |  |
 | Workspace trust banner, trust by host dialog | yes (`workspace-trust`) | - |  |
-| Session header: rename, delete (removes everywhere), new chat | yes (`ChatSessionHeader, SessionRow`) | - |  |
-| Session list: history, background (parked) sessions, switch without losing a running turn | yes (`ChatEngineRegistry`) | - |  |
-| Notices: retry, rate limit, permission denied, fallback, refusal | yes (`notice event`) | - |  |
-| Error states and reconnect after core restart | yes (`error event`) | - |  |
+| Session header: rename, delete (removes everywhere), new chat | yes (`ChatSessionHeader, SessionRow`) | ~ | rename and delete (with confirm) on list rows, new chat button, title in header (`SessionList.tsx`, tests in `components.test.mjs`); delete 'removes everywhere' relies on `DELETE /kb/chat/sessions/:id` only (archive copy is S-D) |
+| Session list: history, background (parked) sessions, switch without losing a running turn | yes (`ChatEngineRegistry`) | ~ | virtualised and grouped list, 2,000 chats render a bounded window, Running flag, switching never kills a turn (`SessionList.tsx`, `controller.ts`; tests "2,000 chats", "switching chats never touches a running turn"); re-attaching to a running turn after a webview reload is blocked-by core (no replay route), the UI only shows that a turn runs on the core |
+| Notices: retry, rate limit, permission denied, fallback, refusal | yes (`notice event`) | ~ | retry, rate limit, permission denied, fallback, refusal and `workspace_trust` render as banners (info hidden, repeats collapsed) (`state.ts`, test "notices: info is hidden") |
+| Error states and reconnect after core restart | yes (`error event`) | ~ | error event, refusals (402/409/503), dropped stream and unreachable core give a retryable error with Retry; 409 TURN_IN_PROGRESS after Stop is retried; SESSION_UNRESUMABLE retries fresh (`controller.ts`; tests "stream dropped mid-turn", "409 TURN_IN_PROGRESS", "SESSION_UNRESUMABLE"); no automatic reconnect |
 | Chat survives quit and reopens (live-then-archive store, plan section 4); recovery sweep after kill | yes (`ChatSessionStore, ChatArchiveService`) | - |  |
 | Ended chat opens read-only | yes (`R2b`) | - |  |
 | Chat archive settings card | yes (`ChatArchiveSettingsCard`) | - |  |
