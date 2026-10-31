@@ -478,3 +478,97 @@ export function decodeSdkStatus(v: unknown): SdkStatus {
   const r = rec(v, "agent-sdk");
   return { running: optStr(r.running, "running") ?? null, restartNeeded: r.restartNeeded === true };
 }
+
+// ---- Mirror-the-Mac groups: Claude Agent SDK, Tool permissions, General preferences -------------
+
+export interface AgentSdkStatus {
+  running: string | null;
+  installed: string | null;
+  latest: string | null;
+  updateAvailable: boolean;
+  restartNeeded: boolean;
+  updating: boolean;
+  /** False while remote access is on (an update runs npm on the host). */
+  canUpdate: boolean;
+  /** Why the registry could not be read (a short status, shown as text). */
+  error: string | null;
+}
+export function decodeAgentSdk(v: unknown): AgentSdkStatus {
+  const r = rec(v, "agent-sdk");
+  return {
+    running: optStr(r.running, "running") ?? null,
+    installed: optStr(r.installed, "installed") ?? null,
+    latest: optStr(r.latest, "latest") ?? null,
+    updateAvailable: r.updateAvailable === true,
+    restartNeeded: r.restartNeeded === true,
+    updating: r.updating === true,
+    canUpdate: r.canUpdate !== false,
+    error: optStr(r.error, "error") ?? null,
+  };
+}
+
+export interface AgentSdkUpdate {
+  ok: boolean;
+  from: string | null;
+  to: string | null;
+  rolledBack: boolean;
+  restartNeeded: boolean;
+  log: string | null;
+}
+export function decodeAgentSdkUpdate(v: unknown): AgentSdkUpdate {
+  const r = rec(v, "agent-sdk update");
+  return {
+    ok: bool(r.ok, "ok"),
+    from: optStr(r.from, "from") ?? null,
+    to: optStr(r.to, "to") ?? null,
+    rolledBack: r.rolledBack === true,
+    restartNeeded: r.restartNeeded === true,
+    log: optStr(r.log, "log") ?? null,
+  };
+}
+
+export interface ToolRule {
+  projectRoot: string;
+  toolName: string;
+  /** Empty = the whole tool. */
+  pattern: string;
+  grantedAt: string;
+}
+export interface LegacyGrant {
+  toolName: string;
+  grantedAt: string;
+}
+export interface ToolPermissions {
+  rules: ToolRule[];
+  /** Pre-project global grants: no longer honoured by the server, still listed so they can be removed. */
+  legacy: LegacyGrant[];
+}
+export function decodeToolPermissions(v: unknown): ToolPermissions {
+  const r = rec(v, "tool-approvals");
+  return {
+    // `rules` is absent on a server older than the project-scoped rules.
+    rules: r.rules == null ? [] : arr(r.rules, "rules").map((x, i) => {
+      const o = rec(x, `rules[${i}]`);
+      return { projectRoot: str(o.projectRoot, "projectRoot"), toolName: str(o.toolName, "toolName"), pattern: typeof o.pattern === "string" ? o.pattern : "", grantedAt: str(o.grantedAt, "grantedAt") };
+    }),
+    legacy: r.approvals == null ? [] : arr(r.approvals, "approvals").map((x, i) => {
+      const o = rec(x, `approvals[${i}]`);
+      return { toolName: str(o.toolName, "toolName"), grantedAt: str(o.grantedAt, "grantedAt") };
+    }),
+  };
+}
+
+export interface UserPrefs {
+  language: string | null;
+  bilingual: boolean | null;
+  /** Unset means on (the server's default). */
+  nativePlugins: boolean | null;
+}
+export function decodeUserPrefs(v: unknown): UserPrefs {
+  const p = rec(rec(v, "prefs").prefs, "prefs.prefs");
+  return {
+    language: optStr(p.language, "language") ?? null,
+    bilingual: p.bilingual == null ? null : bool(p.bilingual, "bilingual"),
+    nativePlugins: p.nativePlugins == null ? null : bool(p.nativePlugins, "nativePlugins"),
+  };
+}
