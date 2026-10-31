@@ -221,17 +221,99 @@ test("gmail easy card: address and write-only app password, workspace caveat, fo
   assert.match(out, /<button[^>]*disabled=""[^>]*>Fetch new mail<\/button>/);
 });
 
-test("calendar easy card: guide, write-only secret address field, read-only and anyone-with-the-URL warning, unavailable on 404", async () => {
-  const fake = new L.FakeIcal();
-  const out = html(h(L.IcalCard, { api: fake }));
+const feed = (over = {}) => ({ sourceId: "0123456789ab", name: "Team", calendarIdPrefix: "me@examp", host: "calendar.google.com", status: "idle", lastRunAt: "2025-11-10T00:00:00.000Z", lastError: null, options: { daysBack: 30, daysAhead: 90 }, ...over });
+const noop = () => {};
+
+test("calendar easy card: guide, write-only secret field, name field, cap shown, read-only and anyone-with-the-URL warning", () => {
+  const out = html(h(L.IcalCard, { api: new L.FakeIcal() }));
+  assert.match(out, /aria-label="Easy setup: Google Calendar"/);
   assert.match(out, /Settings for my calendars/);
   assert.match(out, /Integrate calendar/);
   assert.match(out, /Secret address in iCal format/);
   assert.match(out, /Anyone who has the address can read the whole calendar/);
   assert.match(out, /Read-only/);
+  assert.match(out, /Checking/);
   assert.match(out, /<input type="password" autoComplete="off" spellCheck="false"/);
   assert.ok(!/<input[^>]*type="password"[^>]*value="[^"]/.test(out));
-  assert.match(out, /<button[^>]*disabled=""[^>]*>Connect<\/button>/);
+  assert.match(out, /<span>Name \(only for you/);
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Add calendar<\/button>/);
+  assert.match(out, /up to 10 calendars/);
+});
+
+test("add form at the cap: both fields and the button disabled with the cap wording", () => {
+  const out = html(h(L.AddFeedForm, { count: 10, busy: false, onAdd: noop }));
+  assert.match(out, /already have 10 calendars/);
+  assert.equal(count(out, /disabled=""/g), 3);
+});
+
+test("feed row: name as text, status chip, prefix and host only, window, indexed in the core, labelled actions", () => {
+  const out = html(h(L.FeedRow, { feed: feed({ name: "<img src=x onerror=alert(1)>" }), busy: false, syncing: false, result: null, onSync: noop, onStop: noop, onSaveOptions: noop, onDelete: noop }));
+  assert.match(out, /<li aria-label="Calendar &lt;img src=x onerror=alert\(1\)&gt;"/);
+  assert.ok(!/<img/.test(out));
+  assert.match(out, /Ready/);
+  assert.match(out, /me@examp… on calendar\.google\.com/);
+  assert.match(out, /Window: 30 days back, 90 days ahead\. Indexed in the core/);
+  assert.match(out, /<button[^>]*aria-label="Sync &lt;img[^>]*>Sync<\/button>/);
+  assert.match(out, /aria-label="Delete &lt;img/);
+  assert.match(out, /<fieldset[^>]*aria-label="Window for/);
+  assert.ok(!/private-/.test(out));
+});
+
+test("feed row: revoked explains the reset and that indexed notes are kept; error shows our wording for the stored code", () => {
+  const rev = html(h(L.FeedRow, { feed: feed({ status: "revoked", lastError: "ICAL_FEED_REVOKED" }), busy: false, syncing: false, result: null, onSync: noop, onStop: noop, onSaveOptions: noop, onDelete: noop }));
+  assert.match(rev, /Address no longer accepted/);
+  assert.match(rev, /Google no longer accepts this address: reset it in Calendar settings and add the new one/);
+  assert.match(rev, /already indexed is kept/);
+  const err = html(h(L.FeedRow, { feed: feed({ status: "error", lastError: "ICAL_PARSE_FAILED" }), busy: false, syncing: false, result: null, onSync: noop, onStop: noop, onSaveOptions: noop, onDelete: noop }));
+  assert.match(err, /Last sync failed/);
+  assert.match(err, /not a calendar/);
+  assert.ok(!/ICAL_PARSE_FAILED/.test(err), "the raw code is not shown as the message");
+  const odd = html(h(L.FeedRow, { feed: feed({ status: "error", lastError: "<b>x</b>" }), busy: false, syncing: false, result: null, onSync: noop, onStop: noop, onSaveOptions: noop, onDelete: noop }));
+  assert.ok(!/<b>x/.test(odd));
+});
+
+test("feed row: syncing shows progress and Stop; the result shows counts, truncated notice and mapped warnings", () => {
+  const res = { sourceId: "0123456789ab", status: "ok", events: 6, instances: 12, cancelled: 3, removed: 1, truncated: true, warnings: ["tz_unknown", "weird_code"] };
+  const busy = html(h(L.FeedRow, { feed: feed(), busy: true, syncing: true, result: null, onSync: noop, onStop: noop, onSaveOptions: noop, onDelete: noop }));
+  assert.match(busy, /role="status"[^>]*>Syncing…/);
+  assert.match(busy, />Stop<\/button>/);
+  assert.match(busy, /<button[^>]*disabled=""[^>]*aria-label="Sync Team"/);
+  const done = html(h(L.FeedRow, { feed: feed(), busy: false, syncing: false, result: res, onSync: noop, onStop: noop, onSaveOptions: noop, onDelete: noop }));
+  assert.match(done, /6 events read, 12 occurrences indexed in the core, 3 cancelled, 1 removed\./);
+  assert.match(done, /only part of it was indexed and nothing was removed/);
+  assert.match(done, /<ul aria-label="Sync warnings">/);
+  assert.match(done, /time zone the core does not know/);
+  assert.ok(!/weird_code|tz_unknown/.test(done), "raw warning codes are never shown");
+});
+
+test("window editor: current values, ranges, the full-resync note, Save disabled until a valid change", () => {
+  const out = html(h(L.FeedOptionsEditor, { feed: feed(), busy: false, onSave: noop }));
+  assert.match(out, /value="30"/);
+  assert.match(out, /value="90"/);
+  assert.match(out, /0 to 365/);
+  assert.match(out, /0 to 730/);
+  assert.match(out, /next sync read the whole calendar again/);
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Save window<\/button>/);
+});
+
+test("delete dialog: explains the vault and cached events, typed confirm, Delete disabled until typed", () => {
+  const out = html(h(L.DeleteFeedDialog, { feed: feed(), busy: false, error: null, onConfirm: noop, onClose: noop }));
+  assert.match(out, /role="alertdialog"/);
+  assert.match(out, /removes its secret address from the core&#x27;s vault and the calendar events the core indexed/);
+  assert.match(out, /Type delete to confirm/);
+  assert.match(out, /<button[^>]*disabled=""[^>]*>Delete<\/button>/);
+  const err = html(h(L.DeleteFeedDialog, { feed: feed(), busy: false, error: new L.IcalError("not_found", "ICAL_NOT_FOUND"), onConfirm: noop, onClose: noop }));
+  assert.match(err, /not in the core any more/);
+  assert.ok(!/Unknown calendar feed/.test(err));
+});
+
+test("hostile feed list renders as text: bidi and control names are cleaned by the decoder, the list is bounded", () => {
+  const feeds = L.decodeIcalFeeds({ sources: Array.from({ length: 3000 }, (_, i) => ({ sourceId: (i + 4096).toString(16).padStart(12, "0"), name: `‮<script>${i}`, calendarIdPrefix: "x", host: "h", status: "idle", lastRunAt: null, lastError: null, options: {} })) });
+  assert.ok(feeds.length <= 100);
+  assert.ok(feeds.every((f) => !f.name.includes("‮")));
+  const out = html(h("ul", null, feeds.slice(0, 3).map((f) => h(L.FeedRow, { key: f.sourceId, feed: f, busy: false, syncing: false, result: null, onSync: noop, onStop: noop, onSaveOptions: noop, onDelete: noop }))));
+  assert.ok(!/<script>/.test(out));
+  assert.match(out, /&lt;script&gt;/);
 });
 
 test("drive easy card: Drive for desktop guide, no OAuth, honest link-file caveat, picker needs the desktop app", () => {

@@ -9,146 +9,11 @@ import { StatusBanner } from "@llmide/ui-kit";
 import type { PaneEnv } from "../SourcePanes";
 import { addRepo, indexRepo, listRepos, removeRepo, type RepoEntry } from "../source-actions.ts";
 import { mapThrown, sourceErrorText, type SourceError } from "../source-core.ts";
-import { googleErrorText, mapGoogleThrown, type GoogleError } from "./google-core.ts";
-import { icalApiFrom, icalCardState, icalSyncMessage, validateIcalUrl, type IcalApi, type IcalStatus } from "./ical-api.ts";
+import { icalApiFrom, type IcalApi } from "./ical-api.ts";
+import { IcalCard } from "./IcalCard";
+import { GuideCard } from "./GuideCard";
 import * as E from "./easy.ts";
-import { Check, ErrorLine, formatWhen, useTask } from "./shared";
-
-export function GuideCard({ guide, notes }: { guide: E.Guide; notes: readonly string[] }): ReactNode {
-  return (
-    <>
-      <h4>{guide.title}</h4>
-      <ol aria-label={`${guide.title}: steps`}>
-        {guide.steps.map((s) => (
-          <li key={s}>{s}</li>
-        ))}
-      </ol>
-      <ul aria-label={`${guide.title}: good to know`}>
-        {notes.map((n) => (
-          <li key={n} className="lib-muted">
-            {n}
-          </li>
-        ))}
-      </ul>
-    </>
-  );
-}
-
-// ---- calendar --------------------------------------------------------------------------------
-
-export function IcalCard({ api, now }: { api: IcalApi; now?: () => number }): ReactNode {
-  const [status, setStatus] = useState<IcalStatus | null>(null);
-  const [loadErr, setLoadErr] = useState<GoogleError | null>(null);
-  const [n, setN] = useState(0);
-  const [url, setUrl] = useState("");
-  const [info, setInfo] = useState<string | null>(null);
-  const task = useTask();
-  useEffect(() => {
-    const ac = new AbortController();
-    api.status(ac.signal).then(
-      (s) => {
-        setStatus(s);
-        setLoadErr(null);
-      },
-      (e) => !ac.signal.aborted && setLoadErr(mapGoogleThrown(e, ac.signal)),
-    );
-    return () => ac.abort();
-  }, [api, n]);
-  void now;
-  const state = icalCardState(status, loadErr);
-  const check = url === "" ? null : validateIcalUrl(url);
-  const connect = (): void => {
-    const chk = validateIcalUrl(url);
-    if (!chk.ok) return;
-    const typed = url;
-    // The secret address leaves the window state right away; the request body is built from `typed` synchronously.
-    setUrl("");
-    void task.run(async (signal) => {
-      const r = await api.connect(typed, signal);
-      setInfo(`Connected calendar ${r.calendarIdPrefix}. The address is stored in the core's vault and is not shown again. Press Sync now.`);
-      setN((x) => x + 1);
-    });
-  };
-  const when = formatWhen(status?.lastSyncAt ?? null);
-  return (
-    <section className="lib-pane-section" aria-label="Easy setup: Google Calendar">
-      <h3>
-        Google Calendar{" "}
-        <span className="lib-badge" data-state={state === "connected" ? "ok" : "off"}>
-          {state === "connected" ? "Connected" : state === "unavailable" ? "Available after the core update" : state === "loading" ? "Checking" : "Not set up"}
-        </span>
-      </h3>
-      <GuideCard guide={E.ICAL_GUIDE} notes={E.ICAL_NOTES} />
-      {state === "unavailable" && <StatusBanner severity="info" message={googleErrorText("core_update")} />}
-      {state === "error" && loadErr && <StatusBanner severity="error" message={`${googleErrorText(loadErr.code)}${loadErr.serverCode ? ` (${loadErr.serverCode})` : ""}`} onDismiss={() => setLoadErr(null)} />}
-      {state === "connected" && status ? (
-        <div>
-          <p>
-            Calendar <strong>{status.calendarIdPrefix || "(hidden)"}</strong> is connected. {when ? `Last sync ${when}, ${status.events.toLocaleString()} events.` : "Not synced yet."}
-          </p>
-          <div className="lib-editor-bar">
-            <button
-              type="button"
-              className="lib-btn lib-btn-primary"
-              disabled={task.busy}
-              onClick={() =>
-                void task.run(async (signal) => {
-                  setInfo(icalSyncMessage(await api.sync(signal)));
-                  setN((x) => x + 1);
-                })
-              }
-            >
-              Sync now
-            </button>
-            {task.busy && (
-              <button type="button" className="lib-link-btn" onClick={task.stop}>
-                Stop
-              </button>
-            )}
-            <button
-              type="button"
-              className="lib-btn lib-btn-danger"
-              disabled={task.busy}
-              onClick={() =>
-                void task.run(async (signal) => {
-                  await api.disconnect(signal);
-                  setInfo("Disconnected: the address was deleted from the core's vault. To make the old address useless, reset the secret address in Google Calendar.");
-                  setN((x) => x + 1);
-                })
-              }
-            >
-              Disconnect
-            </button>
-          </div>
-        </div>
-      ) : (
-        state !== "unavailable" && (
-          <div className="lib-form">
-            <label className="lib-field">
-              <span>Secret address in iCal format (sent once to the core's vault, never shown again)</span>
-              <input type="password" autoComplete="off" spellCheck={false} value={url} onChange={(e) => setUrl(e.target.value)} aria-invalid={check !== null && !check.ok} placeholder="https://calendar.google.com/calendar/ical/…/basic.ics" />
-              {check && !check.ok && (
-                <span className="lib-muted" role="alert">
-                  {check.problem}
-                </span>
-              )}
-              {check && check.ok && check.kind === "public" && (
-                <span className="lib-muted" role="status">
-                  This is the public address of a public calendar; it works, but it is not the secret address.
-                </span>
-              )}
-            </label>
-            <button type="button" className="lib-btn lib-btn-primary" onClick={connect} disabled={task.busy || !check || !check.ok}>
-              Connect
-            </button>
-          </div>
-        )
-      )}
-      {info && <StatusBanner severity="info" message={info} onDismiss={() => setInfo(null)} />}
-      <ErrorLine task={task} />
-    </section>
-  );
-}
+import { Check } from "./shared";
 
 // ---- drive -----------------------------------------------------------------------------------
 
@@ -292,7 +157,7 @@ export function EasySetup({ env, gmailCard, ical }: { env: PaneEnv; gmailCard: R
       <h3>Easy setup</h3>
       <p className="lib-muted">{E.EASY_INTRO}</p>
       {gmailCard}
-      <IcalCard api={api} now={env.now} />
+      <IcalCard api={api} />
       <DriveCard env={env} />
     </section>
   );

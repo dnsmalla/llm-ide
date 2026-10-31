@@ -34,14 +34,14 @@ export const ICAL_GUIDE: Guide = {
   steps: [
     "In Google Calendar on the web, open Settings (the gear) and choose your calendar under Settings for my calendars.",
     "Open Integrate calendar and copy the Secret address in iCal format (it ends in basic.ics).",
-    "Paste it below and press Connect. The core reads the calendar from that address.",
+    "Give the calendar a name, paste the address below and press Add calendar, then press Sync. You can add up to 10 calendars.",
   ],
 };
 
 export const ICAL_NOTES: readonly string[] = [
   "Read-only: the address can only be used to read the calendar, never to change it.",
   "Anyone who has the address can read the whole calendar. Treat it like a password: it is stored write-only in the core's vault, never shown again (only the first characters of the calendar id are), and you can make it useless by resetting the secret address in Google Calendar.",
-  "Calendar events are indexed for search; no note files are created. Changes appear when you sync (Google may delay a feed by some hours; unverified).",
+  "The core downloads the calendar itself and indexes its events (only the window of days you choose) for search in the Library; this window writes no files. Changes appear when you press Sync (Google may delay a feed by some hours; unverified).",
 ];
 
 export const DRIVE_GUIDE: Guide = {

@@ -24,7 +24,7 @@ import {
 import { linkState, linkStateText, listSecretKeys, mapThrown, saveSecret, SourceError, sourceErrorText, type LinkState, type SourceSecretKey, type SourcesCore } from "./source-core.ts";
 import * as T from "./source-text.ts";
 import { GooglePane } from "./google/GooglePane";
-import { GuideCard } from "./google/EasySetup";
+import { GuideCard } from "./google/GuideCard";
 import * as EZ from "./google/easy.ts";
 
 export interface PaneEnv {

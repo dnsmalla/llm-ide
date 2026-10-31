@@ -4,5 +4,7 @@ export { EMPTY_FORM } from "../sources/google/connect-flow.ts";
 export { decodeAccounts, decodeFolders } from "../sources/google/google-core.ts";
 export { FakeHost } from "./fake-host.ts";
 export { FakeWriteHost } from "./fake-write-host.ts";
-export { IcalCard, DriveCard, EasySetup } from "../sources/google/EasySetup";
+export { DriveCard, EasySetup } from "../sources/google/EasySetup";
+export { IcalCard, AddFeedForm, FeedRow, FeedOptionsEditor, DeleteFeedDialog } from "../sources/google/IcalCard";
 export { FakeIcal } from "./fake-ical.ts";
+export { IcalError, decodeFeeds as decodeIcalFeeds } from "../sources/google/ical-api.ts";
