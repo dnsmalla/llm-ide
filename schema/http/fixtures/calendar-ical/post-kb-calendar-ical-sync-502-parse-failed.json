@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sync",
+  "status": 502,
+  "request": {
+    "body": {
+      "sourceId": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_PARSE_FAILED",
+      "message": "The address did not return a calendar feed (it may have been reset)."
+    }
+  }
+}

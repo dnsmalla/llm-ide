@@ -1,0 +1,283 @@
+{
+  "description": "The iCal feed connector: read-only Google Calendar through the calendar's \"Secret address in iCal format\" (no OAuth, no Google Cloud project) into the Library (docs/spec/calendar-ical.md). Rows: POST and GET /kb/calendar-ical/sources, DELETE /kb/calendar-ical/sources/:id, POST /kb/calendar-ical/sync, POST /kb/calendar-ical/options. Served by extension/routes/calendar-ical.mjs, dispatched from extension/routes/router.mjs; always on. Token-protected and user-scoped (another user's source id answers 404 ICAL_NOT_FOUND). The feed URL is a bearer secret: it is write-only (request body of POST sources only), is stored only in the per-user vault (ical.src.<id>.url) and appears in no response, log, audit row or error. Error codes: ICAL_URL_INVALID and ICAL_HOST_NOT_ALLOWED (400), ICAL_NOT_FOUND (404), ICAL_DUPLICATE, ICAL_TOO_MANY_SOURCES, ICAL_SYNC_RUNNING, ICAL_FEED_REVOKED (409), ICAL_RATE_LIMITED (429), ICAL_FETCH_FAILED, ICAL_TOO_LARGE, ICAL_PARSE_FAILED (502), plus VALIDATION_FAILED (400) and INTERNAL (500). Fixtures are the real handler's responses (in-process, tests/ical-routes.test.mjs with ICAL_DUMP_FIXTURES) with the feed host answered by recorded ICS fixtures under extension/tests/fixtures/ical; no fixture reached a real host. Source ids and timestamps are normalised to example values and the fake token to private-EXAMPLEEXAMPLEEXAMPLE. The 400 for a malformed JSON body is not declared per route, as SCHEMA.md says.",
+  "$defs": {
+    "Source": {
+      "type": "object",
+      "properties": {
+        "sourceId": {
+          "type": "string"
+        },
+        "name": {
+          "type": "string"
+        },
+        "calendarIdPrefix": {
+          "type": "string",
+          "description": "first characters of the calendar id (a non-secret hint), empty for an operator-added host"
+        },
+        "host": {
+          "type": "string"
+        },
+        "status": {
+          "type": "string",
+          "enum": [
+            "idle",
+            "error",
+            "revoked"
+          ],
+          "description": "last run outcome; revoked = the secret address no longer works (404 or 410)"
+        },
+        "lastRunAt": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "lastError": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "a stable code, never a response body"
+        },
+        "options": {
+          "type": "object",
+          "properties": {
+            "daysBack": {
+              "type": "integer",
+              "description": "0 to 365, default 30"
+            },
+            "daysAhead": {
+              "type": "integer",
+              "description": "0 to 730, default 90"
+            }
+          }
+        }
+      }
+    }
+  },
+  "endpoints": {
+    "POST /kb/calendar-ical/sources": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "name": {
+              "type": "string"
+            },
+            "url": {
+              "type": "string",
+              "description": "the secret iCal address (https://calendar.google.com/calendar/ical/<id>/private-<token>/basic.ics, webcal:// accepted). Write-only: never returned."
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string"
+            },
+            "name": {
+              "type": "string"
+            },
+            "nameOnly": {
+              "type": "boolean",
+              "enum": [
+                true
+              ],
+              "description": "always true: only the label comes back, never the address"
+            },
+            "calendarIdPrefix": {
+              "type": "string"
+            },
+            "host": {
+              "type": "string"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /kb/calendar-ical/sources": {
+      "request": {},
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Source"
+              }
+            }
+          }
+        }
+      }
+    },
+    "DELETE /kb/calendar-ical/sources/:id": {
+      "request": {
+        "params": {
+          "type": "object",
+          "properties": {
+            "id": {
+              "type": "string"
+            }
+          },
+          "required": [
+            "id"
+          ]
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "purgedSources": {
+              "type": "integer",
+              "description": "cached note rows removed"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/calendar-ical/sync": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string"
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string"
+            },
+            "status": {
+              "type": "string",
+              "enum": [
+                "ok",
+                "unchanged",
+                "not_modified"
+              ],
+              "description": "unchanged = same body as the last run; not_modified = the host answered 304"
+            },
+            "events": {
+              "type": "integer",
+              "description": "VEVENT components read"
+            },
+            "instances": {
+              "type": "integer",
+              "description": "event instances written inside the window"
+            },
+            "cancelled": {
+              "type": "integer",
+              "description": "cancelled events or occurrences removed by exact ref"
+            },
+            "removed": {
+              "type": "integer",
+              "description": "rows swept because the feed no longer has them (only after a complete pass)"
+            },
+            "truncated": {
+              "type": "boolean",
+              "description": "a cap or budget stopped the pass; nothing is swept then"
+            },
+            "warnings": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "description": "stable codes, e.g. tz_unknown, floating, rrule_subdaily, rrule_unsupported, rrule_invalid, instance_cap, budget_exhausted, oversized_property, malformed_line, nested_vcalendar"
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "409": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "429": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "502": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "POST /kb/calendar-ical/options": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sourceId": {
+              "type": "string"
+            },
+            "options": {
+              "type": "object",
+              "properties": {
+                "daysBack": {
+                  "type": "integer",
+                  "description": "0 to 365, default 30"
+                },
+                "daysAhead": {
+                  "type": "integer",
+                  "description": "0 to 730, default 90"
+                }
+              }
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "options": {
+              "type": "object",
+              "properties": {
+                "daysBack": {
+                  "type": "integer",
+                  "description": "0 to 365, default 30"
+                },
+                "daysAhead": {
+                  "type": "integer",
+                  "description": "0 to 730, default 90"
+                }
+              }
+            }
+          }
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    }
+  }
+}

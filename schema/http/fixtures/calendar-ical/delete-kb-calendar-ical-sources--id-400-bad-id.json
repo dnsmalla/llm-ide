@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /kb/calendar-ical/sources/:id",
+  "status": 400,
+  "request": {
+    "params": {
+      "id": "not-an-id"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "sourceId is required"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sources",
+  "status": 400,
+  "request": {
+    "body": {
+      "name": "   ",
+      "url": "https://calendar.google.com/calendar/ical/example%40example.com/private-EXAMPLEEXAMPLEEXAMPLE/basic.ics"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "name is required"
+    }
+  }
+}

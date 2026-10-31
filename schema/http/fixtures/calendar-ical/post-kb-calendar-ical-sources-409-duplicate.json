@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sources",
+  "status": 409,
+  "request": {
+    "body": {
+      "name": "again",
+      "url": "https://calendar.google.com/calendar/ical/example%40example.com/private-EXAMPLEEXAMPLEEXAMPLE/basic.ics"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_DUPLICATE",
+      "message": "This calendar feed is already added"
+    }
+  }
+}

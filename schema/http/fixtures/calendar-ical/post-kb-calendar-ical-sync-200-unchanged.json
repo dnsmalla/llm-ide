@@ -1,0 +1,19 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sync",
+  "status": 200,
+  "request": {
+    "body": {
+      "sourceId": "0123456789ab"
+    }
+  },
+  "response": {
+    "sourceId": "0123456789ab",
+    "status": "unchanged",
+    "events": 0,
+    "instances": 0,
+    "cancelled": 0,
+    "removed": 0,
+    "truncated": false,
+    "warnings": []
+  }
+}

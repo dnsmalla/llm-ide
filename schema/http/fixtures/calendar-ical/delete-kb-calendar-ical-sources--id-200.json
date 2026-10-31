@@ -1,0 +1,13 @@
+{
+  "endpoint": "DELETE /kb/calendar-ical/sources/:id",
+  "status": 200,
+  "request": {
+    "params": {
+      "id": "0123456789ab"
+    }
+  },
+  "response": {
+    "ok": true,
+    "purgedSources": 14
+  }
+}

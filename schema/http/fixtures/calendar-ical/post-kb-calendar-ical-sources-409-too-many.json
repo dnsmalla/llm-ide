@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sources",
+  "status": 409,
+  "request": {
+    "body": {
+      "name": "eleven",
+      "url": "https://calendar.google.com/calendar/ical/cal11%40example.com/private-bbbbbbbbbbbb/basic.ics"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_TOO_MANY_SOURCES",
+      "message": "At most 10 calendar feeds per user"
+    }
+  }
+}

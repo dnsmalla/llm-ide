@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sources",
+  "status": 400,
+  "request": {
+    "body": {
+      "name": "x",
+      "url": "http://calendar.google.com/calendar/ical/example%40example.com/private-EXAMPLEEXAMPLEEXAMPLE/basic.ics"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_URL_INVALID",
+      "message": "The calendar address must start with https://."
+    }
+  }
+}

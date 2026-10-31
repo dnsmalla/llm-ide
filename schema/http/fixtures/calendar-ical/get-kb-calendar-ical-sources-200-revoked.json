@@ -1,0 +1,21 @@
+{
+  "endpoint": "GET /kb/calendar-ical/sources",
+  "status": 200,
+  "response": {
+    "sources": [
+      {
+        "sourceId": "0123456789ab",
+        "name": "E",
+        "calendarIdPrefix": "me@examp",
+        "host": "calendar.google.com",
+        "status": "revoked",
+        "lastRunAt": "2025-11-10T00:00:00.000Z",
+        "lastError": "ICAL_FEED_REVOKED",
+        "options": {
+          "daysBack": 30,
+          "daysAhead": 90
+        }
+      }
+    ]
+  }
+}

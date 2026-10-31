@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/calendar-ical/options",
+  "status": 400,
+  "request": {
+    "body": {
+      "sourceId": "zz",
+      "options": {}
+    }
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "sourceId is required"
+    }
+  }
+}

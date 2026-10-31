@@ -1,0 +1,15 @@
+{
+  "endpoint": "DELETE /kb/calendar-ical/sources/:id",
+  "status": 404,
+  "request": {
+    "params": {
+      "id": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_NOT_FOUND",
+      "message": "Unknown calendar feed"
+    }
+  }
+}

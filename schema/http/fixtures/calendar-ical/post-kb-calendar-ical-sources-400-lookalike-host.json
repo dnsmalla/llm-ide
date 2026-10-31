@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sources",
+  "status": 400,
+  "request": {
+    "body": {
+      "name": "x",
+      "url": "https://calendar.google.com.evil.com/calendar/ical/a/private-aaaaaaaaaaaa/basic.ics"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_HOST_NOT_ALLOWED",
+      "message": "Only Google Calendar secret iCal addresses (calendar.google.com) are supported."
+    }
+  }
+}

@@ -63,6 +63,8 @@ async function call(userId, method, url, body, { record = true, label } = {}) {
   if (record) {
     const request = {};
     if (body !== undefined) request.body = body;
+    const pm = /^\/kb\/calendar-ical\/sources\/([^/]+)$/.exec(new URL(url, 'http://x').pathname);
+    if (pm) request.params = { id: pm[1] };
     exchanges.push({ method, path: new URL(url, 'http://x').pathname, status: res.statusCode, request, response: json, label });
   }
   return { handled: true, status: res.statusCode, json };
@@ -73,15 +75,17 @@ function dump(dir) {
   const norm = (v, k) => {
     if (k === 'sourceId') return typeof v === 'string' && /^[a-f0-9]{12}$/.test(v) ? '0123456789ab' : v;
     if (k === 'lastRunAt') return '2025-11-10T00:00:00.000Z';
-    if (k === 'url') return 'https://calendar.google.com/calendar/ical/example%40example.com/private-EXAMPLEEXAMPLEEXAMPLE/basic.ics';
+    if (k === 'id') return typeof v === 'string' && /^[a-f0-9]{12}$/.test(v) ? '0123456789ab' : v;
+    if (k === 'url' && typeof v === 'string') return v.split(TOKEN).join('private-EXAMPLEEXAMPLEEXAMPLE').split('me%40example.com').join('example%40example.com');
     return v;
   };
   const walk = (x, k) => (Array.isArray(x) ? x.map((e) => walk(e, k)) : x && typeof x === 'object' ? Object.fromEntries(Object.entries(x).map(([kk, vv]) => [kk, walk(vv, kk)])) : norm(x, k));
   const seen = new Map();
   for (const e of exchanges) {
-    const p = e.path.replace(/\/sources\/[a-f0-9]{12}$/, '/sources/:id');
+    const p = e.path.replace(/\/sources\/[^/]+$/, '/sources/:id');
     const base = `${e.method.toLowerCase()}${p.replace(/[/:]/g, '-')}-${e.status}`;
     const c = (seen.get(base) || 0) + 1; seen.set(base, c);
+    if (!e.label && c > 1) continue; // one unlabeled example per route and status; every error case is labeled
     const name = e.label ? `${base}-${e.label}` : (c > 1 ? `${base}-${c}` : base);
     const fxo = { endpoint: `${e.method} ${p}`, status: e.status };
     if (Object.keys(e.request).length) fxo.request = walk(e.request, '');
@@ -91,7 +95,7 @@ function dump(dir) {
 }
 
 const feedHost = (body, extra = {}) => { const t = makeTransport().on(() => true, () => textResponse(200, typeof body === 'function' ? body() : body, extra)); f._setIcalFetchForTests(t); return t; };
-async function add(u, name = 'Team', url = GOOD, opts) { const r = await call(u, 'POST', '/kb/calendar-ical/sources', { name, url }, opts); assert.equal(r.status, 200, JSON.stringify(r.json)); return r.json.sourceId; }
+async function add(u, name = 'Team', url = GOOD, opts = { record: false }) { const r = await call(u, 'POST', '/kb/calendar-ical/sources', { name, url }, opts); assert.equal(r.status, 200, JSON.stringify(r.json)); return r.json.sourceId; }
 const rows = (u, sid) => db.prepare("SELECT ref, title, body, meta FROM sources WHERE user_id = ? AND kind = 'doc' AND ref LIKE ?").all(u, `ical:${sid}:%`);
 // indexed_at has one-second resolution and the sweep is strictly older-than: age the rows so a fast test sees the sweep.
 const age = (u, sid) => db.prepare("UPDATE sources SET indexed_at = datetime('now', '-1 hour') WHERE user_id = ? AND ref LIKE ?").run(u, `ical:${sid}:%`);
@@ -99,7 +103,8 @@ const refsOf = (u, sid) => [...new Set(rows(u, sid).map((r) => r.ref))];
 
 test('add: validation, no URL in any response, URL only in the vault', async () => {
   const u = mkUser();
-  let r = await call(u, 'POST', '/kb/calendar-ical/sources', { name: 'x', url: 5 }, { label: 'not-strings' });
+  assert.deepEqual((await call(u, 'GET', '/kb/calendar-ical/sources', undefined, { label: 'empty' })).json, { sources: [] });
+  let r = await call(u, 'POST', '/kb/calendar-ical/sources', { name: 'x', url: 5 }, { record: false });
   assert.equal(r.status, 400); assert.equal(r.json.error.code, 'VALIDATION_FAILED');
   r = await call(u, 'POST', '/kb/calendar-ical/sources', { name: '   ', url: GOOD }, { label: 'no-name' });
   assert.equal(r.status, 400);
@@ -111,7 +116,9 @@ test('add: validation, no URL in any response, URL only in the vault', async () 
   r = await call(u, 'POST', '/kb/calendar-ical/sources', { name: 'x', url: GOOD.replace('basic.ics', 'other') }, { label: 'bad-shape' });
   assert.equal(r.json.error.code, 'ICAL_URL_INVALID');
   assert.equal(db.prepare('SELECT COUNT(*) c FROM ical_sources WHERE user_id = ?').get(u).c, 0, 'nothing stored on a refusal');
-  r = await call(u, 'POST', '/kb/calendar-ical/sources', { name: ' My   team‮ cal ', url: GOOD });
+  const odd = await call(u, 'POST', '/kb/calendar-ical/sources', { name: ' Odd' + String.fromCodePoint(0x202e) + '   name ', url: urlFor('odd%40example.com', 'private-ffffffffffff') }, { record: false });
+  assert.equal(odd.json.name, 'Odd name', 'control and bidi characters are stripped from the label');
+  r = await call(u, 'POST', '/kb/calendar-ical/sources', { name: ' My   team cal ', url: GOOD });
   assert.equal(r.status, 200);
   assert.deepEqual(Object.keys(r.json).sort(), ['calendarIdPrefix', 'host', 'name', 'nameOnly', 'sourceId']);
   assert.equal(r.json.name, 'My team cal'); assert.equal(r.json.calendarIdPrefix, 'me@examp'); assert.equal(r.json.nameOnly, true);
@@ -171,7 +178,7 @@ test('sync: Google-style feed becomes instance notes; second run is unchanged; E
   assert.match(standup.body, /\[the doc\]\(https:\/\/example\.com\/doc\)/, 'HTML description converted to Markdown');
   assert.ok(!standup.body.includes('<a '));
   // health in connector_sync_state
-  const st = (await call(u, 'GET', '/kb/calendar-ical/sources', undefined, { record: false })).json.sources[0];
+  const st = (await call(u, 'GET', '/kb/calendar-ical/sources', undefined, { label: 'after-sync' })).json.sources[0];
   assert.deepEqual([st.status, st.lastError], ['idle', null]); assert.ok(st.lastRunAt);
   // same body again: unchanged, rows intact
   r = await call(u, 'POST', '/kb/calendar-ical/sync', { sourceId: sid }, { label: 'unchanged' });
@@ -204,7 +211,7 @@ test('per-user isolation: another user cannot see, sync, option or delete a feed
   const sb = await add(b, 'B', urlFor('b%40example.com', 'private-cccccccccccc'), { record: false });
   assert.deepEqual((await call(b, 'GET', '/kb/calendar-ical/sources', undefined, { record: false })).json.sources.map((s) => s.sourceId), [sb]);
   for (const [m, p, body] of [['POST', '/kb/calendar-ical/sync', { sourceId: sa }], ['POST', '/kb/calendar-ical/options', { sourceId: sa, options: { daysBack: 5 } }], ['DELETE', `/kb/calendar-ical/sources/${sa}`, undefined]]) {
-    const r = await call(b, m, p, body, { record: false });
+    const r = await call(b, m, p, body, { record: p.endsWith('options') ? true : false, label: 'other-users-source' });
     assert.equal(r.status, 404, `${m} ${p}`); assert.equal(r.json.error.code, 'ICAL_NOT_FOUND');
   }
   assert.ok(refsOf(a, sa).length > 0);
@@ -222,7 +229,7 @@ test('errors: revoked, rate limit, server error, not a feed, too large, host no 
   f._setIcalFetchForTests(makeTransport().on(() => true, () => textResponse(404, 'gone')));
   let r = await sync('revoked');
   assert.equal(r.status, 409); assert.equal(r.json.error.code, 'ICAL_FEED_REVOKED');
-  let st = (await call(u, 'GET', '/kb/calendar-ical/sources', undefined, { record: false })).json.sources[0];
+  let st = (await call(u, 'GET', '/kb/calendar-ical/sources', undefined, { label: 'revoked' })).json.sources[0];
   assert.deepEqual([st.status, st.lastError], ['revoked', 'ICAL_FEED_REVOKED']);
   assert.equal(refsOf(u, sid).length, before, 'a revoked feed keeps what it indexed');
   f._setIcalFetchForTests(makeTransport().on(() => true, () => textResponse(429, 'slow')));
@@ -275,7 +282,7 @@ test('hostile feeds: huge RRULE, nested, 10 MB, binary; bidi and HTML in notes',
 test('options: validated and clamped; a change resets the cursor; the window drives what is indexed', async () => {
   const u = mkUser();
   const sid = await add(u, 'O');
-  let r = await call(u, 'POST', '/kb/calendar-ical/options', { sourceId: sid, options: 'x' }, { label: 'bad-options' });
+  let r = await call(u, 'POST', '/kb/calendar-ical/options', { sourceId: sid, options: 'x' }, { record: false });
   assert.equal(r.status, 400);
   r = await call(u, 'POST', '/kb/calendar-ical/options', { sourceId: 'zz', options: {} }, { label: 'bad-source-id' });
   assert.equal(r.status, 400);

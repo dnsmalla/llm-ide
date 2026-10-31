@@ -1,0 +1,18 @@
+{
+  "endpoint": "POST /kb/calendar-ical/options",
+  "status": 404,
+  "request": {
+    "body": {
+      "sourceId": "0123456789ab",
+      "options": {
+        "daysBack": 5
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_NOT_FOUND",
+      "message": "Unknown calendar feed"
+    }
+  }
+}

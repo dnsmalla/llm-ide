@@ -1,0 +1,7 @@
+{
+  "endpoint": "GET /kb/calendar-ical/sources",
+  "status": 200,
+  "response": {
+    "sources": []
+  }
+}

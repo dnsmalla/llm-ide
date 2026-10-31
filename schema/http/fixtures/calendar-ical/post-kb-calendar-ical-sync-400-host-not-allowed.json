@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sync",
+  "status": 400,
+  "request": {
+    "body": {
+      "sourceId": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_HOST_NOT_ALLOWED",
+      "message": "Only Google Calendar secret iCal addresses (calendar.google.com) are supported."
+    }
+  }
+}

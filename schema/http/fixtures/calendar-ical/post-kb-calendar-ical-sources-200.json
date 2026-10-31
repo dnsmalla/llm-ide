@@ -1,0 +1,17 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sources",
+  "status": 200,
+  "request": {
+    "body": {
+      "name": " My   team cal ",
+      "url": "https://calendar.google.com/calendar/ical/example%40example.com/private-EXAMPLEEXAMPLEEXAMPLE/basic.ics"
+    }
+  },
+  "response": {
+    "sourceId": "0123456789ab",
+    "name": "My team cal",
+    "nameOnly": true,
+    "calendarIdPrefix": "me@examp",
+    "host": "calendar.google.com"
+  }
+}

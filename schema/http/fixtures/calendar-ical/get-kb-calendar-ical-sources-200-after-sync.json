@@ -1,0 +1,21 @@
+{
+  "endpoint": "GET /kb/calendar-ical/sources",
+  "status": 200,
+  "response": {
+    "sources": [
+      {
+        "sourceId": "0123456789ab",
+        "name": "Example Team",
+        "calendarIdPrefix": "me@examp",
+        "host": "calendar.google.com",
+        "status": "idle",
+        "lastRunAt": "2025-11-10T00:00:00.000Z",
+        "lastError": null,
+        "options": {
+          "daysBack": 30,
+          "daysAhead": 90
+        }
+      }
+    ]
+  }
+}

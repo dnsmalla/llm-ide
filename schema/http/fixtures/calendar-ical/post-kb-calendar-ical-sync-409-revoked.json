@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sync",
+  "status": 409,
+  "request": {
+    "body": {
+      "sourceId": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_FEED_REVOKED",
+      "message": "The calendar address no longer works (the secret address was reset or the calendar was removed). Add the new address."
+    }
+  }
+}

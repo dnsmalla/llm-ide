@@ -1,0 +1,16 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sources",
+  "status": 400,
+  "request": {
+    "body": {
+      "name": "x",
+      "url": "https://calendar.google.com/calendar/ical/example%40example.com/private-EXAMPLEEXAMPLEEXAMPLE/other"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_URL_INVALID",
+      "message": "That is not a Google Calendar iCal address. Use \"Secret address in iCal format\" from the calendar settings."
+    }
+  }
+}

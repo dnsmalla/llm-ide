@@ -1,0 +1,15 @@
+{
+  "endpoint": "POST /kb/calendar-ical/sync",
+  "status": 400,
+  "request": {
+    "body": {
+      "sourceId": "0123456789ab"
+    }
+  },
+  "response": {
+    "error": {
+      "code": "ICAL_URL_INVALID",
+      "message": "The stored calendar address is missing. Remove the feed and add it again."
+    }
+  }
+}

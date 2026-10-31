@@ -1,0 +1,20 @@
+{
+  "endpoint": "POST /kb/calendar-ical/options",
+  "status": 200,
+  "request": {
+    "body": {
+      "sourceId": "0123456789ab",
+      "options": {
+        "daysBack": 99999,
+        "daysAhead": -4
+      }
+    }
+  },
+  "response": {
+    "ok": true,
+    "options": {
+      "daysBack": 365,
+      "daysAhead": 0
+    }
+  }
+}
