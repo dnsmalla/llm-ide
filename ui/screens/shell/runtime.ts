@@ -7,6 +7,7 @@ import { createStatusStore } from "./status-store";
 import { createBusProofStore } from "./bus-proof";
 import { describeCoreErrorFor, explainCoreErrorFor } from "./core-explain";
 import { diagnosticsLog } from "./diagnostics";
+import { createActivityStore } from "./activity-store";
 
 export const coreStatusStore = createStatusStore({ fetchStatus: () => host.coreStatus() });
 
@@ -63,3 +64,12 @@ export function describeCoreError(e: unknown, fallback?: string): string {
 export function explainCoreError(e: unknown, fallback?: string): string | null {
   return explainCoreErrorFor(e, coreStatusStore.getSnapshot().status, fallback);
 }
+
+/** The activity feed (status-bar bell): polled from the core only while the bell is mounted and signed in. */
+export const activityStore = createActivityStore({
+  api: {
+    get: (path, signal) => core.request(path, { signal }),
+    post: (path, body, signal) => core.request(path, { method: "POST", body, signal }),
+  },
+  isHidden: () => typeof document !== "undefined" && document.hidden,
+});

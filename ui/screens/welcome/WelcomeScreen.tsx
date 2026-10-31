@@ -25,6 +25,8 @@ export interface WelcomeProps {
   focusNew?: number;
   /** Guide dialog initially open (tests). */
   guideOpen?: boolean;
+  /** Bumps when something asks for the guide (the account menu's "Help & Guide"). */
+  guideSignal?: number;
 }
 
 const dateless = (s: string, max: number) => safeText(s, max);
@@ -81,7 +83,7 @@ function RecentRow({ entry, busy, onOpen, onForget }: { entry: RecentEntry; busy
   );
 }
 
-export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, guideOpen = false }: WelcomeProps) {
+export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, guideOpen = false, guideSignal = 0 }: WelcomeProps) {
   const [name, setName] = useState("");
   const [nameError, setNameError] = useState<string | null>(null);
   const [busy, setBusy] = useState<"create" | "open" | null>(null);
@@ -94,6 +96,9 @@ export function WelcomeScreen({ project, recent, error, actions, focusNew = 0, g
   useEffect(() => {
     if (focusNew > 0) nameInput.current?.focus();
   }, [focusNew]);
+  useEffect(() => {
+    if (guideSignal > 0) setGuide(true);
+  }, [guideSignal]);
 
   const run = async (kind: "create" | "open", fn: () => Promise<boolean>) => {
     setBusy(kind);

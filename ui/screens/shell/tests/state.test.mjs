@@ -114,7 +114,7 @@ test("navigation: select keeps visited sections, ignores disabled/unknown, steps
   s = nav.navReducer(s, { type: "select", id: "chat" });
   assert.deepEqual([s.active, s.visited], ["chat", ["welcome", "library", "chat"]]);
   const before = s;
-  for (const id of ["issues", "gantt", "loop", "autotasks"]) assert.equal(nav.navReducer(s, { type: "select", id }), before, `${id} is a disabled placeholder`);
+  for (const id of ["issues", "gantt", "loop", "autotasks", "conflicts"]) assert.equal(nav.navReducer(s, { type: "select", id }), before, `${id} is a disabled placeholder`);
   assert.equal(nav.navReducer(s, { type: "select", id: "nope" }), before);
   assert.equal(nav.navReducer(s, { type: "select", id: "chat" }), before, "same section: same object (no re-render)");
   assert.equal(nav.navReducer(s, { type: "select", id: "spike" }), before, "Spike is not selectable without developer tools");
@@ -127,10 +127,10 @@ test("navigation: select keeps visited sections, ignores disabled/unknown, steps
   nav.setDevTools(false);
 });
 
-test("nav order follows the Mac toolbar; Settings is last; Spike only with developer tools", () => {
+test("section registry: toolbar sections first in the Mac's order; Settings last; Spike only with developer tools", () => {
   nav.setDevTools(false);
   const labels = nav.visibleSections().map((d) => d.label);
-  assert.deepEqual(labels, ["Home", "Explorer", "Code Graph", "Auto Tasks", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Chat", "Settings"]);
+  assert.deepEqual(labels, ["Home", "Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library", "Chat", "Settings"]);
   assert.equal(nav.devToolsEnabled(), false);
   nav.setDevTools(true);
   assert.equal(nav.visibleSections().at(-1).id, "spike");
@@ -139,7 +139,7 @@ test("nav order follows the Mac toolbar; Settings is last; Spike only with devel
   nav.enableDevToolsForSession();
   assert.equal(nav.devToolsEnabled(), true, "a spike launch shows its item for this session");
   nav.setDevTools(false);
-  for (const id of ["autotasks", "issues", "gantt", "loop"]) assert.match(nav.SECTIONS.find((d) => d.id === id).note, /later phase/);
+  for (const id of ["autotasks", "conflicts", "issues", "gantt", "loop"]) assert.match(nav.SECTIONS.find((d) => d.id === id).note, /later phase/);
 });
 
 test("navigation: shortcuts, nav keys, launch section", () => {

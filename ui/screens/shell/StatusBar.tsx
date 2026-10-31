@@ -1,9 +1,10 @@
 import { memo, useState } from "react";
-import { ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
+import { ChatBubbleIcon, ChevronIcon, FolderIcon, THEMES, type ThemeId } from "@llmide/ui-kit";
+import { ActivityBell } from "./ActivityBell";
 import { MenuButton, type MenuItem } from "./MenuButton";
 import { shellBus } from "./bus";
 import { DiagnosticsPanel } from "./DiagnosticsPanel";
-import { useActiveProject, useCoreStatusView } from "./use-shell";
+import { useActiveProject, useCoreSession, useCoreStatusView } from "./use-shell";
 import { HOME_CHOICES, readHome, storeHome } from "./landing";
 import { SECTIONS, type SectionId } from "./sections";
 import { safeText } from "./safe-text";
@@ -117,12 +118,32 @@ const CoreChip = memo(function CoreChip() {
   );
 });
 
+/** The Mac's "llm-chat" badge: Chat is reachable from every screen. Signed-in only, like the Mac's whole bar. */
+const ChatItem = memo(function ChatItem({ active }: { active: boolean }) {
+  return (
+    <button
+      type="button"
+      className="sh-statusbar-item"
+      aria-label="Open Chat"
+      aria-current={active ? "page" : undefined}
+      title="Chat (Ctrl/Cmd+1)"
+      onClick={() => shellBus.publish({ type: "goto-section", section: "chat" })}
+    >
+      <ChatBubbleIcon size={12} />
+      Chat
+    </button>
+  );
+});
+
 interface Props {
   theme: ThemeId;
+  /** The Chat section is showing (the item is marked current). */
+  chatActive?: boolean;
   onTheme: (id: ThemeId) => void;
 }
 
-export const StatusBar = memo(function StatusBar({ theme, onTheme }: Props) {
+export const StatusBar = memo(function StatusBar({ theme, onTheme, chatActive = false }: Props) {
+  const { signedIn } = useCoreSession();
   const themeLabel = THEMES.find((t) => t.id === theme)?.label ?? theme;
   return (
     <footer className="sh-statusbar" aria-label="Status">
@@ -140,6 +161,8 @@ export const StatusBar = memo(function StatusBar({ theme, onTheme }: Props) {
           <ChevronIcon />
         </span>
       </MenuButton>
+      <ActivityBell />
+      {signedIn && <ChatItem active={chatActive} />}
     </footer>
   );
 });

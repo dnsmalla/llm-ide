@@ -87,6 +87,7 @@ const COMMANDS: &[&str] = &[
     "source_pick_folder",
     "pick_folder",
     "pick_folder_redeem",
+    "host_platform",
     "get_prefs",
     "set_prefs",
     "open_external_url",

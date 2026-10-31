@@ -5,24 +5,24 @@
 .sh-skip { position: absolute; left: var(--tok-space-md); top: -48px; z-index: 100; padding: var(--tok-space-sm) var(--tok-space-md); background: var(--tok-color-surface); color: var(--tok-color-text); border: 1px solid var(--tok-color-accent); border-radius: var(--tok-radius-md); }
 .sh-skip:focus { top: var(--tok-space-md); }
 
-.sh-titlebar { flex: none; display: flex; align-items: center; gap: var(--tok-space-md); height: 44px; box-sizing: border-box; padding: 0 var(--tok-space-md) 0 84px; /* clears the macOS traffic lights */ background: var(--tok-color-surface); border-bottom: 1px solid var(--tok-color-border); -webkit-user-select: none; user-select: none; }
-.sh-title-button { border: 0; background: transparent; padding: 4px 6px; border-radius: 6px; font: inherit; font-weight: 500; cursor: pointer; }
-.sh-title-button:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
-.sh-title { color: var(--tok-color-text-muted); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0; }
+.sh-titlebar { flex: none; display: flex; align-items: center; gap: var(--tok-space-sm); height: 44px; box-sizing: border-box; padding: 0 var(--tok-space-md); background: var(--tok-color-surface); border-bottom: 1px solid var(--tok-color-border); -webkit-user-select: none; user-select: none; }
+/* macOS only: the window has an overlay title bar, so the traffic lights sit on this row (room for them on the left). */
+.sh-app[data-overlay-titlebar] .sh-titlebar { padding-left: 78px; }
 .sh-icon-button { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; border: 0; border-radius: 6px; background: transparent; color: var(--tok-color-text-muted); cursor: pointer; }
 .sh-icon-button:hover { background: color-mix(in srgb, var(--tok-color-text) 8%, transparent); color: var(--tok-color-text); }
 .sh-icon-button[aria-pressed="true"] { color: var(--tok-color-accent); }
 
+/* Toolbar: section buttons right-aligned like the Mac's title bar; the empty parts drag the window. */
+.sh-toolbar { flex: 1 1 0; min-width: 0; display: flex; align-items: center; justify-content: flex-end; gap: 2px; overflow: hidden; height: 100%; }
+.sh-tool { display: inline-flex; align-items: center; gap: 5px; flex: none; padding: 4px 8px; border: 0; border-radius: 7px; background: transparent; color: color-mix(in srgb, var(--tok-color-text) 82%, transparent); font: inherit; font-size: 12px; white-space: nowrap; cursor: pointer; }
+.sh-tool:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--tok-color-text) 6%, transparent); }
+.sh-tool[aria-current="page"] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); color: var(--tok-color-accent); font-weight: 600; }
+.sh-tool[aria-disabled="true"] { opacity: 0.55; cursor: default; }
+.sh-tool-home { padding: 5px 7px; }
+.sh-tool-soon { font-size: 9px; color: var(--tok-color-text-muted); }
+.sh-account { width: 30px; height: 30px; }
+
 .sh-body { flex: 1; min-height: 0; min-width: 0; display: flex; }
-.sh-nav { flex: none; width: 176px; box-sizing: border-box; padding: var(--tok-space-sm); background: var(--tok-color-surface); border-right: 1px solid var(--tok-color-border); overflow-y: auto; }
-.sh-nav ul { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
-.sh-nav li[data-spike] { margin-top: var(--tok-space-md); padding-top: var(--tok-space-sm); border-top: 1px solid var(--tok-color-border); }
-.sh-nav-item { display: flex; align-items: center; gap: var(--tok-space-sm); width: 100%; padding: 6px var(--tok-space-sm); border: 0; border-radius: 7px; background: transparent; color: color-mix(in srgb, var(--tok-color-text) 86%, transparent); text-align: left; cursor: pointer; }
-.sh-nav-item:hover:not([aria-disabled="true"]) { background: color-mix(in srgb, var(--tok-color-text) 6%, transparent); }
-.sh-nav-item[aria-current="page"] { background: color-mix(in srgb, var(--tok-color-accent) 16%, transparent); color: var(--tok-color-accent); font-weight: 600; }
-.sh-nav-item[aria-disabled="true"] { opacity: 0.55; cursor: default; }
-.sh-nav-label { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.sh-nav-soon { font-size: 10px; color: var(--tok-color-text-muted); }
 
 .sh-main { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; display: flex; flex-direction: column; background: var(--tok-color-body); outline: none; }
 .sh-section { flex: 1 1 auto; min-height: 0; min-width: 0; display: flex; flex-direction: column; }
@@ -71,7 +71,13 @@
 .sh-menu-root { position: relative; display: inline-flex; }
 .sh-menu { position: absolute; left: 0; top: calc(100% + 4px); min-width: 180px; max-width: 360px; max-height: 50vh; overflow-y: auto; z-index: 50; padding: 4px; background: var(--tok-color-surface); border: 1px solid var(--tok-color-border); border-radius: 8px; box-shadow: 0 6px 24px color-mix(in srgb, var(--tok-color-body) 60%, transparent); display: flex; flex-direction: column; }
 .sh-menu-up { top: auto; bottom: calc(100% + 4px); }
-.sh-menu-item { padding: 5px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--tok-color-text); text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-menu-end { left: auto; right: 0; }
+.sh-menu-sep { height: 1px; margin: 4px 2px; background: var(--tok-color-border); }
+.sh-menu-label { padding: 4px 10px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.sh-menu-label-muted { font-weight: 400; color: var(--tok-color-text-muted); }
+.sh-menu-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; min-width: 0; }
+.sh-menu-hint { color: var(--tok-color-text-muted); font-size: 11px; margin-left: var(--tok-space-lg, 16px); }
+.sh-menu-item { display: flex; align-items: center; padding: 5px 10px; border: 0; border-radius: 5px; background: transparent; color: var(--tok-color-text); text-align: left; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .sh-menu-item:hover, .sh-menu-item:focus-visible { background: color-mix(in srgb, var(--tok-color-accent) 14%, transparent); }
 .sh-menu-item[aria-checked="true"] { color: var(--tok-color-accent); font-weight: 600; }
 .sh-menu-empty { padding: 5px 10px; color: var(--tok-color-text-muted); }
@@ -92,3 +98,21 @@
 .np-actions { display: flex; flex-wrap: wrap; gap: var(--tok-space-sm); }
 .sh-notice { flex: none; display: flex; align-items: flex-start; gap: var(--tok-space-md); padding: var(--tok-space-sm) var(--tok-space-md); border-bottom: 1px solid var(--tok-color-border); background: color-mix(in srgb, var(--tok-color-warning) 12%, var(--tok-color-surface)); }
 .sh-notice p { margin: 0; flex: 1; line-height: 1.4; overflow-wrap: anywhere; }
+
+/* Status bar: activity bell and its popover. */
+.sh-bell { position: relative; }
+.sh-bell-badge { position: absolute; top: -3px; right: -4px; min-width: 14px; padding: 0 3px; border-radius: 8px; background: var(--tok-color-danger); color: var(--tok-color-body); font-size: 9px; font-weight: 700; line-height: 14px; text-align: center; box-sizing: border-box; }
+.sh-activity { width: 360px; max-height: 420px; padding: 0; }
+.sh-activity-scroll { overflow-y: auto; max-height: 420px; }
+.sh-activity-day { margin: 0; padding: 8px 12px 2px; font-size: 11px; font-weight: 400; color: var(--tok-color-text-muted); }
+.sh-activity-list { list-style: none; margin: 0; padding: 0; }
+.sh-activity-row { display: flex; flex-direction: column; gap: 2px; padding: 6px 12px; border-bottom: 1px solid var(--tok-color-border); }
+.sh-activity-title { overflow-wrap: anywhere; line-height: 1.35; }
+.sh-activity-kind { font-size: 10px; color: var(--tok-color-text-muted); text-transform: capitalize; }
+.sh-activity-empty { margin: 0; padding: 48px 12px; text-align: center; color: var(--tok-color-text-muted); }
+.sh-activity-note { margin: 0; padding: 6px 12px; }
+
+/* Confirmation dialog (sign out). */
+.sh-modal { position: fixed; inset: 0; z-index: 80; display: grid; place-items: center; background: color-mix(in srgb, var(--tok-color-body) 70%, transparent); }
+.sh-modal-card { width: min(420px, calc(100vw - 32px)); display: flex; flex-direction: column; gap: var(--tok-space-md); padding: var(--tok-space-xl); border: 1px solid var(--tok-color-border); border-radius: 12px; background: var(--tok-color-surface); }
+.sh-button-danger { background: var(--tok-color-danger); border-color: var(--tok-color-danger); color: var(--tok-color-body); font-weight: 600; }

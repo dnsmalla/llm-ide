@@ -1,6 +1,6 @@
 // Section registry and navigation state. Pure (no React, no DOM) so it is tested with node.
 
-export type SectionId = "welcome" | "chat" | "explorer" | "library" | "settings" | "graph" | "issues" | "gantt" | "loop" | "docgen" | "visual" | "autotasks" | "spike";
+export type SectionId = "welcome" | "chat" | "explorer" | "library" | "settings" | "graph" | "issues" | "gantt" | "loop" | "docgen" | "visual" | "autotasks" | "conflicts" | "spike";
 
 export interface SectionDef {
   id: SectionId;
@@ -16,16 +16,18 @@ export interface SectionDef {
 const SOON = "Planned for a later phase";
 
 /**
- * Nav order follows the Mac toolbar (`ShellSection.toolbarOrder`): Explorer, Code Graph, Auto Tasks, Issues, Gantt,
- * Loop, Doc Gen, Visual, Library. Review Conflicts has no desktop section yet. Home (the Welcome page) leads, Chat
- * (a section here; the Mac embeds it in Explorer/Library, see the first-look audit) and Settings (the Mac's account
- * menu) follow, and the developer-only Spike item is last and hidden unless developer tools are on.
+ * Section registry. The top toolbar (`toolbar-model.ts`) lists the ids of `TOOLBAR_IDS` in the Mac's
+ * `ShellSection.toolbarOrder` (a drift test parses the Swift source); Home (the Welcome page) is the toolbar's Home
+ * button, Settings lives in the account menu and Chat in the status bar and the Explorer dock, like the Mac. Review
+ * Conflicts has no desktop screen yet (listed, "Soon"). The developer-only Spike item is hidden unless developer
+ * tools are on.
  */
 export const SECTIONS: readonly SectionDef[] = [
   { id: "welcome", label: "Home", enabled: true },
   { id: "explorer", label: "Explorer", enabled: true, shortcut: 2 },
-  { id: "graph", label: "Code Graph", enabled: true },
+  { id: "graph", label: "Graph", enabled: true },
   { id: "autotasks", label: "Auto Tasks", enabled: false, note: SOON },
+  { id: "conflicts", label: "Review Conflicts", enabled: false, note: SOON },
   { id: "issues", label: "Issues", enabled: false, note: SOON },
   { id: "gantt", label: "Gantt", enabled: false, note: SOON },
   { id: "loop", label: "Loop", enabled: false, note: SOON },

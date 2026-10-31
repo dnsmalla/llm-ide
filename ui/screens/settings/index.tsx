@@ -8,7 +8,7 @@ export type { CoreClient, CoreResponse } from "./core-api.ts";
 // ---- section entry ---------------------------------------------------------------------------------
 // The shell lazy-loads the default export (SectionProps). The environment comes from the shell's adapter.
 import { useEffect, useMemo, useState } from "react";
-import { core, coreStatusStore, getTheme, host as shellHost, invokeHost, projectStore, setTheme, shellBus, type SectionProps } from "@llmide/screens/shell";
+import { core, coreStatusStore, devToolsEnabled, getTheme, host as shellHost, invokeHost, projectStore, setDevTools, setTheme, shellBus, type SectionProps } from "@llmide/screens/shell";
 import { createSettingsEnv } from "../shell/settings-adapter";
 import { SettingsScreen } from "./SettingsScreen.tsx";
 import type { ThemeChoice } from "./host.ts";
@@ -27,6 +27,7 @@ export default function SettingsSection({ projectRoot }: SectionProps) {
         hostAvailable: shellHost.isAvailable,
         activeProjectRoot: () => root.current ?? projectStore.getSnapshot().project?.root ?? null,
         theme: { get: () => getTheme() as ThemeChoice, set: (t) => setTheme(t) },
+        devTools: { get: devToolsEnabled, set: setDevTools },
         appVersion: () => (typeof __APP_VERSION__ === "string" ? __APP_VERSION__ : "dev"),
         platform: () => (typeof navigator === "undefined" ? "unknown" : navigator.platform || "unknown"),
         clipboard: () => (typeof navigator !== "undefined" && navigator.clipboard ? navigator.clipboard : null),

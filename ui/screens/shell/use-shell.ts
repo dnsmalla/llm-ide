@@ -1,10 +1,11 @@
 import { useEffect } from "react";
-import { core, coreStatusStore } from "./runtime";
+import { activityStore, core, coreStatusStore } from "./runtime";
 import type { ProjectInfo, RecentEntry, RecentList } from "./host";
 import { projectStore, type AfterCreate } from "./project-store";
 import { useStoreSelector } from "./hooks";
 import { deriveStatusView, statusViewEqual, type StatusView } from "./status-view";
 import type { SessionSnapshot } from "./core";
+import type { ActivityState } from "./activity-store";
 
 /** Login state of the core client (token-free). Re-renders only when it changes. */
 export function useCoreSession(): SessionSnapshot {
@@ -54,4 +55,9 @@ export function useActiveProject(): ActiveProject {
     if (!projectStore.getSnapshot().loaded) void projectStore.refresh();
   }, []);
   return { ...s, ...PROJECT_ACTIONS };
+}
+
+/** The activity feed state (re-renders only when the feed's visible summary changes). */
+export function useActivityFeed(): ActivityState {
+  return useStoreSelector(activityStore, (s) => s);
 }

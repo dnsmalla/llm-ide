@@ -70,6 +70,7 @@
     "allow-source-pick-folder",
     "allow-pick-folder",
     "allow-pick-folder-redeem",
+    "allow-host-platform",
     "allow-get-prefs",
     "allow-set-prefs",
     "allow-chat-bind-session",

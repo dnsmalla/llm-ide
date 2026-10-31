@@ -20,6 +20,8 @@ export interface SettingsAdapterDeps {
   hostAvailable: () => boolean;
   activeProjectRoot: () => string | null;
   theme: { get(): ThemeChoice; set(t: ThemeChoice): void };
+  /** Developer tools flag (sections.ts); absent = the Settings switch is hidden. */
+  devTools?: { get(): boolean; set(on: boolean): void };
   appVersion: () => string;
   platform: () => string;
   clipboard: () => { writeText(text: string): Promise<void> } | null;
@@ -89,6 +91,7 @@ export function createSettingsEnv(d: SettingsAdapterDeps): SettingsEnv {
       if (d.hostAvailable()) void writePrefs({ theme: t }).catch(() => undefined);
     },
     ...hostPart,
+    ...(d.devTools ? { getDevTools: () => d.devTools!.get(), setDevTools: (on: boolean) => d.devTools!.set(on) } : {}),
     activeProjectPath: () => d.activeProjectRoot(),
     async notesFolderPath() {
       if (!d.hostAvailable()) return null;

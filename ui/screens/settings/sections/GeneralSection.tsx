@@ -12,6 +12,7 @@ export default function GeneralSection() {
   const { client, host } = useEnv();
   const [theme, setTheme] = useState<ThemeChoice | null>(null);
   useEffect(() => { setTheme(host.getTheme?.() ?? null); }, [host]);
+  const [devTools, setDevToolsState] = useState(() => host.getDevTools?.() ?? false);
   const m = useModel(() => new UserPrefsModel(client));
   const s = useStore(m);
   useRefreshOnFocus(() => void m.load());
@@ -43,6 +44,16 @@ export default function GeneralSection() {
           </>
         ) : s.error ? null : <p className="st-hint" role="status">Loading...</p>}
       </div>
+      {host.getDevTools && host.setDevTools ? (
+        <div className="st-stack">
+          <Switch
+            label="Show developer tools"
+            hint="Adds the developer-only Spike item (Phase 0 benchmarks) to the toolbar. Kept on this computer."
+            checked={devTools}
+            onChange={(v) => { setDevToolsState(v); host.setDevTools!(v); }}
+          />
+        </div>
+      ) : null}
       <div className="st-stack">
         <AccountSection />
       </div>

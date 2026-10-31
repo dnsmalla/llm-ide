@@ -44,6 +44,9 @@ export interface SettingsHost {
   setExtraPrefs?(prefs: Partial<{ compress: boolean; learn: boolean; terminal: boolean }>): Promise<void>;
   /** Native, default-Cancel confirmation for trusting a folder (fixed text naming the path). Resolves false on cancel. */
   confirmTrust?(path: string): Promise<boolean>;
+  /** The developer-tools switch (shows the Spike item in the toolbar): per viewer, applies at once. */
+  getDevTools?(): boolean;
+  setDevTools?(on: boolean): void;
   /** Sign-in/out through the shell's core client, which owns the tokens. */
   signIn?(email: string, password: string): Promise<void>;
   signOut?(): Promise<void>;

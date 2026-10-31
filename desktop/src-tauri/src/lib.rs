@@ -92,6 +92,22 @@ fn ping() -> &'static str {
     "pong"
 }
 
+/// The OS the window chrome is for, as a fixed token (`macos`, `windows`, `linux`, `other`). The webview uses it
+/// to leave room for the macOS traffic lights (`titleBarStyle: "Overlay"`); it reveals nothing else.
+fn platform_name() -> &'static str {
+    match std::env::consts::OS {
+        "macos" => "macos",
+        "windows" => "windows",
+        "linux" => "linux",
+        _ => "other",
+    }
+}
+
+#[tauri::command]
+fn host_platform() -> &'static str {
+    platform_name()
+}
+
 /// Reads a graph-kit `graph.json` from inside the active project root only
 /// (see `graph_file`); the root is host-chosen, never supplied by the webview.
 #[tauri::command]
@@ -319,6 +335,7 @@ macro_rules! product_handlers {
                 source_pick::source_pick_folder,
                 source_pick::pick_folder,
                 source_pick::pick_folder_redeem,
+                host_platform,
                 prefs::get_prefs,
                 prefs::set_prefs,
                 os_open::open_external_url,
@@ -475,6 +492,12 @@ mod tests {
 
     fn url(s: &str) -> tauri::Url {
         s.parse().unwrap()
+    }
+
+    #[test]
+    fn platform_name_is_one_fixed_token() {
+        assert!(["macos", "windows", "linux", "other"].contains(&super::platform_name()));
+        assert_eq!(super::host_platform(), super::platform_name());
     }
 
     const COMMON_BAD: [&str; 14] = [

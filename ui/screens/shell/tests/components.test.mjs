@@ -18,25 +18,31 @@ const { useStoreSelector } = await load("hooks.ts");
 const html = (el) => renderToStaticMarkup(el);
 const view = (o = {}) => deriveStatusView({ status: { url: "http://127.0.0.1:1", adopted: false, pid: 1, ms_to_healthy: 5, state: "ready", error: null, trust: "spawned", notice: null, restarts: 0, restart_in_ms: null, fatal: false, claude: "found", claude_source: null, claude_notice: null, ...o }, pollError: null, everReady: false });
 
-test("Shell renders landmarks, skip link, section nav and a visible starting state (never blank)", () => {
+test("Shell renders landmarks, skip link, top toolbar and a visible starting state (never blank)", () => {
   const out = html(h(Shell, { spike: () => null }));
   assert.match(out, /<a class="sh-skip" href="#shell-main">Skip to content/);
   assert.match(out, /<header[^>]*data-tauri-drag-region/);
-  assert.match(out, /<nav class="sh-nav" aria-label="Sections"/);
+  assert.match(out, /<div[^>]*class="sh-toolbar"[^>]*role="toolbar"[^>]*aria-label="Sections"/, "the Mac's top toolbar replaces the left nav");
+  assert.doesNotMatch(out, /class="sh-nav"|Hide sidebar/, "no sidebar");
   assert.match(out, /<main id="shell-main"[^>]*tabindex="-1"/);
   assert.match(out, /<footer class="sh-statusbar"/);
   assert.match(out, /role="status"[^>]*>[\s\S]*Starting core/);
-  for (const l of ["Home", "Chat", "Explorer", "Library", "Settings", "Code Graph", "Doc Gen", "Visual", "Auto Tasks", "Issues", "Gantt", "Loop"]) assert.match(out, new RegExp(`>${l}<`));
+  assert.match(out, /aria-label="Home"/, "Home button");
+  for (const l of ["Explorer", "Graph", "Auto Tasks", "Review Conflicts", "Issues", "Gantt", "Loop", "Doc Gen", "Visual", "Library"]) assert.match(out, new RegExp(`>${l}<`));
+  for (const l of ["Chat", "Settings"]) assert.doesNotMatch(out, new RegExp(`class="sh-tool-label">${l}<`), `${l} is not a toolbar item (Mac: status bar / account menu)`);
   assert.doesNotMatch(out, />Spike</, "the developer-only item is hidden by default");
   assert.match(out, /aria-current="page"/);
-  // disabled placeholders are announced as disabled and not tabbable
-  assert.match(out, /aria-disabled="true"[^>]*tabindex="-1"[\s\S]*Issues/);
+  assert.match(out, /aria-disabled="true"[^>]*>[\s\S]*?Issues/);
+  assert.match(out, /data-platform="(macos|windows|linux|other)"/);
+  assert.doesNotMatch(out, /data-overlay-titlebar/, "no desktop host in node: no traffic-light inset");
+  assert.doesNotMatch(out, /aria-label="Activity feed|Account:/, "signed out: no bell, no account menu");
 });
 
 test("Shell with an initial section marks it current; unknown/disabled falls back to Home", () => {
-  const cur = (init) => /aria-current="page"[^>]*>[\s\S]*?<span class="sh-nav-label">([^<]*)/.exec(html(h(Shell, { initialSection: init, spike: () => null })))[1];
-  assert.equal(cur("library"), "Library");
-  assert.equal(cur("issues"), "Home");
+  const cur = (init) => /aria-label="Home" aria-current="page"|data-tb-id="(\w+)"[^>]*aria-current="page"|aria-current="page"[^>]*data-tb-id="(\w+)"/.exec(html(h(Shell, { initialSection: init, spike: () => null })));
+  assert.equal(cur("library")[1] ?? cur("library")[2], "library");
+  assert.match(cur("issues")[0], /aria-label="Home"/);
+  assert.match(cur(null)[0], /aria-label="Home"/);
 });
 
 test("CoreDownPanel: restarting is a polite status, fatal is an alert with guidance, claude notice shown", () => {

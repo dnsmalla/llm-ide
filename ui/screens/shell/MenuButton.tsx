@@ -1,14 +1,28 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useRef, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
 
-export interface MenuItem {
+/** A non-interactive row: a heading (the account's name and email) or a divider. Skipped by arrow-key movement. */
+export interface MenuDecor {
+  id: string;
+  kind: "label" | "separator";
+  label?: string;
+  muted?: boolean;
+}
+
+export interface MenuAction {
   id: string;
   label: string;
   /** Radio-style checked state (`menuitemradio`); omit for a plain `menuitem`. */
   checked?: boolean;
   disabled?: boolean;
   title?: string;
+  /** Keyboard hint shown at the right (display only; the shell owns the key handling). */
+  hint?: string;
   onSelect: () => void;
 }
+
+export type MenuItem = MenuAction | MenuDecor;
+
+const isDecor = (it: MenuItem): it is MenuDecor => "kind" in it;
 
 interface Props {
   /** Visible button content. */
@@ -17,14 +31,19 @@ interface Props {
   items: readonly MenuItem[];
   /** Open upwards (status bar). */
   up?: boolean;
+  /** Align the menu's right edge with the button (toolbar items near the window's right edge). */
+  end?: boolean;
   className?: string;
   /** Runs when the menu opens (e.g. refresh the recent list). */
   onOpen?: () => void;
   emptyText?: string;
+  /** Lets a host (the toolbar) measure the button and give it a roving tab stop. */
+  buttonRef?: (el: HTMLButtonElement | null) => void;
+  buttonProps?: ButtonHTMLAttributes<HTMLButtonElement> & { [attr: `data-${string}`]: string | undefined };
 }
 
 /** Accessible menu button: Enter/Space/Arrow opens, arrows move, Escape closes and returns focus. */
-export function MenuButton({ children, ariaLabel, items, up, className, onOpen, emptyText }: Props) {
+export function MenuButton({ children, ariaLabel, items, up, end, className, onOpen, emptyText, buttonRef, buttonProps }: Props) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -65,7 +84,11 @@ export function MenuButton({ children, ariaLabel, items, up, className, onOpen, 
   return (
     <div className="sh-menu-root" ref={root}>
       <button
-        ref={button}
+        {...buttonProps}
+        ref={(el) => {
+          button.current = el;
+          buttonRef?.(el);
+        }}
         type="button"
         className={className ?? "sh-statusbar-item"}
         aria-label={ariaLabel}
@@ -87,26 +110,34 @@ export function MenuButton({ children, ariaLabel, items, up, className, onOpen, 
         {children}
       </button>
       {open && (
-        <div id={menuId} role="menu" aria-label={ariaLabel} className={`sh-menu${up ? " sh-menu-up" : ""}`} onKeyDown={onMenuKey}>
+        <div id={menuId} role="menu" aria-label={ariaLabel} className={`sh-menu${up ? " sh-menu-up" : ""}${end ? " sh-menu-end" : ""}`} onKeyDown={onMenuKey}>
           {items.length === 0 && emptyText && <div className="sh-menu-empty">{emptyText}</div>}
-          {items.map((it) => (
-            <button
-              key={it.id}
-              type="button"
-              role={it.checked === undefined ? "menuitem" : "menuitemradio"}
-              aria-checked={it.checked}
-              disabled={it.disabled}
-              title={it.title}
-              className="sh-menu-item"
-              tabIndex={-1}
-              onClick={() => {
-                close(true);
-                it.onSelect();
-              }}
-            >
-              {it.label}
-            </button>
-          ))}
+          {items.map((it) => {
+            if (isDecor(it)) {
+              return it.kind === "separator"
+                ? <div key={it.id} role="separator" className="sh-menu-sep" />
+                : <div key={it.id} role="presentation" className={it.muted ? "sh-menu-label sh-menu-label-muted" : "sh-menu-label"}>{it.label}</div>;
+            }
+            return (
+              <button
+                key={it.id}
+                type="button"
+                role={it.checked === undefined ? "menuitem" : "menuitemradio"}
+                aria-checked={it.checked}
+                disabled={it.disabled}
+                title={it.title}
+                className="sh-menu-item"
+                tabIndex={-1}
+                onClick={() => {
+                  close(true);
+                  it.onSelect();
+                }}
+              >
+                <span className="sh-menu-text">{it.label}</span>
+                {it.hint && <span className="sh-menu-hint" aria-hidden="true">{it.hint}</span>}
+              </button>
+            );
+          })}
         </div>
       )}
     </div>

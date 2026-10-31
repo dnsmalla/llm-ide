@@ -14,10 +14,12 @@ import { WelcomeScreen, type WelcomeActions } from "./WelcomeScreen";
 export default function WelcomeSection(_props: SectionProps) {
   const p = useActiveProject();
   const [focusNew, setFocusNew] = useState(0);
+  const [guideSignal, setGuideSignal] = useState(0);
   // "New project" buttons elsewhere (the no-project cards) ask for the form via the shell bus.
   useEffect(() => {
     const take = (ev: { section: string; anchor?: string } | null) => {
       if (ev && ev.section === "welcome" && ev.anchor === "new") setFocusNew((n) => n + 1);
+      if (ev && ev.section === "welcome" && ev.anchor === "guide") setGuideSignal((n) => n + 1);
     };
     take(shellBus.takePending("goto-section"));
     return shellBus.subscribe("goto-section", (ev) => {
@@ -39,5 +41,5 @@ export default function WelcomeSection(_props: SectionProps) {
     }),
     [],
   );
-  return <WelcomeScreen project={p.project} recent={p.recentAll} error={p.error} actions={actions} focusNew={focusNew} />;
+  return <WelcomeScreen project={p.project} recent={p.recentAll} error={p.error} actions={actions} focusNew={focusNew} guideSignal={guideSignal} />;
 }

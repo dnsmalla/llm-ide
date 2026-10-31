@@ -28,6 +28,8 @@ export const ICONS = [
   'sliders-horizontal', 'hammer', 'server', 'plug', 'circle-arrow-down', 'smartphone', 'globe',
   'hand', 'package', 'leaf', 'key-round', 'repeat', 'hard-drive', 'rotate-ccw-clock', 'shield-check',
   'list-checks', 'stethoscope', 'brain', 'git-branch', 'folder-cog',
+  // Desktop toolbar (Mac SF Symbol -> nearest Lucide): Doc Gen wand, Visual photos, Library books, account, overflow, chat dock.
+  'wand-sparkles', 'images', 'library', 'circle-user', 'ellipsis', 'panel-right',
 ];
 
 const lf = (t) => t.replace(/\r\n/g, '\n');

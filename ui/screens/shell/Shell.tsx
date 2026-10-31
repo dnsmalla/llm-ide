@@ -1,33 +1,21 @@
-import { Suspense, memo, useCallback, useEffect, useReducer, useRef, useState, type ComponentType, type KeyboardEvent, type ReactNode } from "react";
-import { ChatIcon, EditorIcon, FolderIcon, GraphIcon, DocIcon, PuzzleIcon, BenchIcon, ChartIcon, SidebarIcon, HomeIcon, StatusBanner, type ThemeId } from "@llmide/ui-kit";
+import { Suspense, memo, useCallback, useEffect, useMemo, useReducer, useRef, useState, type ComponentType } from "react";
+import { HomeIcon, StatusBanner, type ThemeId } from "@llmide/ui-kit";
+import { AccountMenu, type AccountActions } from "./AccountMenu";
+import { SectionToolbar } from "./Toolbar";
+import { guessPlatform, decodePlatform, hasOverlayTitlebar, type Platform } from "./platform";
+import { host as shellHost, invokeHost } from "./host";
 import { SectionErrorBoundary } from "./ErrorBoundary";
 import { CoreDownPanel, LoginPanel } from "./Panels";
 import { StatusBar } from "./StatusBar";
 import { computeGate, isInert, shouldMountSections } from "./gate";
 import { MissingScreen, screenFor } from "./screens";
-import { SECTIONS, enableDevToolsForSession, initialNav, navKeyTarget, navReducer, sectionForShortcut, selectableSections, subscribeDevTools, visibleSections, type SectionDef, type SectionId } from "./sections";
+import { SECTIONS, devToolsEnabled, enableDevToolsForSession, initialNav, navReducer, sectionForShortcut, subscribeDevTools, type SectionDef, type SectionId } from "./sections";
 import { landingFor, readHome } from "./landing";
 import { core, coreStatusStore, trustGate } from "./runtime";
 import { shellBus } from "./bus";
 import { getTheme, setTheme as applyThemeChoice, subscribeTheme, showTheme } from "./theme";
 import { safeText } from "./safe-text";
 import { useActiveProject, useCoreSession, useCoreStatusView } from "./use-shell";
-
-const ICONS: Record<SectionId, ReactNode> = {
-  welcome: <HomeIcon />,
-  gantt: <ChartIcon />,
-  loop: <BenchIcon />,
-  chat: <ChatIcon />,
-  explorer: <FolderIcon />,
-  library: <DocIcon />,
-  settings: <PuzzleIcon />,
-  graph: <GraphIcon />,
-  issues: <ChartIcon />,
-  docgen: <EditorIcon />,
-  visual: <ChartIcon />,
-  autotasks: <HomeIcon />,
-  spike: <BenchIcon />,
-};
 
 export interface ShellProps {
   /** Section to open (launch override); otherwise the shell lands on Welcome, or the home section once a project is open. */
@@ -37,28 +25,6 @@ export interface ShellProps {
   /** The Spike route: Phase 0 bench/graph/terminal/editor views (lazy). Receives no props. */
   spike: ComponentType;
 }
-
-const NavItem = memo(function NavItem({ def, active, index, onSelect, onKey }: { def: SectionDef; active: boolean; index: number; onSelect: (id: SectionId) => void; onKey: (e: KeyboardEvent<HTMLButtonElement>, index: number) => void }) {
-  return (
-    <li data-spike={def.id === "spike" ? "" : undefined}>
-      <button
-        type="button"
-        className="sh-nav-item"
-        data-nav-index={def.enabled ? index : undefined}
-        aria-current={active ? "page" : undefined}
-        aria-disabled={def.enabled ? undefined : true}
-        title={def.note ? `${def.label}: ${def.note}` : def.shortcut ? `${def.label} (Ctrl/Cmd+${def.shortcut})` : def.label}
-        tabIndex={def.enabled && active ? 0 : -1}
-        onClick={() => def.enabled && onSelect(def.id)}
-        onKeyDown={(e) => def.enabled && onKey(e, index)}
-      >
-        {ICONS[def.id]}
-        <span className="sh-nav-label">{def.label}</span>
-        {!def.enabled && <span className="sh-nav-soon">Soon</span>}
-      </button>
-    </li>
-  );
-});
 
 /** One mounted section: lazy screen inside its own error boundary and Suspense. */
 const SectionSlot = memo(function SectionSlot({ def, active, projectRoot, inert, spike: Spike }: { def: SectionDef; active: boolean; projectRoot: string | null; inert: boolean; spike: ComponentType }) {
@@ -83,7 +49,8 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   const [, bumpDev] = useReducer((n: number) => n + 1, 0);
   useEffect(() => subscribeDevTools(() => bumpDev()), []);
   const [theme, setTheme] = useState<ThemeId>(() => themeOverride ?? getTheme());
-  const [navOpen, setNavOpen] = useState(true);
+  const [platform, setPlatform] = useState<Platform>(() => guessPlatform(typeof navigator === "undefined" ? null : navigator));
+  const hostAvailable = shellHost.isAvailable();
   const view = useCoreStatusView();
   const session = useCoreSession();
   const { project, loaded: projectLoaded, notice, dismissNotice } = useActiveProject();
@@ -100,6 +67,15 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
     return () => coreStatusStore.stop();
   }, []);
   useEffect(() => showTheme(theme), [theme]);
+  // The host says which OS it is (the traffic-light inset is macOS-only); the navigator guess above covers the first paint.
+  useEffect(() => {
+    if (!shellHost.isAvailable()) return undefined;
+    let live = true;
+    invokeHost<unknown>("host_platform").then((p) => live && setPlatform(decodePlatform(p)), () => undefined);
+    return () => {
+      live = false;
+    };
+  }, []);
 
   // Landing: Welcome without a project, the home section with one. First load, then project open/close.
   const prevRoot = useRef<string | null | undefined>(undefined);
@@ -119,6 +95,13 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
+      // The Mac's account-menu shortcuts: Cmd+, Settings, Cmd+/ Help & Guide.
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey && (e.key === "," || e.key === "/")) {
+        e.preventDefault();
+        if (e.key === ",") dispatch({ type: "select", id: "settings" });
+        else shellBus.publish({ type: "goto-section", section: "welcome", anchor: "guide" });
+        return;
+      }
       const id = sectionForShortcut(e);
       if (id) {
         e.preventDefault();
@@ -141,50 +124,34 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
   }, []);
 
   const onSelect = useCallback((id: SectionId) => dispatch({ type: "select", id }), []);
-  const onNavKey = useCallback((e: KeyboardEvent<HTMLButtonElement>, index: number) => {
-    const list = selectableSections();
-    const target = navKeyTarget(e.key, index, list.length);
-    if (target === null) return;
-    e.preventDefault();
-    const def = list[target];
-    if (def) {
-      dispatch({ type: "select", id: def.id });
-      // Roving focus: move DOM focus to the newly current item after it renders.
-      requestAnimationFrame(() => document.querySelector<HTMLElement>(`[data-nav-index="${target}"]`)?.focus());
-    }
-  }, []);
+  const account = useMemo<AccountActions>(
+    () => ({
+      openSettings: () => dispatch({ type: "select", id: "settings" }),
+      openHelp: () => shellBus.publish({ type: "goto-section", section: "welcome", anchor: "guide" }),
+      openPermissions: () => shellBus.publish({ type: "goto-section", section: "settings", anchor: "tool-permissions" }),
+      signOut: () => core.logout(),
+    }),
+    [],
+  );
   const onTheme = useCallback((id: ThemeId) => applyThemeChoice(id), []);
   // Settings > Appearance changes the theme through the same store (a launch override stays unpersisted until the user picks).
   useEffect(() => subscribeTheme(() => setTheme(getTheme())), []);
 
   const inert = isInert(gate);
-  let selectableIndex = -1;
+  const overlay = hasOverlayTitlebar(platform, hostAvailable);
   return (
-    <div className="sh-app">
+    <div className="sh-app" data-platform={platform} data-overlay-titlebar={overlay ? "" : undefined}>
       <a className="sh-skip" href="#shell-main" onClick={(e) => { e.preventDefault(); main.current?.focus(); }}>
         Skip to content
       </a>
-      <header className="sh-titlebar" data-tauri-drag-region>
-        <button type="button" className="sh-icon-button" aria-label={navOpen ? "Hide sidebar" : "Show sidebar"} aria-pressed={navOpen} onClick={() => setNavOpen((v) => !v)}>
-          <SidebarIcon />
+      <header className="sh-titlebar" aria-label="LLM-IDE" data-tauri-drag-region>
+        <button type="button" className="sh-tool sh-tool-home" aria-label="Home" aria-current={nav.active === "welcome" ? "page" : undefined} title="Home (Welcome)" onClick={() => dispatch({ type: "select", id: "welcome" })}>
+          <HomeIcon />
         </button>
-        <button type="button" className="sh-title sh-title-button" title="Home" aria-label="Home" onClick={() => dispatch({ type: "select", id: "welcome" })}>
-          LLM-IDE{project ? ` · ${safeText(project.name, 60)}` : ""}
-        </button>
+        <SectionToolbar active={nav.active} onSelect={onSelect} devTools={devToolsEnabled()} />
+        <AccountMenu user={session.user} actions={account} mac={platform === "macos"} />
       </header>
       <div className="sh-body">
-        {navOpen && (
-          <nav className="sh-nav" aria-label="Sections">
-            <ul>
-              {visibleSections().map((def) => {
-                if (def.enabled) selectableIndex++;
-                return (
-                  <NavItem key={def.id} def={def} active={nav.active === def.id} index={def.enabled ? selectableIndex : -1} onSelect={onSelect} onKey={onNavKey} />
-                );
-              })}
-            </ul>
-          </nav>
-        )}
         <main id="shell-main" ref={main} tabIndex={-1} className="sh-main" aria-label={SECTIONS.find((s) => s.id === nav.active)?.label}>
           {gate === "restarting" && <StatusBanner severity="warning" message={`${view.label}. Your screens are kept and will reconnect.`} />}
           {notice && gate === "open" && (
@@ -209,7 +176,7 @@ export function Shell({ initialSection, themeOverride, spike }: ShellProps) {
           )}
         </main>
       </div>
-      <StatusBar theme={theme} onTheme={onTheme} />
+      <StatusBar theme={theme} onTheme={onTheme} chatActive={nav.active === "chat"} />
     </div>
   );
 }
