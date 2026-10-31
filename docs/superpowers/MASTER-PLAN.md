@@ -15,12 +15,12 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Mobile (iPhone native, PWA) | 6 | 3 | 6 | 15 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
 | Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 13 | 4 | 1 | 18 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Shared server and core | 14 | 4 | 1 | 19 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 9 | 2 | 5 | 16 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 88 | 30 | 67 | 185 |  |
+| Total | 89 | 30 | 67 | 186 |  |
 
 ## How the surfaces connect
 
@@ -221,6 +221,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [x] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/*.md`, `845aa869`; each lists numbered decisions for the user) (me)
 - [x] K0 maps for ui-kit and os-kit (`docs/kits/ui-kit.md`, `docs/kits/os-kit.md`, `c8d7b8a5`; numbered decisions U1 to U6 and S1 to S6 for the user) (me)
 - [x] Flaky tests under full-gate load hardened: `index-routes.http` 1 MB body (`e8f11cad`), `loop-contract-lab` probe timeout and Explorer watch tests (`87764821`); 10/10 under artificial load (me)
+- [x] Desktop screen-test flake root-caused: explorer/shell/library/settings helpers bundled to a fixed shared outfile, so parallel test processes clobbered each other (`ExplorerController is not a constructor`, 23 fails in 1 of 10 runs); per-process `bundleDir()` (`f2205fa7`) + fixed-path guard test (`37d9e7dd`); 10/10 clean + 10/10 loaded (x2 concurrent) green (me)
 
 ## S7. Data and storage
 
