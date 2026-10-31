@@ -233,3 +233,66 @@ test("a 10k-delta reply is micro-batched: far fewer state commits than events, t
   const text = c.assistantText(ctl.getState("a").messages.at(-1));
   assert.equal((text.match(/w/g) ?? []).length, 10_000);
 });
+
+test("queued messages keep their OWN options: nothing is sent with the next message's attachments or permission mode", async () => {
+  const core = fakeCore({ streams: [turn(), turn(), turn()] });
+  const { ctl } = make(core);
+  const a1 = [{ path: "one.txt", content: "1" }], a2 = [{ path: "two.txt", content: "2" }];
+  ctl.send("a", "first", { mode: "ask" });
+  ctl.send("a", "second", { mode: "ask", attachments: a1, permissionMode: "ask" });
+  ctl.send("a", "third", { mode: "execute", attachments: a2, permissionMode: "bypass", planExecute: true, fresh: true });
+  await until(() => core.calls.filter((x) => x.method === "STREAM").length === 3 && ctl.getState("a").phase === "idle" && ctl.getState("a").queue.length === 0 && ctl.getState("a").messages.at(-1).status === "done", 3000);
+  const [b1, b2, b3] = core.calls.filter((x) => x.method === "STREAM").map((x) => x.body);
+  assert.deepEqual([b1.message, b2.message, b3.message], ["first", "second", "third"]);
+  assert.equal(b1.attachments, undefined);
+  assert.deepEqual(b2.attachments, a1);
+  assert.equal(b2.permissionMode, "ask");
+  assert.equal(b2.planExecute, undefined);
+  assert.equal(b2.fresh, undefined);
+  assert.deepEqual(b3.attachments, a2);
+  assert.equal(b3.permissionMode, "bypass");
+  assert.equal(b3.planExecute, true);
+  assert.equal(b3.mode, "execute");
+});
+
+test("a dropped queued message does not shift the options of the others", async () => {
+  const core = fakeCore({ streams: [turn(), turn()] });
+  const { ctl } = make(core);
+  ctl.send("a", "first", { mode: "ask" });
+  ctl.send("a", "dropped", { mode: "ask", permissionMode: "bypass" });
+  ctl.send("a", "kept", { mode: "ask", permissionMode: "ask" });
+  ctl.dropQueued("a", 0);
+  await until(() => core.calls.filter((x) => x.method === "STREAM").length === 2 && ctl.getState("a").phase === "idle" && ctl.getState("a").messages.at(-1).status === "done", 3000);
+  const bodies = core.calls.filter((x) => x.method === "STREAM").map((x) => x.body);
+  assert.deepEqual(bodies.map((b) => b.message), ["first", "kept"]);
+  assert.equal(bodies[1].permissionMode, "ask");
+});
+
+test("a message queued for project A is not run in project B: it goes back to the composer", async () => {
+  let root = "/projA";
+  const core = fakeCore({ streams: [turn(), turn()] });
+  const { ctl } = make(core, { workspaceRoot: () => root });
+  ctl.send("a", "first", { mode: "ask" });
+  ctl.send("a", "for project A", { mode: "ask" });
+  ctl.send("a", "also A", { mode: "ask" });
+  root = "/projB"; // the user switched project while the first turn ran
+  await until(() => ctl.getState("a").phase === "idle" && ctl.getState("a").queue.length === 0 && ctl.getState("a").messages.at(-1).status === "done", 3000);
+  await tick(20);
+  const sent = core.calls.filter((x) => x.method === "STREAM");
+  assert.equal(sent.length, 1, "only the first message ran");
+  assert.equal(sent[0].body.agentContext.workspaceRoot, "/projA");
+  assert.equal(ctl.getView("a").draft, "for project A\n\nalso A");
+  assert.ok(ctl.getView("a").draftRev > 0);
+  assert.ok(ctl.getState("a").messages.some((m) => m.role === "assistant" && m.notices.some((n) => n.text === "Project changed: message kept as a draft")));
+  assert.equal(ctl.getState("a").messages.filter((m) => m.role === "user").length, 1, "no bubble for unsent messages");
+});
+
+test("queued messages run in the project they were typed in", async () => {
+  let root = "/projA";
+  const core = fakeCore({ streams: [turn(), turn()] });
+  const { ctl } = make(core, { workspaceRoot: () => root });
+  ctl.send("a", "first", { mode: "ask" });
+  ctl.send("a", "second", { mode: "ask" });
+  await until(() => core.calls.filter((x) => x.method === "STREAM").length === 2 && ctl.getState("a").phase === "idle" && ctl.getState("a").messages.at(-1).status === "done", 3000);
+  assert.deepEqual(core.calls.filter((x) => x.method === "STREAM").map((x) => x.body.agentContext.workspaceRoot), ["/projA", "/projA"]);
+});

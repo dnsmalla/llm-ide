@@ -205,7 +205,7 @@ export function ChatScreen({ controller, store, core, host, initialSessionId = n
               <PermissionChip value={permission} onChange={(m) => void changePermission(m)} />
             </div>
             <DraftComposer
-              key={`${activeId}:${refineNonce}`} controller={controller} id={activeId}
+              key={`${activeId}:${refineNonce}:${controller.getView(activeId).draftRev}`} controller={controller} id={activeId}
               compose={host.compose} models={groups} setMode={(mode) => setCurrent({ mode })} clearChat={() => void newChat()}
               setModel={(provider, model) => { setCurrent({ provider, model }); if (route?.enabled) putRoute(core, activeId, { provider, model }).then(setRoute).catch(() => undefined); }}
               busy={busy} aborting={state.phase === "aborting"} queue={state.queue} history={history}

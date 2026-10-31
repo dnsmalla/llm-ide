@@ -46,13 +46,24 @@ export interface ControllerDeps {
 export type DecisionResult = { ok: true } | { ok: false; code: string; message: string; permanent: boolean };
 
 /** Per-chat UI state kept out of the reducer: it never affects a turn. */
-export interface ChatView { draft: string; scrollTop: number | null; stickToBottom: boolean }
+export interface ChatView {
+  draft: string; scrollTop: number | null; stickToBottom: boolean;
+  /** Bumped when the controller puts text back into the composer (the composer re-reads `draft`). */
+  draftRev: number;
+}
+
+/** A message waiting for the running turn to end: everything it needs is captured when it was queued. */
+interface QueuedSend { text: string; opts: SendOptions; workspaceRoot: string }
+
+export const PROJECT_CHANGED_NOTICE = "Project changed: message kept as a draft";
 
 interface Runtime {
   state: ChatState;
   view: ChatView;
   ac: AbortController | null;
-  lastSend: { text: string; opts: SendOptions } | null;
+  lastSend: { text: string; opts: SendOptions; workspaceRoot: string } | null;
+  /** Options and project of each entry of `state.queue` (same order). */
+  queued: QueuedSend[];
   loaded: boolean;
   userAborted: boolean;
   /** Events of the current turn this client has taken in (the replay `after` cursor; in memory only). */
@@ -94,7 +105,7 @@ export class ChatController {
   private rt(id: string): Runtime {
     let r = this.runtimes.get(id);
     if (!r) {
-      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true }, ac: null, lastSend: null, loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null };
+      r = { state: initialState(id), view: { draft: "", scrollTop: null, stickToBottom: true, draftRev: 0 }, ac: null, lastSend: null, queued: [], loaded: false, userAborted: false, seq: 0, gap: false, reattached: false, attachedTurn: null };
       this.runtimes.set(id, r);
     }
     return r;
@@ -109,7 +120,19 @@ export class ChatController {
   private dispatch(id: string, action: Action): void {
     const r = this.rt(id);
     const next = reduce(r.state, action);
-    if (next !== r.state) { r.state = next; this.emit(); }
+    if (next !== r.state) {
+      r.state = next;
+      if (next.queue.length === 0) r.queued.length = 0; // aborted: the reducer dropped the whole queue
+      this.emit();
+    }
+  }
+
+  /** Puts a message that was not sent back into the composer (kept after any text already typed). */
+  private restoreDraft(id: string, text: string): void {
+    const v = this.rt(id).view;
+    v.draft = v.draft.trim() === "" ? text : `${v.draft}\n\n${text}`;
+    v.draftRev++;
+    this.emit();
   }
 
   // --- history -------------------------------------------------------------------------------
@@ -197,18 +220,25 @@ export class ChatController {
     if (!trimmed) return;
     const r = this.rt(id);
     const wasBusy = r.state.phase === "streaming" || r.state.phase === "aborting";
+    const workspaceRoot = this.deps.workspaceRoot();
+    const before = r.state.queue.length;
     this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text: trimmed, replaceFailed: isRetry });
-    if (wasBusy) { r.lastSend = { text: trimmed, opts }; return; }
-    void this.runTurn(id, trimmed, opts, !isRetry);
+    if (wasBusy) {
+      // Snapshot everything now: the entry is sent later with ITS OWN options and project, never the next message's.
+      if (r.state.queue.length > before) r.queued.push({ text: trimmed, opts: { ...opts }, workspaceRoot });
+      return;
+    }
+    void this.runTurn(id, trimmed, opts, workspaceRoot, !isRetry);
   }
 
   /** Retries the last message of a failed turn (fresh SDK session when the error asks for it). */
   retry(id: string): void {
     const r = this.rt(id);
     if (!r.lastSend || r.state.phase !== "error") return;
-    const { text, opts } = r.lastSend;
+    const { text, opts, workspaceRoot } = r.lastSend;
     const unresumable = r.state.error?.code === "SESSION_UNRESUMABLE";
     this.dispatch(id, { type: "clear_error" });
+    if (workspaceRoot !== this.deps.workspaceRoot()) { this.projectChanged(id, text); return; }
     this.send(id, text, { ...opts, fresh: unresumable || opts.fresh }, true);
   }
 
@@ -244,7 +274,17 @@ export class ChatController {
     this.dispatch(id, { type: "approval_answered", requestId: req.requestId });
     return { ok: true };
   }
-  dropQueued(id: string, index: number): void { this.dispatch(id, { type: "drop_queued", index }); }
+  dropQueued(id: string, index: number): void {
+    const r = this.rt(id);
+    if (index >= 0 && index < r.queued.length) r.queued.splice(index, 1);
+    this.dispatch(id, { type: "drop_queued", index });
+  }
+
+  /** The project changed since the message was typed: nothing is sent, the text goes back to the composer. */
+  private projectChanged(id: string, text: string): void {
+    this.dispatch(id, { type: "marker", kind: "queue_project_changed", level: "warning", text: PROJECT_CHANGED_NOTICE });
+    this.restoreDraft(id, text);
+  }
 
   abort(id: string): void {
     const r = this.rt(id);
@@ -311,17 +351,17 @@ export class ChatController {
     }
   }
 
-  private async runTurn(id: string, text: string, opts: SendOptions, persistUser = true): Promise<void> {
+  private async runTurn(id: string, text: string, opts: SendOptions, workspaceRoot: string, persistUser = true): Promise<void> {
     const r = this.rt(id);
     const ac = new AbortController();
-    r.ac = ac; r.userAborted = false; r.lastSend = { text, opts }; r.seq = 0; r.gap = false; r.reattached = false; r.attachedTurn = null;
+    r.ac = ac; r.userAborted = false; r.lastSend = { text, opts, workspaceRoot }; r.seq = 0; r.gap = false; r.reattached = false; r.attachedTurn = null;
     if (persistUser) this.persist(id, { role: "user", content: text, meta: { mode: opts.mode } });
     const body = {
       message: text, mode: opts.mode, ...(this.deps.core.attach ? { detach: true } : {}), language: opts.language, skills: opts.skills, fresh: opts.fresh === true ? true : undefined,
       ...(opts.model ? { model: opts.model } : {}), ...(opts.provider ? { provider: opts.provider } : {}),
       ...(opts.permissionMode ? { permissionMode: opts.permissionMode } : {}),
       ...(opts.attachments?.length ? { attachments: opts.attachments } : {}), ...(opts.planExecute ? { planExecute: true } : {}),
-      agentContext: { chatSessionId: id, workspaceRoot: this.deps.workspaceRoot(), surface: "desktop" },
+      agentContext: { chatSessionId: id, workspaceRoot, surface: "desktop" },
     };
     let dropped = false;
     try {
@@ -441,11 +481,16 @@ export class ChatController {
       const content = assistantText(last);
       if (content) this.persist(id, { role: "assistant", content, meta: { mode: r.state.resolvedMode, model: r.state.model, status: last.status } });
     }
-    if (r.state.queue.length > 0 && r.state.phase === "idle" && r.lastSend) {
-      const [next] = r.state.queue;
+    while (r.state.queue.length > 0 && r.state.phase === "idle") {
+      const [text] = r.state.queue;
+      const entry = r.queued.shift();
       this.dispatch(id, { type: "dequeue" });
-      this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text: next });
-      void this.runTurn(id, next, r.lastSend.opts);
+      // Out of step with the reducer (never expected): do not guess options for it, give the text back.
+      if (!entry || entry.text !== text) { this.restoreDraft(id, text); continue; }
+      if (entry.workspaceRoot !== this.deps.workspaceRoot()) { this.projectChanged(id, text); continue; }
+      this.dispatch(id, { type: "send", id: (this.deps.newId ?? defaultId)(), text });
+      void this.runTurn(id, text, entry.opts, entry.workspaceRoot);
+      return;
     }
   }
 
