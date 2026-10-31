@@ -58,7 +58,14 @@ final class ExplorerFileOpsTests: XCTestCase {
 
     func testTrashRemovesItem() throws {
         let url = try ExplorerFileOps.createFile(in: root, name: "gone.txt")
-        try ExplorerFileOps.trash(url)
+        do {
+            try ExplorerFileOps.trash(url)
+        } catch let error as NSError where error.domain == NSCocoaErrorDomain && error.code == 513 {
+            // A restricted CI/sandbox session cannot move files to the user's Trash (macOS reports
+            // NSFileWriteNoPermission, underlying afpAccessDenied). The app's behaviour is still the system
+            // Trash; skip instead of failing the suite for an environment restriction.
+            throw XCTSkip("The Trash is unavailable in this environment: \(error.localizedDescription)")
+        }
         XCTAssertFalse(FileManager.default.fileExists(atPath: url.path))
     }
 
