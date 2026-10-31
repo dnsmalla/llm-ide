@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 103
+  x-api-version: 104
 servers:
   - url: "https://{host}"
     variables:
@@ -22,6 +22,7 @@ tags:
   - name: "agent"
   - name: "agent-history"
   - name: "bus"
+  - name: "calendar-ical"
   - name: "docs"
   - name: "extensions"
   - name: "google"
@@ -6793,6 +6794,232 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "502":
           description: "Box connect failed"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/calendar-ical/options:
+    post:
+      tags:
+        - "calendar-ical"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                sourceId:
+                  type: "string"
+                options:
+                  type: "object"
+                  properties:
+                    daysBack:
+                      type: "integer"
+                      description: "0 to 365, default 30"
+                    daysAhead:
+                      type: "integer"
+                      description: "0 to 730, default 90"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  options:
+                    type: "object"
+                    properties:
+                      daysBack:
+                        type: "integer"
+                        description: "0 to 365, default 30"
+                      daysAhead:
+                        type: "integer"
+                        description: "0 to 730, default 90"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/calendar-ical/sources:
+    get:
+      tags:
+        - "calendar-ical"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  sources:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/CalendarIcalSource"
+    post:
+      tags:
+        - "calendar-ical"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                name:
+                  type: "string"
+                url:
+                  type: "string"
+                  description: "the secret iCal address (https://calendar.google.com/calendar/ical/<id>/private-<token>/basic.ics, webcal:// accepted). Write-only: never returned."
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  sourceId:
+                    type: "string"
+                  name:
+                    type: "string"
+                  nameOnly:
+                    type: "boolean"
+                    enum:
+                      - true
+                    description: "always true: only the label comes back, never the address"
+                  calendarIdPrefix:
+                    type: "string"
+                  host:
+                    type: "string"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/calendar-ical/sources/{id}:
+    delete:
+      tags:
+        - "calendar-ical"
+      parameters:
+        - name: "id"
+          in: "path"
+          required: true
+          schema:
+            type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  purgedSources:
+                    type: "integer"
+                    description: "cached note rows removed"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /kb/calendar-ical/sync:
+    post:
+      tags:
+        - "calendar-ical"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                sourceId:
+                  type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  sourceId:
+                    type: "string"
+                  status:
+                    type: "string"
+                    enum:
+                      - "ok"
+                      - "unchanged"
+                      - "not_modified"
+                    description: "unchanged = same body as the last run; not_modified = the host answered 304"
+                  events:
+                    type: "integer"
+                    description: "VEVENT components read"
+                  instances:
+                    type: "integer"
+                    description: "event instances written inside the window"
+                  cancelled:
+                    type: "integer"
+                    description: "cancelled events or occurrences removed by exact ref"
+                  removed:
+                    type: "integer"
+                    description: "rows swept because the feed no longer has them (only after a complete pass)"
+                  truncated:
+                    type: "boolean"
+                    description: "a cap or budget stopped the pass; nothing is swept then"
+                  warnings:
+                    type: "array"
+                    items:
+                      type: "string"
+                    description: "stable codes, e.g. tz_unknown, floating, rrule_subdaily, rrule_unsupported, rrule_invalid, instance_cap, budget_exhausted, oversized_property, malformed_line, nested_vcalendar"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "409":
+          description: "Conflict"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "429":
+          description: "Too Many Requests"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "502":
+          description: "Bad Gateway"
           content:
             application/json:
               schema:
@@ -15654,6 +15881,43 @@ components:
         - "enabled"
         - "allowed"
         - "needsApproval"
+    CalendarIcalSource:
+      type: "object"
+      properties:
+        sourceId:
+          type: "string"
+        name:
+          type: "string"
+        calendarIdPrefix:
+          type: "string"
+          description: "first characters of the calendar id (a non-secret hint), empty for an operator-added host"
+        host:
+          type: "string"
+        status:
+          type: "string"
+          enum:
+            - "idle"
+            - "error"
+            - "revoked"
+          description: "last run outcome; revoked = the secret address no longer works (404 or 410)"
+        lastRunAt:
+          type:
+            - "string"
+            - "null"
+        lastError:
+          type:
+            - "string"
+            - "null"
+          description: "a stable code, never a response body"
+        options:
+          type: "object"
+          properties:
+            daysBack:
+              type: "integer"
+              description: "0 to 365, default 30"
+            daysAhead:
+              type: "integer"
+              description: "0 to 730, default 90"
     CalendarRun:
       type: "object"
       properties:

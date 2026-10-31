@@ -109,9 +109,10 @@ export async function handleCalendarIcalRoutes(req, res, { userId, url }) {
     return true;
   }
 
-  const del = /^\/kb\/calendar-ical\/sources\/([^/]+)$/.exec(path);
-  if (del && req.method === 'DELETE') {
-    const s = source(res, userId, del[1]); if (!s) return true;
+  if (req.method === 'DELETE' && path.startsWith('/kb/calendar-ical/sources/')) {
+    const id = path.slice('/kb/calendar-ical/sources/'.length);
+    if (id.includes('/')) return false;
+    const s = source(res, userId, id); if (!s) return true;
     try {
       db.transaction(() => { setSecret(db, userId, vaultKey(s.sourceId), ''); deleteIcalSource(userId, s.sourceId); })();
       const purged = purgeIcalRows(userId, s.sourceId);

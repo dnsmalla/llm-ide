@@ -476,6 +476,25 @@ export type BusApproval = {
   nonce: string;
 };
 
+export type CalendarIcalSource = {
+  sourceId?: string;
+  name?: string;
+  /** first characters of the calendar id (a non-secret hint), empty for an operator-added host */
+  calendarIdPrefix?: string;
+  host?: string;
+  /** last run outcome; revoked = the secret address no longer works (404 or 410) */
+  status?: "idle" | "error" | "revoked";
+  lastRunAt?: string | null;
+  /** a stable code, never a response body */
+  lastError?: string | null;
+  options?: {
+    /** 0 to 365, default 30 */
+    daysBack?: number;
+    /** 0 to 730, default 90 */
+    daysAhead?: number;
+  };
+};
+
 export type Template = {
   /** Stable UUID for the folder (SHA-256 of llmide.doc-template.<folder>, uppercase). */
   id: string;
@@ -3027,6 +3046,112 @@ export type PutBusKindsKindResponse401 = CommonError;
 export type PutBusKindsKindResponse403 = CommonError;
 
 export type PutBusKindsKindResponse404 = CommonError;
+
+/** Request parts for `POST /kb/calendar-ical/sources` (schema/http/calendar-ical.schema.json). */
+export type PostKbCalendarIcalSourcesRequest = {
+  body: {
+    name?: string;
+    /** the secret iCal address (https://calendar.google.com/calendar/ical/<id>/private-<token>/basic.ics, webcal:// accepted). Write-only: never returned. */
+    url?: string;
+  };
+};
+
+export type PostKbCalendarIcalSourcesResponse200 = {
+  sourceId?: string;
+  name?: string;
+  /** always true: only the label comes back, never the address */
+  nameOnly?: true;
+  calendarIdPrefix?: string;
+  host?: string;
+};
+
+export type PostKbCalendarIcalSourcesResponse400 = CommonError;
+
+export type PostKbCalendarIcalSourcesResponse409 = CommonError;
+
+/** Request parts for `GET /kb/calendar-ical/sources` (schema/http/calendar-ical.schema.json). */
+export type GetKbCalendarIcalSourcesRequest = Record<string, never>;
+
+export type GetKbCalendarIcalSourcesResponse200 = {
+  sources?: CalendarIcalSource[];
+};
+
+/** Request parts for `DELETE /kb/calendar-ical/sources/:id` (schema/http/calendar-ical.schema.json). */
+export type DeleteKbCalendarIcalSourcesIdRequest = {
+  params: {
+    id: string;
+  };
+};
+
+export type DeleteKbCalendarIcalSourcesIdResponse200 = {
+  ok?: boolean;
+  /** cached note rows removed */
+  purgedSources?: number;
+};
+
+export type DeleteKbCalendarIcalSourcesIdResponse400 = CommonError;
+
+export type DeleteKbCalendarIcalSourcesIdResponse404 = CommonError;
+
+/** Request parts for `POST /kb/calendar-ical/sync` (schema/http/calendar-ical.schema.json). */
+export type PostKbCalendarIcalSyncRequest = {
+  body: {
+    sourceId?: string;
+  };
+};
+
+export type PostKbCalendarIcalSyncResponse200 = {
+  sourceId?: string;
+  /** unchanged = same body as the last run; not_modified = the host answered 304 */
+  status?: "ok" | "unchanged" | "not_modified";
+  /** VEVENT components read */
+  events?: number;
+  /** event instances written inside the window */
+  instances?: number;
+  /** cancelled events or occurrences removed by exact ref */
+  cancelled?: number;
+  /** rows swept because the feed no longer has them (only after a complete pass) */
+  removed?: number;
+  /** a cap or budget stopped the pass; nothing is swept then */
+  truncated?: boolean;
+  /** stable codes, e.g. tz_unknown, floating, rrule_subdaily, rrule_unsupported, rrule_invalid, instance_cap, budget_exhausted, oversized_property, malformed_line, nested_vcalendar */
+  warnings?: string[];
+};
+
+export type PostKbCalendarIcalSyncResponse400 = CommonError;
+
+export type PostKbCalendarIcalSyncResponse409 = CommonError;
+
+export type PostKbCalendarIcalSyncResponse429 = CommonError;
+
+export type PostKbCalendarIcalSyncResponse502 = CommonError;
+
+/** Request parts for `POST /kb/calendar-ical/options` (schema/http/calendar-ical.schema.json). */
+export type PostKbCalendarIcalOptionsRequest = {
+  body: {
+    sourceId?: string;
+    options?: {
+      /** 0 to 365, default 30 */
+      daysBack?: number;
+      /** 0 to 730, default 90 */
+      daysAhead?: number;
+    };
+  };
+};
+
+export type PostKbCalendarIcalOptionsResponse200 = {
+  ok?: boolean;
+  options?: {
+    /** 0 to 365, default 30 */
+    daysBack?: number;
+    /** 0 to 730, default 90 */
+    daysAhead?: number;
+  };
+};
+
+export type PostKbCalendarIcalOptionsResponse400 = CommonError;
+
+export type PostKbCalendarIcalOptionsResponse404 = CommonError;
 
 /** Request parts for `GET /kb/docs/templates` (schema/http/docs.schema.json). */
 export type GetKbDocsTemplatesRequest = {
@@ -8099,6 +8224,46 @@ export interface ApiEndpoints {
       401: PutBusKindsKindResponse401;
       403: PutBusKindsKindResponse403;
       404: PutBusKindsKindResponse404;
+    };
+  };
+  "POST /kb/calendar-ical/sources": {
+    request: PostKbCalendarIcalSourcesRequest;
+    responses: {
+      200: PostKbCalendarIcalSourcesResponse200;
+      400: PostKbCalendarIcalSourcesResponse400;
+      409: PostKbCalendarIcalSourcesResponse409;
+    };
+  };
+  "GET /kb/calendar-ical/sources": {
+    request: GetKbCalendarIcalSourcesRequest;
+    responses: {
+      200: GetKbCalendarIcalSourcesResponse200;
+    };
+  };
+  "DELETE /kb/calendar-ical/sources/:id": {
+    request: DeleteKbCalendarIcalSourcesIdRequest;
+    responses: {
+      200: DeleteKbCalendarIcalSourcesIdResponse200;
+      400: DeleteKbCalendarIcalSourcesIdResponse400;
+      404: DeleteKbCalendarIcalSourcesIdResponse404;
+    };
+  };
+  "POST /kb/calendar-ical/sync": {
+    request: PostKbCalendarIcalSyncRequest;
+    responses: {
+      200: PostKbCalendarIcalSyncResponse200;
+      400: PostKbCalendarIcalSyncResponse400;
+      409: PostKbCalendarIcalSyncResponse409;
+      429: PostKbCalendarIcalSyncResponse429;
+      502: PostKbCalendarIcalSyncResponse502;
+    };
+  };
+  "POST /kb/calendar-ical/options": {
+    request: PostKbCalendarIcalOptionsRequest;
+    responses: {
+      200: PostKbCalendarIcalOptionsResponse200;
+      400: PostKbCalendarIcalOptionsResponse400;
+      404: PostKbCalendarIcalOptionsResponse404;
     };
   };
   "GET /kb/docs/templates": {
