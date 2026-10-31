@@ -14,6 +14,7 @@
 //!   widen access.
 //! - Commands return only the chosen root and its display name.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -241,9 +242,36 @@ fn valid_recent(dir: &Path) -> Vec<PathBuf> {
     load_recent(dir).iter().filter_map(|p| validate_root(Path::new(p)).ok()).collect()
 }
 
+/// Mirrors the Mac's `ProjectStore.openFolder`: a folder opened while empty becomes a project.
+///
+/// The Mac validates the folder (marker, or empty) and then scaffolds the canonical tree, so opening a new
+/// empty folder does not leave a bare directory that the core refuses to register. Here the marker check is
+/// the same; when it is absent and the folder is empty (a `.DS_Store` is tolerated, the Mac quirk is not worth
+/// copying) the tree is scaffolded idempotently. A NON-empty folder without the marker is left untouched: the
+/// desktop app can open any folder for Explorer and Chat, and only Doc Gen needs the marker (its screen says so).
+///
+/// A scaffold failure is logged, not fatal: the folder still opens, exactly like the Mac.
+fn ensure_scaffold(root: &Path) -> Result<(), String> {
+    if root.join("system/project.json").is_file() {
+        return Ok(());
+    }
+    let empty = fs::read_dir(root)
+        .map_err(|e| format!("cannot read the chosen folder: {e}"))?
+        .filter_map(|e| e.ok())
+        .all(|e| e.file_name() == ".DS_Store");
+    if !empty {
+        return Ok(());
+    }
+    let project = crate::project_scaffold::NewProject::fresh(&display_name(root));
+    crate::project_scaffold::scaffold(root, &project)
+}
+
 /// Accepts `chosen` as the active root and records it as most recent.
 fn activate(dir: &Path, chosen: &Path) -> Result<ProjectInfo, String> {
     let root = validate_root(chosen)?;
+    if let Err(e) = ensure_scaffold(&root) {
+        eprintln!("project: scaffold not written: {e}");
+    }
     let list = push_recent(&load_recent(dir), &root.to_string_lossy(), MAX_RECENT);
     // A failed history write must not block opening the project.
     if let Err(e) = save_recent(dir, &list) {
@@ -651,5 +679,63 @@ mod tests {
         assert!(active_root().is_none());
         assert_eq!(valid_recent(&dir).len(), 1);
         assert!(proj.is_dir());
+    }
+
+    #[test]
+    fn opening_an_empty_folder_scaffolds_it_like_the_mac_app() {
+        let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let data = scratch("scaf-data");
+        let root = scratch("scaf-open").join("new_llm");
+        fs::create_dir_all(&root).unwrap();
+        // The user's real case: a folder opened before it was ever scaffolded. The core refuses to register it
+        // (no system/project.json), so opening it must create the project, as ProjectStore.openFolder does.
+        assert!(!root.join("system/project.json").exists());
+        let info = activate(&data, &root).unwrap();
+        assert_eq!(info.name, "new_llm");
+        assert!(root.join("system/project.json").is_file(), "the marker the core registers");
+        for dir in ["source", "code", "data", "llm-doc", "templates", "commands", "system"] {
+            assert!(root.join(dir).is_dir(), "{dir} must exist");
+        }
+        assert!(root.join("README.md").is_file());
+        // Re-opening keeps the marker byte for byte (never a new id, never a clobbered file).
+        let before = fs::read(root.join("system/project.json")).unwrap();
+        activate(&data, &root).unwrap();
+        assert_eq!(before, fs::read(root.join("system/project.json")).unwrap());
+        deactivate();
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn a_non_empty_folder_without_the_marker_is_left_alone() {
+        let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let data = scratch("plain-data");
+        let root = scratch("plain-open").join("repo");
+        fs::create_dir_all(root.join("src")).unwrap();
+        fs::write(root.join("Cargo.toml"), "[package]\nname = \"x\"\n").unwrap();
+        fs::write(root.join("src/main.rs"), "fn main() {}\n").unwrap();
+        activate(&data, &root).unwrap();
+        assert!(!root.join("system").exists(), "a code repo is not scaffolded behind the user's back");
+        assert!(!root.join("README.md").exists());
+        assert_eq!(fs::read_to_string(root.join("Cargo.toml")).unwrap(), "[package]\nname = \"x\"\n");
+        assert_eq!(fs::read_to_string(root.join("src/main.rs")).unwrap(), "fn main() {}\n");
+        deactivate();
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&data);
+    }
+
+    #[test]
+    fn a_stray_ds_store_still_counts_as_empty() {
+        let _turn = ACTIVE_TESTS.lock().unwrap_or_else(|p| p.into_inner());
+        let data = scratch("ds-data");
+        let root = scratch("ds-open").join("proj");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(root.join(".DS_Store"), b"finder junk").unwrap();
+        activate(&data, &root).unwrap();
+        assert!(root.join("system/project.json").is_file());
+        assert_eq!(fs::read(root.join(".DS_Store")).unwrap(), b"finder junk", "nothing existing is rewritten");
+        deactivate();
+        let _ = fs::remove_dir_all(&root);
+        let _ = fs::remove_dir_all(&data);
     }
 }

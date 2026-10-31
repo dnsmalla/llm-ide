@@ -23,8 +23,10 @@ clean:
 # Desktop gates: node tests, capability/DOMPurify checks, generated-token drift
 # check, then `cargo test --lib` when a REAL cargo exists. A toolchain counts
 # only if `cargo --version` prints "cargo ..." (a broken rustup shim prints
-# "rustup ..." instead), and the node steps skip if desktop/node_modules is
-# absent. Rust is skipped with a notice, never failed, on a machine without it.
+# "rustup ..." instead); when PATH only holds the shim, fall back to the rustup
+# stable toolchain's own binary so the tests are not skipped silently. The node
+# steps skip if desktop/node_modules is absent. Rust is skipped with a notice,
+# never failed, on a machine without it.
 test-desktop-node:
 	@if [ -d desktop/node_modules ]; then \
 	  cd desktop && npm test && npm run -s check:security && node ../scripts/gen-design-tokens.mjs --check; \
@@ -37,9 +39,14 @@ test-desktop-node:
 # step compiles Tauri (minutes cold), so it stays out of the regression gate
 # (desktop-ci.yml runs it).
 test-desktop: test-desktop-node
-	@if cargo --version 2>/dev/null | grep -q '^cargo '; then \
-	  cd desktop/src-tauri && cargo test --lib; \
-	else echo "test-desktop: no working cargo; skipping cargo test --lib"; fi
+	@CARGO="$$(command -v cargo || true)"; \
+	if [ -z "$$CARGO" ] || ! "$$CARGO" --version 2>/dev/null | grep -q '^cargo '; then \
+	  CARGO="$$(ls -d "$$HOME"/.rustup/toolchains/stable-*/bin/cargo 2>/dev/null | head -1)"; \
+	fi; \
+	if [ -n "$$CARGO" ] && "$$CARGO" --version 2>/dev/null | grep -q '^cargo '; then \
+	  TOOLCHAIN_BIN="$$(dirname "$$CARGO")"; \
+	  cd desktop/src-tauri && PATH="$$TOOLCHAIN_BIN:$$PATH" "$$CARGO" test --lib; \
+	else echo "test-desktop: no working cargo (a shim that prints 'rustup ...' does not count); skipping cargo test --lib"; fi
 
 # --- mac app -----------------------------------------------------------------
 

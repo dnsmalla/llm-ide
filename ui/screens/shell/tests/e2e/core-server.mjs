@@ -46,6 +46,9 @@ export async function startCore({ bootTimeoutMs = 40_000, register = true } = {}
     LLMIDE_HOST: "127.0.0.1",
     LLMIDE_DB_PATH: join(dir, "e2e.db"),
     LLMIDE_AGENT_DB_PATH: join(dir, "e2e-agent.db"),
+    // Keep the log out of the core tree: without this the logger falls back to extension/kb/server.log, which
+    // writes into the source checkout (and, with LLMIDE_E2E_BUNDLE, into the signed .app the suite is testing).
+    LLMIDE_LOG_FILE: join(dir, "e2e-server.log"),
     LLMIDE_JWT_SECRET: randomBytes(36).toString("hex"),
     LLMIDE_VAULT_KEY: randomBytes(36).toString("hex"),
     LLMIDE_BACKUP_INTERVAL_HOURS: "0",
