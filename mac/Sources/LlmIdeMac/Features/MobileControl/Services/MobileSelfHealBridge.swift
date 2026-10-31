@@ -94,7 +94,8 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
     /// Pure so a test can pin every refusal. Ignore/retry/discard are bookkeeping on the Mac's own
     /// incident list; only apply changes files, so only apply needs the switch and a quiet checkout.
     nonisolated static func decide(action: SelfHealAction.Kind, status: String, hasProposal: Bool,
-                                   applyAllowed: Bool, busyReason: String?) -> Decision {
+                                   applyAllowed: Bool, selfHealEnabled: Bool = true,
+                                   busyReason: String?) -> Decision {
         switch action {
         case .ignore:
             return (status == "new" || status == "needsHuman") ? .allow
@@ -106,10 +107,14 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
             // Destructive and not undoable (the branch and worktree are deleted), so it needs the same
             // switch as apply — not just bookkeeping like ignore/retry.
             guard applyAllowed else { return .refuse(PhoneAccess.selfHealApply.deniedMessage) }
+            guard selfHealEnabled else { return .refuse(selfHealOffMessage) }
             guard status == "proposed", hasProposal else { return .refuse("There is no proposal to discard.") }
             return .allow
         case .apply:
             guard applyAllowed else { return .refuse(PhoneAccess.selfHealApply.deniedMessage) }
+            // The Mac's OWN Self-Heal setting is the master switch: a phone cannot patch the checkout
+            // for a feature the Mac has turned off.
+            guard selfHealEnabled else { return .refuse(selfHealOffMessage) }
             guard status == "proposed", hasProposal else { return .refuse("There is no proposal to apply.") }
             if let busyReason { return .refuse(busyReason) }
             return .allow
@@ -126,6 +131,7 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
         let decision = Self.decide(action: req.action, status: incident.status.rawValue,
                                    hasProposal: incident.proposal != nil,
                                    applyAllowed: manager.phoneAccess.isAllowed(.selfHealApply),
+                                   selfHealEnabled: SelfHealSettings.isEnabled(),
                                    busyReason: busyReason?() ?? manager.phoneWorkReason)
         if case .refuse(let why) = decision { push(error: why); return }
         var reviewedPatch: SelfHealProposalService.ReviewedPatch?
@@ -171,6 +177,7 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
             guard let proposal = incident.proposal else { return }
             Task { @MainActor [weak self] in
                 defer { self?.inFlight.remove(incident.id) }
+                guard await self?.confirmOnDesktop(.discard, incident: incident, proposal: proposal) == true else { return }
                 do {
                     try await Task.detached { try SelfHealProposalService.discard(proposal) }.value
                     SelfHealProposalService.markDiscarded(proposal, store: store)
@@ -184,6 +191,7 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
             manager.append(.info, "selfheal apply (phone) \(incident.id)")
             Task { @MainActor [weak self] in
                 defer { self?.inFlight.remove(incident.id) }
+                guard await self?.confirmOnDesktop(.apply, incident: incident, proposal: proposal) == true else { return }
                 do {
                     try await Task.detached {
                         try SelfHealProposalService.apply(proposal, reviewed: held.binaryPatch)
@@ -202,6 +210,58 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
                 }
             }
         }
+    }
+
+    static let selfHealOffMessage = "Self-Heal is turned off on your Mac, so nothing can be applied or discarded from the phone."
+
+    /// What the person at the Mac is shown before a phone-started apply or discard: the exact incident,
+    /// branch and checkout, from the Mac's own records (the phone only named an incident id).
+    nonisolated static func confirmation(for kind: SelfHealAction.Kind, incident: Incident,
+                                         proposal: IncidentProposal) -> PhoneDesktopApprovalRequest {
+        let verb = kind == .apply ? "Apply" : "Discard"
+        var lines = [
+            "Incident: \(incident.id) (\(safe(incident.category, limit: 60)))",
+            "Branch: \(proposal.branch)",
+            "Checkout: \(proposal.mainRepo)",
+        ]
+        lines.append(kind == .apply
+                     ? "Patches the LLM-IDE source checkout (never commits)."
+                     : "Deletes the proposal branch and worktree. This cannot be undone.")
+        return PhoneDesktopApprovalRequest(title: "\(verb) a Self-Heal fix from your iPhone?", lines: lines)
+    }
+
+    nonisolated static func refusalMessage(for outcome: PhoneDesktopApprovalOutcome) -> String {
+        switch outcome {
+        case .approved:  return ""
+        case .denied:    return "You cancelled this on your Mac."
+        case .timedOut:  return "Not approved on your Mac in time, so nothing changed."
+        case .busy:      return "Your Mac is already asking for a confirmation, or was asked too often. Try again later."
+        }
+    }
+
+    /// Ask on the Mac, then re-check everything at execution time: the incident must still be the same
+    /// proposal and the switch, the Mac's Self-Heal setting and the checkout must still allow it.
+    private func confirmOnDesktop(_ kind: SelfHealAction.Kind, incident: Incident,
+                                  proposal: IncidentProposal) async -> Bool {
+        guard let manager else { return false }
+        push(message: "Waiting for you to approve this on your Mac.")
+        let outcome = await manager.desktopApproval.request(
+            Self.confirmation(for: kind, incident: incident, proposal: proposal))
+        guard outcome == .approved else {
+            push(error: Self.refusalMessage(for: outcome))
+            return false
+        }
+        guard let fresh = IncidentStore.shared.incidents.first(where: { $0.id == incident.id }),
+              fresh.proposal == proposal else {
+            push(error: "The incident changed on your Mac meanwhile, so nothing was changed.")
+            return false
+        }
+        let again = Self.decide(action: kind, status: fresh.status.rawValue, hasProposal: true,
+                                applyAllowed: manager.phoneAccess.isAllowed(.selfHealApply),
+                                selfHealEnabled: SelfHealSettings.isEnabled(),
+                                busyReason: busyReason?() ?? manager.phoneWorkReason)
+        if case .refuse(let why) = again { push(error: why); return false }
+        return true
     }
 
     static let notReviewedMessage = "Review the diff again before applying."
@@ -243,7 +303,8 @@ final class MobileSelfHealBridge: MobileFeatureBridge {
     private func push(message: String? = nil, error: String? = nil) {
         guard manager?.mobileClientPaired == true || message != nil || error != nil else { return }
         manager?.reply(Self.state(incidents: IncidentStore.shared.incidents,
-                                  canApply: manager?.phoneAccess.isAllowed(.selfHealApply) ?? false,
+                                  canApply: (manager?.phoneAccess.isAllowed(.selfHealApply) ?? false)
+                                      && SelfHealSettings.isEnabled(),
                                   enabled: SelfHealSettings.isEnabled(),
                                   message: message, error: error))
     }

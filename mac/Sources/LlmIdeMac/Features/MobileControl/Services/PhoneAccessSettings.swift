@@ -50,7 +50,7 @@ enum PhoneAccess: String, CaseIterable, Identifiable {
         case .sourceControlRead: return "Read-only. Nothing is committed, pushed or discarded from the phone."
         case .issuesRead:        return "Uses the Mac's GitHub/GitLab sign-in; tokens never leave the Mac."
         case .issueComment:      return "Posts as you. Closing, editing and deleting stay on the Mac."
-        case .selfHealApply:     return "Apply patches the LLM-IDE source checkout (never commits); discard deletes the proposal. Viewing, ignoring and retrying need no switch."
+        case .selfHealApply:     return "Apply patches the LLM-IDE source checkout (never commits); discard deletes the proposal. Both also need your confirmation on the Mac each time, and are refused while Self-Heal is off. Viewing, ignoring and retrying need no switch."
         case .toolApprovals:     return "Lets the phone answer a running chat's permission prompts, one tap each."
         case .autoTaskControl:   return "Starts a task that is already enabled on the Mac. Implementing issues and pushing branches also need your confirmation on the Mac. Turning tasks on or off and editing their settings and templates stay on the Mac. Viewing state, history and logs, and Stop, need no switch."
         case .loopControl:       return "A Loop run edits files and runs commands in the project. Viewing and Stop need no switch."

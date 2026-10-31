@@ -18,6 +18,38 @@ final class MobileSelfHealBridgeTests: XCTestCase {
         XCTAssertEqual(decide(.apply, status: "proposed", busy: "loop running"), .refuse("loop running"))
     }
 
+    /// The Mac's own Self-Heal setting is the master switch for apply and discard.
+    func testApplyAndDiscardAreRefusedWhenMacSelfHealIsOff() {
+        for kind in [SelfHealAction.Kind.apply, .discard] {
+            XCTAssertEqual(MobileSelfHealBridge.decide(action: kind, status: "proposed", hasProposal: true,
+                                                       applyAllowed: true, selfHealEnabled: false, busyReason: nil),
+                           .refuse(MobileSelfHealBridge.selfHealOffMessage), "\(kind)")
+        }
+        // Ignore and retry are bookkeeping on the Mac's own list and are not affected.
+        XCTAssertEqual(MobileSelfHealBridge.decide(action: .ignore, status: "new", hasProposal: false,
+                                                   applyAllowed: false, selfHealEnabled: false, busyReason: nil), .allow)
+    }
+
+    func testConfirmationNamesTheExactIncidentBranchAndCheckout() {
+        let proposal = IncidentProposal(mainRepo: "/Users/me/llm-ide", worktreePath: "/Users/me/wt",
+                                        branch: "self-heal/abc", baseCommit: "deadbeef")
+        let incident = Incident(id: "0123456789abcdef", source: .crash, category: "crash", message: "m",
+                                stack: "s", firstSeen: Date(), lastSeen: Date(), count: 1, attempts: 0,
+                                status: .proposed, note: nil, proposal: proposal)
+        let apply = MobileSelfHealBridge.confirmation(for: .apply, incident: incident, proposal: proposal)
+        XCTAssertTrue(apply.title.hasPrefix("Apply"))
+        let text = apply.lines.joined(separator: "\n")
+        XCTAssertTrue(text.contains("0123456789abcdef") && text.contains("self-heal/abc") && text.contains("/Users/me/llm-ide"))
+        XCTAssertTrue(MobileSelfHealBridge.confirmation(for: .discard, incident: incident, proposal: proposal)
+            .title.hasPrefix("Discard"))
+    }
+
+    func testEveryNonApprovalOutcomeHasARefusalMessage() {
+        for outcome in [PhoneDesktopApprovalOutcome.denied, .timedOut, .busy] {
+            XCTAssertFalse(MobileSelfHealBridge.refusalMessage(for: outcome).isEmpty)
+        }
+    }
+
     func testBookkeepingActionsMirrorTheMacUI() {
         XCTAssertEqual(decide(.ignore, status: "new"), .allow)
         XCTAssertEqual(decide(.ignore, status: "needsHuman"), .allow)
