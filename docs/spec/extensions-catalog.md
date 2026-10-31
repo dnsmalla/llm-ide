@@ -25,7 +25,7 @@ Governing decisions (user, 2026-10-30): every download is user-initiated; scan f
 | `extension/providers/adapter/mcp-client.mjs` | The MCP client for adapter turns (the only importer of the MCP SDK besides `extension/connectors/mcp-client.mjs`) |
 | `extension/llm_agent/adapter/mcp-mount.mjs` | Policy: which servers, approvals, framing, limits |
 
-The layer rule is unchanged: `llm_agent/extensions/` may import core, kb, server, providers, graphkit, plugins, llm-sources and mcp. ESLint fences `@modelcontextprotocol/sdk` to `connectors/mcp-client.mjs` and `providers/adapter/` (`extension/tests/eslint-mcp-sdk-fence.test.mjs`). No new dependency: the SDK is already pinned exactly (1.30.0).
+The layer rule is unchanged: `llm_agent/extensions/` may import core, kb, server, providers, graphkit, plugins, llm-sources and mcp. ESLint fences `@modelcontextprotocol/sdk` to `connectors/mcp-client.mjs` and `providers/adapter/` (`extension/tests/eslint-mcp-sdk-fence.test.mjs`). No new dependency: the SDK is already pinned exactly (1.32.2).
 
 ## §2 Item model
 
