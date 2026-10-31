@@ -24,6 +24,8 @@ export default defineConfig({
     alias: [
       { find: /^@llmide\/ui-kit\/styles\.css$/, replacement: fileURLToPath(new URL("../ui/kit/src/styles/kit.css", import.meta.url)) },
       { find: /^@llmide\/ui-kit$/, replacement: fileURLToPath(new URL("../ui/kit/src/index.ts", import.meta.url)) },
+      // Phase 3 screens live in ../ui/screens/<name> (one owner per folder; see ui/screens/README.md).
+      { find: /^@llmide\/screens\/(.*)$/, replacement: fileURLToPath(new URL("../ui/screens/", import.meta.url)) + "$1" },
     ],
     dedupe: ["react", "react-dom"],
   },
