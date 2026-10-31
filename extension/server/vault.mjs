@@ -188,6 +188,11 @@ const MCP_CREDENTIAL_KEY_RE = /^mcp\.[a-z][a-z0-9-]{1,40}\.[a-zA-Z]{1,32}$/;
 // by the disconnect flow; NOT settable through the generic POST /auth/me/secrets (isUserSettableVaultKey).
 const GOOGLE_ACCOUNT_KEY_RE = /^google\.acct\.[a-f0-9]{12}\.(refreshToken|clientId|clientSecret)$/;
 
+// iCal feed connector: `ical.src.<sourceId>.url`, sourceId 12 random hex characters. The value is the feed URL, which for
+// Google's "Secret address in iCal format" is itself a bearer secret. Written only by POST /kb/calendar-ical/sources and
+// deleted by DELETE /kb/calendar-ical/sources/:id; NOT settable through the generic POST /auth/me/secrets.
+const ICAL_SOURCE_KEY_RE = /^ical\.src\.[a-f0-9]{12}\.url$/;
+
 // Server-internal keys: readable/writable through setSecret/getSecret, but never
 // settable by a client or listed to one (the IMAP host binding would otherwise
 // be defeatable by POSTing a host of the attacker's choosing).
@@ -214,6 +219,7 @@ function ensureAllowed(key) {
   if (typeof key === 'string' && CUSTOM_PROVIDER_KEY_RE.test(key)) return;
   if (typeof key === 'string' && MCP_CREDENTIAL_KEY_RE.test(key)) return;
   if (typeof key === 'string' && GOOGLE_ACCOUNT_KEY_RE.test(key)) return;
+  if (typeof key === 'string' && ICAL_SOURCE_KEY_RE.test(key)) return;
   throw new Error(`Unknown vault key: ${key}`);
 }
 

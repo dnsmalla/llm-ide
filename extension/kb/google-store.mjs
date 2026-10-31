@@ -2,7 +2,7 @@
 // vault (server/vault.mjs, key pattern google.acct.<id>.*). Every function takes userId first and scopes by it.
 import { getDb, requireUser } from './db.mjs';
 
-const CONNECTORS = new Set(['gmail', 'gcal', 'gdrive']);
+const CONNECTORS = new Set(['gmail', 'gcal', 'gdrive', 'ical']);
 const parseJson = (s, fallback) => { try { const v = JSON.parse(s); return v ?? fallback; } catch { return fallback; } };
 
 function rowToAccount(r) {

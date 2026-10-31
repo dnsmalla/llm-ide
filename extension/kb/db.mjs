@@ -1045,6 +1045,8 @@ export function deleteUserCascade(userId) {
       'bus_commands', 'job_events', 'bus_kind_flags',
       // migration 0059 — Google connector accounts and sync cursors (tokens live in the vault, deleted with user_secrets)
       'google_accounts', 'connector_sync_state',
+      // migration 0060 — iCal feed sources (the feed URLs live in the vault, deleted with user_secrets)
+      'ical_sources',
     ]) {
       counts[t] = del(`DELETE FROM ${t} WHERE user_id = ?`);
     }
