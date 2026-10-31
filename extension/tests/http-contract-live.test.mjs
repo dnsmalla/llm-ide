@@ -137,6 +137,10 @@ const SKIP_RULES = [
       || (fx.endpoint === 'POST /agent/v2/stream' && (fx.status === 503 || fx.status === 402 || (fx.status === 409 && fx.response?.error?.code === 'TURN_IN_PROGRESS'))),
   },
   {
+    why: 'host approval (API 101): the replay server is not started by the Tauri host (no LLMIDE_HOST_APPROVAL_KEY), where Bypass is the legacy path and never answers 403. Covered with the key set by tests/host-approval-bypass.test.mjs',
+    when: (fx) => fx.endpoint === 'POST /agent/v2/stream' && fx.status === 403,
+  },
+  {
     why: 'needs state from a dry run of the same server (a previewId signed in this process) or a run in flight',
     when: (fx) => /^POST \/kb\/agent-history\/(clear|compact)$/.test(fx.endpoint) && (fx.status < 300 || fx.status === 409),
   },

@@ -51,7 +51,7 @@ Every inbound HTTP request passes through these stages **in order** (`extension/
 
 ### API version and stale-server detection
 
-`SERVER_API_VERSION = 100` (`server.mjs:300`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
+`SERVER_API_VERSION = 101` (`server.mjs:300`). Clients compare this value against the `apiVersion` field returned in `GET /` and `GET /health`. If the client's expected version exceeds the server's, the client surfaces "restart the server to pick up new endpoints." The `ENDPOINTS` array (`server.mjs:270–376`) is also returned in both responses so clients can detect missing capabilities by name.
 
 ### Server timeouts
 
@@ -317,6 +317,14 @@ The core caps a streamed `tool_result` at `MAX_TOOL_RESULT_CHARS` in `extension/
 ## 7f. Command bus job API (API 100)
 
 Nine additive routes under `/bus/` (`extension/routes/bus/bus-routes.mjs`, executor `extension/routes/bus/executor.mjs`, store `extension/kb/bus-store.mjs`): `POST /bus/commands`, `GET /bus/commands`, `GET /bus/commands/:id`, `GET /bus/commands/:id/events` (SSE), `POST /bus/commands/:id/cancel|approve|deny`, `GET /bus/approvals`, `GET /bus/kinds`, `PUT /bus/kinds/:kind`. All ride the `kbWrite` rate bucket and are per user. `LLMIDE_BUS=off` answers every one 503 `BUS_DISABLED` and never starts the job runner. Full contract, tiers, error codes and the engine rules: [command-bus](command-bus.md). Contract: `schema/http/bus.schema.json` (fixtures `schema/http/fixtures/bus/`) and `schema/bus/`. Tests: `extension/tests/command-bus.test.mjs`.
+
+## 7g. Host-approved Bypass (API 101)
+
+Only when the core was started by the Tauri host (`LLMIDE_HOST_APPROVAL_KEY` set: 64 hex characters, passed only to the spawned core). With it unset (the Mac app, the extension, a dev server) nothing changes: `permissionMode: "bypass"` is honoured as before and the header is ignored.
+
+With it set, `POST /agent/v2/stream` with `permissionMode: "bypass"` (the only route that reads a permission mode; the session route, decision, cancel and bus routes ignore one, the bus never inherits Bypass) needs the header `x-llmide-host-approval: v1.<expiry_ms>.<nonce_hex32>.<mac_hex64>`, `mac = HMAC-SHA256(key, "llmide-host-approval/v1|bypass|<expiry_ms>|<nonce>")` (format owned by the host, `desktop/PACKAGING.md`). The core (`extension/core/host-approval.mjs`) checks the shape, compares the MAC in constant time, requires `now < expiry <= now + 60 s + 5 s skew`, and remembers the nonce until expiry (single use; in-memory, 4096 entries, a full set refuses). The token carries no user id or core nonce: the key is per launch and per core, and the token lives 60 s. A valid token opens a Bypass grant for that user and chat for 30 minutes (1024 entries, a full table refuses), so later turns of the chat need no new token; any turn of that chat asking for another mode ends the grant, and a grant is never used by another user, another chat or a capped origin. Missing, expired, replayed, wrong-key or tampered: `403 { error: { code: "HOST_APPROVAL_REQUIRED" } }` before any model call. A malformed key value fails closed (every Bypass refused).
+
+Phone, extension and remote origins never get Bypass: a declared `x-llmide-client` other than `desktop-ui`, `agentContext.surface` of `extension`/`phone`/`mobile`/`ios`/`web`, or a non-loopback peer runs the turn as `ask`, token or not (the token is not spent). Audit rows (`audit_log`): `agent.bypass_turn` (success, `{ approvedBy: "host", via: "token"|"chat_grant" }`), `agent.bypass_refused`, `agent.bypass_capped`. The header, the key and token-shaped text are redacted (`core/redact-object.mjs`, `core/redact-secrets.mjs`); nothing logs them.
 
 ## 8. See also
 

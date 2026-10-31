@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 100
+  x-api-version: 101
 servers:
   - url: "https://{host}"
     variables:
@@ -599,6 +599,12 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "402":
           description: "HTTP 402"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
           content:
             application/json:
               schema:

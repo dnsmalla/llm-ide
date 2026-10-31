@@ -32,6 +32,8 @@ import {
 } from '../kb/agent-sessions.mjs';
 import { recordUsage, pickMainModelRow, newTurnTokenTotals, countTurnTokens } from '../kb/usage.mjs';
 import { randomUUID } from 'node:crypto';
+import { hostApprovalEnabled, verifyRequestApproval, bypassForbiddenOrigin, bypassGrants } from '../core/host-approval.mjs';
+import { recordAudit } from '../server/audit.mjs';
 import { createToolAccounting } from '../llm_agent/sdk/tool-accounting.mjs';
 import { createNoticeEffects } from '../llm_agent/sdk/notice-effects.mjs';
 import { recordToolEvents } from '../kb/tool-events.mjs';
@@ -368,6 +370,39 @@ export function routeSeedFrom(body, userId, db) {
 // refreshed with the session the stream actually reported and the turn is
 // metered into the usage ledger (per-model caps keep working).
 
+// Host-approved Bypass (core/host-approval.mjs). Only when the Tauri host started this core
+// (LLMIDE_HOST_APPROVAL_KEY set) does a turn that asks for permissionMode 'bypass' need proof that a human
+// accepted the host's native dialog. Env unset (the Mac app, the extension, dev) is the legacy path, untouched.
+// Returns true when the request was answered (refused).
+function gateBypassRequest(req, res, userId, body, chatSessionId, agentContext) {
+  if (!hostApprovalEnabled()) return false;
+  if (body.permissionMode !== 'bypass') { bypassGrants.revoke(userId, chatSessionId); return false; }
+  const audit = (action, outcome, detail) => {
+    try {
+      recordAudit(getDb(), {
+        userId, requestId: req.id, ip: req.socket?.remoteAddress || 'unknown', userAgent: req.headers?.['user-agent'] || '',
+        action, resource: chatSessionId, outcome, detail,
+      });
+    } catch (err) { log.warn('bypass_audit_failed', { error: String(err?.message || err).slice(0, 120) }); }
+  };
+  if (bypassForbiddenOrigin(req, agentContext)) {
+    // Phone, extension and remote origins never get Bypass, with or without a token: the turn runs as Ask.
+    body.permissionMode = 'ask';
+    audit('agent.bypass_capped', 'denied', { reason: 'origin', cappedTo: 'ask' });
+    return false;
+  }
+  // A fresh token (re)starts the chat's grant; without one, only a live grant carries the turn.
+  const viaToken = verifyRequestApproval(req);
+  if (viaToken) bypassGrants.grant(userId, chatSessionId);
+  if (!viaToken && !bypassGrants.has(userId, chatSessionId)) {
+    audit('agent.bypass_refused', 'denied', { reason: 'host_approval_required' });
+    sendJSON(res, 403, { error: { code: 'HOST_APPROVAL_REQUIRED', message: 'Bypass needs a fresh approval from the desktop app' } });
+    return true;
+  }
+  audit('agent.bypass_turn', 'success', { approvedBy: 'host', via: viaToken ? 'token' : 'chat_grant' });
+  return false;
+}
+
 async function handleV2Stream(req, res, userId, deps) {
   const turnStartedAt = Date.now();
   const body = parseJSON(await readBody(req, 8 * 1024 * 1024)) || {};
@@ -395,6 +430,7 @@ async function handleV2Stream(req, res, userId, deps) {
     sendJSON(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'agentContext.workspaceRoot is required' } });
     return true;
   }
+  if (gateBypassRequest(req, res, userId, body, chatSessionId, agentContext)) return true;
   // While Settings → Claude Agent SDK is installing a new version, the
   // package on disk is being replaced: a turn started now would launch its
   // CLI from a half-installed (or newer) package under this process's old

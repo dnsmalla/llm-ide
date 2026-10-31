@@ -1,0 +1,21 @@
+{
+  "endpoint": "POST /agent/v2/stream",
+  "status": 403,
+  "request": {
+    "body": {
+      "message": "continue",
+      "mode": "ask",
+      "permissionMode": "bypass",
+      "agentContext": {
+        "chatSessionId": "2afd46f8-2e6a-4572-8e5c-1d99f9ac6273",
+        "workspaceRoot": "/example/workspace"
+      }
+    }
+  },
+  "response": {
+    "error": {
+      "code": "HOST_APPROVAL_REQUIRED",
+      "message": "Bypass needs a fresh approval from the desktop app"
+    }
+  }
+}
