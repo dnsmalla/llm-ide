@@ -19,6 +19,10 @@ case "$FEATURES" in
 esac
 [[ "$FEATURES" == *, ]] && { echo "invalid feature list: $FEATURES" >&2; exit 2; }
 
+# An app launched from Finder has a minimal PATH (/usr/bin:/bin): give the build the usual toolchains.
+for d in "$HOME"/.rustup/toolchains/stable-*/bin; do [ -d "$d" ] && PATH="$d:$PATH"; done
+export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$PATH"
+
 LOG_DIR="$HOME/Library/Logs/LLM-IDE"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/rebuild.log"
