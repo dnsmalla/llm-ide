@@ -36,7 +36,6 @@ const ALLOWED = {
   'connectors/google-oauth.mjs': { bareFetch: { n: 2, why: 'Google OAuth token and userinfo endpoints (fixed hosts)' } },
   'connectors/slack-oauth.mjs': { bareFetch: { n: 1, why: 'Slack OAuth token endpoint (fixed host)' } },
   'connectors/slack-source.mjs': { bareFetch: { n: 1, why: 'slack.com Web API (fixed host)' } },
-  'connectors/box.mjs': { bareFetch: { n: 2, why: 'api.box.com and its OAuth token endpoint (fixed hosts)' } },
   'agents/slack.mjs': { bareFetch: { n: 1, why: 'Slack incoming webhook the user configured; not a model-provider path' } },
   'agents/github-pr.mjs': { bareFetch: { n: 1, why: 'api.github.com (fixed host)' } },
   // Self-tests embedded in the handlers (run via `node <file>`), which replace globalThis.fetch on purpose.
