@@ -198,15 +198,24 @@ test("Connections: the catalog card explains selection vs credentials and has no
   assert.match(out, /On the Mac this group also holds/);
 });
 
-test("Repositories: the allow-list card adds with the host folder dialog and removes only after a confirm", () => {
+test("Repositories: the Mac's GitLab/GitHub tabs, write-only tokens, automation switches and saved repos", () => {
   const e = {
     client: { request: async () => ({ status: 200, body: { repos: [] } }) },
     host: { diagnostics: async () => ({}), copyText: async () => {}, pickFolder: async () => null, activeProjectPath: () => "/p" },
   };
   const out = html(h(m.context.SettingsEnvProvider, { env: e }, h(m.repos.default)));
-  assert.match(out, /Add repository folder/);
-  assert.match(out, /Loading repositories/);
-  assert.match(out, /Provider tokens and indexing are managed in/);
+  assert.match(out, /role="tablist"[^>]*aria-label="Repository provider"/);
+  for (const l of ["GitLab", "GitHub"]) assert.match(out, new RegExp(`role="tab"[^>]*>${l}<`));
+  assert.match(out, /Instance URL/);
+  assert.match(out, /Access Token/);
+  assert.match(out, /type="password"/, "the token is write-only and masked");
+  assert.match(out, /Save token/);
+  assert.match(out, /Automation &amp; actions/);
+  assert.match(out, /Pull \/ Re-sync/);
+  assert.match(out, /No repositories added yet/);
+  assert.match(out, /Core index allow-list/);
+  assert.match(out, /Add folder…/);
+  assert.match(out, /Cloning from Settings is not available/);
   const noPick = { client: e.client, host: { diagnostics: async () => ({}), copyText: async () => {} } };
   const bare = html(h(m.context.SettingsEnvProvider, { env: noPick }, h(m.repos.default)));
   assert.match(bare, /Adding a folder needs the desktop host/);

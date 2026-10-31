@@ -479,12 +479,19 @@ test('vault secrets: set → list → delete roundtrip; unknown key refused', as
   assert.equal(list.statusCode, 200);
   assert.ok(list.json().secrets.some((s) => s.key === 'github.token'));
 
+  // The desktop Settings → Repositories card also stores a GitLab PAT in the vault.
+  const gl = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'gitlab.token', value: 'glpat_test' } });
+  assert.equal(gl.statusCode, 200, gl._body);
+  list = await callAuth({ method: 'GET', url: '/auth/me/secrets', user: u });
+  assert.ok(list.json().secrets.some((s) => s.key === 'gitlab.token'));
+
   const bad = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'evil.key', value: 'x' } });
   assert.equal(bad.statusCode, 400);
 
   // Empty value deletes.
   const del = await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'github.token', value: null } });
   assert.equal(del.statusCode, 200);
+  await callAuth({ method: 'POST', url: '/auth/me/secrets', user: u, body: { key: 'gitlab.token', value: null } });
   list = await callAuth({ method: 'GET', url: '/auth/me/secrets', user: u });
   assert.equal(list.json().secrets.length, 0);
 });

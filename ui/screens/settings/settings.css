@@ -37,3 +37,11 @@
 .st-table { width: 100%; border-collapse: collapse; }
 .st-table th, .st-table td { text-align: left; padding: var(--tok-space-xs) var(--tok-space-sm); border-bottom: 1px solid var(--tok-color-border); }
 .st-sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+
+/* Repositories: provider tabs and grouped automation switches (Mac RepoSettingsSection). */
+.st-tabs { display: flex; gap: 2px; border-bottom: 1px solid var(--tok-color-border); }
+.st-tab { padding: var(--tok-space-xs) var(--tok-space-md); border: 0; border-bottom: 2px solid transparent; background: none; color: var(--tok-color-text-muted); font: inherit; cursor: pointer; }
+.st-tab[aria-selected="true"] { color: var(--tok-color-text); border-bottom-color: var(--tok-color-accent); }
+.st-op-group { margin: 0; padding: 0; border: 0; display: flex; flex-direction: column; gap: 2px; }
+.st-op-group > legend { padding: 0; margin-bottom: 2px; }
+.st-spacer { flex: 1; }

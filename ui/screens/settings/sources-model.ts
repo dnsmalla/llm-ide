@@ -87,16 +87,15 @@ export const CONNECTIONS_TEXT = {
 } as const;
 
 export const REPOS_TEXT = {
-  hint:
-    "Local repositories the core may index for git and issues. Provider tokens and indexing are managed in " +
-    "Library → Connections.",
+  hint: "GitLab and GitHub tokens, the automation allow-list, and saved repositories.",
   empty: "No repositories are approved yet.",
-  add: "Add repository folder…",
-  remove: "Remove",
-  removeConfirm: "Remove this repository from the allow-list? Its files and history are untouched.",
+  removeConfirm: "Remove this folder from the allow-list? Its files and history are untouched.",
+  saveOnly:
+    "The Mac's Save & verify checks the token against the provider and then stores it; this desktop build stores it for the core's workflows but does not verify it yet.",
+  cloneGap:
+    "The Mac clones a saved repository into the active project's code/ folder and can pull it again. Cloning from Settings is not available in the desktop yet.",
   partial:
-    "On the Mac this group also holds the GitHub and GitLab tokens and hosts. On the desktop those live in " +
-    "Library → Connections; this group mirrors the local allow-list.",
+    "The provider tabs, write-only tokens, automation switches and saved repository entries are real. Token verification, clone/sync, and the Mac's resolve step are not in the desktop yet. The core index allow-list below is a desktop-only safety control.",
 } as const;
 
 /** A plain sentence for a failed catalog or repo call; never the server's raw text. */

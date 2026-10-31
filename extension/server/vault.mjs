@@ -109,6 +109,9 @@ export function decrypt(userId, blob) {
 
 const ALLOWED_KEYS = new Set([
   'github.token',
+  // GitLab PAT, stored by the desktop Settings → Repositories card (the Mac keeps it in AppConfig).
+  // No server route reads it yet; it is the desktop's secure store for future GitLab workflows.
+  'gitlab.token',
   'backlog.apiKey',
   'linear.apiKey',
   'slack.webhookUrl',
