@@ -53,7 +53,7 @@ const QUEUE: usize = 64;
 const CHUNK_FILES: usize = 64;
 const CHUNK_MATCHES: usize = 200;
 const CHUNK_WAIT: Duration = Duration::from_millis(60);
-const REGEX_SIZE_LIMIT: usize = 2 * 1024 * 1024;
+const REGEX_SIZE_LIMIT: usize = 1024 * 1024;
 const REGEX_DFA_LIMIT: usize = 4 * 1024 * 1024;
 const REGEX_NEST_LIMIT: u32 = 40;
 /// Directories never entered, whatever the query says.
@@ -216,20 +216,76 @@ fn utf16(s: &str) -> u32 {
     s.encode_utf16().count() as u32
 }
 
+/// Cooperative stop for a scan in progress: the run's halt flag (cancel, match cap, closed sink, a newer
+/// search) and its wall-clock deadline. Checked inside the per-file loops, not only between files, so one
+/// huge or pathological file cannot hold a cancelled search for seconds.
+pub struct ScanCtl<'a> {
+    pub halt: &'a AtomicBool,
+    pub deadline: Instant,
+}
+
+impl ScanCtl<'_> {
+    fn stop(&self) -> bool {
+        self.halt.load(Ordering::Relaxed) || Instant::now() >= self.deadline
+    }
+}
+
+/// Lines checked between two stop checks.
+const LINES_PER_CHECK: usize = 256;
+/// Matches between two stop checks inside one line.
+const MATCHES_PER_CHECK: usize = 64;
+/// A line longer than this is first probed in windows (a minified bundle): the stop flag is checked between
+/// windows. A match that straddles two 64 KiB windows of such a line is not found by the probe.
+const LONG_LINE: usize = 512 * 1024;
+const PROBE_WINDOW: usize = 64 * 1024;
+/// The whole-text prefilter (literal acceleration) only below this size; above it the per-line pass runs alone.
+const PREFILTER_MAX: usize = 1024 * 1024;
+
 /// Scans decoded text; pure, so it is unit-tested directly.
 pub fn scan_text(text: &str, re: &Regex, rel: &str) -> Option<FileHits> {
+    scan_text_ctl(text, re, rel, None)
+}
+
+pub fn scan_text_ctl(text: &str, re: &Regex, rel: &str, ctl: Option<&ScanCtl<'_>>) -> Option<FileHits> {
+    let stop = || ctl.is_some_and(|c| c.stop());
     // A cheap whole-text prefilter (literal acceleration); the per-line pass is authoritative.
-    if !re.is_match(text) {
+    if text.len() <= PREFILTER_MAX && !re.is_match(text) {
         return None;
     }
     let mut hits = Vec::new();
     let mut more = false;
     'lines: for (i, raw) in text.lines().enumerate() {
+        if i % LINES_PER_CHECK == 0 && stop() {
+            break;
+        }
         let line = raw;
+        if line.len() > LONG_LINE {
+            // Probe window by window so a cancel is honoured within one window's scan.
+            let mut any = false;
+            let mut w = 0usize;
+            while w < line.len() {
+                if stop() {
+                    break 'lines;
+                }
+                let end = floor_boundary(line, (w + PROBE_WINDOW).min(line.len())).max(w + 1).min(line.len());
+                let end = if line.is_char_boundary(end) { end } else { line.len() };
+                if re.is_match(&line[w..end]) {
+                    any = true;
+                    break;
+                }
+                w = end;
+            }
+            if !any {
+                continue;
+            }
+        }
         let mut n_line = 0usize;
         // Incremental UTF-16 column: matches arrive in ascending order.
         let (mut last_byte, mut col16) = (0usize, 0u32);
-        for m in re.find_iter(line) {
+        for (k, m) in re.find_iter(line).enumerate() {
+            if k % MATCHES_PER_CHECK == 0 && stop() {
+                break 'lines;
+            }
             if m.start() == m.end() {
                 continue; // empty matches (e.g. `x*`) are noise
             }
@@ -264,7 +320,7 @@ pub fn scan_text(text: &str, re: &Regex, rel: &str) -> Option<FileHits> {
     }
 }
 
-fn scan_file(root: &Path, path: &Path, re: &Regex, max_bytes: u64) -> FileOutcome {
+fn scan_file(root: &Path, path: &Path, re: &Regex, max_bytes: u64, ctl: &ScanCtl<'_>) -> FileOutcome {
     use std::io::Read;
     let Ok(f) = open_nofollow(path, false) else { return FileOutcome::Other };
     match crate::graph_file::fd_path(&f) {
@@ -295,7 +351,7 @@ fn scan_file(root: &Path, path: &Path, re: &Regex, max_bytes: u64) -> FileOutcom
         return FileOutcome::Binary;
     }
     let text = String::from_utf8_lossy(&buf);
-    match scan_text(&text, re, &rel_of(root, path)) {
+    match scan_text_ctl(&text, re, &rel_of(root, path), Some(ctl)) {
         Some(h) => FileOutcome::Hits(h),
         None => FileOutcome::NoMatch,
     }
@@ -314,7 +370,7 @@ struct Stats {
     files_cap_hit: AtomicBool,
 }
 
-fn worker_visit(root: &Path, path: &Path, re: &Regex, max_bytes: u64, cap: usize, stats: &Stats, cancel: &AtomicBool, tx: &std::sync::mpsc::SyncSender<FileHits>) -> bool {
+fn worker_visit(root: &Path, path: &Path, re: &Regex, max_bytes: u64, cap: usize, stats: &Stats, cancel: &AtomicBool, deadline: Instant, tx: &std::sync::mpsc::SyncSender<FileHits>) -> bool {
     // `cancel` here is the internal halt flag (set by the aggregator on cancel, cap, time, closed sink).
     if cancel.load(Ordering::Relaxed) || stats.matches.load(Ordering::Relaxed) >= cap {
         return false;
@@ -323,7 +379,7 @@ fn worker_visit(root: &Path, path: &Path, re: &Regex, max_bytes: u64, cap: usize
         stats.files_cap_hit.store(true, Ordering::Relaxed);
         return false;
     }
-    match scan_file(root, path, re, max_bytes) {
+    match scan_file(root, path, re, max_bytes, &ScanCtl { halt: cancel, deadline }) {
         FileOutcome::Hits(h) => {
             stats.matches.fetch_add(h.hits.len(), Ordering::Relaxed);
             if tx.send(h).is_err() {
@@ -367,6 +423,10 @@ pub fn run_search(root: &Path, q: &Query, id: u64, cancel: &AtomicBool, sink: &m
             let mut v = Vec::new();
             for rel in list {
                 split_rel(rel)?;
+                // Never the git metadata folder, whatever its spelling.
+                if crate::fs_ops::deny_git_rel(rel).is_err() {
+                    continue;
+                }
                 // A file that vanished or resolves outside the root is simply not searched.
                 if let Ok(p) = resolve_existing(root, rel) {
                     v.push(p);
@@ -397,7 +457,7 @@ pub fn run_search(root: &Path, q: &Query, id: u64, cancel: &AtomicBool, sink: &m
             let stats = stats_w;
             if let Some(paths) = only {
                 for p in paths {
-                    if !worker_visit(root_w, &p, re_w, max_bytes, cap, &stats, halt, &tx) {
+                    if !worker_visit(root_w, &p, re_w, max_bytes, cap, &stats, halt, deadline, &tx) {
                         break;
                     }
                 }
@@ -415,7 +475,7 @@ pub fn run_search(root: &Path, q: &Query, id: u64, cancel: &AtomicBool, sink: &m
                 .threads(thread_count())
                 .max_depth(Some(256))
                 .filter_entry(|e| {
-                    let skip = e.file_type().is_some_and(|t| t.is_dir()) && e.file_name().to_str().is_some_and(|n| ALWAYS_SKIP_DIRS.contains(&n));
+                    let skip = e.file_type().is_some_and(|t| t.is_dir()) && e.file_name().to_str().is_some_and(|n| ALWAYS_SKIP_DIRS.contains(&n) || crate::fs_ops::is_git_component(n));
                     !skip
                 });
             if let Some(o) = overrides {
@@ -428,7 +488,7 @@ pub fn run_search(root: &Path, q: &Query, id: u64, cancel: &AtomicBool, sink: &m
                     if !entry.file_type().is_some_and(|t| t.is_file()) {
                         return WalkState::Continue;
                     }
-                    if worker_visit(root_w, entry.path(), &re, max_bytes, cap, &stats, halt, &tx) {
+                    if worker_visit(root_w, entry.path(), &re, max_bytes, cap, &stats, halt, deadline, &tx) {
                         WalkState::Continue
                     } else {
                         WalkState::Quit
@@ -522,6 +582,9 @@ pub fn run_search(root: &Path, q: &Query, id: u64, cancel: &AtomicBool, sink: &m
 // ---- commands -----------------------------------------------------------------------------
 
 static NEXT_ID: AtomicU64 = AtomicU64::new(1);
+/// Held by the search thread while it runs. A new search waits here for the (already cancelled) previous one
+/// to wind down, so at most one scan runs and an old thread is never left behind.
+static RUN: Mutex<()> = Mutex::new(());
 static CURRENT: Mutex<Option<(u64, Arc<AtomicBool>)>> = Mutex::new(None);
 
 fn begin() -> (u64, Arc<AtomicBool>) {
@@ -557,21 +620,31 @@ pub async fn project_search_start(req: Query, on_event: Channel<SearchEvent>) ->
     build_overrides(&root, &req)?;
     let (id, cancel) = begin();
     tauri::async_runtime::spawn_blocking(move || {
-        let mut sink = |ev: SearchEvent| on_event.send(ev).is_ok();
-        if let Err(e) = run_search(&root, &req, id, &cancel, &mut sink) {
-            // Validation already passed; this is a late failure (e.g. a path went away).
-            let _ = on_event.send(SearchEvent::Done {
-                id,
-                files_scanned: 0,
-                files_matched: 0,
-                matches: 0,
-                truncated: None,
-                cancelled: true,
-                skipped_binary: 0,
-                skipped_large: 0,
-                skipped_other: 0,
-            });
-            let _ = e;
+        let _running = RUN.lock().unwrap_or_else(|p| p.into_inner());
+        let failed_done = || SearchEvent::Done {
+            id,
+            files_scanned: 0,
+            files_matched: 0,
+            matches: 0,
+            truncated: None,
+            cancelled: true,
+            skipped_binary: 0,
+            skipped_large: 0,
+            skipped_other: 0,
+        };
+        // A newer search may have cancelled this one while it waited for the lock.
+        if cancel.load(Ordering::Relaxed) {
+            let _ = on_event.send(failed_done());
+            finish(id);
+            return;
+        }
+        let ran = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let mut sink = |ev: SearchEvent| on_event.send(ev).is_ok();
+            run_search(&root, &req, id, &cancel, &mut sink)
+        }));
+        // `Done` is always sent: on a late error (a path went away) and on a panic too.
+        if !matches!(ran, Ok(Ok(()))) {
+            let _ = on_event.send(failed_done());
         }
         finish(id);
     });
@@ -783,6 +856,51 @@ mod tests {
         r.regex = true;
         let (f, _) = run(&root, &r);
         assert!(f.is_empty(), "a pattern that only matches the empty string yields nothing");
+    }
+
+    #[test]
+    fn scanning_stops_inside_a_file_when_halted_or_past_the_deadline() {
+        let mut text = "x\n".repeat(200_000);
+        text.push_str("needle\n");
+        let mut re = q("needle");
+        re.regex = false;
+        let re = build_matcher(&re).unwrap();
+        // Control: with no stop request the late match is found.
+        assert!(scan_text(&text, &re, "f").is_some());
+        let halt = AtomicBool::new(true);
+        let ctl = ScanCtl { halt: &halt, deadline: Instant::now() + Duration::from_secs(60) };
+        let t = Instant::now();
+        assert!(scan_text_ctl(&text, &re, "f", Some(&ctl)).is_none(), "halted: nothing is returned");
+        assert!(t.elapsed() < Duration::from_millis(500));
+        // A deadline in the past stops it too.
+        let live = AtomicBool::new(false);
+        let late = ScanCtl { halt: &live, deadline: Instant::now() - Duration::from_secs(1) };
+        assert!(scan_text_ctl(&text, &re, "f", Some(&late)).is_none());
+        // One giant line (a minified bundle) is probed in windows and stops at the next window.
+        let giant = format!("{}needle", "y".repeat(LONG_LINE + 1000));
+        assert!(scan_text(&giant, &re, "g").is_some(), "control");
+        assert!(scan_text_ctl(&giant, &re, "g", Some(&ctl)).is_none());
+        let t = Instant::now();
+        assert!(scan_text_ctl(&giant, &re, "g", Some(&late)).is_none());
+        assert!(t.elapsed() < Duration::from_millis(500));
+    }
+
+    #[test]
+    fn only_paths_and_the_walk_never_enter_git_metadata_in_any_spelling() {
+        let root = scratch("only-git");
+        fs::create_dir_all(root.join(".git")).unwrap();
+        fs::create_dir_all(root.join("sub/.GIT")).unwrap();
+        fs::write(root.join(".git/config"), "needle\n").unwrap();
+        fs::write(root.join("sub/.GIT/config"), "needle\n").unwrap();
+        fs::write(root.join("a.txt"), "needle\n").unwrap();
+        let mut only = q("needle");
+        only.only_paths = Some(vec![".git/config".into(), "sub/.GIT/config".into(), "a.txt".into()]);
+        let (f, _) = run(&root, &only);
+        assert_eq!(f.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), ["a.txt"]);
+        let mut walk = q("needle");
+        walk.include_hidden = true;
+        let (f, _) = run(&root, &walk);
+        assert_eq!(f.iter().map(|h| h.path.as_str()).collect::<Vec<_>>(), ["a.txt"]);
     }
 
     #[test]
