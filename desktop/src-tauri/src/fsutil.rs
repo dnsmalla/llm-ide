@@ -188,6 +188,7 @@ mod tests {
         assert_eq!(std::fs::read(&f).unwrap(), b"{}", "a refused write leaves the old file");
     }
 
+    #[cfg(unix)]
     #[test]
     fn data_dir_is_stable_per_os_and_not_the_mac_apps() {
         let env = |pairs: &'static [(&'static str, &'static str)]| {

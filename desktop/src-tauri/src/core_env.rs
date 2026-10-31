@@ -155,6 +155,7 @@ mod tests {
         assert_eq!(out, ["SystemRoot", "LocalAppData"]);
     }
 
+    #[cfg(unix)]
     #[test]
     fn path_is_widened_deduped_absolute_only_and_bundled_node_last() {
         let get = |k: &str| (k == "HOME").then(|| "/Users/a".to_string());
@@ -169,6 +170,7 @@ mod tests {
         assert_eq!(*s.last().unwrap(), "/App/core/node");
     }
 
+    #[cfg(unix)]
     #[test]
     fn well_known_dirs_match_claude_path_mjs_per_os() {
         let linux = well_known_dirs(Os::Linux, &|k| (k == "HOME").then(|| "/home/a".to_string()));
@@ -184,6 +186,7 @@ mod tests {
         assert!(win[0].ends_with("npm") && win[1].ends_with("claude"));
     }
 
+    #[cfg(unix)]
     #[test]
     fn core_env_never_contains_secrets_or_path_entries_twice() {
         let parent = kv(&[("PATH", "/usr/bin"), ("ANTHROPIC_API_KEY", "x"), ("HOME", "/h")]);

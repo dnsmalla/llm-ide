@@ -1061,11 +1061,20 @@ mod tests {
 
     #[test]
     fn port_in_use_sees_a_listener() {
-        let l = TcpListener::bind("127.0.0.1:0").unwrap();
-        let port = l.local_addr().unwrap().port();
-        assert!(port_in_use(port));
-        drop(l);
-        assert!(!port_in_use(port));
+        // Other tests bind ephemeral ports concurrently, which can recycle this one the
+        // instant it is freed; a fresh port a few times makes that vanishingly unlikely.
+        let mut freed_ok = false;
+        for _ in 0..5 {
+            let l = TcpListener::bind("127.0.0.1:0").unwrap();
+            let port = l.local_addr().unwrap().port();
+            assert!(port_in_use(port));
+            drop(l);
+            if !port_in_use(port) {
+                freed_ok = true;
+                break;
+            }
+        }
+        assert!(freed_ok);
     }
 
     #[test]
@@ -1174,7 +1183,7 @@ const http = require('http'), fs = require('fs'), cp = require('child_process'),
 const dir = process.env.FAKE_DIR, mode = process.env.FAKE_MODE || 'ok';
 const runs = fs.existsSync(path.join(dir, 'runs')) ? fs.readFileSync(path.join(dir, 'runs'), 'utf8').split('\n').filter(Boolean).length : 0;
 fs.appendFileSync(path.join(dir, 'runs'), process.pid + '\n');
-const child = cp.spawn('sleep', ['300'], { stdio: 'ignore' });
+const child = cp.spawn('sleep', ['300'], { stdio: 'ignore' }); child.on('error', () => {});
 fs.writeFileSync(path.join(dir, 'child-' + runs + '.pid'), String(child.pid));
 const [kind, kStr] = mode.split(':'); const k = Number(kStr || 0);
 let hung = false;
@@ -1362,6 +1371,7 @@ process.on('SIGTERM', () => process.exit(0));
         assert_eq!(f.runs().len(), 1);
     }
 
+    #[cfg(unix)]
     #[test]
     fn claude_status_is_exposed_additively_and_never_with_a_path() {
         let Some(f) = Fake::new("claude", "ok", tuning_fast(free_ports(2))) else { return };
@@ -1412,6 +1422,7 @@ process.on('SIGTERM', () => process.exit(0));
         assert_eq!(bundled_core_dir(&d), Some(core));
     }
 
+    #[cfg(unix)]
     #[test]
     fn the_core_command_runs_with_a_cleared_environment_and_explicit_db() {
         let rt = Runtime { mode: "bundled", node: PathBuf::from("/App/core/node/node"), root: PathBuf::from("/App/core/root") };
