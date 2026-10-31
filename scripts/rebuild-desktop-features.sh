@@ -23,12 +23,12 @@ esac
 for d in "$HOME"/.rustup/toolchains/stable-*/bin; do [ -d "$d" ] && PATH="$d:$PATH"; done
 export PATH="/opt/homebrew/bin:/usr/local/bin:$HOME/.cargo/bin:$PATH"
 
-LOG_DIR="$HOME/Library/Logs/LLM-IDE"
+LOG_DIR="${LLMIDE_REBUILD_LOG_DIR:-$HOME/Library/Logs/LLM-IDE}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/rebuild.log"
 STAGE="$(mktemp -d "${TMPDIR:-/tmp}/llmide-rebuild-XXXXXX")"
 APP="$ROOT/desktop/src-tauri/target/release/bundle/macos/LLM-IDE.app"
-CACHE="$HOME/Library/Caches/LLM-IDE/rebuild-target"
+CACHE="${LLMIDE_REBUILD_TARGET_DIR:-$HOME/Library/Caches/LLM-IDE/rebuild-target}"
 
 finish() {
   local code=$?
