@@ -6,7 +6,7 @@ import { ConfirmDialog } from "../Dialogs";
 import type { DockState, TerminalManager } from "./manager";
 import { MAX_TABS } from "./manager";
 import type { TermView, TerminalRuntime } from "./runtime-types";
-import { AckBatcher, DEFAULT_SCROLLBACK, findUrls, needsPasteConfirm, sanitizePaste } from "./text";
+import { AckBatcher, DEFAULT_SCROLLBACK, findUrls, isOpenableLink, needsPasteConfirm, sanitizePaste } from "./text";
 
 export const DOCK_MIN = 120;
 export const DOCK_MAX = 720;
@@ -211,7 +211,9 @@ function TerminalPane({ id, manager, runtime, visible, exited, scrollback, confi
       needsPasteConfirm,
       findUrls,
       confirmPaste,
-      onLink: (url) => void runtime.openUrl(url).catch(() => undefined),
+      onLink: (url) => {
+        if (isOpenableLink(url)) void runtime.openUrl(url).catch(() => undefined);
+      },
       onData: (data) => {
         const h = manager.handle(id);
         if (!h) return;

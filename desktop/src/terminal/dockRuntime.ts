@@ -41,7 +41,12 @@ export interface TermView {
 }
 
 export function createTermView(el: HTMLElement, o: ViewOptions): TermView {
-  const t = new Terminal({ ...terminalFont(), theme: xtermTheme(), cursorBlink: true, scrollback: o.scrollback, allowProposedApi: true, macOptionIsMeta: false });
+  const t = new Terminal({ ...terminalFont(), theme: xtermTheme(), cursorBlink: true, scrollback: o.scrollback, allowProposedApi: true, macOptionIsMeta: false,
+    // OSC 8 hyperlinks carry program-chosen text and scheme: xterm's default handler window.open()s them. Route
+    // through the host (http/https only; the dock re-validates). No clipboard addon is loaded, so OSC 52 stays inert,
+    // and title sequences (OSC 0/2) are never subscribed to, so a program cannot rename UI.
+    linkHandler: { activate: (_e, uri) => o.onLink(uri), allowNonHttpProtocols: false },
+  });
   const fit = new FitAddon();
   t.loadAddon(fit);
   t.open(el);

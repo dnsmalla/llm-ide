@@ -29,7 +29,7 @@ const NORMAL: MonacoEditorNs.IEditorOptions = {
   minimap: { enabled: true },
   folding: true,
   occurrencesHighlight: "singleFile",
-  links: true,
+  links: false, // the default opener would navigate the webview; links are not clickable in the editor
   colorDecorators: true,
   bracketPairColorization: { enabled: true },
   guides: { indentation: true },

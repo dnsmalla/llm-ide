@@ -49,6 +49,17 @@ export function findUrls(line: string): Array<{ start: number; end: number; url:
   return out;
 }
 
+/** A link a program emitted (OSC 8 carries arbitrary text/schemes): only plain http(s) URLs without credentials open. */
+export function isOpenableLink(uri: string): boolean {
+  if (uri.length > 2000 || /[\u0000-\u001f\u007f\s]/.test(uri)) return false;
+  try {
+    const u = new URL(uri);
+    return (u.protocol === "https:" || u.protocol === "http:") && u.username === "" && u.password === "" && u.hostname !== "";
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Batches flow-control credit: xterm reports each parsed output batch; the host is told in chunks, far below
  * the host's high-water mark (1 MiB), so a flood pauses instead of overrunning the terminal.
