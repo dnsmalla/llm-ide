@@ -86,6 +86,23 @@ Findings for the independent review: (1) three calls are exposed to redirect and
 
 - MASTER-PLAN line (S/Security "Provider and connector fetch pinning"): stays `[~]` with this evidence: pinned for providers, adapter MCP, extension install and trackers; **not** for Box (data-dependent URLs), the MCP connector OAuth discovery, Jev's connection-level check and 7 literal-host calls.
 
+## Dependency bumps (2026-10-31)
+
+One concern per commit; full extension suite green after the zod bump (4362 pass, 0 fail, 4 skipped).
+
+| Package | From | To | Why |
+|---|---|---|---|
+| `@modelcontextprotocol/sdk` | 1.30.0 | 1.32.2 (exact) | OAuth credential redirection to a server-chosen auth server (1.31); cross-origin redirect header/body re-send (1.32). Our `VaultOAuthProvider` was already issuer-scoped, so no code change; new test `tests/mcp-adapter-redirect.test.mjs` pins that the adapter transport refuses a redirect and never contacts the target |
+| `zod` | 4.4.3 | 4.6.7 (exact) | GHSA-mrhx-c7xc-m3w5; `npm ls zod` shows one deduped copy, no `overrides` |
+| `ai` / `@ai-sdk/openai-compatible` | 6.0.317 / 2.0.87 | 6.0.320 / 2.0.88 (exact) | Patch level; adapter fence and tests green. Agent SDK deliberately not bumped (bench-gated) |
+| Rust `time` (+ `time-core`, `time-macros`, `num-conv`) | 0.3.45 | 0.3.47 | Needs Rust 1.88, so `rust-version` in `desktop/src-tauri/Cargo.toml` and the README moved 1.84 to 1.88 (CI installs stable). `serde_with` 3.17.0 and `quick-xml` have no newer MSRV-compatible release; untouched |
+
+`npm audit` delta: extension 25 (14 moderate, 10 high, 1 critical) to 23 (14 moderate, 8 high, 1 critical); desktop 0 to 0.
+
+Left (upstream-only chains, nothing applied): vite advisories, nodemailer, socks, nanoid chains. Option if wanted later: npm `overrides` in `extension/package.json` for the transitive copies, each gated by the full suite.
+
+Still open from item 11 above: the connector OAuth transports (`connectors/mcp-client.mjs`) use the SDK default fetch, not the pinned fetch. SDK 1.32 now refuses cross-origin redirects there by default (same-origin only), but private-address checks on discovered endpoints are still not applied.
+
 ## Decisions for you
 
 1. Sparkle: single build-number source for local and CI releases (a).
