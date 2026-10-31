@@ -50,7 +50,7 @@
 | Gantt | Real: issues + `/kb/issue-schedule`, day/week zoom, today/weekend, undated list, overlay editor | Drawn dependency arrows; provider-native GitLab dates |
 | Loop | **Soon** | Needs a core/API model for loop runs/verification (Mac state is local) |
 | Doc Gen / Visual | Real: setup, sources (Code/LLM Doc/Data; Visual Data/Code), result/history, save, Mermaid | Step chrome and remaining Mac affordances |
-| Library | Real: notes sidebar/list/viewer/write, extension panes | Mac file-tree sidebar with add-file/folder menus |
+| Library | Real: notes sidebar/list/viewer/write, extension panes, and Code/Data project trees with a read-only viewer | Add-file/folder menus and the Mac's tree-integrated list |
 | Chat | Real, Mac-like layout/typography | Turn-action parity |
 
 ## Blocked by missing core/host state (not UI work)
