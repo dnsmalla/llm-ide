@@ -202,7 +202,6 @@ export class SseFramer {
 
   push(chunk: string): string[] {
     this.buf += chunk;
-    if (this.buf.length > MAX_SSE_EVENT_BYTES) { this.overflow = true; this.buf = ""; this.data = []; return []; }
     const out: string[] = [];
     let start = 0;
     for (;;) {
@@ -218,6 +217,11 @@ export class SseFramer {
       }
     }
     this.buf = this.buf.slice(start);
+    // The cap bounds ONE unfinished event (the unparsed remainder plus the data lines gathered so far), not the size
+    // of a chunk: a burst of many complete events in one chunk is fine and has been returned above.
+    let pending = this.buf.length;
+    for (const d of this.data) pending += d.length + 1;
+    if (pending > MAX_SSE_EVENT_BYTES) { this.overflow = true; this.buf = ""; this.data = []; }
     return out;
   }
 

@@ -62,3 +62,20 @@ test("SseFramer flags an oversize event instead of buffering it forever", () => 
   f.push("data: " + "x".repeat(c.MAX_SSE_EVENT_BYTES + 10));
   assert.equal(f.overflow, true);
 });
+
+test("SseFramer: a burst of many complete events in one chunk is all delivered; the cap bounds only the unfinished remainder", () => {
+  const f = new c.SseFramer();
+  const ev = `data: ${"x".repeat(900)}\n\n`;
+  const n = Math.ceil((c.MAX_SSE_EVENT_BYTES * 1.5) / ev.length);
+  const out = f.push(ev.repeat(n) + "data: tail");
+  assert.equal(out.length, n, "every complete event is returned");
+  assert.equal(f.overflow, false);
+  assert.deepEqual(f.push("\n\n"), ["tail"], "the unfinished event survives the burst");
+  // an unfinished event over the cap still overflows, whether one long line or many data lines
+  const g = new c.SseFramer();
+  g.push(`data: ${"y".repeat(c.MAX_SSE_EVENT_BYTES + 10)}`);
+  assert.equal(g.overflow, true);
+  const m = new c.SseFramer();
+  for (let i = 0; i < 9; i++) m.push(`data: ${"z".repeat(1024 * 1024)}\n`);
+  assert.equal(m.overflow, true, "many data lines of one event add up");
+});
