@@ -1720,14 +1720,14 @@ export async function runAgentV2Turn(
     computeOpts: { nativeEnabled: nativePluginsEnabled(userId), cwd: queryOptions.cwd },
   });
   // Workspace trust (extensions/workspace-trust.mjs): in a folder the user has not trusted, the folder's own
-  // `.mcp.json` servers that start a process are withheld (the CLI reads that file from cwd) and a notice names
+  // `.mcp.json` servers (any, including parents') are withheld (the CLI reads that file from cwd) and a notice names
   // what was skipped. Nothing changes for a folder that carries none, a trusted folder, or LLMIDE_WORKSPACE_TRUST=off.
   const wsTrust = workspaceTrustForTurn(userId, workspaceRoot);
   const wsTrustNotice = workspaceTrustNotice(wsTrust);
   if (wsTrustNotice) onEvent?.(wsTrustNotice);
   const q = queryFactory(buildPromptInput(prompt, images), {
     ...queryOptions,
-    ...(wsTrust.withheld.length ? { strictMcpConfig: true } : {}),
+    ...(wsTrust.strict ? { strictMcpConfig: true } : {}),
     // A gateway (Anthropic-compatible custom provider) may not accept the
     // effort parameter; leave that turn at its backend's own default.
     ...(gatewayBaseUrl && queryOptions.effort ? { effort: undefined } : {}),

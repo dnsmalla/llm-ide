@@ -13,8 +13,13 @@
 //     named in an info notice, so a user can see what the folder carries and trust it knowingly.
 //   - A provider-adapter turn never read project config; same detection and info notice.
 //
-// LLMIDE_WORKSPACE_TRUST=off: nothing here runs and nothing changes. Never throws: a folder that cannot be read
-// is treated as carrying nothing.
+// Fail closed: for ANY untrusted folder (and any folder that cannot be resolved) a Claude turn ALWAYS runs
+// strictMcpConfig, whatever detection found. Detection only drives the notice; a `.mcp.json` that is oversized,
+// has a BOM, is unparseable, or sits in a PARENT directory is still withheld by strict mode (the CLI walks up).
+// http/sse servers in that file are withheld too (an exfiltration channel); the user's own servers are passed
+// explicitly and stay.
+//
+// LLMIDE_WORKSPACE_TRUST=off: nothing here runs and nothing changes. Never throws.
 import fs from 'node:fs';
 import path from 'node:path';
 import { workspaceTrustEnabled } from './flags.mjs';
@@ -27,9 +32,19 @@ function readJson(file) {
   try {
     const st = fs.statSync(file);
     if (!st.isFile() || st.size > MAX_JSON_BYTES) return null;
-    const v = JSON.parse(fs.readFileSync(file, 'utf8'));
+    const v = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
     return v && typeof v === 'object' && !Array.isArray(v) ? v : null;
   } catch { return null; }
+}
+/** @returns {{ state: 'absent' }|{ state: 'uninspected' }|{ state: 'ok', json: object }} for the file that matters most. */
+function inspectMcpJson(file) {
+  let st;
+  try { st = fs.statSync(file); } catch (e) { return e?.code === 'ENOENT' || e?.code === 'ENOTDIR' ? { state: 'absent' } : { state: 'uninspected' }; }
+  if (!st.isFile() || st.size > MAX_JSON_BYTES) return { state: 'uninspected' };
+  try {
+    const v = JSON.parse(fs.readFileSync(file, 'utf8').replace(/^\uFEFF/, ''));
+    return v && typeof v === 'object' && !Array.isArray(v) ? { state: 'ok', json: v } : { state: 'uninspected' };
+  } catch { return { state: 'uninspected' }; }
 }
 const dirs = (d) => { try { return fs.readdirSync(d, { withFileTypes: true }).filter((e) => e.isDirectory() || e.isSymbolicLink()).map((e) => e.name).sort(); } catch { return []; } };
 const exists = (p) => { try { return fs.existsSync(p); } catch { return false; } };
@@ -41,7 +56,7 @@ const hooksIn = (j) => !!j && typeof j.hooks === 'object' && j.hooks !== null &&
 
 /**
  * What a project folder carries that could execute. Names only: never a command line, argument or env value.
- * @returns {Array<{ kind: 'mcp-stdio'|'hooks'|'plugin'|'skill-scripts', name: string, file: string, withheld: boolean }>}
+ * @returns {Array<{ kind: 'mcp-stdio'|'mcp-remote'|'mcp-uninspected'|'hooks'|'plugin'|'skill-scripts', name: string, file: string, withheld: boolean }>}
  *   `withheld` is true for the kinds this gate actually removes from a Claude turn.
  */
 export function detectProjectExecutables(root) {
@@ -49,11 +64,21 @@ export function detectProjectExecutables(root) {
   if (!root) return out;
   const push = (e) => { if (out.length < MAX_ENTRIES) out.push(e); };
 
-  const mcp = readJson(path.join(root, '.mcp.json'));
-  const servers = mcp && typeof mcp.mcpServers === 'object' && mcp.mcpServers ? mcp.mcpServers : {};
-  for (const [name, cfg] of Object.entries(servers)) {
-    const stdio = cfg && typeof cfg === 'object' && typeof cfg.command === 'string' && cfg.command && (cfg.type === undefined || cfg.type === 'stdio');
-    if (stdio) push({ kind: 'mcp-stdio', name: String(name).slice(0, 64), file: '.mcp.json', withheld: true });
+  // The folder's own .mcp.json and every ancestor's (the CLI reads parents too).
+  const chain = [{ dir: root, rel: '.mcp.json' }];
+  for (let d = path.dirname(root), n = 0; d && d !== path.dirname(d) && n < 12; d = path.dirname(d), n += 1) {
+    chain.push({ dir: d, rel: `${path.relative(root, d) ? `${path.relative(root, d)}/` : ''}.mcp.json`.replace(/\\/g, '/') });
+  }
+  for (const { dir, rel } of chain) {
+    const r = inspectMcpJson(path.join(dir, '.mcp.json'));
+    if (r.state === 'uninspected') { push({ kind: 'mcp-uninspected', name: 'could not be inspected', file: rel, withheld: true }); continue; }
+    if (r.state !== 'ok') continue;
+    const servers = typeof r.json.mcpServers === 'object' && r.json.mcpServers && !Array.isArray(r.json.mcpServers) ? r.json.mcpServers : {};
+    for (const [name, cfg] of Object.entries(servers)) {
+      if (!cfg || typeof cfg !== 'object') continue;
+      const stdio = typeof cfg.command === 'string' && cfg.command && (cfg.type === undefined || cfg.type === 'stdio');
+      push({ kind: stdio ? 'mcp-stdio' : 'mcp-remote', name: String(name).slice(0, 64), file: rel, withheld: true });
+    }
   }
   for (const f of ['settings.json', 'settings.local.json']) {
     const j = readJson(path.join(root, '.claude', f));
@@ -71,23 +96,24 @@ export function detectProjectExecutables(root) {
 
 /**
  * The trust decision for one turn.
- * @returns {{ active: boolean, root: string|null, trusted: boolean, restricted: boolean, detected: Array, withheld: Array }}
- *   `restricted` is true only when something executable was found in an untrusted folder.
+ * @returns {{ active: boolean, root: string|null, trusted: boolean, strict: boolean, restricted: boolean, detected: Array, withheld: Array }}
+ *   `strict` is true for EVERY untrusted (or unresolvable) folder: the engine must pass strictMcpConfig.
+ *   `restricted` is true only when something executable was found (it drives the notice).
  */
 export function workspaceTrustForTurn(userId, workspaceRoot) {
-  const none = { active: false, root: null, trusted: false, restricted: false, detected: [], withheld: [] };
+  const none = { active: false, root: null, trusted: false, strict: false, restricted: false, detected: [], withheld: [] };
   if (!workspaceTrustEnabled() || !workspaceRoot || !userId) return none;
   try {
     const root = realFolder(workspaceRoot);
-    if (!root) return none;
+    if (!root) return { ...none, active: true, strict: true };
     const trusted = isWorkspaceTrusted(userId, root);
     if (trusted) return { ...none, active: true, root, trusted: true };
     const detected = detectProjectExecutables(root);
-    return { active: true, root, trusted: false, restricted: detected.length > 0, detected, withheld: detected.filter((d) => d.withheld) };
-  } catch { return none; }
+    return { active: true, root, trusted: false, strict: true, restricted: detected.length > 0, detected, withheld: detected.filter((d) => d.withheld) };
+  } catch { return { ...none, active: true, strict: true }; }
 }
 
-const KIND_TEXT = { 'mcp-stdio': 'MCP server', hooks: 'hooks', plugin: 'plugin', 'skill-scripts': 'skill with scripts' };
+const KIND_TEXT = { 'mcp-stdio': 'MCP server', 'mcp-remote': 'remote (http/sse) MCP server', 'mcp-uninspected': '.mcp.json that', hooks: 'hooks', plugin: 'plugin', 'skill-scripts': 'skill with scripts' };
 
 /** The notice event for a restricted turn, or null. Warning only when something was actually withheld. */
 export function workspaceTrustNotice(t) {

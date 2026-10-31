@@ -6,7 +6,7 @@
 // Trust is only ever set here, by the signed-in user's explicit request; nothing trusts a folder on its own.
 // The path is stored as its real path (symlinks resolved), so a link and its target are one folder.
 import { config } from '../core/config.mjs';
-import { isTooBroadRoot } from '../core/broad-root.mjs';
+import { isTooBroadTrustRoot } from '../core/broad-root.mjs';
 import { send, readJson, clientIp, safeAudit } from '../server/route-http.mjs';
 import { normalizeWorkspaceRoot } from '../llm_agent/adapter/tool-bridge.mjs';
 import { workspaceTrustEnabled } from '../llm_agent/extensions/flags.mjs';
@@ -34,7 +34,7 @@ export async function handleWorkspaceTrustRoute(req, res, { db, requestId }) {
     try { abs = normalizeWorkspaceRoot(body.path.trim()); } catch (e) { bad(res, 400, 'VALIDATION_FAILED', e.message); return; }
     const real = realFolder(abs);
     if (!real) { bad(res, 404, 'NOT_FOUND', 'that folder does not exist'); return; }
-    if (isTooBroadRoot(real)) { bad(res, 400, 'INVALID_PATH', 'that folder is too broad to trust as one project'); return; }
+    if (isTooBroadTrustRoot(real)) { bad(res, 400, 'INVALID_PATH', 'that folder is too broad to trust as one project'); return; }
     const r = setWorkspaceTrust(userId, real, body.trusted);
     if (r.error) { bad(res, 400, 'VALIDATION_FAILED', 'too many trust records; remove one first'); return; }
     safeAudit(db, { userId, requestId, ip: clientIp(req), userAgent: req.headers['user-agent'] || '', action: 'workspace.trust', resource: real, outcome: 'success', detail: { trusted: body.trusted } });

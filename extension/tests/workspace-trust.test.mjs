@@ -74,10 +74,13 @@ test('user delete cascades the trust and allowlist rows', () => {
   assert.equal(main.getDb().prepare('SELECT COUNT(*) AS n FROM workspace_trust WHERE user_id = ?').get(U).n, 0);
 });
 
-test('detect: stdio MCP servers are withheld, http servers are not executable, names only', () => {
+test('detect: stdio and http/sse MCP servers are both withheld and named, names only', () => {
   const r = mkRoot('detect', { '.mcp.json': STDIO });
   const d = gate.detectProjectExecutables(r);
-  assert.deepEqual(d, [{ kind: 'mcp-stdio', name: 'build', file: '.mcp.json', withheld: true }]);
+  assert.deepEqual(d, [
+    { kind: 'mcp-stdio', name: 'build', file: '.mcp.json', withheld: true },
+    { kind: 'mcp-remote', name: 'web', file: '.mcp.json', withheld: true },
+  ]);
   assert.ok(!JSON.stringify(d).includes('secret-value'), 'never a command line or env value');
 });
 
@@ -95,17 +98,46 @@ test('detect: hooks, plugins and skill scripts are named but not withheld; plain
   assert.equal(d.find((x) => x.kind === 'skill-scripts').name, 'runner');
 });
 
-test('detect: a malformed or oversized file carries nothing and never throws', () => {
-  const r = mkRoot('detect3', { '.mcp.json': '{not json', '.claude/settings.json': 'x'.repeat(300_000) });
-  assert.deepEqual(gate.detectProjectExecutables(r), []);
+test('detect: an unparseable or oversized .mcp.json is treated as executable config ("could not be inspected")', () => {
+  for (const [n, body] of [['bad', '{not json'], ['big', JSON.stringify({ mcpServers: {}, pad: 'x'.repeat(300_000) })]]) {
+    const r = mkRoot(`detect3-${n}`, { '.mcp.json': body });
+    assert.deepEqual(gate.detectProjectExecutables(r), [{ kind: 'mcp-uninspected', name: 'could not be inspected', file: '.mcp.json', withheld: true }], n);
+  }
+  const r = mkRoot('detect3-settings', { '.claude/settings.json': 'x'.repeat(300_000) });
+  assert.deepEqual(gate.detectProjectExecutables(r), [], 'oversized settings are not executable gates');
   assert.deepEqual(gate.detectProjectExecutables(path.join(base, 'missing')), []);
+});
+
+test('detect: a UTF-8 BOM does not hide the servers; a PARENT .mcp.json is found', () => {
+  const r = mkRoot('detect-bom', { '.mcp.json': `\uFEFF${STDIO}` });
+  assert.equal(gate.detectProjectExecutables(r).filter((x) => x.kind === 'mcp-stdio').length, 1);
+  const parent = mkRoot('detect-parent', { '.mcp.json': STDIO, 'sub/keep': 'x' });
+  const d = gate.detectProjectExecutables(path.join(parent, 'sub'));
+  assert.ok(d.some((x) => x.kind === 'mcp-stdio' && x.file === '../.mcp.json'));
+});
+
+test('gate: strict for EVERY untrusted folder (clean, oversized, BOM, parent, unresolvable); trusted and off are legacy', () => {
+  const clean = mkRoot('strict-clean');
+  assert.equal(gate.workspaceTrustForTurn(A, clean).strict, true);
+  assert.equal(gate.workspaceTrustForTurn(A, clean).restricted, false);
+  assert.equal(gate.workspaceTrustForTurn(A, path.join(base, 'does-not-exist')).strict, true);
+  const big = mkRoot('strict-big', { '.mcp.json': JSON.stringify({ pad: 'x'.repeat(300_000) }) });
+  const t = gate.workspaceTrustForTurn(A, big);
+  assert.equal(t.strict, true);
+  assert.equal(t.restricted, true);
+  assert.match(gate.workspaceTrustNotice(t).text, /could not be inspected/);
+  const trusted = mkRoot('strict-trusted');
+  store.setWorkspaceTrust(A, trusted, true);
+  assert.equal(gate.workspaceTrustForTurn(A, trusted).strict, false);
+  process.env.LLMIDE_WORKSPACE_TRUST = 'off';
+  try { assert.equal(gate.workspaceTrustForTurn(A, clean).strict, false); } finally { delete process.env.LLMIDE_WORKSPACE_TRUST; }
 });
 
 test('gate: untrusted + executable = restricted; trusted, nothing executable and the kill switch are not', () => {
   const r = mkRoot('gate', { '.mcp.json': STDIO });
   const t = gate.workspaceTrustForTurn(A, r);
   assert.equal(t.restricted, true);
-  assert.equal(t.withheld.length, 1);
+  assert.equal(t.withheld.length, 2);
   store.setWorkspaceTrust(A, r, true);
   assert.equal(gate.workspaceTrustForTurn(A, r).restricted, false);
   assert.equal(gate.workspaceTrustForTurn(A, r).trusted, true);
@@ -135,9 +167,10 @@ test('notice: names what was skipped and how to trust; info when nothing was wit
   assert.equal(n.level, 'warning');
   assert.match(n.text, /not trusted/);
   assert.match(n.text, /MCP server build/);
+  assert.match(n.text, /remote \(http\/sse\) MCP server web/);
   assert.match(n.text, /workspace-trust/);
   assert.ok(n.text.length <= 300);
-  assert.equal(n.data.skipped.length, 2);
+  assert.equal(n.data.skipped.length, 3);
   const h = mkRoot('notice2', { '.claude/settings.json': JSON.stringify({ hooks: { Stop: [] } }) });
   assert.equal(gate.workspaceTrustNotice(gate.workspaceTrustForTurn(A, h)).level, 'info');
   assert.equal(gate.workspaceTrustNotice(gate.workspaceTrustForTurn(A, mkRoot('notice3'))), null);
@@ -172,11 +205,11 @@ test('engine: an untrusted folder with a stdio .mcp.json runs strict (project se
   assert.equal(n.level, 'warning');
 });
 
-test('engine: legacy options are identical when the folder carries nothing, is trusted, or the switch is off', async () => {
+test('engine: an untrusted clean folder is strict with no notice; trusted or switch off is legacy', async () => {
   const clean = mkRoot('eng2');
   const u = mk('wt-e2@example.test');
   const a = await turn(u, clean);
-  assert.equal('strictMcpConfig' in a.options, false);
+  assert.equal(a.options.strictMcpConfig, true, 'an untrusted folder is ALWAYS strict, even when nothing was detected');
   assert.equal(a.events.some((e) => e.kind === 'workspace_trust'), false);
 
   const r = mkRoot('eng3', { '.mcp.json': STDIO });
