@@ -18,11 +18,11 @@ const cardProps = (approval, extra = {}) => ({
 });
 
 test("ApprovalCard: named group, the four choices with shortcuts, and a statement that nothing is automatic", () => {
-  const out = html(h(A.ApprovalCard, cardProps(bash("r1", "npm test", { suggestion: { scope: "project", toolName: "Bash", pattern: "npm test" } }))));
+  const out = html(h(A.ApprovalCard, cardProps(bash("r1", "git status", { suggestion: { scope: "project", toolName: "Bash", pattern: "git status" } }))));
   assert.match(out, /role="group"[^>]*aria-label="Approval needed: Run a command"/);
   assert.match(out, />Allow once</);
   assert.match(out, /aria-keyshortcuts="Alt\+Y"/);
-  assert.match(out, /Always allow &quot;npm test&quot; here/);
+  assert.match(out, /Always allow &quot;git status&quot; here/);
   assert.match(out, />Deny</);
   assert.match(out, /aria-label="Optional note to the assistant, sent with Deny"/);
   assert.match(out, /never allowed automatically, and a timeout only denies/);
@@ -43,7 +43,7 @@ test("ApprovalCard: tool arguments are escaped text; hidden characters and secre
 test("ApprovalCard: destructive calls say why, show no saved-rule button, and are not batchable", () => {
   const out = html(h(A.ApprovalCard, cardProps(bash("r1", "rm -rf build", { suggestion: { scope: "project", toolName: "Bash", pattern: "rm -rf" } }))));
   assert.match(out, /data-destructive="true"/);
-  assert.match(out, /deletes files recursively or by force/);
+  assert.match(out, /deletes files recursively, by force or by pattern/);
   assert.ok(!/Always allow/.test(out));
   assert.match(out, /approved one at a time/);
 });
@@ -66,10 +66,10 @@ test("ApprovalCard: long arguments are collapsed with a count, not rendered whol
 });
 
 test("ApprovalCard: confirming a saved rule shows the exact rule, scope and where to revoke it", () => {
-  const a = bash("r1", "npm test", { suggestion: { scope: "project", toolName: "Bash", pattern: "npm test" } });
+  const a = bash("r1", "git status", { suggestion: { scope: "project", toolName: "Bash", pattern: "git status" } });
   const out = html(h(A.ApprovalCard, cardProps(a, { ui: { phase: "idle", error: null, shown: "d", confirmingRule: true } })));
   assert.match(out, /This will save a rule/);
-  assert.match(out, /Bash: commands starting with &quot;npm test&quot;/);
+  assert.match(out, /Bash: any command starting with &quot;git status&quot;/);
   assert.match(out, /Only in \/p\. Other projects still ask/);
   assert.match(out, /Revoke it in Settings/);
   assert.match(out, /Save rule and allow/);

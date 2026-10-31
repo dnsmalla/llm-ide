@@ -87,16 +87,16 @@ test("risk: edits, writes, commands, network, extension, unknown", () => {
 });
 
 test("rules: the exact rule and scope are shown; destructive, broad or hidden-character rules are refused", () => {
-  const bash = A.classifyApproval(tool("r", "Bash", { command: "npm test" }), "/p");
-  const ok = A.describeRule({ scope: "project", toolName: "Bash", pattern: "npm test" }, bash, "/p");
+  const bash = A.classifyApproval(tool("r", "Bash", { command: "git status" }), "/p");
+  const ok = A.describeRule({ scope: "project", toolName: "Bash", pattern: "git status" }, bash, "/p", "git status");
   assert.equal(ok.ok, true);
-  assert.equal(ok.view.exact, 'Bash: commands starting with "npm test"');
+  assert.equal(ok.view.exact, 'Bash: any command starting with "git status", with any arguments');
   assert.match(ok.view.scopeText, /Only in \/p\. Other projects still ask/);
   assert.match(ok.view.revoke, /Settings/);
   assert.equal(A.describeRule({ scope: "project", toolName: "Bash", pattern: "bash" }, bash, "/p").ok, false);
   assert.equal(A.describeRule({ scope: "project", toolName: "Bash", pattern: "sudo" }, bash, "/p").ok, false);
-  assert.equal(A.describeRule({ scope: "project", toolName: "Bash", pattern: "npm‮ test" }, bash, "/p").ok, false);
-  assert.equal(A.describeRule({ scope: "project", toolName: "Bash", pattern: "npm test" }, bash, null).ok, false, "needs a project to scope to");
+  assert.equal(A.describeRule({ scope: "project", toolName: "Bash", pattern: "git‮ status" }, bash, "/p").ok, false);
+  assert.equal(A.describeRule({ scope: "project", toolName: "Bash", pattern: "git status" }, bash, null).ok, false, "needs a project to scope to");
   const rm = A.classifyApproval(tool("r", "Bash", { command: "rm -rf x" }), "/p");
   assert.equal(A.describeRule({ scope: "project", toolName: "Bash", pattern: "rm -rf" }, rm, "/p").ok, false);
   const e = A.classifyApproval(edit("r"), "/p");

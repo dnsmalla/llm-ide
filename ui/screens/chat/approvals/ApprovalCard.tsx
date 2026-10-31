@@ -14,6 +14,7 @@ export type ToolAction = "allow" | "deny" | "always-allow";
 export interface ApprovalCardProps {
   approval: PendingApproval;
   ui: CardUi | undefined;
+  /** The workspace root THE TURN was sent with (not the project open now): rules are scoped to it and paths are checked against it. */
   projectRoot: string | null;
   position: number;
   total: number;
@@ -30,6 +31,12 @@ export interface ApprovalCardProps {
   dwellMs?: number;
 }
 
+/** The Bash command being approved, when the call carries one. */
+const commandOf = (a: PendingApproval): string | null => {
+  const c = (a.args as { command?: unknown } | null | undefined)?.command;
+  return typeof c === "string" ? c : null;
+};
+
 const FOCUSABLE = "button:not([disabled]), input:not([disabled]), textarea:not([disabled]), [tabindex='0']";
 
 export function ApprovalCard({ approval, ui, projectRoot, position, total, batch, turnClosed, onDecide, onConfirmRule, onBatch, batchProgress, cardRef, dwellMs = DWELL_MS }: ApprovalCardProps) {
@@ -45,7 +52,7 @@ export function ApprovalCard({ approval, ui, projectRoot, position, total, batch
   const el = useRef<HTMLElement | null>(null);
   const risk = useMemo(() => classifyApproval(approval, projectRoot), [approval, projectRoot]);
   const preview = useMemo(() => buildPreview(approval), [approval]);
-  const rule = useMemo(() => describeRule(approval.suggestion, risk, projectRoot), [approval.suggestion, risk, projectRoot]);
+  const rule = useMemo(() => describeRule(approval.suggestion, risk, projectRoot, commandOf(approval)), [approval, risk, projectRoot]);
   const phase = ui?.phase ?? "idle";
   const locked = !armed || turnClosed || phase === "submitting" || phase === "expired" || batchProgress !== null;
   const title = toolTitle(approval.toolName);
