@@ -10,10 +10,33 @@ const CASE_INSENSITIVE = process.platform === 'darwin' || process.platform === '
 const cmp = (p) => (CASE_INSENSITIVE ? p.toLowerCase() : p);
 function canon(p) { try { return realpathSync(p); } catch { return null; } }
 
+// Credential and kernel/system trees that are never a project: a root equal to or inside one
+// of these is refused. (Kept in step with desktop/src-tauri/src/project.rs `is_too_broad`.)
+const SECRET_HOME_DIRS = ['.ssh', '.aws', '.gnupg'];          // equal or inside
+const SECRET_HOME_EXACT = ['.config'];                        // the container itself only
+const SYSTEM_TREES = ['proc', 'dev', 'sys', 'boot'];          // equal or inside
+const SYSTEM_EXACT = ['root'];                                // /root itself only
+
+function inSensitiveTree(real, home) {
+  const lower = real.replace(/\\/g, '/').split('/').filter(Boolean).map((x) => x.toLowerCase());
+  if (lower.length && SYSTEM_TREES.includes(lower[0])) return true;
+  if (lower.length === 1 && SYSTEM_EXACT.includes(lower[0])) return true;
+  // macOS per-user temp roots: /private/var/folders/xx/yyyy[/T] themselves, not projects inside them.
+  if (lower[0] === 'private' && lower[1] === 'var' && lower[2] === 'folders' && lower.length <= 6) return true;
+  const h = home.replace(/\\/g, '/').split('/').filter(Boolean).map((x) => x.toLowerCase());
+  if (h.length && lower.length > h.length && h.every((seg, i) => seg === lower[i])) {
+    const rest = lower.slice(h.length);
+    if (SECRET_HOME_DIRS.includes(rest[0])) return true;
+    if (rest.length === 1 && SECRET_HOME_EXACT.includes(rest[0])) return true;
+  }
+  return false;
+}
+
 export function isTooBroadRoot(real) {
   const home = canon(homedir()) || homedir();
   if (real === '/' || real === home) return true;
   if (cmp(real) === cmp(home)) return true;
+  if (inSensitiveTree(real, home)) return true;
   // Reject obvious system trees and depth-1 roots like /Users, /etc, /usr.
   const segs = real.split(sep).filter(Boolean);
   if (segs.length <= 1) return true;

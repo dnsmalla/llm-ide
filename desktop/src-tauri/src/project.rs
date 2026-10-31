@@ -68,6 +68,9 @@ const HOME_CONTAINERS: [&str; 8] =
 const SYSTEM_TOPS: [&str; 9] =
     ["etc", "usr", "var", "bin", "sbin", "system", "library", "private", "opt"];
 
+const SENSITIVE_SYSTEM_TREES: [&str; 4] = ["proc", "dev", "sys", "boot"];
+const SECRET_HOME_DIRS: [&str; 3] = [".ssh", ".aws", ".gnupg"];
+
 /// True when `real` (a canonical path) is too broad to be a project root: `/`, the
 /// home directory, system trees, volumes, other users' homes, temp dirs, home
 /// containers (Documents/Desktop/Downloads...), Windows drive/system/users trees and
@@ -98,6 +101,27 @@ pub fn is_too_broad(real: &str, home: Option<&str>) -> bool {
         // The JS list is case-sensitive ('/System', '/Library'); lower-casing is the
         // stricter reading and only matters on case-insensitive filesystems.
         return true;
+    }
+
+    // Credential and kernel trees (mirror of `inSensitiveTree` in broad-root.mjs).
+    if SENSITIVE_SYSTEM_TREES.contains(&lower[0].as_str()) {
+        return true;
+    }
+    if segs.len() == 1 && lower[0] == "root" {
+        return true;
+    }
+    if lower.len() <= 6 && lower.len() >= 3 && lower[0] == "private" && lower[1] == "var" && lower[2] == "folders" {
+        return true; // per-user temp roots themselves, not projects inside them
+    }
+    if let Some(hn) = &home_norm {
+        if !hn.is_empty() {
+            if let Some(rest) = norm.strip_prefix(&format!("{hn}/")) {
+                let first = rest.split('/').next().unwrap_or("");
+                if SECRET_HOME_DIRS.contains(&first) || (rest == ".config") {
+                    return true;
+                }
+            }
+        }
     }
 
     // isTooBroadTrustRoot
@@ -276,6 +300,21 @@ pub fn project_recent(app: tauri::AppHandle) -> Result<Vec<ProjectInfo>, String>
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn credential_and_kernel_trees_match_the_server_list() {
+        let h = Some("/Users/alice");
+        for p in [
+            "/Users/alice/.ssh", "/Users/alice/.ssh/keys", "/Users/alice/.aws", "/Users/alice/.gnupg/x",
+            "/Users/alice/.config", "/proc", "/proc/1", "/dev", "/sys/kernel", "/boot", "/root",
+            "/private/var/folders/ab/cdef", "/private/var/folders/ab/cdef/T",
+        ] {
+            assert!(is_too_broad(p, h), "{p} must be too broad");
+        }
+        for p in ["/Users/alice/.config/nvim", "/root/proj", "/private/var/folders/ab/cdef/T/proj"] {
+            assert!(!is_too_broad(p, h), "{p} must be allowed");
+        }
+    }
+
     use super::*;
     use std::fs;
 
