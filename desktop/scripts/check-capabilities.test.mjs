@@ -31,7 +31,9 @@ test('remote scope and other windows fail', () => {
 test('the real repo config passes', () => {
   const t = join(import.meta.dirname, '..', 'src-tauri');
   const capabilities = Object.fromEntries(['default.json', 'spike.json'].map((f) => [f, JSON.parse(readFileSync(join(t, 'capabilities', f), 'utf8'))]));
-  assert.deepEqual(check({ libRs: readFileSync(join(t, 'src/lib.rs'), 'utf8'), buildRs: readFileSync(join(t, 'build.rs'), 'utf8'), capabilities }), []);
+  const base = { libRs: readFileSync(join(t, 'src/lib.rs'), 'utf8'), buildRs: readFileSync(join(t, 'build.rs'), 'utf8'), cargoToml: readFileSync(join(t, 'Cargo.toml'), 'utf8'), capabilities };
+  assert.deepEqual(check(base), []);
+  assert.deepEqual(check({ ...base, product: true }), []);
 });
 
 test('core permissions outside the allowlist and unknown permissions fail; allowlisted core passes', () => {
@@ -43,12 +45,50 @@ test('core permissions outside the allowlist and unknown permissions fail; allow
   }
 });
 
-test('--product fails while spike.json exists', () => {
-  const c = ok();
-  assert.deepEqual(check({ ...c, product: true }), []);
-  c.capabilities['spike.json'] = cap([]);
-  assert.ok(check(c).length === 0);
-  assert.ok(check({ ...c, product: true }).some((p) => p.includes('spike.json')));
+// ---- the spike feature (--product) ----------------------------------------------------------------
+
+const spikeLib = `macro_rules! product_handlers { ($($spike:path),* $(,)?) => { tauri::generate_handler![ pty::thing_two, core_host::core_status, $($spike),* ] }; }
+#[cfg(feature = "spike")]
+macro_rules! app_handler { () => { product_handlers![ ping, bench::bench ] }; }
+#[cfg(not(feature = "spike"))]
+macro_rules! app_handler { () => { product_handlers![] }; }`;
+const spikeBuild = `const COMMANDS: &[&str] = &["ping", "bench", "thing_two", "core_status"];
+fn main() { if std::env::var_os("CARGO_FEATURE_SPIKE").is_none() { attrs.capabilities_path_pattern("./capabilities/default.json"); } }`;
+const cargo = '[package]\nname = "x"\n\n[features]\nspike = []\n\n[dependencies]\n';
+const spikeTree = () => ({
+  libRs: spikeLib,
+  buildRs: spikeBuild,
+  cargoToml: cargo,
+  capabilities: { 'default.json': cap(['allow-thing-two', 'allow-core-status']), 'spike.json': cap(['allow-ping', 'allow-bench']) },
+});
+
+test('--product: the spike commands live only behind the spike feature and spike.json', () => {
+  assert.deepEqual(check(spikeTree()), []);
+  assert.deepEqual(check({ ...spikeTree(), product: true }), []);
+});
+test('--product fails when `spike` is a default cargo feature, or Cargo.toml is unreadable', () => {
+  for (const toml of ['[features]\ndefault = ["spike"]\nspike = []\n', '[features]\nspike = []\ndefault = ["a", "spike"]\n']) {
+    assert.ok(check({ ...spikeTree(), cargoToml: toml, product: true }).some((p) => p.includes('default feature')), toml);
+  }
+  assert.deepEqual(check({ ...spikeTree(), cargoToml: '[features]\ndefault = []\nspike = []\n[dependencies]\nx = "1"\n', product: true }), []);
+  assert.ok(check({ ...spikeTree(), cargoToml: undefined, product: true }).some((p) => p.includes('Cargo.toml')));
+});
+test('--product fails when build.rs does not gate the capability embedding on the feature', () => {
+  const t = { ...spikeTree(), buildRs: 'const COMMANDS: &[&str] = &["ping", "bench", "thing_two", "core_status"]; fn main() {}', product: true };
+  assert.ok(check(t).some((p) => p.includes('CARGO_FEATURE_SPIKE')));
+});
+test('--product fails when a non-spike capability grants a spike command, or spike.json is the only grant of an always-on one', () => {
+  const t = spikeTree();
+  t.capabilities['default.json'] = cap(['allow-thing-two', 'allow-core-status', 'allow-bench']);
+  assert.ok(check({ ...t, product: true }).some((p) => p.includes('spike command bench is granted by a non-spike capability')));
+  const u = spikeTree();
+  u.capabilities['default.json'] = cap(['allow-thing-two']);
+  u.capabilities['spike.json'] = cap(['allow-ping', 'allow-bench', 'allow-core-status']);
+  assert.ok(check(u).some((p) => p.includes('core_status') && p.includes('only spike.json')));
+});
+test('a command registered in the always-on list but granted only by spike.json is caught', () => {
+  const t = { ...spikeTree(), libRs: spikeLib.replace('pty::thing_two,', 'pty::thing_two, bench::bench,') };
+  assert.ok(check({ ...t, product: true }).some((p) => p.includes('only spike.json grants it')));
 });
 
 test('a #[cfg]-gated handler fails loudly; comments in the handler list are ignored', () => {
@@ -80,8 +120,12 @@ test('the CLI exits 1 on a bad tree and 0 on a good one, from a path with spaces
     writeFileSync(capFile, JSON.stringify(cap(['allow-ping', 'allow-thing-two', 'allow-core-status', 'fs:default'])));
     assert.equal(run().status, 1);
     writeFileSync(capFile, JSON.stringify(cap(['allow-ping', 'allow-thing-two', 'allow-core-status'])));
-    writeFileSync(join(tauri, 'capabilities', 'spike.json'), JSON.stringify(cap([])));
+    // --product also needs Cargo.toml and the build.rs gate
+    writeFileSync(join(tauri, 'Cargo.toml'), '[features]\ndefault = ["spike"]\nspike = []\n');
     assert.equal(run('--product').status, 1);
+    writeFileSync(join(tauri, 'Cargo.toml'), '[features]\nspike = []\n');
+    writeFileSync(join(tauri, 'build.rs'), buildRs + ' // CARGO_FEATURE_SPIKE capabilities_path_pattern');
+    assert.equal(run('--product').status, 0, run('--product').stderr);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

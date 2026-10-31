@@ -7,7 +7,12 @@
 //     `allow-<command>` grant for a registered handler
 //   - a #[cfg]-gated or otherwise non-plain handler entry fails loudly (the check cannot see which
 //     build it is in)
-//   - --product additionally fails if capabilities/spike.json exists (spike/bench commands)
+//   - the Phase-0 spike/bench commands are registered ONLY in the `#[cfg(feature = "spike")]` app_handler! block
+//     of lib.rs (cargo feature `spike`, default off) and granted ONLY by capabilities/spike.json; the
+//     always-on handler list must be granted by a non-spike capability
+//   - --product additionally fails if: the `spike` feature is in Cargo's default features, build.rs does not
+//     gate the capability embedding on CARGO_FEATURE_SPIKE, a non-spike capability grants a spike command,
+//     or a command that only spike.json grants is registered in the always-on list
 // Usage: node scripts/check-capabilities.mjs [--product]   (exit 1 on any problem)
 import { readdirSync, readFileSync, realpathSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -34,13 +39,37 @@ function handlerBlock(libRs) {
   return null;
 }
 
-export function check({ libRs, buildRs, capabilities, product = false }) {
+/** Commands registered under `#[cfg(feature = "spike")]` (the spike app_handler! block), if any. */
+function spikeCommands(libRs) {
+  const m = libRs.match(/#\[cfg\(feature\s*=\s*"spike"\)\]\s*macro_rules!\s*app_handler\s*\{[\s\S]*?product_handlers!\[([\s\S]*?)\]/);
+  if (!m) return [];
+  const body = m[1].replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  return [...body.matchAll(/([A-Za-z_][\w:]*)/g)].map((x) => x[1].split('::').pop());
+}
+
+/** Does Cargo's `default` feature list include `spike`? */
+function defaultHasSpike(cargoToml) {
+  const feat = cargoToml.match(/^\[features\]([\s\S]*?)(?=^\[|(?![\s\S]))/m)?.[1] ?? '';
+  const def = feat.match(/^\s*default\s*=\s*\[([^\]]*)\]/m)?.[1] ?? '';
+  return /"spike"/.test(def);
+}
+
+export function check({ libRs, buildRs, capabilities, cargoToml, product = false }) {
   const problems = [];
-  if (product && 'spike.json' in capabilities) problems.push('product build: capabilities/spike.json must not exist (spike/bench commands)');
+  const spike = spikeCommands(libRs);
+  const nonSpikeCaps = Object.entries(capabilities).filter(([f]) => f !== 'spike.json');
+  const grantedBy = (cmd, pred) => Object.entries(capabilities).some(([f, c]) => pred(f) && (c.permissions ?? []).includes(`allow-${toKebab(cmd)}`));
+  if (product) {
+    if (cargoToml === undefined) problems.push('product build: Cargo.toml not readable, cannot verify the default features');
+    else if (defaultHasSpike(cargoToml)) problems.push('product build: the `spike` cargo feature must not be a default feature');
+    if (!/CARGO_FEATURE_SPIKE/.test(buildRs) || !/capabilities_path_pattern/.test(buildRs)) problems.push('product build: build.rs must gate the capability embedding on CARGO_FEATURE_SPIKE (capabilities_path_pattern)');
+    for (const cmd of spike) if (grantedBy(cmd, (f) => f !== 'spike.json')) problems.push(`product build: spike command ${cmd} is granted by a non-spike capability`);
+  }
   const raw = handlerBlock(libRs);
   if (raw === null) problems.push('generate_handler![ ... ] not found or unbalanced');
   if (/#\s*\[/.test(raw ?? '')) problems.push('generate_handler! contains an attribute (#[cfg] ...): a conditionally registered command cannot be verified, refactor it out');
-  const handler = (raw ?? '').replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '');
+  // `$($spike:path),*` in the macro body is the spike hook, not a command.
+  const handler = (raw ?? '').replace(/\/\/[^\n]*/g, '').replace(/\/\*[\s\S]*?\*\//g, '').replace(/\$\([^)]*\)[^\n]*/g, '');
   const handled = [...handler.matchAll(/([A-Za-z_][\w:]*)/g)].map((m) => m[1].split('::').pop());
   const manifest = [...(buildRs.match(/COMMANDS[^=]*=\s*&\[([\s\S]*?)\];/)?.[1] ?? '').matchAll(/"([\w]+)"/g)].map((m) => m[1]);
   if (!handled.length) problems.push('no commands found in generate_handler!');
@@ -59,11 +88,18 @@ export function check({ libRs, buildRs, capabilities, product = false }) {
       granted.add(perm);
     }
   }
-  for (const cmd of handled) {
+  const all = [...handled, ...spike];
+  for (const cmd of all) {
     if (!manifest.includes(cmd)) problems.push(`command ${cmd} is not in build.rs COMMANDS (would be open to every window)`);
     if (!granted.has(`allow-${toKebab(cmd)}`)) problems.push(`command ${cmd} has no allow-${toKebab(cmd)} grant in any capability`);
   }
-  for (const cmd of manifest) if (!handled.includes(cmd)) problems.push(`build.rs COMMANDS lists ${cmd}, which is not a registered handler`);
+  // The always-on list needs a NON-spike grant (spike.json is not embedded in a product build).
+  if ('spike.json' in capabilities || spike.length) {
+    for (const cmd of handled) {
+      if (!nonSpikeCaps.some(([, c]) => (c.permissions ?? []).includes(`allow-${toKebab(cmd)}`))) problems.push(`command ${cmd} is registered in every build but only spike.json grants it`);
+    }
+  }
+  for (const cmd of manifest) if (!all.includes(cmd)) problems.push(`build.rs COMMANDS lists ${cmd}, which is not a registered handler`);
   return problems;
 }
 
@@ -77,6 +113,7 @@ function main() {
   const problems = check({
     libRs: readFileSync(join(tauri, 'src', 'lib.rs'), 'utf8'),
     buildRs: readFileSync(join(tauri, 'build.rs'), 'utf8'),
+    cargoToml: (() => { try { return readFileSync(join(tauri, 'Cargo.toml'), 'utf8'); } catch { return undefined; } })(),
     capabilities,
     product,
   });

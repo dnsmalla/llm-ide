@@ -1,4 +1,5 @@
 mod attach;
+#[cfg(feature = "spike")]
 mod ax_probe;
 mod chat_archive;
 mod chat_cmds;
@@ -25,6 +26,7 @@ mod project_search;
 mod pty;
 mod secrets;
 mod source_pick;
+#[cfg(feature = "spike")]
 mod sse_replay;
 mod tray;
 
@@ -80,6 +82,7 @@ static CORE: OnceLock<CoreHost> = OnceLock::new();
 /// Kept for the process lifetime; dropping it would release the single-instance lock.
 static INSTANCE_LOCK: OnceLock<fsutil::InstanceLock> = OnceLock::new();
 
+#[cfg(feature = "spike")]
 #[tauri::command]
 fn ping() -> &'static str {
     "pong"
@@ -95,6 +98,7 @@ fn read_graph_file(path: String) -> Result<String, String> {
 
 /// Prints one measurement as `BENCH <json>` on stdout. The line must be a
 /// single JSON object so the report task can parse it.
+#[cfg(feature = "spike")]
 #[tauri::command]
 fn bench(line: String) -> Result<(), String> {
     if line.contains('\n') {
@@ -108,21 +112,34 @@ fn bench(line: String) -> Result<(), String> {
 
 /// Ends the bench run through the normal exit path, so `RunEvent::ExitRequested`
 /// shuts the Node core child down.
+#[cfg(feature = "spike")]
 #[tauri::command]
 fn bench_done(app: tauri::AppHandle) {
     app.exit(0);
 }
 
 /// Value of `LLMIDE_POC_AUTOBENCH` (e.g. `graph`), if set and non-empty.
+#[cfg(feature = "spike")]
 #[tauri::command]
 fn autobench_mode() -> Option<String> {
-    std::env::var("LLMIDE_POC_AUTOBENCH")
-        .ok()
-        .filter(|v| !v.is_empty())
+    autobench_env()
+}
+
+/// The autobench env switch. Product builds (no `spike` feature) never honour it: it also skips the
+/// single-instance lock and brings the window to the front.
+#[cfg(feature = "spike")]
+fn autobench_env() -> Option<String> {
+    std::env::var("LLMIDE_POC_AUTOBENCH").ok().filter(|v| !v.is_empty())
+}
+
+#[cfg(not(feature = "spike"))]
+fn autobench_env() -> Option<String> {
+    None
 }
 
 /// Value of `LLMIDE_POC_GRAPH` (a graph.json path), if set and non-empty. The
 /// Graph tab falls back to its built-in path when this is absent.
+#[cfg(feature = "spike")]
 #[tauri::command]
 fn graph_path_override() -> Option<String> {
     std::env::var("LLMIDE_POC_GRAPH")
@@ -133,6 +150,7 @@ fn graph_path_override() -> Option<String> {
 /// Value of `LLMIDE_POC_THEME` (dark | light | midnight), if set. Used by the
 /// parity screenshots to launch the shell in a given theme; the webview
 /// validates it, so any other value is ignored.
+#[cfg(feature = "spike")]
 #[tauri::command]
 fn theme_override() -> Option<String> {
     std::env::var("LLMIDE_POC_THEME")
@@ -142,6 +160,7 @@ fn theme_override() -> Option<String> {
 
 /// Value of `LLMIDE_POC_SECTION` (a section id such as `editor`), if set. Lets the
 /// parity screenshots open a section directly; the webview validates the id.
+#[cfg(feature = "spike")]
 #[tauri::command]
 fn section_override() -> Option<String> {
     std::env::var("LLMIDE_POC_SECTION")
@@ -219,6 +238,120 @@ fn bring_to_front(app: &tauri::AppHandle) {
     }
 }
 
+/// The command list. Product commands are listed once here; the Phase-0 spike/bench commands are added only
+/// when the `spike` cargo feature is on (off by default and in every release build), so a product binary does
+/// not even contain them. `scripts/check-capabilities.mjs` parses this block.
+macro_rules! product_handlers {
+    ($($spike:path),* $(,)?) => {
+        tauri::generate_handler![
+                core_host::core_status,
+                secrets::secrets_status,
+                read_graph_file,
+                project::project_open,
+                project::project_open_recent,
+                project::project_active,
+                project::project_recent,
+                fs_ops::fs_list_dir,
+                fs_ops::fs_read_file,
+                fs_ops::fs_read_range,
+                fs_ops::fs_write_file,
+                fs_ops::fs_create,
+                fs_ops::fs_rename,
+                fs_ops::fs_delete,
+                fs_watch::fs_watch_start,
+                fs_watch::fs_watch_set,
+                fs_watch::fs_watch_stop,
+                project_search::project_search_start,
+                project_search::project_search_cancel,
+                git::git_status,
+                git::git_diff,
+                git::git_show,
+                git::git_stage,
+                git_scm::git_diff_hunks,
+                git_scm::git_stage_hunks,
+                git_scm::git_stage_all,
+                git_scm::git_discard,
+                git_scm::git_identity,
+                git_scm::git_commit,
+                git_scm::git_branches,
+                git_scm::git_checkout,
+                git_scm::git_create_branch,
+                git_scm::git_log,
+                git_scm::git_commit_files,
+                git_scm::git_commit_diff,
+                tray::notify,
+                tray::tray_status,
+                tray::tray_set_close_to_tray,
+                pty_status,
+                pty_retry_consent,
+                pty_spawn,
+                pty_write,
+                pty_resize,
+                pty_ack,
+                pty_kill,
+                chat_cmds::chat_bind_session,
+                chat_cmds::chat_unbind_session,
+                chat_cmds::chat_list,
+                chat_cmds::chat_load,
+                chat_cmds::chat_save,
+                chat_cmds::chat_delete,
+                chat_cmds::chat_confirm_truncate,
+                chat_cmds::chat_archive_status,
+                notes_fs::notes_root_get,
+                notes_fs::notes_root_choose,
+                notes_fs::notes_root_clear,
+                notes_fs::notes_list,
+                notes_fs::notes_read,
+                notes_fs::notes_heads,
+                notes_write::note_open,
+                notes_write::note_save,
+                notes_write::note_create,
+                notes_write::note_rename,
+                notes_write::notes_delete_many,
+                source_pick::source_pick_folder,
+                source_pick::pick_folder,
+                source_pick::pick_folder_redeem,
+                prefs::get_prefs,
+                prefs::set_prefs,
+                os_open::open_external_url,
+                os_open::reveal_in_os,
+                attach::attach_pick_files,
+                attach::attach_read,
+                attach::attach_release,
+                confirm::bypass_confirm,
+                confirm::bypass_confirm_signed,
+                confirm::trust_confirm,
+            $($spike),*
+        ]
+    };
+}
+
+#[cfg(feature = "spike")]
+macro_rules! app_handler {
+    () => {
+        product_handlers![
+                ping,
+                bench,
+                bench_done,
+                autobench_mode,
+                graph_path_override,
+                theme_override,
+                section_override,
+                sse_replay::sse_replay_start,
+                sse_replay::sse_replay_stop,
+                sse_replay::sse_channel_stream,
+                ax_probe::ax_probe
+        ]
+    };
+}
+
+#[cfg(not(feature = "spike"))]
+macro_rules! app_handler {
+    () => {
+        product_handlers![]
+    };
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let host = CoreHost::new();
@@ -268,7 +401,7 @@ pub fn run() {
         .setup(move |app| {
             // One instance per data dir: two first-run instances would race on the
             // keychain secrets and the DB. (Benches opt out and run on a temp setup.)
-            if autobench_mode().is_none() {
+            if autobench_env().is_none() {
                 if let Ok(dir) = fsutil::desktop_data_dir() {
                     let dir = fsutil::private_dir(&dir)?;
                     match fsutil::acquire_instance_lock(&dir) {
@@ -302,96 +435,7 @@ pub fn run() {
             setup_host.start_in_background(fsutil::desktop_data_dir().ok());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![
-            ping,
-            core_host::core_status,
-            secrets::secrets_status,
-            read_graph_file,
-            project::project_open,
-            project::project_open_recent,
-            project::project_active,
-            project::project_recent,
-            fs_ops::fs_list_dir,
-            fs_ops::fs_read_file,
-            fs_ops::fs_read_range,
-            fs_ops::fs_write_file,
-            fs_ops::fs_create,
-            fs_ops::fs_rename,
-            fs_ops::fs_delete,
-            fs_watch::fs_watch_start,
-            fs_watch::fs_watch_set,
-            fs_watch::fs_watch_stop,
-            project_search::project_search_start,
-            project_search::project_search_cancel,
-            git::git_status,
-            git::git_diff,
-            git::git_show,
-            git::git_stage,
-            git_scm::git_diff_hunks,
-            git_scm::git_stage_hunks,
-            git_scm::git_stage_all,
-            git_scm::git_discard,
-            git_scm::git_identity,
-            git_scm::git_commit,
-            git_scm::git_branches,
-            git_scm::git_checkout,
-            git_scm::git_create_branch,
-            git_scm::git_log,
-            git_scm::git_commit_files,
-            git_scm::git_commit_diff,
-            tray::notify,
-            tray::tray_status,
-            tray::tray_set_close_to_tray,
-            bench,
-            bench_done,
-            autobench_mode,
-            graph_path_override,
-            theme_override,
-            section_override,
-            pty_status,
-            pty_retry_consent,
-            pty_spawn,
-            pty_write,
-            pty_resize,
-            pty_ack,
-            pty_kill,
-            sse_replay::sse_replay_start,
-            sse_replay::sse_replay_stop,
-            sse_replay::sse_channel_stream,
-            ax_probe::ax_probe,
-            chat_cmds::chat_bind_session,
-            chat_cmds::chat_unbind_session,
-            chat_cmds::chat_list,
-            chat_cmds::chat_load,
-            chat_cmds::chat_save,
-            chat_cmds::chat_delete,
-            chat_cmds::chat_confirm_truncate,
-            chat_cmds::chat_archive_status,
-            notes_fs::notes_root_get,
-            notes_fs::notes_root_choose,
-            notes_fs::notes_root_clear,
-            notes_fs::notes_list,
-            notes_fs::notes_read,
-            notes_fs::notes_heads,
-            notes_write::note_open,
-            notes_write::note_save,
-            notes_write::note_create,
-            notes_write::note_rename,
-            notes_write::notes_delete_many,
-            source_pick::source_pick_folder,
-            source_pick::pick_folder,
-            source_pick::pick_folder_redeem,
-            prefs::get_prefs,
-            prefs::set_prefs,
-            os_open::open_external_url,
-            os_open::reveal_in_os,
-            attach::attach_pick_files,
-            attach::attach_read,
-            attach::attach_release,
-            confirm::bypass_confirm,
-            confirm::bypass_confirm_signed,
-            confirm::trust_confirm
-        ])
+        .invoke_handler(app_handler!())
         .build(tauri::generate_context!())
         .expect("error while building LLM-IDE Desktop PoC");
 
@@ -399,12 +443,13 @@ pub fn run() {
         // Autobench runs must be frontmost: WKWebView does not paint or run rAF/timers for a
         // window that is not key, which stalls the benches. Done after launch so the
         // activation takes effect; the bench needs no external activation step.
-        RunEvent::Ready if autobench_mode().is_some() => bring_to_front(app_handle),
+        RunEvent::Ready if autobench_env().is_some() => bring_to_front(app_handle),
         RunEvent::ExitRequested { .. } | RunEvent::Exit => {
             // Live-then-archive first (the core must still be up), capped at 6 s, once per process.
             let _ = app_handle.state::<chat_cmds::ChatService>().quit_archive_default();
             app_handle.state::<CoreHost>().shutdown();
             pty::kill_all();
+            #[cfg(feature = "spike")]
             sse_replay::stop();
         }
         _ => {}

@@ -96,9 +96,14 @@ const COMMANDS: &[&str] = &[
 ];
 
 fn main() {
-    tauri_build::try_build(
-        tauri_build::Attributes::new()
-            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
-    )
-    .expect("tauri build failed");
+    // Without the `spike` cargo feature the spike commands are not registered, and their capability file
+    // is not even embedded: only `default.json` is compiled in. (The commands stay in the manifest so
+    // `capabilities/spike.json` still validates when the feature is on.)
+    println!("cargo:rerun-if-changed=capabilities");
+    let spike = std::env::var_os("CARGO_FEATURE_SPIKE").is_some();
+    let mut attrs = tauri_build::Attributes::new().app_manifest(tauri_build::AppManifest::new().commands(COMMANDS));
+    if !spike {
+        attrs = attrs.capabilities_path_pattern("./capabilities/default.json");
+    }
+    tauri_build::try_build(attrs).expect("tauri build failed");
 }

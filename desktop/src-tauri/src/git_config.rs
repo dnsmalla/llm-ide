@@ -104,6 +104,7 @@ fn check_key_line(section: &(String, bool), line: &str, allow_worktree: bool) ->
 }
 
 /// `Ok(())` only when `bytes` is a config made solely of allowed, plain-data settings.
+#[allow(dead_code)] // the unit tests and external callers use the strict form without a worktree allowance
 pub fn check_config(bytes: &[u8]) -> Result<(), String> {
     check_config_ex(bytes, false).map(|_| ())
 }

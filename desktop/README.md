@@ -13,7 +13,12 @@ npm run dev            # frontend only, http://localhost:5173
 npm run tauri dev      # full app window (starts Vite via beforeDevCommand)
 npm run tauri build    # release bundle (LLM-IDE Desktop PoC.app on macOS)
 npm run tauri build -- --debug --bundles app   # faster debug .app
+npm run tauri dev -- --features spike          # + the Phase-0 spike/bench host commands (autobench, parity screenshots)
 ```
+
+The spike/bench commands (`ping`, `bench*`, `autobench_mode`, `*_override`, `sse_replay_*`, `ax_probe`) and
+`capabilities/spike.json` exist only with the `spike` cargo feature, which is off by default and never in a release
+build (`npm run check:security:product`, run by `npm run build` and `scripts/build-desktop-mac.sh`, enforces it).
 
 Requirements: Node 20.19+ (tested on 22), Rust 1.88+ (required by `time` 0.3.47; tested on stable 1.99).
 The Rust lockfile (`src-tauri/Cargo.lock`) is resolved for Rust 1.84.

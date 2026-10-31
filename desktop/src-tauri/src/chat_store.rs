@@ -1152,6 +1152,7 @@ impl ChatStore {
     // -- save --
 
     /// Validates and writes a chat. See the module docs for the conflict rules.
+    #[allow(dead_code)] // kept for tests and callers that never shrink a chat
     pub fn save(&self, session: Value, mode: SaveMode, expected_revision: Option<&str>, touch: bool) -> Result<SaveOutcome> {
         self.save_with(session, mode, expected_revision, touch, false)
     }
@@ -1371,6 +1372,7 @@ impl ChatStore {
     }
 
     /// Recoverable copies: (chat id, deleted-at unix seconds, path), newest first.
+    #[allow(dead_code)] // the restore command (later) lists these
     pub fn trashed(&self) -> Vec<(String, u64, PathBuf)> {
         list_trash(&self.deleted_dir())
     }

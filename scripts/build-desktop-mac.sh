@@ -63,6 +63,10 @@ npm_ci_if_needed "$DESKTOP"
 step "Stage the core (pinned official Node, production dependencies, no SDK claude binary)"
 LLMIDE_STAGE_RELEASE=1 node "$DESKTOP/scripts/stage-core.mjs" --target "$TARGET"
 
+# Always, even with the other checks skipped: the product build must not carry the spike/bench commands.
+step "Product security gate (no spike feature, capabilities least-privilege)"
+(cd "$DESKTOP" && npm run --silent check:security:product)
+
 if [ "$CHECKS" = 1 ]; then
   step "Security checks (capability manifest, DOMPurify pin)"
   (cd "$DESKTOP" && npm run --silent check:security)
@@ -81,6 +85,13 @@ codesign --verify --deep --strict --verbose=2 "$APP"
 
 step "Verify the bundle"
 node "$DESKTOP/scripts/verify-bundle.mjs" "$APP"
+# The spike commands are compiled out without `--features spike`; prove it on the finished binary.
+for bin in "$APP"/Contents/MacOS/*; do
+  if grep -aq "LLMIDE_POC_AUTOBENCH" "$bin"; then
+    echo "product binary $bin still contains the spike/autobench code (built with --features spike?)" >&2
+    exit 1
+  fi
+done
 echo "bundle id: $(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist") (the Swift Mac app is com.llmide.macapp; they can run side by side)"
 echo "app data:  ~/Library/Application Support/llm-ide-desktop (the Swift app uses .../llm-ide)"
 

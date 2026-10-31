@@ -81,16 +81,20 @@ pub fn mint(purpose: &str) -> Result<String, String> {
     Ok(mint_with(key()?, purpose, crate::confirm::now_ms(), &to_hex(&n)))
 }
 
-/// Remembers used nonces until they expire (single use).
+/// Remembers used nonces until they expire (single use). Reference verifier: the core (Node) implements
+/// the same rule; here it pins the token format in tests.
 #[derive(Default)]
+#[allow(dead_code)]
 pub struct Verifier {
     used: Mutex<HashMap<String, u64>>,
 }
 
+#[allow(dead_code)]
 fn ct_eq(a: &[u8], b: &[u8]) -> bool {
     a.len() == b.len() && a.iter().zip(b).fold(0u8, |acc, (x, y)| acc | (x ^ y)) == 0
 }
 
+#[allow(dead_code)]
 impl Verifier {
     /// True once per valid, unexpired token for `purpose`. Mirrors what the core must do.
     pub fn verify_at(&self, key: &[u8], token: &str, purpose: &str, now: u64) -> bool {

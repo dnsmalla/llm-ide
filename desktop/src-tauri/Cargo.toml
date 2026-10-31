@@ -7,6 +7,12 @@ rust-version = "1.88"
 resolver = "3"
 publish = false
 
+[features]
+# Default OFF and never in a release build: the Phase-0 spike/bench host commands (ping, bench, autobench_mode,
+# graph_path_override, theme_override, section_override, sse_replay_*, ax_probe) and capabilities/spike.json.
+# Dev and autobench runs: `npm run tauri dev -- --features spike` / `cargo run --features spike`.
+spike = []
+
 [lib]
 name = "llmide_desktop_poc_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
