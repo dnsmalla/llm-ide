@@ -13,14 +13,14 @@ Numbers are computed from the checkboxes below by `node scripts/plan-status.mjs`
 | Desktop Mac (Swift) | 8 | 2 | 7 | 17 | Shipping product; feature-complete for today's scope, manual checks pending |
 | Desktop multi-OS (Tauri) | 13 | 20 | 14 | 47 | Phase 0 spike measured (GO with 4 conditions); no product app, ADR still "proposed" |
 | Mobile (iPhone native, PWA) | 9 | 6 | 10 | 25 | Native chat/explorer/auto-task client works through the Mac; PWA and push do not exist |
-| Web app and relay | 6 | 1 | 7 | 14 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
+| Web app and relay | 6 | 1 | 8 | 15 | Scope decided (relay-served phone web view, built last in sync-kit); no relay code yet, host undecided |
 | Chrome extension | 6 | 2 | 5 | 13 | Capture and live chat client work; stores nothing; origin pin and store listing open |
-| Shared server and core | 14 | 4 | 1 | 19 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
+| Shared server and core | 14 | 4 | 2 | 20 | API 92, contract gates and feature matrix landed; kit K1 moves still ahead |
 | Data and storage | 6 | 1 | 7 | 14 | Moved and backed up; live-then-archive phases 0-4 done, meeting phases wait for use |
 | Agents, providers, extensions | 14 | 1 | 10 | 25 | Agent store, provider catalog, router built; token-affecting parts OFF until bench |
 | Security | 10 | 2 | 5 | 17 | Loopback, vault, guardrails in place; relay, signing and Tauri scoping not started |
 | Release and CI | 7 | 2 | 6 | 15 | Mac release/notarize and 8 workflows exist; Tauri, Windows, Linux builds do not |
-| Total | 93 | 41 | 72 | 206 |  |
+| Total | 93 | 41 | 74 | 208 |  |
 
 ## How the surfaces connect
 
@@ -197,6 +197,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [ ] Extension read/queue through the relay when the desktop is off (me)
 - [ ] Relay contract added to `schema/http` with conformance tests (kit plan: contract group "relay (new)") (me)
 - [~] Connector catalog: phase 1 verified shipped (catalog, per-user selection, `/auth/me/connectors*` routes, Library and selection-gated Settings, Miro MCP ingest, tests exist); open: gdrive/gcal MCP descriptors (`pipelineReady: false`), Miro tool names are unverified guesses; spec written (`docs/spec/connector-catalog.md`, `de7d1f38`); audit in `plans/2026-10-31-status-audit.md` (b) (me)
+- [ ] Google connectors: Gmail, Calendar and Drive as read-only Library connectors through our own OAuth client (bring your own, PKCE loopback in the core, tokens in the vault, pinned Google hosts), replacing the broad `mail.google.com` Gmail scope; Google's official Workspace MCP servers are Developer Preview and need write scopes, so not v1; 3 open questions Q-G1 to Q-G3 (`plans/2026-10-31-google-connectors-plan.md`) (you)
 
 ## S5. Chrome extension
 
@@ -236,6 +237,7 @@ Recommendation was **A**, built last (sync-kit), after Tauri K3 provides the sha
 - [~] P17 token baseline: `schema/bench/token-baseline.json` committed; both real baselines not run per the agent-kit plan T0.2 (you)
 - [~] K1 per kit, in order (ui-kit done 2026-10-31): ui-kit, os-kit finish, docs-kit, graph-kit, knowledge-kit, agent-kit, work-kit, workspace-kit, capture-kit (kit plan) (me)
 - [~] Core job runner: library done (`extension/kb/job-queue.mjs`, `job-runner.mjs`, `core/process-group.mjs`, migration 0055, spec `docs/spec/job-runner.md`, 10 tests in `extension/tests/job-runner.test.mjs`); not wired into boot or HTTP, no flake gate yet (me)
+- [ ] work-kit K1: Issues and Gantt provider logic (GitHub, GitLab, Backlog, Linear list, get, update, comment, transition) into the core with vault tokens, a rebuildable issue cache for 10k-issue repos, overlay widened to string keys, T1 phone writes; 3 open questions Q-I1 to Q-I3 (`plans/2026-10-31-issues-gantt-core-plan.md`) (you)
 - [ ] automation-kit (Loop + Auto Tasks) logic into Node, the largest kit; the 13 Auto Tasks collapse to six job kinds (review, sources.update, issues.from_notes, issues.implement, loop.run, custom.run) behind a job API for the phone, scope pending `node scripts/auto-task-usage.mjs` output (`plans/2026-10-31-auto-tasks-audit.md`) (me)
 - [x] K0 maps for work-, workspace-, capture-, automation-, sync-kit (`docs/kits/*.md`, `845aa869`; each lists numbered decisions for the user) (me)
 - [x] K0 maps for ui-kit and os-kit (`docs/kits/ui-kit.md`, `docs/kits/os-kit.md`, `c8d7b8a5`; numbered decisions U1 to U6 and S1 to S6 for the user) (me)

@@ -118,6 +118,8 @@ Blocked-by (recorded, nothing worked around):
 
 ## 6. P5-I Issues + Gantt (work-kit)
 
+Core-side detail (route set, adapter interface, cache, overlay keys, tiers, fixtures, slices IC0 to IC6, questions Q-I1 to Q-I3): [Issues and Gantt core plan](2026-10-31-issues-gantt-core-plan.md). Related connector plan for the Library: [Google connectors](2026-10-31-google-connectors-plan.md).
+
 **Mac source** (`Features/Issues/`, 4,278 lines, 185 KB, 11 files): `Views/RepoIssueDetailSheet` 925, `RepoIssuesView` 691, `RepoKanbanPanel` 261, `Gantt/Views/GanttView` 885, `GanttViewModel` 411, `GanttContainerView` 284, `GanttFilterBar` 252, `IssueScheduleEditorSheet` 212, `Services/RecentIssuesResolver`. Backing code in `Core/Repo/` (25 files, 5,765 lines: `GitHubClient`, `GitLabClient`, `RepoBackend`, `AllowlistedRepoBackend`, `RepoBackendFactory`).
 
 **Server routes**: `GET/POST /kb/issue-schedule` (only route the Mac calls today; feature `gantt_issues`), `GET /kb/issues`; planning and dispatch for the extension exist (`/kb/dispatch` with modes `preview`, `github`, `backlog`, `linear`), `/kb/outcomes/*`. **Gap**: the Mac calls GitHub and GitLab directly from Swift; Node has only dispatch (create), not list, update, comment, label.
