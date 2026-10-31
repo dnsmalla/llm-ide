@@ -28,3 +28,7 @@ test("a missing palette is a hard error", () => {
 test("--check passes on the committed tokens.css", () => {
   execFileSync("node", [resolve(here, "gen-tokens.mjs"), "--check"], { stdio: "pipe" });
 });
+
+test("CRLF sources (a Windows checkout) render the same CSS", () => {
+  assert.equal(render(themeSrc.replace(/\n/g, "\r\n"), tokensSrc.replace(/\n/g, "\r\n")), render(themeSrc, tokensSrc));
+});

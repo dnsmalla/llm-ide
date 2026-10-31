@@ -134,7 +134,10 @@ function parseTypography(src) {
   return out;
 }
 
-export function render(themeSrc, tokensSrc) {
+export function render(themeSrcRaw, tokensSrcRaw) {
+  // Windows checkouts may convert line endings (core.autocrlf): parse on LF only.
+  const themeSrc = themeSrcRaw.replace(/\r\n/g, "\n");
+  const tokensSrc = tokensSrcRaw.replace(/\r\n/g, "\n");
   const { themes, switches } = parseThemes(tokensSrc);
   const aliases = parseAliases(themeSrc);
   const spacing = parseScale(tokensSrc, "spacing", "SpacingScale");
@@ -181,11 +184,13 @@ export function render(themeSrc, tokensSrc) {
 }
 
 function main() {
+// The generated file may also be CRLF on a Windows checkout: compare on LF only.
+const lf = (t) => t.replace(/\r\n/g, "\n");
 const css = render(readFileSync(THEME_SWIFT, "utf8"), readFileSync(TOKENS_SWIFT, "utf8"));
 const check = process.argv.includes("--check");
 
 if (check) {
-  const current = existsSync(OUT) ? readFileSync(OUT, "utf8") : null;
+  const current = existsSync(OUT) ? lf(readFileSync(OUT, "utf8")) : null;
   if (current !== css) {
     console.error(`tokens.css is stale: run "npm run tokens" (${OUT})`);
     process.exit(1);
