@@ -11,6 +11,7 @@ folder (see `docs/superpowers/plans/2026-10-31-tauri-phase3-plan.md` section 8):
 | `explorer/` | S-C Explorer, tree, tabs, Monaco |
 | `library/` | S-E, S-I, S-J |
 | `settings/` | S-F |
+| `docgen/` | P5-D Doc Gen and Visual (`index.tsx` = Doc Gen, `visual.tsx` = Visual) |
 
 Rules:
 
