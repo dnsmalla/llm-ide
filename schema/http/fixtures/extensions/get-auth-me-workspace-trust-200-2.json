@@ -1,0 +1,19 @@
+{
+  "endpoint": "GET /auth/me/workspace-trust",
+  "status": 200,
+  "response": {
+    "enforced": true,
+    "items": [
+      {
+        "path": "/Users/dev/project",
+        "trusted": true,
+        "updatedAt": "2026-10-31T09:00:00.000Z"
+      },
+      {
+        "path": "/Users/dev/other",
+        "trusted": false,
+        "updatedAt": "2026-10-31T09:05:00.000Z"
+      }
+    ]
+  }
+}

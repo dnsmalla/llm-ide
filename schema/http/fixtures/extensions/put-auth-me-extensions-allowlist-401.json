@@ -1,0 +1,15 @@
+{
+  "endpoint": "PUT /auth/me/extensions/allowlist",
+  "status": 401,
+  "request": {
+    "body": {
+      "sources": []
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Authentication required"
+    }
+  }
+}

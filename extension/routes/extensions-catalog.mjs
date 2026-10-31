@@ -19,6 +19,10 @@
 //   POST /auth/me/extensions/rollback          { id }
 //   POST /auth/me/extensions/repair            { id }
 //
+// Install allowlist, per user (API 95):
+//   GET  /auth/me/extensions/allowlist          { operator, ceiling, user, ignored, effective }
+//   PUT  /auth/me/extensions/allowlist { sources: string[] }   replaces the user's additions
+//
 // Every download is the user's request and goes through the pinned fetch
 // (github.com only). Installing never enables or runs anything; enabling an
 // item that declares executable parts needs consent per kind. Per-user: a user
@@ -33,6 +37,7 @@ import {
 } from '../llm_agent/extensions/install.mjs';
 import { checkUpdates, listUpdates, previewUpdate, applyUpdate, rollback, repair } from '../llm_agent/extensions/update.mjs';
 import { refreshIndexes, searchCatalog } from '../llm_agent/extensions/indexes.mjs';
+import { allowlistView, setAllowlist, AllowlistError } from '../llm_agent/extensions/allowlist.mjs';
 
 const PATHS = new Set([
   '/auth/me/extensions/installed',
@@ -48,8 +53,9 @@ const PATHS = new Set([
   '/auth/me/extensions/update',
   '/auth/me/extensions/rollback',
   '/auth/me/extensions/repair',
+  '/auth/me/extensions/allowlist',
 ]);
-const GET_PATHS = new Set(['/auth/me/extensions/installed', '/auth/me/extensions/catalog', '/auth/me/extensions/active', '/auth/me/extensions/updates']);
+const GET_PATHS = new Set(['/auth/me/extensions/installed', '/auth/me/extensions/catalog', '/auth/me/extensions/active', '/auth/me/extensions/updates', '/auth/me/extensions/allowlist']);
 
 export function isCatalogRoute(url) {
   return PATHS.has(String(url || '').split('?')[0]);
@@ -58,13 +64,14 @@ export function isCatalogRoute(url) {
 const STATUS = {
   invalid_url: 400, invalid_ref: 400, invalid_commit: 400, invalid_path: 400, invalid_member: 400, invalid_user: 400,
   not_found: 404, catalog_disabled: 404, source_not_allowed: 403, consent_required: 409, already_installed: 409, busy: 409,
+  invalid_source: 400, too_many_sources: 400, source_exceeds_ceiling: 403,
   already_current: 409, bytes_missing: 409, integrity_mismatch: 409, no_previous: 404, previous_unavailable: 409, identity_changed: 422,
   marketplace: 422, nothing_installable: 422, unsafe_path: 422, too_large: 422, bad_archive: 422,
   blocked: 403, upstream: 502, redirect_refused: 502, aborted: 499, state_unreadable: 500, write_failed: 500,
 };
 
 function fail(res, err) {
-  if (err instanceof InstallError) {
+  if (err instanceof InstallError || err instanceof AllowlistError) {
     send(res, STATUS[err.code] ?? 400, { error: { code: err.code.toUpperCase(), message: err.message, ...(Object.keys(err.extra).length ? { details: err.extra } : {}) } });
     return;
   }
@@ -107,11 +114,27 @@ export async function handleCatalogRoute(req, res, { db, requestId }) {
     userId, requestId, ip: clientIp(req), userAgent: req.headers['user-agent'] || '', action, resource, outcome, ...(detail ? { detail } : {}),
   });
 
+  if (url === '/auth/me/extensions/allowlist' && method === 'PUT') {
+    let b;
+    try { b = await readJson(req, config.bodyLimitMB * 1024 * 1024); }
+    catch (err) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: err.message } }); return; }
+    if (!b || typeof b !== 'object' || Array.isArray(b) || !Array.isArray(b.sources)) { send(res, 400, { error: { code: 'VALIDATION_FAILED', message: 'sources must be an array of owner/repo patterns' } }); return; }
+    try {
+      const view = setAllowlist(userId, b.sources);
+      audit('extension.allowlist_set', 'allowlist', 'success', { count: view.user.length });
+      send(res, 200, view);
+    } catch (err) {
+      if (err instanceof AllowlistError) audit('extension.allowlist_set', 'allowlist', 'failure', { code: err.code });
+      fail(res, err);
+    }
+    return;
+  }
   if (GET_PATHS.has(url)) {
     if (method !== 'GET') { send(res, 405, { error: { code: 'METHOD_NOT_ALLOWED', message: 'GET only' } }); return; }
     try {
       if (url === '/auth/me/extensions/installed') send(res, 200, listInstalled(userId));
       else if (url === '/auth/me/extensions/updates') send(res, 200, listUpdates(userId));
+      else if (url === '/auth/me/extensions/allowlist') send(res, 200, allowlistView(userId));
       else if (url === '/auth/me/extensions/catalog') {
         const sp = new URL(req.url, 'http://x').searchParams;
         const num = (k) => (sp.has(k) && /^\d{1,6}$/.test(sp.get(k)) ? Number(sp.get(k)) : undefined);

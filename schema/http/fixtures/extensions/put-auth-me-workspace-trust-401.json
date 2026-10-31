@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /auth/me/workspace-trust",
+  "status": 401,
+  "request": {
+    "body": {
+      "path": "/Users/dev/project",
+      "trusted": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "AUTH_REQUIRED",
+      "message": "Authentication required"
+    }
+  }
+}

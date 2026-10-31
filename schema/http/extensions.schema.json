@@ -1,5 +1,5 @@
 {
-  "description": "Extensions catalog (installed items, install, switches, updates, rollback, repair, indexes, search, active set). Per user. Nothing here executes fetched code; every route that reaches the network is a POST. Shared by the Mac Extensions screen.",
+  "description": "Extensions catalog (installed items, install, switches, updates, rollback, repair, indexes, search, active set). Per user. Nothing here executes fetched code; every route that reaches the network is a POST. Shared by the Mac Extensions screen. Also workspace trust (per user) and the per-user install allowlist.",
   "$defs": {
     "Finding": {
       "type": "object",
@@ -404,6 +404,71 @@
         "status",
         "count",
         "fetchedAt"
+      ]
+    },
+    "TrustItem": {
+      "type": "object",
+      "properties": {
+        "path": {
+          "type": "string"
+        },
+        "trusted": {
+          "type": "boolean"
+        },
+        "updatedAt": {
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "trusted",
+        "updatedAt"
+      ]
+    },
+    "Allowlist": {
+      "type": "object",
+      "description": "operator: the operator's own list; ceiling: what a user may add (null = no ceiling); user: the user's saved additions; ignored: saved additions the current ceiling no longer covers; effective: operator + active user additions.",
+      "properties": {
+        "operator": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ceiling": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string"
+          }
+        },
+        "user": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "ignored": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "effective": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      },
+      "required": [
+        "operator",
+        "ceiling",
+        "user",
+        "ignored",
+        "effective"
       ]
     }
   },
@@ -1552,6 +1617,116 @@
           "$ref": "_common#/$defs/Error"
         },
         "409": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/workspace-trust": {
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "enforced": {
+              "type": "boolean"
+            },
+            "items": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/TrustItem"
+              }
+            }
+          },
+          "required": [
+            "enforced",
+            "items"
+          ]
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /auth/me/workspace-trust": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "path": {
+              "type": "string"
+            },
+            "trusted": {
+              "type": "boolean"
+            }
+          },
+          "required": [
+            "path",
+            "trusted"
+          ]
+        }
+      },
+      "responses": {
+        "200": {
+          "type": "object",
+          "properties": {
+            "ok": {
+              "type": "boolean"
+            },
+            "item": {
+              "$ref": "#/$defs/TrustItem"
+            }
+          },
+          "required": [
+            "ok",
+            "item"
+          ]
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "404": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "GET /auth/me/extensions/allowlist": {
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Allowlist"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        }
+      }
+    },
+    "PUT /auth/me/extensions/allowlist": {
+      "request": {
+        "body": {
+          "type": "object",
+          "properties": {
+            "sources": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              },
+              "x-optional": true
+            }
+          }
+        }
+      },
+      "responses": {
+        "200": {
+          "$ref": "#/$defs/Allowlist"
+        },
+        "400": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "401": {
+          "$ref": "_common#/$defs/Error"
+        },
+        "403": {
           "$ref": "_common#/$defs/Error"
         }
       }

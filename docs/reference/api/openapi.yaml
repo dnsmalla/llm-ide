@@ -9,7 +9,7 @@ info:
   description: "Multi-user, self-hostable backend for the LLM-IDE conversation-driven\nproject system.  Every state-mutating endpoint requires a JWT access\ntoken; data is scoped per user (tenant) at the SQL layer.\n"
   license:
     name: "MIT"
-  x-api-version: 94
+  x-api-version: 95
 servers:
   - url: "https://{host}"
     variables:
@@ -1565,6 +1565,62 @@ paths:
                   - "warnings"
         "401":
           description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/extensions/allowlist:
+    get:
+      tags:
+        - "extensions"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Allowlist"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    put:
+      tags:
+        - "extensions"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                sources:
+                  type: "array"
+                  items:
+                    type: "string"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Allowlist"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "403":
+          description: "Forbidden"
           content:
             application/json:
               schema:
@@ -3574,6 +3630,83 @@ paths:
                 "$ref": "#/components/schemas/Error"
         "401":
           description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+  /auth/me/workspace-trust:
+    get:
+      tags:
+        - "extensions"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  enforced:
+                    type: "boolean"
+                  items:
+                    type: "array"
+                    items:
+                      "$ref": "#/components/schemas/TrustItem"
+                required:
+                  - "enforced"
+                  - "items"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+    put:
+      tags:
+        - "extensions"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: "object"
+              properties:
+                path:
+                  type: "string"
+                trusted:
+                  type: "boolean"
+              required:
+                - "path"
+                - "trusted"
+      responses:
+        "200":
+          description: "OK"
+          content:
+            application/json:
+              schema:
+                type: "object"
+                properties:
+                  ok:
+                    type: "boolean"
+                  item:
+                    "$ref": "#/components/schemas/TrustItem"
+                required:
+                  - "ok"
+                  - "item"
+        "400":
+          description: "Bad Request"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "401":
+          description: "Unauthorized"
+          content:
+            application/json:
+              schema:
+                "$ref": "#/components/schemas/Error"
+        "404":
+          description: "Not Found"
           content:
             application/json:
               schema:
@@ -13974,6 +14107,38 @@ components:
               type: "string"
             retryable:
               type: "boolean"
+    Allowlist:
+      type: "object"
+      description: "operator: the operator's own list; ceiling: what a user may add (null = no ceiling); user: the user's saved additions; ignored: saved additions the current ceiling no longer covers; effective: operator + active user additions."
+      properties:
+        operator:
+          type: "array"
+          items:
+            type: "string"
+        ceiling:
+          type:
+            - "array"
+            - "null"
+          items:
+            type: "string"
+        user:
+          type: "array"
+          items:
+            type: "string"
+        ignored:
+          type: "array"
+          items:
+            type: "string"
+        effective:
+          type: "array"
+          items:
+            type: "string"
+      required:
+        - "operator"
+        - "ceiling"
+        - "user"
+        - "ignored"
+        - "effective"
     ApprovalGrant:
       type: "object"
       required:
@@ -17491,6 +17656,19 @@ components:
         grantedAt:
           type: "string"
           description: "ISO-8601 timestamp"
+    TrustItem:
+      type: "object"
+      properties:
+        path:
+          type: "string"
+        trusted:
+          type: "boolean"
+        updatedAt:
+          type: "string"
+      required:
+        - "path"
+        - "trusted"
+        - "updatedAt"
     Turn:
       type: "object"
       description: "One prior chat turn. role is 'user' or 'assistant'; the server maps any other role to 'Assistant' in the /chat prompt."

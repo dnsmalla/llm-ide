@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /auth/me/workspace-trust",
+  "status": 404,
+  "request": {
+    "body": {
+      "path": "/Users/dev/missing",
+      "trusted": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "NOT_FOUND",
+      "message": "that folder does not exist"
+    }
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "endpoint": "PUT /auth/me/workspace-trust",
+  "status": 400,
+  "request": {
+    "body": {
+      "path": "/",
+      "trusted": true
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_PATH",
+      "message": "that folder is too broad to trust as one project"
+    }
+  }
+}

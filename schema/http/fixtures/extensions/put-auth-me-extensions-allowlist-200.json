@@ -1,0 +1,30 @@
+{
+  "endpoint": "PUT /auth/me/extensions/allowlist",
+  "status": 200,
+  "request": {
+    "body": {
+      "sources": [
+        "Acme/Tools",
+        "foo/*"
+      ]
+    }
+  },
+  "response": {
+    "operator": [
+      "anthropics/*",
+      "modelcontextprotocol/*"
+    ],
+    "ceiling": null,
+    "user": [
+      "acme/tools",
+      "foo/*"
+    ],
+    "ignored": [],
+    "effective": [
+      "anthropics/*",
+      "modelcontextprotocol/*",
+      "acme/tools",
+      "foo/*"
+    ]
+  }
+}

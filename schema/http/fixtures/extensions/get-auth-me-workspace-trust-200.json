@@ -1,0 +1,8 @@
+{
+  "endpoint": "GET /auth/me/workspace-trust",
+  "status": 200,
+  "response": {
+    "enforced": true,
+    "items": []
+  }
+}

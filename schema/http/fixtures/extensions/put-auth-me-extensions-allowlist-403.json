@@ -1,0 +1,20 @@
+{
+  "endpoint": "PUT /auth/me/extensions/allowlist",
+  "status": 403,
+  "request": {
+    "body": {
+      "sources": [
+        "*/*"
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "SOURCE_EXCEEDS_CEILING",
+      "message": "only owner/repo or owner/* can be added; wider patterns need the operator to allow them",
+      "details": {
+        "entry": "*/*"
+      }
+    }
+  }
+}

@@ -1,0 +1,17 @@
+{
+  "endpoint": "GET /auth/me/extensions/allowlist",
+  "status": 200,
+  "response": {
+    "operator": [
+      "anthropics/*",
+      "modelcontextprotocol/*"
+    ],
+    "ceiling": null,
+    "user": [],
+    "ignored": [],
+    "effective": [
+      "anthropics/*",
+      "modelcontextprotocol/*"
+    ]
+  }
+}

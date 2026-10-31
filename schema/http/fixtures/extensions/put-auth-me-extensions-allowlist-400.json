@@ -1,0 +1,20 @@
+{
+  "endpoint": "PUT /auth/me/extensions/allowlist",
+  "status": 400,
+  "request": {
+    "body": {
+      "sources": [
+        "not a repo"
+      ]
+    }
+  },
+  "response": {
+    "error": {
+      "code": "INVALID_SOURCE",
+      "message": "each source must look like owner/repo or owner/*",
+      "details": {
+        "entry": "not a repo"
+      }
+    }
+  }
+}

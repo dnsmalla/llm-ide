@@ -1,0 +1,13 @@
+{
+  "endpoint": "PUT /auth/me/extensions/allowlist",
+  "status": 400,
+  "request": {
+    "body": {}
+  },
+  "response": {
+    "error": {
+      "code": "VALIDATION_FAILED",
+      "message": "sources must be an array of owner/repo patterns"
+    }
+  }
+}

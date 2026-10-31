@@ -109,6 +109,7 @@ export function loadRosters(readText) {
         { src: readText('extension/server/auth-routes.mjs'), rel: 'extension/server/auth-routes.mjs' },
         { src: readText('extension/routes/extension-routes.mjs'), rel: 'extension/routes/extension-routes.mjs' },
         { src: readText('extension/routes/extensions-catalog.mjs'), rel: 'extension/routes/extensions-catalog.mjs' },
+        { src: readText('extension/routes/workspace-trust.mjs'), rel: 'extension/routes/workspace-trust.mjs' },
       ],
     }),
   };

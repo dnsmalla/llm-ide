@@ -174,6 +174,10 @@ const SKIP_RULES = [
     when: (fx) => /^POST \/auth\/me\/extensions\/(install|update|update\/preview|rollback|repair|toggle|uninstall)$/.test(fx.endpoint) && fx.status !== 401,
   },
   {
+    why: 'fixture folder must exist on the server host (workspace trust stores the real path); covered by tests/workspace-trust-routes.test.mjs',
+    when: (fx) => fx.status < 300 && fx.endpoint === 'PUT /auth/me/workspace-trust',
+  },
+  {
     why: 'fixture path must exist on the server host (project install-skills)',
     when: (fx) => fx.status === 400 && fx.endpoint === 'POST /kb/project/install-skills',
   },

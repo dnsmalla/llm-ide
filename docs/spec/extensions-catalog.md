@@ -95,7 +95,7 @@ For a Claude-format plugin with unchecked members, `materializePluginView` build
 
 ## §9 Sources and install (P4)
 
-A user's request is the only trigger: nothing is fetched in the background, and the server never reads a catalog or index in this phase. Flags: `LLMIDE_EXT_CATALOG` (default on; `off` refuses install with 404 `CATALOG_DISABLED`), `LLMIDE_EXT_SCAN` (default on; `off` skips the scan), `LLMIDE_EXT_ALLOWED_SOURCES` (comma list of `owner/repo` globs; unset or blank means `anthropics/*,modelcontextprotocol/*`; a `*/*` entry allows any GitHub repository; the operator adds repositories through this variable, `extension/.env.example` documents it; a Settings screen for it is pending).
+A user's request is the only trigger: nothing is fetched in the background, and the server never reads a catalog or index in this phase. Flags: `LLMIDE_EXT_CATALOG` (default on; `off` refuses install with 404 `CATALOG_DISABLED`), `LLMIDE_EXT_SCAN` (default on; `off` skips the scan), `LLMIDE_EXT_ALLOWED_SOURCES` (comma list of `owner/repo` globs; unset or blank means `anthropics/*,modelcontextprotocol/*`; a `*/*` entry allows any GitHub repository; the operator adds repositories through this variable, `extension/.env.example` documents it; per-user additions are section 9c).
 
 | Path | Role |
 |---|---|
@@ -200,15 +200,48 @@ The GitHub adapters resolve `HEAD`, skip the download when the commit equals the
 | `POST /auth/me/extensions/rollback` | `{ id }` | `{ ok, item, rollback }`; 404 `NO_PREVIOUS`, 409 `PREVIOUS_UNAVAILABLE` |
 | `POST /auth/me/extensions/repair` | `{ id }` | `{ ok, repaired, status, was?, item }`; 409 `INTEGRITY_MISMATCH` |
 
-The contract is `schema/http/extensions.schema.json` (fixtures captured from the real handlers under `schema/http/fixtures/extensions/`); `scripts/lib/roster.mjs` reads `routes/extensions-catalog.mjs` for the roster.
+The contract is `schema/http/extensions.schema.json` (fixtures captured from the real handlers under `schema/http/fixtures/extensions/`); `scripts/lib/roster.mjs` reads `routes/extensions-catalog.mjs` and `routes/workspace-trust.mjs` for the roster.
+
+## §9c Per-user install allowlist (API 95)
+
+`effective(user) = operator list + the user's additions that still fit under the operator's ceiling`. The operator list is `LLMIDE_EXT_ALLOWED_SOURCES` (or the default). A user's list is stored in `ext_source_allowlist` (migration 0057; one row per user, `sources_json`, cascades on user delete) and is read only for that user: it can add, never remove, and never changes what anyone else may install. Install, update (`loadCandidate`) and the catalog search's `installable` flag all use `sourceAllowedFor(userId, owner, repo)` (`llm_agent/extensions/allowlist.mjs`).
+
+- Entry grammar: lower-case `owner/repo` or `owner/*` (one owner, any repository); `https://github.com/` prefix, `.git` and a trailing slash are stripped; duplicates collapse; at most 50 entries.
+- Ceiling: `LLMIDE_EXT_ALLOWED_SOURCES_CEILING` (comma list of globs, optional). Unset: a user may add any `owner/repo` or `owner/*` but never an owner wildcard or another glob (`*/*`, `a*/b`, `acme/to*ls`): 403 `SOURCE_EXCEEDS_CEILING`. Set: every entry must be matched by a ceiling glob, and then wildcards inside it are allowed (`*/*` as a ceiling lets a user add `*/*`). The ceiling is re-applied on every read, so tightening it takes effect at once; saved entries it no longer covers are reported as `ignored` and kept, not deleted.
+
+| Path | Body | Answers |
+|---|---|---|
+| `GET /auth/me/extensions/allowlist` | none | `{ operator: string[], ceiling: string[] or null, user: string[], ignored: string[], effective: string[] }` |
+| `PUT /auth/me/extensions/allowlist` | `{ sources: string[] }` replaces the user's additions | the same shape; 400 `VALIDATION_FAILED` (not an array) or `INVALID_SOURCE` (`details.entry`) or `TOO_MANY_SOURCES` (`details.max`); 403 `SOURCE_EXCEEDS_CEILING` (`details.entry`); a failed PUT changes nothing |
+
+## §9d Workspace trust (API 95)
+
+Threat: opening a repository must not be enough to run code the repository ships. A project folder can carry executable config: a `.mcp.json` server that starts a process, hooks in `.claude/settings.json` or `settings.local.json`, a project plugin (`.claude-plugin/plugin.json`, `.claude/plugins/*`), a project skill with a `scripts/` folder or executable files (`.claude/skills/*`). User-level installed and consented items (the catalog, section 4) are not project-scoped and are never affected.
+
+**Record.** `workspace_trust` (migration 0056): `(user_id, path)` primary key, `trusted` 0 or 1, `updated_at`, cascade on user delete, at most 500 rows per user. `path` is the folder's real path (symlinks resolved), so a link and its target are one folder. No row means untrusted. Only `PUT /auth/me/workspace-trust`, called by the signed-in user, writes a row; no server code trusts a folder (not on first open, not on install, not on a tool call).
+
+| Path | Body | Answers |
+|---|---|---|
+| `GET /auth/me/workspace-trust` | none | `{ enforced, items: [{ path, trusted, updatedAt }] }`; `enforced` is false under `LLMIDE_WORKSPACE_TRUST=off` |
+| `PUT /auth/me/workspace-trust` | `{ path, trusted }` (absolute or `~/` path, boolean) | `{ ok, item }`; 400 `VALIDATION_FAILED`, 400 `INVALID_PATH` (`/`, the home folder or a system tree), 404 `NOT_FOUND` (folder missing or not a folder) |
+
+**Enforcement** (`llm_agent/extensions/workspace-trust.mjs`, called once per turn with the normalised workspace root):
+
+- Claude SDK turn (`runAgentV2Turn`): in an untrusted folder that carries a `.mcp.json` server with a `command` (stdio), the turn sets `strictMcpConfig: true`. The Claude CLI reads `.mcp.json` from its cwd, and the in-process `llmide` server and the user's own servers are passed explicitly in `mcpServers`, so they stay. A `.mcp.json` with only http or sse servers is not executable here and changes nothing.
+- Hooks, project plugins and project skill scripts: the engine already isolates project settings (`settingSources: []`) and mounts only user-level plugins, so they never ran. They are detected and named, not changed.
+- Provider-adapter turn (`runProviderTurn`): never read project config; same detection and notice, nothing withheld.
+- A turn in a restricted folder emits one `notice` event, kind `workspace_trust`: `text` names what was skipped and how to trust (at most 300 characters), `data: { path, trusted: false, skipped: [{ kind: 'mcp-stdio'|'hooks'|'plugin'|'skill-scripts', name, file, withheld }] }`. Level `warning` when something was withheld, `info` otherwise (clients show warnings only). Names and relative file paths only, never a command line, argument or env value. Detection reads at most 262144 bytes per JSON file and lists at most 50 entries.
+- Not restricted: a trusted folder, a folder that carries nothing executable, no workspace root, a folder that cannot be read.
+
+**What changes for an existing project (behaviour list).** Exactly one thing: an untrusted folder whose own `.mcp.json` declares a stdio server no longer has that server loaded on a Claude turn. Everything else is byte-identical, which `tests/workspace-trust.test.mjs` pins (options without `strictMcpConfig`, no notice) for a clean folder, a trusted folder and the kill switch. `LLMIDE_WORKSPACE_TRUST=off` restores the previous behaviour exactly (no detection, no notice, no `strictMcpConfig`).
 
 ## §10 Not in these phases
 
-User-added index sources (the seed list is code), installing a registry `server.json` item or a package-launcher server, the Mac Extensions screen and the allowlist setting, an `extensionsFingerprint` column in `turn_composition`, the adapter's skills catalog block (it would add tokens to every provider turn), per-tool MCP deny lists, and write-through to the legacy files.
+User-added index sources (the seed list is code), installing a registry `server.json` item or a package-launcher server, the Mac Extensions screen, an `extensionsFingerprint` column in `turn_composition`, the adapter's skills catalog block (it would add tokens to every provider turn), per-tool MCP deny lists, and write-through to the legacy files.
 
 ## §11 Tests
 
-`extensions-baseline`, `extensions-model`, `extensions-store`, `extensions-importer`, `extensions-active-set`, `extensions-consumers`, `extensions-adapter`, `extensions-sources`, `extensions-install`, `extensions-update`, `extensions-index`, `extensions-catalog-routes`, `extensions-installed-runtime` and `eslint-mcp-sdk-fence` under `extension/tests/`, with the synthetic world in `extension/tests/helpers/extensions-world.mjs`, in-memory archives in `extension/tests/helpers/tar-fixture.mjs` and a real local stdio MCP server in `extension/tests/fixtures/fake-mcp-stdio-server.mjs`. No test reaches the network or a paid model.
+`extensions-baseline`, `extensions-model`, `extensions-store`, `extensions-importer`, `extensions-active-set`, `extensions-consumers`, `extensions-adapter`, `extensions-sources`, `extensions-install`, `extensions-update`, `extensions-index`, `extensions-catalog-routes`, `extensions-allowlist`, `workspace-trust`, `workspace-trust-routes`, `extensions-installed-runtime` and `eslint-mcp-sdk-fence` under `extension/tests/`, with the synthetic world in `extension/tests/helpers/extensions-world.mjs`, in-memory archives in `extension/tests/helpers/tar-fixture.mjs` and a real local stdio MCP server in `extension/tests/fixtures/fake-mcp-stdio-server.mjs`. No test reaches the network or a paid model.
 
 ## Regeneration checklist
 

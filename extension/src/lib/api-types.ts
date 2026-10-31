@@ -591,6 +591,21 @@ export type ExtensionsSource = {
   error?: string;
 };
 
+export type TrustItem = {
+  path: string;
+  trusted: boolean;
+  updatedAt: string;
+};
+
+/** operator: the operator's own list; ceiling: what a user may add (null = no ceiling); user: the user's saved additions; ignored: saved additions the current ceiling no longer covers; effective: operator + active user additions. */
+export type Allowlist = {
+  operator: string[];
+  ceiling: string[] | null;
+  user: string[];
+  ignored: string[];
+  effective: string[];
+};
+
 export type User = {
   id: string;
   email: string;
@@ -3019,6 +3034,57 @@ export type PostAuthMeExtensionsRepairResponse401 = CommonError;
 export type PostAuthMeExtensionsRepairResponse404 = CommonError;
 
 export type PostAuthMeExtensionsRepairResponse409 = CommonError;
+
+/** Request parts for `GET /auth/me/workspace-trust` (schema/http/extensions.schema.json). */
+export type GetAuthMeWorkspaceTrustRequest = Record<string, never>;
+
+export type GetAuthMeWorkspaceTrustResponse200 = {
+  enforced: boolean;
+  items: TrustItem[];
+};
+
+export type GetAuthMeWorkspaceTrustResponse401 = CommonError;
+
+/** Request parts for `PUT /auth/me/workspace-trust` (schema/http/extensions.schema.json). */
+export type PutAuthMeWorkspaceTrustRequest = {
+  body: {
+    path: string;
+    trusted: boolean;
+  };
+};
+
+export type PutAuthMeWorkspaceTrustResponse200 = {
+  ok: boolean;
+  item: TrustItem;
+};
+
+export type PutAuthMeWorkspaceTrustResponse400 = CommonError;
+
+export type PutAuthMeWorkspaceTrustResponse401 = CommonError;
+
+export type PutAuthMeWorkspaceTrustResponse404 = CommonError;
+
+/** Request parts for `GET /auth/me/extensions/allowlist` (schema/http/extensions.schema.json). */
+export type GetAuthMeExtensionsAllowlistRequest = Record<string, never>;
+
+export type GetAuthMeExtensionsAllowlistResponse200 = Allowlist;
+
+export type GetAuthMeExtensionsAllowlistResponse401 = CommonError;
+
+/** Request parts for `PUT /auth/me/extensions/allowlist` (schema/http/extensions.schema.json). */
+export type PutAuthMeExtensionsAllowlistRequest = {
+  body: {
+    sources?: string[];
+  };
+};
+
+export type PutAuthMeExtensionsAllowlistResponse200 = Allowlist;
+
+export type PutAuthMeExtensionsAllowlistResponse400 = CommonError;
+
+export type PutAuthMeExtensionsAllowlistResponse401 = CommonError;
+
+export type PutAuthMeExtensionsAllowlistResponse403 = CommonError;
 
 /** Request parts for `GET /` (schema/http/health-auth.schema.json). */
 export type GetRequest = Record<string, never>;
@@ -7377,6 +7443,38 @@ export interface ApiEndpoints {
       401: PostAuthMeExtensionsRepairResponse401;
       404: PostAuthMeExtensionsRepairResponse404;
       409: PostAuthMeExtensionsRepairResponse409;
+    };
+  };
+  "GET /auth/me/workspace-trust": {
+    request: GetAuthMeWorkspaceTrustRequest;
+    responses: {
+      200: GetAuthMeWorkspaceTrustResponse200;
+      401: GetAuthMeWorkspaceTrustResponse401;
+    };
+  };
+  "PUT /auth/me/workspace-trust": {
+    request: PutAuthMeWorkspaceTrustRequest;
+    responses: {
+      200: PutAuthMeWorkspaceTrustResponse200;
+      400: PutAuthMeWorkspaceTrustResponse400;
+      401: PutAuthMeWorkspaceTrustResponse401;
+      404: PutAuthMeWorkspaceTrustResponse404;
+    };
+  };
+  "GET /auth/me/extensions/allowlist": {
+    request: GetAuthMeExtensionsAllowlistRequest;
+    responses: {
+      200: GetAuthMeExtensionsAllowlistResponse200;
+      401: GetAuthMeExtensionsAllowlistResponse401;
+    };
+  };
+  "PUT /auth/me/extensions/allowlist": {
+    request: PutAuthMeExtensionsAllowlistRequest;
+    responses: {
+      200: PutAuthMeExtensionsAllowlistResponse200;
+      400: PutAuthMeExtensionsAllowlistResponse400;
+      401: PutAuthMeExtensionsAllowlistResponse401;
+      403: PutAuthMeExtensionsAllowlistResponse403;
     };
   };
   "GET /": {
